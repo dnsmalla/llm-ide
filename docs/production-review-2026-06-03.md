@@ -35,7 +35,7 @@ findings below are the real gaps. Graph/memory engine is shared via GraphKit (re
 ## UI / quality (low risk)
 - [x] **UI1 — ImageDetailView loads NSImage(contentsOf:) in body getter** (main-thread, re-runs each render;
   bad on iCloud/Dropbox folders). Load once into @State via `.task(id:)`.
-- [ ] **UI2 — Backend port 3456 hardcoded in 7 sites.** One constant.
+- [x] **UI2 — Backend port 3456 hardcoded in 7 sites.** One constant.
 - [ ] **UI3 — SRP: CodeAssistantPanel (1567 lines), UAGraphView (1389).** Extract opportunistically.
 
 ## Verified GOOD (do not re-litigate)

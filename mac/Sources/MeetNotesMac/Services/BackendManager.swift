@@ -18,6 +18,9 @@ struct BackendLogLine: Identifiable, Hashable {
 @MainActor
 @Observable
 final class BackendManager {
+    /// The loopback port the Node backend listens on. Single source of truth.
+    static let defaultBackendPort = 3456
+
     enum Status: Equatable {
         case stopped
         case starting
@@ -136,23 +139,23 @@ final class BackendManager {
         // surfacing as a 4-minute login spinner after relaunch.
         Task { [weak self] in
             guard let self else { return }
-            let portInUse = await Self.isPortInUse(port: 3456)
+            let portInUse = await Self.isPortInUse(port: Self.defaultBackendPort)
             if !portInUse {
                 await MainActor.run { self.spawn(nodePath: trimmedNode, workURL: workURL) }
                 return
             }
             if await Self.probeHealth() {
                 await MainActor.run {
-                    self.append("--- Adopted existing backend on 127.0.0.1:3456 ---", stream: .info)
+                    self.append("--- Adopted existing backend on 127.0.0.1:\(Self.defaultBackendPort) ---", stream: .info)
                     self.adoptedExternal = true
                     self.pid = nil
                     self.status = .running
                 }
             } else {
                 await MainActor.run {
-                    self.append("--- Stale backend on :3456 did not answer /health in 2s — killing and respawning ---", stream: .info)
+                    self.append("--- Stale backend on :\(Self.defaultBackendPort) did not answer /health in 2s — killing and respawning ---", stream: .info)
                 }
-                Self.killExternalListener(port: 3456)
+                Self.killExternalListener(port: Self.defaultBackendPort)
                 // Give the kernel a beat to release the port before we
                 // bind it. 250ms is plenty for SIGTERM-on-loopback.
                 try? await Task.sleep(nanoseconds: 250_000_000)
@@ -283,7 +286,7 @@ final class BackendManager {
             adoptedExternal = false
             status = .stopped
             pid = nil
-            Task.detached { Self.killExternalListener(port: 3456) }
+            Task.detached { Self.killExternalListener(port: Self.defaultBackendPort) }
         }
     }
 
@@ -337,7 +340,7 @@ final class BackendManager {
     /// alongside reachability so callers can distinguish "not running"
     /// from "running but incompatible".
     nonisolated static func probeHealthDetail() async -> HealthProbeResult {
-        guard let url = URL(string: "http://127.0.0.1:3456/health") else {
+        guard let url = URL(string: "http://127.0.0.1:\(Self.defaultBackendPort)/health") else {
             return HealthProbeResult(ok: false, apiVersion: nil, versionTooOld: false)
         }
         var req = URLRequest(url: url)
