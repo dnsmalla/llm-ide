@@ -1,4 +1,5 @@
 import SwiftUI
+import GraphKit
 
 /// Mirrors GitLabSettingsSection. Only the auth shape differs: GitHub
 /// uses a Bearer-token PAT against api.github.com; no per-host base URL.

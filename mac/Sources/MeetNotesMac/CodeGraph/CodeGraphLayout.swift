@@ -4,6 +4,7 @@
 // at high counts. Edges whose endpoints aren't in the input are dropped.
 
 import Foundation
+import GraphKit
 import CoreGraphics
 
 public enum CodeGraphLayout {

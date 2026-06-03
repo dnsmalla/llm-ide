@@ -1,4 +1,5 @@
 import Foundation
+import GraphKit
 import CoreGraphics
 
 // Pure helpers for the Code Graph view's "Files & Symbols" panel and

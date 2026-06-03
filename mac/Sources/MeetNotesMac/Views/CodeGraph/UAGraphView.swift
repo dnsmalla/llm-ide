@@ -19,6 +19,7 @@
 // Library, Review Code, Review Doc, DocGen, etc. No NSOpenPanel here.
 
 import SwiftUI
+import GraphKit
 import AppKit
 
 @MainActor

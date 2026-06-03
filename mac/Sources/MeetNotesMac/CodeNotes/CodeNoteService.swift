@@ -1,4 +1,5 @@
 import Foundation
+import GraphKit
 import Combine
 
 /// Generates the code graph + deterministic notes from a repository.

@@ -10,6 +10,7 @@
 // • Clear-focus button in floating toolbar
 
 import SwiftUI
+import GraphKit
 
 @MainActor
 struct CodeGraphCanvas: View {

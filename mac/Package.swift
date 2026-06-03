@@ -13,6 +13,7 @@ let package = Package(
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"),
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0"),
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
+        .package(path: "../../GraphKit"),
     ],
     targets: [
         .executableTarget(
@@ -21,12 +22,12 @@ let package = Package(
                 "Yams",
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
+                .product(name: "GraphKit", package: "GraphKit"),
             ],
             path: "Sources/MeetNotesMac",
             resources: [
                 .copy("Resources/note_template.docx"),
                 .copy("Resources/generate_meeting_note.py"),
-                .copy("Resources/code_ast_scan.py"),
             ],
             linkerSettings: [
                 .linkedLibrary("sqlite3")

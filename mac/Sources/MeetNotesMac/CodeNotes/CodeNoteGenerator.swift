@@ -1,4 +1,5 @@
 import Foundation
+import GraphKit
 
 /// Generates deterministic, human-readable code notes from a ScanResult.
 /// No AI — notes are produced directly from structural facts (imports, types,

@@ -1,4 +1,5 @@
 import SwiftUI
+import GraphKit
 
 struct GitLabSettingsSection: View {
     @EnvironmentObject var theme: ThemeStore
