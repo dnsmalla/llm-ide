@@ -121,14 +121,18 @@ enum MeetingNoteGenerator {
         let errPipe = Pipe()
         proc.standardError = errPipe
 
+        // Install the termination handler BEFORE run(): set after, a script that
+        // exits in the gap between run() and assignment never signals, forcing a
+        // full 60s wait on an already-finished process.
+        let deadline = DispatchTime.now() + .seconds(60)
+        let timedOut = DispatchSemaphore(value: 0)
+        proc.terminationHandler = { _ in timedOut.signal() }
+
         do {
             try proc.run()
 
             // Wait up to 60 s — enough for any realistic template + content
             // size. If the script still hasn't exited, kill it and log.
-            let deadline = DispatchTime.now() + .seconds(60)
-            let timedOut = DispatchSemaphore(value: 0)
-            proc.terminationHandler = { _ in timedOut.signal() }
             if timedOut.wait(timeout: deadline) == .timedOut {
                 proc.terminate()
                 log.error("python script timed out after 60 s — killed")

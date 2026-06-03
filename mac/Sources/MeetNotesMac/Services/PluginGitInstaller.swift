@@ -157,13 +157,6 @@ enum PluginGitInstaller {
             }
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeoutSec, execute: timeoutItem)
 
-            proc.terminationHandler = { p in
-                timeoutItem.cancel()
-                let out = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                cont.resume(returning: ProcessResult(code: p.terminationStatus, stdout: out, stderr: err))
-            }
-
             do {
                 try proc.run()
             } catch {
@@ -173,6 +166,28 @@ enum PluginGitInstaller {
                 } else {
                     cont.resume(throwing: InstallError.cloneFailed(error.localizedDescription))
                 }
+                return
+            }
+
+            // Drain both pipes concurrently. Reading them only after exit (the
+            // old terminationHandler approach) deadlocks when a clone writes more
+            // than the ~64KB pipe buffer to stderr — git blocks on write and never
+            // exits. The background reads hit EOF when the process closes the pipes.
+            final class OutBox: @unchecked Sendable { var s = "" }
+            let outBox = OutBox(), errBox = OutBox()
+            let group = DispatchGroup()
+            let rq = DispatchQueue.global(qos: .utility)
+            group.enter(); rq.async {
+                outBox.s = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                group.leave()
+            }
+            group.enter(); rq.async {
+                errBox.s = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                group.leave()
+            }
+            group.notify(queue: rq) {
+                timeoutItem.cancel()
+                cont.resume(returning: ProcessResult(code: proc.terminationStatus, stdout: outBox.s, stderr: errBox.s))
             }
         }
     }
