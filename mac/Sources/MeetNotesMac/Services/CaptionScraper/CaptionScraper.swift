@@ -68,7 +68,8 @@ final class CaptionOrchestrator: ObservableObject {
 
     private let log = Logger(subsystem: "com.meetnotes.macapp", category: "Capture")
     private var pollTimer: Timer?
-    private var recentKeys: [(key: String, at: Date)] = []
+    private var recentKeys: [(key: String, at: Date)] = []   // time-ordered, for expiry
+    private var recentKeySet: Set<String> = []                // mirror of recentKeys, for O(1) membership
     private let dedupWindow: TimeInterval = 2.0
     private let scrapers: [CaptionScraper]
     private let pollInterval: TimeInterval
@@ -111,6 +112,7 @@ final class CaptionOrchestrator: ObservableObject {
         startedAt = now
         captions.removeAll()
         recentKeys.removeAll()
+        recentKeySet.removeAll()
         lastIngestStatus = .idle
         lastNewCaptionAt = now
         isIdlePolling = false
@@ -277,14 +279,20 @@ final class CaptionOrchestrator: ObservableObject {
         }
 
         let now = Date()
-        // Trim dedup buffer first so it doesn't grow without bound.
-        recentKeys.removeAll { now.timeIntervalSince($0.at) > dedupWindow }
+        // Expire old dedup entries from the front (recentKeys is time-ordered),
+        // keeping recentKeySet in sync — O(expired), not an O(n) scan per tick.
+        let cutoff = now.addingTimeInterval(-dedupWindow)
+        while let first = recentKeys.first, first.at < cutoff {
+            recentKeySet.remove(first.key)
+            recentKeys.removeFirst()
+        }
 
         var sawNew = false
         for (speaker, text) in scraper.snapshot() {
             let key = "\(speaker)::\(text)"
-            if recentKeys.contains(where: { $0.key == key }) { continue }
+            if recentKeySet.contains(key) { continue }   // O(1) dedup
             recentKeys.append((key, now))
+            recentKeySet.insert(key)
             captions.append(Caption(speaker: speaker, text: text, source: scraper.source))
             sawNew = true
             if let h = fileHandle {

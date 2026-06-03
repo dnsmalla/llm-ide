@@ -52,6 +52,8 @@ export function reloadPlugins() {
   pluginRegistry = loadPlugins();
   // Invalidate the cached skill catalog — new/removed plugins change it.
   _allSkillsCache = null;
+  // Drop parsed-plugin-skill cache so re-installed plugins get re-read.
+  _pluginSkillCache = new Map();
   // Drop enable-state entries for plugins that have been uninstalled
   // since the last load. Without this, removing a plugin folder leaves
   // its name in plugin-state.json forever — harmless functionally
@@ -164,6 +166,20 @@ export function listInstalledPlugins(userId) {
  * Plugin skills with names that clash with core skills lose — core
  * always wins, so a malicious plugin can't shadow ask-internal etc.
  */
+// Parsed plugin skills cached by plugin skills-dir. Plugin skill files only
+// change on install/remove, which call reloadPlugins() (clears this) — so we
+// don't re-read + re-parse + re-validate every plugin's skills/ on every
+// /code-assist request anymore.
+let _pluginSkillCache = new Map();
+function loadPluginSkillsCached(dir) {
+  let cached = _pluginSkillCache.get(dir);
+  if (!cached) {
+    cached = loadSkills(dir);
+    _pluginSkillCache.set(dir, cached);
+  }
+  return cached;
+}
+
 function buildPerUserSkillSet(userId) {
   const enabled = listEnabledPlugins(userId);
   // Start with a copy of the internal skill set so mutations here
@@ -178,7 +194,7 @@ function buildPerUserSkillSet(userId) {
     // core skills get. Bad plugin skills are dropped with a warning
     // server-side.
     if (p.skillFiles.length > 0) {
-      const pluginSkills = loadSkills(join(p.dir, 'skills'));
+      const pluginSkills = loadPluginSkillsCached(join(p.dir, 'skills'));
       if (pluginSkills.warnings.length > 0) {
         console.warn(`[plugin:${p.name}] skill warnings:`, pluginSkills.warnings);
       }

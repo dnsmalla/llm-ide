@@ -169,38 +169,38 @@ final class LibraryItemStore {
     /// This is a full clear-and-resync: stale entries (deleted files)
     /// are removed and the current folder contents replace them.
     func syncMeetingNotes(from folder: URL) {
-        // Remove all existing notes items so deleted files don't linger.
-        items.removeAll { $0.category == .notes }
-
         let fm = FileManager.default
-        guard let enumerator = fm.enumerator(
+        var newItems: [LibraryItem] = []
+        let folderName = folder.lastPathComponent   // e.g. "notes"
+        if let enumerator = fm.enumerator(
             at: folder,
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
-        ) else {
-            save()
-            return
-        }
+        ) {
+            for case let url as URL in enumerator {
+                let ext  = url.pathExtension.lowercased()
+                let name = url.lastPathComponent
+                // Accept .docx (template-generated) and .md (manual/fallback).
+                // Skip .partial.md drafts and the reference template.md itself.
+                let isNote = ext == "docx"
+                    || (ext == "md"
+                        && !name.hasSuffix(".partial.md")
+                        && name != "template.md")
+                guard isNote,
+                      (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+                else { continue }
 
-        let folderName = folder.lastPathComponent   // e.g. "notes"
-        for case let url as URL in enumerator {
-            let ext  = url.pathExtension.lowercased()
-            let name = url.lastPathComponent
-            // Accept .docx (template-generated) and .md (manual/fallback).
-            // Skip .partial.md drafts and the reference template.md itself.
-            let isNote = ext == "docx"
-                || (ext == "md"
-                    && !name.hasSuffix(".partial.md")
-                    && name != "template.md")
-            guard isNote,
-                  (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
-            else { continue }
-
-            // folderOrigin != nil → rendered in a collapsed DisclosureGroup.
-            var item = LibraryItem(name: name, path: url.path, category: .notes)
-            item.folderOrigin = folderName
-            items.append(item)
+                var item = LibraryItem(name: name, path: url.path, category: .notes)
+                item.folderOrigin = folderName   // folderOrigin != nil → collapsed DisclosureGroup
+                newItems.append(item)
+            }
         }
+        // Skip the rebuild + JSON write when the file set is unchanged (the common
+        // case — a live transcript's content grows but its path doesn't).
+        guard Set(newItems.map(\.path)) != Set(items.filter { $0.category == .notes }.map(\.path))
+        else { return }
+        items.removeAll { $0.category == .notes }
+        items.append(contentsOf: newItems)
         save()
     }
 
@@ -213,18 +213,13 @@ final class LibraryItemStore {
     ///
     /// Full clear-and-resync: stale entries are pruned automatically.
     func syncMeetingTranscripts(from folder: URL) {
-        items.removeAll { $0.category == .meetings }
-
         let fm = FileManager.default
-        guard let enumerator = fm.enumerator(
+        var newItems: [LibraryItem] = []
+        if let enumerator = fm.enumerator(
             at: folder,
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles]
-        ) else {
-            save()
-            return
-        }
-
+        ) {
         for case let url as URL in enumerator {
             let name = url.lastPathComponent
             let ext  = url.pathExtension.lowercased()
@@ -255,8 +250,14 @@ final class LibraryItemStore {
 
             var item = LibraryItem(name: name, path: url.path, category: .meetings)
             item.folderOrigin = folderOrigin
-            items.append(item)
+            newItems.append(item)
         }
+        }
+        // Skip the rebuild + JSON write when the file set is unchanged.
+        guard Set(newItems.map(\.path)) != Set(items.filter { $0.category == .meetings }.map(\.path))
+        else { return }
+        items.removeAll { $0.category == .meetings }
+        items.append(contentsOf: newItems)
         save()
     }
 
