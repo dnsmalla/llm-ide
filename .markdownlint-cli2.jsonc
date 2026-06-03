@@ -1,0 +1,15 @@
+{
+  "config": {
+    "default": true,
+    "MD013": false,
+    "MD033": false,
+    "MD041": false,
+    "MD024": { "siblings_only": true }
+  },
+  "ignores": [
+    "docs/superpowers/**",
+    "docs/_templates/**",
+    "node_modules/**",
+    ".venv-docs/**"
+  ]
+}

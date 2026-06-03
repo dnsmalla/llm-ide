@@ -1,0 +1,680 @@
+// KB storage layer.  better-sqlite3 is synchronous and ~4× faster than
+// node-sqlite3 for our access pattern (small reads, tiny writes), and
+// keeps the server.mjs HTTP layer dependency-free of Promise plumbing.
+
+import crypto from 'crypto';
+import Database from 'better-sqlite3';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { applyMigrations } from './migrations.mjs';
+import { config } from '../core/config.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DB_PATH = config.dbPath || path.join(__dirname, 'data.db');
+
+let _db = null;
+
+// Lazy prepared-statement cache keyed by (db, sql).  better-sqlite3's
+// `db.prepare(sql)` still parses + hits an internal lookup on every
+// call — for SQL strings invoked per-row or per-request in hot paths
+// (search SELECTs, planner context retrieval, JTI checks) reusing the
+// Statement object avoids that work entirely.  WeakMap so the cache
+// drops automatically when the db connection is closed/replaced.
+const _stmtCache = new WeakMap();   // db → Map<sql, Statement>
+// Module-public so extracted helper modules (personas, reviews,
+// plans, …) can share the prepared-statement cache instead of
+// each going through `db.prepare(sql)` from scratch.
+export function lazyPrepare(db, sql) {
+  let m = _stmtCache.get(db);
+  if (!m) { m = new Map(); _stmtCache.set(db, m); }
+  let s = m.get(sql);
+  if (!s) { s = db.prepare(sql); m.set(sql, s); }
+  return s;
+}
+
+// Multi-tenant guard — every state-mutating function below MUST be
+// invoked with a userId.  `requireUser` exists so callers can fail loud
+// rather than silently writing to the legacy fallback row.
+// Exported so all kb/ sub-modules can import a single canonical copy
+// instead of each maintaining a local duplicate.
+export function requireUser(userId) {
+  if (!userId || typeof userId !== 'string') {
+    throw new Error('userId is required for tenanted operations');
+  }
+  return userId;
+}
+
+// Production-grade SQLite settings.  WAL mode lets readers run
+// concurrently with a writer; synchronous=NORMAL is the right balance
+// for a single-user app (FULL is overkill, OFF risks corruption);
+// foreign_keys must be turned on per-connection.  busy_timeout gives
+// concurrent transactions 5s to back off rather than failing
+// immediately with SQLITE_BUSY.  wal_autocheckpoint truncates the WAL
+// every ~4 MB so it doesn't grow unbounded on a long-running server.
+const PRAGMAS = [
+  'PRAGMA journal_mode = WAL',
+  'PRAGMA synchronous = NORMAL',
+  'PRAGMA foreign_keys = ON',
+  'PRAGMA busy_timeout = 5000',
+  'PRAGMA wal_autocheckpoint = 1000',
+  'PRAGMA temp_store = MEMORY',
+  'PRAGMA mmap_size = 67108864',         // 64 MB; safe on every modern system
+];
+
+// Module-level logger captured on first getDb() call. Functions like
+// safeParseMeta have no convenient way to receive the structured
+// logger through their call chain (deep inside search hydration), so
+// we stash it here and let them write via the same JSON channel
+// everything else uses.
+let _logger = null;
+
+export function getDb({ logger } = {}) {
+  if (logger) _logger = logger;
+  if (_db) return _db;
+  _db = new Database(DB_PATH);
+  for (const p of PRAGMAS) _db.pragma(p.replace(/^PRAGMA\s+/i, ''));
+  applyMigrations(_db, { logger });
+  return _db;
+}
+
+// Graceful shutdown — call from the HTTP server's SIGTERM handler so
+// in-flight writes finish and the WAL checkpoint flushes to the main
+// db file.  Safe to call multiple times.
+export function closeDb({ logger } = {}) {
+  if (!_db) return;
+  try {
+    _db.pragma('wal_checkpoint(TRUNCATE)');
+    _db.close();
+    if (logger) logger.info('db_closed');
+  } catch (err) {
+    if (logger) logger.error('db_close_failed', { error: err.message });
+  } finally {
+    _db = null;
+  }
+}
+
+// --- helpers --------------------------------------------------------------
+
+// Exported so the extracted helper modules (personas.mjs,
+// feedback.mjs, reviews.mjs, …) can share the same JSON encode
+// strategy without redefining it. Not part of the public KB
+// surface — these are db-internal but module-public.
+export function safeJSONStringify(v) {
+  try { return JSON.stringify(v); } catch { return '{}'; }
+}
+
+// FTS5 MATCH does not accept arbitrary user input — punctuation is
+// interpreted as operators ("foo.bar" → syntax error).  We tokenize on
+// non-word chars, drop empties, and quote each remaining term.  The
+// `mode` argument controls how the terms are combined:
+//   'and' (default) — every term must appear (precise search box use)
+//   'or'            — any term may appear (fuzzy retrieval, ranked by bm25)
+function buildMatchExpr(raw, mode = 'and') {
+  if (typeof raw !== 'string') return null;
+  const tokens = raw
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}_]+/u)
+    .filter((t) => t.length >= 2 && t.length <= 64)
+    .slice(0, 12);
+  if (tokens.length === 0) return null;
+  const joiner = mode === 'or' ? ' OR ' : ' ';
+  return tokens.map((t) => `"${t.replace(/"/g, '""')}"`).join(joiner);
+}
+
+// Meeting + entity CRUD + stats live in meetings.mjs. Re-exported
+// here for backward compat: server.mjs imports statsAdmin from
+// './kb/db.mjs' directly, and every route handler is happy with
+// `kb.ingestMeeting(...)` resolving the same way as before.
+export {
+  ingestMeeting,
+  deleteMeeting,
+  getMeetingTranscript,
+  getMeeting,
+  listMeetings,
+  listEntities,
+  getEntity,
+  stats,
+  statsAdmin,
+} from './meetings.mjs';
+
+// --- reads ----------------------------------------------------------------
+
+// Tenant-aware unified search.  Every result row is filtered by the
+// caller's userId — both the empty-query fast path and the FTS
+// branch.  We hydrate via lookups against scoped tables (meetings,
+// entities, sources, plans, plan_tasks, outcomes) so an FTS hit that
+// matches the index but belongs to another user won't survive
+// hydration.
+export function search(userId, { q, kind, limit = 20, projectId } = {}) {
+  requireUser(userId);
+  const db = getDb();
+  const cap = Math.max(1, Math.min(100, Number(limit) || 20));
+
+  // Plain "list everything" path — used by the History pane when the search
+  // box is empty.  We don't hit FTS at all so empty queries are O(rows).
+  if (!q || !buildMatchExpr(q)) {
+    if (kind === 'meeting' || !kind) {
+      const rows = lazyPrepare(db, `
+        SELECT id, title, date, duration_sec, meta FROM meetings
+        WHERE user_id = ?
+        ORDER BY date DESC LIMIT ?
+      `).all(userId, cap);
+      return rows
+        .filter((r) => !projectId || safeParseMeta(r.meta)?.projectId === projectId)
+        .map((r) => ({
+          kind: 'meeting',
+          meetingId: r.id,
+          entityId: null,
+          title: r.title,
+          body: '',
+          date: r.date,
+          durationSec: r.duration_sec,
+        }));
+    }
+    // Phase-1 entity kinds live in the `entities` table.
+    if (kind === 'action' || kind === 'decision' || kind === 'blocker') {
+      const rows = lazyPrepare(db, `
+        SELECT e.id, e.meeting_id, e.kind, e.text, e.quote, e.meta, m.title, m.date, m.meta AS m_meta
+        FROM entities e JOIN meetings m ON m.id = e.meeting_id
+        WHERE e.kind = ? AND e.user_id = ?
+        ORDER BY m.date DESC LIMIT ?
+      `).all(kind, userId, cap);
+      return rows
+        .filter((r) => !projectId || safeParseMeta(r.m_meta)?.projectId === projectId)
+        .map((r) => ({
+          kind: r.kind,
+          meetingId: r.meeting_id,
+          entityId: r.id,
+          title: r.text,
+          body: r.quote || '',
+          meta: safeParseMeta(r.meta),
+          meetingTitle: r.title,
+          date: r.date,
+        }));
+    }
+    // Phase-8 outcomes live in their own table.
+    if (kind === 'outcome') {
+      const rows = lazyPrepare(db, `
+        SELECT id, task_id, provider, ref, state, meta, observed_at FROM outcomes
+        WHERE user_id = ?
+        ORDER BY observed_at DESC LIMIT ?
+      `).all(userId, cap);
+      return rows.map((r) => ({
+        kind: 'outcome',
+        meetingId: r.task_id,
+        entityId: String(r.id),
+        ref: r.ref,
+        title: `${r.state} — ${r.provider}`,
+        body: '',
+        meta: safeParseMeta(r.meta),
+        date: r.observed_at,
+      }));
+    }
+    // Phase-3 external sources live in the `sources` table.
+    const rows = lazyPrepare(db, `
+      SELECT id, kind, ref, title, body, meta, indexed_at FROM sources
+      WHERE kind = ? AND user_id = ?
+      ORDER BY indexed_at DESC LIMIT ?
+    `).all(kind, userId, cap);
+    return rows
+      .filter((r) => !projectId || safeParseMeta(r.meta)?.projectId === projectId)
+      .map((r) => ({
+      kind: r.kind,
+      meetingId: r.kind,
+      entityId: String(r.id),
+      ref: r.ref,
+      title: r.title,
+      body: r.body,
+      meta: safeParseMeta(r.meta),
+      date: r.indexed_at,
+    }));
+  }
+
+  const match = buildMatchExpr(q);
+  const params = [match];
+  let where = 'search MATCH ?';
+  if (kind) {
+    where += ' AND kind = ?';
+    params.push(kind);
+  }
+  // bm25() ranks more relevant rows first; lower is better.
+  const rows = lazyPrepare(db, `
+    SELECT meeting_id, entity_id, kind, title, body, bm25(search) AS rank
+    FROM search
+    WHERE ${where}
+    ORDER BY rank LIMIT ?
+  `).all(...params, cap);
+
+  // Per-kind hydration.  Tenancy enforcement: build an
+  // owned-by-this-user allow-set per backing table, then drop any FTS
+  // row whose hydration came up empty.
+  //
+  // FTS triggers (see migrations/0001_initial.sql) store DIFFERENT
+  // things in `meeting_id` depending on kind:
+  //   - meeting / action / decision / blocker → real meetings.id
+  //   - plan                                  → COALESCE(meeting_id,'')
+  //   - task                                  → plan_id (NOT a meeting)
+  //   - outcome                               → task_id (NOT a meeting)
+  //   - code / ticket / qa / doc              → kind string (sources)
+  // So we cannot use a single meetingMap gate for the non-source kinds.
+  // We hydrate plans/tasks/outcomes against THEIR own user-scoped tables
+  // by `entity_id`.
+  const SOURCE_KINDS = new Set(['code', 'ticket', 'qa', 'doc']);
+  const ENTITY_KINDS = new Set(['meeting', 'action', 'decision', 'blocker']);
+
+  const meetingRows = rows.filter((r) => ENTITY_KINDS.has(r.kind));
+  const sourceRows  = rows.filter((r) => SOURCE_KINDS.has(r.kind));
+  const planRows    = rows.filter((r) => r.kind === 'plan');
+  const taskRows    = rows.filter((r) => r.kind === 'task');
+  const outcomeRows = rows.filter((r) => r.kind === 'outcome');
+
+  // Meetings — used for both 'meeting' rows and the entity sub-kinds
+  // (action/decision/blocker), which trace back via meeting_id.
+  const meetingMap = new Map();
+  const meetingIds = [...new Set(meetingRows.map((r) => r.meeting_id))];
+  if (meetingIds.length > 0) {
+    const placeholders = meetingIds.map(() => '?').join(',');
+    const meetings = db.prepare(
+      `SELECT id, title, date, meta FROM meetings WHERE user_id = ? AND id IN (${placeholders})`,
+    ).all(userId, ...meetingIds);
+    for (const m of meetings) meetingMap.set(m.id, m);
+  }
+
+  const sourceMap = new Map();
+  if (sourceRows.length > 0) {
+    const sourceIds = sourceRows.map((r) => Number(r.entity_id)).filter(Number.isFinite);
+    if (sourceIds.length > 0) {
+      const placeholders = sourceIds.map(() => '?').join(',');
+      const srcs = db.prepare(
+        `SELECT id, ref, meta, indexed_at FROM sources WHERE user_id = ? AND id IN (${placeholders})`,
+      ).all(userId, ...sourceIds);
+      for (const s of srcs) sourceMap.set(String(s.id), s);
+    }
+  }
+
+  function buildIdSet(kindRows, table) {
+    if (kindRows.length === 0) return new Set();
+    const ids = [...new Set(kindRows.map((r) => r.entity_id).filter(Boolean))];
+    if (ids.length === 0) return new Set();
+    const placeholders = ids.map(() => '?').join(',');
+    const found = db.prepare(
+      `SELECT id FROM ${table} WHERE user_id = ? AND id IN (${placeholders})`,
+    ).all(userId, ...ids);
+    return new Set(found.map((r) => String(r.id)));
+  }
+  const planIdSet    = buildIdSet(planRows,    'plans');
+  const taskIdSet    = buildIdSet(taskRows,    'plan_tasks');
+  const outcomeIdSet = buildIdSet(outcomeRows, 'outcomes');
+
+  // Drop any FTS row whose hydration came up empty — that means the
+  // row belongs to another tenant or has been deleted between FTS
+  // index time and now.  Either way, don't surface it to this user.
+  return rows.map((r) => {
+    // projectId gate: meeting/entity rows trace to a meeting's meta;
+    // source rows have meta on the source row itself.  Plan/task/
+    // outcome rows aren't yet tagged with a projectId, so they're
+    // dropped entirely when a projectId filter is in effect (the
+    // alternative — passing them through unfiltered — would leak
+    // cross-project context into a project-scoped search).
+    if (projectId) {
+      let rowMeta = null;
+      if (SOURCE_KINDS.has(r.kind)) {
+        rowMeta = sourceMap.get(r.entity_id)?.meta;
+      } else if (ENTITY_KINDS.has(r.kind)) {
+        rowMeta = meetingMap.get(r.meeting_id)?.meta;
+      } else {
+        return null;
+      }
+      const parsed = typeof rowMeta === 'string' ? safeParseMeta(rowMeta) : (rowMeta || {});
+      if (parsed?.projectId !== projectId) return null;
+    }
+    if (SOURCE_KINDS.has(r.kind)) {
+      const s = sourceMap.get(r.entity_id);
+      if (!s) return null;
+      return {
+        kind: r.kind,
+        meetingId: null,
+        entityId: r.entity_id,
+        title: r.title,
+        body: r.body,
+        rank: r.rank,
+        ref: s.ref,
+        meta: safeParseMeta(s.meta),
+        date: s.indexed_at,
+      };
+    }
+    // Entity kinds trace via meeting_id.
+    if (ENTITY_KINDS.has(r.kind)) {
+      if (!meetingMap.has(r.meeting_id)) return null;
+      return {
+        kind: r.kind,
+        meetingId: r.meeting_id,
+        entityId: r.entity_id,
+        title: r.title,
+        body: r.body,
+        rank: r.rank,
+        meetingTitle: meetingMap.get(r.meeting_id)?.title,
+        date: meetingMap.get(r.meeting_id)?.date,
+      };
+    }
+    // Plan / task / outcome — gated by their own owned-id sets.
+    const ownsByKind = {
+      plan: planIdSet,
+      task: taskIdSet,
+      outcome: outcomeIdSet,
+    };
+    const set = ownsByKind[r.kind];
+    if (!set || !set.has(String(r.entity_id))) return null;
+    return {
+      kind: r.kind,
+      meetingId: r.meeting_id || null,
+      entityId: r.entity_id,
+      title: r.title,
+      body: r.body,
+      rank: r.rank,
+    };
+  }).filter(Boolean);
+}
+
+export function safeParseMeta(s) {
+  if (!s) return {};
+  try { return JSON.parse(s); }
+  catch (err) {
+    // Log via the structured logger so the diagnostic carries the
+    // standard JSON envelope (timestamp, level, msg) and lands in
+    // the same channel as everything else. Direct stderr.write
+    // bypassed that and made grepping logs noisy. Fallback to
+    // stderr only if no logger was captured yet (very early boot).
+    const detail = {
+      error: (err?.message || 'unknown').slice(0, 200),
+      sample: String(s).slice(0, 40),
+    };
+    if (_logger?.warn) {
+      try { _logger.warn('kb_safe_parse_meta_failed', detail); }
+      catch { /* never block on a logging failure */ }
+    } else {
+      try { process.stderr.write(`[db] safeParseMeta failed: ${detail.error}\n`); }
+      catch { /* */ }
+    }
+    return {};
+  }
+}
+
+
+// Phase-3 external source ingestion lives in sources.mjs.
+export { ingestSources, deleteSourcesByPrefix } from './sources.mjs';
+
+// Random id helper. Exported so the extracted helper modules
+// (reviews.mjs, plans.mjs) can mint plan/task/review ids without
+// duplicating the CSPRNG + base64url plumbing.
+export function genId(prefix) {
+  // 12 bytes of CSPRNG → 16 base64url chars. Math.random gives ~30
+  // bits of effective entropy after slice(2,8); a timestamp-prefixed
+  // ID with 30 bits of randomness lets a same-second attacker brute-
+  // force the suffix in ~1 B tries, which is feasible against an
+  // online enumeration probe. CSPRNG removes that class of attack.
+  // Timestamp prefix is kept so IDs remain roughly sortable.
+  return `${prefix}-${Date.now().toString(36)}-${crypto.randomBytes(12).toString('base64url')}`;
+}
+
+// Phase 4 plan + task CRUD moved into plans.mjs. Re-exported here
+// for backward compat with `kb.savePlan(...)` etc.
+export {
+  savePlan,
+  getPlan,
+  listPlans,
+  deletePlan,
+  updateTask,
+  mergeTaskMeta,
+  getTaskById,
+  getPlanSnapshots,
+} from './plans.mjs';
+
+// Per-user metadata (repo allow-list, UI prefs, JWT revocation list)
+// lives in user.mjs.
+export {
+  listUserRepos,
+  addUserRepo,
+  removeUserRepo,
+  userRepoAllowlist,
+  getUserPrefs,
+  setUserPrefs,
+  revokeJti,
+  isJtiRevoked,
+  purgeExpiredJti,
+} from './user.mjs';
+
+
+// Meeting-agent personas + Ask-the-Agent history live in personas.mjs.
+// Re-exported here so existing callers (`kb.getAgentPersona(...)`,
+// `kb.appendAgentAskMessage(...)`, etc.) keep working unchanged.
+export {
+  getAgentPersona,
+  setAgentPersona,
+  listAgentPersonas,
+  createAgentPersona,
+  updateAgentPersona,
+  deleteAgentPersona,
+  setActiveAgentPersona,
+  appendAgentAskMessage,
+  listAgentAskMessages,
+  clearAgentAskMessages,
+} from './personas.mjs';
+
+
+// Meeting-agent question feedback (verdicts + stats) lives in
+// feedback.mjs. Re-exported here for backward compat with existing
+// `kb.recordAgentFeedback(...)` etc. call sites.
+export {
+  recordAgentFeedback,
+  getAgentFeedback,
+  agentFeedbackByTask,
+  agentFeedbackStats,
+} from './feedback.mjs';
+
+
+// Phase-8 outcome polling helpers live in outcomes.mjs.
+export {
+  recordOutcome,
+  listOutcomesForTask,
+  listDispatchedTasks,
+  listDispatchedTasksForRetry,
+  listUsersWithDispatchedTasks,
+  outcomeStats,
+} from './outcomes.mjs';
+
+// Phase-6 review-queue helpers live in reviews.mjs. Re-exported here
+// for backward compat with `kb.submitReview(...)` etc.
+export {
+  submitReview,
+  listReviews,
+  getReview,
+  setReviewStatus,
+  deleteReview,
+} from './reviews.mjs';
+
+// Project-scoped full export — used by GET /kb/project/:id/export and
+// the Swift ProjectExporter (writes canonical folder tree on close).
+export { exportProject } from './project-export.mjs';
+
+// Used by the planning agent to assemble grounding context.  Returns up
+// to N similar past meetings, similar past tasks, and matching code/
+// ticket sources for a free-form query (typically the meeting goal +
+// salient action texts).
+// Retrieval helper for the planner / risk / code-sync agents.  Uses OR
+// semantics so a multi-word task title still produces ranked candidates
+// even when no single chunk contains every term — the agent layer can
+// always filter further on rank, but a strict-AND no-match starves it.
+export function findContext(userId, query, limit = 5) {
+  requireUser(userId);
+  const expr = buildMatchExpr(query, 'or');
+  if (!expr) return { meetings: [], tasks: [], code: [], tickets: [], blockers: [] };
+  const db = getDb();
+  const cap = Math.max(1, Math.min(20, Number(limit) || 5));
+
+  // FTS5 indexes hits regardless of tenant, so we hydrate every match
+  // through the owning table with WHERE user_id = ? — non-owned hits
+  // are dropped during hydration.
+  const sliceMeetings = (k) => {
+    const hits = lazyPrepare(db, `
+      SELECT meeting_id, entity_id, kind, title, body, bm25(search) AS rank
+      FROM search WHERE search MATCH ? AND kind = ?
+      ORDER BY rank LIMIT ?
+    `).all(expr, k, cap * 4);  // overshoot for tenant filtering
+    if (hits.length === 0) return [];
+    const ids = [...new Set(hits.map((h) => h.meeting_id))];
+    const ph = ids.map(() => '?').join(',');
+    const owned = new Set(
+      db.prepare(`SELECT id FROM meetings WHERE user_id = ? AND id IN (${ph})`)
+        .all(userId, ...ids).map((r) => r.id),
+    );
+    return hits.filter((h) => owned.has(h.meeting_id)).slice(0, cap);
+  };
+
+  const sliceEntities = (kind) => {
+    const hits = lazyPrepare(db, `
+      SELECT meeting_id, entity_id, kind, title, body, bm25(search) AS rank
+      FROM search WHERE search MATCH ? AND kind = ?
+      ORDER BY rank LIMIT ?
+    `).all(expr, kind, cap * 4);
+    if (hits.length === 0) return [];
+    const ids = [...new Set(hits.map((h) => h.entity_id))];
+    const ph = ids.map(() => '?').join(',');
+    const owned = new Set(
+      db.prepare(`SELECT id FROM entities WHERE user_id = ? AND id IN (${ph})`)
+        .all(userId, ...ids).map((r) => r.id),
+    );
+    return hits.filter((h) => owned.has(h.entity_id)).slice(0, cap);
+  };
+
+  const sliceTasks = () => {
+    const hits = lazyPrepare(db, `
+      SELECT meeting_id, entity_id, kind, title, body, bm25(search) AS rank
+      FROM search WHERE search MATCH ? AND kind = 'task'
+      ORDER BY rank LIMIT ?
+    `).all(expr, cap * 4);
+    if (hits.length === 0) return [];
+    const ids = [...new Set(hits.map((h) => h.entity_id))];
+    const ph = ids.map(() => '?').join(',');
+    const owned = new Set(
+      db.prepare(`SELECT id FROM plan_tasks WHERE user_id = ? AND id IN (${ph})`)
+        .all(userId, ...ids).map((r) => r.id),
+    );
+    return hits.filter((h) => owned.has(h.entity_id)).slice(0, cap);
+  };
+
+  const sliceCode = () => {
+    const hits = lazyPrepare(db, `
+      SELECT meeting_id, entity_id, kind, title, body, bm25(search) AS rank
+      FROM search WHERE search MATCH ? AND kind = 'code'
+      ORDER BY rank LIMIT ?
+    `).all(expr, cap * 4);
+    if (hits.length === 0) return [];
+    const ids = [...new Set(hits.map((h) => Number(h.entity_id)).filter(Number.isFinite))];
+    if (ids.length === 0) return [];
+    const ph = ids.map(() => '?').join(',');
+    const refByOwnedId = new Map(
+      db.prepare(`SELECT id, ref FROM sources WHERE user_id = ? AND id IN (${ph})`)
+        .all(userId, ...ids).map((r) => [String(r.id), r.ref]),
+    );
+    return hits
+      .filter((h) => refByOwnedId.has(h.entity_id))
+      .map((h) => ({ ...h, ref: refByOwnedId.get(h.entity_id) }))
+      .slice(0, cap);
+  };
+
+  const sliceTickets = () => {
+    const hits = lazyPrepare(db, `
+      SELECT meeting_id, entity_id, kind, title, body, bm25(search) AS rank
+      FROM search WHERE search MATCH ? AND kind = 'ticket'
+      ORDER BY rank LIMIT ?
+    `).all(expr, cap * 4);
+    if (hits.length === 0) return [];
+    const ids = [...new Set(hits.map((h) => Number(h.entity_id)).filter(Number.isFinite))];
+    if (ids.length === 0) return [];
+    const ph = ids.map(() => '?').join(',');
+    const owned = new Set(
+      db.prepare(`SELECT id FROM sources WHERE user_id = ? AND id IN (${ph})`)
+        .all(userId, ...ids).map((r) => String(r.id)),
+    );
+    return hits.filter((h) => owned.has(h.entity_id)).slice(0, cap);
+  };
+
+  return {
+    meetings: sliceMeetings('meeting'),
+    tasks:    sliceTasks(),
+    code:     sliceCode(),
+    tickets:  sliceTickets(),
+    blockers: sliceEntities('blocker'),
+  };
+}
+
+
+
+/**
+ * Wipe every row owned by `userId` across every user-scoped table,
+ * then delete the user row. Runs in a single transaction so a
+ * mid-deletion failure leaves the database consistent.
+ *
+ * Older tables (meetings/entities/sources/plans/plan_tasks/review_items/
+ * outcomes) were added user_id via ALTER TABLE in migration 0002 and
+ * do NOT have ON DELETE CASCADE on the FK. We delete them explicitly
+ * in child-first order so the FTS triggers fire correctly and FK
+ * enforcement (if enabled) is satisfied.
+ *
+ * audit_log is treated specially: rows aren't deleted, they're
+ * anonymized (user_id → NULL). This preserves the audit trail for
+ * compliance (e.g. "show me every login attempt before this account
+ * was deleted") without leaving the deleted user identifiable.
+ *
+ * Returns counts of rows touched per table for the audit log.
+ */
+export function deleteUserCascade(userId) {
+  requireUser(userId);
+  const db = getDb();
+  const tx = db.transaction(() => {
+    const counts = {};
+    const del = (sql) => db.prepare(sql).run(userId).changes;
+
+    // Children-first to avoid FK constraint violations under
+    // foreign_keys=ON, even though most of these don't have
+    // declared FKs to each other.
+    counts.outcomes        = del('DELETE FROM outcomes      WHERE user_id = ?');
+    counts.plan_tasks      = del('DELETE FROM plan_tasks    WHERE user_id = ?');
+    counts.plans           = del('DELETE FROM plans         WHERE user_id = ?');
+    counts.review_items    = del('DELETE FROM review_items  WHERE user_id = ?');
+    counts.entities        = del('DELETE FROM entities      WHERE user_id = ?');
+    counts.sources         = del('DELETE FROM sources       WHERE user_id = ?');
+    counts.meetings        = del('DELETE FROM meetings      WHERE user_id = ?');
+
+    // These have ON DELETE CASCADE on the users FK; explicit deletes
+    // here so we get a count in the receipt and so we don't rely on
+    // FK-cascade being enabled.
+    counts.user_repos      = del('DELETE FROM user_repos    WHERE user_id = ?');
+    counts.user_secrets    = del('DELETE FROM user_secrets  WHERE user_id = ?');
+    counts.agent_feedback  = del('DELETE FROM agent_feedback WHERE user_id = ?');
+    counts.refresh_tokens  = del('DELETE FROM refresh_tokens WHERE user_id = ?');
+    // migration 0008 — password-reset tokens are tied to a user; if we
+    // skip these the column hangs as a dangling reference after the
+    // users row is gone (FK enforcement would block the user delete if
+    // FK cascades were active — explicit delete avoids the assumption).
+    counts.password_reset_tokens = del('DELETE FROM password_reset_tokens WHERE user_id = ?');
+    // migration 0009 — rate_limit_buckets has no user_id column; the key
+    // column stores "<profile>::<scope>" where scope == userId for
+    // authenticated KB routes.  We match by suffix so all per-user
+    // buckets are pruned without touching IP-keyed buckets for other users.
+    counts.rate_limit_buckets = db.prepare(
+      "DELETE FROM rate_limit_buckets WHERE key LIKE '%::' || ?"
+    ).run(userId).changes;
+
+    // Anonymise audit log rather than deleting so the operator can
+    // still answer "what happened with this account before delete".
+    counts.audit_anonymised = db.prepare(
+      'UPDATE audit_log SET user_id = NULL WHERE user_id = ?'
+    ).run(userId).changes;
+
+    counts.user = del('DELETE FROM users WHERE id = ?');
+    return counts;
+  });
+  return tx();
+}

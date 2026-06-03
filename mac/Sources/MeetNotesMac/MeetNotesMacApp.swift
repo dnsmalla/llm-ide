@@ -1,0 +1,407 @@
+import SwiftUI
+import os.log
+
+// Uncaught exceptions and signal-triggered crashes are not reported
+// by SwiftUI — they die into ~/Library/Logs/DiagnosticReports/ where
+// users never look. Wire them through Apple's unified logging so the
+// crash text appears in Console.app under the meetnotes subsystem,
+// which we can pull into a bug report.
+fileprivate let crashLog = Logger(subsystem: "com.meetnotes.macapp", category: "Crash")
+fileprivate func installCrashHandlers() {
+    NSSetUncaughtExceptionHandler { exception in
+        crashLog.critical(
+            "Uncaught \(exception.name.rawValue, privacy: .public): \(exception.reason ?? "<no reason>", privacy: .public)\nstack: \(exception.callStackSymbols.joined(separator: "\n"), privacy: .public)"
+        )
+    }
+    // POSIX signals — SIGSEGV/SIGABRT/SIGILL/SIGBUS. Re-raise the
+    // default after logging so the OS still produces the crash log
+    // and exits the process cleanly.
+    for sig: Int32 in [SIGSEGV, SIGABRT, SIGILL, SIGBUS, SIGFPE] {
+        signal(sig) { sig in
+            crashLog.critical("Fatal signal \(sig)")
+            signal(sig, SIG_DFL)
+            raise(sig)
+        }
+    }
+}
+
+@main
+struct MeetNotesMacApp: App {
+    // Adopt an NSApplicationDelegate to handle reopen and "should-quit"
+    // events SwiftUI alone can't express on macOS.  Without this,
+    // closing the main window kills the process AND a second deep
+    // link click looks like a fresh launch.
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
+    @StateObject private var theme: ThemeStore
+    @StateObject private var templateStore: DocTemplateStore
+    @StateObject private var session: SessionStore
+    @StateObject private var config: AppConfig
+    @StateObject private var capture: CaptionOrchestrator
+    @StateObject private var deepLink: DeepLinkRouter
+    @StateObject private var liveMirror: LiveSessionMirror
+    @StateObject private var autoCodeUpdate: AutoCodeUpdateService
+    @StateObject private var updateService = UpdateService()
+    @StateObject private var projectStore: ProjectStore
+    @StateObject private var agentRuns: AgentRunsStore
+    @State private var backend = BackendManager()
+    @State private var quickSwitcherShown = false
+    private let api: MeetNotesAPIClient
+    private let autoCapture: AutoCaptureService
+
+    init() {
+        installCrashHandlers()
+        // Build the dependency graph once, on the main actor where
+        // SwiftUI requires it.  The API client needs SessionStore
+        // so it can mint authorization headers from the live token.
+        let cfg = AppConfig.shared
+        let store = SessionStore(server: cfg.serverURL)
+        let client = MeetNotesAPIClient(baseURL: cfg.serverURL, sessionStore: store)
+        let orchestrator = CaptionOrchestrator()
+        let themeStore = ThemeStore(initial: Theme.find(id: cfg.themeID))
+        let router = DeepLinkRouter()
+        let mirror = LiveSessionMirror(api: client)
+        let appSupportBase = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSHomeDirectory())
+                .appendingPathComponent("Library/Application Support")
+        let registryURL = appSupportBase.appendingPathComponent("MeetNotes/processed-actions.json")
+        let registry = ProcessedActionsRegistry(storeURL: registryURL)
+        let projectStoreStateDir = appSupportBase.appendingPathComponent("MeetNotes")
+        let projectStoreInstance = ProjectStore(stateDirectory: projectStoreStateDir,
+                                                 defaults: cfg.defaultProjectSettings)
+        // Wire ProjectStore into the API client so write endpoints
+        // (currently /kb/ingest) can stamp `projectId` onto payloads
+        // without every caller having to thread it through.
+        client._projectStore = projectStoreInstance
+        // Wire the API client back into ProjectStore so it can call
+        // /kb/project/:id/export on close without threading the client
+        // through every call site.
+        projectStoreInstance._apiClient = client
+        let autoCode = AutoCodeUpdateService(
+            config: cfg,
+            gitLabClient: GitLabClient(),
+            registry: registry,
+            projectStore: projectStoreInstance,
+            api: client)
+
+        // The registry's `bootstrap()` (the disk-read path) is invoked
+        // from the AppShell's first `.task` tick — see `autoCode.start()`
+        // which performs it lazily before any registry query.  Errors are
+        // surfaced after bootstrap inside AutoCodeUpdateService.
+        registry.onSaveError = { [weak autoCode] error in
+            Task { @MainActor in
+                autoCode?.setError("Action history failed to save: \(error.localizedDescription)")
+            }
+        }
+
+        self._config = StateObject(wrappedValue: cfg)
+        self._templateStore = StateObject(wrappedValue: DocTemplateStore())
+        self._session = StateObject(wrappedValue: store)
+        self._capture = StateObject(wrappedValue: orchestrator)
+        self._theme = StateObject(wrappedValue: themeStore)
+        self._deepLink = StateObject(wrappedValue: router)
+        self._liveMirror = StateObject(wrappedValue: mirror)
+        self._autoCodeUpdate = StateObject(wrappedValue: autoCode)
+        self._projectStore = StateObject(wrappedValue: projectStoreInstance)
+        let runs = AgentRunsStore(api: client)
+        self._agentRuns = StateObject(wrappedValue: runs)
+        self.api = client
+        self.autoCapture = AutoCaptureService(capture: orchestrator, config: cfg)
+    }
+
+    var body: some Scene {
+        // Use `Window` (singular) instead of `WindowGroup` so SwiftUI
+        // enforces one main window per process.  `WindowGroup` lets a
+        // deep-link arrival spawn a second window of the same scene
+        // (we'd see two login screens stacked when clicking the
+        // extension's ↗ button while the app was already running);
+        // `Window` is the canonical macOS pattern for a single-window
+        // app like Mail or Slack and never multi-instances.
+        //
+        // The id "main" is used by EnvironmentValues.openWindow when
+        // we need to programmatically reopen the window after the
+        // user closes it via Cmd-W.
+        Window(L.App.name, id: "main") {
+            ContentView(api: api)
+                .environmentObject(theme)
+                .environmentObject(templateStore)
+                .environmentObject(session)
+                .environmentObject(config)
+                .environmentObject(capture)
+                .environmentObject(deepLink)
+                .environmentObject(liveMirror)
+                .environmentObject(autoCodeUpdate)
+                .environmentObject(updateService)
+                .environmentObject(projectStore)
+                .environmentObject(agentRuns)
+                .environment(backend)
+                // 1000 gives the 3-pane Review layout breathing room
+                // (sidebar ~240 + code ~380 + assistant ~280 = 900,
+                // plus toolbar + dividers + comfort).  Users can still
+                // shrink the sidebar to icon-only mode for more space.
+                .frame(minWidth: 1000, minHeight: 600)
+                .task {
+                    // One-shot import of legacy SavedGitLab/HubRepo entries
+                    // with localPath. No-op on every launch after the first
+                    // successful run (ProjectMigrator records completion in
+                    // a sidecar marker). Runs FIRST so the migrator's
+                    // imported activeProject (if any) is visible to every
+                    // other bootstrap step below.
+                    let migrator = ProjectMigrator(store: projectStore)
+                    let result = migrator.runOnce(
+                        gitLab: config.gitLabSavedProjects,
+                        gitHub: config.gitHubSavedRepos)
+                    if result.imported > 0 {
+                        Logger(subsystem: "com.meetnotes.macapp", category: "Migration")
+                            .info("Imported \(result.imported, privacy: .public) legacy projects")
+                    }
+                    // Lazy bootstrap: DocTemplateStore's disk read is
+                    // deferred from init() to here so MeetNotesMacApp.init
+                    // stays cheap.  Run first so any UI that reads
+                    // customTemplates on first frame still gets the
+                    // hydrated list within the same .task tick.
+                    templateStore.bootstrap()
+                    // Restore persisted session on launch, if any.
+                    await session.bootstrap(api: api)
+                    autoCapture.start()
+                    if config.autoCodeUpdateEnabled { autoCodeUpdate.start() }
+                    autoStartBackend()
+                }
+                // Start / stop the live caption mirror in lockstep
+                // with authentication.  When signed out, polling
+                // would just 401 in a loop; when signed in, we want
+                // immediate visibility of any active extension session.
+                .onChange(of: session.isAuthenticated) { _, authed in
+                    if authed { liveMirror.start() } else { liveMirror.stop() }
+                }
+                // Stop the supervised backend on Cmd-Q so we don't
+                // leak an orphan node process every time the user
+                // quits the app.
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                    backend.stop()
+                }
+                .task {
+                    if session.isAuthenticated { liveMirror.start() }
+                }
+                // Custom URL scheme handler.  Fired by macOS when any
+                // app (the Chrome extension, Spotlight, `open
+                // meetnotes://transcript`, etc.) opens a URL with our
+                // scheme.  Routing decisions live in the router so this
+                // hook stays trivial.
+                .onOpenURL { url in
+                    deepLink.handle(url)
+                }
+                .sheet(isPresented: $quickSwitcherShown) {
+                    QuickSwitcherSheet(isPresented: $quickSwitcherShown)
+                        .environmentObject(theme)
+                        .environmentObject(projectStore)
+                }
+        }
+        // `.contentSize` was making the window resize whenever the
+        // selected section's content had a different intrinsic width
+        // (Library three-pane vs. single-pane Plans/Review/Settings),
+        // which pulled the sidebar in/out on every click.  Default
+        // resizability keeps the window stable on section switch.
+        .defaultSize(width: 1280, height: 760)
+        .windowResizability(.contentMinSize)
+        // Titlebar blends with the sidebar / toolbar (no separator
+        // line) — matches Mail.app, Notes.app, Reminders.app.
+        .windowToolbarStyle(.unified)
+        // Replace SwiftUI's default "Meet Notes" → "About" group so we
+        // can slot the Sparkle "Check for updates…" item beside it.
+        // .appInfo lives under the app menu's first divider — exactly
+        // where every macOS app puts its update entry.
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    updateService.checkForUpdates()
+                }
+                .disabled(!updateService.canCheckForUpdates)
+            }
+            CommandGroup(after: .windowList) {
+                Button("Quick Switch Project…") { quickSwitcherShown = true }
+                    .keyboardShortcut("p", modifiers: .command)
+                // Global "Ask the Agent" — opens the AskAgentSheet
+                // owned by AppShell, regardless of which section is
+                // active. Posts a notification rather than mutating
+                // state directly because the App scene has no direct
+                // handle on AppShell's @State.
+                Button("Ask the Agent…") {
+                    NotificationCenter.default.post(name: .openAskAgentSheet, object: nil)
+                }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+            }
+        }
+
+        // Menu-bar item — visible status of the recording state and a
+        // one-click Start/Stop.  Lets capture continue when the main
+        // window is closed.
+        MenuBarExtra {
+            MenuBarMenu(api: api)
+                .environmentObject(theme)
+                .environmentObject(session)
+                .environmentObject(capture)
+                .environmentObject(config)
+        } label: {
+            Image(systemName: capture.isRunning ? "record.circle.fill" : "record.circle")
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(capture.isRunning ? .red : .secondary)
+                .accessibilityLabel(capture.isRunning ? "Meet Notes — recording" : "Meet Notes")
+        }
+        .menuBarExtraStyle(.menu)
+    }
+
+    /// Always tries to start the backend on app launch:
+    ///   1. Fill in any missing config paths from well-known locations.
+    ///   2. If both paths resolve to a real server.mjs + node binary,
+    ///      call backend.start(). BackendManager handles the adopt-vs-
+    ///      spawn decision via its /health probe.
+    /// Failures are surfaced in Settings → Backend, not as alerts.
+    @MainActor
+    private func autoStartBackend() {
+        if config.backendNodePath.isEmpty, let detected = BackendManager.autoDetectNode() {
+            config.backendNodePath = detected
+        }
+        if config.backendWorkingDir.isEmpty {
+            for candidate in autoDetectProjectFolders() {
+                if FileManager.default.fileExists(atPath: candidate.appendingPathComponent("server.mjs").path) {
+                    config.backendWorkingDir = candidate.path
+                    break
+                }
+            }
+        }
+        guard !config.backendNodePath.isEmpty, !config.backendWorkingDir.isEmpty else { return }
+        backend.start(nodePath: config.backendNodePath, workingDirectory: config.backendWorkingDir)
+    }
+
+    /// Project-folder guesses, in order of likelihood:
+    ///   - the directory the app was built from (Bundle path)
+    ///   - the user's Developer/MeetNotes/<…>/extension hideouts
+    ///   - a sibling Desktop/meet-notes/extension (typical local clone)
+    private func autoDetectProjectFolders() -> [URL] {
+        let fm = FileManager.default
+        var out: [URL] = []
+        let home = fm.homeDirectoryForCurrentUser
+        out.append(home.appendingPathComponent("Desktop/meet-notes/extension"))
+        out.append(home.appendingPathComponent("Developer/meet-notes/extension"))
+        out.append(home.appendingPathComponent("Developer/MeetNotes/notes-extension/extension"))
+        // Sibling of the running app bundle: handy when the app is run
+        // from inside the repo (e.g., via mac/build_app.sh).
+        if let bundleParent = Bundle.main.bundleURL.deletingLastPathComponent() as URL? {
+            out.append(bundleParent.deletingLastPathComponent().appendingPathComponent("extension"))
+        }
+        return out
+    }
+}
+
+/// Compact menu-bar menu — tiny on purpose so it doesn't compete with
+/// the main window.  All real interaction happens in the window; the
+/// menu is just the persistent status surface.
+struct MenuBarMenu: View {
+    @EnvironmentObject var capture: CaptionOrchestrator
+    @EnvironmentObject var session: SessionStore
+    @EnvironmentObject var config: AppConfig
+    let api: MeetNotesAPIClient
+
+    /// Open-bug count cached on appear + every 30s. Counting bugs is
+    /// disk-bound (decode every frontmatter); recomputing on every
+    /// menu render would flicker and stutter.
+    @State private var openBugCount: Int = 0
+    @State private var refreshTimer: Timer?
+
+    var body: some View {
+        if capture.isRunning {
+            Button("Stop recording") { capture.stop() }
+        } else {
+            Button("Start recording") {
+                if AXCaptionReader.canRead { capture.start() }
+            }
+            .disabled(!AXCaptionReader.canRead)
+        }
+
+        // Status pill — only the rows that have non-zero signal.
+        // Each row opens the relevant tab and brings the window
+        // forward via .openSection.
+        if openBugCount > 0 || config.lastRegressionRunAt != nil {
+            Divider()
+        }
+        if openBugCount > 0 {
+            Button {
+                NotificationCenter.default.post(
+                    name: .openSection,
+                    object: ShellState.Section.codeGraph.rawValue
+                )
+            } label: {
+                Text("🐜 \(openBugCount) open bug report\(openBugCount == 1 ? "" : "s")")
+            }
+        }
+        if let last = config.lastRegressionRunAt {
+            Button {
+                NotificationCenter.default.post(
+                    name: .openSection,
+                    object: ShellState.Section.regression.rawValue
+                )
+            } label: {
+                let n = config.lastRegressionRegressedCount
+                let when = MenuBarMenu.relativeFormatter.localizedString(for: last, relativeTo: Date())
+                if n > 0 {
+                    Text("⚠ \(n) regression\(n == 1 ? "" : "s") · \(when)")
+                } else {
+                    Text("✓ No regressions · \(when)")
+                }
+            }
+        }
+
+        Divider()
+        if let user = session.user {
+            Text("Signed in as \(user.email)")
+        } else {
+            Text("Not signed in")
+        }
+        Divider()
+        Button("Quit Meet Notes") { NSApplication.shared.terminate(nil) }
+            .keyboardShortcut("q")
+        // The MenuBarExtra menu re-renders on each open, but
+        // @State doesn't get a fresh init on each render — so
+        // onAppear fires once. We still want a periodic refresh
+        // in case bugs are added/closed elsewhere while the menu
+        // sits open, hence the timer.
+        EmptyView()
+            .onAppear {
+                refreshOpenBugCount()
+                if refreshTimer == nil {
+                    // Timer.scheduledTimer retains its target via the run
+                    // loop, so we MUST invalidate on disappear. Without
+                    // this the timer (and the closure it owns) lives for
+                    // the entire app process, performing disk I/O every
+                    // 30s for the lifetime of the app.
+                    refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+                        Task { @MainActor in refreshOpenBugCount() }
+                    }
+                }
+            }
+            .onDisappear {
+                refreshTimer?.invalidate()
+                refreshTimer = nil
+            }
+    }
+
+    private func refreshOpenBugCount() {
+        guard let repo = config.activeRepoLocalURL else {
+            openBugCount = 0
+            return
+        }
+        let store = config.memoryStore
+        let bugs = store.listBugs(at: repo)
+        openBugCount = bugs.compactMap { try? store.loadBug(at: $0) }
+            .filter { $0.status == .open }
+            .count
+    }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
+}

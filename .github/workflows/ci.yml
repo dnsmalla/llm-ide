@@ -1,0 +1,114 @@
+# Continuous integration: runs on every push + PR.
+#
+# Three jobs:
+#
+#   server      Node 20 + 22 matrix. Installs deps, type-checks the
+#               extension TS, runs the full node:test suite (currently
+#               ~221 tests covering tenancy, auth, plugins, agent loop,
+#               rate limits, etc.). better-sqlite3 builds natively so
+#               we need the Linux toolchain; this is cached.
+#
+#   extension   The browser-extension Vite build. Runs only on Node 22
+#               since vite + crxjs are version-sensitive enough that
+#               two builds aren't worth the time.
+#
+#   mac         Swift build + test on macOS runner. Uses the same
+#               release product the .dmg ships. Runs the full Swift
+#               Testing suite after a release build.
+#
+# All three jobs must pass before merge.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-progress runs on the same branch when a new push lands —
+# saves runner minutes when someone pushes a fixup commit.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: server (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Type-check
+        run: npm run type-check
+
+      - name: Tests
+        run: npm test
+        env:
+          # Tests use ephemeral DBs under $TMPDIR but the bootstrap
+          # config still wants these to start the server-side code.
+          MEETNOTES_JWT_SECRET: test-jwt-secret-not-prod
+          MEETNOTES_VAULT_KEY: test-vault-key-32-bytes-padded__
+
+  extension:
+    name: extension build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Format check
+        run: npm run format:check
+      - name: Production bundle
+        run: npm run build
+      - name: Package for store
+        run: npm run package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension-zip
+          path: extension/extension-v*.zip
+          if-no-files-found: error
+
+  mac:
+    name: mac swift build + test
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: mac
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Build (release)
+        run: swift build -c release --product MeetNotesMac
+      - name: Build tests
+        run: swift build --build-tests
+      - name: Run tests
+        run: swift test --skip-build

@@ -1,0 +1,367 @@
+openapi: 3.1.0
+info:
+  title: Meet Notes API
+  version: '2.10.0'
+  description: |
+    Multi-user, self-hostable backend for the Meet Notes conversation-driven
+    project system.  Every state-mutating endpoint requires a JWT access
+    token; data is scoped per user (tenant) at the SQL layer.
+
+  license:
+    name: MIT
+
+servers:
+  - url: https://{host}
+    variables:
+      host: { default: meetnotes.example.com }
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:    { type: string, enum: [
+              AUTH_REQUIRED, FORBIDDEN, NOT_FOUND, VALIDATION_FAILED,
+              CONFLICT, GUARDRAIL_FAILED, RATE_LIMITED, UPSTREAM_ERROR,
+              INTERNAL_ERROR,
+            ]}
+            message: { type: string }
+            details: { type: object, additionalProperties: true, description: 'Code-specific structured detail (e.g. guardrail report)' }
+
+    User:
+      type: object
+      properties:
+        id:           { type: string }
+        email:        { type: string, format: email }
+        displayName:  { type: string }
+        role:         { type: string, enum: [user, admin] }
+        status:       { type: string, enum: [active, disabled] }
+        createdAt:    { type: string }
+        lastLoginAt:  { type: string, nullable: true }
+
+    Session:
+      type: object
+      required: [user, accessToken, refreshToken, accessTokenTTLSec]
+      properties:
+        user:               { $ref: '#/components/schemas/User' }
+        accessToken:        { type: string, description: 'HS256 JWT, valid 15 min by default' }
+        refreshToken:       { type: string, description: 'Opaque, hashed in DB; rotate via /auth/refresh' }
+        accessTokenTTLSec:  { type: integer }
+
+    Health:
+      type: object
+      properties:
+        status:     { type: string, enum: [ok, degraded] }
+        apiVersion: { type: integer }
+        env:        { type: string }
+        uptimeSec:  { type: integer }
+        schema:     { type: object, properties: { current: { type: integer }, applied: { type: integer } } }
+
+    Plan:
+      type: object
+      properties:
+        id:        { type: string }
+        meetingId: { type: string, nullable: true }
+        title:     { type: string }
+        goal:      { type: string, nullable: true }
+        tasks:
+          type: array
+          items: { $ref: '#/components/schemas/PlanTask' }
+
+    PlanTask:
+      type: object
+      properties:
+        id:           { type: string }
+        title:        { type: string }
+        description:  { type: string, nullable: true }
+        owner:        { type: string, nullable: true }
+        due:          { type: string, format: date, nullable: true }
+        estimateDays: { type: number, nullable: true }
+        dependsOn:    { type: array, items: { type: string } }
+        status:       { type: string, enum: [planned, in_progress, done, blocked] }
+        risk:         { type: string, nullable: true, enum: [low, med, high, null] }
+        riskReason:   { type: string, nullable: true }
+        files:        { type: array, items: { type: object } }
+
+    GuardrailReport:
+      type: object
+      properties:
+        passed:   { type: boolean }
+        blocking: { type: array, items: { $ref: '#/components/schemas/GuardrailFinding' } }
+        warnings: { type: array, items: { $ref: '#/components/schemas/GuardrailFinding' } }
+        info:     { type: array, items: { $ref: '#/components/schemas/GuardrailFinding' } }
+
+    GuardrailFinding:
+      type: object
+      properties:
+        ruleId:   { type: string }
+        severity: { type: string, enum: [blocking, warning, info] }
+        message:  { type: string }
+        details:  { type: object, additionalProperties: true }
+
+paths:
+
+  /health:
+    get:
+      summary: Health probe
+      security: []
+      responses:
+        '200':
+          description: Server status snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+
+  /metrics:
+    get:
+      summary: Prometheus scrape target
+      security: []
+      responses:
+        '200':
+          description: Prometheus text-format metrics
+          content:
+            text/plain: { schema: { type: string } }
+
+  /auth/well-known:
+    get:
+      summary: Server capability + auth metadata
+      security: []
+      responses:
+        '200':
+          description: Issuer, registration policy, vault keys
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  issuer:           { type: string }
+                  registrationOpen: { type: boolean }
+                  vaultKeys:        { type: array, items: { type: string } }
+                  accessTokenTTLSec: { type: integer }
+
+  /auth/register:
+    post:
+      summary: Public registration
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:       { type: string, format: email }
+                password:    { type: string, minLength: 10, maxLength: 200 }
+                displayName: { type: string }
+      responses:
+        '201':
+          description: User created (first user becomes admin)
+          content:
+            application/json:
+              schema: { type: object, properties: { user: { $ref: '#/components/schemas/User' } } }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Registration disabled, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Email already registered }
+        '429': { description: Rate limited per IP }
+
+  /auth/login:
+    post:
+      summary: Exchange credentials for a session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:    { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200': { description: Session issued, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
+        '401': { description: Invalid credentials }
+        '429': { description: Rate limited per IP }
+
+  /auth/refresh:
+    post:
+      summary: Rotate session via refresh token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties: { refreshToken: { type: string } }
+      responses:
+        '200': { description: Session rotated, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
+        '401': { description: Invalid or revoked refresh token }
+
+  /auth/logout:
+    post:
+      summary: Revoke current refresh token (or all sessions with allDevices=true)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken: { type: string }
+                allDevices:   { type: boolean }
+      responses:
+        '200': { description: ok }
+
+  /auth/me:
+    get:
+      summary: Current user
+      responses:
+        '200':
+          description: User record
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+
+  /auth/me/password:
+    post:
+      summary: Change password (revokes all sessions)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string }
+                newPassword:     { type: string, minLength: 10 }
+      responses:
+        '200': { description: ok }
+        '401': { description: Current password incorrect }
+
+  /auth/me/secrets:
+    get:
+      summary: List stored credential keys (no values)
+      responses:
+        '200':
+          description: Keys + allowed-key list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secrets:   { type: array, items: { type: object, properties: { key: { type: string }, updatedAt: { type: string } } } }
+                  available: { type: array, items: { type: string } }
+    post:
+      summary: Set or delete an encrypted secret
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key]
+              properties:
+                key:   { type: string, enum: [github.token, backlog.apiKey, linear.apiKey, slack.webhookUrl] }
+                value: { type: string, nullable: true, description: 'null/empty deletes' }
+      responses:
+        '200': { description: ok }
+
+  /auth/me/audit:
+    get:
+      summary: Per-user audit log
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+        - in: query
+          name: action
+          schema: { type: string }
+      responses:
+        '200':
+          description: Audit entries newest-first
+
+  /kb/ingest:
+    post:
+      summary: Upsert a meeting and replace its entities
+      responses: { '200': { description: ok } }
+
+  /kb/search:
+    get:
+      summary: Tenant-scoped FTS5 + empty-query unified search
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: kind
+          schema: { type: string, enum: [meeting, action, decision, blocker, code, ticket, qa, plan, task, outcome] }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses: { '200': { description: ok } }
+
+  /kb/generate-plan:
+    post:
+      summary: Synthesize a plan from a meeting (chains analyze-risks + code-sync by default)
+      responses: { '200': { description: ok }, '422': { description: 'GUARDRAIL_FAILED' } }
+
+  /kb/dispatch:
+    post:
+      summary: Preview / send tasks to GitHub, Backlog, or Linear
+      responses: { '200': { description: ok } }
+
+  /kb/generate-code:
+    post:
+      summary: LLM-generate files + tests for a single task (preview only)
+      responses: { '200': { description: ok } }
+
+  /kb/review/submit:
+    post:
+      summary: Submit an artifact (dispatch / codegen-apply) for human review
+      responses: { '200': { description: ok with guardrail report } }
+
+  /kb/review/approve:
+    post:
+      summary: Execute an approved review item (re-runs guardrails)
+      responses:
+        '200': { description: executed }
+        '422': { description: 'GUARDRAIL_FAILED at approval time — auto-rejects' }
+
+  /kb/outcomes/refresh:
+    post:
+      summary: Poll dispatched tasks across providers and record outcomes
+      responses: { '200': { description: poll summary } }
+
+  /kb/notify/slack:
+    post:
+      summary: Send a plan / dispatch / custom message via Slack incoming webhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind:       { type: string, enum: [plan, dispatch, review, custom] }
+                planId:     { type: string }
+                webhookUrl: { type: string, description: 'Optional — vault key slack.webhookUrl is preferred' }
+                payload:    { description: 'Inline payload when kind=custom or kind=dispatch' }
+      responses: { '200': { description: ok } }

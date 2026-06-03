@@ -1,0 +1,68 @@
+{
+  "manifest_version": 3,
+  "name": "Notes Extension - AI Meeting Notes",
+  "version": "2.3.0",
+  "description": "AI-powered meeting notes for Google Meet, Teams, Zoom & more. Transcribes live captions and summarizes with Claude.",
+  "author": "Dinesh Bahadur Malla",
+  "homepage_url": "https://gitlab.com/grid-devs/personal/dinesh/notes-extension",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://meet.google.com/*",
+    "https://teams.microsoft.com/l/*",
+    "https://teams.microsoft.com/_*",
+    "https://teams.microsoft.com/v2/*",
+    "https://teams.live.com/_*",
+    "https://teams.live.com/v2/*",
+    "https://zoom.us/wc/*",
+    "https://zoom.us/j/*",
+    "https://*.zoom.us/wc/*",
+    "https://*.zoom.us/j/*"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.ts",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; connect-src 'self' http://127.0.0.1:3456 http://localhost:3456"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://meet.google.com/*",
+        "https://teams.microsoft.com/l/*",
+        "https://teams.microsoft.com/_*",
+        "https://teams.microsoft.com/v2/*",
+        "https://teams.live.com/_*",
+        "https://teams.live.com/v2/*",
+        "https://zoom.us/wc/*",
+        "https://zoom.us/j/*",
+        "https://*.zoom.us/wc/*",
+        "https://*.zoom.us/j/*"
+      ],
+      "js": [
+        "src/content/speaker-detector.ts",
+        "src/content/floating-overlay.ts",
+        "src/content/caption-scraper.ts"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "public/icons/icon16.png",
+    "48": "public/icons/icon48.png",
+    "128": "public/icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Notes Extension"
+  },
+  "web_accessible_resources": []
+}

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mockup",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "54344", "--directory", "/Users/dinesh.malla/Desktop/meet-notes/.claude/mockup"],
+      "port": 54344
+    }
+  ]
+}
