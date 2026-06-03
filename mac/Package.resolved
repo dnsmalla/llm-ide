@@ -1,6 +1,15 @@
 {
   "pins" : [
     {
+      "identity" : "graph-kit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/dnsmalla/graph-kit.git",
+      "state" : {
+        "revision" : "1ec4949b1ee8d56c17985e9988fb3570e08a14a2",
+        "version" : "1.0.0"
+      }
+    },
+    {
       "identity" : "sparkle",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/sparkle-project/Sparkle.git",
