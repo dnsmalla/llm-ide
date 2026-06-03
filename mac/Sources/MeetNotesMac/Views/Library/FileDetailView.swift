@@ -134,21 +134,35 @@ struct PDFDetailView: NSViewRepresentable {
 
 struct ImageDetailView: View {
     let url: URL
+    @State private var image: NSImage?
+    @State private var failed = false
 
     var body: some View {
-        if let image = NSImage(contentsOf: url) {
-            GeometryReader { geo in
-                ScrollView([.horizontal, .vertical]) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: geo.size.width, maxHeight: geo.size.height)
-                        .padding(20)
+        Group {
+            if let image {
+                GeometryReader { geo in
+                    ScrollView([.horizontal, .vertical]) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: geo.size.width, maxHeight: geo.size.height)
+                            .padding(20)
+                    }
                 }
+            } else if failed {
+                ContentUnavailableView("Can't Load Image", systemImage: "photo.slash",
+                                       description: Text("The file may be corrupt or in an unsupported format."))
+            } else {
+                ProgressView()
             }
-        } else {
-            ContentUnavailableView("Can't Load Image", systemImage: "photo.slash",
-                                   description: Text("The file may be corrupt or in an unsupported format."))
+        }
+        // Decode off the main thread (was NSImage(contentsOf:) in the body getter,
+        // re-running each render and blocking the UI — bad on iCloud/Dropbox folders).
+        .task(id: url) {
+            failed = false
+            image = nil
+            let loaded = await Task.detached(priority: .userInitiated) { NSImage(contentsOf: url) }.value
+            if loaded == nil { failed = true } else { image = loaded }
         }
     }
 }

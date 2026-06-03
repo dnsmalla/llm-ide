@@ -48,6 +48,11 @@ final class MeetingIndex {
         }
         try exec("PRAGMA journal_mode=WAL;")
         try exec("PRAGMA foreign_keys=ON;")
+        // Wait (instead of failing immediately) when another connection holds the
+        // write lock — two connections open this DB (folder indexer + auto-code
+        // run); without this a concurrent write throws SQLITE_BUSY and aborts the
+        // in-progress scan, leaving the index diverged from disk.
+        try exec("PRAGMA busy_timeout=5000;")
         try migrate()
     }
     deinit { sqlite3_close(db) }
@@ -116,6 +121,21 @@ final class MeetingIndex {
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_text(stmt, 1, id, -1, Self.transient)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw err("step delete") }
+    }
+
+    /// Runs `body` in a single transaction: commits on success, rolls back on
+    /// throw. Makes a multi-row update (e.g. a full folder scan + reap) atomic,
+    /// so a crash or error mid-scan can't leave the index half-updated.
+    func transaction<T>(_ body: () throws -> T) throws -> T {
+        try exec("BEGIN IMMEDIATE;")
+        do {
+            let result = try body()
+            try exec("COMMIT;")
+            return result
+        } catch {
+            try? exec("ROLLBACK;")
+            throw error
+        }
     }
 
     func list() throws -> [Row] {

@@ -35,21 +35,26 @@ final class FolderIndexer {
         defer { scanLock.unlock() }
         let fm = FileManager.default
         var foundIDs = Set<String>()
-        if let enumerator = fm.enumerator(at: root,
-                                          includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
-                                          options: [.skipsHiddenFiles]) {
-            for case let url as URL in enumerator {
-                let name = url.lastPathComponent
-                guard name.hasSuffix(".md"), !name.hasSuffix(".partial.md") else { continue }
-                if let id = try? upsert(fileAt: url) {
-                    foundIDs.insert(id)
+        // One transaction for the whole scan + reap: a crash/throw mid-scan
+        // rolls back rather than leaving the index half-updated (ghost/missing
+        // rows), and collapses N autocommit fsyncs into one.
+        try index.transaction {
+            if let enumerator = fm.enumerator(at: root,
+                                              includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+                                              options: [.skipsHiddenFiles]) {
+                for case let url as URL in enumerator {
+                    let name = url.lastPathComponent
+                    guard name.hasSuffix(".md"), !name.hasSuffix(".partial.md") else { continue }
+                    if let id = try? upsert(fileAt: url) {
+                        foundIDs.insert(id)
+                    }
                 }
             }
-        }
-        // Reap deletions.
-        let existing = try index.list().map(\.id)
-        for id in existing where !foundIDs.contains(id) {
-            try index.delete(id: id)
+            // Reap deletions.
+            let existing = try index.list().map(\.id)
+            for id in existing where !foundIDs.contains(id) {
+                try index.delete(id: id)
+            }
         }
         NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
     }
