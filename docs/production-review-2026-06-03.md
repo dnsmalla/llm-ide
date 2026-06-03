@@ -20,7 +20,7 @@ findings below are the real gaps. Graph/memory engine is shared via GraphKit (re
   ingestMeeting summarize the same meeting; index notification races. Pick one source of truth.
 
 ## Meeting capture (behavior-sensitive — confirm)
-- [ ] **CAP1 — Auto-capture stops on app focus-switch** (AutoCaptureService.handleDeactivation): switching
+- [x] **CAP1 — Auto-capture stops on app focus-switch** (AutoCaptureService.handleDeactivation): switching
   to a browser/Slack mid-call stops capture, fragments the meeting into multiple files, and drops captions
   spoken while away. Gate stop on the meeting app terminating, not losing frontmost focus.
 

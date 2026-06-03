@@ -36,17 +36,20 @@ final class AutoCaptureService {
             Task { @MainActor in self.handleActivation(note) }
         }
 
-        // App deactivated / terminated — may need to stop capture.
-        let deactivateObs = nc.addObserver(
-            forName: NSWorkspace.didDeactivateApplicationNotification,
+        // App terminated — may need to stop capture. We stop on TERMINATION, not
+        // deactivation: a meeting app losing frontmost focus (user switches to a
+        // browser/Slack mid-call) must NOT stop capture, or the meeting fragments
+        // into multiple notes and captions spoken while away are lost.
+        let terminateObs = nc.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification,
             object: nil,
             queue: .main
         ) { [weak self] note in
             guard let self else { return }
-            Task { @MainActor in self.handleDeactivation(note) }
+            Task { @MainActor in self.handleTermination(note) }
         }
 
-        observers = [activateObs, deactivateObs]
+        observers = [activateObs, terminateObs]
         log.info("auto_capture_service_started")
     }
 
@@ -68,13 +71,17 @@ final class AutoCaptureService {
         capture.start()
     }
 
-    private func handleDeactivation(_ note: Notification) {
+    private func handleTermination(_ note: Notification) {
         guard config.autoCaptureOnMeeting, capture.isRunning else { return }
         let bundleID = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier ?? ""
         guard meetingBundleIDs.contains(bundleID) else { return }
-        // Only stop if no meeting app is still running in the foreground.
-        let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
-        guard !meetingBundleIDs.contains(frontmost) else { return }
+        // Stop only when NO meeting app remains running — handles the case of
+        // multiple meeting apps open, and never stops just because one lost focus.
+        let stillRunning = NSWorkspace.shared.runningApplications.contains {
+            guard let id = $0.bundleIdentifier else { return false }
+            return meetingBundleIDs.contains(id)
+        }
+        guard !stillRunning else { return }
         log.info("auto_capture_stop bundleID=\(bundleID, privacy: .public)")
         capture.stop()
     }
