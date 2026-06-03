@@ -43,3 +43,42 @@ Tokens in Keychain (ThisDeviceOnly) not UserDefaults; no token logging (redacted
 nonce-fenced untrusted issue prompts; backend loopback-only + remote-exposure guard; PathValidator blocks ../~/abs;
 atomic writes + PID-liveness recovery; subprocess double-resume guarded; no print()/try!/TODO; exemplary ViewModels
 (defer isLoading=false, surfaced errors). Entitlements: sandbox off + library-validation off (deliberate, revisit pre-ship).
+
+---
+
+## 2026-06-04 — performance + central-skills review
+
+### Performance (fixed)
+- [x] **P2 — `FolderIndexer.fullScan` re-read/re-parsed every `.md` on every event.** Now skips
+  unchanged files by comparing mtime+size against the indexed row (schema already stored them).
+  Turns an O(library) re-parse into O(changed). Biggest win.
+- [x] **P1a — double full-scan per fs event.** `AppEnvironment.startWatching` ran `fullScan()` AND
+  the AppShell `onChange` closure ran it again. Removed the duplicate in AppShell.
+- [x] **P1b — no debounce on the watcher.** Live caption writes fired a scan per append. Added a
+  0.6s trailing debounce in `FolderIndexer.startWatching` so bursts collapse to one scan.
+
+Net: a live meeting previously triggered a full-library re-parse storm on the main path; now an
+unchanged library costs ~one cheap stat-only scan per debounced burst.
+
+Remaining perf (not done, lower priority): P3 (`.meetingIndexChanged` does 2 folder enumerations +
+JSON rewrites on main — largely mitigated by P1/P2 cutting frequency), P4 (caption AX snapshot on
+@MainActor — move off-main + O(1) dedup), P5 (`LibraryViewModel.groupedRows` recomputed per render),
+P6 (plugin skills re-parsed per `/code-assist` request — cache by dir+mtime), P7 (highlight.js from CDN).
+
+### Settings (fixed)
+- [x] `Config.swift` default server URL now interpolates `BackendManager.defaultBackendPort`
+  (was a second hardcoded `3456`).
+- [x] `route.mjs` stale comment ("default of 5" → DEFAULT_MAX_ITERATIONS 10).
+
+Remaining small config (not done): lift CLI/agent timeouts + summary maxTokens to named
+constants/env; user-facing model picker for server summarization.
+
+### Central skills — finding
+meet-notes loads skills only server-side (`extension/llm_agent/runtime/skill-loader.mjs` →
+`buildSystemPrompt`); the Swift mac app has NO SkillRunner. Its skills are agent-loop tools:
+`search-kb` is a `.md`+handler pair (read), the 3 GitLab ones are prompt-only write skills. There is
+no current shared content to pull from the central repo's `runtime/` family (that's InfiniteBrain's
+graph prompt-skills, irrelevant to meet-notes). To consume central later: a sync of a central
+`agent-tools/` family into a new gitignored `external/skills/` added as a third `loadSkills` source —
+safe for write/prompt-only skills, but read skills must keep their local handler. Not worth doing
+until there's actually shared content.

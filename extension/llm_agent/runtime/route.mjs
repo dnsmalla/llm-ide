@@ -330,7 +330,7 @@ export async function handleCodeAssist({
     kb,
     userId,
     handlers,
-    maxIterations: 3,         // global cap is tighter; see runAgentLoop default of 5
+    maxIterations: 3,         // global cap is tighter; see runAgentLoop DEFAULT_MAX_ITERATIONS (10)
     // Long-form writing / refactoring asks routinely take 60-90s per
     // Claude call; with a single internal delegation that's two calls
     // back-to-back. 3 minutes covers the realistic worst case while

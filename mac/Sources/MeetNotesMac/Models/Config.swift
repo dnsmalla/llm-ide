@@ -279,7 +279,7 @@ final class AppConfig: ObservableObject {
     init(userDefaults defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.serverURL = (defaults.string(forKey: "serverURL")
-            ?? "http://127.0.0.1:3456")
+            ?? "http://127.0.0.1:\(BackendManager.defaultBackendPort)")
         self.themeID = defaults.string(forKey: "themeID") ?? Theme.dark.id
         self.autoCaptureOnMeeting = defaults.object(forKey: "autoCaptureOnMeeting") as? Bool ?? false
         self.pollIntervalMs = defaults.object(forKey: "pollIntervalMs") as? Int ?? 250

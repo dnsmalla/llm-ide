@@ -8,6 +8,11 @@ final class FolderIndexer {
     let index: MeetingIndex
     private var source: DispatchSourceFileSystemObject?
     private var watchFD: CInt = -1
+    /// Trailing-debounce of watcher events: a burst of writes (e.g. live caption
+    /// appends) collapses into a single scan instead of one per event. Mutated
+    /// only from the source's serial event-handler queue, so no extra lock.
+    private var pendingScan: DispatchWorkItem?
+    private let debounceInterval: TimeInterval = 0.6
     /// Serialization gate for `fullScan`. The kqueue watcher fires on
     /// `DispatchQueue.global(.utility)` while `AppEnvironment.init` and
     /// manual settings actions can also drive a scan — without this
@@ -39,21 +44,37 @@ final class FolderIndexer {
         // rolls back rather than leaving the index half-updated (ghost/missing
         // rows), and collapses N autocommit fsyncs into one.
         try index.transaction {
+            // Index existing rows by path so we can skip unchanged files: a full
+            // scan otherwise re-reads + re-parses every .md on every event. With
+            // mtime+size matching, an unchanged file costs one stat, not a read.
+            let existingRows = try index.list()
+            var byPath: [String: MeetingIndex.Row] = [:]
+            for r in existingRows { byPath[r.path] = r }
+
             if let enumerator = fm.enumerator(at: root,
                                               includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
                                               options: [.skipsHiddenFiles]) {
                 for case let url as URL in enumerator {
                     let name = url.lastPathComponent
                     guard name.hasSuffix(".md"), !name.hasSuffix(".partial.md") else { continue }
+                    let relative = url.path.replacingOccurrences(of: root.path + "/", with: "")
+                    // Unchanged (same mtime AND size) → skip the read/parse/upsert.
+                    if let row = byPath[relative],
+                       let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+                       let mdate = rv.contentModificationDate, let fsize = rv.fileSize,
+                       Int64(mdate.timeIntervalSince1970 * 1000) == row.fileMtime,
+                       Int64(fsize) == row.fileSize {
+                        foundIDs.insert(row.id)
+                        continue
+                    }
                     if let id = try? upsert(fileAt: url) {
                         foundIDs.insert(id)
                     }
                 }
             }
-            // Reap deletions.
-            let existing = try index.list().map(\.id)
-            for id in existing where !foundIDs.contains(id) {
-                try index.delete(id: id)
+            // Reap deletions (reuse the rows we already loaded).
+            for r in existingRows where !foundIDs.contains(r.id) {
+                try index.delete(id: r.id)
             }
         }
         NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
@@ -114,7 +135,13 @@ final class FolderIndexer {
             fileDescriptor: watchFD,
             eventMask: [.write, .extend, .rename, .delete],
             queue: DispatchQueue.global(qos: .utility))
-        src.setEventHandler { onChange() }
+        src.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.pendingScan?.cancel()
+            let item = DispatchWorkItem { onChange() }
+            self.pendingScan = item
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + self.debounceInterval, execute: item)
+        }
         src.setCancelHandler { [fd = watchFD] in close(fd) }
         src.resume()
         source = src

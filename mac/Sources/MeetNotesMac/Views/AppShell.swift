@@ -168,10 +168,10 @@ struct AppShell: View {
         .task {
             guard let env = appEnv else { return }
             env.startWatching {
-                // fullScan() updates the SQLite index first, then we post
-                // the notification on the main thread so SwiftUI observers
-                // (LibraryView etc.) always receive it on the right queue.
-                try? env.indexer.fullScan()
+                // startWatching already ran fullScan() to update the SQLite index
+                // (don't scan again here — that was a double scan per fs event).
+                // Just post the notification on the main thread so SwiftUI observers
+                // (LibraryView etc.) receive it on the right queue.
                 DispatchQueue.main.async {
                     NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
                 }
