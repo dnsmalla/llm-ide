@@ -3,7 +3,7 @@
   "version": "3.0.0",
   "private": true,
   "type": "module",
-  "description": "Conversation-driven autonomous project system — meetings → plans → tickets → code, fully local",
+  "description": "Conversation-driven autonomous project system \u2014 meetings \u2192 plans \u2192 tickets \u2192 code, fully local",
   "engines": {
     "node": ">=20.0.0"
   },
@@ -21,7 +21,8 @@
     "format": "prettier --write 'src/**/*.{ts,tsx,css}'",
     "format:check": "prettier --check 'src/**/*.{ts,tsx,css}'",
     "package": "npm run build && cd dist && zip -r -X ../extension-v$npm_package_version.zip . && cd ..",
-    "init": "cd .. && bash setup.sh"
+    "init": "cd .. && bash setup.sh",
+    "sync:skills": "bash scripts/sync-skills.sh"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
