@@ -367,11 +367,36 @@ final class AutoCodeUpdateService: ObservableObject {
 
     // MARK: - CLI subprocess
 
+    /// True if the repo working tree has no uncommitted changes. Best-effort:
+    /// if git can't be run we return true (don't block) — same as before the check.
+    nonisolated static func isWorkingTreeClean(at localPath: String) -> Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        p.arguments = ["-C", localPath, "status", "--porcelain"]
+        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
+        do { try p.run() } catch { return true }
+        p.waitUntilExit()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        let s = String(data: data, encoding: .utf8) ?? ""
+        return s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private func runCLI(issue: RepoIssue, localPath: String, logDir: URL) async -> Bool {
         let cliTool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
         let cliCommand = cliTool.cliExecutable   // e.g. "claude" or "gh copilot"
         let components = cliCommand.split(separator: " ").map(String.init)
         guard let executable = components.first else { return false }
+
+        // Refuse to run on a dirty tree — the CLI commits whatever is staged/modified,
+        // so it would otherwise sweep the user's unrelated WIP into the fix commit.
+        let clean = await Task.detached { Self.isWorkingTreeClean(at: localPath) }.value
+        guard clean else {
+            let msg = "Skipped issue #\(issue.number): working tree has uncommitted changes. Commit or stash them first."
+            lastError = msg
+            taskErrors["#\(issue.number)"] = msg
+            log.error("auto_code_skip_dirty issue=\(issue.number, privacy: .public)")
+            return false
+        }
 
         let slug = issue.title
             .lowercased()
@@ -516,6 +541,16 @@ final class AutoCodeUpdateService: ObservableObject {
         let cliCommand = cliTool.cliExecutable
         let components = cliCommand.split(separator: " ").map(String.init)
         guard let executable = components.first else { return false }
+
+        // Refuse to run on a dirty tree (would sweep the user's WIP into the commit).
+        let clean = await Task.detached { Self.isWorkingTreeClean(at: localPath) }.value
+        guard clean else {
+            let msg = "Skipped auto-task \(logSuffix): working tree has uncommitted changes. Commit or stash them first."
+            lastError = msg
+            taskErrors[logSuffix] = msg
+            log.error("auto_task_skip_dirty suffix=\(logSuffix, privacy: .public)")
+            return false
+        }
 
         let logURL = logDir.appendingPathComponent("auto-task-\(logSuffix).log")
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
