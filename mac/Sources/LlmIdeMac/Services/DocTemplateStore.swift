@@ -114,7 +114,11 @@ final class DocTemplateStore: ObservableObject {
         let dir = storeURL.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let file = StoreFile(templates: customTemplates)
-        guard let data = try? AppJSON.encoder.encode(file) else { return }
-        try? data.write(to: storeURL, options: .atomic)
+        do {
+            let data = try AppJSON.encoder.encode(file)
+            try data.write(to: storeURL, options: .atomic)
+        } catch {
+            logger.error("failed to save doc templates: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }

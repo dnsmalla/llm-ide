@@ -371,7 +371,11 @@ final class ProjectExporter {
         } else {
             updated = content + "\n---\n\(badge)\n"
         }
-        try? updated.write(to: url, atomically: true, encoding: .utf8)
+        do {
+            try updated.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            log.error("failed to stamp export badge: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     // MARK: - YAML helpers

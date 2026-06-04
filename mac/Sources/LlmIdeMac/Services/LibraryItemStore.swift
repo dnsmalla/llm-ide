@@ -309,8 +309,12 @@ final class LibraryItemStore {
         let dir = url.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let file = StoreFile(items: items)
-        if let data = try? AppJSON.encoder.encode(file) {
-            try? data.write(to: url)
+        do {
+            let data = try AppJSON.encoder.encode(file)
+            try data.write(to: url)
+        } catch {
+            os_log(.error, "LibraryItemStore: failed to save index: %{public}@",
+                   error.localizedDescription)
         }
     }
 }
