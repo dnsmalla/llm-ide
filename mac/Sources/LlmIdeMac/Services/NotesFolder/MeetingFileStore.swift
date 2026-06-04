@@ -1,8 +1,10 @@
 import Foundation
+import os
 
 /// File-based meeting store.  One .md file per meeting.  Lifecycle:
 ///   createPartial → appendCaption* → finalize (rename) → writeSummary
 final class MeetingFileStore {
+    private static let log = Logger(subsystem: "com.llmide.macapp", category: "MeetingFileStore")
     let root: URL
     private static let slugAllowed = CharacterSet.alphanumerics
         .union(.whitespaces)
@@ -30,6 +32,13 @@ final class MeetingFileStore {
         /// is a no-op rather than a double-close on Foundation's
         /// non-idempotent FileHandle.close().
         private var isClosed = false
+        /// Count of periodic fsync failures during the recording. The caption
+        /// bytes are already written (the write itself throws on failure); a
+        /// failed periodic sync only risks the last <1s of durability on a
+        /// crash, so it's logged/counted rather than thrown — aborting a live
+        /// recording on a transient fsync hiccup would lose far more. finalize()
+        /// performs a final flush() that DOES throw, enforcing durability at end.
+        private(set) var failedSyncCount = 0
 
         init(id: String, url: URL, fileHandle: FileHandle, frontmatter: MeetingFrontmatter) {
             self.id = id; self.url = url; self.fileHandle = fileHandle; self.frontmatter = frontmatter
@@ -46,7 +55,15 @@ final class MeetingFileStore {
             try fileHandle.write(contentsOf: Data(line.utf8))
             let now = Date()
             if now.timeIntervalSince(lastSyncedAt) >= flushInterval {
-                try? fileHandle.synchronize()
+                do {
+                    try fileHandle.synchronize()
+                } catch {
+                    // Non-fatal: bytes are written; only durability of the last
+                    // window is at risk. Surface it instead of dropping silently.
+                    failedSyncCount += 1
+                    MeetingFileStore.log.error(
+                        "periodic fsync failed (count=\(self.failedSyncCount, privacy: .public)): \(error.localizedDescription, privacy: .public)")
+                }
                 lastSyncedAt = now
             }
         }

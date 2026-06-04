@@ -45,6 +45,33 @@ final class MeetingFileStoreTests {
         try handle.close()
     }
 
+    @Test func allCaptionsSurviveFinalize() throws {
+        // Data-integrity guard: every appended caption must be present, in
+        // order, in the finalized file (no loss across the flush + rename).
+        let store = MeetingFileStore(root: tempRoot)
+        let handle = try store.createPartial(
+            id: "01HDUR", startedAt: Date(timeIntervalSince1970: 1715184000),
+            platform: "meet", language: "en")
+        let n = 200
+        for i in 0..<n {
+            try handle.appendCaption(
+                timestamp: Date(timeIntervalSince1970: 1715184000 + Double(i)),
+                speaker: "spk\(i % 3)", text: "line-\(i)")
+        }
+        #expect(handle.failedSyncCount == 0)   // healthy fs: no swallowed sync errors
+        let finalURL = try store.finalize(handle: handle, title: "Standup",
+                                          endedAt: Date(timeIntervalSince1970: 1715184300),
+                                          participants: ["spk0", "spk1", "spk2"])
+        let contents = try String(contentsOf: finalURL, encoding: .utf8)
+        for i in 0..<n {
+            #expect(contents.contains("line-\(i)"), "missing caption line-\(i)")
+        }
+        // Order preserved: first appears before last.
+        let first = contents.range(of: "line-0")
+        let last = contents.range(of: "line-\(n - 1)")
+        #expect(first != nil && last != nil && first!.lowerBound < last!.lowerBound)
+    }
+
     @Test func finalizeRenamesAndUpdatesFrontmatter() throws {
         let store = MeetingFileStore(root: tempRoot)
         let handle = try store.createPartial(
