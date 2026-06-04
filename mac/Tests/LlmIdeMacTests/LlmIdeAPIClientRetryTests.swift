@@ -69,4 +69,61 @@ struct LlmIdeAPIClientRetryTests {
         }
         #expect(await counter.count == 1)
     }
+
+    // MARK: - 401 → refresh → retry
+
+    private func sessionJSON(access: String, refresh: String) -> Data {
+        Data("""
+        {"user":{"id":"u1","email":"a@b.c","displayName":"A","role":"user"},
+         "accessToken":"\(access)","refreshToken":"\(refresh)","accessTokenTTLSec":3600}
+        """.utf8)
+    }
+
+    @MainActor @Test func unauthorizedRefreshesTokenThenRetries() async throws {
+        let store = SessionStore(server: "https://example.test")
+        // Seed an expired access token + a valid refresh token.
+        store.adopt(session: try JSONDecoder().decode(
+            SessionResponse.self, from: sessionJSON(access: "old", refresh: "r1")))
+
+        let counter = Counter()
+        let client = LlmIdeAPIClient(baseURL: "https://example.test",
+                                     sessionStore: store) { [self] req in
+            let path = req.url!.path
+            if path.hasSuffix("/auth/refresh") {
+                // Refresh succeeds with rotated tokens.
+                return (sessionJSON(access: "new", refresh: "r2"), resp(req.url!, 200))
+            }
+            // Protected endpoint: 401 first, 200 after the token is refreshed.
+            let n = await counter.bump()
+            return n == 1
+                ? (Data("{}".utf8), resp(req.url!, 401))
+                : (okJSON, resp(req.url!, 200))
+        }
+
+        let ping: Ping = try await client.get("/protected", authenticated: true)
+        #expect(ping == Ping(ok: true))
+        #expect(store.accessToken == "new")   // token was rotated
+        #expect(await counter.count == 2)     // original 401 + one retry
+    }
+
+    @MainActor @Test func unauthorizedWithFailedRefreshThrowsNoSession() async throws {
+        let store = SessionStore(server: "https://example.test")
+        store.adopt(session: try JSONDecoder().decode(
+            SessionResponse.self, from: sessionJSON(access: "old", refresh: "r1")))
+
+        let client = LlmIdeAPIClient(baseURL: "https://example.test",
+                                     sessionStore: store) { [self] req in
+            let path = req.url!.path
+            if path.hasSuffix("/auth/refresh") {
+                return (Data("{}".utf8), resp(req.url!, 401))   // refresh rejected
+            }
+            return (Data("{}".utf8), resp(req.url!, 401))       // protected stays 401
+        }
+
+        await #expect(throws: APIError.self) {
+            let _: Ping = try await client.get("/protected", authenticated: true)
+        }
+        // Failed refresh clears the session.
+        #expect(store.accessToken == nil)
+    }
 }
