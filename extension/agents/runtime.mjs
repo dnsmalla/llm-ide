@@ -15,7 +15,7 @@ const CLAUDE_TIMEOUT_MS = 90_000;        // 90 s per CLI attempt.  Planning
                                          // two calls could hit 6 min, outlasting
                                          // both the URLSession (240 s) and the
                                          // route timeout before the fix.
-const DEFAULT_MODEL = process.env.MEETNOTES_MODEL || 'claude-sonnet-4-6';
+const DEFAULT_MODEL = process.env.LLMIDE_MODEL || 'claude-sonnet-4-6';
 
 // Anthropic 529 "overloaded" responses usually clear within 5-30s.
 // Retry transient capacity errors (529, 503) with jittered backoff
@@ -187,7 +187,7 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
       return await new Promise((resolve, reject) => {
         // Pass a minimal allowlist rather than spreading all of
         // process.env.  Spreading the full env exposes every secret
-        // the server was started with (JWT_SECRET, MEETNOTES_VAULT_KEY,
+        // the server was started with (JWT_SECRET, LLMIDE_VAULT_KEY,
         // DB path, etc.) to the Claude CLI subprocess and any logging
         // it performs.  Claude CLI needs PATH + HOME to locate configs
         // and optional helper binaries; everything else is application

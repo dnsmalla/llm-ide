@@ -264,7 +264,7 @@ test('e2e: regression guard — global never sees app-specific context', async (
   const globalPrompt = promptsSeen[0];
   assert.doesNotMatch(globalPrompt, /TopSecretTitle/);
   assert.doesNotMatch(globalPrompt, /## Recent open issues/);
-  assert.match(globalPrompt, /Code Assistant for Meet Notes/);
+  assert.match(globalPrompt, /Code Assistant for LLM IDE/);
   // Second runClaude call is internal's first turn.
   const internalPrompt = promptsSeen[1];
   assert.match(internalPrompt, /TopSecretTitle/);
@@ -272,5 +272,5 @@ test('e2e: regression guard — global never sees app-specific context', async (
   // Internal MUST receive its role-and-rules prompt. If this assertion
   // ever fails, the askInternal handler stopped concatenating
   // internal/prompt.md into agentContext.base.
-  assert.match(internalPrompt, /Meet Notes internal agent/);
+  assert.match(internalPrompt, /LLM IDE internal agent/);
 });

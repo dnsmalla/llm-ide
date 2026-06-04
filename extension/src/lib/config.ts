@@ -6,7 +6,7 @@
 // Local AI server — configurable via chrome.storage.local.set({ serverUrl: '...' })
 const DEFAULT_SERVER_URL = 'http://localhost:3456';
 
-// Only http://localhost or http://127.0.0.1 on the expected meetnotes
+// Only http://localhost or http://127.0.0.1 on the expected llmide
 // port are accepted. The server is designed to bind to 127.0.0.1 only
 // and is unauthenticated, so pointing this at a remote host would both
 // leak transcripts and invite CORS/SSRF surprises. Wildcard ports are
@@ -415,17 +415,17 @@ export async function parseJsonResponse<T = unknown>(r: Response): Promise<T> {
   return data as T;
 }
 
-// Debug logging — enable by running `localStorage.setItem('MEETNOTES_DEBUG', '1')` in devtools
+// Debug logging — enable by running `localStorage.setItem('LLMIDE_DEBUG', '1')` in devtools
 const DEBUG = (() => {
   try {
-    return typeof localStorage !== 'undefined' && localStorage.getItem('MEETNOTES_DEBUG') === '1';
+    return typeof localStorage !== 'undefined' && localStorage.getItem('LLMIDE_DEBUG') === '1';
   } catch {
     return false;
   }
 })();
 
 export function debug(...args: unknown[]): void {
-  if (DEBUG) console.log('[MeetNotes]', ...args);
+  if (DEBUG) console.log('[LLM IDE]', ...args);
 }
 
 // Timing constants used across the extension

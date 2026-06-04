@@ -200,9 +200,9 @@ async function pollTask(t, userId, creds) {
 
 const log = _bgLogger.child ? _bgLogger.child({ component: 'outcome-bg-poller' }) : _bgLogger;
 
-// How often the background poller wakes up (env override: MEETNOTES_OUTCOME_POLL_MS).
+// How often the background poller wakes up (env override: LLMIDE_OUTCOME_POLL_MS).
 const OUTCOME_POLL_INTERVAL_MS = (() => {
-  const v = Number(process.env.MEETNOTES_OUTCOME_POLL_MS);
+  const v = Number(process.env.LLMIDE_OUTCOME_POLL_MS);
   return Number.isFinite(v) && v > 0 ? v : 5 * 60_000;  // default 5 min
 })();
 

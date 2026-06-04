@@ -95,7 +95,7 @@ function buildMeetingDocx(noteData, { title, dateStr }) {
   }
 
   return new Document({
-    creator: 'Meet Notes',
+    creator: 'LLM IDE',
     title: safeTitle,
     sections: [{ properties: {}, children }],
   });

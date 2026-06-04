@@ -5,9 +5,9 @@ import { runClaude as defaultRunClaude, tryParseJSON } from './runtime.mjs';
 
 // Prefer the summarize-specific model override, fall back to the global
 // model env-var, then the hard-coded default.  This keeps summarize.mjs
-// in sync with the rest of the agent layer which all obey MEETNOTES_MODEL.
-const MODEL = process.env.MEETNOTES_SUMMARIZE_MODEL
-           || process.env.MEETNOTES_MODEL
+// in sync with the rest of the agent layer which all obey LLMIDE_MODEL.
+const MODEL = process.env.LLMIDE_SUMMARIZE_MODEL
+           || process.env.LLMIDE_MODEL
            || 'claude-sonnet-4-6';
 
 function buildPrompt({ transcript, title, language, started_at, duration_seconds, participants }, { strict = false } = {}) {

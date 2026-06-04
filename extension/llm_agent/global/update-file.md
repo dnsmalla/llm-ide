@@ -44,7 +44,7 @@ Do NOT use for:
 <<<TOOL_CALL>>>
 {"name": "update-file", "arguments": {
   "path": "/Users/.../README.md",
-  "content": "# Meet Notes\n\n...the full updated file content here...\n"
+  "content": "# LLM IDE\n\n...the full updated file content here...\n"
 }}
 <<<END_TOOL_CALL>>>
 

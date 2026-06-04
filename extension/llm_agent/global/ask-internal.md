@@ -11,7 +11,7 @@ schema:
 
 # ask-internal
 
-Delegate to the Meet Notes internal agent — the only authority on
+Delegate to the LLM IDE internal agent — the only authority on
 this app's state.
 
 ## When to use

@@ -17,16 +17,16 @@ import { detectPlatformFromUrl, type PlatformId } from '../lib/platforms';
 // intervals every time the SW wakes and re-injects. Bail out if already loaded.
 declare global {
   interface Window {
-    __meetnotesCaptionScraperInjected?: boolean;
+    __llmideCaptionScraperInjected?: boolean;
   }
 }
-if (window.__meetnotesCaptionScraperInjected) {
+if (window.__llmideCaptionScraperInjected) {
   debug('[caption-scraper] already injected — skipping re-init');
   // Throwing aborts module evaluation; chrome.scripting.executeScript
   // surfaces it as a rejected promise which the SW logs and ignores.
-  throw new Error('meetnotes:caption-scraper-already-injected');
+  throw new Error('llmide:caption-scraper-already-injected');
 }
-window.__meetnotesCaptionScraperInjected = true;
+window.__llmideCaptionScraperInjected = true;
 
 type Platform = PlatformId | null;
 
@@ -475,7 +475,7 @@ function handleSendError(e: Error): void {
     if (contextInvalidated) return;
     contextInvalidated = true;
 
-    console.error('[MeetNotes] Extension context lost — stopping scraper. Reload the tab to resume.');
+    console.error('[LLM IDE] Extension context lost — stopping scraper. Reload the tab to resume.');
     isCapturing = false;
     stopScraping();
 
@@ -496,13 +496,13 @@ function handleSendError(e: Error): void {
       boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
       whiteSpace: 'nowrap',
     });
-    banner.textContent = '⚠ Meet Notes: connection lost — reload this tab to resume capture';
+    banner.textContent = '⚠ LLM IDE: connection lost — reload this tab to resume capture';
     document.body?.appendChild(banner);
     return;
   }
 
   // Transient errors — log but keep scraping.
-  console.warn('[MeetNotes] send failed (will retry):', msg);
+  console.warn('[LLM IDE] send failed (will retry):', msg);
 }
 
 function sendUpdate(speaker: string, text: string, sessionId: string): void {
@@ -518,7 +518,7 @@ function sendUpdate(speaker: string, text: string, sessionId: string): void {
   chrome.runtime.sendMessage(msg).catch((e: Error) => handleSendError(e));
 
   // Notify the floating overlay (same tab — custom events are shared across content scripts)
-  window.dispatchEvent(new CustomEvent('meetnotes:caption', {
+  window.dispatchEvent(new CustomEvent('llmide:caption', {
     detail: { speaker, text, sessionId },
   }));
 }
@@ -634,7 +634,7 @@ function enableCC(): boolean {
 // visibility:hidden keeps elements in the layout and innerText still returns
 // text — unlike display:none which empties innerText.
 
-const CC_HIDE_STYLE_ID = 'meetnotes-cc-hide';
+const CC_HIDE_STYLE_ID = 'llmide-cc-hide';
 
 function hideMeetCCOverlay(): void {
   if (!document.getElementById(CC_HIDE_STYLE_ID)) {
@@ -799,7 +799,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
     if (!wasAlreadyCapturing) {
       speakerState.clear();
       sessionCounter = 0;
-      window.dispatchEvent(new CustomEvent('meetnotes:recording-start'));
+      window.dispatchEvent(new CustomEvent('llmide:recording-start'));
     }
     debug(`Starting caption scraping on ${platform}`);
 
@@ -824,7 +824,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
   if (type === MsgType.STOP_CAPTION_SCRAPING) {
     isCapturing = false;
     stopScraping();
-    window.dispatchEvent(new CustomEvent('meetnotes:recording-stop'));
+    window.dispatchEvent(new CustomEvent('llmide:recording-stop'));
     debug('Stopped caption scraping');
 
     // Broadcast stop so every extension context (side panel, floating popup)

@@ -39,7 +39,7 @@ export default function LoginView({ onLogin, onRegister, busy, error, registrati
   return (
     <div className="login-view">
       <header className="login-header">
-        <h1>Meet Notes</h1>
+        <h1>LLM IDE</h1>
         <p>{mode === 'login' ? 'Sign in to continue' : 'Create an account'}</p>
       </header>
 
@@ -105,7 +105,7 @@ export default function LoginView({ onLogin, onRegister, busy, error, registrati
 
       <footer className="login-footer">
         <p>
-          Server: <code>{(typeof window !== 'undefined' && (window as { __meetnotesUrl?: string }).__meetnotesUrl) || 'http://localhost:3456'}</code>
+          Server: <code>{(typeof window !== 'undefined' && (window as { __llmideUrl?: string }).__llmideUrl) || 'http://localhost:3456'}</code>
         </p>
         <button
           type="button"

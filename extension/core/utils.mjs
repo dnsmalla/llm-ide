@@ -1,7 +1,7 @@
 import { AppError } from './errors.mjs';
 import { config } from './config.mjs';
 
-// Default = whatever the operator configured (env MEETNOTES_BODY_LIMIT_MB,
+// Default = whatever the operator configured (env LLMIDE_BODY_LIMIT_MB,
 // fallback in config.mjs).  Callers can pass a smaller cap explicitly
 // (e.g. /auth routes use their own value).  Single source of truth — the
 // older 2-MB-vs-8-MB split between server.mjs and config.mjs is gone.

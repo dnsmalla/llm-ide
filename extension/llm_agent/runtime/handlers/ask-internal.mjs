@@ -1,4 +1,4 @@
-// Read handler: delegates a question to the internal Meet Notes
+// Read handler: delegates a question to the internal LLM IDE
 // agent. Runs a fresh internal sub-loop and bundles its
 // {reply, pendingTool} as {answer, pendingTool} for global to read.
 

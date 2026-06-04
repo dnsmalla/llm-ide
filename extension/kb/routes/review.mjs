@@ -185,14 +185,14 @@ export async function handleReviewRoutes(req, res, ctx) {
   }
 
   // POST /kb/review/cleanup-artifacts
-  // Remove the `.meetnotes-auto/<taskId>/` directory that codegen-apply
+  // Remove the `.llmide-auto/<taskId>/` directory that codegen-apply
   // wrote.  Called after the user integrates (or rejects) the generated
   // files so they don't accumulate in the working tree.
   //
   // Safety rules:
   //   1. repoPath must be on the user's server-side allow-list.
   //   2. taskId is slugified to [A-Za-z0-9_.-] so the derived path
-  //      stays inside `.meetnotes-auto/<safeSlug>/` and can never
+  //      stays inside `.llmide-auto/<safeSlug>/` and can never
   //      escape with ".." or leading slashes.
   //   3. We only remove directories (not arbitrary paths).
   if (req.method === 'POST' && url === '/kb/review/cleanup-artifacts') {
@@ -215,7 +215,7 @@ export async function handleReviewRoutes(req, res, ctx) {
       sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'taskId is invalid' } });
       return true;
     }
-    const artifactDir = path.join(normalRepo, '.meetnotes-auto', safeTask);
+    const artifactDir = path.join(normalRepo, '.llmide-auto', safeTask);
     // Use realpathSync (not path.resolve) so symlinks in the repo path
     // are resolved before the containment check — path.resolve is purely
     // lexical and can be fooled by a symlinked repoPath on the allow-list.
@@ -226,7 +226,7 @@ export async function handleReviewRoutes(req, res, ctx) {
       // Resolve the repo root (which MUST exist) and then reconstruct the
       // artifact path from there lexically.
       resolvedRepo = fs.realpathSync(normalRepo);
-      resolved = path.join(resolvedRepo, '.meetnotes-auto', safeTask);
+      resolved = path.join(resolvedRepo, '.llmide-auto', safeTask);
     } catch (err) {
       sendJSON(res, 403, { error: { code: 'REPO_RESOLVE_FAILED', message: `Cannot resolve repoPath: ${err.message}` } });
       return true;

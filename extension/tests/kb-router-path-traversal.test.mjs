@@ -16,13 +16,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-process.env.MEETNOTES_JWT_SECRET = 'a'.repeat(48);
-process.env.MEETNOTES_VAULT_KEY  = 'b'.repeat(48);
+process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
+process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tmpDb = path.join(__dirname, '_kb-router-path-traversal-test.db');
-process.env.MEETNOTES_DB_PATH = tmpDb;
+process.env.LLMIDE_DB_PATH = tmpDb;
 
 const db = await import('../kb/db.mjs');
 const { handleKB } = await import('../kb/router.mjs');

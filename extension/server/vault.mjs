@@ -3,12 +3,12 @@
 // Threat model: an attacker who reads our SQLite file (operator with
 // shell access, backup leak, supply-chain compromise) must NOT be
 // able to recover plaintext credentials.  They must additionally
-// possess the master `MEETNOTES_VAULT_KEY` env var.  The user_id is
+// possess the master `LLMIDE_VAULT_KEY` env var.  The user_id is
 // mixed into key derivation so a leak of one user's data doesn't
 // trivially compromise another.
 //
 // Crypto:
-//   data_key = HKDF-SHA256(master, salt=user_id, info='meetnotes-vault-v1', length=32)
+//   data_key = HKDF-SHA256(master, salt=user_id, info='llmide-vault-v1', length=32)
 //   ciphertext = iv(12) || AES-256-GCM_data_key(plaintext) || tag(16)
 //
 // Rotation: we store the key version in the first byte of the iv prefix
@@ -48,7 +48,7 @@ export function isVaultError(err) {
 
 function deriveDataKey(userId) {
   const master = Buffer.from(config.vaultKey);
-  return crypto.hkdfSync('sha256', master, Buffer.from(String(userId)), Buffer.from('meetnotes-vault-v1'), 32);
+  return crypto.hkdfSync('sha256', master, Buffer.from(String(userId)), Buffer.from('llmide-vault-v1'), 32);
 }
 
 export function encrypt(userId, plaintext) {

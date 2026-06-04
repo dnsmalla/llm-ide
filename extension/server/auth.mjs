@@ -24,7 +24,7 @@ const PUBLIC_PATHS = new Set([
   '/auth/register',
   '/auth/login',
   '/auth/refresh',
-  '/launch-app',                       // Cross-client deep link → meetnotes://
+  '/launch-app',                       // Cross-client deep link → llmide://
 ]);
 
 // Path prefixes that are public.  Used for routes whose URL contains

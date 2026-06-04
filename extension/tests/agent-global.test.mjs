@@ -14,7 +14,7 @@ const GLOBAL_SKILLS_DIR = join(__dirname, '..', 'llm_agent', 'global');
 test('composeGlobalPrompt is lean — no system context, only role + ask-internal skill', () => {
   const skills = loadSkills(GLOBAL_SKILLS_DIR);
   const prompt = composeGlobalPrompt({ skills: skills.skills });
-  assert.match(prompt, /Code Assistant for Meet Notes/);
+  assert.match(prompt, /Code Assistant for LLM IDE/);
   assert.match(prompt, /# ask-internal/);
   // Regression guard: no app-specific context leaks into global.
   assert.doesNotMatch(prompt, /## Active project/);

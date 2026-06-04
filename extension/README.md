@@ -1,4 +1,4 @@
-# Meet Notes — Extension + Server
+# LLM IDE — Extension + Server
 
 Chrome side-panel extension and local Node server. Full engineering docs: <SITE_URL>.
 

@@ -22,7 +22,7 @@ test('full loop: real skills, mocked claude — write tool returns pendingTool',
     agentContext: {
       base,
       activeProject: { name: 'notes-extension', url: 'https://gitlab.com/example/notes', defaultBranch: 'main' },
-      indexedRepos: [{ name: 'notes-extension', path: '~/Developer/MeetNotes/notes-extension' }],
+      indexedRepos: [{ name: 'notes-extension', path: '~/Developer/LLM IDE/notes-extension' }],
     },
     runClaude: fakeClaude,
     kb: { search: () => [] },

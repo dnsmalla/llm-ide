@@ -1,4 +1,4 @@
-// User account panel — shows the Meet Notes server account this
+// User account panel — shows the LLM IDE server account this
 // extension is signed in to (the email/password the user registered
 // with on 127.0.0.1:3456), and lets them change their password or
 // sign out.  This is distinct from the Bot account panel below,
@@ -87,7 +87,7 @@ export default function UserAccountSettings(): JSX.Element {
     <>
       <h3 className="settings-heading">User account</h3>
       <p className="settings-hint">
-        The Meet Notes account you signed in to your local server with.
+        The LLM IDE account you signed in to your local server with.
         Stored on <code>127.0.0.1:3456</code>; never leaves your machine.
       </p>
 

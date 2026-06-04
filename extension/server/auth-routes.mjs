@@ -78,7 +78,7 @@ async function readRawBody(req, max) {
 }
 
 function clientIp(req) {
-  // We respect X-Forwarded-For ONLY when MEETNOTES_TRUST_PROXY is on.
+  // We respect X-Forwarded-For ONLY when LLMIDE_TRUST_PROXY is on.
   // Otherwise we use the socket address — anything else is spoofable.
   //
   // XFF is built left-to-right as "client, proxy1, proxy2, …": each hop
@@ -88,7 +88,7 @@ function clientIp(req) {
   // entry we can trust is the RIGHTMOST one — the address our single
   // trusted proxy actually observed. Taking the first entry would let any
   // client spoof its IP in the audit log. (This assumes one trusted proxy
-  // hop, which is the documented MEETNOTES_TRUST_PROXY deployment.)
+  // hop, which is the documented LLMIDE_TRUST_PROXY deployment.)
   if (config.trustProxy) {
     const xff = req.headers['x-forwarded-for'];
     if (typeof xff === 'string' && xff.length > 0) {

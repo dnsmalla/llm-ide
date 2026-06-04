@@ -13,8 +13,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-process.env.MEETNOTES_JWT_SECRET = 'a'.repeat(48);
-process.env.MEETNOTES_VAULT_KEY  = 'b'.repeat(48);
+process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
+process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
 const { draftQuestion } = await import('../agents/agent-prompt.mjs');

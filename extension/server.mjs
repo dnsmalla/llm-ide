@@ -1,3 +1,5 @@
+// Alias legacy MEETNOTES_* env vars to LLMIDE_* before any config is read.
+import './core/env-compat.mjs';
 import http from 'http';
 import { execFile } from 'child_process';
 import path from 'path';
@@ -278,7 +280,7 @@ const server = http.createServer(async (req, res) => {
 
   // Cross-client deep link to the desktop app.  Used by the Chrome
   // extension's ↗ button: it opens this URL in a new tab; the server
-  // returns a 302 with `Location: meetnotes://<tab>`.  Chrome's URL
+  // returns a 302 with `Location: llmide://<tab>`.  Chrome's URL
   // bar then asks the OS to handle the custom scheme — the JS-driven
   // path from a chrome-extension:// origin is unreliable because MV3
   // strips user-gesture context on cross-tab navigation, but a real
@@ -296,7 +298,7 @@ const server = http.createServer(async (req, res) => {
     const requestedTab = (u.searchParams.get('to') || 'transcript').toLowerCase();
     const tab = ALLOWED_TABS.has(requestedTab) ? requestedTab : 'transcript';
     const session = u.searchParams.get('session');
-    let target = `meetnotes://${tab}`;
+    let target = `llmide://${tab}`;
     if (session) target += `?session=${encodeURIComponent(session)}`;
     const targetHtml = target.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 
@@ -304,7 +306,7 @@ const server = http.createServer(async (req, res) => {
 <html lang="en"><head>
 <meta charset="utf-8" />
 <meta http-equiv="refresh" content="0; url=${targetHtml}" />
-<title>Opening Meet Notes…</title>
+<title>Opening LLM IDE…</title>
 <style>
   :root { color-scheme: light dark; }
   body { font-family:-apple-system,BlinkMacSystemFont,sans-serif;
@@ -336,10 +338,10 @@ const server = http.createServer(async (req, res) => {
 </style>
 </head><body>
 <div class="card">
-  <h1><span class="pulse"></span>Opening Meet Notes…</h1>
+  <h1><span class="pulse"></span>Opening LLM IDE…</h1>
   <p>Handing off to the desktop app.</p>
   <p class="muted">If nothing happens, click the button below.</p>
-  <a class="btn" href="${targetHtml}">Open Meet Notes</a>
+  <a class="btn" href="${targetHtml}">Open LLM IDE</a>
 </div>
 <script>
   // Belt-and-braces: in addition to the meta refresh, fire the URL
@@ -647,17 +649,17 @@ function runAuthGc(stage) {
 }
 
 // Automatic DB backup — runs every 24 hours (configurable via
-// MEETNOTES_BACKUP_INTERVAL_HOURS). Uses the same VACUUM INTO primitive
+// LLMIDE_BACKUP_INTERVAL_HOURS). Uses the same VACUUM INTO primitive
 // as the /admin/backup endpoint: produces a self-consistent snapshot
-// without locking the live DB. Keeps up to MEETNOTES_BACKUP_RETAIN
+// without locking the live DB. Keeps up to LLMIDE_BACKUP_RETAIN
 // recent copies (default 7) and prunes older ones so disk doesn't
-// grow unboundedly. Disabled when MEETNOTES_BACKUP_INTERVAL_HOURS=0.
+// grow unboundedly. Disabled when LLMIDE_BACKUP_INTERVAL_HOURS=0.
 const BACKUP_INTERVAL_HOURS = (() => {
-  const v = Number(process.env.MEETNOTES_BACKUP_INTERVAL_HOURS ?? 24);
+  const v = Number(process.env.LLMIDE_BACKUP_INTERVAL_HOURS ?? 24);
   return Number.isFinite(v) && v >= 0 ? v : 24;
 })();
 const BACKUP_RETAIN = (() => {
-  const v = Number(process.env.MEETNOTES_BACKUP_RETAIN ?? 7);
+  const v = Number(process.env.LLMIDE_BACKUP_RETAIN ?? 7);
   return Number.isFinite(v) && v >= 1 ? Math.floor(v) : 7;
 })();
 let backupTimer = null;
@@ -667,7 +669,7 @@ function runAutoBackup() {
   if (BACKUP_INTERVAL_HOURS === 0) return;
   try {
     const dbDir     = path.dirname(config.dbPath);
-    const backupDir = process.env.MEETNOTES_BACKUP_DIR || path.join(dbDir, 'backups');
+    const backupDir = process.env.LLMIDE_BACKUP_DIR || path.join(dbDir, 'backups');
     fs.mkdirSync(backupDir, { recursive: true });
     const stamp  = Math.floor(Date.now() / 1000);
     const target = path.join(backupDir, `data-${stamp}.db`);
@@ -697,7 +699,7 @@ function runAutoBackup() {
 // ── Fail-closed loopback guard ──────────────────────────────────────────
 // This server has no built-in TLS and exposes auth tokens + an encrypted
 // vault. Binding a non-loopback address is only allowed when the operator
-// has explicitly opted in via MEETNOTES_ALLOW_REMOTE=1 AND is expected to
+// has explicitly opted in via LLMIDE_ALLOW_REMOTE=1 AND is expected to
 // front it with a TLS-terminating reverse proxy. Otherwise we refuse to
 // start rather than silently exposing secrets on the network.
 const IS_LOOPBACK = HOST === '127.0.0.1' || HOST === 'localhost' || HOST === '::1';
@@ -705,9 +707,9 @@ if (!IS_LOOPBACK && !config.allowRemote) {
   logger.error('server_bind_refused', {
     host: HOST,
     message:
-      `Refusing to bind non-loopback address "${HOST}" without MEETNOTES_ALLOW_REMOTE=1. ` +
+      `Refusing to bind non-loopback address "${HOST}" without LLMIDE_ALLOW_REMOTE=1. ` +
       'This server has no built-in TLS; exposing it leaks tokens and vault data. ' +
-      'Set MEETNOTES_HOST=127.0.0.1 for local use, or set MEETNOTES_ALLOW_REMOTE=1 ' +
+      'Set LLMIDE_HOST=127.0.0.1 for local use, or set LLMIDE_ALLOW_REMOTE=1 ' +
       'AND place a TLS-terminating reverse proxy (nginx, Caddy) in front.',
   });
   process.exit(1);

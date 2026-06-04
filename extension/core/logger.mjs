@@ -10,8 +10,8 @@
 import { randomBytes } from 'crypto';
 
 const LEVELS = { trace: 10, debug: 20, info: 30, warn: 40, error: 50 };
-const isPretty = process.stdout.isTTY && !process.env.MEETNOTES_LOG_JSON;
-const minLevel = LEVELS[(process.env.MEETNOTES_LOG_LEVEL || 'info').toLowerCase()] ?? LEVELS.info;
+const isPretty = process.stdout.isTTY && !process.env.LLMIDE_LOG_JSON;
+const minLevel = LEVELS[(process.env.LLMIDE_LOG_LEVEL || 'info').toLowerCase()] ?? LEVELS.info;
 
 const COLORS = {
   trace: '\x1b[90m',

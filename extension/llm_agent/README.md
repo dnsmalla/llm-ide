@@ -1,6 +1,6 @@
 # llm_agent
 
-All agent runtime for the Meet Notes Code Assistant lives here. Two
+All agent runtime for the LLM IDE Code Assistant lives here. Two
 agents share one engine:
 
 - `global/` — the front-line agent. Lean prompt, one tool

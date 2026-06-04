@@ -1,4 +1,4 @@
-// Floating overlay — injects a minimal "Meet Notes" status pill into the
+// Floating overlay — injects a minimal "LLM IDE" status pill into the
 // meeting page while recording is active.  Clicking "Open" deep-links to
 // the native Mac app via the service worker (LAUNCH_MAC_APP message,
 // historically called OPEN_POPUP for backwards compat with stored builds).
@@ -10,18 +10,18 @@ import { MsgType } from '../lib/messages';
 // Guard against re-injection — see caption-scraper.ts for rationale.
 declare global {
   interface Window {
-    __meetnotesFloatingOverlayInjected?: boolean;
+    __llmideFloatingOverlayInjected?: boolean;
   }
 }
-if (window.__meetnotesFloatingOverlayInjected) {
-  throw new Error('meetnotes:floating-overlay-already-injected');
+if (window.__llmideFloatingOverlayInjected) {
+  throw new Error('llmide:floating-overlay-already-injected');
 }
-window.__meetnotesFloatingOverlayInjected = true;
+window.__llmideFloatingOverlayInjected = true;
 
-const BAR_ID = 'meetnotes-bar';
+const BAR_ID = 'llmide-bar';
 let barEl: HTMLDivElement | null = null;
 
-// ── Meet Notes Toolbar Icon ───────────────────────────────────────────
+// ── LLM IDE Toolbar Icon ───────────────────────────────────────────
 // A small cloud icon that appears on the right edge of the screen,
 // styling matching Google Meet's native toolbar. Clicking it opens the app.
 
@@ -36,7 +36,7 @@ function buildBar(): void {
 
   const style = document.createElement('style');
   style.textContent = `
-    #meetnotes-icon {
+    #llmide-icon {
       position: fixed;
       right: 24px;
       bottom: 120px; /* Positioned near the Meet sidebar vertical controls */
@@ -54,12 +54,12 @@ function buildBar(): void {
       transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
       user-select: none;
     }
-    #meetnotes-icon.visible { display: flex; }
-    #meetnotes-icon:hover {
+    #llmide-icon.visible { display: flex; }
+    #llmide-icon:hover {
       background: rgba(60, 64, 67, 0.95);
       transform: scale(1.05);
     }
-    #meetnotes-icon:active {
+    #llmide-icon:active {
       transform: scale(0.95);
     }
     /* The SVG matches the gradient cloud look the user liked */
@@ -90,8 +90,8 @@ function buildBar(): void {
   `;
 
   const bar = document.createElement('div');
-  bar.id = 'meetnotes-icon';
-  bar.title = 'Open Meet Notes';
+  bar.id = 'llmide-icon';
+  bar.title = 'Open LLM IDE';
 
   // An SVG spark/cloud to closely match the user's screenshot aesthetic
   bar.innerHTML = `
@@ -123,22 +123,22 @@ function buildBar(): void {
 
 function showBar(): void {
   if (!barEl) return;
-  const bar = barEl.shadowRoot?.getElementById('meetnotes-icon');
+  const bar = barEl.shadowRoot?.getElementById('llmide-icon');
   bar?.classList.add('visible');
 }
 
 function hideBar(): void {
-  const bar = barEl?.shadowRoot?.getElementById('meetnotes-icon');
+  const bar = barEl?.shadowRoot?.getElementById('llmide-icon');
   bar?.classList.remove('visible');
 }
 
 // ── Recording events ──────────────────────────────────────────────────
 
-window.addEventListener('meetnotes:recording-start', () => {
+window.addEventListener('llmide:recording-start', () => {
   showBar();
 });
 
-window.addEventListener('meetnotes:recording-stop', () => {
+window.addEventListener('llmide:recording-stop', () => {
   hideBar();
 });
 

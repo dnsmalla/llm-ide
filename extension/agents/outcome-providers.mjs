@@ -38,7 +38,7 @@ async function pollGithub(dispatched, { token } = {}) {
     const headers = {
       'Accept': 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'meet-notes-extension',
+      'User-Agent': 'llm-ide-extension',
     };
     if (token) headers['Authorization'] = `Bearer ${token}`;
     const path = u.kind === 'pr'
@@ -96,7 +96,7 @@ async function pollBacklog(dispatched, { apiKey } = {}) {
     //      surface the HTTP status code, not the full URL).
     //   2. The key is URL-encoded so it can't break the URL structure.
     const url = `https://${u.space}/api/v2/issues/${encodeURIComponent(u.issueKey)}?apiKey=${encodeURIComponent(apiKey)}`;
-    const r = await fetch(url, { headers: { 'User-Agent': 'meet-notes-extension' }, signal: AbortSignal.timeout(15_000) });
+    const r = await fetch(url, { headers: { 'User-Agent': 'llm-ide-extension' }, signal: AbortSignal.timeout(15_000) });
     // Intentionally omit the URL from the error — it contains the apiKey.
     if (!r.ok) return { state: 'unknown', meta: { error: `Backlog HTTP ${r.status}` } };
     const data = await r.json();
@@ -137,7 +137,7 @@ async function pollLinear(dispatched, { apiKey } = {}) {
       headers: {
         'Authorization': apiKey,
         'Content-Type': 'application/json',
-        'User-Agent': 'meet-notes-extension',
+        'User-Agent': 'llm-ide-extension',
       },
       body: JSON.stringify({ query, variables: { id: String(id) } }),
       signal: AbortSignal.timeout(15_000),

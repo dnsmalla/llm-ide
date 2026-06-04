@@ -14,8 +14,8 @@ import { fileURLToPath } from 'node:url';
 
 // Test-time secrets MUST be set before kb/db imports the config module
 // (which validates env at load time).
-process.env.MEETNOTES_JWT_SECRET = 'a'.repeat(48);
-process.env.MEETNOTES_VAULT_KEY  = 'b'.repeat(48);
+process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
+process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
 // Per-test database file — isolated under a temp dir, deleted in
@@ -23,10 +23,10 @@ process.env.NODE_ENV = 'test';
 // process-wide singleton in db.mjs and we'd need to reset it.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tmpDb = path.join(__dirname, '_tenancy-test.db');
-process.env.MEETNOTES_DB_PATH = tmpDb;
+process.env.LLMIDE_DB_PATH = tmpDb;
 
 // Import AFTER env is set — order matters because config validates
-// MEETNOTES_VAULT_KEY length at import time.
+// LLMIDE_VAULT_KEY length at import time.
 const db = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
 

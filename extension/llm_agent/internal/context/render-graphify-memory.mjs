@@ -3,7 +3,7 @@
 // Bridges the Mac app's Graphify-generated memory files into the in-app
 // agent's system prompt. Previously the Mac app wrote rich `repo.md`,
 // `graph-notes.md`, and bug/Q&A entries under `<repo>/graphify-out/memory/`
-// but only external CLIs (Claude/Cursor) read them — the meet-notes
+// but only external CLIs (Claude/Cursor) read them — the llm-ide
 // `/code-assist` agent ignored them. This module closes that loop.
 //
 // Safety rails:

@@ -8,14 +8,14 @@ import { detectPlatformFromUrl, type PlatformId } from '../lib/platforms';
 // Guard against re-injection — see caption-scraper.ts for rationale.
 declare global {
   interface Window {
-    __meetnotesSpeakerDetectorInjected?: boolean;
+    __llmideSpeakerDetectorInjected?: boolean;
   }
 }
-if (window.__meetnotesSpeakerDetectorInjected) {
+if (window.__llmideSpeakerDetectorInjected) {
   debug('[speaker-detector] already injected — skipping re-init');
-  throw new Error('meetnotes:speaker-detector-already-injected');
+  throw new Error('llmide:speaker-detector-already-injected');
 }
-window.__meetnotesSpeakerDetectorInjected = true;
+window.__llmideSpeakerDetectorInjected = true;
 
 type Platform = PlatformId;
 

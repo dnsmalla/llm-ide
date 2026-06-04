@@ -109,15 +109,15 @@ export default function HelpPanel({ onClose }: Props) {
 function OverviewSection() {
   return (
     <div className="help-section">
-      <h3>Welcome to Meet Notes</h3>
+      <h3>Welcome to LLM IDE</h3>
       <p>
         Meetings are where important things happen &mdash; decisions get made,
         tasks get assigned, ideas take shape. But keeping up with everything
         while you&apos;re actually <em>in</em> the conversation? That&apos;s
-        almost impossible. That&apos;s exactly why Meet Notes exists.
+        almost impossible. That&apos;s exactly why LLM IDE exists.
       </p>
       <p>
-        Meet Notes sits quietly beside your meeting, captures every word,
+        LLM IDE sits quietly beside your meeting, captures every word,
         and lets AI do the heavy lifting &mdash; summarizing, analyzing, and
         answering your questions. You focus on the conversation. We take care
         of the notes.
@@ -126,7 +126,7 @@ function OverviewSection() {
       <div className="help-card">
         <h4>Your five-tab workspace</h4>
         <p>
-          Meet Notes is organized into five pages. Each one handles a different
+          LLM IDE is organized into five pages. Each one handles a different
           part of the meeting workflow. Here&apos;s a quick map:
         </p>
         <div className="help-page-overview">
@@ -185,7 +185,7 @@ function OverviewSection() {
             <div className="help-flow-icon">1</div>
             <div className="help-flow-body">
               <h4>Before the meeting</h4>
-              <p>Make sure the server is running. Open Meet Notes from the toolbar.</p>
+              <p>Make sure the server is running. Open LLM IDE from the toolbar.</p>
             </div>
           </div>
           <div className="help-flow-arrow">↓</div>
@@ -241,7 +241,7 @@ function GettingStartedSection() {
         <p>
           You should see output like <code>Server running on port 3456</code>.
           Leave this terminal open &mdash; it needs to stay running while you use
-          Meet Notes.
+          LLM IDE.
         </p>
         <div className="help-card help-tip">
           <strong>Good to know:</strong> Recording works even without the server.
@@ -264,7 +264,7 @@ function GettingStartedSection() {
           <p>
             You have a standup at 10am on Google Meet. You click the meeting link,
             Chrome opens the meeting, and you&apos;re in. That&apos;s all the setup
-            Meet Notes needs.
+            LLM IDE needs.
           </p>
         </div>
       </div>
@@ -272,7 +272,7 @@ function GettingStartedSection() {
       <div className="help-card">
         <h4>Step 3 &mdash; Open the side panel</h4>
         <p>
-          Click the <strong>Meet Notes icon</strong> in your browser toolbar
+          Click the <strong>LLM IDE icon</strong> in your browser toolbar
           (it&apos;s in the top-right corner, next to your other extensions).
           A side panel slides open on the right side of your screen, right
           next to the meeting.
@@ -287,7 +287,7 @@ function GettingStartedSection() {
       <div className="help-card">
         <h4>Step 4 &mdash; Press Start</h4>
         <p>
-          Click the big <strong>Start</strong> button at the top. Meet Notes
+          Click the big <strong>Start</strong> button at the top. LLM IDE
           automatically figures out the best way to capture your meeting:
         </p>
         <div className="help-compare">
@@ -309,7 +309,7 @@ function GettingStartedSection() {
           </div>
         </div>
         <p className="help-hint">
-          You don&apos;t need to choose &mdash; Meet Notes picks captions mode
+          You don&apos;t need to choose &mdash; LLM IDE picks captions mode
           automatically when available.
         </p>
       </div>
@@ -409,7 +409,7 @@ function TranscriptPageSection() {
       <div className="help-card">
         <h4>Renaming speakers</h4>
         <p>
-          When Meet Notes uses <strong>mic mode</strong> (no platform captions
+          When LLM IDE uses <strong>mic mode</strong> (no platform captions
           available), speakers are labeled generically: &ldquo;Speaker 1&rdquo;,
           &ldquo;Speaker 2&rdquo;, and so on.
         </p>
@@ -440,7 +440,7 @@ function TranscriptPageSection() {
       <div className="help-card">
         <h4>Auto-save &amp; manual save</h4>
         <p>
-          When you stop recording, Meet Notes <strong>automatically saves</strong>{' '}
+          When you stop recording, LLM IDE <strong>automatically saves</strong>{' '}
           the transcript to your browser&apos;s local storage. If the browser
           crashes or you accidentally close the tab, your transcript is safe.
         </p>
@@ -460,7 +460,7 @@ function TranscriptPageSection() {
           the transcript.
         </p>
         <p>
-          When bilingual mode is active, Meet Notes runs <em>two</em> speech
+          When bilingual mode is active, LLM IDE runs <em>two</em> speech
           recognizers at the same time &mdash; one for each language. For every
           sentence, it compares both results and picks the one with higher
           confidence. The winning language is shown as a small badge next to each
@@ -473,7 +473,7 @@ function TranscriptPageSection() {
         <p>
           Above the transcript you&apos;ll find dropdown menus to set your{' '}
           <strong>primary language</strong> and (optionally) a{' '}
-          <strong>secondary language</strong>. Meet Notes supports 20 languages
+          <strong>secondary language</strong>. LLM IDE supports 20 languages
           including Japanese, English, Chinese, Korean, Hindi, Nepali, Spanish,
           French, German, Arabic, Thai, and more.
         </p>
@@ -585,7 +585,7 @@ function NotesPageSection() {
         <h4>Export options &mdash; share it your way</h4>
         <p>
           Below the generated notes, you&apos;ll find a row of export buttons.
-          Meet Notes gives you multiple formats for different needs:
+          LLM IDE gives you multiple formats for different needs:
         </p>
         <ul className="help-list">
           <li><strong>Download DOCX</strong> &mdash; A polished Word document with
@@ -964,7 +964,7 @@ function SettingsPageSection() {
         <h4>Microphone selection</h4>
         <p>
           If you have multiple audio input devices (e.g., a USB headset, laptop
-          mic, and a webcam mic), this is where you choose which one Meet Notes
+          mic, and a webcam mic), this is where you choose which one LLM IDE
           listens to in <strong>mic mode</strong>.
         </p>
         <ul className="help-list">
@@ -1077,7 +1077,7 @@ function SettingsPageSection() {
       <div className="help-card">
         <h4>Knowledge Base Search &mdash; your meeting memory</h4>
         <p>
-          This is one of the most powerful features in Meet Notes, and it gets
+          This is one of the most powerful features in LLM IDE, and it gets
           better the more you use it.
         </p>
         <p>
@@ -1126,7 +1126,7 @@ function PlatformsSection() {
     <div className="help-section">
       <h3>Supported Platforms</h3>
       <p>
-        Meet Notes works with the three most popular meeting platforms, plus
+        LLM IDE works with the three most popular meeting platforms, plus
         a fallback for everything else. Here&apos;s a detailed breakdown of
         what each platform supports.
       </p>
@@ -1135,7 +1135,7 @@ function PlatformsSection() {
         <div className="help-card">
           <h4>Google Meet &mdash; Best experience</h4>
           <p>
-            Google Meet is the flagship platform for Meet Notes. You get the
+            Google Meet is the flagship platform for LLM IDE. You get the
             fullest feature set:
           </p>
           <ul className="help-list">
@@ -1144,14 +1144,14 @@ function PlatformsSection() {
             <li><strong>Participant list</strong> synced from meeting roster</li>
             <li><strong>Chat injection</strong> &mdash; post AI-generated questions
               directly into the meeting chat</li>
-            <li><strong>CC overlay hiding</strong> &mdash; Meet Notes can hide the
+            <li><strong>CC overlay hiding</strong> &mdash; LLM IDE can hide the
               platform&apos;s own caption overlay so you see captions only in the
               side panel, keeping the video clean</li>
           </ul>
           <div className="help-card help-tip">
             <strong>For best results:</strong> Make sure closed captions are turned
             on in the meeting. Look for the &ldquo;CC&rdquo; button in the bottom
-            toolbar. Meet Notes will also try to enable CC automatically when you
+            toolbar. LLM IDE will also try to enable CC automatically when you
             start recording.
           </div>
         </div>
@@ -1191,7 +1191,7 @@ function PlatformsSection() {
         <h4>Everything else &mdash; Microphone fallback</h4>
         <p>
           For platforms without built-in caption support (e.g., phone calls,
-          Slack huddles, Discord, or in-person meetings), Meet Notes switches to{' '}
+          Slack huddles, Discord, or in-person meetings), LLM IDE switches to{' '}
           <strong>microphone mode</strong>:
         </p>
         <ul className="help-list">
@@ -1294,7 +1294,7 @@ function TroubleshootingSection() {
         </p>
         <ol className="help-steps">
           <li>
-            <strong>Turn on CC in the meeting itself.</strong> Meet Notes reads the
+            <strong>Turn on CC in the meeting itself.</strong> LLM IDE reads the
             platform&apos;s captions &mdash; they must be enabled first. Look for a
             &ldquo;CC&rdquo; or &ldquo;Captions&rdquo; button in the meeting toolbar.
           </li>
@@ -1338,7 +1338,7 @@ function TroubleshootingSection() {
           </li>
           <li>
             <strong>Check your Node version.</strong> Run <code>node --version</code>.
-            Meet Notes requires <strong>Node.js 20+</strong>.
+            LLM IDE requires <strong>Node.js 20+</strong>.
           </li>
           <li>
             <strong>&ldquo;Server needs restart&rdquo;</strong> means the server is
@@ -1437,7 +1437,7 @@ function TroubleshootingSection() {
             for clues about what&apos;s working and what isn&apos;t</li>
           <li><strong>Browser DevTools console</strong> &mdash; Right-click the side
             panel, choose &ldquo;Inspect,&rdquo; go to the Console tab. Errors
-            prefixed with <code>[MeetNotes]</code> will tell you exactly
+            prefixed with <code>[LLM IDE]</code> will tell you exactly
             what failed</li>
         </ul>
       </div>

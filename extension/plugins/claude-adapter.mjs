@@ -169,17 +169,17 @@ export function scanMarketplace(rootOverride) {
 }
 
 /**
- * Import a Claude Code plugin into Meet Notes' plugin directory.
+ * Import a Claude Code plugin into LLM IDE' plugin directory.
  * @param {object} opts
  * @param {string} [opts.claudeRoot] - Override Claude plugins root
- * @param {string} [opts.meetnotesPluginDir] - Override MeetNotes plugin dir
+ * @param {string} [opts.llmidePluginDir] - Override LLM IDE plugin dir
  * @param {'installed'|'marketplace'} opts.source
  * @param {string} opts.name - Plugin name
  * @returns {{ ok: boolean, plugin?: object, error?: string }}
  */
 export function importPlugin(opts) {
   const claudeRoot = opts.claudeRoot || claudePluginsRoot();
-  const mnDir = opts.meetnotesPluginDir || defaultPluginDir();
+  const mnDir = opts.llmidePluginDir || defaultPluginDir();
   const { source, name } = opts;
 
   // Validate BEFORE any path join — `name` and `source` reach the
@@ -310,9 +310,9 @@ function findMarketplaceName(root, pluginName) {
 }
 
 /**
- * Copy and adapt Claude Code skills into MeetNotes format.
+ * Copy and adapt Claude Code skills into LLM IDE format.
  * Claude Code skills may lack the `kind` and `name` fields that
- * MeetNotes' skill-loader requires. This function injects them
+ * LLM IDE' skill-loader requires. This function injects them
  * during import so the skills actually load at LLM runtime.
  *
  * - `kind` defaults to 'read' (Claude skills are contextual/informational)
@@ -357,7 +357,7 @@ function copySkills(src, dst) {
 
 /**
  * Ensure a Claude Code skill .md file has the frontmatter fields
- * required by MeetNotes' skill-loader: `name` and `kind`.
+ * required by LLM IDE' skill-loader: `name` and `kind`.
  * If frontmatter exists but lacks these, inject them.
  * If no frontmatter at all, wrap the content with a minimal one.
  */
@@ -414,8 +414,8 @@ function copyCmds(src, dst) {
 }
 
 /**
- * Lightweight check: list MeetNotes plugin directory names (no full load).
- * Returns a Set of plugin folder names from the MeetNotes plugin dir.
+ * Lightweight check: list LLM IDE plugin directory names (no full load).
+ * Returns a Set of plugin folder names from the LLM IDE plugin dir.
  * @param {string} [mnDirOverride] - Override for tests
  * @returns {Set<string>}
  */
@@ -438,8 +438,8 @@ export function listImportedNames(mnDirOverride) {
 }
 
 /**
- * Read the version from a MeetNotes-imported plugin's manifest.
- * @param {string} pluginName - MeetNotes plugin name (e.g., 'claude-code-review')
+ * Read the version from a LLM IDE-imported plugin's manifest.
+ * @param {string} pluginName - LLM IDE plugin name (e.g., 'claude-code-review')
  * @param {string} [mnDirOverride] - Override for tests
  * @returns {string|null}
  */
@@ -457,12 +457,12 @@ export function getImportedVersion(pluginName, mnDirOverride) {
  * Check for updates: compare imported plugin versions against Claude source.
  * @param {object} [opts]
  * @param {string} [opts.claudeRoot] - Override Claude plugins root
- * @param {string} [opts.meetnotesPluginDir] - Override MeetNotes plugin dir
+ * @param {string} [opts.llmidePluginDir] - Override LLM IDE plugin dir
  * @returns {Array<{name: string, importedVersion: string, sourceVersion: string, source: string}>}
  */
 export function checkForUpdates(opts = {}) {
   const claudeRoot = opts.claudeRoot || claudePluginsRoot();
-  const mnDir = opts.meetnotesPluginDir || defaultPluginDir();
+  const mnDir = opts.llmidePluginDir || defaultPluginDir();
 
   const imported = listImportedNames(mnDir);
   const updates = [];

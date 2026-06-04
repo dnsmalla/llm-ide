@@ -11,9 +11,9 @@
 //                        a prompt template with {{argName}} slots.
 //
 // Plugins live under the OS-standard per-user data directory:
-//   ~/Library/Application Support/MeetNotes/plugins/   (macOS)
-//   $XDG_DATA_HOME/meetnotes/plugins/                  (Linux)
-//   %APPDATA%\MeetNotes\plugins\                       (Windows)
+//   ~/Library/Application Support/LLM IDE/plugins/   (macOS)
+//   $XDG_DATA_HOME/llmide/plugins/                  (Linux)
+//   %APPDATA%\LLM IDE\plugins\                       (Windows)
 //
 // Per-user enable state is stored in the existing user_secrets vault
 // under the synthetic key 'plugins.enabled' (JSON array of plugin
@@ -69,19 +69,19 @@ function scanForSuspiciousContent(text) {
 }
 
 /**
- * OS-standard per-user plugin root. Override via $MEETNOTES_PLUGIN_DIR
+ * OS-standard per-user plugin root. Override via $LLMIDE_PLUGIN_DIR
  * for tests / dev.
  */
 export function defaultPluginDir() {
-  if (process.env.MEETNOTES_PLUGIN_DIR) return process.env.MEETNOTES_PLUGIN_DIR;
+  if (process.env.LLMIDE_PLUGIN_DIR) return process.env.LLMIDE_PLUGIN_DIR;
   const home = os.homedir();
   if (process.platform === 'darwin') {
-    return join(home, 'Library', 'Application Support', 'MeetNotes', 'plugins');
+    return join(home, 'Library', 'Application Support', 'LLM IDE', 'plugins');
   }
   if (process.platform === 'win32') {
-    return join(process.env.APPDATA || join(home, 'AppData', 'Roaming'), 'MeetNotes', 'plugins');
+    return join(process.env.APPDATA || join(home, 'AppData', 'Roaming'), 'LLM IDE', 'plugins');
   }
-  return join(process.env.XDG_DATA_HOME || join(home, '.local', 'share'), 'meetnotes', 'plugins');
+  return join(process.env.XDG_DATA_HOME || join(home, '.local', 'share'), 'llmide', 'plugins');
 }
 
 function parseFrontmatter(raw) {

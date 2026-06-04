@@ -284,7 +284,7 @@ export default function App() {
     const duration = formatDuration(transcript.elapsed);
 
     const lines = [
-      'Meet Notes — Transcript',
+      'LLM IDE — Transcript',
       `Date: ${date}`,
       `Duration: ${duration}`,
       '',
@@ -319,8 +319,8 @@ export default function App() {
         : `Microphone mode${transcript.bilingual ? ' · bilingual' : ''}`
       : 'Google Meet, Teams, Zoom & more';
 
-  // Hand the transcript off to the Meet Notes desktop app via its
-  // registered `meetnotes://` URL scheme.
+  // Hand the transcript off to the LLM IDE desktop app via its
+  // registered `llmide://` URL scheme.
   //
   // We *route through the local backend* rather than firing the
   // custom scheme directly from the side panel.  Reason: Chrome MV3
@@ -347,7 +347,7 @@ export default function App() {
   if (sess.loading) {
     return (
       <div className="app login-loading">
-        <p>Connecting to Meet Notes…</p>
+        <p>Connecting to LLM IDE…</p>
       </div>
     );
   }
@@ -367,7 +367,7 @@ export default function App() {
     <div className="app">
       <header className="app-header">
         <div className="header-row">
-          <h1>Meet Notes</h1>
+          <h1>LLM IDE</h1>
           <span className="header-user" title={sess.user?.email}>
             {sess.user?.displayName || sess.user?.email || ''}
             {sess.user?.role === 'admin' && <span className="meta-chip role-admin">admin</span>}
@@ -387,8 +387,8 @@ export default function App() {
           <button
             className="btn-popout"
             onClick={popOut}
-            title="Open transcript in the Meet Notes desktop app"
-            aria-label="Open transcript in the Meet Notes desktop app"
+            title="Open transcript in the LLM IDE desktop app"
+            aria-label="Open transcript in the LLM IDE desktop app"
           >↗</button>
         </div>
         <p className="meeting-subtitle">{subtitle}</p>

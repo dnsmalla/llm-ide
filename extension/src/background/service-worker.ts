@@ -7,7 +7,7 @@ import { isSupportedUrl } from '../lib/platforms';
 // when recording started.  That created a "second screen" alongside
 // the side panel and the Mac app — confusing.  Now OPEN_POPUP just
 // opens a tab to the server's /launch-app endpoint, which 302s into
-// the meetnotes:// scheme so the native Mac app comes to the front.
+// the llmide:// scheme so the native Mac app comes to the front.
 // (We can't navigate directly to a custom scheme from a chrome-extension://
 // origin — Chrome MV3 silently blocks it.  The server redirect bypasses
 // that.)
@@ -18,7 +18,7 @@ async function openMacAppDeepLink(): Promise<void> {
     const url = `${serverUrl}/launch-app?to=transcript`;
     await chrome.tabs.create({ url, active: false });
   } catch (err) {
-    console.error('[MeetNotes] Failed to open Mac app deep link:', err);
+    console.error('[LLM IDE] Failed to open Mac app deep link:', err);
   }
 }
 
@@ -48,11 +48,11 @@ async function ensureContentScriptInjected(tabId: number, url: string): Promise<
       // has set its sentinel.
       func: () => Boolean(
         // @ts-ignore window augmentation lives in each content script
-        (window as any).__meetnotesCaptionScraperInjected
+        (window as any).__llmideCaptionScraperInjected
           // @ts-ignore
-          || (window as any).__meetnotesSpeakerDetectorInjected
+          || (window as any).__llmideSpeakerDetectorInjected
           // @ts-ignore
-          || (window as any).__meetnotesFloatingOverlayInjected
+          || (window as any).__llmideFloatingOverlayInjected
       ),
     });
     if (pageResult?.result === true) return true;
@@ -72,7 +72,7 @@ async function ensureContentScriptInjected(tabId: number, url: string): Promise<
     await chrome.scripting.executeScript({ target: { tabId }, files });
     return true;
   } catch (err) {
-    console.error('[MeetNotes] Failed to inject content script:', err);
+    console.error('[LLM IDE] Failed to inject content script:', err);
     return false;
   }
 }
@@ -179,7 +179,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         sendResponse({ ok: true, results });
       } catch (err) {
-        console.error('[MeetNotes] caption scraping dispatch failed:', err);
+        console.error('[LLM IDE] caption scraping dispatch failed:', err);
         sendResponse({ ok: false, error: String(err) });
       }
     })();

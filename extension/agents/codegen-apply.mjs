@@ -7,7 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 
-const SUBDIR = '.meetnotes-auto';
+const SUBDIR = '.llmide-auto';
 
 function isWithinAllowlist(repoPath, allowedRepos) {
   const abs = path.resolve(repoPath);
@@ -61,7 +61,7 @@ function assertNoSymlinkEscape(baseDir, target) {
     let st;
     try { st = fs.lstatSync(cursor); } catch { return; }   // doesn't exist yet — safe
     if (st.isSymbolicLink()) {
-      throw new Error(`Refusing write: symlink in path under .meetnotes-auto/: ${cursor}`);
+      throw new Error(`Refusing write: symlink in path under .llmide-auto/: ${cursor}`);
     }
   }
 }

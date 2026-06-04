@@ -104,13 +104,13 @@ function makeFakeClaudeWithSkills() {
   return root;
 }
 
-test('importPlugin converts Claude plugin into MeetNotes format', () => {
+test('importPlugin converts Claude plugin into LLM IDE format', () => {
   const claudeRoot = makeFakeClaudeWithSkills();
   const mnRoot = mkdtempSync(join(tmpdir(), 'mn-plugins-'));
   try {
     const result = importPlugin({
       claudeRoot,
-      meetnotesPluginDir: mnRoot,
+      llmidePluginDir: mnRoot,
       source: 'marketplace',
       name: 'code-review',
     });
@@ -123,9 +123,9 @@ test('importPlugin converts Claude plugin into MeetNotes format', () => {
     assert.equal(manifest.name, 'claude-code-review');
     assert.equal(manifest.origin, 'claude');
     assert.equal(manifest.sourcePlugin, 'code-review');
-    // Verify MeetNotes loader can load it
+    // Verify LLM IDE loader can load it
     const { plugins } = loadPlugins({ pluginDir: mnRoot });
-    assert.ok(plugins.has('claude-code-review'), 'plugin not loaded by MeetNotes loader');
+    assert.ok(plugins.has('claude-code-review'), 'plugin not loaded by LLM IDE loader');
   } finally {
     rmSync(claudeRoot, { recursive: true, force: true });
     rmSync(mnRoot, { recursive: true, force: true });
@@ -141,7 +141,7 @@ test('full round-trip: scan → import → verify', () => {
 
     const result = importPlugin({
       claudeRoot,
-      meetnotesPluginDir: mnRoot,
+      llmidePluginDir: mnRoot,
       source: 'marketplace',
       name: 'code-review',
     });
@@ -166,7 +166,7 @@ test('importPlugin does not double-prefix claude- names', () => {
   try {
     const result = importPlugin({
       claudeRoot,
-      meetnotesPluginDir: mnRoot,
+      llmidePluginDir: mnRoot,
       source: 'marketplace',
       name: 'claude-code-setup',
     });
@@ -186,7 +186,7 @@ test('importPlugin rejects if plugin not found in Claude dirs', () => {
   try {
     const result = importPlugin({
       claudeRoot,
-      meetnotesPluginDir: mnRoot,
+      llmidePluginDir: mnRoot,
       source: 'marketplace',
       name: 'nonexistent',
     });
@@ -268,7 +268,7 @@ test('checkForUpdates detects version mismatch', () => {
   // First import the plugin
   const result = importPlugin({
     claudeRoot,
-    meetnotesPluginDir: mnRoot,
+    llmidePluginDir: mnRoot,
     source: 'marketplace',
     name: 'code-review',
   });
@@ -282,7 +282,7 @@ test('checkForUpdates detects version mismatch', () => {
   const sourceDir = join(claudeRoot, 'marketplaces', 'claude-plugins-official', 'plugins', 'code-review');
   writeFileSync(join(sourceDir, 'package.json'), JSON.stringify({ version: '1.2.0' }), 'utf8');
   try {
-    const updates = checkForUpdates({ claudeRoot, meetnotesPluginDir: mnRoot });
+    const updates = checkForUpdates({ claudeRoot, llmidePluginDir: mnRoot });
     assert.equal(updates.length, 1);
     assert.equal(updates[0].name, 'claude-code-review');
     assert.equal(updates[0].importedVersion, '0.9.0');
@@ -309,14 +309,14 @@ test('imported skills pass skill-loader validation (kind + name injected)', () =
   try {
     const result = importPlugin({
       claudeRoot,
-      meetnotesPluginDir: mnRoot,
+      llmidePluginDir: mnRoot,
       source: 'marketplace',
       name: 'my-tool',
     });
     assert.equal(result.ok, true);
     assert.equal(result.plugin.skillCount, 2);
 
-    // Now run the actual MeetNotes skill-loader on the imported skills
+    // Now run the actual LLM IDE skill-loader on the imported skills
     const skillsDir = join(mnRoot, 'claude-my-tool', 'skills');
     const loaded = loadSkills(skillsDir);
 

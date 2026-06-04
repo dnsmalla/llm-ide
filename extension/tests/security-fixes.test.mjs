@@ -87,7 +87,7 @@ test('C-8: codegen-apply refuses to overwrite an existing symlink under the task
   try {
     // Pre-create the per-task dir and plant a symlink that points
     // outside the repo.  applyCodegen should detect and reject.
-    const taskDir = path.join(root, '.meetnotes-auto', 'task1');
+    const taskDir = path.join(root, '.llmide-auto', 'task1');
     fs.mkdirSync(taskDir, { recursive: true });
     fs.symlinkSync(escapeTarget, path.join(taskDir, 'esc'));
     assert.throws(
@@ -119,7 +119,7 @@ test('C-8: codegen-apply still allows ordinary writes inside the task dir', () =
     });
     assert.equal(res.count, 1);
     assert.equal(
-      fs.readFileSync(path.join(root, '.meetnotes-auto', 'okay', 'src', 'hello.txt'), 'utf8'),
+      fs.readFileSync(path.join(root, '.llmide-auto', 'okay', 'src', 'hello.txt'), 'utf8'),
       'hi',
     );
   } finally {

@@ -28,4 +28,4 @@ fi
 
 echo "central skills repo: $central"
 "$central/scripts/sync-agent-tools.sh" "$TARGET"
-echo "meet-notes agent-tool definitions refreshed from central (handlers unchanged)."
+echo "llm-ide agent-tool definitions refreshed from central (handlers unchanged)."

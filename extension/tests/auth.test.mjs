@@ -6,8 +6,8 @@ import assert from 'node:assert/strict';
 
 // Set fixed secrets BEFORE importing config-dependent modules so the
 // dev-fallback doesn't generate fresh ones per run.
-process.env.MEETNOTES_JWT_SECRET = 'a'.repeat(48);
-process.env.MEETNOTES_VAULT_KEY  = 'b'.repeat(48);
+process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
+process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
 const { signAccessToken, verifyAccessToken, hashRefreshToken, newRefreshToken } =
@@ -71,7 +71,7 @@ test('verifyAccessToken rejects tampered signature', () => {
 test('verifyAccessToken rejects alg=none impersonation', () => {
   const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
   const payload = Buffer.from(JSON.stringify({
-    iss: 'meetnotes', sub: 'u1', typ: 'access', iat: Math.floor(Date.now() / 1000),
+    iss: 'llmide', sub: 'u1', typ: 'access', iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + 3600,
   })).toString('base64url');
   assert.equal(verifyAccessToken(`${header}.${payload}.`), null);

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Meet Notes — One-command startup
+# LLM IDE — One-command startup
 # Usage:  ./start.sh
 # =============================================================================
 set -euo pipefail
@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo -e ""
 echo -e "${BOLD}${BLUE}╔══════════════════════════════════════╗${NC}"
-echo -e "${BOLD}${BLUE}║       Meet Notes — Quick Start       ║${NC}"
+echo -e "${BOLD}${BLUE}║       LLM IDE — Quick Start       ║${NC}"
 echo -e "${BOLD}${BLUE}╚══════════════════════════════════════╝${NC}"
 
 # ── Step 1: Dependencies ──────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ else
 fi
 
 # ── Step 2: Start server ──────────────────────────────────────────────────────
-STEP "2/2" "Starting Meet Notes server"
+STEP "2/2" "Starting LLM IDE server"
 
 # Track PID for clean Ctrl-C
 SERVER_PID=""
@@ -53,7 +53,7 @@ node server.mjs &
 SERVER_PID=$!
 
 echo ""
-echo -e "${GREEN}${BOLD}✓ Meet Notes is running.${NC}"
+echo -e "${GREEN}${BOLD}✓ LLM IDE is running.${NC}"
 echo -e "  Dashboard:  ${BLUE}http://127.0.0.1:3456${NC}"
 echo -e "  Press ${BOLD}Ctrl-C${NC} to stop.\n"
 
