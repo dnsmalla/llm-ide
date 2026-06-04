@@ -398,8 +398,11 @@ struct GitHubSettingsSection: View {
 
         let token = config.gitHubToken
         let raw = r.url.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty, !token.isEmpty,
-              let (owner, name) = GitHubClient.ownerAndName(from: raw) else {
+        guard !token.isEmpty else {
+            cloneErrors[r.id] = "Add and verify a GitHub access token first."
+            return
+        }
+        guard !raw.isEmpty, let (owner, name) = GitHubClient.ownerAndName(from: raw) else {
             cloneErrors[r.id] = "Couldn't parse owner/repo from URL."
             return
         }
