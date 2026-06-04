@@ -67,6 +67,21 @@ struct AppConfigPathsTests {
         #expect(urls.count == 4)
     }
 
+    @Test func effectiveClonesURLFallsBackWhenNoRoot() {
+        let c = makeConfig()
+        // No Paths root → resolved* stay nil, but clones still have a home so
+        // cloning works (even while a project locks the global root).
+        #expect(c.resolvedClonesURL == nil)
+        #expect(c.effectiveClonesURL == AppConfig.defaultClonesFallback)
+    }
+
+    @Test func effectiveClonesURLUsesConfiguredRoot() {
+        let c = makeConfig()
+        c.dataRoot = "/tmp/workspace"
+        c.clonesSubdir = "Clones"
+        #expect(c.effectiveClonesURL.path == "/tmp/workspace/Clones")
+    }
+
     @Test func emptyDataRootSuppressesAllResolved() {
         let c = makeConfig()
         c.dataRoot = ""

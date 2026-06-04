@@ -274,7 +274,6 @@ struct GitHubSettingsSection: View {
                     Spacer()
                 }
 
-                let needsPaths = !r.isCloned && config.resolvedClonesURL == nil
                 Button(isCloning
                        ? (r.isCloned ? "Syncing…" : "Cloning…")
                        : (r.isCloned ? "Re-sync"  : "Clone")) {
@@ -282,10 +281,8 @@ struct GitHubSettingsSection: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
-                .disabled(isCloning || r.url.isEmpty || config.gitHubToken.isEmpty || needsPaths)
-                .help(needsPaths
-                      ? "Set Settings → Paths → Root directory before cloning."
-                      : "")
+                .disabled(isCloning || r.url.isEmpty || config.gitHubToken.isEmpty)
+                .help(config.gitHubToken.isEmpty ? "Add and verify a GitHub access token first." : "")
             }
 
             // Migration affordance — when the saved clone lives
@@ -368,10 +365,10 @@ struct GitHubSettingsSection: View {
                 .foregroundStyle(t.accent4)
                 .font(.system(size: 12))
             VStack(alignment: .leading, spacing: 1) {
-                Text("Set a Paths root to enable cloning")
+                Text("No Paths root set — clones use a default location")
                     .font(Typography.captionStrong)
                     .foregroundStyle(t.text)
-                Text("Settings → Paths → Root directory. Clones land at <root>/Clones/<repo>.")
+                Text("Clones land at ~/Documents/LLM IDE/Clones/<repo>. Set Settings → Paths → Root directory to choose your own.")
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
             }
@@ -413,13 +410,10 @@ struct GitHubSettingsSection: View {
                 let localURL = URL(fileURLWithPath: existingPath)
                 try await repoManager.pull(at: localURL, token: token, backend: .github)
             } else {
-                // Settings → Paths is required. Mirrors the GitLab
-                // guard — no `~/Developer/LLM IDE/` fallback in
-                // production; the Paths setting is authoritative.
-                guard let baseDir = config.resolvedClonesURL else {
-                    cloneErrors[r.id] = "Set Settings → Paths → Root directory before cloning. Clones land under <root>/<Clones subfolder>."
-                    return
-                }
+                // Clones go to <root>/Clones when a Paths root is set, else a
+                // sensible default — so cloning works even while a project is
+                // active and the global root can't be edited.
+                let baseDir = config.effectiveClonesURL
                 try? FileManager.default.createDirectory(
                     at: baseDir, withIntermediateDirectories: true)
                 let destURL = baseDir.appendingPathComponent(name)

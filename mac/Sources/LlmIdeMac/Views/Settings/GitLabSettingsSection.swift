@@ -304,16 +304,13 @@ struct GitLabSettingsSection: View {
                 // Re-sync stays available even without Paths set —
                 // the existing clone has its own localPath. Only a
                 // *fresh* clone needs the Paths root.
-                let needsPaths = !p.isCloned && config.resolvedClonesURL == nil
                 Button(isCloning ? (p.isCloned ? "Syncing…" : "Cloning…") : (p.isCloned ? "Re-sync" : "Clone")) {
                     Task { await cloneOrSync(proj) }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
-                .disabled(isCloning || p.url.isEmpty || config.gitLabToken.isEmpty || needsPaths)
-                .help(needsPaths
-                      ? "Set Settings → Paths → Root directory before cloning."
-                      : "")
+                .disabled(isCloning || p.url.isEmpty || config.gitLabToken.isEmpty)
+                .help(config.gitLabToken.isEmpty ? "Add and verify a GitLab access token first." : "")
             }
 
             // Migration affordance — when the saved clone lives
@@ -411,10 +408,10 @@ struct GitLabSettingsSection: View {
                 .foregroundStyle(t.accent4)
                 .font(.system(size: 12))
             VStack(alignment: .leading, spacing: 1) {
-                Text("Set a Paths root to enable cloning")
+                Text("No Paths root set — clones use a default location")
                     .font(Typography.captionStrong)
                     .foregroundStyle(t.text)
-                Text("Settings → Paths → Root directory. Clones land at <root>/Clones/<repo>.")
+                Text("Clones land at ~/Documents/LLM IDE/Clones/<repo>. Set Settings → Paths → Root directory to choose your own.")
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
             }
@@ -455,10 +452,9 @@ struct GitLabSettingsSection: View {
                 // the user's intent and made the "Move to Clones
                 // folder" banner trip later. Production wants the
                 // path setting to be authoritative; no fallback.
-                guard let baseDir = config.resolvedClonesURL else {
-                    cloneErrors[p.id] = "Set Settings → Paths → Root directory before cloning. Clones land under <root>/<Clones subfolder>."
-                    return
-                }
+                // Configured <root>/Clones if a Paths root is set, else a
+                // sensible default — cloning isn't blocked by a missing root.
+                let baseDir = config.effectiveClonesURL
                 // trimmingCharacters strips trailing "/" so .last
                 // returns the repo name for URLs ending in `/`.
                 let rawSlug = repoURL

@@ -433,6 +433,19 @@ extension AppConfig {
     var resolvedClonesURL: URL? { dataRootURL?.appendingPathComponent(clonesSubdir, isDirectory: true) }
     var resolvedInfiniteBrainURL: URL? { dataRootURL?.appendingPathComponent(infiniteBrainSubdir, isDirectory: true) }
 
+    /// Default clones location when no Paths root is configured. Unlike notes/
+    /// docs (which are workspace data and stay unset until a root is chosen),
+    /// clones just need somewhere on disk — so they get a sensible default.
+    static let defaultClonesFallback: URL = FileManager.default
+        .homeDirectoryForCurrentUser
+        .appendingPathComponent("Documents/LLM IDE/Clones", isDirectory: true)
+
+    /// Where a repo clone should land: the configured `<root>/Clones` if a
+    /// Paths root is set, otherwise the default fallback. Always non-nil so
+    /// cloning works out of the box — and even while a project is active, when
+    /// the global Paths root can't be edited.
+    var effectiveClonesURL: URL { resolvedClonesURL ?? AppConfig.defaultClonesFallback }
+
     /// Every resolved subfolder the user has configured. Used by
     /// "Create missing folders" in PathsSettingsSection.
     var allResolvedSubfolders: [URL] {
