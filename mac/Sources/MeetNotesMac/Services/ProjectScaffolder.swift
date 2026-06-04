@@ -112,12 +112,19 @@ enum ProjectScaffolder {
         }
 
         // 4. README.md — refreshed on every open so settings changes (language,
-        //    linked repo, display name) are always reflected.  We overwrite
-        //    unconditionally and document in the README that edits are preserved
-        //    only outside the auto-generated section.
-        writeAlways(
-            at: folderURL.appendingPathComponent("README.md"),
-            content: makeReadme(project: project, folderURL: folderURL))
+        //    linked repo, display name) are always reflected.  BUT never clobber
+        //    a foreign README: when adopting a cloned code repo as a project, the
+        //    repo ships its own README.md.  Only (re)write when the file is absent
+        //    or already MeetNotes-managed (carries the auto marker).
+        let readmeURL = folderURL.appendingPathComponent("README.md")
+        let existingReadme = try? String(contentsOf: readmeURL, encoding: .utf8)
+        if existingReadme == nil || existingReadme!.contains("<!-- meetnotes:auto") {
+            writeAlways(
+                at: readmeURL,
+                content: makeReadme(project: project, folderURL: folderURL))
+        } else {
+            log.info("preserving existing non-MeetNotes README at \(folderURL.lastPathComponent, privacy: .public)")
+        }
 
         log.info("scaffold complete: \(folderURL.lastPathComponent, privacy: .public)")
     }

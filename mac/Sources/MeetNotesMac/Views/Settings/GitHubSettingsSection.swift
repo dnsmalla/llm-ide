@@ -6,6 +6,7 @@ import GraphKit
 struct GitHubSettingsSection: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
+    @EnvironmentObject var projectStore: ProjectStore
     @Environment(LibraryItemStore.self) private var library
 
     @State private var tokenDraft: String = ""
@@ -423,6 +424,17 @@ struct GitHubSettingsSection: View {
                 if let idx = config.gitHubSavedRepos.firstIndex(where: { $0.id == r.id }) {
                     config.gitHubSavedRepos[idx].localPath = destURL.path
                     config.gitHubSavedRepos[idx].defaultBranch = branch
+                }
+                // A bare git clone has no `.meetnotes/`, `meetings/`, `notes/`
+                // or `plans/` — so "Open Folder" would reject it as "not a
+                // MeetNotes project". Adopt the freshly-cloned repo as a
+                // project: write project.json + scaffold the tree (the repo's
+                // own README is preserved). Non-fatal — the clone itself
+                // already succeeded.
+                do {
+                    try projectStore.ensureProjectScaffold(at: destURL)
+                } catch {
+                    cloneErrors[r.id] = "Cloned, but couldn't initialize MeetNotes project: \(error.localizedDescription)"
                 }
                 // Prune stale entries (older clone at a different
                 // path) before re-indexing — same hygiene as GitLab.

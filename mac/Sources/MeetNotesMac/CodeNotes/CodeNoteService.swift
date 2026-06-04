@@ -1,6 +1,7 @@
 import Foundation
 import GraphKit
 import Combine
+import os
 
 /// Generates the code graph + deterministic notes from a repository.
 /// No AI: the graph and notes are derived directly from structural facts
@@ -29,9 +30,17 @@ public final class CodeNoteService: ObservableObject {
     @Published public private(set) var graph: CGData = .empty
 
     private let launcher: ProcessLauncher
+    /// CLI used to enrich notes in the background after the structural skeleton
+    /// is built. When nil (the default), generation stops at the deterministic
+    /// skeleton and no agent is invoked.
+    private let cliExecutable: URL?
 
-    public init(launcher: ProcessLauncher = SystemProcessLauncher()) {
+    private static let log = Logger(subsystem: "com.meetnotes.macapp", category: "CodeNoteService")
+
+    public init(launcher: ProcessLauncher = SystemProcessLauncher(),
+                cliExecutable: URL? = nil) {
         self.launcher = launcher
+        self.cliExecutable = cliExecutable
     }
 
     /// Scan the repo (incrementally), build the graph, write deterministic
@@ -66,6 +75,24 @@ public final class CodeNoteService: ObservableObject {
         progress = .complete(files: result.files.count,
                              edges: graph.edges.count,
                              reused: inc.reusedFiles)
+
+        // Background enrichment: only when a CLI is configured and files changed.
+        // Fire-and-forget — the skeleton above is already the returned result.
+        if let cli = cliExecutable, !inc.changedPaths.isEmpty {
+            let changed = inc.changedPaths
+            Task.detached(priority: .utility) {
+                let files = result.files.map(\.path).filter { changed.contains($0) }
+                let batches = BatchPlanner.plan(files: files, imports: result.imports,
+                                                maxBatchSize: 8)
+                let phase = AnalyzePhase(launcher: launcher, cliExecutable: cli)
+                for batch in batches {
+                    if case .failure(let err) = await phase.run(batch: batch, scan: result,
+                                                                repoRoot: repoRoot) {
+                        Self.log.error("note enrichment batch \(batch.index) failed: \(String(describing: err))")
+                    }
+                }
+            }
+        }
         return .success(graph)
     }
 }

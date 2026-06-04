@@ -7,9 +7,9 @@ struct PathValidatorTests {
     // MARK: - Memory subdir
 
     @Test func memorySubdirAcceptsDefaultAsOK() {
-        let v = PathValidator.memorySubdir("graphify-out/memory")
+        let v = PathValidator.memorySubdir(AppConfig.defaultMemorySubdir)
         if case .ok(let c) = v {
-            #expect(c == "graphify-out/memory")
+            #expect(c == AppConfig.defaultMemorySubdir)
         } else {
             Issue.record("expected .ok, got \(v)")
         }

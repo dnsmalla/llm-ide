@@ -3,7 +3,9 @@ import Foundation
 @testable import MeetNotesMac
 
 // These tests cover the pure, side-effect-free helpers on AutoCodeUpdateService.
-@Suite("AutoCodeUpdateService helpers")
+// `.serialized` because several tests mutate the `AppConfig.shared` singleton's
+// tokens; running them in parallel races on that shared state.
+@Suite("AutoCodeUpdateService helpers", .serialized)
 struct AutoCodeUpdateServiceTests {
 
     @Test func normalizeLowercasesText() {

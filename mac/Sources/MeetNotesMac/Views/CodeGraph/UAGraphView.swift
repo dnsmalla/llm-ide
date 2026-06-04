@@ -416,12 +416,22 @@ struct UAGraphView: View {
         .onReceive(codeNoteService.$graph) { newGraph in
             guard mode == .code, !newGraph.nodes.isEmpty else { return }
             self.selectedNode = self.selectedNode  // keep selection
-            self.fullData = CodeGraphLayout.compute(
+            // Phase 1: type-clustered circular layout — publish immediately so
+            // the canvas isn't blank while physics runs.
+            let initial = CodeGraphLayout.compute(
                 newGraph, canvasSize: UAHelpers.layoutSize(for: newGraph.nodes.count))
+            self.fullData = initial
             self.codeArtifacts = UAHelpers.collectCodeArtifacts(newGraph)
-            if case .complete(let f, let e, _) = codeNoteService.progress {
-                self.status = .loaded(nodeCount: f, edgeCount: e)
-            }
+            // Flip to .loaded straight from the published graph — don't gate
+            // on `progress == .complete`. `@Published` emits `graph` (in
+            // CodeNoteService) before `progress` is set, so reading progress
+            // here races and leaves the spinner stuck. The graph carries the
+            // counts we need.
+            self.status = .loaded(nodeCount: newGraph.nodes.count,
+                                  edgeCount: newGraph.edges.count)
+            // Phase 2: force-directed settle in the background, then republish
+            // the organic layout — matches InfiniteBrain's Code Graph look.
+            self.settlePhysics(from: initial, expectedMode: .code)
         }
         .onChange(of: memoryChunks)  { _, _ in rebuildMemoryIndex() }
         .onChange(of: selectedURL) { _, _ in
@@ -1272,14 +1282,36 @@ struct UAGraphView: View {
         status = .running
         runTask = Task.detached(priority: .userInitiated) {
             let mem = MemoryGenerator.generate(files: urls)
+            let initial = CodeGraphLayout.compute(mem.graph,
+                                                  canvasSize: CGSize(width: 1200, height: 800))
             await MainActor.run {
                 self.selectedNode = nil
                 self.memoryChunks = mem.chunks
                 self.memoryDocCount = mem.docCount
-                self.fullData = CodeGraphLayout.compute(mem.graph,
-                                                    canvasSize: CGSize(width: 1200, height: 800))
+                self.fullData = initial
                 self.status = .loaded(nodeCount: mem.graph.nodes.count,
                                       edgeCount: mem.graph.edges.count)
+                // Settle into the same organic layout as the code graph.
+                self.settlePhysics(from: initial, expectedMode: .data)
+            }
+        }
+    }
+
+    /// Phase 2 of layout: run the force-directed `CGSimulation` off the main
+    /// actor, then republish the settled positions. Mirrors InfiniteBrain's
+    /// `CodeGraphView` so both graphs show an organic cluster instead of the
+    /// raw circular rings. No-op for trivially small graphs. The `expectedMode`
+    /// guard drops the result if the user switched tabs mid-settle.
+    private func settlePhysics(from initial: CGData, expectedMode: Mode) {
+        guard initial.nodes.count > 2 else { return }
+        Task.detached(priority: .userInitiated) {
+            let sim = CGSimulation(data: initial)
+            sim.settle(maxIterations: 200)
+            let settled = sim.appliedData(to: initial)
+            await MainActor.run {
+                guard self.mode == expectedMode,
+                      self.fullData.nodes.count == settled.nodes.count else { return }
+                self.fullData = settled
             }
         }
     }

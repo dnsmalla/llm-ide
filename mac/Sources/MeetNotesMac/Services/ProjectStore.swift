@@ -106,6 +106,31 @@ final class ProjectStore: ObservableObject {
         NotificationCenter.default.post(name: .notesFolderChanged, object: nil)
     }
 
+    /// Adopt `folderURL` as a MeetNotes project: write `.meetnotes/project.json`
+    /// and the canonical folder tree if they don't already exist. Idempotent —
+    /// safe on an existing project (returns its bundle unchanged).
+    ///
+    /// Unlike `openFolder`, this deliberately does NOT run
+    /// `ProjectScaffolder.validate` first, so it can adopt a folder that is
+    /// non-empty and lacks the MeetNotes tree — e.g. a freshly-cloned code
+    /// repo. After this call the folder passes validation and `openFolder`
+    /// succeeds. Does not activate the project or touch recents.
+    @discardableResult
+    func ensureProjectScaffold(at folderURL: URL) throws -> Project {
+        let url = folderURL.standardizedFileURL
+        let projectJSON = url.appendingPathComponent(".meetnotes/project.json")
+        let project: Project
+        if FileManager.default.fileExists(atPath: projectJSON.path) {
+            project = try Project.fromJSON(Data(contentsOf: projectJSON))
+        } else {
+            project = createFromDefaults(folder: url)
+            try writeProjectJSON(project, to: projectJSON)
+        }
+        // Idempotent; preserves a repo's own README (see ProjectScaffolder).
+        try ProjectScaffolder.scaffold(at: url, project: project)
+        return project
+    }
+
     func switchTo(recent entry: RecentEntry) throws {
         // Prevent switching while an export is in-flight — the export holds
         // a reference to the current activeProject; switching underneath it
