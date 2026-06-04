@@ -44,19 +44,30 @@ struct PathsSettingsSection: View {
                 SettingsHint("Workspace root + named subfolders for every kind of file the app reads or writes. Invalid entries are rejected — the Save button stays disabled until validation passes.")
 
                 if let ap = projectStore.activeProject {
-                    // ── Project-controlled paths ──────────────────────
-                    // While a project is open it is the single source of
-                    // truth for all folder paths. Global AppConfig settings
-                    // are preserved in UserDefaults but inactive.
+                    // While a project is open, show its folders as read-only
+                    // context — they're the source of truth for THIS project's
+                    // data — but still let the user edit the global workspace
+                    // defaults below (used for new projects / when no project
+                    // is open, and where clones land).
                     projectPathsPanel(ap)
-                } else {
-                    // ── Global (no project active) ────────────────────
-                    rootRow
 
                     Divider().background(theme.current.border)
 
-                    subfoldersSection
+                    Text("GLOBAL WORKSPACE DEFAULTS")
+                        .font(Typography.treeHeader)
+                        .foregroundStyle(theme.current.textMuted)
+                    Text("Editable any time. Applied to new projects and when no project is open; the active project's folders above take precedence for its own data.")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+
+                // ── Global workspace paths (always editable) ──────────
+                rootRow
+
+                Divider().background(theme.current.border)
+
+                subfoldersSection
 
                 Divider().background(theme.current.border)
 
@@ -134,7 +145,7 @@ struct PathsSettingsSection: View {
             // Actions strip for the meetings/ folder (index rebuild etc.)
             notesActionsStrip
 
-            Text("Close the project (via the folder dropdown in the toolbar) to edit global workspace paths.")
+            Text("These folders belong to the active project. Global defaults are editable below.")
                 .font(Typography.caption)
                 .foregroundStyle(t.textMuted)
                 .padding(.top, 2)
