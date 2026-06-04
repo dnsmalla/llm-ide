@@ -15,6 +15,9 @@ struct WelcomeView: View {
         ScrollView {
             VStack(spacing: Spacing.xxl) {
                 hero(t)
+                if let archived = projectStore.corruptStateArchivedAt {
+                    corruptStateBanner(archived, t)
+                }
                 actionCards(t)
                 explainer(t)
                 if !projectStore.recents.isEmpty { recentsSection(t) }
@@ -131,6 +134,38 @@ struct WelcomeView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Corrupt-state notice
+
+    private func corruptStateBanner(_ archived: URL, _ t: Theme) -> some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(t.accent4)
+                .font(.system(size: 13))
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Recent-projects list was reset")
+                    .font(Typography.captionStrong)
+                    .foregroundStyle(t.text)
+                Text("The saved list was unreadable and has been archived to \(archived.lastPathComponent). Your project folders are untouched — reopen them with “Open Folder”.")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Button("Dismiss") { projectStore.acknowledgeCorruptState() }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .padding(Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .fill(t.accent4.opacity(0.10)))
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                .strokeBorder(t.accent4.opacity(0.30), lineWidth: 1))
     }
 
     // MARK: - Error

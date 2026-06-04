@@ -142,6 +142,43 @@ struct ProjectStoreTests {
         #expect(reborn.recents.isEmpty)
         #expect(reborn.activeProject == nil)
     }
+
+    @Test func legacyMeetnotesRecentSurvivesLoad() throws {
+        // An upgrading user's project still has only a `.meetnotes` marker.
+        // It must NOT be pruned from recents on launch.
+        let root = tmpRoot()
+        let legacyProj = tmpRoot()
+        let mn = legacyProj.appendingPathComponent(".meetnotes")
+        try FileManager.default.createDirectory(at: mn, withIntermediateDirectories: true)
+        try "{}".write(to: mn.appendingPathComponent("project.json"),
+                       atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let state = """
+        {"schemaVersion":1,"activeId":null,"recents":[
+          {"id":"p1","path":"\(legacyProj.path)","displayName":"Legacy","lastOpenedAt":"2026-01-01T00:00:00Z"}
+        ]}
+        """
+        try state.write(to: root.appendingPathComponent("projects.json"),
+                        atomically: true, encoding: .utf8)
+
+        let store = ProjectStore(stateDirectory: root, defaults: .testDefaults)
+        #expect(store.recents.count == 1)
+        #expect(store.recents.first?.path == legacyProj.path)
+    }
+
+    @Test func corruptStateIsSurfacedNotSilent() throws {
+        let root = tmpRoot()
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try "{ this is not valid json".write(
+            to: root.appendingPathComponent("projects.json"),
+            atomically: true, encoding: .utf8)
+
+        let store = ProjectStore(stateDirectory: root, defaults: .testDefaults)
+        #expect(store.recents.isEmpty)
+        #expect(store.corruptStateArchivedAt != nil)   // reset is surfaced, not silent
+        store.acknowledgeCorruptState()
+        #expect(store.corruptStateArchivedAt == nil)
+    }
 }
 
 extension ProjectSettings {

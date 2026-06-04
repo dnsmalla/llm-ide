@@ -27,6 +27,12 @@ final class ProjectStore: ObservableObject {
     @Published private(set) var recents: [RecentEntry] = []
     /// True while an async export is running — drives the close-progress UI.
     @Published private(set) var isExporting = false
+    /// Set when a corrupt projects.json was archived on launch; the Welcome
+    /// screen shows a one-time notice so the reset isn't silent. nil = healthy.
+    @Published private(set) var corruptStateArchivedAt: URL?
+
+    /// Dismiss the corrupt-state notice once the user has seen it.
+    func acknowledgeCorruptState() { corruptStateArchivedAt = nil }
 
     private let stateDirectory: URL
     private let defaults: ProjectSettings
@@ -264,9 +270,15 @@ final class ProjectStore: ObservableObject {
             // (folder deleted, permissions revoked). Without this, a stale
             // entry stays in the sidebar forever and a click on it throws.
             let pruned = state.recents.filter { entry in
-                let projectJSON = URL(fileURLWithPath: entry.path)
-                    .appendingPathComponent(".llmide/project.json")
-                return FileManager.default.fileExists(atPath: projectJSON.path)
+                let base = URL(fileURLWithPath: entry.path)
+                // Accept the new marker OR a legacy `.meetnotes` one — otherwise
+                // an upgrading user's not-yet-migrated projects would be pruned
+                // from recents on first launch (silent data loss). The legacy
+                // marker is migrated to `.llmide` when the project is opened.
+                return FileManager.default.fileExists(
+                        atPath: base.appendingPathComponent(".llmide/project.json").path)
+                    || FileManager.default.fileExists(
+                        atPath: base.appendingPathComponent(".meetnotes/project.json").path)
             }
             recents = pruned
             if let activeId = state.activeId,
@@ -287,6 +299,9 @@ final class ProjectStore: ObservableObject {
     }
 
     private func rehydrateActive(from entry: RecentEntry) -> Bool {
+        // Migrate a legacy `.meetnotes` marker so a pre-rename active project
+        // restores correctly on launch.
+        Self.migrateLegacyMarker(at: URL(fileURLWithPath: entry.path))
         let projectJSON = URL(fileURLWithPath: entry.path)
             .appendingPathComponent(".llmide/project.json")
         let data: Data
@@ -318,6 +333,10 @@ final class ProjectStore: ObservableObject {
         let dst = stateDirectory.appendingPathComponent("projects.corrupt.\(stamp).json")
         do {
             try FileManager.default.moveItem(at: stateFile, to: dst)
+            // Surface it so the UI can tell the user their recents list was
+            // reset (and where the unparseable file was archived) instead of
+            // it vanishing silently.
+            corruptStateArchivedAt = dst
         } catch {
             log.error("Failed to archive corrupt state file from \(self.stateFile.path, privacy: .public) to \(dst.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }

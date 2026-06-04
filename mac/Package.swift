@@ -42,6 +42,7 @@ let package = Package(
             name: "LlmIdeMacTests",
             dependencies: ["LlmIdeMac"],
             path: "Tests/LlmIdeMacTests",
+            exclude: ["README-skipped-tests.md"],
             swiftSettings: [
                 .unsafeFlags([
                     "-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
