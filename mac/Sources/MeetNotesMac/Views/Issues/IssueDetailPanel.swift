@@ -29,7 +29,6 @@ struct IssueDetailPanel: View {
     // Sidebar pickers
     @State private var showLabelPicker = false
     @State private var showAssigneePicker = false
-    @State private var showMilestonePicker = false
     @State private var showDueDatePicker = false
     @State private var pendingLabels: [String] = []
     @State private var pendingAssigneeIds: Set<Int> = []

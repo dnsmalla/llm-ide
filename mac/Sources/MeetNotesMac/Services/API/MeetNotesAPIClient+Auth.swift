@@ -120,17 +120,6 @@ extension MeetNotesAPIClient {
                               authenticated: true)
     }
 
-    func refreshClaudePlugins() async throws {
-        struct Empty: Encodable {}
-        struct Ack: Decodable { let installed: Int; let marketplace: Int }
-        let _: Ack = try await post("/auth/me/claude-plugins/refresh",
-                                    body: Empty(),
-                                    authenticated: true)
-    }
-
-    func checkClaudePluginUpdates() async throws -> ClaudeUpdatesResponse {
-        try await get("/auth/me/claude-plugins/updates", authenticated: true)
-    }
 }
 
 struct PluginInstallResponse: Decodable {
@@ -300,14 +289,3 @@ struct ClaudeImportResponse: Decodable {
     }
 }
 
-struct ClaudeUpdateInfo: Decodable, Identifiable {
-    let name: String
-    let importedVersion: String
-    let sourceVersion: String
-    let source: String
-    var id: String { name }
-}
-
-struct ClaudeUpdatesResponse: Decodable {
-    let updates: [ClaudeUpdateInfo]
-}

@@ -2,7 +2,6 @@ import SwiftUI
 
 struct DocGenView: View {
     let api: MeetNotesAPIClient
-    @EnvironmentObject private var templateStore: DocTemplateStore
     @StateObject private var vm = DocGenViewModel()
     @State private var sourceVisible = false
     @State private var assistantVisible = true

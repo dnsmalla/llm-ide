@@ -8,7 +8,6 @@ import AppKit
 
 struct FileDetailView: View {
     let url: URL
-    @State private var reloadToken = UUID()
 
     var body: some View {
         Group {

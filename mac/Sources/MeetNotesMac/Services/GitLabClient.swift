@@ -112,16 +112,6 @@ final class GitLabClient {
         return try await get("/projects/\(id)")
     }
 
-    /// Fetch a single project by its namespace path (e.g. "group/subproject").
-    /// Slashes must be percent-encoded as %2F for the GitLab API.
-    func getProjectByPath(_ path: String) async throws -> GitLabProject {
-        let encoded = path
-            .components(separatedBy: "/")
-            .map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0 }
-            .joined(separator: "%2F")
-        return try await get("/projects/\(encoded)")
-    }
-
     /// Resolves a raw string (full URL, namespace path, or numeric ID) to a GitLabProject.
     /// When a full URL is given, the host is extracted from it directly so the
     /// configured Instance URL does not need to match.
@@ -242,11 +232,6 @@ final class GitLabClient {
     }
 
     // MARK: - Branches
-
-    func listBranches(projectId: Int) async throws -> [GitLabBranch] {
-        return try await get("/projects/\(projectId)/repository/branches",
-                             query: [.init(name: "per_page", value: "100")])
-    }
 
     func createBranch(projectId: Int, name: String, ref: String) async throws -> GitLabBranch {
         return try await post("/projects/\(projectId)/repository/branches",

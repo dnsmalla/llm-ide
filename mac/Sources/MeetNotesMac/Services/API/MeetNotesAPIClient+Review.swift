@@ -2,17 +2,6 @@ import Foundation
 
 extension MeetNotesAPIClient {
 
-    struct ReviewSummary: Codable, Identifiable {
-        let id: String
-        let kind: String
-        let planId: String?
-        let taskId: String?
-        let title: String
-        let status: String
-        let createdAt: String
-        let decidedAt: String?
-    }
-
     struct ReviewItem: Codable, Identifiable {
         let id: String
         let kind: String
@@ -40,11 +29,6 @@ extension MeetNotesAPIClient {
         let severity: String
         let message: String
         var id: String { ruleId + "::" + message }
-    }
-
-    struct DecisionRequest: Encodable {
-        let id: String
-        let note: String?
     }
 
     enum DispatchTarget: String, Codable, CaseIterable, Identifiable {
@@ -149,30 +133,6 @@ extension MeetNotesAPIClient {
                 let baseBranch: String?
             }
         }
-    }
-
-    // --- Review methods ----------------------------------------------
-
-    func listReviews(status: String? = nil) async throws -> [ReviewSummary] {
-        struct Wrap: Decodable { let items: [ReviewSummary] }
-        var path = "/kb/review/list"
-        if let s = status, !s.isEmpty, s != "all" {
-            path += "?status=\(percentEncoded(s))"
-        }
-        let r: Wrap = try await get(path, authenticated: true)
-        return r.items
-    }
-
-    func getReview(id: String) async throws -> ReviewItem {
-        try await get("/kb/review/get/\(percentEncoded(id))", authenticated: true)
-    }
-
-    func approveReview(id: String, note: String?) async throws -> ReviewItem {
-        try await post("/kb/review/approve", body: DecisionRequest(id: id, note: note), authenticated: true)
-    }
-
-    func rejectReview(id: String, note: String?) async throws -> ReviewItem {
-        try await post("/kb/review/reject", body: DecisionRequest(id: id, note: note), authenticated: true)
     }
 
     func previewDispatch(planId: String, taskIds: [String]? = nil) async throws -> DispatchPreviewResponse {
