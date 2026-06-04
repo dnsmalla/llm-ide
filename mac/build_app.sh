@@ -13,7 +13,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_DIR="$SCRIPT_DIR/MeetNotesMac.app"
+APP_DIR="$SCRIPT_DIR/LlmIdeMac.app"
 
 echo -e "${BLUE}[build_app]${NC} dev pipeline: build → sign → dmg"
 

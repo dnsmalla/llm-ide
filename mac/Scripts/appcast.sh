@@ -3,12 +3,12 @@
 # Generate Sparkle appcast.xml entry for the just-built DMG.
 #
 # Inputs (env vars; release.sh sets these):
-#   MEETNOTES_SU_DOWNLOAD_URL_BASE  base URL where DMGs are hosted
-#                                   e.g. https://updates.meetnotes.app/releases
+#   LLMIDE_SU_DOWNLOAD_URL_BASE  base URL where DMGs are hosted
+#                                   e.g. https://updates.llmide.app/releases
 #                                   final URL = $base/$DMG_NAME
-#   MEETNOTES_SU_PRIVATE_KEY_FILE   path to the EdDSA private key generated
+#   LLMIDE_SU_PRIVATE_KEY_FILE   path to the EdDSA private key generated
 #                                   by Sparkle's `generate_keys` tool.
-#                                   Default: ~/.meetnotes/sparkle_ed25519
+#                                   Default: ~/.llmide/sparkle_ed25519
 #
 # Outputs:
 #   - Prints a single <item>...</item> block to stdout (you splice this
@@ -35,16 +35,16 @@ if [ -z "$VERSION" ]; then
   exit 1
 fi
 
-DMG_NAME="MeetNotesMac_v${VERSION}.dmg"
+DMG_NAME="LlmIdeMac_v${VERSION}.dmg"
 DMG_PATH="$PROJ_DIR/$DMG_NAME"
 if [ ! -f "$DMG_PATH" ]; then
   echo -e "${RED}[appcast] DMG not found at $DMG_PATH — run release.sh first${NC}" >&2
   exit 1
 fi
 
-BASE_URL="${MEETNOTES_SU_DOWNLOAD_URL_BASE:-https://example.invalid/releases}"
+BASE_URL="${LLMIDE_SU_DOWNLOAD_URL_BASE:-https://example.invalid/releases}"
 if [ "$BASE_URL" = "https://example.invalid/releases" ]; then
-  echo -e "${BLUE}[appcast]${NC} WARN: MEETNOTES_SU_DOWNLOAD_URL_BASE unset — using placeholder host" >&2
+  echo -e "${BLUE}[appcast]${NC} WARN: LLMIDE_SU_DOWNLOAD_URL_BASE unset — using placeholder host" >&2
 fi
 DOWNLOAD_URL="${BASE_URL%/}/$DMG_NAME"
 
@@ -56,7 +56,7 @@ if [ -z "$SIGN_TOOL" ]; then
   exit 1
 fi
 
-PRIVATE_KEY_FILE="${MEETNOTES_SU_PRIVATE_KEY_FILE:-$HOME/.meetnotes/sparkle_ed25519}"
+PRIVATE_KEY_FILE="${LLMIDE_SU_PRIVATE_KEY_FILE:-$HOME/.llmide/sparkle_ed25519}"
 if [ ! -f "$PRIVATE_KEY_FILE" ]; then
   echo -e "${RED}[appcast] Sparkle private key not found at $PRIVATE_KEY_FILE${NC}" >&2
   echo -e "${RED}[appcast] Generate one (one-time): \"\$SIGN_TOOL\" --generate-keys (see docs/how-to/release-with-auto-update.md)${NC}" >&2

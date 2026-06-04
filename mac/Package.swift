@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "MeetNotesMac",
+    name: "LlmIdeMac",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "MeetNotesMac", targets: ["MeetNotesMac"])
+        .executable(name: "LlmIdeMac", targets: ["LlmIdeMac"])
     ],
     dependencies: [
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"),
@@ -17,14 +17,14 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "MeetNotesMac",
+            name: "LlmIdeMac",
             dependencies: [
                 "Yams",
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
                 .product(name: "GraphKit", package: "graph-kit"),
             ],
-            path: "Sources/MeetNotesMac",
+            path: "Sources/LlmIdeMac",
             resources: [
                 .copy("Resources/note_template.docx"),
                 .copy("Resources/generate_meeting_note.py"),
@@ -39,9 +39,9 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "MeetNotesMacTests",
-            dependencies: ["MeetNotesMac"],
-            path: "Tests/MeetNotesMacTests",
+            name: "LlmIdeMacTests",
+            dependencies: ["LlmIdeMac"],
+            path: "Tests/LlmIdeMacTests",
             swiftSettings: [
                 .unsafeFlags([
                     "-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",

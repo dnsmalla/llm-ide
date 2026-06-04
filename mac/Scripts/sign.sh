@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================
 # Sign phase: codesign the .app bundle.
-# Reads MEETNOTES_SIGN_IDENTITY (default "-" for ad-hoc dev).
+# Reads LLMIDE_SIGN_IDENTITY (default "-" for ad-hoc dev).
 # ============================================
 set -euo pipefail
 
@@ -12,9 +12,9 @@ NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJ_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP_NAME="MeetNotesMac"
+APP_NAME="LlmIdeMac"
 APP_DIR="$PROJ_DIR/$APP_NAME.app"
-IDENTITY="${MEETNOTES_SIGN_IDENTITY:--}"
+IDENTITY="${LLMIDE_SIGN_IDENTITY:--}"
 
 if [ ! -d "$APP_DIR" ]; then
   echo -e "${RED}[sign] missing $APP_DIR — run Scripts/build.sh first${NC}"
@@ -22,12 +22,12 @@ if [ ! -d "$APP_DIR" ]; then
 fi
 
 if [ "$IDENTITY" = "-" ]; then
-  echo -e "${BLUE}[sign]${NC} ad-hoc signing (set MEETNOTES_SIGN_IDENTITY for Developer ID)..."
+  echo -e "${BLUE}[sign]${NC} ad-hoc signing (set LLMIDE_SIGN_IDENTITY for Developer ID)..."
 else
   echo -e "${BLUE}[sign]${NC} signing with identity: $IDENTITY"
 fi
 
 codesign -s "$IDENTITY" --force --deep --options runtime \
-  --entitlements "$PROJ_DIR/MeetNotesMac.entitlements" "$APP_DIR"
+  --entitlements "$PROJ_DIR/LlmIdeMac.entitlements" "$APP_DIR"
 
 echo -e "${GREEN}[sign]${NC} ok"

@@ -12,7 +12,7 @@ NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJ_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP_NAME="MeetNotesMac"
+APP_NAME="LlmIdeMac"
 APP_DIR="$PROJ_DIR/$APP_NAME.app"
 # Single source of truth: mac/VERSION. Bump there, both build.sh and
 # dmg.sh pick it up automatically.
@@ -49,13 +49,13 @@ echo -e "${BLUE}[build]${NC} writing Info.plist..."
 
 # Sparkle wiring. Two env vars feed the appcast lookup + signature
 # verification:
-#   MEETNOTES_SU_FEED_URL    e.g. https://updates.meetnotes.app/appcast.xml
-#   MEETNOTES_SU_PUBLIC_KEY  Base64 EdDSA public key (from generate_keys)
+#   LLMIDE_SU_FEED_URL    e.g. https://updates.llmide.app/appcast.xml
+#   LLMIDE_SU_PUBLIC_KEY  Base64 EdDSA public key (from generate_keys)
 # Both are optional — when unset (typical dev build) Sparkle starts
 # but never finds updates and "Check for Updates…" reports "no updates
 # available". For a release build, set both before running release.sh.
-SU_FEED_URL="${MEETNOTES_SU_FEED_URL:-}"
-SU_PUBLIC_KEY="${MEETNOTES_SU_PUBLIC_KEY:-}"
+SU_FEED_URL="${LLMIDE_SU_FEED_URL:-}"
+SU_PUBLIC_KEY="${LLMIDE_SU_PUBLIC_KEY:-}"
 SPARKLE_KEYS=""
 if [ -n "$SU_FEED_URL" ]; then
   SPARKLE_KEYS+="
@@ -84,11 +84,11 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>com.meetnotes.macapp</string>
+    <string>com.llmide.macapp</string>
     <key>CFBundleName</key>
-    <string>Meet Notes</string>
+    <string>LLM IDE</string>
     <key>CFBundleDisplayName</key>
-    <string>Meet Notes</string>
+    <string>LLM IDE</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -108,9 +108,9 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <key>NSSupportsAutomaticTermination</key>
     <false/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Meet Notes uses the microphone only when caption scraping is unavailable, as a fallback transcription source.</string>
+    <string>LLM IDE uses the microphone only when caption scraping is unavailable, as a fallback transcription source.</string>
     <key>NSScreenCaptureDescription</key>
-    <string>Meet Notes can capture audio from a single meeting app (Zoom, Teams, etc.) when its in-app captions are not exposed.</string>
+    <string>LLM IDE can capture audio from a single meeting app (Zoom, Teams, etc.) when its in-app captions are not exposed.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsLocalNetworking</key>
@@ -135,9 +135,10 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>com.meetnotes.macapp.deeplink</string>
+            <string>com.llmide.macapp.deeplink</string>
             <key>CFBundleURLSchemes</key>
             <array>
+                <string>llmide</string>
                 <string>meetnotes</string>
             </array>
             <key>CFBundleTypeRole</key>
@@ -148,8 +149,8 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
 </plist>
 PLIST
 
-if [ -d "$PROJ_DIR/Sources/MeetNotesMac/Resources" ]; then
-  rsync -a "$PROJ_DIR/Sources/MeetNotesMac/Resources/" "$APP_DIR/Contents/Resources/"
+if [ -d "$PROJ_DIR/Sources/LlmIdeMac/Resources" ]; then
+  rsync -a "$PROJ_DIR/Sources/LlmIdeMac/Resources/" "$APP_DIR/Contents/Resources/"
 fi
 
 echo -e "${BLUE}[build]${NC} compiling via swift build (release)..."

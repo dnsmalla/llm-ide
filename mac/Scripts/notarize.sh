@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================
 # Notarize phase: submit the signed .app to Apple notary service
-# and staple the ticket. Requires MEETNOTES_NOTARY_PROFILE (the
+# and staple the ticket. Requires LLMIDE_NOTARY_PROFILE (the
 # keychain profile name created via `xcrun notarytool store-credentials`).
 # Skips with a friendly message if unset — dev builds don't need this.
 # ============================================
@@ -15,12 +15,12 @@ NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJ_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP_NAME="MeetNotesMac"
+APP_NAME="LlmIdeMac"
 APP_DIR="$PROJ_DIR/$APP_NAME.app"
-PROFILE="${MEETNOTES_NOTARY_PROFILE:-}"
+PROFILE="${LLMIDE_NOTARY_PROFILE:-}"
 
 if [ -z "$PROFILE" ]; then
-  echo -e "${YELLOW}[notarize]${NC} MEETNOTES_NOTARY_PROFILE unset — skipping notarization (dev build)."
+  echo -e "${YELLOW}[notarize]${NC} LLMIDE_NOTARY_PROFILE unset — skipping notarization (dev build)."
   exit 0
 fi
 

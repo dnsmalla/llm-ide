@@ -36,8 +36,8 @@ extension/bot-worker/bot-profile/
 
 # Mac build artefacts
 mac/.build/
-mac/MeetNotesMac.app/
-mac/MeetNotesMac_*.dmg
+mac/LlmIdeMac.app/
+mac/LlmIdeMac_*.dmg
 
 # Editor / OS
 .DS_Store

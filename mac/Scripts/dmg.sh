@@ -11,7 +11,7 @@ NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJ_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP_NAME="MeetNotesMac"
+APP_NAME="LlmIdeMac"
 APP_DIR="$PROJ_DIR/$APP_NAME.app"
 # Pulled from mac/VERSION; build.sh writes the same value into the
 # .app's Info.plist, so the DMG filename matches the bundle version.

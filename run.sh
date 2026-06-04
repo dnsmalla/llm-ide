@@ -3,25 +3,25 @@ set -euo pipefail
 
 cd "$(dirname "$0")/mac"
 
-echo "Building MeetNotesMac…"
+echo "Building LlmIdeMac…"
 if ! swift build 2>&1 | grep -v "^warning:"; then
   echo "❌ Build failed." >&2
   exit 1
 fi
 
-BINARY=".build/debug/MeetNotesMac"
+BINARY=".build/debug/LlmIdeMac"
 if [ ! -f "$BINARY" ]; then
   echo "❌ Binary not found at $BINARY" >&2
   exit 1
 fi
 
 # Stop any running instance
-pkill -f "MeetNotesMac" 2>/dev/null || true
+pkill -f "LlmIdeMac" 2>/dev/null || true
 sleep 0.3
 
-APP_DIR="${TMPDIR:-/tmp}/MeetNotesMac.app"
+APP_DIR="${TMPDIR:-/tmp}/LlmIdeMac.app"
 mkdir -p "$APP_DIR/Contents/MacOS"
-cp "$BINARY" "$APP_DIR/Contents/MacOS/MeetNotesMac"
+cp "$BINARY" "$APP_DIR/Contents/MacOS/LlmIdeMac"
 
 # The binary links @rpath/Sparkle.framework and carries an @loader_path rpath,
 # so the framework must sit next to the executable. Copy whichever build
@@ -44,9 +44,9 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleExecutable</key><string>MeetNotesMac</string>
-    <key>CFBundleIdentifier</key><string>com.meetnotes.macapp</string>
-    <key>CFBundleName</key><string>MeetNotesMac</string>
+    <key>CFBundleExecutable</key><string>LlmIdeMac</string>
+    <key>CFBundleIdentifier</key><string>com.llmide.macapp</string>
+    <key>CFBundleName</key><string>LlmIdeMac</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>1.0</string>
     <key>CFBundleVersion</key><string>1</string>
@@ -57,5 +57,5 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
 </plist>
 PLIST
 
-echo "✅ Launching MeetNotesMac…"
+echo "✅ Launching LlmIdeMac…"
 open "$APP_DIR"

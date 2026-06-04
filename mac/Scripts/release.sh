@@ -2,7 +2,7 @@
 # ============================================
 # Release pipeline: build → sign → notarize → dmg.
 # Stops on any failure (set -e).
-# Requires MEETNOTES_SIGN_IDENTITY and MEETNOTES_NOTARY_PROFILE
+# Requires LLMIDE_SIGN_IDENTITY and LLMIDE_NOTARY_PROFILE
 # for a fully notarized build; dev defaults produce an ad-hoc
 # signed, un-notarized DMG.
 # ============================================
@@ -21,16 +21,16 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # notarized. Without both, the pipeline would otherwise emit an ad-hoc
 # signed, un-notarized DMG — a dev artifact that Gatekeeper will reject and
 # that must never be handed out as a release. Allow that dev path ONLY when
-# the operator explicitly opts in with MEETNOTES_ALLOW_DEV_RELEASE=1.
-IDENTITY="${MEETNOTES_SIGN_IDENTITY:--}"
-NOTARY="${MEETNOTES_NOTARY_PROFILE:-}"
-ALLOW_DEV="${MEETNOTES_ALLOW_DEV_RELEASE:-0}"
+# the operator explicitly opts in with LLMIDE_ALLOW_DEV_RELEASE=1.
+IDENTITY="${LLMIDE_SIGN_IDENTITY:--}"
+NOTARY="${LLMIDE_NOTARY_PROFILE:-}"
+ALLOW_DEV="${LLMIDE_ALLOW_DEV_RELEASE:-0}"
 
 if [ "$IDENTITY" = "-" ] || [ -z "$NOTARY" ]; then
   if [ "$ALLOW_DEV" != "1" ]; then
     echo -e "${RED}[release] refusing to build a release without signing + notarization.${NC}"
-    echo -e "${RED}          set MEETNOTES_SIGN_IDENTITY (Developer ID) and MEETNOTES_NOTARY_PROFILE,${NC}"
-    echo -e "${RED}          or set MEETNOTES_ALLOW_DEV_RELEASE=1 to produce an UNSIGNED dev build.${NC}"
+    echo -e "${RED}          set LLMIDE_SIGN_IDENTITY (Developer ID) and LLMIDE_NOTARY_PROFILE,${NC}"
+    echo -e "${RED}          or set LLMIDE_ALLOW_DEV_RELEASE=1 to produce an UNSIGNED dev build.${NC}"
     exit 1
   fi
   echo -e "${YELLOW}[release] WARNING: producing a DEV artifact (ad-hoc signed / not notarized).${NC}"
