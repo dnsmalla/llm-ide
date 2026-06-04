@@ -194,7 +194,10 @@ struct WelcomeView: View {
 
     // MARK: - Actions
 
-    /// New project: bias the picker toward creating a fresh, empty folder.
+    /// New project: adopt whatever folder the user picks. Unlike "Open", this
+    /// scaffolds the project structure into any folder (empty or not) — the
+    /// user explicitly asked to create a project here, and scaffolding never
+    /// overwrites existing files (a repo's own README is preserved).
     private func newProject() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -202,8 +205,15 @@ struct WelcomeView: View {
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
         panel.prompt = "Create Project"
-        panel.message = "Choose an empty folder — it becomes your new project workspace."
-        open(panel)
+        panel.message = "Choose (or create) a folder — LLM IDE sets up the workspace inside it."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try projectStore.ensureProjectScaffold(at: url)
+            try projectStore.openFolder(at: url)
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     /// Open existing: an already-scaffolded project or an adopted folder.
