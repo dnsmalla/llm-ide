@@ -250,45 +250,103 @@ final class MeetNotesAPIClient {
             req.httpBody = try encoder.encode(body)
         }
 
-        let (data, response): (Data, URLResponse)
-        do {
-            (data, response) = try await session(for: path).data(for: req)
-        } catch {
-            throw APIError.network(error)
-        }
+        // Only GETs are safe to auto-retry — re-issuing a POST/PUT/DELETE could
+        // double-apply a side effect. Transient connectivity blips and transient
+        // server statuses (429/502/503/504) get a bounded backoff.
+        let isGET = method == "GET"
+        let maxAttempts = 3
+        var attempt = 0
+        while true {
+            attempt += 1
+            let data: Data
+            let response: URLResponse
+            do {
+                (data, response) = try await session(for: path).data(for: req)
+            } catch {
+                if isGET, attempt < maxAttempts, Self.isTransient(error) {
+                    try? await Task.sleep(nanoseconds: Self.backoffNanos(attempt))
+                    continue
+                }
+                throw APIError.network(error)
+            }
 
-        guard let http = response as? HTTPURLResponse else {
-            throw APIError.network(URLError(.badServerResponse))
-        }
+            guard let http = response as? HTTPURLResponse else {
+                throw APIError.network(URLError(.badServerResponse))
+            }
 
-        // 401 retry path — refresh the access token once, then re-issue.
-        if http.statusCode == 401 && authenticated && !isRetry, let store = sessionStore {
-            let hasRefresh = await MainActor.run { store.refreshToken != nil }
-            if hasRefresh {
-                let ok = await store.attemptRefresh(via: self)
-                if ok {
-                    return try await send(path: path, method: method, body: body, authenticated: authenticated, isRetry: true)
+            // 401 retry path — refresh the access token once, then re-issue.
+            if http.statusCode == 401 && authenticated && !isRetry, let store = sessionStore {
+                let hasRefresh = await MainActor.run { store.refreshToken != nil }
+                if hasRefresh {
+                    let ok = await store.attemptRefresh(via: self)
+                    if ok {
+                        return try await send(path: path, method: method, body: body, authenticated: authenticated, isRetry: true)
+                    }
                 }
             }
-        }
 
-        if !(200..<300).contains(http.statusCode) {
-            let env = try? decoder.decode(ErrorEnvelope.self, from: data)
-            let flat = try? decoder.decode(FlatErrorEnvelope.self, from: data)
-            let raw = String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let code = env?.error?.code ?? "UPSTREAM_ERROR"
-            let msg = env?.error?.message
-                ?? flat?.error
-                ?? (raw?.isEmpty == false ? raw! : "HTTP \(http.statusCode)")
-            throw APIError.http(status: http.statusCode, code: code, message: msg, details: nil)
-        }
+            // Transient server status → backoff + retry (GET only), honoring
+            // a server-supplied Retry-After.
+            if isGET, attempt < maxAttempts, [429, 502, 503, 504].contains(http.statusCode) {
+                let delay = Self.retryAfterNanos(http) ?? Self.backoffNanos(attempt)
+                try? await Task.sleep(nanoseconds: delay)
+                continue
+            }
 
-        do {
-            return try decoder.decode(T.self, from: data)
-        } catch {
-            throw APIError.decoding(error)
+            // An unrecoverable 401 means the session is gone — surface a clear
+            // "signed out" signal instead of a generic HTTP 401 so the UI can
+            // prompt re-login rather than showing an opaque error.
+            if http.statusCode == 401 && authenticated {
+                throw APIError.noSession
+            }
+
+            if !(200..<300).contains(http.statusCode) {
+                let env = try? decoder.decode(ErrorEnvelope.self, from: data)
+                let flat = try? decoder.decode(FlatErrorEnvelope.self, from: data)
+                let raw = String(data: data, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let code = env?.error?.code ?? "UPSTREAM_ERROR"
+                let msg = env?.error?.message
+                    ?? flat?.error
+                    ?? (raw?.isEmpty == false ? raw! : "HTTP \(http.statusCode)")
+                throw APIError.http(status: http.statusCode, code: code, message: msg, details: nil)
+            }
+
+            do {
+                return try decoder.decode(T.self, from: data)
+            } catch {
+                throw APIError.decoding(error)
+            }
         }
+    }
+
+    // MARK: - Retry helpers
+
+    /// True for connectivity blips that are worth a short retry (GET only).
+    static func isTransient(_ error: Error) -> Bool {
+        let ns = error as NSError
+        guard ns.domain == NSURLErrorDomain else { return false }
+        switch ns.code {
+        case NSURLErrorTimedOut, NSURLErrorCannotConnectToHost,
+             NSURLErrorNetworkConnectionLost, NSURLErrorDNSLookupFailed:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Exponential backoff: 0.4s, 0.8s, … capped at 5s.
+    static func backoffNanos(_ attempt: Int) -> UInt64 {
+        let base = 0.4 * pow(2.0, Double(max(0, attempt - 1)))
+        return UInt64(min(base, 5.0) * 1_000_000_000)
+    }
+
+    /// Parse a `Retry-After` header (delta-seconds form), capped at 10s.
+    static func retryAfterNanos(_ http: HTTPURLResponse) -> UInt64? {
+        guard let v = http.value(forHTTPHeaderField: "Retry-After"),
+              let secs = Double(v.trimmingCharacters(in: .whitespaces)),
+              secs >= 0 else { return nil }
+        return UInt64(min(secs, 10.0) * 1_000_000_000)
     }
 
     /// Percent-encode a single path *segment* (not a full path).
