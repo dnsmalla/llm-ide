@@ -28,6 +28,11 @@ let package = Package(
             resources: [
                 .copy("Resources/note_template.docx"),
                 .copy("Resources/generate_meeting_note.py"),
+                // Vendored highlight.js v11.9.0 (BSD-3) — inlined by the code
+                // viewer so syntax highlighting needs no remote CDN.
+                .copy("Resources/highlight.min.js"),
+                .copy("Resources/atom-one-dark.min.css"),
+                .copy("Resources/atom-one-light.min.css"),
             ],
             linkerSettings: [
                 .linkedLibrary("sqlite3")

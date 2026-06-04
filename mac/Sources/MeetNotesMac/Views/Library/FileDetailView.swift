@@ -408,13 +408,23 @@ struct CodeWebView: NSViewRepresentable {
         Self.hljsLanguageMap[language.lowercased()] ?? ""
     }
 
+    // highlight.js v11.9.0 is vendored under Resources/ and inlined below —
+    // no remote CDN, so code preview works offline and can't be tampered
+    // with in transit (closes a MITM/XSS vector against local file content).
+    private static let hljsJS: String      = bundledText("highlight.min", "js")
+    private static let hljsDarkCSS: String  = bundledText("atom-one-dark.min", "css")
+    private static let hljsLightCSS: String = bundledText("atom-one-light.min", "css")
+
+    private static func bundledText(_ name: String, _ ext: String) -> String {
+        guard let url = Bundle.main.url(forResource: name, withExtension: ext),
+              let s = try? String(contentsOf: url, encoding: .utf8) else { return "" }
+        return s
+    }
+
     private func html() -> String {
-        // VSCode-flavoured theme. atom-one-dark / atom-one-light are
-        // the closest matches and are widely cached on CDNs.
-        let themeCSS = isDark
-            ? "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"
-            : "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css"
-        let hljsJS = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"
+        // Inlined, locally-bundled theme + highlighter (atom-one-dark/light).
+        let themeCSS = isDark ? Self.hljsDarkCSS : Self.hljsLightCSS
+        let hljsJS   = Self.hljsJS
 
         let bg     = isDark ? "#1e1e1e" : "#fafafa"
         let fg     = isDark ? "#abb2bf" : "#383a42"
@@ -437,7 +447,7 @@ struct CodeWebView: NSViewRepresentable {
         <html>
         <head>
         <meta charset="utf-8">
-        <link rel="stylesheet" href="\(themeCSS)">
+        <style>\(themeCSS)</style>
         <style>
           * { margin:0; padding:0; box-sizing:border-box; }
           html, body { height:100%; background:\(bg); }
@@ -484,7 +494,7 @@ struct CodeWebView: NSViewRepresentable {
           <div class="ln-col" id="ln"></div>
           <div class="code-col"><pre><code\(classAttr) id="code">\(escaped)</code></pre></div>
         </div>
-        <script src="\(hljsJS)"></script>
+        <script>\(hljsJS)</script>
         <script>
           (function() {
             var code = document.getElementById('code');

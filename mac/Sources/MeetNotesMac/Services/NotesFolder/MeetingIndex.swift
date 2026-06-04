@@ -57,26 +57,55 @@ final class MeetingIndex {
     }
     deinit { sqlite3_close(db) }
 
+    /// Bump when the on-disk schema changes; add a matching `if current < N`
+    /// migration step below. `PRAGMA user_version` gives us a real migration
+    /// seam so a future schema change can `ALTER TABLE` instead of silently
+    /// diverging from an old database.
+    private static let schemaVersion = 1
+
     private func migrate() throws {
-        try exec("""
-        CREATE TABLE IF NOT EXISTS meetings_index (
-          id              TEXT PRIMARY KEY,
-          path            TEXT NOT NULL,
-          title           TEXT,
-          started_at      INTEGER NOT NULL,
-          ended_at        INTEGER,
-          duration_sec    INTEGER,
-          gist            TEXT,
-          tldr_json       TEXT,
-          actions_count   INTEGER NOT NULL DEFAULT 0,
-          decisions_count INTEGER NOT NULL DEFAULT 0,
-          blockers_count  INTEGER NOT NULL DEFAULT 0,
-          file_mtime      INTEGER NOT NULL,
-          file_size       INTEGER NOT NULL,
-          indexed_at      INTEGER NOT NULL
-        );
-        """)
-        try exec("CREATE INDEX IF NOT EXISTS meetings_index_started_at ON meetings_index(started_at DESC);")
+        let current = try userVersion()
+
+        if current < 1 {
+            try exec("""
+            CREATE TABLE IF NOT EXISTS meetings_index (
+              id              TEXT PRIMARY KEY,
+              path            TEXT NOT NULL,
+              title           TEXT,
+              started_at      INTEGER NOT NULL,
+              ended_at        INTEGER,
+              duration_sec    INTEGER,
+              gist            TEXT,
+              tldr_json       TEXT,
+              actions_count   INTEGER NOT NULL DEFAULT 0,
+              decisions_count INTEGER NOT NULL DEFAULT 0,
+              blockers_count  INTEGER NOT NULL DEFAULT 0,
+              file_mtime      INTEGER NOT NULL,
+              file_size       INTEGER NOT NULL,
+              indexed_at      INTEGER NOT NULL
+            );
+            """)
+            try exec("CREATE INDEX IF NOT EXISTS meetings_index_started_at ON meetings_index(started_at DESC);")
+        }
+
+        // Future migrations go here, e.g.:
+        //   if current < 2 { try exec("ALTER TABLE meetings_index ADD COLUMN …;") }
+
+        if current < Self.schemaVersion {
+            try exec("PRAGMA user_version=\(Self.schemaVersion);")
+        }
+    }
+
+    /// Read `PRAGMA user_version` (0 on a fresh database).
+    private func userVersion() throws -> Int {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA user_version;", -1, &stmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "MeetingIndex", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "Failed to read schema version"])
+        }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int(stmt, 0))
     }
 
     func upsert(_ r: Row) throws {
