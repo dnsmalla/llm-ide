@@ -39,11 +39,11 @@ you embed in every shipped binary so clients can verify downloads.
 Export the private key to a file so `appcast.sh` can read it:
 
 ```bash
-mkdir -p ~/.meetnotes
-chmod 700 ~/.meetnotes
+mkdir -p ~/.llmide
+chmod 700 ~/.llmide
 security find-generic-password -ga "Private key for signing Sparkle updates" 2>&1 \
-  | awk -F'"' '/password:/ {print $2}' > ~/.meetnotes/sparkle_ed25519
-chmod 600 ~/.meetnotes/sparkle_ed25519
+  | awk -F'"' '/password:/ {print $2}' > ~/.llmide/sparkle_ed25519
+chmod 600 ~/.llmide/sparkle_ed25519
 ```
 
 **Back this file up.** If you lose it, you have to ship a new public
@@ -62,7 +62,7 @@ in increasing complexity:
 - **Inside the same Node server** — possible but couples release
   reach to server uptime. Don't.
 
-This guide uses `https://updates.meetnotes.app/appcast.xml` as a
+This guide uses `https://updates.llmide.app/appcast.xml` as a
 placeholder. Substitute your actual URL.
 
 ### 3. Set the build-time env vars
@@ -71,11 +71,11 @@ Two env vars feed `mac/Scripts/build.sh`:
 
 ```bash
 # Add these to your shell profile (or your CI secret store).
-export MEETNOTES_SU_FEED_URL="https://updates.meetnotes.app/appcast.xml"
-export MEETNOTES_SU_PUBLIC_KEY="<paste base64 public key from generate_keys output>"
+export LLMIDE_SU_FEED_URL="https://updates.llmide.app/appcast.xml"
+export LLMIDE_SU_PUBLIC_KEY="<paste base64 public key from generate_keys output>"
 
 # And one for appcast.sh:
-export MEETNOTES_SU_DOWNLOAD_URL_BASE="https://updates.meetnotes.app/releases"
+export LLMIDE_SU_DOWNLOAD_URL_BASE="https://updates.llmide.app/releases"
 ```
 
 Without these, the build still succeeds — Sparkle just stays inert
@@ -102,7 +102,7 @@ cd mac
 ./Scripts/release.sh
 ```
 
-That produces `mac/MeetNotesMac_v0.2.0.dmg`. The DMG contains the .app
+That produces `mac/LlmIdeMac_v0.2.0.dmg`. The DMG contains the .app
 with Sparkle wired in via Info.plist — clients of this DMG will
 auto-update on the next release.
 
@@ -124,8 +124,8 @@ Pull your appcast repo, paste the new item ABOVE existing items
 (Sparkle uses RSS-style "newest first" ordering), commit, push.
 
 ```bash
-git clone https://github.com/yourorg/meetnotes-appcast.git
-cd meetnotes-appcast
+git clone https://github.com/yourorg/llmide-appcast.git
+cd llmide-appcast
 # edit appcast.xml — paste the new <item> right after <language>
 git add appcast.xml
 git commit -m "release: v0.2.0"
@@ -137,8 +137,8 @@ The first existing item is `<item>v0.1.x</item>`; you're adding
 
 ### 5. Upload the DMG
 
-Drop `MeetNotesMac_v0.2.0.dmg` at the URL declared in
-`MEETNOTES_SU_DOWNLOAD_URL_BASE/MeetNotesMac_v0.2.0.dmg`. For GitHub
+Drop `LlmIdeMac_v0.2.0.dmg` at the URL declared in
+`LLMIDE_SU_DOWNLOAD_URL_BASE/LlmIdeMac_v0.2.0.dmg`. For GitHub
 Pages that's typically `gh-pages/releases/`; for S3 it's an `s3 cp`.
 
 ### 6. Verify end-to-end

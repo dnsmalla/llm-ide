@@ -1,4 +1,4 @@
-# meet-notes Production-Readiness Review — 2026-06-03
+# llm-ide Production-Readiness Review — 2026-06-03
 
 Fresh 3-pass review (services, persistence/security, UI/quality). Codebase is high quality;
 findings below are the real gaps. Graph/memory engine is shared via GraphKit (reviewed separately).
@@ -74,11 +74,11 @@ Remaining small config (not done): lift CLI/agent timeouts + summary maxTokens t
 constants/env; user-facing model picker for server summarization.
 
 ### Central skills — finding
-meet-notes loads skills only server-side (`extension/llm_agent/runtime/skill-loader.mjs` →
+llm-ide loads skills only server-side (`extension/llm_agent/runtime/skill-loader.mjs` →
 `buildSystemPrompt`); the Swift mac app has NO SkillRunner. Its skills are agent-loop tools:
 `search-kb` is a `.md`+handler pair (read), the 3 GitLab ones are prompt-only write skills. There is
 no current shared content to pull from the central repo's `runtime/` family (that's InfiniteBrain's
-graph prompt-skills, irrelevant to meet-notes). To consume central later: a sync of a central
+graph prompt-skills, irrelevant to llm-ide). To consume central later: a sync of a central
 `agent-tools/` family into a new gitignored `external/skills/` added as a third `loadSkills` source —
 safe for write/prompt-only skills, but read skills must keep their local handler. Not worth doing
 until there's actually shared content.

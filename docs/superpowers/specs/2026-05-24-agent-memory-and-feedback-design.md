@@ -42,7 +42,7 @@ Give the user's CLI coding agent (Claude Code / Cursor / Copilot / Gemini) durab
         │ writes                                       │ reads via
         │ (this spec)                                  │ installed skill
 ┌───────┴────────────────────┐               ┌─────────┴────────────┐
-│  MeetNotesMac                │               │  Claude Code / Cursor│
+│  LlmIdeMac                │               │  Claude Code / Cursor│
 │  ┌──────────────────────┐    │               │  / Gemini / Copilot   │
 │  │ Graphify view        │    │               │  (active CLI from     │
 │  │  · Graphify (code)   │    │               │   Settings)           │
@@ -88,9 +88,9 @@ A new third tab in `GraphifyView` next to **Graphify** / **InfiniteBrain**, labe
 
 | Path | Purpose |
 |---|---|
-| `Sources/MeetNotesMac/CodeGraph/MemoryStore.swift` | Read/write the memory dir. Phase A only ships the seed + read methods (`seedIfMissing(in:)`, `loadRepoNotes(at:)`, `saveRepoNotes(at:_:)`, `listBugs(at:)`, `listQA(at:)`). The write methods (`writeBug`, `updateBugStatus`, `writeQA`) are added by phases B and C. |
-| `Sources/MeetNotesMac/CodeGraph/GraphifyInstaller.swift` | Wraps `graphify install --platform <cli>`. Maps `AICliTool` → `--platform` arg. Uses the existing `ProcessLauncher` seam for testability. |
-| `Sources/MeetNotesMac/Views/CodeGraph/MemoryTabView.swift` | The tab content. Left: tree of memory files. Right: `FileDetailView` (same component the Library uses for markdown editing). |
+| `Sources/LlmIdeMac/CodeGraph/MemoryStore.swift` | Read/write the memory dir. Phase A only ships the seed + read methods (`seedIfMissing(in:)`, `loadRepoNotes(at:)`, `saveRepoNotes(at:_:)`, `listBugs(at:)`, `listQA(at:)`). The write methods (`writeBug`, `updateBugStatus`, `writeQA`) are added by phases B and C. |
+| `Sources/LlmIdeMac/CodeGraph/GraphifyInstaller.swift` | Wraps `graphify install --platform <cli>`. Maps `AICliTool` → `--platform` arg. Uses the existing `ProcessLauncher` seam for testability. |
+| `Sources/LlmIdeMac/Views/CodeGraph/MemoryTabView.swift` | The tab content. Left: tree of memory files. Right: `FileDetailView` (same component the Library uses for markdown editing). |
 
 **Memory dir bootstrap**
 
@@ -197,7 +197,7 @@ The user toggles status manually via a status picker on each bug row in the Memo
 
 | Path | Purpose |
 |---|---|
-| `Sources/MeetNotesMac/Views/CodeAssistant/ReportBugSheet.swift` | The compose sheet. |
+| `Sources/LlmIdeMac/Views/CodeAssistant/ReportBugSheet.swift` | The compose sheet. |
 | `MemoryStore` | gains `writeBug(at:_:)` and `updateBugStatus(at:_:_:)`. (`listBugs` already exists from A.) |
 
 **Memory-tab affordances added**
@@ -246,7 +246,7 @@ On **Dismiss**, suppresses the banner for this prompt-hash for the remainder of 
 
 | Path | Purpose |
 |---|---|
-| `Sources/MeetNotesMac/Services/CodeAssistantSession.swift` | Session-scoped counter + dismiss-set. `@Observable`. |
+| `Sources/LlmIdeMac/Services/CodeAssistantSession.swift` | Session-scoped counter + dismiss-set. `@Observable`. |
 | `MemoryStore` | gains `writeQA(at:_:)`. (`listQA` already exists from A.) |
 
 ### D. Regression check on update
@@ -291,8 +291,8 @@ Reuses the existing path `CodeAssistantPanel` uses to invoke the CLI. I'll confi
 
 | Path | Purpose |
 |---|---|
-| `Sources/MeetNotesMac/Views/Regression/RegressionView.swift` | The list view + diff sheet. |
-| `Sources/MeetNotesMac/Services/RegressionRunner.swift` | Iterates bugs, invokes the CLI, computes verdicts. |
+| `Sources/LlmIdeMac/Views/Regression/RegressionView.swift` | The list view + diff sheet. |
+| `Sources/LlmIdeMac/Services/RegressionRunner.swift` | Iterates bugs, invokes the CLI, computes verdicts. |
 
 ## Data flow (end-to-end)
 

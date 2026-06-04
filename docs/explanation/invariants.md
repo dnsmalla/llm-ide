@@ -181,7 +181,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 ### ✅ MUST preserve:
 
 - **CORS is a strict allowlist** — `chrome-extension://<id>` + `localhost` / `127.0.0.1`. The `Access-Control-Allow-Origin` header echoes the request's `Origin` (never `*`), and is only set when the origin is in the allowlist.
-- **Server binds to `127.0.0.1` by default** — a non-loopback `MEETNOTES_HOST` is REFUSED at startup unless `MEETNOTES_ALLOW_REMOTE=1` is also set (the operator opting into a TLS-terminating proxy). The server itself terminates no TLS.
+- **Server binds to `127.0.0.1` by default** — a non-loopback `LLMIDE_HOST` is REFUSED at startup unless `LLMIDE_ALLOW_REMOTE=1` is also set (the operator opting into a TLS-terminating proxy). The server itself terminates no TLS.
 - **`runClaude()` prefers the user's stored `claude.apiKey`** (per-user, from the encrypted vault) so multi-user deployments bill each user's own Anthropic account; it falls back to the operator's Claude CLI login (`execFile('claude', ['-p', prompt])`) when no user key is present. A user-scoped key NEVER silently falls back to the operator CLI on failure — that would misattribute spend.
 - **2 MB request body limit** — DoS guard.
 - **500 k-char prompt cap** — keeps requests within Claude CLI's comfort zone.
@@ -361,9 +361,9 @@ Run through this against a real meeting before merging:
 ### ✅ MUST understand:
 
 - **`git push` uses the user's ambient credentials.** The PR flow calls `git push -u origin <branch>` using whatever git config / credential helper the user has set up on their machine (SSH key, HTTPS keychain, etc.). No token is passed to the server; the server never stores one.
-- **The working tree must be clean before `openPullRequest()`** — the function now checks `git status --porcelain` and throws if there are uncommitted changes outside `.meetnotes-auto/`. This prevents codegen-generated files from accidentally staging the user's WIP alongside the auto-generated artifacts.
-- **Branch names are prefixed `meetnotes/auto/<slug>`** — the slug is derived from `taskId` (lowercase alphanumeric + `-_`) so the branch name is deterministic and safe. A branch with the same name existing locally causes an explicit error; the user must delete or rename it before retrying.
-- **The function stages ONLY `.meetnotes-auto/<taskId>/`** — it never stages the rest of the repo.
+- **The working tree must be clean before `openPullRequest()`** — the function now checks `git status --porcelain` and throws if there are uncommitted changes outside `.llmide-auto/`. This prevents codegen-generated files from accidentally staging the user's WIP alongside the auto-generated artifacts.
+- **Branch names are prefixed `llmide/auto/<slug>`** — the slug is derived from `taskId` (lowercase alphanumeric + `-_`) so the branch name is deterministic and safe. A branch with the same name existing locally causes an explicit error; the user must delete or rename it before retrying.
+- **The function stages ONLY `.llmide-auto/<taskId>/`** — it never stages the rest of the repo.
 
 ### ❌ DO NOT do these:
 

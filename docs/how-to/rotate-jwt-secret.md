@@ -3,7 +3,7 @@ title: How to rotate the JWT secret
 applies_to: server
 ---
 
-# How to rotate `MEETNOTES_JWT_SECRET`
+# How to rotate `LLMIDE_JWT_SECRET`
 
 JWT rotation is simpler than [vault-key rotation](../runbooks/rotate-vault-key.md)
 because JWTs are short-lived (15 min access, 30 day refresh by default).
@@ -40,10 +40,10 @@ trivial cost). Most users of this codebase fit this profile.
 ### Path B — Dual-secret window (for multi-user production)
 
 The current codebase does NOT support dual-secret verification — the
-JWT module reads exactly one `MEETNOTES_JWT_SECRET`. To do a graceful
+JWT module reads exactly one `LLMIDE_JWT_SECRET`. To do a graceful
 rotation you would:
 
-1. Add a `MEETNOTES_JWT_SECRET_PREVIOUS` env var (code change required:
+1. Add a `LLMIDE_JWT_SECRET_PREVIOUS` env var (code change required:
    modify `server/jwt.mjs` to try verifying with both secrets, mint
    only with the new one).
 2. Deploy the code change with both env vars set.
@@ -98,12 +98,12 @@ refresh token.
 ### 4. Swap the env var
 
 Update your supervisor's secret file to use the new
-`MEETNOTES_JWT_SECRET`. Do NOT keep the old one around.
+`LLMIDE_JWT_SECRET`. Do NOT keep the old one around.
 
 ### 5. Restart the server
 
 ```bash
-systemctl restart meetnotes        # or launchctl, or your runner
+systemctl restart llmide        # or launchctl, or your runner
 ```
 
 Watch the boot log:
@@ -152,5 +152,5 @@ re-login". This is the expected hard-cutover behavior.
   rotation during a low-traffic window.
 - **Mac app's auto-restart loop may show several `--- Server started
   ---` lines in quick succession** as it adopts the new server. Not a
-  bug; that's the [BackendManager auto-restart](../../mac/Sources/MeetNotesMac/Services/BackendManager.swift)
+  bug; that's the [BackendManager auto-restart](../../mac/Sources/LlmIdeMac/Services/BackendManager.swift)
   doing its job.

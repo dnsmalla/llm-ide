@@ -7,7 +7,7 @@ applies_to: macOS
 
 ## Goal
 
-A running `MeetNotesMac.app` connected to your local server.
+A running `LlmIdeMac.app` connected to your local server.
 
 ## Steps
 

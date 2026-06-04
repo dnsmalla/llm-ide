@@ -14,27 +14,27 @@
 
 | File | Change |
 |---|---|
-| `Sources/MeetNotesMac/Models/Config.swift` | Add 3 template `@Published` String properties + init loading |
-| `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift` | Add `runCLI(prompt:localPath:logSuffix:logDir:)` overload; call it for each enabled task type at end of `run()` |
-| `Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift` | Full rewrite: two-pane HSplitView |
-| `Sources/MeetNotesMac/Views/Shell/SidebarView.swift` | Rename label "Auto Code" → "Auto Tasks" |
-| `Sources/MeetNotesMac/Views/Settings/AutoCodeSettingsSection.swift` | Rename card title "Auto Code Update" → "Auto Tasks" |
+| `Sources/LlmIdeMac/Models/Config.swift` | Add 3 template `@Published` String properties + init loading |
+| `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift` | Add `runCLI(prompt:localPath:logSuffix:logDir:)` overload; call it for each enabled task type at end of `run()` |
+| `Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift` | Full rewrite: two-pane HSplitView |
+| `Sources/LlmIdeMac/Views/Shell/SidebarView.swift` | Rename label "Auto Code" → "Auto Tasks" |
+| `Sources/LlmIdeMac/Views/Settings/AutoCodeSettingsSection.swift` | Rename card title "Auto Code Update" → "Auto Tasks" |
 
 ---
 
 ## Task 1: Add template properties to AppConfig
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Models/Config.swift`
-- Test: `Tests/MeetNotesMacTests/AppConfigAutoTaskTemplatesTests.swift`
+- Modify: `Sources/LlmIdeMac/Models/Config.swift`
+- Test: `Tests/LlmIdeMacTests/AppConfigAutoTaskTemplatesTests.swift`
 
 - [ ] **Step 1: Write failing tests**
 
-Create `Tests/MeetNotesMacTests/AppConfigAutoTaskTemplatesTests.swift`:
+Create `Tests/LlmIdeMacTests/AppConfigAutoTaskTemplatesTests.swift`:
 
 ```swift
 import Testing
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 @Suite("AppConfig Auto Task Templates")
 struct AppConfigAutoTaskTemplatesTests {
@@ -56,7 +56,7 @@ struct AppConfigAutoTaskTemplatesTests {
 }
 ```
 
-Run: `cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift test --filter AppConfigAutoTaskTemplatesTests 2>&1 | tail -10`
+Run: `cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift test --filter AppConfigAutoTaskTemplatesTests 2>&1 | tail -10`
 Expected: compile error — properties don't exist yet.
 
 - [ ] **Step 2: Add the three properties to Config.swift**
@@ -104,15 +104,15 @@ Add immediately after:
 - [ ] **Step 4: Build**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift build 2>&1 | tail -5
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift build 2>&1 | tail -5
 ```
 Expected: `Build complete!`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
-git add Sources/MeetNotesMac/Models/Config.swift Tests/MeetNotesMacTests/AppConfigAutoTaskTemplatesTests.swift
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
+git add Sources/LlmIdeMac/Models/Config.swift Tests/LlmIdeMacTests/AppConfigAutoTaskTemplatesTests.swift
 git commit -m "feat: add autoTaskTemplate properties to AppConfig"
 ```
 
@@ -121,13 +121,13 @@ git commit -m "feat: add autoTaskTemplate properties to AppConfig"
 ## Task 2: Add prompt-based runCLI overload to AutoCodeUpdateService
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift`
+- Modify: `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift`
 
 The current `runCLI(issue:localPath:logDir:)` builds a prompt from a `GitLabIssue`. Add a second overload that accepts a raw prompt string and a log file suffix, sharing the same subprocess-launch logic.
 
 - [ ] **Step 1: Add the overload**
 
-In `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift`, after the closing `}` of the existing `runCLI(issue:localPath:logDir:)` method, add:
+In `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift`, after the closing `}` of the existing `runCLI(issue:localPath:logDir:)` method, add:
 
 ```swift
     private func runCLI(prompt: String, localPath: String, logSuffix: String, logDir: URL) async -> Bool {
@@ -257,15 +257,15 @@ Change `let project` to store it — currently it is already stored as `project`
 - [ ] **Step 3: Build**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift build 2>&1 | tail -5
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift build 2>&1 | tail -5
 ```
 Expected: `Build complete!`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
-git add Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
+git add Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift
 git commit -m "feat: add prompt-based runCLI overload, invoke per-task-type templates in run()"
 ```
 
@@ -274,13 +274,13 @@ git commit -m "feat: add prompt-based runCLI overload, invoke per-task-type temp
 ## Task 3: Rewrite AutoCodeView as two-pane layout
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift`
+- Modify: `Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift`
 
 The current file is a single-column VStack. Replace it entirely with a two-pane HSplitView.
 
 - [ ] **Step 1: Replace AutoCodeView.swift with the two-pane implementation**
 
-Overwrite `Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift` with:
+Overwrite `Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift` with:
 
 ```swift
 import SwiftUI
@@ -587,7 +587,7 @@ enum AutoTask: String, CaseIterable, Identifiable {
 - [ ] **Step 2: Build**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift build 2>&1 | grep -E "error:|Build complete" | head -20
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift build 2>&1 | grep -E "error:|Build complete" | head -20
 ```
 Expected: `Build complete!`
 
@@ -599,8 +599,8 @@ Fix any compiler errors. Common issues:
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
-git add Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
+git add Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift
 git commit -m "feat: rewrite AutoCodeView as two-pane layout with template editor"
 ```
 
@@ -609,8 +609,8 @@ git commit -m "feat: rewrite AutoCodeView as two-pane layout with template edito
 ## Task 4: Rename labels
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/Shell/SidebarView.swift`
-- Modify: `Sources/MeetNotesMac/Views/Settings/AutoCodeSettingsSection.swift`
+- Modify: `Sources/LlmIdeMac/Views/Shell/SidebarView.swift`
+- Modify: `Sources/LlmIdeMac/Views/Settings/AutoCodeSettingsSection.swift`
 
 - [ ] **Step 1: Rename in SidebarView.swift**
 
@@ -641,15 +641,15 @@ Change to:
 - [ ] **Step 3: Build and verify**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift build 2>&1 | tail -5
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift build 2>&1 | tail -5
 ```
 Expected: `Build complete!`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
-git add Sources/MeetNotesMac/Views/Shell/SidebarView.swift Sources/MeetNotesMac/Views/Settings/AutoCodeSettingsSection.swift
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
+git add Sources/LlmIdeMac/Views/Shell/SidebarView.swift Sources/LlmIdeMac/Views/Settings/AutoCodeSettingsSection.swift
 git commit -m "feat: rename Auto Code → Auto Tasks in sidebar and settings"
 ```
 
@@ -660,14 +660,14 @@ git commit -m "feat: rename Auto Code → Auto Tasks in sidebar and settings"
 - [ ] **Step 1: Build the .app bundle**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && bash build_app.sh 2>&1 | grep -E "✓|error:" | head -10
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && bash build_app.sh 2>&1 | grep -E "✓|error:" | head -10
 ```
 Expected: `✓ Build Successful!`
 
 - [ ] **Step 2: Open the app**
 
 ```bash
-open /Users/dinesh.malla/Desktop/meet-notes/mac/MeetNotesMac.app
+open /Users/dinesh.malla/Desktop/llm-ide/mac/LlmIdeMac.app
 ```
 
 - [ ] **Step 3: Verify**

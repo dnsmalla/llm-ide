@@ -6,7 +6,7 @@ worthwhile but needs a small refactor first.
 
 ## CodeWorkflowServiceTests (deferred)
 - `CodeWorkflowService` is `final class` with an `init(project:api:)` that
-  takes a concrete `MeetNotesAPIClient`. To test
+  takes a concrete `LlmIdeAPIClient`. To test
   `bootstrapFromExistingIssue` / `retryMROnly` / `closeIssueIfNeeded`
   (idempotent via `doneCloseFired`), we need to inject mockable seams for
   `GitLabClient` and `RepoManager`.

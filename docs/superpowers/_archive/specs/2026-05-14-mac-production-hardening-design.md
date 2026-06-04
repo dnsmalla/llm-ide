@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Harden the Meet Notes macOS app to production quality by fixing security vulnerabilities, eliminating crashes, closing reliability gaps, and cleaning up code quality issues found in the production-readiness audit.
+**Goal:** Harden the LLM IDE macOS app to production quality by fixing security vulnerabilities, eliminating crashes, closing reliability gaps, and cleaning up code quality issues found in the production-readiness audit.
 
 **Architecture:** Three sequential groups — Security & Stability first (prevents data leaks and crashes), then Reliability & UX (closes silent failures and UX gaps visible to users), then Code Quality (internal improvements that prevent future regressions). Each group produces a clean commit.
 
@@ -14,10 +14,10 @@
 
 ### A1: Move GitLab PAT from UserDefaults to Keychain
 
-**Problem:** `AppConfig` stores `gitLabToken` in `UserDefaults` (`~/Library/Preferences/com.meetnotes.macapp.plist`) — plaintext, readable by any process with filesystem access.
+**Problem:** `AppConfig` stores `gitLabToken` in `UserDefaults` (`~/Library/Preferences/com.llmide.macapp.plist`) — plaintext, readable by any process with filesystem access.
 
 **Fix:**
-- `KeychainStore` already exists at `Services/KeychainStore.swift` for the JWT refresh token. Add two new static methods: `saveGitLabToken(_ token: String, host: String)` and `loadGitLabToken(host: String) -> String?` and `deleteGitLabToken(host: String)`. Use service `com.meetnotes.macapp`, account key `gitlab::\(host)::token`, accessibility `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`.
+- `KeychainStore` already exists at `Services/KeychainStore.swift` for the JWT refresh token. Add two new static methods: `saveGitLabToken(_ token: String, host: String)` and `loadGitLabToken(host: String) -> String?` and `deleteGitLabToken(host: String)`. Use service `com.llmide.macapp`, account key `gitlab::\(host)::token`, accessibility `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`.
 - In `AppConfig`, replace the `gitLabToken` `@Published var` UserDefaults backing with Keychain reads/writes. The getter calls `KeychainStore.loadGitLabToken(host: gitLabBaseURL)`, the setter calls `KeychainStore.saveGitLabToken`.
 - **Migration:** In `AppConfig.init()`, after loading, check if `defaults.string(forKey: "gitLabToken")` is non-empty. If so, save it to Keychain and then `defaults.removeObject(forKey: "gitLabToken")`. Run once silently.
 - `gitLabBaseURL` and `gitLabSavedProjects` remain in UserDefaults (not sensitive).
@@ -216,7 +216,7 @@ SwiftUI guarantees this initializer runs exactly once for the view's lifetime.
 ## Out of Scope
 
 The following audit findings are noted but excluded from this plan:
-- MeetNotesAPIClient pagination (requires API contract changes)
+- LlmIdeAPIClient pagination (requires API contract changes)
 - LibraryItemStore filesystem enumeration on main thread (requires larger refactor)
 - SessionStore refresh slot overflow (theoretical, UInt64 won't overflow in practice)
 - Bot error message 140-char truncation (intentional — prevents log injection)

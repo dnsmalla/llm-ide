@@ -8,7 +8,7 @@ date: 2026-05-20
 
 ## Context
 
-The Code Assistant chat originally persisted to a single `chat-history.json` file under `~/Library/Application Support/MeetNotes/`. That worked for a one-chat-per-user world but broke down once users started keeping several work threads in flight (one for a refactor, one for a bug hunt, one for a spec review). Every new question polluted the same transcript; the only "new chat" gesture was Clear History, which threw the previous context away.
+The Code Assistant chat originally persisted to a single `chat-history.json` file under `~/Library/Application Support/LLM IDE/`. That worked for a one-chat-per-user world but broke down once users started keeping several work threads in flight (one for a refactor, one for a bug hunt, one for a spec review). Every new question polluted the same transcript; the only "new chat" gesture was Clear History, which threw the previous context away.
 
 Users started asking for Cursor-style chat history — a list of past sessions on a sidebar, each named after its first user turn, switchable with one click.
 
@@ -19,7 +19,7 @@ Two alternative shapes were considered:
 
 ## Decision
 
-One JSON file per session under `~/Library/Application Support/MeetNotes/sessions/<uuid>.json`.
+One JSON file per session under `~/Library/Application Support/LLM IDE/sessions/<uuid>.json`.
 
 - `currentSessionIDString` in `@AppStorage` points to the active session id; sidebar selection writes through to it.
 - New sessions start untitled and auto-title from the first user turn (truncated to ~40 chars). Title is rewritable later.

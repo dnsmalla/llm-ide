@@ -5,7 +5,7 @@ applies_to: server, mac, extension
 
 # Persistence reference
 
-Every persistent store in Meet Notes, with location, schema shape,
+Every persistent store in LLM IDE, with location, schema shape,
 version mechanism, and migration policy.
 
 If you are renaming or removing a Codable property, jump to the
@@ -16,7 +16,7 @@ any code.
 
 | | |
 |---|---|
-| Location | `MEETNOTES_DB_PATH` (default `<repo>/kb/data.db`) |
+| Location | `LLMIDE_DB_PATH` (default `<repo>/kb/data.db`) |
 | Engine | SQLite, WAL mode, FTS5, foreign keys on |
 | Schema version | Tracked in the `schema_migrations` table |
 | Migrations | `extension/kb/migrations/NNNN_*.sql`, applied at server start by `extension/kb/db.mjs` |
@@ -28,7 +28,7 @@ Tables: see `docs/explanation/architecture.md` § Storage.
 
 | | |
 |---|---|
-| Location | `~/Library/Application Support/MeetNotes/sessions/<uuid>.json` |
+| Location | `~/Library/Application Support/LLM IDE/sessions/<uuid>.json` |
 | Root type | `ChatSession` struct (one file per session) |
 | Version field | `storeVersion: Int` on `ChatSession` (default `1`; absent on legacy files, defaulted in `init(from:)`) |
 | Corrupt files | Renamed `<uuid>.corrupt-<ts>.json` and skipped |
@@ -38,7 +38,7 @@ Tables: see `docs/explanation/architecture.md` § Storage.
 
 | | |
 |---|---|
-| Location | `~/Library/Application Support/MeetNotes/library_items.json` |
+| Location | `~/Library/Application Support/LLM IDE/library_items.json` |
 | Root type | `LibraryItemStore.StoreFile { storeVersion: Int, items: [LibraryItem] }` |
 | Version field | `storeVersion: Int = 1` on the envelope |
 | Legacy decode | If the envelope decode fails, the bare `[LibraryItem]` shape is attempted (files written before the envelope existed) |
@@ -49,7 +49,7 @@ Tables: see `docs/explanation/architecture.md` § Storage.
 
 | | |
 |---|---|
-| Location | `~/Library/Application Support/com.meetnotes.macapp/doc-templates.json` |
+| Location | `~/Library/Application Support/com.llmide.macapp/doc-templates.json` |
 | Root type | `DocTemplateStore.StoreFile { storeVersion: Int, templates: [DocTemplate] }` |
 | Version field | `storeVersion: Int = 1` |
 | Legacy decode | Falls back to bare `[DocTemplate]` for pre-envelope files |
@@ -59,7 +59,7 @@ Tables: see `docs/explanation/architecture.md` § Storage.
 
 | | |
 |---|---|
-| Location | `~/Library/Application Support/MeetNotes/processed_actions.json` (passed in by `AutoCodeUpdateService`) |
+| Location | `~/Library/Application Support/LLM IDE/processed_actions.json` (passed in by `AutoCodeUpdateService`) |
 | Root type | `ProcessedActionsRegistry.RegistryFile { storeVersion: Int, entries: [String: RegistryEntry] }` |
 | Version field | `storeVersion: Int = 1` |
 | Legacy decode | Falls back to bare `[String: RegistryEntry]` dict |
@@ -71,7 +71,7 @@ Tables: see `docs/explanation/architecture.md` § Storage.
 |---|---|
 | Refresh token | Keychain (`<host>::refresh_token`, see `KeychainStore.swift`) |
 | Access token | In-memory only (re-acquired on app launch from refresh token) |
-| Logout | `KeychainStore.logout()` nukes every entry under the service id `com.meetnotes.macapp` |
+| Logout | `KeychainStore.logout()` nukes every entry under the service id `com.llmide.macapp` |
 | Policy | Tokens are opaque server-issued strings; the Mac side has no schema to migrate. |
 
 ## `@AppStorage` / UserDefaults (macOS)
@@ -81,9 +81,9 @@ Every key currently in use:
 | Key | Owner | Purpose |
 |---|---|---|
 | `serverURL`, `themeID`, `autoCaptureOnMeeting`, `pollIntervalMs`, `activeCLI`, `defaultModelId`, `gitLabBaseURL`, `gitLabLastProjectId`, `gitLabSavedProjects`, `autoCodeUpdateEnabled`, `autoCodeUpdateLookbackCount`, `autoCodeRunReviewCode`, `autoCodeRunReviewDoc`, `autoCodeRunReviewConflicts`, `autoTaskTemplateReviewCode`, `autoTaskTemplateReviewDoc`, `autoTaskTemplateReviewConflicts`, `backendNodePath`, `backendWorkingDir`, `backendAutoStart` | `AppConfig` | See `configuration.md`. |
-| `MEETNOTES_CURRENT_CHAT_SESSION_ID` | `CodeAssistantPanel` | Last-opened chat. |
-| `MEETNOTES_CHAT_PANEL_WIDTH` | `ReviewView` | Splitter width. |
-| `MEETNOTES_LEGACY_PROMPT_SUPPRESSED` | `AppShell` | Dismissed flag. |
+| `LLMIDE_CURRENT_CHAT_SESSION_ID` | `CodeAssistantPanel` | Last-opened chat. |
+| `LLMIDE_CHAT_PANEL_WIDTH` | `ReviewView` | Splitter width. |
+| `LLMIDE_LEGACY_PROMPT_SUPPRESSED` | `AppShell` | Dismissed flag. |
 
 No schema version — flat string/int/bool keys. Renaming a key is a
 breaking change that resets that value to its default.
@@ -92,7 +92,7 @@ breaking change that resets that value to its default.
 
 | | |
 |---|---|
-| Mac service id | `com.meetnotes.macapp` |
+| Mac service id | `com.llmide.macapp` |
 | Mac entries | `<host>::refresh_token`, `gitlab::<host>::token` |
 | Server vault | `user_secrets(user_id, key, ciphertext)` table; ciphertext = `version ‖ iv(12) ‖ aes-256-gcm ‖ tag(16)` |
 | Server allowed keys | `claude.apiKey`, `github.token`, `backlog.apiKey`, `linear.apiKey`, `slack.webhookUrl` |

@@ -18,33 +18,33 @@
 
 | Path | Responsibility |
 |---|---|
-| `mac/Sources/MeetNotesMac/CodeGraph/QAEntry.swift` | `QAEntry` struct + YAML-frontmatter encode + `suggestedFileName()`. |
-| `mac/Sources/MeetNotesMac/Services/CodeAssistantSession.swift` | Session-scoped repeat counter + dismissed set. `ObservableObject`. |
-| `mac/Tests/MeetNotesMacTests/QAEntryTests.swift` | Frontmatter encode test + slug test. |
-| `mac/Tests/MeetNotesMacTests/CodeAssistantSessionTests.swift` | Normalisation + threshold + dismiss tests. |
+| `mac/Sources/LlmIdeMac/CodeGraph/QAEntry.swift` | `QAEntry` struct + YAML-frontmatter encode + `suggestedFileName()`. |
+| `mac/Sources/LlmIdeMac/Services/CodeAssistantSession.swift` | Session-scoped repeat counter + dismissed set. `ObservableObject`. |
+| `mac/Tests/LlmIdeMacTests/QAEntryTests.swift` | Frontmatter encode test + slug test. |
+| `mac/Tests/LlmIdeMacTests/CodeAssistantSessionTests.swift` | Normalisation + threshold + dismiss tests. |
 
 **Modify:**
 
 | Path | Why |
 |---|---|
-| `mac/Sources/MeetNotesMac/CodeGraph/MemoryStore.swift` | Add `writeQA(at:_:)`. |
-| `mac/Sources/MeetNotesMac/Views/CodeAssistantPanel.swift` | Own a `@StateObject CodeAssistantSession`; call `record()` in `send()`; render banner above the composer when `shouldNudge` is true. |
+| `mac/Sources/LlmIdeMac/CodeGraph/MemoryStore.swift` | Add `writeQA(at:_:)`. |
+| `mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift` | Own a `@StateObject CodeAssistantSession`; call `record()` in `send()`; render banner above the composer when `shouldNudge` is true. |
 
 ---
 
 ## Task 1: `QAEntry` model
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeGraph/QAEntry.swift`
-- Create: `mac/Tests/MeetNotesMacTests/QAEntryTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeGraph/QAEntry.swift`
+- Create: `mac/Tests/LlmIdeMacTests/QAEntryTests.swift`
 
 - [ ] **Step 1: Write tests**
 
 ```swift
-// mac/Tests/MeetNotesMacTests/QAEntryTests.swift
+// mac/Tests/LlmIdeMacTests/QAEntryTests.swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct QAEntryTests {
     @Test func encodeIncludesRequiredFrontmatterFields() throws {
@@ -83,7 +83,7 @@ struct QAEntryTests {
 - [ ] **Step 2: Implement `QAEntry`**
 
 ```swift
-// mac/Sources/MeetNotesMac/CodeGraph/QAEntry.swift
+// mac/Sources/LlmIdeMac/CodeGraph/QAEntry.swift
 //
 // User-saved Q&A pair. Persisted as markdown with YAML frontmatter
 // under <repo>/graphify-out/memory/q&a/<slug>.md, alongside bug
@@ -142,7 +142,7 @@ swift test --filter QAEntryTests
 - [ ] **Step 4: Commit**
 
 ```
-git add mac/Sources/MeetNotesMac/CodeGraph/QAEntry.swift mac/Tests/MeetNotesMacTests/QAEntryTests.swift
+git add mac/Sources/LlmIdeMac/CodeGraph/QAEntry.swift mac/Tests/LlmIdeMacTests/QAEntryTests.swift
 git commit -m "feat(memory): QAEntry model for saved question/answer pairs"
 ```
 
@@ -151,7 +151,7 @@ git commit -m "feat(memory): QAEntry model for saved question/answer pairs"
 ## Task 2: Extend `MemoryStore` with `writeQA`
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/CodeGraph/MemoryStore.swift`
+- Modify: `mac/Sources/LlmIdeMac/CodeGraph/MemoryStore.swift`
 
 - [ ] **Step 1: Add `writeQA(at:_:)`**
 
@@ -187,7 +187,7 @@ Expected: `Build complete!`.
 - [ ] **Step 3: Commit**
 
 ```
-git add mac/Sources/MeetNotesMac/CodeGraph/MemoryStore.swift
+git add mac/Sources/LlmIdeMac/CodeGraph/MemoryStore.swift
 git commit -m "feat(memory): MemoryStore.writeQA — persist saved Q&A pairs"
 ```
 
@@ -196,16 +196,16 @@ git commit -m "feat(memory): MemoryStore.writeQA — persist saved Q&A pairs"
 ## Task 3: `CodeAssistantSession` service
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Services/CodeAssistantSession.swift`
-- Create: `mac/Tests/MeetNotesMacTests/CodeAssistantSessionTests.swift`
+- Create: `mac/Sources/LlmIdeMac/Services/CodeAssistantSession.swift`
+- Create: `mac/Tests/LlmIdeMacTests/CodeAssistantSessionTests.swift`
 
 - [ ] **Step 1: Write tests**
 
 ```swift
-// mac/Tests/MeetNotesMacTests/CodeAssistantSessionTests.swift
+// mac/Tests/LlmIdeMacTests/CodeAssistantSessionTests.swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 @MainActor
 struct CodeAssistantSessionTests {
@@ -268,7 +268,7 @@ struct CodeAssistantSessionTests {
 - [ ] **Step 2: Implement the service**
 
 ```swift
-// mac/Sources/MeetNotesMac/Services/CodeAssistantSession.swift
+// mac/Sources/LlmIdeMac/Services/CodeAssistantSession.swift
 //
 // In-memory bookkeeping for "the user just asked this 3 times in a
 // row" detection. Lives for the lifetime of a CodeAssistantPanel
@@ -359,7 +359,7 @@ swift test --filter CodeAssistantSessionTests
 - [ ] **Step 4: Commit**
 
 ```
-git add mac/Sources/MeetNotesMac/Services/CodeAssistantSession.swift mac/Tests/MeetNotesMacTests/CodeAssistantSessionTests.swift
+git add mac/Sources/LlmIdeMac/Services/CodeAssistantSession.swift mac/Tests/LlmIdeMacTests/CodeAssistantSessionTests.swift
 git commit -m "feat(memory): CodeAssistantSession — session-scoped repeated-prompt counter"
 ```
 
@@ -368,7 +368,7 @@ git commit -m "feat(memory): CodeAssistantSession — session-scoped repeated-pr
 ## Task 4: Wire banner into `CodeAssistantPanel`
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Views/CodeAssistantPanel.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift`
 
 - [ ] **Step 1: Own the session object**
 
@@ -536,7 +536,7 @@ Expected: `Build complete!`.
 - [ ] **Step 6: Commit**
 
 ```
-git add mac/Sources/MeetNotesMac/Views/CodeAssistantPanel.swift
+git add mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift
 git commit -m "feat(memory): repeated-prompt banner in CodeAssistant composer
 
 Phase C.4. CodeAssistantSession tracks repeats per session; at
@@ -568,7 +568,7 @@ Expected: `2`.
 - [ ] **Step 3: Manual smoke**
 
 ```
-./build_app.sh && pkill -f MeetNotesMac.app; sleep 1; open -n MeetNotesMac.app
+./build_app.sh && pkill -f LlmIdeMac.app; sleep 1; open -n LlmIdeMac.app
 ```
 
 1. Pick a repo as Active.

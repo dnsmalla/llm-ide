@@ -6,7 +6,7 @@
 
 **Architecture:** `RegressionRunner` is a `@MainActor ObservableObject` service that iterates `<repo>/graphify-out/memory/bugs/*.md`, filters to `status == .fixed`, sends each `prompt` through `api.codeAssist`, and computes a per-bug verdict via normalised-whitespace exact match against the answer the bug captured. Verdicts publish to the new `RegressionView`. Auto-trigger lives in `AppShell` on launch (compares `Bundle.main` short version to `config.lastSeenAppVersion`). A new sidebar section `regression` sits under **Explore** alongside Graphify.
 
-**Tech Stack:** Swift 5.9 / SwiftUI / existing `MeetNotesAPIClient`.
+**Tech Stack:** Swift 5.9 / SwiftUI / existing `LlmIdeAPIClient`.
 
 **Spec:** [docs/superpowers/specs/2026-05-24-agent-memory-and-feedback-design.md §D](../specs/2026-05-24-agent-memory-and-feedback-design.md).
 
@@ -18,38 +18,38 @@
 
 | Path | Responsibility |
 |---|---|
-| `mac/Sources/MeetNotesMac/Services/RegressionRunner.swift` | Driver — iterates fixed bugs, invokes the agent, computes verdicts. Pure logic + state; no SwiftUI. |
-| `mac/Sources/MeetNotesMac/Views/Regression/RegressionView.swift` | The list view + diff sheet. |
-| `mac/Tests/MeetNotesMacTests/RegressionRunnerTests.swift` | Verdict-comparison logic + iteration over a fake prompter. |
+| `mac/Sources/LlmIdeMac/Services/RegressionRunner.swift` | Driver — iterates fixed bugs, invokes the agent, computes verdicts. Pure logic + state; no SwiftUI. |
+| `mac/Sources/LlmIdeMac/Views/Regression/RegressionView.swift` | The list view + diff sheet. |
+| `mac/Tests/LlmIdeMacTests/RegressionRunnerTests.swift` | Verdict-comparison logic + iteration over a fake prompter. |
 
 **Modify:**
 
 | Path | Why |
 |---|---|
-| `mac/Sources/MeetNotesMac/Services/ShellState.swift` | Add `.regression` case + label + icon + tint + userHideable entry. |
-| `mac/Sources/MeetNotesMac/Views/Shell/SidebarView.swift` | Add `.regression` row under the **Explore** group (next to Graphify). |
-| `mac/Sources/MeetNotesMac/Views/AppShell.swift` | Route `.regression` → `RegressionView`. Wire auto-trigger on launch. |
-| `mac/Sources/MeetNotesMac/Models/Config.swift` | Add `lastSeenAppVersion: String` persisted to UserDefaults. |
+| `mac/Sources/LlmIdeMac/Services/ShellState.swift` | Add `.regression` case + label + icon + tint + userHideable entry. |
+| `mac/Sources/LlmIdeMac/Views/Shell/SidebarView.swift` | Add `.regression` row under the **Explore** group (next to Graphify). |
+| `mac/Sources/LlmIdeMac/Views/AppShell.swift` | Route `.regression` → `RegressionView`. Wire auto-trigger on launch. |
+| `mac/Sources/LlmIdeMac/Models/Config.swift` | Add `lastSeenAppVersion: String` persisted to UserDefaults. |
 
 ---
 
 ## Task 1: `RegressionRunner` + verdict logic
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Services/RegressionRunner.swift`
-- Create: `mac/Tests/MeetNotesMacTests/RegressionRunnerTests.swift`
+- Create: `mac/Sources/LlmIdeMac/Services/RegressionRunner.swift`
+- Create: `mac/Tests/LlmIdeMacTests/RegressionRunnerTests.swift`
 
 - [ ] **Step 1: Write the tests**
 
 ```swift
-// mac/Tests/MeetNotesMacTests/RegressionRunnerTests.swift
+// mac/Tests/LlmIdeMacTests/RegressionRunnerTests.swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 @MainActor
 struct RegressionRunnerTests {
-    /// Tiny stand-in for MeetNotesAPIClient so the runner can be
+    /// Tiny stand-in for LlmIdeAPIClient so the runner can be
     /// tested without hitting the network. Keyed by prompt → reply.
     final class FakePrompter: RegressionPrompter {
         var replies: [String: String] = [:]
@@ -146,7 +146,7 @@ struct RegressionRunnerTests {
 - [ ] **Step 2: Implement `RegressionRunner`**
 
 ```swift
-// mac/Sources/MeetNotesMac/Services/RegressionRunner.swift
+// mac/Sources/LlmIdeMac/Services/RegressionRunner.swift
 //
 // Phase D driver. Iterates all `status: fixed` BugReports under
 // <repo>/graphify-out/memory/bugs/, re-asks the agent each
@@ -156,12 +156,12 @@ struct RegressionRunnerTests {
 //
 // The agent invocation is abstracted via the RegressionPrompter
 // protocol so tests can swap in a deterministic fake (and so we
-// can later replace MeetNotesAPIClient without touching this file).
+// can later replace LlmIdeAPIClient without touching this file).
 
 import Foundation
 
 /// Minimal interface the runner needs. Production binds this to
-/// `MeetNotesAPIClient.codeAssist`; tests bind a fake.
+/// `LlmIdeAPIClient.codeAssist`; tests bind a fake.
 protocol RegressionPrompter: AnyObject {
     func ask(prompt: String) async throws -> String
 }
@@ -250,16 +250,16 @@ final class RegressionRunner: ObservableObject {
     }
 }
 
-/// Production adapter — binds the protocol to MeetNotesAPIClient.
+/// Production adapter — binds the protocol to LlmIdeAPIClient.
 /// Lives next to the runner so callers don't reach into the API
 /// surface directly.
 final class CodeAssistPrompter: RegressionPrompter {
-    let api: MeetNotesAPIClient
+    let api: LlmIdeAPIClient
     let language: String
     let model: String?
     let agent: String
 
-    init(api: MeetNotesAPIClient, language: String = "en",
+    init(api: LlmIdeAPIClient, language: String = "en",
          model: String? = nil, agent: String = "claude_code") {
         self.api = api
         self.language = language
@@ -290,7 +290,7 @@ swift test --filter RegressionRunnerTests
 - [ ] **Step 4: Commit**
 
 ```
-git add mac/Sources/MeetNotesMac/Services/RegressionRunner.swift mac/Tests/MeetNotesMacTests/RegressionRunnerTests.swift
+git add mac/Sources/LlmIdeMac/Services/RegressionRunner.swift mac/Tests/LlmIdeMacTests/RegressionRunnerTests.swift
 git commit -m "feat(memory): RegressionRunner — re-ask fixed bugs and flag drift"
 ```
 
@@ -299,8 +299,8 @@ git commit -m "feat(memory): RegressionRunner — re-ask fixed bugs and flag dri
 ## Task 2: Sidebar entry + route
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Services/ShellState.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/Shell/SidebarView.swift`
+- Modify: `mac/Sources/LlmIdeMac/Services/ShellState.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/Shell/SidebarView.swift`
 
 - [ ] **Step 1: Add `.regression` to `ShellState.Section`**
 
@@ -357,9 +357,9 @@ Skip committing here; defer to Task 3's combined commit.
 ## Task 3: Route + auto-trigger
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Models/Config.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/AppShell.swift`
-- Create: `mac/Sources/MeetNotesMac/Views/Regression/RegressionView.swift`
+- Modify: `mac/Sources/LlmIdeMac/Models/Config.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/AppShell.swift`
+- Create: `mac/Sources/LlmIdeMac/Views/Regression/RegressionView.swift`
 
 - [ ] **Step 1: Add `lastSeenAppVersion` to AppConfig**
 
@@ -384,10 +384,10 @@ Initialise in the `init`:
 Run:
 
 ```
-mkdir -p mac/Sources/MeetNotesMac/Views/Regression
+mkdir -p mac/Sources/LlmIdeMac/Views/Regression
 ```
 
-Create `mac/Sources/MeetNotesMac/Views/Regression/RegressionView.swift`:
+Create `mac/Sources/LlmIdeMac/Views/Regression/RegressionView.swift`:
 
 ```swift
 // Phase D view — lists every fixed bug and the verdict of re-asking
@@ -398,7 +398,7 @@ Create `mac/Sources/MeetNotesMac/Views/Regression/RegressionView.swift`:
 import SwiftUI
 
 struct RegressionView: View {
-    let api: MeetNotesAPIClient
+    let api: LlmIdeAPIClient
 
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
@@ -407,7 +407,7 @@ struct RegressionView: View {
 
     @State private var inspectURL: URL?
 
-    init(api: MeetNotesAPIClient) {
+    init(api: LlmIdeAPIClient) {
         self.api = api
         let prompter = CodeAssistPrompter(api: api, agent: "claude_code")
         _runner = StateObject(wrappedValue: RegressionRunner(prompter: prompter))
@@ -656,11 +656,11 @@ Expected: `Build complete!`.
 - [ ] **Step 6: Commit (combined with Task 2)**
 
 ```
-git add mac/Sources/MeetNotesMac/Services/ShellState.swift \
-        mac/Sources/MeetNotesMac/Views/Shell/SidebarView.swift \
-        mac/Sources/MeetNotesMac/Views/AppShell.swift \
-        mac/Sources/MeetNotesMac/Views/Regression/RegressionView.swift \
-        mac/Sources/MeetNotesMac/Models/Config.swift
+git add mac/Sources/LlmIdeMac/Services/ShellState.swift \
+        mac/Sources/LlmIdeMac/Views/Shell/SidebarView.swift \
+        mac/Sources/LlmIdeMac/Views/AppShell.swift \
+        mac/Sources/LlmIdeMac/Views/Regression/RegressionView.swift \
+        mac/Sources/LlmIdeMac/Models/Config.swift
 git commit -m "feat(memory): Regression sidebar + view, lastSeenAppVersion gate
 
 Phase D.2 + D.3. New 'Regression' section under Explore. The view
@@ -693,7 +693,7 @@ Expected: `2` (same two pre-existing unrelated failures).
 - [ ] **Step 3: Manual smoke**
 
 ```
-./build_app.sh && pkill -f MeetNotesMac.app; sleep 1; open -n MeetNotesMac.app
+./build_app.sh && pkill -f LlmIdeMac.app; sleep 1; open -n LlmIdeMac.app
 ```
 
 1. With an active repo selected, file a bug from Code Assistant; in Memory tab flip it to **Fixed**.

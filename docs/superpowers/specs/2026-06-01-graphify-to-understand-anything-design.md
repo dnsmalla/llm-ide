@@ -6,7 +6,7 @@
 
 ## Summary
 
-Replace the graphify CLI and its integration throughout the meet-notes system
+Replace the graphify CLI and its integration throughout the llm-ide system
 with [Understand-Anything](https://github.com/Lum1104/Understand-Anything)
 (UA). The migration uses an adapter-layer strategy: the internal `CGData` /
 `CGNode` / `CGEdge` types remain the common interface consumed by all SwiftUI
@@ -86,7 +86,7 @@ labels, or strings. These consume `CGData` and need only cosmetic renames:
 - `Config.swift` — `graphifyBinaryOverride` -> `uaBinaryOverride`
 - `PathValidator.swift` — validate `.understand-anything/` directory
 - `Project.swift` — path references
-- `MeetNotesMacApp.swift` — initialization
+- `LlmIdeMacApp.swift` — initialization
 - `AppShell.swift` — navigation
 - `SidebarView.swift` — nav label "Graphify" -> "Code Graph"
 - `ShellState.swift` — state references
@@ -269,7 +269,7 @@ table applied before mapping.
 ## UAStore
 
 Same disk-cache pattern as GraphifyStore:
-- Cache directory: `~/Library/Application Support/MeetNotesMac/CodeGraph/<sha256>/`
+- Cache directory: `~/Library/Application Support/LlmIdeMac/CodeGraph/<sha256>/`
 - Files: `knowledge-graph.json` + `meta.json`
 - `RunMetadata.graphifyVersion` renamed to `RunMetadata.toolVersion`
 - `invalidate(for:)` unchanged

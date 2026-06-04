@@ -14,7 +14,7 @@
 
 ## Prerequisites and conventions
 
-**Working directory.** `/Users/dinesh.malla/Desktop/meet-notes`. Branch `main` (this work lands as a feature branch — first task creates it).
+**Working directory.** `/Users/dinesh.malla/Desktop/llm-ide`. Branch `main` (this work lands as a feature branch — first task creates it).
 
 **Commit cadence.** Each task ends with one commit. Conventional-commit prefixes: `feat(agent)`, `feat(mac)`, `test`, `docs`, `chore`. Never amend, never force-push.
 
@@ -43,9 +43,9 @@ extension/
     ├── agent-tool-loop.test.mjs              # NEW — fence parser + dispatch tests
     └── agent-code-assist.test.mjs            # NEW — end-to-end route test with mocked runClaude
 
-mac/Sources/MeetNotesMac/
+mac/Sources/LlmIdeMac/
 ├── Services/API/
-│   └── MeetNotesAPIClient+CodeAssist.swift   # MODIFY — add agentContext + pendingTool to request/response
+│   └── LlmIdeAPIClient+CodeAssist.swift   # MODIFY — add agentContext + pendingTool to request/response
 ├── Models/
 │   └── AgentTypes.swift                      # NEW — AgentContext + PendingTool models
 ├── Views/
@@ -55,7 +55,7 @@ mac/Sources/MeetNotesMac/
 │   │   └── CreateGitLabIssueSheet.swift      # NEW — editable confirm sheet
 └── (existing files untouched)
 
-mac/Tests/MeetNotesMacTests/
+mac/Tests/LlmIdeMacTests/
 └── AgentContextTests.swift                   # NEW — agentContext composition tests
 
 docs/
@@ -83,7 +83,7 @@ Goal: a working agent loop on the server that loads skill files, composes the pr
 - [ ] **Step 1: Create the feature branch**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git checkout main
 git pull
 git switch -c feat/agent-tools
@@ -107,7 +107,7 @@ The skill loader needs YAML frontmatter parsing. We deliberately do not roll our
 - [ ] **Step 3: Commit if package.json changed**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git status --short
 # If extension/package.json or package-lock.json changed:
 git add extension/package.json extension/package-lock.json
@@ -204,7 +204,7 @@ test('loader returns empty base when _base.md is missing', () => {
 - [ ] **Step 2: Run tests to confirm they fail**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 node --test tests/agent-skills.test.mjs 2>&1 | tail -10
 ```
 
@@ -355,7 +355,7 @@ git commit -m "feat(agent): skill loader with frontmatter validation"
 Create `extension/agent-skills/_base.md`:
 
 ```markdown
-You are the Code Assistant inside Meet Notes. You help the user understand
+You are the Code Assistant inside LLM IDE. You help the user understand
 their codebase, search their meeting notes, and act on their behalf when
 they ask for something concrete (e.g. filing an issue).
 
@@ -523,7 +523,7 @@ GitLab.
 - [ ] **Step 4: Verify the loader parses them**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 node -e "
   const { loadSkills } = await import('./server/agent-skills.mjs');
   const r = loadSkills('./agent-skills');
@@ -1310,7 +1310,7 @@ Find the `if (req.method === 'POST' && req.url === '/code-assist')` block. Repla
 - [ ] **Step 4: Type-check + tests**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 npm run type-check 2>&1 | tail -5
 npm test 2>&1 | tail -5
 ```
@@ -1321,8 +1321,8 @@ Expected: type-check exit 0; tests pass except the pre-existing `exporter.test.m
 
 ```bash
 node -e "
-  process.env.MEETNOTES_JWT_SECRET ||= 'dev';
-  process.env.MEETNOTES_VAULT_KEY  ||= 'dev';
+  process.env.LLMIDE_JWT_SECRET ||= 'dev';
+  process.env.LLMIDE_VAULT_KEY  ||= 'dev';
   import('./server/agent-skills.mjs').then(async ({ loadSkills }) => {
     const r = loadSkills('./agent-skills');
     console.log('warnings:', r.warnings);
@@ -1336,7 +1336,7 @@ Expected: `warnings: []`, `skills: [ 'search-kb', 'create-gitlab-issue' ]`.
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git add extension/server/ai-routes.mjs
 git commit -m "feat(agent): wire /code-assist into the agent loop when agentContext present"
 ```
@@ -1376,7 +1376,7 @@ test('full loop: real skills, mocked claude — write tool returns pendingTool',
     agentContext: {
       base,
       activeProject: { name: 'notes-extension', url: 'https://gitlab.com/example/notes', defaultBranch: 'main' },
-      indexedRepos: [{ name: 'notes-extension', path: '~/Developer/MeetNotes/notes-extension' }],
+      indexedRepos: [{ name: 'notes-extension', path: '~/Developer/LLM IDE/notes-extension' }],
     },
     runClaude: fakeClaude,
     kb: { search: () => [] },
@@ -1435,7 +1435,7 @@ test('full loop: agent honours (none configured) and does not call create-gitlab
 - [ ] **Step 2: Run + verify**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 node --test tests/agent-code-assist.test.mjs 2>&1 | tail -5
 ```
 
@@ -1452,7 +1452,7 @@ Expected: all tests except `exporter.test.mjs` pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git add extension/tests/agent-code-assist.test.mjs
 git commit -m "test(agent): end-to-end loop with real skills and mocked claude"
 ```
@@ -1470,18 +1470,18 @@ Goal: the Mac Code Assistant attaches `agentContext` to every request, renders a
 ### Task B1: Extend the API client request + response models — TDD
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Services/API/MeetNotesAPIClient+CodeAssist.swift`
-- Create: `mac/Sources/MeetNotesMac/Models/AgentTypes.swift`
-- Create: `mac/Tests/MeetNotesMacTests/AgentTypesTests.swift`
+- Modify: `mac/Sources/LlmIdeMac/Services/API/LlmIdeAPIClient+CodeAssist.swift`
+- Create: `mac/Sources/LlmIdeMac/Models/AgentTypes.swift`
+- Create: `mac/Tests/LlmIdeMacTests/AgentTypesTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
-Create `mac/Tests/MeetNotesMacTests/AgentTypesTests.swift`:
+Create `mac/Tests/LlmIdeMacTests/AgentTypesTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 @Test func agentContextEncodesEmptyFieldsAsNullAndEmptyArray() throws {
     let ctx = AgentContext(activeProject: nil, indexedRepos: [])
@@ -1494,7 +1494,7 @@ import Foundation
 @Test func agentContextEncodesActiveProject() throws {
     let ctx = AgentContext(
         activeProject: .init(name: "notes-extension", url: "https://gitlab.com/x/notes", defaultBranch: "main"),
-        indexedRepos: [.init(name: "notes-extension", path: "~/Developer/MeetNotes/notes-extension")]
+        indexedRepos: [.init(name: "notes-extension", path: "~/Developer/LLM IDE/notes-extension")]
     )
     let data = try JSONEncoder().encode(ctx)
     let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
@@ -1527,7 +1527,7 @@ import Foundation
 - [ ] **Step 2: Run — must fail to compile**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift test --filter AgentTypesTests 2>&1 | tail -10
 ```
 
@@ -1535,7 +1535,7 @@ Expected: compile error ("AgentContext / PendingTool / createIssueArgs not in sc
 
 - [ ] **Step 3: Create the model types**
 
-Create `mac/Sources/MeetNotesMac/Models/AgentTypes.swift`:
+Create `mac/Sources/LlmIdeMac/Models/AgentTypes.swift`:
 
 ```swift
 import Foundation
@@ -1646,7 +1646,7 @@ struct AnyCodable: Codable, Equatable {
 
 - [ ] **Step 4: Extend the API client to send + receive the new fields**
 
-Modify `mac/Sources/MeetNotesMac/Services/API/MeetNotesAPIClient+CodeAssist.swift`. Replace `CodeAssistRequest` and `CodeAssistResponse`:
+Modify `mac/Sources/LlmIdeMac/Services/API/LlmIdeAPIClient+CodeAssist.swift`. Replace `CodeAssistRequest` and `CodeAssistResponse`:
 
 ```swift
     struct CodeAssistRequest: Encodable {
@@ -1710,10 +1710,10 @@ Expected: clean build. If `codeAssist(...)` calls elsewhere fail to compile beca
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
-git add mac/Sources/MeetNotesMac/Models/AgentTypes.swift \
-        mac/Sources/MeetNotesMac/Services/API/MeetNotesAPIClient+CodeAssist.swift \
-        mac/Tests/MeetNotesMacTests/AgentTypesTests.swift
+cd /Users/dinesh.malla/Desktop/llm-ide
+git add mac/Sources/LlmIdeMac/Models/AgentTypes.swift \
+        mac/Sources/LlmIdeMac/Services/API/LlmIdeAPIClient+CodeAssist.swift \
+        mac/Tests/LlmIdeMacTests/AgentTypesTests.swift
 git commit -m "feat(mac): AgentContext + PendingTool models, codeAssist API extension"
 ```
 
@@ -1722,11 +1722,11 @@ git commit -m "feat(mac): AgentContext + PendingTool models, codeAssist API exte
 ### Task B2: Compose `agentContext` in CodeAssistantPanel + send it
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Views/CodeAssistantPanel.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift`
 
 - [ ] **Step 1: Locate the send() body**
 
-Open `mac/Sources/MeetNotesMac/Views/CodeAssistantPanel.swift`. Find the `send()` function (around line 611 in the current file). Identify the existing `try await api.codeAssist(...)` call and the environment objects the panel already has — it should already have `@EnvironmentObject var config: AppConfig` and `@Environment(LibraryItemStore.self) private var library` (if not, add them).
+Open `mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift`. Find the `send()` function (around line 611 in the current file). Identify the existing `try await api.codeAssist(...)` call and the environment objects the panel already has — it should already have `@EnvironmentObject var config: AppConfig` and `@Environment(LibraryItemStore.self) private var library` (if not, add them).
 
 - [ ] **Step 2: Add agentContext composition + send**
 
@@ -1799,7 +1799,7 @@ Add `@State private var pendingTool: PendingTool?` near the top of the struct, r
 - [ ] **Step 3: Build**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | tail -10
 ```
 
@@ -1808,8 +1808,8 @@ Expected: clean build. If `library` or `config` aren't already in scope, add the
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
-git add mac/Sources/MeetNotesMac/Views/CodeAssistantPanel.swift
+cd /Users/dinesh.malla/Desktop/llm-ide
+git add mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift
 git commit -m "feat(mac): compose agentContext from config + LibraryItemStore and send it"
 ```
 
@@ -1818,13 +1818,13 @@ git commit -m "feat(mac): compose agentContext from config + LibraryItemStore an
 ### Task B3: PendingActionCard view
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Views/Agent/PendingActionCard.swift`
+- Create: `mac/Sources/LlmIdeMac/Views/Agent/PendingActionCard.swift`
 
 A compact card rendered under the assistant bubble. Shows the tool name, title (for create-gitlab-issue), and a description preview. Tapping opens the editable sheet (wired in Task B5).
 
 - [ ] **Step 1: Write the view**
 
-Create `mac/Sources/MeetNotesMac/Views/Agent/PendingActionCard.swift`:
+Create `mac/Sources/LlmIdeMac/Views/Agent/PendingActionCard.swift`:
 
 ```swift
 import SwiftUI
@@ -1894,7 +1894,7 @@ struct PendingActionCard: View {
 - [ ] **Step 2: Build**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | tail -5
 ```
 
@@ -1903,8 +1903,8 @@ Expected: clean build.
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
-git add mac/Sources/MeetNotesMac/Views/Agent/PendingActionCard.swift
+cd /Users/dinesh.malla/Desktop/llm-ide
+git add mac/Sources/LlmIdeMac/Views/Agent/PendingActionCard.swift
 git commit -m "feat(mac): PendingActionCard for write-tool previews"
 ```
 
@@ -1913,13 +1913,13 @@ git commit -m "feat(mac): PendingActionCard for write-tool previews"
 ### Task B4: CreateGitLabIssueSheet view
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Views/Agent/CreateGitLabIssueSheet.swift`
+- Create: `mac/Sources/LlmIdeMac/Views/Agent/CreateGitLabIssueSheet.swift`
 
 The editable confirm sheet. Bindings for title, description, labels (comma-separated string for v1), assignee. Read-only "Project" line.
 
 - [ ] **Step 1: Write the view**
 
-Create `mac/Sources/MeetNotesMac/Views/Agent/CreateGitLabIssueSheet.swift`:
+Create `mac/Sources/LlmIdeMac/Views/Agent/CreateGitLabIssueSheet.swift`:
 
 ```swift
 import SwiftUI
@@ -2053,7 +2053,7 @@ struct CreateGitLabIssueSheet: View {
 - [ ] **Step 2: Build**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | tail -5
 ```
 
@@ -2062,8 +2062,8 @@ Expected: clean build.
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
-git add mac/Sources/MeetNotesMac/Views/Agent/CreateGitLabIssueSheet.swift
+cd /Users/dinesh.malla/Desktop/llm-ide
+git add mac/Sources/LlmIdeMac/Views/Agent/CreateGitLabIssueSheet.swift
 git commit -m "feat(mac): editable confirm sheet for create-gitlab-issue"
 ```
 
@@ -2072,7 +2072,7 @@ git commit -m "feat(mac): editable confirm sheet for create-gitlab-issue"
 ### Task B5: Wire card + sheet into CodeAssistantPanel; execute issue creation
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Views/CodeAssistantPanel.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift`
 
 Render the card next to the last assistant message when `pendingTool != nil`. Open the sheet on tap. On confirm, call `GitLabClient.createIssue(...)`, update history with a synthetic user turn, and re-call `/code-assist` so the agent can acknowledge.
 
@@ -2180,16 +2180,16 @@ NB: assignee resolution (username → user id) is deferred. v1 ignores `args.ass
 - [ ] **Step 3: Build**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | tail -10
 ```
 
-Expected: clean build. If `GitLabClient.createIssue(...)`'s payload shape differs from the assumed names (`title`, `description`, `labels`, `assignee_id`), match the actual struct exactly (inspect `mac/Sources/MeetNotesMac/Services/GitLabClient.swift`) and adjust.
+Expected: clean build. If `GitLabClient.createIssue(...)`'s payload shape differs from the assumed names (`title`, `description`, `labels`, `assignee_id`), match the actual struct exactly (inspect `mac/Sources/LlmIdeMac/Services/GitLabClient.swift`) and adjust.
 
 - [ ] **Step 4: Visual smoke test**
 
 ```bash
-pkill -9 -f MeetNotesMac 2>/dev/null; sleep 1
+pkill -9 -f LlmIdeMac 2>/dev/null; sleep 1
 cd mac && ./build_app.sh 2>&1 | tail -4
 ```
 
@@ -2198,8 +2198,8 @@ Then in the app: ensure backend is running, type a prompt like "can you file an 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
-git add mac/Sources/MeetNotesMac/Views/CodeAssistantPanel.swift
+cd /Users/dinesh.malla/Desktop/llm-ide
+git add mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift
 git commit -m "feat(mac): render PendingActionCard, open confirm sheet, wire GitLab createIssue + follow-up"
 ```
 
@@ -2268,7 +2268,7 @@ Body: `# <name>`, `## When to use`, `## Call shape`, `## Result shape` (read onl
 
 ### 4. Mac client side (write tools only)
 
-Add a confirm sheet under `mac/Sources/MeetNotesMac/Views/Agent/` modelled on `CreateGitLabIssueSheet.swift`. Wire it from `CodeAssistantPanel.swift` keyed on `pendingTool.name`.
+Add a confirm sheet under `mac/Sources/LlmIdeMac/Views/Agent/` modelled on `CreateGitLabIssueSheet.swift`. Wire it from `CodeAssistantPanel.swift` keyed on `pendingTool.name`.
 
 ### 5. Restart and test
 
@@ -2417,7 +2417,7 @@ The Code Assistant uses the fence convention over `claude -p`. The server parses
 - [ ] **Step 2: Build the docs (verify the new pages render)**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 .venv-docs/bin/python docs/_scripts/check_frontmatter.py docs && echo "frontmatter OK"
 .venv-docs/bin/mkdocs build 2>&1 | tail -3
 ```
@@ -2440,7 +2440,7 @@ After Phase A + B + C are complete:
 - [ ] **Step 1: Run the full server test suite**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 npm run type-check 2>&1 | tail -3
 npm test 2>&1 | tail -10
 ```
@@ -2450,7 +2450,7 @@ Expected: type-check exit 0; all tests pass except the pre-existing `exporter.te
 - [ ] **Step 2: Run the Mac test suite**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift test --filter AgentTypesTests 2>&1 | tail -5
 swift build 2>&1 | tail -3
 ```
@@ -2467,7 +2467,7 @@ Start the server from Settings → Backend. In the Code Assistant:
 - [ ] **Step 4: Push**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git log --oneline main..feat/agent-tools | head -20
 git push -u origin feat/agent-tools
 ```

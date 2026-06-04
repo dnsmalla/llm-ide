@@ -1,6 +1,6 @@
 name: mac-ci
 
-# Build and test the MeetNotesMac app on every push / PR that touches it.
+# Build and test the LlmIdeMac app on every push / PR that touches it.
 # Foundational gate so broken builds or failing tests never reach main.
 
 on:

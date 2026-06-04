@@ -22,7 +22,7 @@ without rework.
 
 ## File Structure
 
-### New files — `mac/Sources/MeetNotesMac/CodeNotes/`
+### New files — `mac/Sources/LlmIdeMac/CodeNotes/`
 
 | File | Responsibility |
 |------|---------------|
@@ -43,12 +43,12 @@ without rework.
 
 | File | Change |
 |------|--------|
-| `mac/Sources/MeetNotesMac/CodeGraph/ProcessLauncher.swift` | Add `currentDirectory` parameter |
-| `mac/Tests/MeetNotesMacTests/*` (any with a MockLauncher) | Update mock to new signature |
-| `mac/Sources/MeetNotesMac/Views/CodeGraph/UAGraphView.swift` | Add `codeNotes` mode + Generate button + progress |
+| `mac/Sources/LlmIdeMac/CodeGraph/ProcessLauncher.swift` | Add `currentDirectory` parameter |
+| `mac/Tests/LlmIdeMacTests/*` (any with a MockLauncher) | Update mock to new signature |
+| `mac/Sources/LlmIdeMac/Views/CodeGraph/UAGraphView.swift` | Add `codeNotes` mode + Generate button + progress |
 | `mac/.gitignore` | Add `.code-notes/` |
 
-### New test files — `mac/Tests/MeetNotesMacTests/`
+### New test files — `mac/Tests/LlmIdeMacTests/`
 
 `FingerprintTests.swift`, `BatchPlannerTests.swift`, `CodeNoteWriterTests.swift`, `CodeNoteParserTests.swift`, `EdgeRecoveryTests.swift`, `IndexWriterTests.swift`, `ScanPhaseTests.swift`, `AnalyzePhaseTests.swift`, `CodeNotePipelineIntegrationTests.swift`
 
@@ -59,7 +59,7 @@ without rework.
 The agent must run with its working directory set to the repo (for `git ls-files`, ripgrep). The current `ProcessLauncher` has no cwd parameter.
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/CodeGraph/ProcessLauncher.swift`
+- Modify: `mac/Sources/LlmIdeMac/CodeGraph/ProcessLauncher.swift`
 - Modify: any test file defining a `MockLauncher` conforming to `ProcessLauncher`
 
 - [ ] **Step 1: Find all ProcessLauncher conformances**
@@ -169,7 +169,7 @@ Expected: `Build complete!` (fix any conformance errors by adding the new parame
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeGraph/ProcessLauncher.swift mac/Tests/MeetNotesMacTests
+git add mac/Sources/LlmIdeMac/CodeGraph/ProcessLauncher.swift mac/Tests/LlmIdeMacTests
 git commit -m "feat(codegraph): add currentDirectory to ProcessLauncher for agent cwd"
 ```
 
@@ -178,8 +178,8 @@ git commit -m "feat(codegraph): add currentDirectory to ProcessLauncher for agen
 ## Task 2: CodeNoteError and ScanResult models
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/CodeNoteError.swift`
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/ScanResult.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/CodeNoteError.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/ScanResult.swift`
 
 - [ ] **Step 1: Create CodeNoteError.swift**
 
@@ -246,7 +246,7 @@ Expected: `Build complete!`
 - [ ] **Step 4: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeNotes/CodeNoteError.swift mac/Sources/MeetNotesMac/CodeNotes/ScanResult.swift
+git add mac/Sources/LlmIdeMac/CodeNotes/CodeNoteError.swift mac/Sources/LlmIdeMac/CodeNotes/ScanResult.swift
 git commit -m "feat(codenotes): add CodeNoteError and ScanResult models"
 ```
 
@@ -255,15 +255,15 @@ git commit -m "feat(codenotes): add CodeNoteError and ScanResult models"
 ## Task 3: Fingerprint + FingerprintStore + change classifier
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/Fingerprint.swift`
-- Test: `mac/Tests/MeetNotesMacTests/FingerprintTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/Fingerprint.swift`
+- Test: `mac/Tests/LlmIdeMacTests/FingerprintTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct FingerprintTests {
     @Test func hashIsStableForSameContent() {
@@ -365,7 +365,7 @@ Expected: PASS (4 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeNotes/Fingerprint.swift mac/Tests/MeetNotesMacTests/FingerprintTests.swift
+git add mac/Sources/LlmIdeMac/CodeNotes/Fingerprint.swift mac/Tests/LlmIdeMacTests/FingerprintTests.swift
 git commit -m "feat(codenotes): add Fingerprint hashing, store, and change classifier"
 ```
 
@@ -374,14 +374,14 @@ git commit -m "feat(codenotes): add Fingerprint hashing, store, and change class
 ## Task 4: BatchPlanner — connected-components batching + neighbor map
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/BatchPlanner.swift`
-- Test: `mac/Tests/MeetNotesMacTests/BatchPlannerTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/BatchPlanner.swift`
+- Test: `mac/Tests/LlmIdeMacTests/BatchPlannerTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import Testing
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct BatchPlannerTests {
     @Test func importConnectedFilesShareABatch() {
@@ -513,7 +513,7 @@ Expected: PASS (4 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeNotes/BatchPlanner.swift mac/Tests/MeetNotesMacTests/BatchPlannerTests.swift
+git add mac/Sources/LlmIdeMac/CodeNotes/BatchPlanner.swift mac/Tests/LlmIdeMacTests/BatchPlannerTests.swift
 git commit -m "feat(codenotes): add BatchPlanner with connected-components batching + neighbor map"
 ```
 
@@ -522,16 +522,16 @@ git commit -m "feat(codenotes): add BatchPlanner with connected-components batch
 ## Task 5: CodeNote model + CodeNoteWriter (YAML round-trip)
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/CodeNote.swift`
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/CodeNoteWriter.swift`
-- Test: `mac/Tests/MeetNotesMacTests/CodeNoteWriterTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/CodeNote.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/CodeNoteWriter.swift`
+- Test: `mac/Tests/LlmIdeMacTests/CodeNoteWriterTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct CodeNoteWriterTests {
     private func sampleNote() -> CodeNote {
@@ -736,7 +736,7 @@ Expected: PASS (4 tests).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeNotes/CodeNote.swift mac/Sources/MeetNotesMac/CodeNotes/CodeNoteWriter.swift mac/Tests/MeetNotesMacTests/CodeNoteWriterTests.swift
+git add mac/Sources/LlmIdeMac/CodeNotes/CodeNote.swift mac/Sources/LlmIdeMac/CodeNotes/CodeNoteWriter.swift mac/Tests/LlmIdeMacTests/CodeNoteWriterTests.swift
 git commit -m "feat(codenotes): add CodeNote model + CodeNoteWriter YAML round-trip"
 ```
 
@@ -747,14 +747,14 @@ git commit -m "feat(codenotes): add CodeNote model + CodeNoteWriter YAML round-t
 Reuses the existing `UAParser.mapNodeType` / `UAParser.mapEdgeType` (already `public static`) for string→enum mapping, so we don't duplicate alias tables.
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/CodeNoteParser.swift`
-- Test: `mac/Tests/MeetNotesMacTests/CodeNoteParserTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/CodeNoteParser.swift`
+- Test: `mac/Tests/LlmIdeMacTests/CodeNoteParserTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import Testing
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct CodeNoteParserTests {
     private func note(_ id: String, kind: String, links: [CodeNote.Link]) -> CodeNote {
@@ -881,7 +881,7 @@ Expected: PASS (4 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeNotes/CodeNoteParser.swift mac/Tests/MeetNotesMacTests/CodeNoteParserTests.swift
+git add mac/Sources/LlmIdeMac/CodeNotes/CodeNoteParser.swift mac/Tests/LlmIdeMacTests/CodeNoteParserTests.swift
 git commit -m "feat(codenotes): add CodeNoteParser deriving CGData from note links"
 ```
 
@@ -890,14 +890,14 @@ git commit -m "feat(codenotes): add CodeNoteParser deriving CGData from note lin
 ## Task 7: EdgeRecovery — re-add dropped import edges
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/EdgeRecovery.swift`
-- Test: `mac/Tests/MeetNotesMacTests/EdgeRecoveryTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/EdgeRecovery.swift`
+- Test: `mac/Tests/LlmIdeMacTests/EdgeRecoveryTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import Testing
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct EdgeRecoveryTests {
     @Test func reAddsMissingImportEdges() {
@@ -987,7 +987,7 @@ Expected: PASS (3 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeNotes/EdgeRecovery.swift mac/Tests/MeetNotesMacTests/EdgeRecoveryTests.swift
+git add mac/Sources/LlmIdeMac/CodeNotes/EdgeRecovery.swift mac/Tests/LlmIdeMacTests/EdgeRecoveryTests.swift
 git commit -m "feat(codenotes): add EdgeRecovery to re-add dropped import edges"
 ```
 
@@ -996,14 +996,14 @@ git commit -m "feat(codenotes): add EdgeRecovery to re-add dropped import edges"
 ## Task 8: IndexWriter — map of content
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/IndexWriter.swift`
-- Test: `mac/Tests/MeetNotesMacTests/IndexWriterTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/IndexWriter.swift`
+- Test: `mac/Tests/LlmIdeMacTests/IndexWriterTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import Testing
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct IndexWriterTests {
     @Test func rendersStatsAndGroupsByKind() {
@@ -1083,7 +1083,7 @@ Expected: PASS (2 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeNotes/IndexWriter.swift mac/Tests/MeetNotesMacTests/IndexWriterTests.swift
+git add mac/Sources/LlmIdeMac/CodeNotes/IndexWriter.swift mac/Tests/LlmIdeMacTests/IndexWriterTests.swift
 git commit -m "feat(codenotes): add IndexWriter for map-of-content index.md"
 ```
 
@@ -1092,15 +1092,15 @@ git commit -m "feat(codenotes): add IndexWriter for map-of-content index.md"
 ## Task 9: ScanPhase — build prompt, launch agent, read scan.json
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/ScanPhase.swift`
-- Test: `mac/Tests/MeetNotesMacTests/ScanPhaseTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/ScanPhase.swift`
+- Test: `mac/Tests/LlmIdeMacTests/ScanPhaseTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct ScanPhaseTests {
     final class MockLauncher: ProcessLauncher, @unchecked Sendable {
@@ -1257,7 +1257,7 @@ Expected: PASS (3 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeNotes/ScanPhase.swift mac/Tests/MeetNotesMacTests/ScanPhaseTests.swift
+git add mac/Sources/LlmIdeMac/CodeNotes/ScanPhase.swift mac/Tests/LlmIdeMacTests/ScanPhaseTests.swift
 git commit -m "feat(codenotes): add ScanPhase (deterministic structure extraction)"
 ```
 
@@ -1270,15 +1270,15 @@ per the spec). There is no separate edges file — `CodeNoteParser` derives
 all edges from note links, and `EdgeRecovery` backstops dropped imports.
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/AnalyzePhase.swift`
-- Test: `mac/Tests/MeetNotesMacTests/AnalyzePhaseTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/AnalyzePhase.swift`
+- Test: `mac/Tests/LlmIdeMacTests/AnalyzePhaseTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct AnalyzePhaseTests {
     final class MockLauncher: ProcessLauncher, @unchecked Sendable {
@@ -1461,7 +1461,7 @@ Expected: PASS (3 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeNotes/AnalyzePhase.swift mac/Tests/MeetNotesMacTests/AnalyzePhaseTests.swift
+git add mac/Sources/LlmIdeMac/CodeNotes/AnalyzePhase.swift mac/Tests/LlmIdeMacTests/AnalyzePhaseTests.swift
 git commit -m "feat(codenotes): add AnalyzePhase (per-batch markdown note generation)"
 ```
 
@@ -1470,15 +1470,15 @@ git commit -m "feat(codenotes): add AnalyzePhase (per-batch markdown note genera
 ## Task 11: CodeNoteService — orchestrator
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/CodeNoteService.swift`
-- Test: `mac/Tests/MeetNotesMacTests/CodeNotePipelineIntegrationTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/CodeNoteService.swift`
+- Test: `mac/Tests/LlmIdeMacTests/CodeNotePipelineIntegrationTests.swift`
 
 - [ ] **Step 1: Write the failing integration test**
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 @MainActor
 struct CodeNotePipelineIntegrationTests {
@@ -1686,7 +1686,7 @@ Expected: all tests pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeNotes/CodeNoteService.swift mac/Tests/MeetNotesMacTests/CodeNotePipelineIntegrationTests.swift
+git add mac/Sources/LlmIdeMac/CodeNotes/CodeNoteService.swift mac/Tests/LlmIdeMacTests/CodeNotePipelineIntegrationTests.swift
 git commit -m "feat(codenotes): add CodeNoteService orchestrator + full pipeline integration test"
 ```
 
@@ -1695,7 +1695,7 @@ git commit -m "feat(codenotes): add CodeNoteService orchestrator + full pipeline
 ## Task 12: UI integration + gitignore
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Views/CodeGraph/UAGraphView.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/CodeGraph/UAGraphView.swift`
 - Modify: `mac/.gitignore`
 
 - [ ] **Step 1: Add `.code-notes/` to gitignore**
@@ -1707,7 +1707,7 @@ In `mac/.gitignore`, add a line after the `.understand-anything/` entry:
 
 - [ ] **Step 2: Read UAGraphView to find the Mode enum and run controls**
 
-Run: `cd mac && grep -n 'enum Mode\|case code\|case data\|case memory\|func run\|Button' Sources/MeetNotesMac/Views/CodeGraph/UAGraphView.swift | head -30`
+Run: `cd mac && grep -n 'enum Mode\|case code\|case data\|case memory\|func run\|Button' Sources/LlmIdeMac/Views/CodeGraph/UAGraphView.swift | head -30`
 Expected: locates the `Mode` enum and the existing run button / mode switch you'll extend.
 
 - [ ] **Step 3: Add a `codeNotes` case to the Mode enum**
@@ -1772,7 +1772,7 @@ Expected: `Build complete!` (fix property-name mismatches against the real `UAGr
 - [ ] **Step 7: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Views/CodeGraph/UAGraphView.swift mac/.gitignore
+git add mac/Sources/LlmIdeMac/Views/CodeGraph/UAGraphView.swift mac/.gitignore
 git commit -m "feat(ui): add Code Notes mode to the graph view + gitignore .code-notes/"
 ```
 
@@ -1793,11 +1793,11 @@ Expected: all tests pass (Fingerprint, BatchPlanner, CodeNoteWriter, CodeNotePar
 - [ ] **Step 3: Build the app bundle**
 
 Run: `cd mac && bash Scripts/build.sh 2>&1 | tail -3`
-Expected: `[build] ok — …/MeetNotesMac.app`
+Expected: `[build] ok — …/LlmIdeMac.app`
 
 - [ ] **Step 4: Launch and smoke-test**
 
-Run: `pkill -9 MeetNotesMac 2>/dev/null; sleep 1; open mac/MeetNotesMac.app`
+Run: `pkill -9 LlmIdeMac 2>/dev/null; sleep 1; open mac/LlmIdeMac.app`
 Verify: open a project → Code Graph section → switch to **Code Notes** mode → click **Generate Code Notes**. With an AI CLI installed it runs the pipeline (Scanning → Analyzing → Deriving) and renders the graph; the `.code-notes/notes/` folder fills with `.md` files. Without a CLI it surfaces the install hint without crashing.
 
 - [ ] **Step 5: Final commit + push**

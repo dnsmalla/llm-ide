@@ -5,7 +5,7 @@ applies_to: all
 
 # How to contribute
 
-> Conventions for committing code to Meet Notes.
+> Conventions for committing code to LLM IDE.
 
 ## Goal
 

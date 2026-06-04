@@ -6,7 +6,7 @@
 
 ## Repo
 
-- **Path:** `/Users/dinesh.malla/Desktop/meet-notes`
+- **Path:** `/Users/dinesh.malla/Desktop/llm-ide`
 - **Branches:** Work directly on `main` (this project uses a direct-to-main policy — there is no PR review). Commit per logical unit; push after each commit.
 - **Push policy:** `git push origin main` after every commit. Use HEREDOC for multi-line commit messages.
 - **Language split:**
@@ -24,14 +24,14 @@ node --check kb/db.mjs    # Syntax check a single file
 For the Mac app:
 ```
 cd mac
-swift build -c release    # Release build; emits .build/release/MeetNotesMac
-bash Scripts/build.sh     # Produces MeetNotesMac.app bundle + vendors Sparkle
+swift build -c release    # Release build; emits .build/release/LlmIdeMac
+bash Scripts/build.sh     # Produces LlmIdeMac.app bundle + vendors Sparkle
 ```
 
 For an installed-bundle launch (used to manually verify):
 ```
-pkill -f MeetNotesMac/Contents/MacOS 2>&1; sleep 1
-/Users/dinesh.malla/Desktop/meet-notes/mac/MeetNotesMac.app/Contents/MacOS/MeetNotesMac >/dev/null 2>&1 &
+pkill -f LlmIdeMac/Contents/MacOS 2>&1; sleep 1
+/Users/dinesh.malla/Desktop/llm-ide/mac/LlmIdeMac.app/Contents/MacOS/LlmIdeMac >/dev/null 2>&1 &
 ```
 
 ## Architecture pointers
@@ -39,9 +39,9 @@ pkill -f MeetNotesMac/Contents/MacOS 2>&1; sleep 1
 - **Server entry:** `extension/server.mjs`. Authentication via `server/auth.mjs`, KB routing via `kb/router.mjs`, AI/LLM routes via `server/ai-routes.mjs`.
 - **Storage:** `kb/db.mjs` is the public façade — re-exports 8 sibling modules: `personas.mjs`, `plans.mjs`, `meetings.mjs`, `sources.mjs`, `user.mjs`, `reviews.mjs`, `feedback.mjs`, `outcomes.mjs`. `db.mjs` itself keeps the shared helpers + search + findContext + deleteUserCascade.
 - **KB routes:** `kb/router.mjs` dispatches to `kb/routes/agent.mjs` / `planning.mjs` / `live.mjs` / `review.mjs`.
-- **Mac shell:** `mac/Sources/MeetNotesMac/Views/AppShell.swift` (~430 LOC) owns global state. `ShellState` controls section routing. Library tree lives in `Views/Library/`, settings in `Views/Settings/`.
-- **AutoCodeUpdateService** in `mac/Sources/MeetNotesMac/Services/` runs the hourly auto-task loop (Review Code / Doc / Conflicts / Regression).
-- **Tests:** `mac/Tests/MeetNotesMacTests/` (35 files) and `extension/tests/` (31 files). Run them after every meaningful change.
+- **Mac shell:** `mac/Sources/LlmIdeMac/Views/AppShell.swift` (~430 LOC) owns global state. `ShellState` controls section routing. Library tree lives in `Views/Library/`, settings in `Views/Settings/`.
+- **AutoCodeUpdateService** in `mac/Sources/LlmIdeMac/Services/` runs the hourly auto-task loop (Review Code / Doc / Conflicts / Regression).
+- **Tests:** `mac/Tests/LlmIdeMacTests/` (35 files) and `extension/tests/` (31 files). Run them after every meaningful change.
 
 Architecture doc: `docs/explanation/server-internals.md`.
 
@@ -76,9 +76,9 @@ Each task is independent. Run tests + commit + push after each one.
 - A user-visible status surface (alert, status banner, settings row).
 
 **Where to look first:**
-- `mac/Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift` — registry IO and CLI subprocess paths
-- `mac/Sources/MeetNotesMac/Services/ProjectStore.swift` — `try?` around bundle hydration
-- `mac/Sources/MeetNotesMac/Views/AskAgentSheet.swift` — history-load fallback
+- `mac/Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift` — registry IO and CLI subprocess paths
+- `mac/Sources/LlmIdeMac/Services/ProjectStore.swift` — `try?` around bundle hydration
+- `mac/Sources/LlmIdeMac/Views/AskAgentSheet.swift` — history-load fallback
 - `extension/server/ai-routes.mjs` — best-effort `ingestGeneratedDoc` calls
 
 **Don't change** `try?` in:
@@ -119,9 +119,9 @@ Tests under `extension/tests/scripts-backup.test.mjs` covering: happy path produ
 
 **Problem.** Storage-layer Mac code (notes folder index, ChatSession persistence, project bundle hydration) uses `try?` extensively. A silent disk-full or permissions issue leaves the user wondering why their data didn't save.
 
-**Acceptance.** In **one** representative file (`mac/Sources/MeetNotesMac/Services/Sessions/ChatSessionStore.swift` is a good candidate — verify the path), replace silent `try?` with a logged failure + a publish to a `@Published var lastIOError: String?`. Surface the error in the matching view (CodeAssistantPanel's chat session picker, for ChatSessionStore).
+**Acceptance.** In **one** representative file (`mac/Sources/LlmIdeMac/Services/Sessions/ChatSessionStore.swift` is a good candidate — verify the path), replace silent `try?` with a logged failure + a publish to a `@Published var lastIOError: String?`. Surface the error in the matching view (CodeAssistantPanel's chat session picker, for ChatSessionStore).
 
-Add a single unit test under `mac/Tests/MeetNotesMacTests/` covering the publish on a write that throws.
+Add a single unit test under `mac/Tests/LlmIdeMacTests/` covering the publish on a write that throws.
 
 ### 5. Recovery test for "AppShell first-render after login"
 
@@ -171,7 +171,7 @@ If anything is missing, add it. If a step is duplicating work between the two CI
 ## What NOT to touch
 
 - `docs/superpowers/specs/` and `docs/superpowers/plans/` — historical records, append-only.
-- `mac/MeetNotesMac.app/` — build output, not source.
+- `mac/LlmIdeMac.app/` — build output, not source.
 - `extension/node_modules/`, `mac/.build/`.
 - Migrations once applied — never edit `kb/migrations/*.sql` in-place (add a new numbered file instead).
 - The persona / agent / ask-history schema — recently shipped, leave the contracts alone.

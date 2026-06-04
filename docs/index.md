@@ -1,9 +1,9 @@
 ---
-title: Meet Notes — Engineering Documentation
+title: LLM IDE — Engineering Documentation
 maintainer: TBD
 ---
 
-# Meet Notes — Engineering Documentation
+# LLM IDE — Engineering Documentation
 
 Internal engineering documentation. End-user docs and customer/admin docs live elsewhere (planned).
 

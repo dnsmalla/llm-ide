@@ -22,7 +22,7 @@
 | Modify | `Services/ShellState.swift` |
 | Modify | `Views/Shell/SidebarView.swift` |
 | Views/AppShell.swift | add `.docGen` branch in `detailColumn` |
-| Modify | `Services/API/MeetNotesAPIClient+Export.swift` |
+| Modify | `Services/API/LlmIdeAPIClient+Export.swift` |
 
 ---
 
@@ -69,7 +69,7 @@ struct DocGenSource {
 `@MainActor` `ObservableObject` service injected via `.environmentObject`.
 
 - `var templates: [DocTemplate]` — computed: `DocTemplate.builtins + customTemplates`
-- `var customTemplates: [DocTemplate]` — loaded from / persisted to `~/Library/Application Support/com.meetnotes.macapp/doc-templates.json`
+- `var customTemplates: [DocTemplate]` — loaded from / persisted to `~/Library/Application Support/com.llmide.macapp/doc-templates.json`
 - `func add(_ template: DocTemplate)` — appends to `customTemplates`, saves
 - `func update(_ template: DocTemplate)` — replaces by id, saves
 - `func delete(id: UUID)` — removes from `customTemplates`, saves (no-op for builtins)
@@ -98,8 +98,8 @@ enum GenerationState {
 var canGenerate: Bool { !selectedSources.isEmpty && selectedTemplate != nil }
 ```
 
-- `func generate(api: MeetNotesAPIClient)` — async, sets state to `.generating`, fetches content for each selected source (meetings via `api.getMeeting(id:)`, files via `String(contentsOf:)`), formats the combined prompt (see below), calls `api.generateDocFromTemplate(content:template:)`, sets state to `.done(text)` or `.error(...)` on finish
-- `func export(content: String, api: MeetNotesAPIClient)` — calls `api.exportMarkdown(content:filename:)`, opens the saved `.md` file in Finder on success via `NSWorkspace.shared.activateFileViewerSelecting`
+- `func generate(api: LlmIdeAPIClient)` — async, sets state to `.generating`, fetches content for each selected source (meetings via `api.getMeeting(id:)`, files via `String(contentsOf:)`), formats the combined prompt (see below), calls `api.generateDocFromTemplate(content:template:)`, sets state to `.done(text)` or `.error(...)` on finish
+- `func export(content: String, api: LlmIdeAPIClient)` — calls `api.exportMarkdown(content:filename:)`, opens the saved `.md` file in Finder on success via `NSWorkspace.shared.activateFileViewerSelecting`
 
 ---
 
@@ -131,7 +131,7 @@ The existing `/generate-docx` endpoint returns a DOCX binary and uses a rigid fi
 
 ---
 
-## API additions (`MeetNotesAPIClient+Export.swift`)
+## API additions (`LlmIdeAPIClient+Export.swift`)
 
 ```swift
 func generateDoc(templateName: String, sections: [String],
@@ -233,7 +233,7 @@ sidebarRow(label: "Doc Gen", systemImage: "wand.and.document", section: .docGen)
 case .docGen: DocGenView(api: api)
 ```
 
-**`DocTemplateStore`** is instantiated once in `MeetNotesMacApp` and injected as `.environmentObject` (same pattern as `ThemeStore`).
+**`DocTemplateStore`** is instantiated once in `LlmIdeMacApp` and injected as `.environmentObject` (same pattern as `ThemeStore`).
 
 ---
 

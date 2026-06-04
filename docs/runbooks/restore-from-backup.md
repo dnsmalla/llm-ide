@@ -25,7 +25,7 @@ npm run backup
 #   sha256=<hex>
 
 # Or choose an explicit destination:
-npm run backup -- --out /path/to/backups/meetnotes.db
+npm run backup -- --out /path/to/backups/llmide.db
 
 # For a live admin-triggered copy over HTTP:
 curl -s -X POST -H "Authorization: Bearer <admin-token>" \

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Eliminate all crash risks, silent failures, resource leaks, and UX rough edges across the Meet Notes macOS app to reach production quality.
+**Goal:** Eliminate all crash risks, silent failures, resource leaks, and UX rough edges across the LLM IDE macOS app to reach production quality.
 
 **Architecture:** Issues are fixed in dependency order — crash prevention first (nothing else matters if the app crashes), then error propagation infrastructure (services surface errors), then resource management (cleanup on all paths), then UX polish (banners, confirmations, accessibility) that consumes the error infrastructure.
 
@@ -14,7 +14,7 @@
 
 ### 1.1 `AutoCodeUpdateService.logsDirectory()`
 
-**File:** `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift`
+**File:** `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift`
 
 **Problem:** `FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]` — subscript `[0]` on an array that could theoretically be empty. Crashes if the system returns no library directory.
 
@@ -22,7 +22,7 @@
 
 ### 1.2 `LibraryItemStore.storeURL`
 
-**File:** `Sources/MeetNotesMac/Services/LibraryItemStore.swift`
+**File:** `Sources/LlmIdeMac/Services/LibraryItemStore.swift`
 
 **Problem:** `FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!` — force-unwrap. Will crash on sandboxed environments where the directory cannot be resolved.
 
@@ -30,7 +30,7 @@
 
 ### 1.3 `NoteAction.swift` string parsing
 
-**File:** `Sources/MeetNotesMac/Models/NoteAction.swift`
+**File:** `Sources/LlmIdeMac/Models/NoteAction.swift`
 
 **Problem 1:** `String(contents[split.bodyStart...])` — `split.bodyStart` is not bounds-checked against `contents.endIndex`. If the parser returns an out-of-range index, this crashes.
 
@@ -42,7 +42,7 @@
 
 ### 1.4 Sidebar keyboard shortcut character conversion
 
-**File:** `Sources/MeetNotesMac/Views/Shell/SidebarView.swift`
+**File:** `Sources/LlmIdeMac/Views/Shell/SidebarView.swift`
 
 **Problem:** `Character("\(idx + 1)")` — if `idx + 1 > 9`, this creates a two-digit string `"10"`, which cannot be converted to a single `Character`. `KeyEquivalent(Character("10"))` takes only the first character silently but the intent is wrong.
 
@@ -54,7 +54,7 @@
 
 ### 2.1 `AutoCodeUpdateService` — surface errors to UI
 
-**File:** `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift`
+**File:** `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift`
 
 **Problem:** Multiple `try?` calls in `run()` swallow errors. If MeetingIndex, NoteActionExtractor, or GitLab fetch fail, `statusMessage` is updated but the user sees no actionable error.
 
@@ -66,18 +66,18 @@
 
 ### 2.2 `ProcessedActionsRegistry` — surface load/save errors
 
-**File:** `Sources/MeetNotesMac/Models/ProcessedActionsRegistry.swift`
+**File:** `Sources/LlmIdeMac/Models/ProcessedActionsRegistry.swift`
 
 **Problem:** Both `load()` and `save()` use `try?` with no user notification. Failed persistence silently loses action history.
 
 **Fix:**
 - `load()`: Replace `try?` with `do/catch`. On decode failure, log with `os_log(.error, ...)` and call a stored `onLoadError: ((Error) -> Void)?` closure (injected at init, optional so existing callers don't break).
 - `save()`: Replace `try?` with `do/catch`. On failure, log and call an `onSaveError` closure.
-- `MeetNotesMacApp.swift`: Wire these closures to set `autoCodeUpdate.lastError`.
+- `LlmIdeMacApp.swift`: Wire these closures to set `autoCodeUpdate.lastError`.
 
 ### 2.3 `AutoCodeView` — display `lastError` and `taskErrors`
 
-**File:** `Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift`
+**File:** `Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift`
 
 **Problem:** No UI path for errors from the service.
 
@@ -87,7 +87,7 @@
 
 ### 2.4 `GitLabClient` network error messages
 
-**File:** `Sources/MeetNotesMac/Services/GitLabClient.swift`
+**File:** `Sources/LlmIdeMac/Services/GitLabClient.swift`
 
 **Problem:** On decode failure, error message falls back to `String(data: data.prefix(200), encoding: .utf8) ?? "Unknown error"`. The fallback `"Unknown error"` loses all diagnostic context.
 
@@ -95,7 +95,7 @@
 
 ### 2.5 `AppShell` — surface scan/recovery errors
 
-**File:** `Sources/MeetNotesMac/Views/AppShell.swift`
+**File:** `Sources/LlmIdeMac/Views/AppShell.swift`
 
 **Problem:** `try? rec.scanOrphans()` and `try? appEnv?.indexer.fullScan()` swallow errors silently.
 
@@ -107,7 +107,7 @@
 
 ### 3.1 File handle leak in `runCLI` (both overloads)
 
-**File:** `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift`
+**File:** `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift`
 
 **Problem:** Both `runCLI` overloads open a `FileHandle` before `process.run()`. If `run()` throws, the local handle variable goes out of scope without being closed (it was never assigned to `logFileHandle`).
 
@@ -126,7 +126,7 @@ do {
 
 ### 3.2 Timer leak in `AutoCodeUpdateService.deinit`
 
-**File:** `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift`
+**File:** `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift`
 
 **Problem:** No `deinit`. If the service is deallocated while a timer is active, the timer fires into a deallocated object.
 
@@ -134,7 +134,7 @@ do {
 
 ### 3.3 Combine sink doesn't call `stop()`
 
-**File:** `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift`
+**File:** `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift`
 
 **Problem:** The `config.$autoCodeUpdateEnabled` sink only updates `isEnabled` when disabled. The timer keeps running.
 
@@ -142,7 +142,7 @@ do {
 
 ### 3.4 `localPath` capture race in `run()`
 
-**File:** `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift`
+**File:** `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift`
 
 **Problem:** `localPath` / `resolvedLocalPath` is read from config before the first `await`, but used after multiple `await` points. If the user changes config during a run, the value could be inconsistent.
 
@@ -154,7 +154,7 @@ Use `capturedLocalPath` for all subsequent steps.
 
 ### 3.5 Background task timeout in `AppShell`
 
-**File:** `Sources/MeetNotesMac/Views/AppShell.swift`
+**File:** `Sources/LlmIdeMac/Views/AppShell.swift`
 
 **Problem:** `Task.detached(priority: .background)` recovery scan has no timeout. Network-mounted drives or permission issues could hang it indefinitely.
 
@@ -166,7 +166,7 @@ Use `capturedLocalPath` for all subsequent steps.
 
 ### 4.1 "Restore Default" confirmation dialog
 
-**File:** `Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift`
+**File:** `Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift`
 
 **Problem:** Clicking "Restore Default" immediately overwrites the template with no warning.
 
@@ -174,7 +174,7 @@ Use `capturedLocalPath` for all subsequent steps.
 
 ### 4.2 Empty state messages
 
-**File:** `Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift`
+**File:** `Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift`
 
 **Current:** "No actions yet"
 **Fix:** "No actions found yet. Run Auto Tasks or record a meeting with action items."
@@ -184,7 +184,7 @@ Use `capturedLocalPath` for all subsequent steps.
 
 ### 4.3 Auto Tasks history row — add task type and timestamp
 
-**File:** `Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift`
+**File:** `Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift`
 
 **Problem:** History rows show only status icon + action text. No timestamp, no task type label. Hard to scan.
 
@@ -198,7 +198,7 @@ Use `capturedLocalPath` for all subsequent steps.
 
 ### 4.4 "No linked repo" hint — add navigation button
 
-**File:** `Sources/MeetNotesMac/Views/Settings/AutoCodeSettingsSection.swift`
+**File:** `Sources/LlmIdeMac/Views/Settings/AutoCodeSettingsSection.swift`
 
 **Problem:** Warning hint has no action. User must manually navigate to GitLab settings.
 
@@ -217,7 +217,7 @@ Use `capturedLocalPath` for all subsequent steps.
 
 ### 4.6 `ProcessedActionsRegistry` retry cap
 
-**File:** `Sources/MeetNotesMac/Models/ProcessedActionsRegistry.swift`
+**File:** `Sources/LlmIdeMac/Models/ProcessedActionsRegistry.swift`
 
 **Problem:** Entries stuck in `.implementing` reset to `.pending` indefinitely. A crashed CLI will retry forever.
 
@@ -228,14 +228,14 @@ Use `capturedLocalPath` for all subsequent steps.
 ## File Structure
 
 **Modified files:**
-- `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift` — error propagation, resource fixes, capture race
-- `Sources/MeetNotesMac/Models/ProcessedActionsRegistry.swift` — error closures, retry cap, `taskType` field, `retryCount` field
-- `Sources/MeetNotesMac/Services/LibraryItemStore.swift` — safe URL, nil propagation
-- `Sources/MeetNotesMac/Models/NoteAction.swift` — bounds checks, guarded dropFirst
-- `Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift` — error banners, confirmation dialog, empty states, accessibility, history row
-- `Sources/MeetNotesMac/Views/Shell/SidebarView.swift` — shortcut cap, accessibility labels
-- `Sources/MeetNotesMac/Views/AppShell.swift` — error alert, task timeout
-- `Sources/MeetNotesMac/Views/Settings/AutoCodeSettingsSection.swift` — navigation button in hint
-- `Sources/MeetNotesMac/MeetNotesMacApp.swift` — wire registry error closures
+- `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift` — error propagation, resource fixes, capture race
+- `Sources/LlmIdeMac/Models/ProcessedActionsRegistry.swift` — error closures, retry cap, `taskType` field, `retryCount` field
+- `Sources/LlmIdeMac/Services/LibraryItemStore.swift` — safe URL, nil propagation
+- `Sources/LlmIdeMac/Models/NoteAction.swift` — bounds checks, guarded dropFirst
+- `Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift` — error banners, confirmation dialog, empty states, accessibility, history row
+- `Sources/LlmIdeMac/Views/Shell/SidebarView.swift` — shortcut cap, accessibility labels
+- `Sources/LlmIdeMac/Views/AppShell.swift` — error alert, task timeout
+- `Sources/LlmIdeMac/Views/Settings/AutoCodeSettingsSection.swift` — navigation button in hint
+- `Sources/LlmIdeMac/LlmIdeMacApp.swift` — wire registry error closures
 
 **No new files required** — all changes are targeted edits to existing files.

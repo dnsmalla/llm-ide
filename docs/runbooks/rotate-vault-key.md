@@ -3,7 +3,7 @@ title: Rotate vault key
 applies_to: server
 ---
 
-# Runbook: Rotate `MEETNOTES_VAULT_KEY`
+# Runbook: Rotate `LLMIDE_VAULT_KEY`
 
 ## When to use
 
@@ -34,7 +34,7 @@ helper would be a worthwhile follow-up if you rotate frequently.
 
 - Server is healthy and reachable.
 - Admin access to set env vars and restart the server.
-- A SECOND `MEETNOTES_VAULT_KEY` value ≥32 chars generated via
+- A SECOND `LLMIDE_VAULT_KEY` value ≥32 chars generated via
   `openssl rand -base64 48`.
 - A fresh backup taken just before starting:
 
@@ -89,7 +89,7 @@ const KEY_VERSION = 0x01;
 function derive(masterStr, userId) {
   const master = Buffer.from(masterStr);
   return crypto.hkdfSync('sha256', master, Buffer.from(String(userId)),
-                          Buffer.from('meetnotes-vault-v1'), 32);
+                          Buffer.from('llmide-vault-v1'), 32);
 }
 function decrypt(userId, blob, masterStr) {
   const iv  = blob.subarray(1, 13);
@@ -157,13 +157,13 @@ for a row, the OLD key isn't what you think it is; abort and recover.
 ### 4. Swap the env var
 
 Update your supervisor's secret file to use `<new key>` for
-`MEETNOTES_VAULT_KEY`. Do NOT keep both around.
+`LLMIDE_VAULT_KEY`. Do NOT keep both around.
 
 ### 5. Restart the server and verify
 
 ```bash
 # Start your supervisor
-systemctl restart meetnotes        # or launchctl, or your runner
+systemctl restart llmide        # or launchctl, or your runner
 
 # Confirm the digest changed
 curl -s http://127.0.0.1:3456/health | jq .

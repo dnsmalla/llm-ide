@@ -14,7 +14,7 @@
 
 ## Prerequisites and conventions
 
-**Working directory.** All paths are relative to `/Users/dinesh.malla/Desktop/meet-notes` unless stated.
+**Working directory.** All paths are relative to `/Users/dinesh.malla/Desktop/llm-ide` unless stated.
 
 **Branch.** First task creates `feat/llm-agent-split`. All work lands there. Final task pushes for MR.
 
@@ -70,7 +70,7 @@ extension/
     ├── agent-code-assist.test.mjs             # UPDATED in Task E3
     └── agent-global-internal.test.mjs         # NEW (Task E3)
 
-mac/Sources/MeetNotesMac/
+mac/Sources/LlmIdeMac/
 ├── Models/
 │   └── AgentTypes.swift                       # MOVED (Task F1)
 ├── Views/Agent/
@@ -105,7 +105,7 @@ Goal: move every existing agent file under `llm_agent/` with zero behaviour chan
 - [ ] **Step 1: Create the feature branch**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git switch main
 git pull --ff-only
 git switch -c feat/llm-agent-split
@@ -127,7 +127,7 @@ mkdir -p extension/llm_agent/runtime/handlers
 ```markdown
 # llm_agent
 
-All agent runtime for the Meet Notes Code Assistant lives here. Two
+All agent runtime for the LLM IDE Code Assistant lives here. Two
 agents share one engine:
 
 - `global/` — the front-line agent. Lean prompt, one tool
@@ -168,7 +168,7 @@ git commit -m "chore(agent): scaffold extension/llm_agent/ folder tree"
 - [ ] **Step 1: Move the file via git**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git mv extension/server/agent-skills.mjs extension/llm_agent/runtime/skill-loader.mjs
 ```
 
@@ -199,7 +199,7 @@ import { loadSkills } from '../llm_agent/runtime/skill-loader.mjs';
 - [ ] **Step 4: Type-check + tests**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 npm run type-check 2>&1 | tail -3
 npm test 2>&1 | grep -E "tests|pass|fail" | tail -6
 ```
@@ -209,7 +209,7 @@ Expected: type-check clean. Tests: 162 pass / 1 fail (the pre-existing `exporter
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git add extension/server/ai-routes.mjs extension/llm_agent/runtime/skill-loader.mjs extension/tests/agent-skills.test.mjs
 git status --short
 git commit -m "refactor(agent): relocate skill-loader to llm_agent/runtime/"
@@ -234,7 +234,7 @@ The current `agent-tool-loop.mjs` exports `parseFence`, `validateArgs`, `runRead
 - [ ] **Step 1: Inspect the current file**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 grep -n "^export " server/agent-tool-loop.mjs
 ```
 
@@ -378,7 +378,7 @@ import { loadSkills } from '../llm_agent/runtime/skill-loader.mjs';
 - [ ] **Step 5: Delete the old file**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git rm extension/server/agent-tool-loop.mjs
 ```
 
@@ -395,7 +395,7 @@ Expected: 162 pass / 1 fail (pre-existing). The 21 tests in `agent-tool-loop.tes
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git add extension/llm_agent/runtime/fence.mjs extension/llm_agent/runtime/loop.mjs extension/server/ai-routes.mjs extension/tests/agent-tool-loop.test.mjs extension/tests/agent-code-assist.test.mjs
 git status --short
 git commit -m "refactor(agent): split tool-loop into runtime/fence.mjs + runtime/loop.mjs"
@@ -561,7 +561,7 @@ const out = await runAgentLoop({
 - [ ] **Step 6: Type-check + tests**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 npm run type-check 2>&1 | tail -3
 npm test 2>&1 | grep -E "tests|pass|fail" | tail -6
 ```
@@ -571,7 +571,7 @@ Expected: 162 pass / 1 fail (pre-existing).
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git add extension/llm_agent/runtime/handlers/search-kb.mjs extension/llm_agent/runtime/loop.mjs extension/tests/agent-tool-loop.test.mjs extension/tests/agent-code-assist.test.mjs extension/server/ai-routes.mjs
 git status --short
 git commit -m "refactor(agent): extract read handlers into runtime/handlers/"
@@ -589,7 +589,7 @@ git commit -m "refactor(agent): extract read handlers into runtime/handlers/"
 - [ ] **Step 1: Move the three files**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git mv extension/agent-skills/_base.md extension/llm_agent/internal/skills/_base.md
 git mv extension/agent-skills/search-kb.md extension/llm_agent/internal/skills/search-kb.md
 git mv extension/agent-skills/create-gitlab-issue.md extension/llm_agent/internal/skills/create-gitlab-issue.md
@@ -621,7 +621,7 @@ const SKILLS_DIR = join(__dirname, '..', 'llm_agent', 'internal', 'skills');
 - [ ] **Step 4: Verify the loader still finds the skills**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 node -e "
   import('./llm_agent/runtime/skill-loader.mjs').then(({ loadSkills }) => {
     const r = loadSkills('./llm_agent/internal/skills');
@@ -649,7 +649,7 @@ Expected: 162 pass / 1 fail (pre-existing).
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git status --short
 git add -A
 git commit -m "refactor(agent): move skill markdown to llm_agent/internal/skills/
@@ -669,7 +669,7 @@ truth window."
 The previous behaviour (recent issues, recent meetings, search-kb, create-gitlab-issue) must work identically. The user will verify visually in a follow-up; here we just confirm the build + tests.
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 npm run type-check 2>&1 | tail -3
 npm test 2>&1 | grep -E "tests|pass|fail" | tail -6
 ```
@@ -679,7 +679,7 @@ Expected: 162 pass / 1 fail.
 - [ ] **Step 2: Verify directory tree**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 test ! -d extension/agent-skills && echo "OK: agent-skills deleted"
 test ! -f extension/server/agent-skills.mjs && echo "OK: server/agent-skills.mjs deleted"
 test ! -f extension/server/agent-tool-loop.mjs && echo "OK: server/agent-tool-loop.mjs deleted"
@@ -973,7 +973,7 @@ test('composeSystemContext — minimal (no projects, no repos, no issues, no mee
 - [ ] **Step 6: Run new + existing tests**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 node --test tests/agent-context-renderers.test.mjs 2>&1 | tail -3
 npm test 2>&1 | grep -E "tests|pass|fail" | tail -6
 ```
@@ -983,7 +983,7 @@ Expected: 10 new tests pass; overall 172 pass / 1 fail (pre-existing).
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git add extension/llm_agent/internal/context/ extension/llm_agent/runtime/loop.mjs extension/tests/agent-context-renderers.test.mjs
 git status --short
 git commit -m "refactor(agent): extract context renderers into internal/context/
@@ -1012,7 +1012,7 @@ Goal: replace today's monolithic skill `_base.md` with two pieces — a role-and
 Create `extension/llm_agent/internal/prompt.md`:
 
 ```markdown
-You are the Meet Notes internal agent. You answer questions and
+You are the LLM IDE internal agent. You answer questions and
 perform actions about THIS specific app's state — its GitLab
 project, library, issues, meetings, action items, decisions, and
 indexed code — on behalf of an upstream caller (the global
@@ -1049,7 +1049,7 @@ narrate ("Let me check..."); just answer.
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git add extension/llm_agent/internal/prompt.md
 git commit -m "feat(agent): write internal agent prompt"
 ```
@@ -1099,7 +1099,7 @@ Anything outside the fence is plain prose shown to your caller.
 - [ ] **Step 3: Verify the loader still parses cleanly**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 node -e "
   import('./llm_agent/runtime/skill-loader.mjs').then(({ loadSkills }) => {
     const r = loadSkills('./llm_agent/internal/skills');
@@ -1122,7 +1122,7 @@ Expected: 172 pass / 1 fail.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git add extension/llm_agent/internal/skills/_base.md
 git commit -m "refactor(agent): shrink _base.md to fence-shape contract only
 
@@ -1167,7 +1167,7 @@ test('composeInternalPrompt includes role, system context, base, and all skill b
       recentMeetings: [],
     },
   });
-  assert.match(prompt, /Meet Notes internal agent/);   // from prompt.md
+  assert.match(prompt, /LLM IDE internal agent/);   // from prompt.md
   assert.match(prompt, /# System context/);
   assert.match(prompt, /## Active GitLab project/);
   assert.match(prompt, /#1 colourful/);
@@ -1193,7 +1193,7 @@ test('composeInternalPrompt omits empty context sections', () => {
 - [ ] **Step 2: Run — must fail (composeInternalPrompt not exported)**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 node --test tests/agent-internal-prompt.test.mjs 2>&1 | tail -5
 ```
 
@@ -1255,7 +1255,7 @@ Expected: 174 pass / 1 fail.
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git add extension/llm_agent/internal/compose-prompt.mjs extension/tests/agent-internal-prompt.test.mjs
 git commit -m "feat(agent): internal prompt composer"
 ```
@@ -1278,9 +1278,9 @@ Goal: write the global prompt + its one skill, and implement the `ask-internal` 
 Create `extension/llm_agent/global/prompt.md`:
 
 ```markdown
-You are the Code Assistant for Meet Notes. You answer the user
+You are the Code Assistant for LLM IDE. You answer the user
 directly using your general engineering knowledge, and delegate
-to the internal Meet Notes agent when the user's request touches
+to the internal LLM IDE agent when the user's request touches
 THIS specific app — its project, library, issues, meetings, or
 any other application state.
 
@@ -1338,7 +1338,7 @@ internal's facts via your answer.
 - [ ] **Step 2: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git add extension/llm_agent/global/prompt.md
 git commit -m "feat(agent): write global agent prompt"
 ```
@@ -1368,7 +1368,7 @@ schema:
 
 # ask-internal
 
-Delegate to the Meet Notes internal agent — the only authority on
+Delegate to the LLM IDE internal agent — the only authority on
 this app's state.
 
 ## When to use
@@ -1393,7 +1393,7 @@ handles confirmation.
 - [ ] **Step 2: Verify the loader parses it cleanly**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 node -e "
   import('./llm_agent/runtime/skill-loader.mjs').then(({ loadSkills }) => {
     const r = loadSkills('./llm_agent/global');
@@ -1408,7 +1408,7 @@ Expected: `skills: [ 'ask-internal' ]`, `warnings: [ ... _base.md missing ... ]`
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git add extension/llm_agent/global/ask-internal.md
 git commit -m "feat(agent): write ask-internal skill markdown"
 ```
@@ -1445,7 +1445,7 @@ const GLOBAL_SKILLS_DIR = join(__dirname, '..', 'llm_agent', 'global');
 test('composeGlobalPrompt is lean — no system context, only role + ask-internal skill', () => {
   const skills = loadSkills(GLOBAL_SKILLS_DIR);
   const prompt = composeGlobalPrompt({ skills: skills.skills });
-  assert.match(prompt, /Code Assistant for Meet Notes/);
+  assert.match(prompt, /Code Assistant for LLM IDE/);
   assert.match(prompt, /# ask-internal/);
   // Regression guard: no app-specific context leaks into global.
   assert.doesNotMatch(prompt, /## Active GitLab project/);
@@ -1524,7 +1524,7 @@ test('askInternal — search-kb call by internal feeds back, internal answers', 
 - [ ] **Step 2: Run tests — must fail (modules not found)**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 node --test tests/agent-global.test.mjs 2>&1 | tail -5
 ```
 
@@ -1565,7 +1565,7 @@ export function composeGlobalPrompt({ skills }) {
 Create `extension/llm_agent/runtime/handlers/ask-internal.mjs`:
 
 ```javascript
-// Read handler: delegates a question to the internal Meet Notes
+// Read handler: delegates a question to the internal LLM IDE
 // agent. Runs a fresh internal sub-loop and bundles its
 // {reply, pendingTool} as {answer, pendingTool} for global to read.
 
@@ -1636,7 +1636,7 @@ Expected: 178 pass / 1 fail.
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git add extension/llm_agent/global/compose-prompt.mjs extension/llm_agent/runtime/handlers/ask-internal.mjs extension/tests/agent-global.test.mjs
 git commit -m "feat(agent): global prompt composer + ask-internal handler"
 ```
@@ -1776,7 +1776,7 @@ export async function runAgentLoop({
 - [ ] **Step 3: Verify existing tests still pass**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 npm test 2>&1 | grep -E "tests|pass|fail" | tail -6
 ```
 
@@ -1785,7 +1785,7 @@ Expected: still 178 pass / 1 fail. The existing iteration-cap test asserts `/too
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git add extension/llm_agent/runtime/route.mjs extension/llm_agent/runtime/loop.mjs
 git commit -m "feat(agent): route.mjs orchestrates global + internal; loop takes maxIterations"
 ```
@@ -1881,7 +1881,7 @@ If `kb` was imported for direct use here AND in route.mjs, keep the import in ai
 - [ ] **Step 3: Type-check + tests**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 npm run type-check 2>&1 | tail -3
 npm test 2>&1 | grep -E "tests|pass|fail" | tail -6
 ```
@@ -1891,7 +1891,7 @@ Expected: still 178 pass / 1 fail.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git add extension/server/ai-routes.mjs
 git commit -m "refactor(agent): ai-routes.mjs delegates /code-assist to llm_agent/runtime/route.mjs"
 ```
@@ -2054,7 +2054,7 @@ test('e2e: regression guard — global never sees app-specific context', async (
   const globalPrompt = promptsSeen[0];
   assert.doesNotMatch(globalPrompt, /TopSecretTitle/);
   assert.doesNotMatch(globalPrompt, /## Recent open issues/);
-  assert.match(globalPrompt, /Code Assistant for Meet Notes/);
+  assert.match(globalPrompt, /Code Assistant for LLM IDE/);
   // Second runClaude call is internal's first turn.
   const internalPrompt = promptsSeen[1];
   assert.match(internalPrompt, /TopSecretTitle/);
@@ -2062,14 +2062,14 @@ test('e2e: regression guard — global never sees app-specific context', async (
   // Internal MUST receive its role-and-rules prompt. If this assertion
   // ever fails, the askInternal handler stopped concatenating
   // internal/prompt.md into agentContext.base.
-  assert.match(internalPrompt, /Meet Notes internal agent/);
+  assert.match(internalPrompt, /LLM IDE internal agent/);
 });
 ```
 
 - [ ] **Step 2: Run**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 node --test tests/agent-global-internal.test.mjs 2>&1 | tail -10
 ```
 
@@ -2088,7 +2088,7 @@ Expected: 183 pass / 1 fail (pre-existing).
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git add extension/tests/agent-global-internal.test.mjs
 git commit -m "test(agent): end-to-end global ↔ internal handoff incl. context-leak regression guard"
 ```
@@ -2104,31 +2104,31 @@ Goal: consolidate the three agent-related Swift files under a new `Agent/` group
 ### Task F1: Move Swift files into the new group
 
 **Files:**
-- Move: `mac/Sources/MeetNotesMac/Models/AgentTypes.swift` → `mac/Sources/MeetNotesMac/Agent/Models/AgentTypes.swift`
-- Move: `mac/Sources/MeetNotesMac/Views/Agent/CreateGitLabIssueSheet.swift` → `mac/Sources/MeetNotesMac/Agent/Views/CreateGitLabIssueSheet.swift`
-- Move: `mac/Sources/MeetNotesMac/Views/Agent/PendingActionCard.swift` → `mac/Sources/MeetNotesMac/Agent/Views/PendingActionCard.swift`
-- Delete: the now-empty `mac/Sources/MeetNotesMac/Views/Agent/` directory
+- Move: `mac/Sources/LlmIdeMac/Models/AgentTypes.swift` → `mac/Sources/LlmIdeMac/Agent/Models/AgentTypes.swift`
+- Move: `mac/Sources/LlmIdeMac/Views/Agent/CreateGitLabIssueSheet.swift` → `mac/Sources/LlmIdeMac/Agent/Views/CreateGitLabIssueSheet.swift`
+- Move: `mac/Sources/LlmIdeMac/Views/Agent/PendingActionCard.swift` → `mac/Sources/LlmIdeMac/Agent/Views/PendingActionCard.swift`
+- Delete: the now-empty `mac/Sources/LlmIdeMac/Views/Agent/` directory
 
 - [ ] **Step 1: Create the new subgroups**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
-mkdir -p mac/Sources/MeetNotesMac/Agent/Models
-mkdir -p mac/Sources/MeetNotesMac/Agent/Views
+cd /Users/dinesh.malla/Desktop/llm-ide
+mkdir -p mac/Sources/LlmIdeMac/Agent/Models
+mkdir -p mac/Sources/LlmIdeMac/Agent/Views
 ```
 
 - [ ] **Step 2: Move the three files via git**
 
 ```bash
-git mv mac/Sources/MeetNotesMac/Models/AgentTypes.swift mac/Sources/MeetNotesMac/Agent/Models/AgentTypes.swift
-git mv mac/Sources/MeetNotesMac/Views/Agent/CreateGitLabIssueSheet.swift mac/Sources/MeetNotesMac/Agent/Views/CreateGitLabIssueSheet.swift
-git mv mac/Sources/MeetNotesMac/Views/Agent/PendingActionCard.swift mac/Sources/MeetNotesMac/Agent/Views/PendingActionCard.swift
+git mv mac/Sources/LlmIdeMac/Models/AgentTypes.swift mac/Sources/LlmIdeMac/Agent/Models/AgentTypes.swift
+git mv mac/Sources/LlmIdeMac/Views/Agent/CreateGitLabIssueSheet.swift mac/Sources/LlmIdeMac/Agent/Views/CreateGitLabIssueSheet.swift
+git mv mac/Sources/LlmIdeMac/Views/Agent/PendingActionCard.swift mac/Sources/LlmIdeMac/Agent/Views/PendingActionCard.swift
 ```
 
 - [ ] **Step 3: Remove the now-empty old directory**
 
 ```bash
-rmdir mac/Sources/MeetNotesMac/Views/Agent
+rmdir mac/Sources/LlmIdeMac/Views/Agent
 ```
 
 If `rmdir` complains, something else is in the directory — list and decide.
@@ -2140,7 +2140,7 @@ cd mac
 swift build 2>&1 | tail -8
 ```
 
-Expected: clean build. Swift Package Manager doesn't care about subfolder structure within a target's path — file relocations within `Sources/MeetNotesMac/` are picked up automatically.
+Expected: clean build. Swift Package Manager doesn't care about subfolder structure within a target's path — file relocations within `Sources/LlmIdeMac/` are picked up automatically.
 
 - [ ] **Step 5: Run the Mac tests**
 
@@ -2153,7 +2153,7 @@ Expected: clean build of tests. (Swift Testing emits no output on pass; exit 0 m
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git status --short
 git commit -m "refactor(mac): relocate agent-related Swift files into Agent/ group
 
@@ -2162,7 +2162,7 @@ Views/Agent/CreateGitLabIssueSheet.swift → Agent/Views/CreateGitLabIssueSheet.
 Views/Agent/PendingActionCard.swift   → Agent/Views/PendingActionCard.swift
 
 No behaviour change — Swift Package Manager treats every file under
-Sources/MeetNotesMac/ as part of the same target regardless of
+Sources/LlmIdeMac/ as part of the same target regardless of
 subfolder structure."
 ```
 
@@ -2201,7 +2201,7 @@ applies_to: server, extension, mac
 
 ## Goal
 
-Teach the internal Meet Notes agent a new capability — either a read (server-executed) or a write (client-confirmed).
+Teach the internal LLM IDE agent a new capability — either a read (server-executed) or a write (client-confirmed).
 
 > The **global** agent has only one skill (`ask-internal`). Don't add skills there — they'd defeat the token-savings goal. All app-aware capabilities live on internal.
 
@@ -2239,7 +2239,7 @@ Body: `# <name>`, `## When to use`, `## Call shape`, `## Result shape` (read onl
 
 ### 4. Mac client side (write tools only)
 
-Add a confirm sheet under `mac/Sources/MeetNotesMac/Agent/Views/` modelled on `CreateGitLabIssueSheet.swift`. Wire it from `CodeAssistantPanel.swift` keyed on `pendingTool.name`.
+Add a confirm sheet under `mac/Sources/LlmIdeMac/Agent/Views/` modelled on `CreateGitLabIssueSheet.swift`. Wire it from `CodeAssistantPanel.swift` keyed on `pendingTool.name`.
 
 ### 5. Restart and test
 
@@ -2437,7 +2437,7 @@ All agent code lives under `extension/llm_agent/`, with `runtime/` (mechanism), 
 - [ ] **Step 2: Run frontmatter check**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 .venv-docs/bin/python docs/_scripts/check_frontmatter.py docs && echo "OK" || echo "(skip if venv missing)"
 ```
 
@@ -2459,7 +2459,7 @@ After Phases A–G are complete, run the full suite once more and push the branc
 - [ ] **Step 1: Full server tests**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/extension
+cd /Users/dinesh.malla/Desktop/llm-ide/extension
 npm run type-check 2>&1 | tail -3
 npm test 2>&1 | grep -E "tests|pass|fail" | tail -6
 ```
@@ -2469,7 +2469,7 @@ Expected: 183 pass / 1 fail (pre-existing `exporter.test.mjs`).
 - [ ] **Step 2: Mac build**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | tail -3
 swift test --filter AgentTypesTests 2>&1 | tail -3
 ```
@@ -2489,7 +2489,7 @@ If any of those fails, check the Backend log pane in Settings for `[llm_agent]` 
 - [ ] **Step 4: Push the branch**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git log --oneline main..feat/llm-agent-split | head -25
 git push -u origin feat/llm-agent-split
 ```

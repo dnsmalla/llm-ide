@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-15
 **Status:** Approved
-**Scope:** macOS app (`meet-notes/mac`)
+**Scope:** macOS app (`llm-ide/mac`)
 
 ---
 

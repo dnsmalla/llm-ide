@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Harden the Meet Notes macOS app to production quality by fixing security vulnerabilities, eliminating crashes, closing reliability gaps, and cleaning up code quality issues.
+**Goal:** Harden the LLM IDE macOS app to production quality by fixing security vulnerabilities, eliminating crashes, closing reliability gaps, and cleaning up code quality issues.
 
 **Architecture:** Three sequential groups — Security & Stability (Group A), Reliability & UX (Group B), Code Quality (Group C). Each group ends with `swift build` + one commit. Groups must be done in order because A1 affects Config.swift which B1 also touches.
 
@@ -37,19 +37,19 @@
 ### Task A1: Move GitLab PAT from UserDefaults to Keychain
 
 **Files:**
-- Create: `Sources/MeetNotesMac/Services/KeychainStore.swift`
-- Modify: `Sources/MeetNotesMac/Models/Config.swift`
+- Create: `Sources/LlmIdeMac/Services/KeychainStore.swift`
+- Modify: `Sources/LlmIdeMac/Models/Config.swift`
 
 - [ ] **Step 1: Create KeychainStore.swift with GitLab token methods**
 
-Create `Sources/MeetNotesMac/Services/KeychainStore.swift`:
+Create `Sources/LlmIdeMac/Services/KeychainStore.swift`:
 
 ```swift
 import Foundation
 import Security
 
 enum KeychainStore {
-    private static let service = "com.meetnotes.macapp"
+    private static let service = "com.llmide.macapp"
 
     // MARK: - JWT refresh token (existing pattern, kept for reference)
 
@@ -122,7 +122,7 @@ enum KeychainStore {
 
 - [ ] **Step 2: Update AppConfig to use Keychain for gitLabToken**
 
-In `Sources/MeetNotesMac/Models/Config.swift`, replace lines 61–64 (the `gitLabToken` published property and its `didSet`):
+In `Sources/LlmIdeMac/Models/Config.swift`, replace lines 61–64 (the `gitLabToken` published property and its `didSet`):
 
 Old code (lines 61–64):
 ```swift
@@ -146,7 +146,7 @@ New code:
 
 - [ ] **Step 3: Update AppConfig.init() to load token from Keychain + migrate**
 
-In `Sources/MeetNotesMac/Models/Config.swift`, replace the init line that sets `gitLabToken` (line 95):
+In `Sources/LlmIdeMac/Models/Config.swift`, replace the init line that sets `gitLabToken` (line 95):
 
 Old code:
 ```swift
@@ -169,7 +169,7 @@ New code:
 - [ ] **Step 4: Build to verify**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | grep -E "error:|warning:|Build complete"
 ```
 
@@ -180,11 +180,11 @@ Expected: `Build complete!` with no errors.
 ### Task A2: Fix force unwraps in MeetingFileStore
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Services/NotesFolder/MeetingFileStore.swift`
+- Modify: `Sources/LlmIdeMac/Services/NotesFolder/MeetingFileStore.swift`
 
 - [ ] **Step 1: Add utf8Data helper and replace force unwraps**
 
-In `Sources/MeetNotesMac/Services/NotesFolder/MeetingFileStore.swift`, add a private helper after the `renderSummarySection` method (after line 208, before the closing `}`):
+In `Sources/LlmIdeMac/Services/NotesFolder/MeetingFileStore.swift`, add a private helper after the `renderSummarySection` method (after line 208, before the closing `}`):
 
 ```swift
     private func utf8Data(_ string: String) throws -> Data {
@@ -231,7 +231,7 @@ With:
 - [ ] **Step 5: Build to verify**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | grep -E "error:|Build complete"
 ```
 
@@ -242,12 +242,12 @@ Expected: `Build complete!` with no errors.
 ### Task A3: Cap caption array growth
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Services/CaptionScraper/CaptionScraper.swift`
-- Modify: `Sources/MeetNotesMac/Services/LiveSessionMirror.swift`
+- Modify: `Sources/LlmIdeMac/Services/CaptionScraper/CaptionScraper.swift`
+- Modify: `Sources/LlmIdeMac/Services/LiveSessionMirror.swift`
 
 - [ ] **Step 1: Add cap constant and trim logic to CaptionOrchestrator**
 
-In `Sources/MeetNotesMac/Services/CaptionScraper/CaptionScraper.swift`, add a constant after the `private let pollInterval: TimeInterval` declaration (after line 76):
+In `Sources/LlmIdeMac/Services/CaptionScraper/CaptionScraper.swift`, add a constant after the `private let pollInterval: TimeInterval` declaration (after line 76):
 
 ```swift
     private let maxCaptionCount = 10_000
@@ -286,7 +286,7 @@ New code:
 
 - [ ] **Step 2: Add cap constant and trim logic to LiveSessionMirror**
 
-In `Sources/MeetNotesMac/Services/LiveSessionMirror.swift`, add a constant after the `private let finalizedSlowdownNs` declaration (after line 44):
+In `Sources/LlmIdeMac/Services/LiveSessionMirror.swift`, add a constant after the `private let finalizedSlowdownNs` declaration (after line 44):
 
 ```swift
     private let maxCaptionCount = 10_000
@@ -312,7 +312,7 @@ New code:
 - [ ] **Step 3: Build to verify**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | grep -E "error:|Build complete"
 ```
 
@@ -321,12 +321,12 @@ Expected: `Build complete!` with no errors.
 - [ ] **Step 4: Commit Group A**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
-git add Sources/MeetNotesMac/Services/KeychainStore.swift \
-        Sources/MeetNotesMac/Models/Config.swift \
-        Sources/MeetNotesMac/Services/NotesFolder/MeetingFileStore.swift \
-        Sources/MeetNotesMac/Services/CaptionScraper/CaptionScraper.swift \
-        Sources/MeetNotesMac/Services/LiveSessionMirror.swift
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
+git add Sources/LlmIdeMac/Services/KeychainStore.swift \
+        Sources/LlmIdeMac/Models/Config.swift \
+        Sources/LlmIdeMac/Services/NotesFolder/MeetingFileStore.swift \
+        Sources/LlmIdeMac/Services/CaptionScraper/CaptionScraper.swift \
+        Sources/LlmIdeMac/Services/LiveSessionMirror.swift
 git commit -m "security: move GitLab PAT to Keychain, fix force unwraps, cap caption arrays"
 ```
 
@@ -337,15 +337,15 @@ git commit -m "security: move GitLab PAT to Keychain, fix force unwraps, cap cap
 ### Task B1: Replace silent catch blocks with visible error states
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/AppShell.swift`
-- Modify: `Sources/MeetNotesMac/Views/Library/MeetingDetailView.swift`
-- Modify: `Sources/MeetNotesMac/Views/Settings/AgentSettingsSection.swift`
+- Modify: `Sources/LlmIdeMac/Views/AppShell.swift`
+- Modify: `Sources/LlmIdeMac/Views/Library/MeetingDetailView.swift`
+- Modify: `Sources/LlmIdeMac/Views/Settings/AgentSettingsSection.swift`
 
 **Note:** PlanView's outcomes error is already surfaced via `outcomesError` state; only the three above have empty catches.
 
 - [ ] **Step 1: Fix AppShell.swift line 203**
 
-In `Sources/MeetNotesMac/Views/AppShell.swift`, locate the recovery task around line 195–204:
+In `Sources/LlmIdeMac/Views/AppShell.swift`, locate the recovery task around line 195–204:
 
 ```swift
             } catch {}
@@ -373,7 +373,7 @@ if let err = recoverError {
 
 - [ ] **Step 2: Fix MeetingDetailView.swift line 308**
 
-In `Sources/MeetNotesMac/Views/Library/MeetingDetailView.swift`, locate the `reload(for:)` function:
+In `Sources/LlmIdeMac/Views/Library/MeetingDetailView.swift`, locate the `reload(for:)` function:
 
 Old code (line 308):
 ```swift
@@ -411,7 +411,7 @@ if let err = loadError {
 
 - [ ] **Step 3: Fix AgentSettingsSection.swift lines 96–103**
 
-In `Sources/MeetNotesMac/Views/Settings/AgentSettingsSection.swift`, locate `loadPersona()`:
+In `Sources/LlmIdeMac/Views/Settings/AgentSettingsSection.swift`, locate `loadPersona()`:
 
 Old code:
 ```swift
@@ -444,7 +444,7 @@ New code:
 - [ ] **Step 4: Build to verify**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | grep -E "error:|Build complete"
 ```
 
@@ -455,13 +455,13 @@ Expected: `Build complete!` with no errors.
 ### Task B2: Fix Task cancellation race in PlanView
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/PlanView.swift`
+- Modify: `Sources/LlmIdeMac/Views/PlanView.swift`
 
 - [ ] **Step 1: Fix StateObject lifecycle (line 41)**
 
-In `Sources/MeetNotesMac/Views/PlanView.swift`, the init currently does:
+In `Sources/LlmIdeMac/Views/PlanView.swift`, the init currently does:
 ```swift
-    init(api: MeetNotesAPIClient, onJumpToReview: (() -> Void)? = nil) {
+    init(api: LlmIdeAPIClient, onJumpToReview: (() -> Void)? = nil) {
         self.api = api
         self.onJumpToReview = onJumpToReview
         _viewModel = StateObject(wrappedValue: PlanListViewModel(api: api))
@@ -475,7 +475,7 @@ Look at how PlanView is constructed by checking its callers first, then apply: m
 The spec says change to `@StateObject private var vm = PlanListViewModel()`. Check `PlanListViewModel.swift` to see if it takes an `api` parameter:
 
 ```bash
-head -20 /Users/dinesh.malla/Desktop/meet-notes/mac/Sources/MeetNotesMac/ViewModels/PlanListViewModel.swift
+head -20 /Users/dinesh.malla/Desktop/llm-ide/mac/Sources/LlmIdeMac/ViewModels/PlanListViewModel.swift
 ```
 
 If `PlanListViewModel` requires `api` in its init, we cannot use the no-argument form without refactoring. In that case, change `_viewModel` assignment to use the recommended pattern by moving the `StateObject` declaration outside init:
@@ -495,7 +495,7 @@ For now, apply the simpler fix: make the `@StateObject` declaration `private` an
 
 - [ ] **Step 2: Replace three .task modifiers with single coordinated task**
 
-In `Sources/MeetNotesMac/Views/PlanView.swift`, find the three `.task` modifiers (lines 52–54):
+In `Sources/LlmIdeMac/Views/PlanView.swift`, find the three `.task` modifiers (lines 52–54):
 ```swift
         .task { await viewModel.refresh() }
         .task { await loadFeedbackByTask() }
@@ -547,7 +547,7 @@ This runs all three concurrently on initial appear (single `.task` instead of th
 - [ ] **Step 3: Build to verify**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | grep -E "error:|Build complete"
 ```
 
@@ -558,11 +558,11 @@ Expected: `Build complete!` with no errors.
 ### Task B3: Add exponential backoff to TranscriptView polling loop
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/TranscriptView.swift`
+- Modify: `Sources/LlmIdeMac/Views/TranscriptView.swift`
 
 - [ ] **Step 1: Add backoff state and apply to refreshActiveAgent**
 
-In `Sources/MeetNotesMac/Views/TranscriptView.swift`, add a state variable near the other `@State` declarations (search for the block of `@State` vars in TranscriptView):
+In `Sources/LlmIdeMac/Views/TranscriptView.swift`, add a state variable near the other `@State` declarations (search for the block of `@State` vars in TranscriptView):
 
 ```swift
     @State private var agentPollBackoffNs: UInt64 = 0
@@ -607,7 +607,7 @@ New code:
 - [ ] **Step 2: Build to verify**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | grep -E "error:|Build complete"
 ```
 
@@ -618,11 +618,11 @@ Expected: `Build complete!` with no errors.
 ### Task B4: Fix Gantt milestone title truncation
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/Gantt/GanttView.swift`
+- Modify: `Sources/LlmIdeMac/Views/Gantt/GanttView.swift`
 
 - [ ] **Step 1: Increase title frame and add tooltip**
 
-In `Sources/MeetNotesMac/Views/Gantt/GanttView.swift`, locate the milestone title Text at line 426–427:
+In `Sources/LlmIdeMac/Views/Gantt/GanttView.swift`, locate the milestone title Text at line 426–427:
 
 Old code:
 ```swift
@@ -641,7 +641,7 @@ New code:
 - [ ] **Step 2: Build to verify**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | grep -E "error:|Build complete"
 ```
 
@@ -652,11 +652,11 @@ Expected: `Build complete!` with no errors.
 ### Task B5: Fix image overflow in FileDetailView
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/Library/FileDetailView.swift`
+- Modify: `Sources/LlmIdeMac/Views/Library/FileDetailView.swift`
 
 - [ ] **Step 1: Wrap ImageDetailView body with GeometryReader**
 
-In `Sources/MeetNotesMac/Views/Library/FileDetailView.swift`, locate `ImageDetailView` (lines 249–266):
+In `Sources/LlmIdeMac/Views/Library/FileDetailView.swift`, locate `ImageDetailView` (lines 249–266):
 
 Old code:
 ```swift
@@ -707,7 +707,7 @@ struct ImageDetailView: View {
 - [ ] **Step 2: Build to verify**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | grep -E "error:|Build complete"
 ```
 
@@ -718,11 +718,11 @@ Expected: `Build complete!` with no errors.
 ### Task B6: HTTPS enforcement warning in Settings
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/Settings/ServerSettingsSection.swift`
+- Modify: `Sources/LlmIdeMac/Views/Settings/ServerSettingsSection.swift`
 
 - [ ] **Step 1: Add isInsecureRemote computed property and warning label**
 
-In `Sources/MeetNotesMac/Views/Settings/ServerSettingsSection.swift`, add a computed property before `body`:
+In `Sources/LlmIdeMac/Views/Settings/ServerSettingsSection.swift`, add a computed property before `body`:
 
 ```swift
     private var isInsecureRemote: Bool {
@@ -750,7 +750,7 @@ In the `body`, add the warning below the error label (after the `if let err = se
 - [ ] **Step 2: Build to verify**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | grep -E "error:|Build complete"
 ```
 
@@ -759,15 +759,15 @@ Expected: `Build complete!` with no errors.
 - [ ] **Step 3: Commit Group B**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
-git add Sources/MeetNotesMac/Views/AppShell.swift \
-        Sources/MeetNotesMac/Views/Library/MeetingDetailView.swift \
-        Sources/MeetNotesMac/Views/Settings/AgentSettingsSection.swift \
-        Sources/MeetNotesMac/Views/Settings/ServerSettingsSection.swift \
-        Sources/MeetNotesMac/Views/TranscriptView.swift \
-        Sources/MeetNotesMac/Views/PlanView.swift \
-        Sources/MeetNotesMac/Views/Gantt/GanttView.swift \
-        Sources/MeetNotesMac/Views/Library/FileDetailView.swift
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
+git add Sources/LlmIdeMac/Views/AppShell.swift \
+        Sources/LlmIdeMac/Views/Library/MeetingDetailView.swift \
+        Sources/LlmIdeMac/Views/Settings/AgentSettingsSection.swift \
+        Sources/LlmIdeMac/Views/Settings/ServerSettingsSection.swift \
+        Sources/LlmIdeMac/Views/TranscriptView.swift \
+        Sources/LlmIdeMac/Views/PlanView.swift \
+        Sources/LlmIdeMac/Views/Gantt/GanttView.swift \
+        Sources/LlmIdeMac/Views/Library/FileDetailView.swift
 git commit -m "reliability: surface errors, fix task race, add backoff, fix Gantt/image UI"
 ```
 
@@ -778,12 +778,12 @@ git commit -m "reliability: surface errors, fix task race, add backoff, fix Gant
 ### Task C1: Extract inline HTML from FileDetailView into MarkdownRenderer
 
 **Files:**
-- Create: `Sources/MeetNotesMac/Views/Library/MarkdownRenderer.swift`
-- Modify: `Sources/MeetNotesMac/Views/Library/FileDetailView.swift`
+- Create: `Sources/LlmIdeMac/Views/Library/MarkdownRenderer.swift`
+- Modify: `Sources/LlmIdeMac/Views/Library/FileDetailView.swift`
 
 - [ ] **Step 1: Create MarkdownRenderer.swift**
 
-Create `Sources/MeetNotesMac/Views/Library/MarkdownRenderer.swift`:
+Create `Sources/LlmIdeMac/Views/Library/MarkdownRenderer.swift`:
 
 ```swift
 import Foundation
@@ -889,7 +889,7 @@ enum MarkdownRenderer {
 
 - [ ] **Step 2: Update MarkdownWebView to call MarkdownRenderer**
 
-In `Sources/MeetNotesMac/Views/Library/FileDetailView.swift`, in the `MarkdownWebView` struct, replace the entire `buildHTML()` method with:
+In `Sources/LlmIdeMac/Views/Library/FileDetailView.swift`, in the `MarkdownWebView` struct, replace the entire `buildHTML()` method with:
 
 ```swift
     private func buildHTML() -> String {
@@ -900,7 +900,7 @@ In `Sources/MeetNotesMac/Views/Library/FileDetailView.swift`, in the `MarkdownWe
 - [ ] **Step 3: Build to verify**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | grep -E "error:|Build complete"
 ```
 
@@ -911,11 +911,11 @@ Expected: `Build complete!` with no errors.
 ### Task C2: Static character set in slugify()
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Services/NotesFolder/MeetingFileStore.swift`
+- Modify: `Sources/LlmIdeMac/Services/NotesFolder/MeetingFileStore.swift`
 
 - [ ] **Step 1: Hoist CharacterSet to static property**
 
-In `Sources/MeetNotesMac/Services/NotesFolder/MeetingFileStore.swift`, before the `slugify` method (around line 166), add a static property to `MeetingFileStore`:
+In `Sources/LlmIdeMac/Services/NotesFolder/MeetingFileStore.swift`, before the `slugify` method (around line 166), add a static property to `MeetingFileStore`:
 
 ```swift
     private static let slugAllowed = CharacterSet.alphanumerics
@@ -943,7 +943,7 @@ New code:
 - [ ] **Step 2: Build to verify**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | grep -E "error:|Build complete"
 ```
 
@@ -954,20 +954,20 @@ Expected: `Build complete!` with no errors.
 ### Task C3: Fix PlanView StateObject lifecycle
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/PlanView.swift`
-- Modify: `Sources/MeetNotesMac/ViewModels/PlanListViewModel.swift`
+- Modify: `Sources/LlmIdeMac/Views/PlanView.swift`
+- Modify: `Sources/LlmIdeMac/ViewModels/PlanListViewModel.swift`
 
 - [ ] **Step 1: Check PlanListViewModel init signature**
 
 Read the PlanListViewModel to see how it is initialized:
 
 ```bash
-head -30 /Users/dinesh.malla/Desktop/meet-notes/mac/Sources/MeetNotesMac/ViewModels/PlanListViewModel.swift
+head -30 /Users/dinesh.malla/Desktop/llm-ide/mac/Sources/LlmIdeMac/ViewModels/PlanListViewModel.swift
 ```
 
 If `PlanListViewModel.init(api:)` requires an api parameter, we need to make `api` injectable. The cleanest fix without refactoring the whole view model is to add a no-arg initializer to `PlanListViewModel` that reads from an environment, OR to accept the existing `init` pattern but add a guard to prevent re-initialization.
 
-**If PlanListViewModel has `init(api: MeetNotesAPIClient)`:** Add an `@EnvironmentObject var api: MeetNotesAPIClient` property to PlanListViewModel, then change PlanView's declaration to:
+**If PlanListViewModel has `init(api: LlmIdeAPIClient)`:** Add an `@EnvironmentObject var api: LlmIdeAPIClient` property to PlanListViewModel, then change PlanView's declaration to:
 
 ```swift
 @StateObject private var viewModel: PlanListViewModel
@@ -989,7 +989,7 @@ This is a visibility-only change that doesn't affect behavior but ensures no ext
 - [ ] **Step 2: Build to verify**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | grep -E "error:|Build complete"
 ```
 
@@ -1000,11 +1000,11 @@ Expected: `Build complete!` with no errors.
 ### Task C4: Reorder AnyCodable type probes
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Models/Plan.swift`
+- Modify: `Sources/LlmIdeMac/Models/Plan.swift`
 
 - [ ] **Step 1: Reorder decode attempts in AnyCodable init(from:)**
 
-In `Sources/MeetNotesMac/Models/Plan.swift`, locate the `AnyCodable` decoder (around line 77). The current order is: nil → Bool → Int → Double → String → array → dict.
+In `Sources/LlmIdeMac/Models/Plan.swift`, locate the `AnyCodable` decoder (around line 77). The current order is: nil → Bool → Int → Double → String → array → dict.
 
 The spec says reorder to: String → Int → Bool → Double → dict → array → nil (String is most common in plan JSON).
 
@@ -1053,14 +1053,14 @@ New code:
 - [ ] **Step 2: Build and run full app build**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 swift build 2>&1 | grep -E "error:|Build complete"
 ```
 
 Expected: `Build complete!` with no errors.
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
 ./build_app.sh 2>&1 | tail -20
 ```
 
@@ -1069,13 +1069,13 @@ Expected: DMG created, no signing errors.
 - [ ] **Step 3: Commit Group C**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
-git add Sources/MeetNotesMac/Views/Library/MarkdownRenderer.swift \
-        Sources/MeetNotesMac/Views/Library/FileDetailView.swift \
-        Sources/MeetNotesMac/Services/NotesFolder/MeetingFileStore.swift \
-        Sources/MeetNotesMac/Views/PlanView.swift \
-        Sources/MeetNotesMac/ViewModels/PlanListViewModel.swift \
-        Sources/MeetNotesMac/Models/Plan.swift
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
+git add Sources/LlmIdeMac/Views/Library/MarkdownRenderer.swift \
+        Sources/LlmIdeMac/Views/Library/FileDetailView.swift \
+        Sources/LlmIdeMac/Services/NotesFolder/MeetingFileStore.swift \
+        Sources/LlmIdeMac/Views/PlanView.swift \
+        Sources/LlmIdeMac/ViewModels/PlanListViewModel.swift \
+        Sources/LlmIdeMac/Models/Plan.swift
 git commit -m "quality: extract MarkdownRenderer, static slugAllowed, fix AnyCodable order"
 ```
 
@@ -1086,11 +1086,11 @@ git commit -m "quality: extract MarkdownRenderer, static slugAllowed, fix AnyCod
 - [ ] **Run build_app.sh and confirm signed DMG**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac
-./build_app.sh 2>&1 | grep -E "error|warning|MeetNotesMac|Done"
+cd /Users/dinesh.malla/Desktop/llm-ide/mac
+./build_app.sh 2>&1 | grep -E "error|warning|LlmIdeMac|Done"
 ```
 
-Expected: `MeetNotesMac.app` and `MeetNotesMac_*.dmg` produced with zero errors.
+Expected: `LlmIdeMac.app` and `LlmIdeMac_*.dmg` produced with zero errors.
 
 - [ ] **Manual smoke tests**
 

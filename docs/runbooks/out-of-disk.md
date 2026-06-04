@@ -66,14 +66,14 @@ Add to `crontab -e`:
 
 ### Move the DB to a larger volume
 
-`MEETNOTES_DB_PATH` controls the location. To migrate:
+`LLMIDE_DB_PATH` controls the location. To migrate:
 
 ```bash
 kill -TERM $(lsof -ti :3456)            # stop the server cleanly
 mv "$DB" /new/volume/data.db
 mv "${DB}-wal" /new/volume/ 2>/dev/null   # optional; safe to discard
 mv "${DB}-shm" /new/volume/ 2>/dev/null   # optional; safe to discard
-export MEETNOTES_DB_PATH=/new/volume/data.db
+export LLMIDE_DB_PATH=/new/volume/data.db
 # Restart the server (your supervisor will re-read the env var).
 ```
 
@@ -85,7 +85,7 @@ export MEETNOTES_DB_PATH=/new/volume/data.db
 
 ## Prevention
 
-- Always set `MEETNOTES_DB_PATH` to a volume with at least 5× the
+- Always set `LLMIDE_DB_PATH` to a volume with at least 5× the
   current DB size of headroom. Backups are full copies, not deltas.
 - Wire the backup-retention cron above into the install procedure.
 - Monitor disk usage via the supervisor or `/health` (Phase 2: we plan

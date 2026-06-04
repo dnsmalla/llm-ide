@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Eliminate all crash risks, silent failures, resource leaks, and UX rough edges across the Meet Notes macOS app.
+**Goal:** Eliminate all crash risks, silent failures, resource leaks, and UX rough edges across the LLM IDE macOS app.
 
 **Architecture:** Changes are grouped in dependency order — crashes first, then resource management, then error propagation (infrastructure), then UX polish (consumers of that infrastructure). Each task is self-contained and commits on its own.
 
@@ -13,23 +13,23 @@
 ## File Structure
 
 **Modified files only — no new files:**
-- `Sources/MeetNotesMac/Models/NoteAction.swift` — bounds-checked string parsing
-- `Sources/MeetNotesMac/Services/LibraryItemStore.swift` — safe storeURL, os_log import
-- `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift` — safe logsDirectory, deinit, sink, capture, file-handle defer, error properties, do/catch
-- `Sources/MeetNotesMac/MeetNotesMacApp.swift` — safe registry URL, wire error callbacks
-- `Sources/MeetNotesMac/Views/Shell/SidebarView.swift` — shortcut cap, accessibility labels
-- `Sources/MeetNotesMac/Views/AppShell.swift` — recovery error do/catch, 30s timeout
-- `Sources/MeetNotesMac/Services/GitLabClient.swift` — better error message
-- `Sources/MeetNotesMac/Models/ProcessedActionsRegistry.swift` — error callbacks, loadError, taskType, retry cap
-- `Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift` — error banners, confirmation, empty states, history timestamp, accessibility
-- `Sources/MeetNotesMac/Views/Settings/AutoCodeSettingsSection.swift` — navigation button in hint
+- `Sources/LlmIdeMac/Models/NoteAction.swift` — bounds-checked string parsing
+- `Sources/LlmIdeMac/Services/LibraryItemStore.swift` — safe storeURL, os_log import
+- `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift` — safe logsDirectory, deinit, sink, capture, file-handle defer, error properties, do/catch
+- `Sources/LlmIdeMac/LlmIdeMacApp.swift` — safe registry URL, wire error callbacks
+- `Sources/LlmIdeMac/Views/Shell/SidebarView.swift` — shortcut cap, accessibility labels
+- `Sources/LlmIdeMac/Views/AppShell.swift` — recovery error do/catch, 30s timeout
+- `Sources/LlmIdeMac/Services/GitLabClient.swift` — better error message
+- `Sources/LlmIdeMac/Models/ProcessedActionsRegistry.swift` — error callbacks, loadError, taskType, retry cap
+- `Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift` — error banners, confirmation, empty states, history timestamp, accessibility
+- `Sources/LlmIdeMac/Views/Settings/AutoCodeSettingsSection.swift` — navigation button in hint
 
 ---
 
 ### Task 1: NoteAction safe string parsing
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Models/NoteAction.swift`
+- Modify: `Sources/LlmIdeMac/Models/NoteAction.swift`
 
 Context: `NoteAction.swift` has three unsafe patterns in `extract(from:notesRoot:)` and `actionsSection(in:)`: a range subscript on a String without a bounds guard, and two `dropFirst(n)` calls without size guards. The fixes are defensive guards that skip malformed content rather than crashing.
 
@@ -104,13 +104,13 @@ enum NoteActionExtractor {
 
 - [ ] **Step 2: Build to verify no errors**
 
-Run: `cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift build 2>&1 | grep -E "error:|Build complete"`
+Run: `cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift build 2>&1 | grep -E "error:|Build complete"`
 Expected: `Build complete!`
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Models/NoteAction.swift
+git add Sources/LlmIdeMac/Models/NoteAction.swift
 git commit -m "fix: add bounds guards to NoteAction string parsing"
 ```
 
@@ -119,7 +119,7 @@ git commit -m "fix: add bounds guards to NoteAction string parsing"
 ### Task 2: LibraryItemStore safe storeURL
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Services/LibraryItemStore.swift`
+- Modify: `Sources/LlmIdeMac/Services/LibraryItemStore.swift`
 
 Context: `storeURL` force-unwraps `.first!` on the application support directory array. On sandboxed or unusual environments this crashes. Fix: make it optional and guard in callers.
 
@@ -141,7 +141,7 @@ final class LibraryItemStore {
         FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first?
-            .appendingPathComponent("MeetNotes/library_items.json")
+            .appendingPathComponent("LLM IDE/library_items.json")
     }
 
     init() { load() }
@@ -229,19 +229,19 @@ Expected: `Build complete!`
 - [ ] **Step 3: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Services/LibraryItemStore.swift
+git add Sources/LlmIdeMac/Services/LibraryItemStore.swift
 git commit -m "fix: replace force-unwrap in LibraryItemStore.storeURL with safe optional"
 ```
 
 ---
 
-### Task 3: Safe URLs in AutoCodeUpdateService and MeetNotesMacApp
+### Task 3: Safe URLs in AutoCodeUpdateService and LlmIdeMacApp
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift` (logsDirectory only)
-- Modify: `Sources/MeetNotesMac/MeetNotesMacApp.swift` (registry URL)
+- Modify: `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift` (logsDirectory only)
+- Modify: `Sources/LlmIdeMac/LlmIdeMacApp.swift` (registry URL)
 
-Context: Two force-subscript `[0]` patterns: `logsDirectory()` in AutoCodeUpdateService, and the registry URL construction in MeetNotesMacApp.
+Context: Two force-subscript `[0]` patterns: `logsDirectory()` in AutoCodeUpdateService, and the registry URL construction in LlmIdeMacApp.
 
 - [ ] **Step 1: Fix `logsDirectory()` return type**
 
@@ -250,7 +250,7 @@ Find this function at the bottom of `AutoCodeUpdateService.swift`:
 ```swift
 private func logsDirectory() -> URL {
     let url = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("Logs/MeetNotes")
+        .appendingPathComponent("Logs/LLM IDE")
     try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
 }
@@ -263,7 +263,7 @@ private func logsDirectory() -> URL? {
     guard let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first else {
         return nil
     }
-    let url = base.appendingPathComponent("Logs/MeetNotes")
+    let url = base.appendingPathComponent("Logs/LLM IDE")
     try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
 }
@@ -347,13 +347,13 @@ Replace with:
         }
 ```
 
-- [ ] **Step 3: Fix registry URL in MeetNotesMacApp**
+- [ ] **Step 3: Fix registry URL in LlmIdeMacApp**
 
-In `MeetNotesMacApp.init()`, find:
+In `LlmIdeMacApp.init()`, find:
 
 ```swift
         let registryURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("MeetNotes/processed-actions.json")
+            .appendingPathComponent("LLM IDE/processed-actions.json")
 ```
 
 Replace with:
@@ -363,7 +363,7 @@ Replace with:
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first ?? URL(fileURLWithPath: NSHomeDirectory())
                 .appendingPathComponent("Library/Application Support")
-        let registryURL = appSupportBase.appendingPathComponent("MeetNotes/processed-actions.json")
+        let registryURL = appSupportBase.appendingPathComponent("LLM IDE/processed-actions.json")
 ```
 
 - [ ] **Step 4: Build**
@@ -374,8 +374,8 @@ Expected: `Build complete!`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift \
-        Sources/MeetNotesMac/MeetNotesMacApp.swift
+git add Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift \
+        Sources/LlmIdeMac/LlmIdeMacApp.swift
 git commit -m "fix: replace [0] force-subscript with safe .first in URL lookups"
 ```
 
@@ -384,7 +384,7 @@ git commit -m "fix: replace [0] force-subscript with safe .first in URL lookups"
 ### Task 4: Sidebar keyboard shortcut cap at 9
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/Shell/SidebarView.swift`
+- Modify: `Sources/LlmIdeMac/Views/Shell/SidebarView.swift`
 
 Context: `Character("\(idx + 1)")` creates a multi-character string if there are 10+ sidebar items. `KeyEquivalent` silently takes only the first char. Guard at 9.
 
@@ -422,7 +422,7 @@ Expected: `Build complete!`
 - [ ] **Step 3: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Views/Shell/SidebarView.swift
+git add Sources/LlmIdeMac/Views/Shell/SidebarView.swift
 git commit -m "fix: cap sidebar keyboard shortcuts at 9 to avoid multi-char Character"
 ```
 
@@ -431,7 +431,7 @@ git commit -m "fix: cap sidebar keyboard shortcuts at 9 to avoid multi-char Char
 ### Task 5: AutoCodeUpdateService resource management
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift`
+- Modify: `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift`
 
 Context: Three resource issues: (1) no `deinit` — timer fires into deallocated object; (2) Combine sink doesn't call `stop()` when disabled; (3) `localPath` in step 4 of `run()` uses the guard-bound name while step 6 uses `resolvedLocalPath` — unify to a single `let capturedLocalPath` for clarity.
 
@@ -522,7 +522,7 @@ Expected: `Build complete!`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift
+git add Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift
 git commit -m "fix: add deinit, fix sink stop(), unify localPath capture in AutoCodeUpdateService"
 ```
 
@@ -531,7 +531,7 @@ git commit -m "fix: add deinit, fix sink stop(), unify localPath capture in Auto
 ### Task 6: File handle cleanup with defer in runCLI
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift`
+- Modify: `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift`
 
 Context: Both `runCLI` overloads open a `FileHandle` before calling `process.run()`. Using a `defer` makes the cleanup unconditional and explicit. Also convert `var logFileHandle` to `let` for clarity.
 
@@ -615,7 +615,7 @@ Expected: `Build complete!`
 - [ ] **Step 4: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift
+git add Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift
 git commit -m "fix: use defer for FileHandle cleanup in runCLI to prevent leaks"
 ```
 
@@ -624,7 +624,7 @@ git commit -m "fix: use defer for FileHandle cleanup in runCLI to prevent leaks"
 ### Task 7: AppShell recovery background task timeout
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/AppShell.swift`
+- Modify: `Sources/LlmIdeMac/Views/AppShell.swift`
 
 Context: `recover(_:)` uses `Task.detached(priority: .background)` with no timeout. If the file operation hangs (network drive, permission issue), it runs indefinitely. Add a 30-second timeout using `withThrowingTaskGroup`.
 
@@ -689,7 +689,7 @@ Expected: `Build complete!`
 - [ ] **Step 3: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Views/AppShell.swift
+git add Sources/LlmIdeMac/Views/AppShell.swift
 git commit -m "fix: add 30s timeout to AppShell recovery background task"
 ```
 
@@ -698,7 +698,7 @@ git commit -m "fix: add 30s timeout to AppShell recovery background task"
 ### Task 8: AutoCodeUpdateService error properties and do/catch in run()
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift`
+- Modify: `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift`
 
 Context: `run()` uses `try?` to open MeetingIndex, silently dropping errors. Add `@Published var lastError` and `taskErrors` to surface failures to the UI, replace `try?` with `do/catch`, and add a `setError(_:)` helper for external callers (e.g., registry error wiring in Task 9).
 
@@ -808,7 +808,7 @@ Replace with:
                 if ok {
                     taskErrors.removeValue(forKey: AutoTask.reviewCode.rawValue)
                 } else {
-                    taskErrors[AutoTask.reviewCode.rawValue] = "Review Code task failed. Check ~/Library/Logs/MeetNotes/auto-task-review-code.log"
+                    taskErrors[AutoTask.reviewCode.rawValue] = "Review Code task failed. Check ~/Library/Logs/LLM IDE/auto-task-review-code.log"
                 }
             }
             if config.autoCodeRunReviewDoc {
@@ -819,7 +819,7 @@ Replace with:
                 if ok {
                     taskErrors.removeValue(forKey: AutoTask.reviewDoc.rawValue)
                 } else {
-                    taskErrors[AutoTask.reviewDoc.rawValue] = "Review Doc task failed. Check ~/Library/Logs/MeetNotes/auto-task-review-doc.log"
+                    taskErrors[AutoTask.reviewDoc.rawValue] = "Review Doc task failed. Check ~/Library/Logs/LLM IDE/auto-task-review-doc.log"
                 }
             }
             if config.autoCodeRunReviewConflicts {
@@ -830,7 +830,7 @@ Replace with:
                 if ok {
                     taskErrors.removeValue(forKey: AutoTask.reviewConflicts.rawValue)
                 } else {
-                    taskErrors[AutoTask.reviewConflicts.rawValue] = "Review Conflicts task failed. Check ~/Library/Logs/MeetNotes/auto-task-review-conflicts.log"
+                    taskErrors[AutoTask.reviewConflicts.rawValue] = "Review Conflicts task failed. Check ~/Library/Logs/LLM IDE/auto-task-review-conflicts.log"
                 }
             }
         }
@@ -844,19 +844,19 @@ Expected: `Build complete!`
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift
+git add Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift
 git commit -m "feat: add lastError/taskErrors to AutoCodeUpdateService, replace try? with do/catch"
 ```
 
 ---
 
-### Task 9: ProcessedActionsRegistry error callbacks and MeetNotesMacApp wiring
+### Task 9: ProcessedActionsRegistry error callbacks and LlmIdeMacApp wiring
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Models/ProcessedActionsRegistry.swift`
-- Modify: `Sources/MeetNotesMac/MeetNotesMacApp.swift`
+- Modify: `Sources/LlmIdeMac/Models/ProcessedActionsRegistry.swift`
+- Modify: `Sources/LlmIdeMac/LlmIdeMacApp.swift`
 
-Context: `load()` and `save()` silently swallow errors. Add optional error callbacks and a `loadError` property (for init-time errors that fire before callbacks are wired). Wire in `MeetNotesMacApp` to forward errors to `AutoCodeUpdateService.lastError`.
+Context: `load()` and `save()` silently swallow errors. Add optional error callbacks and a `loadError` property (for init-time errors that fire before callbacks are wired). Wire in `LlmIdeMacApp` to forward errors to `AutoCodeUpdateService.lastError`.
 
 - [ ] **Step 1: Add error callbacks and `loadError` to `ProcessedActionsRegistry`**
 
@@ -930,7 +930,7 @@ With:
     }
 ```
 
-- [ ] **Step 4: Wire callbacks in `MeetNotesMacApp.init()`**
+- [ ] **Step 4: Wire callbacks in `LlmIdeMacApp.init()`**
 
 After:
 
@@ -961,8 +961,8 @@ Expected: `Build complete!`
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Models/ProcessedActionsRegistry.swift \
-        Sources/MeetNotesMac/MeetNotesMacApp.swift
+git add Sources/LlmIdeMac/Models/ProcessedActionsRegistry.swift \
+        Sources/LlmIdeMac/LlmIdeMacApp.swift
 git commit -m "feat: add error callbacks to ProcessedActionsRegistry, wire to AutoCodeUpdateService"
 ```
 
@@ -971,7 +971,7 @@ git commit -m "feat: add error callbacks to ProcessedActionsRegistry, wire to Au
 ### Task 10: GitLabClient better error message
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Services/GitLabClient.swift`
+- Modify: `Sources/LlmIdeMac/Services/GitLabClient.swift`
 
 Context: The fallback error message loses the HTTP status code when JSON decode fails. Always include the status code.
 
@@ -1004,7 +1004,7 @@ Expected: `Build complete!`
 - [ ] **Step 3: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Services/GitLabClient.swift
+git add Sources/LlmIdeMac/Services/GitLabClient.swift
 git commit -m "fix: include HTTP status code in GitLabClient fallback error message"
 ```
 
@@ -1013,7 +1013,7 @@ git commit -m "fix: include HTTP status code in GitLabClient fallback error mess
 ### Task 11: AppShell scan and rescan error handling
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/AppShell.swift`
+- Modify: `Sources/LlmIdeMac/Views/AppShell.swift`
 
 Context: `checkRecovery()` swallows orphan scan errors with `try?`. `rescanIndex()` swallows full-scan errors. Both should set `recoveryError` (already displayed via the existing bottom banner).
 
@@ -1079,7 +1079,7 @@ Expected: `Build complete!`
 - [ ] **Step 4: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Views/AppShell.swift
+git add Sources/LlmIdeMac/Views/AppShell.swift
 git commit -m "fix: surface checkRecovery and rescanIndex errors to AppShell banner"
 ```
 
@@ -1088,7 +1088,7 @@ git commit -m "fix: surface checkRecovery and rescanIndex errors to AppShell ban
 ### Task 12: AutoCodeView error banners
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift`
+- Modify: `Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift`
 
 Context: `AutoCodeUpdateService` now publishes `lastError` and `taskErrors` but nothing displays them. Add a reusable `errorBanner` helper and wire it into the left pane (run errors) and right pane template editor (per-task CLI errors).
 
@@ -1214,7 +1214,7 @@ Expected: `Build complete!`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift
+git add Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift
 git commit -m "feat: add error banners to AutoCodeView for run and per-task CLI failures"
 ```
 
@@ -1223,7 +1223,7 @@ git commit -m "feat: add error banners to AutoCodeView for run and per-task CLI 
 ### Task 13: "Restore Default" confirmation dialog
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift`
+- Modify: `Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift`
 
 Context: The "Restore Default" button immediately overwrites customized templates with no warning. Add a `confirmationDialog` so the user must confirm the destructive action.
 
@@ -1291,7 +1291,7 @@ Expected: `Build complete!`
 - [ ] **Step 3: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift
+git add Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift
 git commit -m "feat: add confirmation dialog to Restore Default button in AutoCodeView"
 ```
 
@@ -1300,8 +1300,8 @@ git commit -m "feat: add confirmation dialog to Restore Default button in AutoCo
 ### Task 14: Empty state messages and history row timestamp
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift`
-- Modify: `Sources/MeetNotesMac/Models/ProcessedActionsRegistry.swift`
+- Modify: `Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift`
+- Modify: `Sources/LlmIdeMac/Models/ProcessedActionsRegistry.swift`
 
 Context: "No actions yet" is vague. The history row shows no timestamp. `RegistryEntry` already has `lastUpdated: Date` — use it. Also add an optional `taskType: String?` field to RegistryEntry for forward-compatibility.
 
@@ -1421,8 +1421,8 @@ Expected: `Build complete!`
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift \
-        Sources/MeetNotesMac/Models/ProcessedActionsRegistry.swift
+git add Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift \
+        Sources/LlmIdeMac/Models/ProcessedActionsRegistry.swift
 git commit -m "feat: improve empty state messages and add timestamp to AutoTasks history row"
 ```
 
@@ -1431,7 +1431,7 @@ git commit -m "feat: improve empty state messages and add timestamp to AutoTasks
 ### Task 15: ProcessedActionsRegistry retry cap in resetStuckImplementing
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Models/ProcessedActionsRegistry.swift`
+- Modify: `Sources/LlmIdeMac/Models/ProcessedActionsRegistry.swift`
 
 Context: `resetStuckImplementing()` resets `.implementing` entries to `.pending` on every launch without incrementing `retryCount`. A CLI that always crashes would retry forever. Fix: increment `retryCount` during reset, and if `retryCount >= 3`, mark `.failed` instead.
 
@@ -1481,7 +1481,7 @@ Expected: `Build complete!`
 - [ ] **Step 3: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Models/ProcessedActionsRegistry.swift
+git add Sources/LlmIdeMac/Models/ProcessedActionsRegistry.swift
 git commit -m "fix: cap retry count at 3 in ProcessedActionsRegistry.resetStuckImplementing"
 ```
 
@@ -1490,7 +1490,7 @@ git commit -m "fix: cap retry count at 3 in ProcessedActionsRegistry.resetStuckI
 ### Task 16: "No linked repo" hint with navigation button
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/Settings/AutoCodeSettingsSection.swift`
+- Modify: `Sources/LlmIdeMac/Views/Settings/AutoCodeSettingsSection.swift`
 
 Context: The existing `SettingsHint` tells the user to configure GitLab settings but provides no way to navigate there. Add a `Button("Open GitLab Settings")` that sets `shell.section = .settings`. `ShellState` is accessed via `@Environment(ShellState.self)` (same pattern as `SidebarView`).
 
@@ -1540,7 +1540,7 @@ Expected: `Build complete!`
 - [ ] **Step 3: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Views/Settings/AutoCodeSettingsSection.swift
+git add Sources/LlmIdeMac/Views/Settings/AutoCodeSettingsSection.swift
 git commit -m "feat: add Open GitLab Settings navigation button to AutoCode settings hint"
 ```
 
@@ -1549,8 +1549,8 @@ git commit -m "feat: add Open GitLab Settings navigation button to AutoCode sett
 ### Task 17: Accessibility labels throughout
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/Shell/SidebarView.swift`
-- Modify: `Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift`
+- Modify: `Sources/LlmIdeMac/Views/Shell/SidebarView.swift`
+- Modify: `Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift`
 
 Context: Compact-mode sidebar rows, record/stop buttons, and Auto Tasks status icons all lack `.accessibilityLabel`. Screen readers only see the SF Symbol name or nothing.
 
@@ -1661,8 +1661,8 @@ Expected: `Build complete!`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/MeetNotesMac/Views/Shell/SidebarView.swift \
-        Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift
+git add Sources/LlmIdeMac/Views/Shell/SidebarView.swift \
+        Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift
 git commit -m "feat: add accessibilityLabel to sidebar rows, record buttons, and status icons"
 ```
 
@@ -1674,12 +1674,12 @@ git commit -m "feat: add accessibilityLabel to sidebar rows, record buttons, and
 
 - [ ] **Step 1: Full production build**
 
-Run: `bash /Users/dinesh.malla/Desktop/meet-notes/mac/build_app.sh 2>&1 | tail -10`
+Run: `bash /Users/dinesh.malla/Desktop/llm-ide/mac/build_app.sh 2>&1 | tail -10`
 Expected: `✓ Build Successful!`
 
 - [ ] **Step 2: Open app and smoke test**
 
-Run: `open /Users/dinesh.malla/Desktop/meet-notes/mac/MeetNotesMac.app`
+Run: `open /Users/dinesh.malla/Desktop/llm-ide/mac/LlmIdeMac.app`
 
 Verify:
 - Auto Tasks sidebar entry present, clicking it shows two-pane layout

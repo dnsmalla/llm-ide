@@ -7,7 +7,7 @@ applies_to: server, extension, mac
 
 ## Goal
 
-Teach the internal Meet Notes agent a new capability — either a read (server-executed) or a write (client-confirmed).
+Teach the internal LLM IDE agent a new capability — either a read (server-executed) or a write (client-confirmed).
 
 > The **global** agent has only one skill (`ask-internal`). Don't add skills there — they'd defeat the token-savings goal. All app-aware capabilities live on internal.
 
@@ -45,7 +45,7 @@ Body: `# <name>`, `## When to use`, `## Call shape`, `## Result shape` (read onl
 
 ### 4. Mac client side (write tools only)
 
-Add a confirm sheet under `mac/Sources/MeetNotesMac/Agent/Views/` modelled on `CreateGitLabIssueSheet.swift`. Wire it from `CodeAssistantPanel.swift` keyed on `pendingTool.name`.
+Add a confirm sheet under `mac/Sources/LlmIdeMac/Agent/Views/` modelled on `CreateGitLabIssueSheet.swift`. Wire it from `CodeAssistantPanel.swift` keyed on `pendingTool.name`.
 
 ### 5. Restart and test
 

@@ -31,7 +31,7 @@ API credentials are stored in `user_secrets(user_id, secret_key, ciphertext)`. T
 version (1 byte) || iv (12 bytes) || AES-256-GCM(plaintext) || tag (16 bytes)
 ```
 
-Each user's data key is derived as `HKDF-SHA256(masterKey, salt=userId, info='meetnotes-vault-v1', length=32)`. The master key never leaves the server process. A DB-only leak yields ciphertext that cannot be decrypted without the master key; one user's ciphertext cannot be used to attack another's because the derived keys differ.
+Each user's data key is derived as `HKDF-SHA256(masterKey, salt=userId, info='llmide-vault-v1', length=32)`. The master key never leaves the server process. A DB-only leak yields ciphertext that cannot be decrypted without the master key; one user's ciphertext cannot be used to attack another's because the derived keys differ.
 
 Allowed secret keys are `github.token`, `backlog.apiKey`, `linear.apiKey`, and `slack.webhookUrl`. Attempts to store keys outside this allowlist are rejected at the route layer.
 
@@ -76,7 +76,7 @@ The install flow in `extension/plugins/installer.mjs` validates only the bundle 
 - zip entries are scanned before extraction and rejected on path traversal, absolute paths, Windows drive escapes, or invalid bundle shape
 - install happens in a temp staging directory and moves into the real plugin directory only after validation succeeds
 
-Once installed and enabled, plugin code runs inside the same Node.js server process as the rest of Meet Notes. That means a malicious plugin can:
+Once installed and enabled, plugin code runs inside the same Node.js server process as the rest of LLM IDE. That means a malicious plugin can:
 
 - read process environment variables and any secrets reachable from them
 - import server modules directly, including KB/storage helpers

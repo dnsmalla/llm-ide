@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the graphify CLI integration with Understand-Anything (UA) across the entire meet-notes system — Mac app, Claude Code skill, and gitignore — using an adapter-layer strategy that keeps CGData as the common interface.
+**Goal:** Replace the graphify CLI integration with Understand-Anything (UA) across the entire llm-ide system — Mac app, Claude Code skill, and gitignore — using an adapter-layer strategy that keeps CGData as the common interface.
 
 **Architecture:** Producer layer (runner, parser, store, installer) is rewritten to target UA's JSON schema and npx-based invocation. The CGNodeKind and CGEdgeKind enums are expanded to cover UA's 21 node types and 35 edge types. All 20+ consumer files (views, services, view models) see the same CGData types with cosmetic renames.
 
@@ -57,14 +57,14 @@
 
 ### Downstream renames (~20 files — string replacements only)
 
-`Config.swift`, `Project.swift`, `ProjectStore.swift`, `PathValidator.swift`, `ShellState.swift`, `SidebarView.swift`, `MeetNotesMacApp.swift`, `AppShell.swift`, `LibraryItemStore.swift`, `AutoCodeUpdateService.swift`, `RegressionRunner.swift`, `PathsSettingsSection.swift`, `GitHubSettingsSection.swift`, `GitLabSettingsSection.swift`, `MemoryTabView.swift`, `AutoCodeView.swift`, `ReportBugSheet.swift`, `HelpGuideView.swift`, `RegressionView.swift`, `CodeGraphCanvas.swift`
+`Config.swift`, `Project.swift`, `ProjectStore.swift`, `PathValidator.swift`, `ShellState.swift`, `SidebarView.swift`, `LlmIdeMacApp.swift`, `AppShell.swift`, `LibraryItemStore.swift`, `AutoCodeUpdateService.swift`, `RegressionRunner.swift`, `PathsSettingsSection.swift`, `GitHubSettingsSection.swift`, `GitLabSettingsSection.swift`, `MemoryTabView.swift`, `AutoCodeView.swift`, `ReportBugSheet.swift`, `HelpGuideView.swift`, `RegressionView.swift`, `CodeGraphCanvas.swift`
 
 ---
 
 ## Task 1: Expand CGNodeKind and CGEdgeKind enums
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/CodeGraph/CodeGraphModels.swift`
+- Modify: `mac/Sources/LlmIdeMac/CodeGraph/CodeGraphModels.swift`
 
 - [ ] **Step 1: Add new CGNodeKind cases**
 
@@ -322,14 +322,14 @@ public struct CGData: Equatable, Sendable {
 
 - [ ] **Step 7: Build to verify no compile errors**
 
-Run: `cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift build 2>&1 | tail -5`
+Run: `cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift build 2>&1 | tail -5`
 
 Expected: Build succeeds (possibly with existing warnings). The old `CGData(nodes:edges:)` call sites still work because `layers` and `tour` have default values.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeGraph/CodeGraphModels.swift
+git add mac/Sources/LlmIdeMac/CodeGraph/CodeGraphModels.swift
 git commit -m "feat(models): expand CGNodeKind to 21 types and CGEdgeKind to 35 types for UA
 
 Add UALayer and UATourStep structs. CGData gains optional layers/tour
@@ -341,8 +341,8 @@ arrays with backward-compatible defaults."
 ## Task 2: Create UAError
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeGraph/UAError.swift`
-- Delete: `mac/Sources/MeetNotesMac/CodeGraph/GraphifyError.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeGraph/UAError.swift`
+- Delete: `mac/Sources/LlmIdeMac/CodeGraph/GraphifyError.swift`
 
 - [ ] **Step 1: Create UAError.swift**
 
@@ -364,7 +364,7 @@ public enum UAError: Error, Equatable {
 - [ ] **Step 2: Delete GraphifyError.swift**
 
 ```bash
-git rm mac/Sources/MeetNotesMac/CodeGraph/GraphifyError.swift
+git rm mac/Sources/LlmIdeMac/CodeGraph/GraphifyError.swift
 ```
 
 - [ ] **Step 3: Fix all references from GraphifyError to UAError**
@@ -381,8 +381,8 @@ For now the build will have errors — they'll be resolved in subsequent tasks. 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeGraph/UAError.swift
-git add mac/Sources/MeetNotesMac/CodeGraph/GraphifyError.swift
+git add mac/Sources/LlmIdeMac/CodeGraph/UAError.swift
+git add mac/Sources/LlmIdeMac/CodeGraph/GraphifyError.swift
 git commit -m "feat(codegraph): add UAError, remove GraphifyError
 
 Adds nodeVersionTooOld case for Node.js version checking."
@@ -393,8 +393,8 @@ Adds nodeVersionTooOld case for Node.js version checking."
 ## Task 3: Create UARunner (replaces GraphifyRunner)
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeGraph/UARunner.swift`
-- Delete: `mac/Sources/MeetNotesMac/CodeGraph/GraphifyRunner.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeGraph/UARunner.swift`
+- Delete: `mac/Sources/LlmIdeMac/CodeGraph/GraphifyRunner.swift`
 
 - [ ] **Step 1: Create UARunner.swift**
 
@@ -574,14 +574,14 @@ public final class UARunner {
 - [ ] **Step 2: Delete GraphifyRunner.swift**
 
 ```bash
-git rm mac/Sources/MeetNotesMac/CodeGraph/GraphifyRunner.swift
+git rm mac/Sources/LlmIdeMac/CodeGraph/GraphifyRunner.swift
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeGraph/UARunner.swift
-git add mac/Sources/MeetNotesMac/CodeGraph/GraphifyRunner.swift
+git add mac/Sources/LlmIdeMac/CodeGraph/UARunner.swift
+git add mac/Sources/LlmIdeMac/CodeGraph/GraphifyRunner.swift
 git commit -m "feat(codegraph): add UARunner, remove GraphifyRunner
 
 Invokes understand-anything via npx or direct binary. Checks
@@ -593,8 +593,8 @@ Node.js >= 22 before running. Same ProcessLauncher seam for testing."
 ## Task 4: Create UAParser (replaces GraphifyParser)
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeGraph/UAParser.swift`
-- Delete: `mac/Sources/MeetNotesMac/CodeGraph/GraphifyParser.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeGraph/UAParser.swift`
+- Delete: `mac/Sources/LlmIdeMac/CodeGraph/GraphifyParser.swift`
 
 - [ ] **Step 1: Create UAParser.swift**
 
@@ -858,14 +858,14 @@ public enum UAParser {
 - [ ] **Step 2: Delete GraphifyParser.swift**
 
 ```bash
-git rm mac/Sources/MeetNotesMac/CodeGraph/GraphifyParser.swift
+git rm mac/Sources/LlmIdeMac/CodeGraph/GraphifyParser.swift
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeGraph/UAParser.swift
-git add mac/Sources/MeetNotesMac/CodeGraph/GraphifyParser.swift
+git add mac/Sources/LlmIdeMac/CodeGraph/UAParser.swift
+git add mac/Sources/LlmIdeMac/CodeGraph/GraphifyParser.swift
 git commit -m "feat(codegraph): add UAParser, remove GraphifyParser
 
 Parses UA's versioned knowledge-graph.json with 21 node types, 35 edge
@@ -877,10 +877,10 @@ types, alias resolution, layers, and tours."
 ## Task 5: Create UAStore and UAInstaller
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeGraph/UAStore.swift`
-- Create: `mac/Sources/MeetNotesMac/CodeGraph/UAInstaller.swift`
-- Delete: `mac/Sources/MeetNotesMac/CodeGraph/GraphifyStore.swift`
-- Delete: `mac/Sources/MeetNotesMac/CodeGraph/GraphifyInstaller.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeGraph/UAStore.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeGraph/UAInstaller.swift`
+- Delete: `mac/Sources/LlmIdeMac/CodeGraph/GraphifyStore.swift`
+- Delete: `mac/Sources/LlmIdeMac/CodeGraph/GraphifyInstaller.swift`
 
 - [ ] **Step 1: Create UAStore.swift**
 
@@ -913,7 +913,7 @@ public final class UAStore {
                 appropriateFor: nil, create: true))
                 ?? URL(fileURLWithPath: NSTemporaryDirectory())
             self.baseDirectory = appSupport
-                .appendingPathComponent("MeetNotesMac", isDirectory: true)
+                .appendingPathComponent("LlmIdeMac", isDirectory: true)
                 .appendingPathComponent("CodeGraph", isDirectory: true)
         }
     }
@@ -1008,15 +1008,15 @@ final class UAInstaller {
 - [ ] **Step 3: Delete old files**
 
 ```bash
-git rm mac/Sources/MeetNotesMac/CodeGraph/GraphifyStore.swift
-git rm mac/Sources/MeetNotesMac/CodeGraph/GraphifyInstaller.swift
+git rm mac/Sources/LlmIdeMac/CodeGraph/GraphifyStore.swift
+git rm mac/Sources/LlmIdeMac/CodeGraph/GraphifyInstaller.swift
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeGraph/UAStore.swift mac/Sources/MeetNotesMac/CodeGraph/UAInstaller.swift
-git add mac/Sources/MeetNotesMac/CodeGraph/GraphifyStore.swift mac/Sources/MeetNotesMac/CodeGraph/GraphifyInstaller.swift
+git add mac/Sources/LlmIdeMac/CodeGraph/UAStore.swift mac/Sources/LlmIdeMac/CodeGraph/UAInstaller.swift
+git add mac/Sources/LlmIdeMac/CodeGraph/GraphifyStore.swift mac/Sources/LlmIdeMac/CodeGraph/GraphifyInstaller.swift
 git commit -m "feat(codegraph): add UAStore and UAInstaller, remove Graphify equivalents
 
 UAStore caches knowledge-graph.json. UAInstaller invokes via npx."
@@ -1027,10 +1027,10 @@ UAStore caches knowledge-graph.json. UAInstaller invokes via npx."
 ## Task 6: Update MemoryStore and MemoryNotesWriter paths
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/CodeGraph/MemoryStore.swift`
-- Modify: `mac/Sources/MeetNotesMac/CodeGraph/MemoryNotesWriter.swift`
-- Modify: `mac/Sources/MeetNotesMac/CodeGraph/BugReport.swift`
-- Modify: `mac/Sources/MeetNotesMac/CodeGraph/QAEntry.swift`
+- Modify: `mac/Sources/LlmIdeMac/CodeGraph/MemoryStore.swift`
+- Modify: `mac/Sources/LlmIdeMac/CodeGraph/MemoryNotesWriter.swift`
+- Modify: `mac/Sources/LlmIdeMac/CodeGraph/BugReport.swift`
+- Modify: `mac/Sources/LlmIdeMac/CodeGraph/QAEntry.swift`
 
 - [ ] **Step 1: Update MemoryStore.swift**
 
@@ -1062,7 +1062,7 @@ Replace all occurrences of `graphify-out/memory` with `.understand-anything/memo
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/CodeGraph/MemoryStore.swift mac/Sources/MeetNotesMac/CodeGraph/MemoryNotesWriter.swift mac/Sources/MeetNotesMac/CodeGraph/BugReport.swift mac/Sources/MeetNotesMac/CodeGraph/QAEntry.swift
+git add mac/Sources/LlmIdeMac/CodeGraph/MemoryStore.swift mac/Sources/LlmIdeMac/CodeGraph/MemoryNotesWriter.swift mac/Sources/LlmIdeMac/CodeGraph/BugReport.swift mac/Sources/LlmIdeMac/CodeGraph/QAEntry.swift
 git commit -m "chore(memory): update paths from graphify-out/ to .understand-anything/"
 ```
 
@@ -1071,10 +1071,10 @@ git commit -m "chore(memory): update paths from graphify-out/ to .understand-any
 ## Task 7: Update Config, Project, and AppConfig
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Models/Config.swift`
-- Modify: `mac/Sources/MeetNotesMac/Models/Project.swift`
-- Modify: `mac/Sources/MeetNotesMac/Models/PathValidator.swift`
-- Modify: `mac/Sources/MeetNotesMac/Services/ProjectStore.swift`
+- Modify: `mac/Sources/LlmIdeMac/Models/Config.swift`
+- Modify: `mac/Sources/LlmIdeMac/Models/Project.swift`
+- Modify: `mac/Sources/LlmIdeMac/Models/PathValidator.swift`
+- Modify: `mac/Sources/LlmIdeMac/Services/ProjectStore.swift`
 
 - [ ] **Step 1: Update Config.swift**
 
@@ -1103,7 +1103,7 @@ Line 55: `graphifyBinaryOverride: ""` → `uaBinaryOverride: ""`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Models/Config.swift mac/Sources/MeetNotesMac/Models/Project.swift mac/Sources/MeetNotesMac/Services/ProjectStore.swift mac/Sources/MeetNotesMac/Models/PathValidator.swift
+git add mac/Sources/LlmIdeMac/Models/Config.swift mac/Sources/LlmIdeMac/Models/Project.swift mac/Sources/LlmIdeMac/Services/ProjectStore.swift mac/Sources/LlmIdeMac/Models/PathValidator.swift
 git commit -m "chore(config): rename graphifyBinaryOverride to uaBinaryOverride
 
 Update defaultMemorySubdir and PathValidator messages."
@@ -1114,17 +1114,17 @@ Update defaultMemorySubdir and PathValidator messages."
 ## Task 8: Rename views and update ShellState
 
 **Files:**
-- Rename: `mac/Sources/MeetNotesMac/Views/CodeGraph/GraphifyView.swift` → `UAGraphView.swift`
-- Rename: `mac/Sources/MeetNotesMac/Views/CodeGraph/GraphifyHelpers.swift` → `UAHelpers.swift`
-- Modify: `mac/Sources/MeetNotesMac/Services/ShellState.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/Shell/SidebarView.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/AppShell.swift` (if it references `GraphifyView`)
-- Modify: `mac/Sources/MeetNotesMac/MeetNotesMacApp.swift`
+- Rename: `mac/Sources/LlmIdeMac/Views/CodeGraph/GraphifyView.swift` → `UAGraphView.swift`
+- Rename: `mac/Sources/LlmIdeMac/Views/CodeGraph/GraphifyHelpers.swift` → `UAHelpers.swift`
+- Modify: `mac/Sources/LlmIdeMac/Services/ShellState.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/Shell/SidebarView.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/AppShell.swift` (if it references `GraphifyView`)
+- Modify: `mac/Sources/LlmIdeMac/LlmIdeMacApp.swift`
 
 - [ ] **Step 1: Rename and update GraphifyView.swift → UAGraphView.swift**
 
 ```bash
-git mv mac/Sources/MeetNotesMac/Views/CodeGraph/GraphifyView.swift mac/Sources/MeetNotesMac/Views/CodeGraph/UAGraphView.swift
+git mv mac/Sources/LlmIdeMac/Views/CodeGraph/GraphifyView.swift mac/Sources/LlmIdeMac/Views/CodeGraph/UAGraphView.swift
 ```
 
 Then in `UAGraphView.swift`, do these replacements throughout the 1383-line file:
@@ -1147,7 +1147,7 @@ Then in `UAGraphView.swift`, do these replacements throughout the 1383-line file
 - [ ] **Step 2: Rename and update GraphifyHelpers.swift → UAHelpers.swift**
 
 ```bash
-git mv mac/Sources/MeetNotesMac/Views/CodeGraph/GraphifyHelpers.swift mac/Sources/MeetNotesMac/Views/CodeGraph/UAHelpers.swift
+git mv mac/Sources/LlmIdeMac/Views/CodeGraph/GraphifyHelpers.swift mac/Sources/LlmIdeMac/Views/CodeGraph/UAHelpers.swift
 ```
 
 In `UAHelpers.swift`:
@@ -1169,7 +1169,7 @@ Replace the `.graphify` section case:
 
 Line 47: `.graphify` → `.codeGraph`
 
-- [ ] **Step 5: Update MeetNotesMacApp.swift**
+- [ ] **Step 5: Update LlmIdeMacApp.swift**
 
 Line 333: `ShellState.Section.graphify.rawValue` → `ShellState.Section.codeGraph.rawValue`
 
@@ -1180,7 +1180,7 @@ Replace any reference to `GraphifyView` with `UAGraphView`.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add -A mac/Sources/MeetNotesMac/Views/CodeGraph/ mac/Sources/MeetNotesMac/Services/ShellState.swift mac/Sources/MeetNotesMac/Views/Shell/SidebarView.swift mac/Sources/MeetNotesMac/MeetNotesMacApp.swift mac/Sources/MeetNotesMac/Views/AppShell.swift
+git add -A mac/Sources/LlmIdeMac/Views/CodeGraph/ mac/Sources/LlmIdeMac/Services/ShellState.swift mac/Sources/LlmIdeMac/Views/Shell/SidebarView.swift mac/Sources/LlmIdeMac/LlmIdeMacApp.swift mac/Sources/LlmIdeMac/Views/AppShell.swift
 git commit -m "feat(ui): rename GraphifyView to UAGraphView, update all UI strings
 
 Section.graphify → Section.codeGraph. User-facing labels now say
@@ -1192,19 +1192,19 @@ Section.graphify → Section.codeGraph. User-facing labels now say
 ## Task 9: Update remaining downstream files
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Services/LibraryItemStore.swift`
-- Modify: `mac/Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift`
-- Modify: `mac/Sources/MeetNotesMac/Services/RegressionRunner.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/Settings/PathsSettingsSection.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/Settings/GitHubSettingsSection.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/Settings/GitLabSettingsSection.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/CodeGraph/MemoryTabView.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/CodeGraph/CodeGraphCanvas.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/AutoCode/AutoCodeView.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/CodeAssistant/ReportBugSheet.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/HelpGuideView.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/Regression/RegressionView.swift`
-- Modify: `mac/Sources/MeetNotesMac/CodeGraph/ProcessLauncher.swift`
+- Modify: `mac/Sources/LlmIdeMac/Services/LibraryItemStore.swift`
+- Modify: `mac/Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift`
+- Modify: `mac/Sources/LlmIdeMac/Services/RegressionRunner.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/Settings/PathsSettingsSection.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/Settings/GitHubSettingsSection.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/Settings/GitLabSettingsSection.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/CodeGraph/MemoryTabView.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/CodeGraph/CodeGraphCanvas.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/CodeAssistant/ReportBugSheet.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/HelpGuideView.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/Regression/RegressionView.swift`
+- Modify: `mac/Sources/LlmIdeMac/CodeGraph/ProcessLauncher.swift`
 
 - [ ] **Step 1: Update LibraryItemStore.swift**
 
@@ -1264,21 +1264,21 @@ Updates 13 files: services, settings, views, and comments."
 ## Task 10: Rewrite tests
 
 **Files:**
-- Create: `mac/Tests/MeetNotesMacTests/UAParserTests.swift`
-- Create: `mac/Tests/MeetNotesMacTests/UAInstallerTests.swift`
-- Delete: `mac/Tests/MeetNotesMacTests/GraphifyParserTests.swift`
-- Delete: `mac/Tests/MeetNotesMacTests/GraphifyParserPathTests.swift`
-- Delete: `mac/Tests/MeetNotesMacTests/GraphifyInstallerTests.swift`
-- Modify: `mac/Tests/MeetNotesMacTests/MemoryStoreTests.swift`
-- Modify: `mac/Tests/MeetNotesMacTests/MemoryStoreWritesTests.swift`
-- Modify: `mac/Tests/MeetNotesMacTests/MemoryNotesWriterTests.swift`
+- Create: `mac/Tests/LlmIdeMacTests/UAParserTests.swift`
+- Create: `mac/Tests/LlmIdeMacTests/UAInstallerTests.swift`
+- Delete: `mac/Tests/LlmIdeMacTests/GraphifyParserTests.swift`
+- Delete: `mac/Tests/LlmIdeMacTests/GraphifyParserPathTests.swift`
+- Delete: `mac/Tests/LlmIdeMacTests/GraphifyInstallerTests.swift`
+- Modify: `mac/Tests/LlmIdeMacTests/MemoryStoreTests.swift`
+- Modify: `mac/Tests/LlmIdeMacTests/MemoryStoreWritesTests.swift`
+- Modify: `mac/Tests/LlmIdeMacTests/MemoryNotesWriterTests.swift`
 
 - [ ] **Step 1: Create UAParserTests.swift**
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct UAParserTests {
     private let repoRoot = URL(fileURLWithPath: "/repo")
@@ -1459,7 +1459,7 @@ struct UAParserTests {
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct UAInstallerTests {
     final class MockLauncher: ProcessLauncher, @unchecked Sendable {
@@ -1528,9 +1528,9 @@ struct UAInstallerTests {
 - [ ] **Step 3: Delete old test files**
 
 ```bash
-git rm mac/Tests/MeetNotesMacTests/GraphifyParserTests.swift
-git rm mac/Tests/MeetNotesMacTests/GraphifyParserPathTests.swift
-git rm mac/Tests/MeetNotesMacTests/GraphifyInstallerTests.swift
+git rm mac/Tests/LlmIdeMacTests/GraphifyParserTests.swift
+git rm mac/Tests/LlmIdeMacTests/GraphifyParserPathTests.swift
+git rm mac/Tests/LlmIdeMacTests/GraphifyInstallerTests.swift
 ```
 
 - [ ] **Step 4: Update MemoryStoreTests.swift**
@@ -1547,7 +1547,7 @@ Update any assertion checking the header text from `"Graphify"` to `"Understand-
 
 - [ ] **Step 7: Run all tests**
 
-Run: `cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift test 2>&1 | tail -20`
+Run: `cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift test 2>&1 | tail -20`
 
 Expected: All tests pass.
 
@@ -1567,7 +1567,7 @@ git commit -m "test: rewrite parser/installer tests for UA, update memory test p
 
 - [ ] **Step 1: Full release build**
 
-Run: `cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift build -c release 2>&1 | grep -E 'error:|Build'`
+Run: `cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift build -c release 2>&1 | grep -E 'error:|Build'`
 
 - [ ] **Step 2: Fix any remaining compile errors**
 
@@ -1581,7 +1581,7 @@ Fix each error by updating the reference to the new name.
 
 - [ ] **Step 3: Run all tests again**
 
-Run: `cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift test 2>&1 | tail -10`
+Run: `cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift test 2>&1 | tail -10`
 
 Expected: All tests pass.
 
@@ -1623,7 +1623,7 @@ When the user types `/understand`, run the Understand-Anything plugin to analyze
 - [ ] **Step 3: Delete old graphify-out data**
 
 ```bash
-rm -rf /Users/dinesh.malla/Desktop/meet-notes/mac/graphify-out/
+rm -rf /Users/dinesh.malla/Desktop/llm-ide/mac/graphify-out/
 ```
 
 - [ ] **Step 4: Commit**
@@ -1639,25 +1639,25 @@ git commit -m "chore: update gitignore for .understand-anything/, remove graphif
 
 - [ ] **Step 1: Clean build**
 
-Run: `cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift build -c release 2>&1 | tail -5`
+Run: `cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift build -c release 2>&1 | tail -5`
 
-Expected: `Build of product 'MeetNotesMac' complete!`
+Expected: `Build of product 'LlmIdeMac' complete!`
 
 - [ ] **Step 2: Run test suite**
 
-Run: `cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift test 2>&1 | tail -10`
+Run: `cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift test 2>&1 | tail -10`
 
 Expected: All tests pass.
 
 - [ ] **Step 3: Build the app bundle**
 
-Run: `cd /Users/dinesh.malla/Desktop/meet-notes/mac && bash Scripts/build.sh 2>&1 | tail -5`
+Run: `cd /Users/dinesh.malla/Desktop/llm-ide/mac && bash Scripts/build.sh 2>&1 | tail -5`
 
-Expected: `[build] ok — /Users/dinesh.malla/Desktop/meet-notes/mac/MeetNotesMac.app`
+Expected: `[build] ok — /Users/dinesh.malla/Desktop/llm-ide/mac/LlmIdeMac.app`
 
 - [ ] **Step 4: Launch the app**
 
-Run: `open /Users/dinesh.malla/Desktop/meet-notes/mac/MeetNotesMac.app`
+Run: `open /Users/dinesh.malla/Desktop/llm-ide/mac/LlmIdeMac.app`
 
 Verify: App launches without crash. Navigate to Code Graph section — should show the install prompt for Understand-Anything (since no analysis has been run yet).
 

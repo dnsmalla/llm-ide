@@ -4,7 +4,7 @@
 
 **Goal:** Build per-project workspaces (Phase 1 of the spec) so each opened folder maintains its own settings/state bundle and the app can switch cleanly between them.
 
-**Architecture:** Two-layer storage — `<projectFolder>/.meetnotes/project.json` travels with the folder, `~/Library/Application Support/MeetNotes/projects.json` tracks recents + active. A new `ProjectStore` becomes the single source of truth for "which project is active"; every existing feature that consults `AppConfig` for project-scoped settings now consults the active Project's bundle. Server-side, `projectId` rides in the existing `meta` JSON column — no schema migration.
+**Architecture:** Two-layer storage — `<projectFolder>/.llmide/project.json` travels with the folder, `~/Library/Application Support/LLM IDE/projects.json` tracks recents + active. A new `ProjectStore` becomes the single source of truth for "which project is active"; every existing feature that consults `AppConfig` for project-scoped settings now consults the active Project's bundle. Server-side, `projectId` rides in the existing `meta` JSON column — no schema migration.
 
 **Tech Stack:** Swift 5.9 + SwiftUI (Mac client); Node.js 20+ + better-sqlite3 (server); `node:test` (server tests); Swift Testing (mac tests).
 
@@ -18,33 +18,33 @@
 
 | File | Responsibility |
 |---|---|
-| `mac/Sources/MeetNotesMac/Models/Project.swift` | `Project`, `ProjectSettings` Codable models + `LinkedRepo` substruct |
-| `mac/Sources/MeetNotesMac/Services/ProjectStore.swift` | `@MainActor` store: recents, active project, atomic on-disk reads/writes, posts `Notification.Name.activeProjectChanged` |
-| `mac/Sources/MeetNotesMac/Services/ProjectMigrator.swift` | One-shot import from legacy `SavedGitLab/GitHubRepo` arrays |
-| `mac/Sources/MeetNotesMac/Views/Welcome/WelcomeView.swift` | First-launch + no-active screen with Open Folder + recents list |
-| `mac/Sources/MeetNotesMac/Views/Welcome/RecentProjectsList.swift` | Reusable list (used by Welcome and Cmd-P) |
-| `mac/Sources/MeetNotesMac/Views/Shell/ProjectSwitcher.swift` | Sidebar header dropdown |
-| `mac/Sources/MeetNotesMac/Views/Shell/QuickSwitcherSheet.swift` | Cmd-P HUD overlay |
-| `mac/Sources/MeetNotesMac/Views/Shell/StatusBar.swift` | Bottom status bar inside the main window |
+| `mac/Sources/LlmIdeMac/Models/Project.swift` | `Project`, `ProjectSettings` Codable models + `LinkedRepo` substruct |
+| `mac/Sources/LlmIdeMac/Services/ProjectStore.swift` | `@MainActor` store: recents, active project, atomic on-disk reads/writes, posts `Notification.Name.activeProjectChanged` |
+| `mac/Sources/LlmIdeMac/Services/ProjectMigrator.swift` | One-shot import from legacy `SavedGitLab/GitHubRepo` arrays |
+| `mac/Sources/LlmIdeMac/Views/Welcome/WelcomeView.swift` | First-launch + no-active screen with Open Folder + recents list |
+| `mac/Sources/LlmIdeMac/Views/Welcome/RecentProjectsList.swift` | Reusable list (used by Welcome and Cmd-P) |
+| `mac/Sources/LlmIdeMac/Views/Shell/ProjectSwitcher.swift` | Sidebar header dropdown |
+| `mac/Sources/LlmIdeMac/Views/Shell/QuickSwitcherSheet.swift` | Cmd-P HUD overlay |
+| `mac/Sources/LlmIdeMac/Views/Shell/StatusBar.swift` | Bottom status bar inside the main window |
 
 ### New tests (Mac)
 
 | File | Coverage |
 |---|---|
-| `mac/Tests/MeetNotesMacTests/ProjectTests.swift` | Codable round-trip, unknown-future-field tolerance |
-| `mac/Tests/MeetNotesMacTests/ProjectStoreTests.swift` | Recents pruning, atomic write, schema-version refusal, corrupt-file archive |
-| `mac/Tests/MeetNotesMacTests/ProjectMigratorTests.swift` | Happy path, empty input, idempotency |
+| `mac/Tests/LlmIdeMacTests/ProjectTests.swift` | Codable round-trip, unknown-future-field tolerance |
+| `mac/Tests/LlmIdeMacTests/ProjectStoreTests.swift` | Recents pruning, atomic write, schema-version refusal, corrupt-file archive |
+| `mac/Tests/LlmIdeMacTests/ProjectMigratorTests.swift` | Happy path, empty input, idempotency |
 
 ### Modified files (Mac)
 
 | File | Change |
 |---|---|
-| `mac/Sources/MeetNotesMac/Models/Config.swift` | Extract project-scoped fields into `defaultProjectSettings` template; mark old fields deprecated |
-| `mac/Sources/MeetNotesMac/MeetNotesMacApp.swift` | `@StateObject ProjectStore`; injects into environment; wires Cmd-P shortcut |
-| `mac/Sources/MeetNotesMac/Views/AppShell.swift` | Mount Welcome when `projectStore.activeProject == nil`; show project context otherwise |
-| `mac/Sources/MeetNotesMac/Views/SettingsView.swift` | Split into App + Project section groups |
-| `mac/Sources/MeetNotesMac/Views/CodeAssistantPanel.swift` | `buildAgentContext` reads from active project |
-| `mac/Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift` | `resolveBackendAndProject` consults active project |
+| `mac/Sources/LlmIdeMac/Models/Config.swift` | Extract project-scoped fields into `defaultProjectSettings` template; mark old fields deprecated |
+| `mac/Sources/LlmIdeMac/LlmIdeMacApp.swift` | `@StateObject ProjectStore`; injects into environment; wires Cmd-P shortcut |
+| `mac/Sources/LlmIdeMac/Views/AppShell.swift` | Mount Welcome when `projectStore.activeProject == nil`; show project context otherwise |
+| `mac/Sources/LlmIdeMac/Views/SettingsView.swift` | Split into App + Project section groups |
+| `mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift` | `buildAgentContext` reads from active project |
+| `mac/Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift` | `resolveBackendAndProject` consults active project |
 
 ### Modified files (server)
 
@@ -60,17 +60,17 @@
 ## Task 1: Project + ProjectSettings models (TDD)
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Models/Project.swift`
-- Test: `mac/Tests/MeetNotesMacTests/ProjectTests.swift`
+- Create: `mac/Sources/LlmIdeMac/Models/Project.swift`
+- Test: `mac/Tests/LlmIdeMacTests/ProjectTests.swift`
 
 - [ ] **Step 1: Write the failing tests**
 
-Write `mac/Tests/MeetNotesMacTests/ProjectTests.swift`:
+Write `mac/Tests/LlmIdeMacTests/ProjectTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 @Suite("Project model")
 struct ProjectTests {
@@ -78,7 +78,7 @@ struct ProjectTests {
     @Test func roundTripsCodable() throws {
         let p = Project(
             id: "01HBYZ123",
-            displayName: "Meet Notes Mac",
+            displayName: "LLM IDE Mac",
             createdAt: Date(timeIntervalSince1970: 1_700_000_000),
             settings: ProjectSettings(
                 language: "en",
@@ -151,12 +151,12 @@ Expected: compilation errors — `Project` not defined.
 
 - [ ] **Step 3: Create Project.swift**
 
-Write `mac/Sources/MeetNotesMac/Models/Project.swift`:
+Write `mac/Sources/LlmIdeMac/Models/Project.swift`:
 
 ```swift
 import Foundation
 
-/// On-disk per-project bundle. Stored at <projectFolder>/.meetnotes/project.json.
+/// On-disk per-project bundle. Stored at <projectFolder>/.llmide/project.json.
 struct Project: Codable, Equatable, Identifiable {
     let schemaVersion: Int
     let id: String
@@ -231,7 +231,7 @@ Expected: 3 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Models/Project.swift mac/Tests/MeetNotesMacTests/ProjectTests.swift
+git add mac/Sources/LlmIdeMac/Models/Project.swift mac/Tests/LlmIdeMacTests/ProjectTests.swift
 git commit -m "feat(mac): Project + ProjectSettings Codable models
 
 Phase 1 of per-project workspaces (spec
@@ -248,17 +248,17 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ## Task 2: ProjectStore — recents + active + atomic disk writes
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Services/ProjectStore.swift`
-- Test: `mac/Tests/MeetNotesMacTests/ProjectStoreTests.swift`
+- Create: `mac/Sources/LlmIdeMac/Services/ProjectStore.swift`
+- Test: `mac/Tests/LlmIdeMacTests/ProjectStoreTests.swift`
 
 - [ ] **Step 1: Write failing tests**
 
-Write `mac/Tests/MeetNotesMacTests/ProjectStoreTests.swift`:
+Write `mac/Tests/LlmIdeMacTests/ProjectStoreTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 @Suite("ProjectStore")
 @MainActor
@@ -295,7 +295,7 @@ struct ProjectStoreTests {
         #expect(store.activeProject != nil)
         #expect(store.activeProject?.localPath == proj.path)
         #expect(FileManager.default.fileExists(
-            atPath: proj.appendingPathComponent(".meetnotes/project.json").path))
+            atPath: proj.appendingPathComponent(".llmide/project.json").path))
 
         // Persistence: a fresh store reads it back.
         let reborn = ProjectStore(stateDirectory: root, defaults: defaults)
@@ -360,7 +360,7 @@ Expected: `ProjectStore` not defined.
 
 - [ ] **Step 3: Create ProjectStore.swift**
 
-Write `mac/Sources/MeetNotesMac/Services/ProjectStore.swift`:
+Write `mac/Sources/LlmIdeMac/Services/ProjectStore.swift`:
 
 ```swift
 import Foundation
@@ -372,7 +372,7 @@ extension Notification.Name {
 
 /// App-wide recents + active project record. Kept in
 /// `<stateDirectory>/projects.json`. The active Project is fully
-/// hydrated from its own `<folder>/.meetnotes/project.json` on demand.
+/// hydrated from its own `<folder>/.llmide/project.json` on demand.
 @MainActor
 final class ProjectStore: ObservableObject {
 
@@ -415,7 +415,7 @@ final class ProjectStore: ObservableObject {
     // MARK: - Public API
 
     func openFolder(at url: URL) throws {
-        let projectJSON = url.appendingPathComponent(".meetnotes/project.json")
+        let projectJSON = url.appendingPathComponent(".llmide/project.json")
         let project: Project
         if FileManager.default.fileExists(atPath: projectJSON.path) {
             let data = try Data(contentsOf: projectJSON)
@@ -477,7 +477,7 @@ final class ProjectStore: ObservableObject {
 
     private func rehydrateActive(from entry: RecentEntry) throws {
         let projectJSON = URL(fileURLWithPath: entry.path)
-            .appendingPathComponent(".meetnotes/project.json")
+            .appendingPathComponent(".llmide/project.json")
         let data = try Data(contentsOf: projectJSON)
         let project = try Project.fromJSON(data)
         activeProject = ActiveProject(bundle: project, localPath: entry.path)
@@ -542,7 +542,7 @@ Expected: 5 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Services/ProjectStore.swift mac/Tests/MeetNotesMacTests/ProjectStoreTests.swift
+git add mac/Sources/LlmIdeMac/Services/ProjectStore.swift mac/Tests/LlmIdeMacTests/ProjectStoreTests.swift
 git commit -m "feat(mac): ProjectStore with atomic disk writes + recents
 
 @MainActor store for recents/active. Reads project.json on demand,
@@ -558,17 +558,17 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ## Task 3: ProjectMigrator — import legacy saved repos
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Services/ProjectMigrator.swift`
-- Test: `mac/Tests/MeetNotesMacTests/ProjectMigratorTests.swift`
+- Create: `mac/Sources/LlmIdeMac/Services/ProjectMigrator.swift`
+- Test: `mac/Tests/LlmIdeMacTests/ProjectMigratorTests.swift`
 
 - [ ] **Step 1: Failing tests**
 
-Write `mac/Tests/MeetNotesMacTests/ProjectMigratorTests.swift`:
+Write `mac/Tests/LlmIdeMacTests/ProjectMigratorTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 @Suite("ProjectMigrator")
 @MainActor
@@ -642,7 +642,7 @@ Expected: `ProjectMigrator` not defined.
 
 - [ ] **Step 3: Create ProjectMigrator.swift**
 
-Write `mac/Sources/MeetNotesMac/Services/ProjectMigrator.swift`:
+Write `mac/Sources/LlmIdeMac/Services/ProjectMigrator.swift`:
 
 ```swift
 import Foundation
@@ -671,7 +671,7 @@ final class ProjectMigrator {
         self.defaults = defaults
         let dir = markerDirectory
             ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-                .appendingPathComponent("MeetNotes")
+                .appendingPathComponent("LLM IDE")
         self.completionMarker = dir.appendingPathComponent(".project-migration-complete")
     }
 
@@ -735,7 +735,7 @@ Expected: 3 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Services/ProjectMigrator.swift mac/Tests/MeetNotesMacTests/ProjectMigratorTests.swift
+git add mac/Sources/LlmIdeMac/Services/ProjectMigrator.swift mac/Tests/LlmIdeMacTests/ProjectMigratorTests.swift
 git commit -m "feat(mac): ProjectMigrator imports legacy SavedGitLab/HubRepo
 
 One-shot importer. Walks each saved repo that has a non-empty
@@ -752,17 +752,17 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ## Task 4: AppConfig extracts default project settings
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Models/Config.swift`
+- Modify: `mac/Sources/LlmIdeMac/Models/Config.swift`
 
 - [ ] **Step 1: Add a computed defaultProjectSettings property**
 
-Open `mac/Sources/MeetNotesMac/Models/Config.swift`. Find the end of the `AppConfig` class. Add this computed property (before the closing `}`):
+Open `mac/Sources/LlmIdeMac/Models/Config.swift`. Find the end of the `AppConfig` class. Add this computed property (before the closing `}`):
 
 ```swift
 extension AppConfig {
     /// Snapshot of current AppConfig values projected into a
     /// ProjectSettings shape. Used by ProjectStore.openFolder when
-    /// it materialises `<folder>/.meetnotes/project.json` for the
+    /// it materialises `<folder>/.llmide/project.json` for the
     /// first time. After Phase 1, AppConfig retains these fields for
     /// back-compat but project-scoped call sites consult the active
     /// Project's bundle instead.
@@ -783,7 +783,7 @@ extension AppConfig {
 
 - [ ] **Step 2: Add a no-op test to lock the shape**
 
-Append to `mac/Tests/MeetNotesMacTests/AppConfigPathsTests.swift` (or create a new test file if cleaner):
+Append to `mac/Tests/LlmIdeMacTests/AppConfigPathsTests.swift` (or create a new test file if cleaner):
 
 ```swift
 @Test func defaultProjectSettingsMirrorsAppConfig() async {
@@ -809,12 +809,12 @@ Expected: build + 1 test passes.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Models/Config.swift mac/Tests/MeetNotesMacTests/AppConfigPathsTests.swift
+git add mac/Sources/LlmIdeMac/Models/Config.swift mac/Tests/LlmIdeMacTests/AppConfigPathsTests.swift
 git commit -m "feat(mac): AppConfig.defaultProjectSettings snapshot for ProjectStore
 
 Computed property projects current global AppConfig values into a
 ProjectSettings shape. ProjectStore.openFolder uses this when
-materialising .meetnotes/project.json for the first time, so a
+materialising .llmide/project.json for the first time, so a
 freshly-opened folder inherits the user's current global prefs as
 defaults.
 
@@ -823,13 +823,13 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 ---
 
-## Task 5: Wire ProjectStore into MeetNotesMacApp + Welcome view
+## Task 5: Wire ProjectStore into LlmIdeMacApp + Welcome view
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Views/Welcome/WelcomeView.swift`
-- Create: `mac/Sources/MeetNotesMac/Views/Welcome/RecentProjectsList.swift`
-- Modify: `mac/Sources/MeetNotesMac/MeetNotesMacApp.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/AppShell.swift`
+- Create: `mac/Sources/LlmIdeMac/Views/Welcome/WelcomeView.swift`
+- Create: `mac/Sources/LlmIdeMac/Views/Welcome/RecentProjectsList.swift`
+- Modify: `mac/Sources/LlmIdeMac/LlmIdeMacApp.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/AppShell.swift`
 
 - [ ] **Step 1: Create RecentProjectsList.swift**
 
@@ -886,7 +886,7 @@ struct WelcomeView: View {
     var body: some View {
         let t = theme.current
         VStack(alignment: .leading, spacing: Spacing.lg) {
-            Text("Meet Notes")
+            Text("LLM IDE")
                 .font(.system(size: 28, weight: .semibold))
                 .foregroundStyle(t.text)
             Text("Open a project folder to get started. Each folder becomes its own workspace.")
@@ -942,13 +942,13 @@ struct WelcomeView: View {
 
 - [ ] **Step 3: Wire ProjectStore into the app**
 
-Modify `mac/Sources/MeetNotesMac/MeetNotesMacApp.swift`. Inside the `init()` (after the registry construction, before the `self._config = ...` block) add:
+Modify `mac/Sources/LlmIdeMac/LlmIdeMacApp.swift`. Inside the `init()` (after the registry construction, before the `self._config = ...` block) add:
 
 ```swift
 let projectStoreInstance: ProjectStore = {
     let appSupport = FileManager.default
         .urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSHomeDirectory())
-    let stateDir = appSupport.appendingPathComponent("MeetNotes")
+    let stateDir = appSupport.appendingPathComponent("LLM IDE")
     return ProjectStore(stateDirectory: stateDir, defaults: cfg.defaultProjectSettings)
 }()
 ```
@@ -973,7 +973,7 @@ In the `Window` body, add the environment object:
 
 - [ ] **Step 4: Mount Welcome from AppShell**
 
-Modify `mac/Sources/MeetNotesMac/Views/AppShell.swift` body. Find the top of `body: some View`. Wrap the existing content in a Group that switches on active project:
+Modify `mac/Sources/LlmIdeMac/Views/AppShell.swift` body. Find the top of `body: some View`. Wrap the existing content in a Group that switches on active project:
 
 ```swift
 @EnvironmentObject var projectStore: ProjectStore
@@ -995,19 +995,19 @@ var body: some View {
 - [ ] **Step 5: Build, launch, smoke-test**
 
 ```bash
-cd mac && bash Scripts/build.sh && open MeetNotesMac.app
+cd mac && bash Scripts/build.sh && open LlmIdeMac.app
 ```
 Expected behavior:
 - Fresh launch (no projects.json yet) → WelcomeView appears
 - Click "Open Folder…" → pick any folder → app switches to existing shell
 - Quit + relaunch → app reopens the same project
 
-Quit the app between checks. If the previous .meetnotes/project.json exists in the picked folder you may want a clean test folder.
+Quit the app between checks. If the previous .llmide/project.json exists in the picked folder you may want a clean test folder.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Views/Welcome/*.swift mac/Sources/MeetNotesMac/MeetNotesMacApp.swift mac/Sources/MeetNotesMac/Views/AppShell.swift
+git add mac/Sources/LlmIdeMac/Views/Welcome/*.swift mac/Sources/LlmIdeMac/LlmIdeMacApp.swift mac/Sources/LlmIdeMac/Views/AppShell.swift
 git commit -m "feat(mac): WelcomeView + ProjectStore wiring
 
 ProjectStore is now in the environment; AppShell shows WelcomeView
@@ -1023,8 +1023,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ## Task 6: Sidebar project header + switcher dropdown
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Views/Shell/ProjectSwitcher.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/Shell/SidebarView.swift`
+- Create: `mac/Sources/LlmIdeMac/Views/Shell/ProjectSwitcher.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/Shell/SidebarView.swift`
 
 - [ ] **Step 1: Create ProjectSwitcher.swift**
 
@@ -1091,7 +1091,7 @@ struct ProjectSwitcher: View {
 
 - [ ] **Step 2: Slot it into SidebarView**
 
-In `mac/Sources/MeetNotesMac/Views/Shell/SidebarView.swift`, find the top of the sidebar body. Insert above the existing section list:
+In `mac/Sources/LlmIdeMac/Views/Shell/SidebarView.swift`, find the top of the sidebar body. Insert above the existing section list:
 
 ```swift
 ProjectSwitcher()
@@ -1103,14 +1103,14 @@ Divider().padding(.vertical, 4)
 - [ ] **Step 3: Build + manual smoke**
 
 ```bash
-bash Scripts/build.sh && open MeetNotesMac.app
+bash Scripts/build.sh && open LlmIdeMac.app
 ```
 Open two folders in sequence. Switch between them via the chip dropdown. Verify each switch shows the new name in the chip and the sidebar tabs reflect the new project context (this will be a no-op visually until Task 8 wires the panels — but the chip text and recents-list update should both work).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Views/Shell/ProjectSwitcher.swift mac/Sources/MeetNotesMac/Views/Shell/SidebarView.swift
+git add mac/Sources/LlmIdeMac/Views/Shell/ProjectSwitcher.swift mac/Sources/LlmIdeMac/Views/Shell/SidebarView.swift
 git commit -m "feat(mac): sidebar project switcher chip
 
 Menu surfaces recent projects + Open Folder + Reveal in Finder +
@@ -1125,8 +1125,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ## Task 7: Cmd-P quick switcher
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Views/Shell/QuickSwitcherSheet.swift`
-- Modify: `mac/Sources/MeetNotesMac/MeetNotesMacApp.swift` (add the keyboard shortcut + sheet)
+- Create: `mac/Sources/LlmIdeMac/Views/Shell/QuickSwitcherSheet.swift`
+- Modify: `mac/Sources/LlmIdeMac/LlmIdeMacApp.swift` (add the keyboard shortcut + sheet)
 
 - [ ] **Step 1: Create QuickSwitcherSheet.swift**
 
@@ -1172,9 +1172,9 @@ struct QuickSwitcherSheet: View {
 }
 ```
 
-- [ ] **Step 2: Hook the shortcut + sheet in MeetNotesMacApp**
+- [ ] **Step 2: Hook the shortcut + sheet in LlmIdeMacApp**
 
-In `MeetNotesMacApp.swift`, add an `@State private var quickSwitcherShown = false`. In the Window's `.commands { ... }` block (the one we added in the Sparkle pass), add a new CommandGroup:
+In `LlmIdeMacApp.swift`, add an `@State private var quickSwitcherShown = false`. In the Window's `.commands { ... }` block (the one we added in the Sparkle pass), add a new CommandGroup:
 
 ```swift
 CommandGroup(after: .windowList) {
@@ -1196,14 +1196,14 @@ In the Window's body (after the existing `.environmentObject(...)` chain), add:
 - [ ] **Step 3: Build + smoke**
 
 ```bash
-bash Scripts/build.sh && open MeetNotesMac.app
+bash Scripts/build.sh && open LlmIdeMac.app
 ```
 Open app, ensure ≥2 projects in recents. Press Cmd-P → HUD opens. Type a substring → list filters. Enter / click → switch. Esc → close.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Views/Shell/QuickSwitcherSheet.swift mac/Sources/MeetNotesMac/MeetNotesMacApp.swift
+git add mac/Sources/LlmIdeMac/Views/Shell/QuickSwitcherSheet.swift mac/Sources/LlmIdeMac/LlmIdeMacApp.swift
 git commit -m "feat(mac): Cmd-P quick switcher HUD
 
 Modal sheet with a text field + filtered recent list. Esc cancels;
@@ -1218,7 +1218,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ## Task 8: Wire CodeAssistantPanel.buildAgentContext to active project
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Views/CodeAssistantPanel.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift`
 
 - [ ] **Step 1: Replace the activeProject derivation**
 
@@ -1248,12 +1248,12 @@ Add the `projectStore` env declaration at the top of the view (near the other `@
 
 - [ ] **Step 2: Add a sanity test**
 
-In a new `mac/Tests/MeetNotesMacTests/CodeAssistantAgentContextTests.swift`:
+In a new `mac/Tests/LlmIdeMacTests/CodeAssistantAgentContextTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 @Suite("CodeAssistantPanel agent context")
 @MainActor
@@ -1283,14 +1283,14 @@ Expected: 1 passes.
 - [ ] **Step 4: Manual smoke**
 
 ```bash
-bash Scripts/build.sh && open MeetNotesMac.app
+bash Scripts/build.sh && open LlmIdeMac.app
 ```
 Open a project with no linked repo (Welcome → pick a fresh folder). Open Code Assistant panel — chat should work, agent context has `activeProject: null`. Then set the project's linked repo via Settings → Project → GitHub/GitLab → save (Task 9 wiring) — agent context now surfaces the repo. Defer this last bit until Task 9 lands; for now just confirm the unlinked path doesn't crash.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Views/CodeAssistantPanel.swift mac/Tests/MeetNotesMacTests/CodeAssistantAgentContextTests.swift
+git add mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift mac/Tests/LlmIdeMacTests/CodeAssistantAgentContextTests.swift
 git commit -m "feat(mac): CodeAssistantPanel uses active project for agent context
 
 buildAgentContext() now reads from projectStore.activeProject's
@@ -1307,7 +1307,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ## Task 9: Wire AutoCodeUpdateService.resolveBackendAndProject to active project
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift`
+- Modify: `mac/Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift`
 
 - [ ] **Step 1: Inject ProjectStore**
 
@@ -1375,7 +1375,7 @@ private func resolveBackendAndProject() -> ResolvedRepo? {
 
 - [ ] **Step 3: Pass projectStore into the constructor**
 
-In `MeetNotesMacApp.swift`, update the AutoCodeUpdateService construction:
+In `LlmIdeMacApp.swift`, update the AutoCodeUpdateService construction:
 
 ```swift
 let autoCode = AutoCodeUpdateService(
@@ -1395,7 +1395,7 @@ Expected: existing tests still green (we kept backwards compatibility for the pr
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift mac/Sources/MeetNotesMac/MeetNotesMacApp.swift
+git add mac/Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift mac/Sources/LlmIdeMac/LlmIdeMacApp.swift
 git commit -m "feat(mac): AutoCodeUpdateService prefers active project's linkedRepo
 
 resolveBackendAndProject now checks projectStore.activeProject first
@@ -1411,7 +1411,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ## Task 10: Settings — split into App vs Project sections
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Views/SettingsView.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/SettingsView.swift`
 
 - [ ] **Step 1: Re-bucket sections**
 
@@ -1468,14 +1468,14 @@ Add the env declaration at the top of `SettingsView`:
 - [ ] **Step 2: Build + manual smoke**
 
 ```bash
-bash Scripts/build.sh && open MeetNotesMac.app
+bash Scripts/build.sh && open LlmIdeMac.app
 ```
 With no active project (Welcome): Settings is not reachable (existing AppShell only renders Settings via the section). With an active project: Settings shows both groups.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Views/SettingsView.swift
+git add mac/Sources/LlmIdeMac/Views/SettingsView.swift
 git commit -m "feat(mac): split Settings into App + Project groups
 
 App: Account, Server, Backend, Appearance, Sidebar, Capture,
@@ -1490,7 +1490,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ## Task 11: Run migrator at app startup
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/MeetNotesMacApp.swift`
+- Modify: `mac/Sources/LlmIdeMac/LlmIdeMacApp.swift`
 
 - [ ] **Step 1: Add migration trigger to the launch task**
 
@@ -1522,7 +1522,7 @@ Quit + relaunch. If the user has SavedGitLab/HubRepo entries with localPath in t
 - [ ] **Step 3: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/MeetNotesMacApp.swift
+git add mac/Sources/LlmIdeMac/LlmIdeMacApp.swift
 git commit -m "feat(mac): run ProjectMigrator at first launch
 
 Idempotent. Imports legacy SavedGitLab/HubRepo entries whose
@@ -1666,12 +1666,12 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ## Task 13: Mac client passes projectId on every KB write
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Services/API/MeetNotesAPIClient+*.swift` (the ingest call sites)
+- Modify: `mac/Sources/LlmIdeMac/Services/API/LlmIdeAPIClient+*.swift` (the ingest call sites)
 
 - [ ] **Step 1: Locate ingest call sites**
 
 ```bash
-grep -rn "kb/ingest\|/kb/ingest" mac/Sources/MeetNotesMac
+grep -rn "kb/ingest\|/kb/ingest" mac/Sources/LlmIdeMac
 ```
 
 For each call site that POSTs to `/kb/ingest`, add `projectId: projectStore.activeProject?.bundle.id` to the request payload.
@@ -1689,7 +1689,7 @@ lsof -ti :3456 | xargs kill -9 2>/dev/null; sleep 1
 sleep 3
 
 # Build + launch mac
-bash mac/Scripts/build.sh && open mac/MeetNotesMac.app
+bash mac/Scripts/build.sh && open mac/LlmIdeMac.app
 ```
 
 In the app: open project A, ingest a meeting via the recording flow. Switch to project B (via cmd-P). Search the KB — expect only project A's meeting to NOT appear in B's search (KB search is now project-scoped client-side via the projectId parameter; until the Mac search UI plumbs it through, this can be verified via curl).
@@ -1703,7 +1703,7 @@ curl -s -G --data-urlencode 'q=roadmap' "http://127.0.0.1:3456/kb/search?project
 - [ ] **Step 4: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Services/API/
+git add mac/Sources/LlmIdeMac/Services/API/
 git commit -m "feat(mac): pass projectId on KB ingest + connect-git
 
 Every write that materialises a meeting or source on the server
@@ -1719,8 +1719,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ## Task 14: Status bar (bottom of main window)
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Views/Shell/StatusBar.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/AppShell.swift`
+- Create: `mac/Sources/LlmIdeMac/Views/Shell/StatusBar.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/AppShell.swift`
 
 - [ ] **Step 1: Create StatusBar.swift**
 
@@ -1779,14 +1779,14 @@ VStack(spacing: 0) {
 - [ ] **Step 3: Build + smoke**
 
 ```bash
-bash Scripts/build.sh && open MeetNotesMac.app
+bash Scripts/build.sh && open LlmIdeMac.app
 ```
 A thin row at the bottom shows the project name + path + (if linked) the repo identifier. Switching projects updates it live.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Views/Shell/StatusBar.swift mac/Sources/MeetNotesMac/Views/AppShell.swift
+git add mac/Sources/LlmIdeMac/Views/Shell/StatusBar.swift mac/Sources/LlmIdeMac/Views/AppShell.swift
 git commit -m "feat(mac): status bar at the bottom of the main window
 
 Project name + abbreviated path + linked-repo badge. Updates live
@@ -1838,7 +1838,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 - [ ] **Step 1: Fresh install path**
 
-Wipe `~/Library/Application Support/MeetNotes/projects.json` and `.project-migration-complete` markers. Launch app → Welcome appears. Open Folder → app enters project mode. Quit + relaunch → reopens the same project.
+Wipe `~/Library/Application Support/LLM IDE/projects.json` and `.project-migration-complete` markers. Launch app → Welcome appears. Open Folder → app enters project mode. Quit + relaunch → reopens the same project.
 
 - [ ] **Step 2: Switch between projects**
 
@@ -1905,4 +1905,4 @@ After implementing all tasks, walk through the spec section by section:
 - Multi-window (Phase 2)
 - Per-project plugin enable layer (Phase 2)
 - Auto-trigger background indexing on project open (Phase 2 — the openFolder flow today just creates the JSON; KB indexing is still a manual `/kb/connect-git` call from the existing UI)
-- Move regression baselines to `<project>/.meetnotes/regression/` (Phase 2)
+- Move regression baselines to `<project>/.llmide/regression/` (Phase 2)

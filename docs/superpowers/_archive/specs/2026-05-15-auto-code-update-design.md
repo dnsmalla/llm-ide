@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-15  
 **Status:** Approved  
-**Scope:** macOS app (`meet-notes/mac`)
+**Scope:** macOS app (`llm-ide/mac`)
 
 ---
 
@@ -16,7 +16,7 @@ When enabled, the app automatically scans recent meeting notes every hour, creat
 
 ### 1. `AutoCodeUpdateService`
 
-New `@MainActor final class` that mirrors `AutoCaptureService`. Lives in `MeetNotesMacApp`, injected via `@EnvironmentObject`.
+New `@MainActor final class` that mirrors `AutoCaptureService`. Lives in `LlmIdeMacApp`, injected via `@EnvironmentObject`.
 
 **Responsibilities:**
 - Owns a `Timer` firing every 3600 s (1 hour)
@@ -46,7 +46,7 @@ Parses only the `## Actions` section (same logic as `FolderIndexer.countListItem
 
 ### 3. `ProcessedActionsRegistry`
 
-Persists to `~/Library/Application Support/MeetNotes/processed-actions.json`.
+Persists to `~/Library/Application Support/LLM IDE/processed-actions.json`.
 
 ```swift
 struct RegistryEntry: Codable {
@@ -173,7 +173,7 @@ CLI binary resolved from `AICliTool` (same as `CLISettingsSection`):
 - Gemini CLI → `gemini`
 - GitHub Copilot → `gh copilot`
 
-Subprocess runs with `Process`, stdout/stderr captured to log file at `~/Library/Logs/MeetNotes/auto-code-<iid>.log`.
+Subprocess runs with `Process`, stdout/stderr captured to log file at `~/Library/Logs/LLM IDE/auto-code-<iid>.log`.
 
 ---
 
@@ -209,4 +209,4 @@ Subprocess runs with `Process`, stdout/stderr captured to log file at `~/Library
 | `Views/Settings/AutoCodeSettingsSection.swift` | **New** — settings UI |
 | `Models/Config.swift` | Add `autoCodeUpdateEnabled`, `autoCodeUpdateLookbackCount` |
 | `Views/SettingsView.swift` | Add `AutoCodeSettingsSection` |
-| `MeetNotesMacApp.swift` | Instantiate + inject `AutoCodeUpdateService` |
+| `LlmIdeMacApp.swift` | Instantiate + inject `AutoCodeUpdateService` |

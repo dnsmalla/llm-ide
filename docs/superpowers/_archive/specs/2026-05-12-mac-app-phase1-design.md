@@ -1,7 +1,7 @@
 # Mac App Phase 1 — IA Redesign, Native Polish, File-Based Notes
 
 **Date:** 2026-05-12
-**Scope:** macOS SwiftUI app (`mac/Sources/MeetNotesMac/`) only
+**Scope:** macOS SwiftUI app (`mac/Sources/LlmIdeMac/`) only
 **Phase:** 1 of 3 — see "Phasing" below
 
 ---
@@ -117,20 +117,20 @@ Net effect: structurally the app looks like Mail.app / Reminders.app / Notes.app
 ### 6.1 On-disk layout
 
 ```
-<NotesFolder>/                                ← default ~/Documents/MeetNotes/,
+<NotesFolder>/                                ← default ~/Documents/LLM IDE/,
 │                                                 configurable in Settings
 ├── 2026/
 │   └── 05/
 │       ├── 2026-05-08-q1-planning.md
 │       ├── 2026-05-07-standup.md
 │       └── 2026-05-12-1430-untitled.partial.md   ← active recording
-└── .meetnotes/                               ← app-managed, hidden
+└── .llmide/                               ← app-managed, hidden
     ├── index.sqlite                          ← thin index (see 6.4)
     └── recovery/                             ← crash-recovery records
         └── 01HXYABC….json
 ```
 
-The notes folder is user-visible and chosen by the user. The `.meetnotes/` subdirectory inside it holds the index and recovery state. We deliberately co-locate the index with the notes folder so a user moving their folder to a new machine (via cloud sync or USB) gets a re-indexable bundle.
+The notes folder is user-visible and chosen by the user. The `.llmide/` subdirectory inside it holds the index and recovery state. We deliberately co-locate the index with the notes folder so a user moving their folder to a new machine (via cloud sync or USB) gets a re-indexable bundle.
 
 ### 6.2 File format
 
@@ -177,19 +177,19 @@ Compatible with Obsidian (frontmatter, headings, `- [ ]` tasks). Renders cleanly
 
 ### 6.3 Live writing — `.partial.md` lifecycle
 
-1. **On record start.** `MeetingFileStore` creates `<folder>/<YYYY>/<MM>/<YYYY-MM-DD-HHmm>-<slug>.partial.md` with frontmatter containing `id`, `started_at`, `platform`, `language`. Writes a `## Transcript` heading and nothing else yet. Writes a recovery record at `.meetnotes/recovery/<id>.json` containing `{id, path, pid, started_at}`.
+1. **On record start.** `MeetingFileStore` creates `<folder>/<YYYY>/<MM>/<YYYY-MM-DD-HHmm>-<slug>.partial.md` with frontmatter containing `id`, `started_at`, `platform`, `language`. Writes a `## Transcript` heading and nothing else yet. Writes a recovery record at `.llmide/recovery/<id>.json` containing `{id, path, pid, started_at}`.
 2. **On each caption arriving.** Append `[HH:MM:SS] **speaker**: text\n` to the file. A `FileHandle` opened with append mode stays open for the duration of the recording. Writes are buffered in a 1-second flush window to keep iCloud sync overhead bounded.
 3. **On Stop & Save.**
    - Update frontmatter (`ended_at`, `duration_seconds`, `participants`, final `title`).
    - Background: call `POST /kb/summarize` with the transcript + metadata.
    - On summary response: insert `## Summary`, `## Actions`, `## Decisions`, `## Blockers` sections **above** the Transcript, update frontmatter (`gist`, `tldr`, `summary_generated_at`, `summary_model`).
    - Atomic rename `.partial.md` → final filename via `FileManager.replaceItemAt`. Atomic on APFS. Remove the recovery record.
-4. **On crash recovery (next app launch).** `PartialRecovery` scans `.meetnotes/recovery/`. For each orphan whose `pid` is not alive (or doesn't match a fresh app launch), prompt: *"Found unfinished recording from 2026-05-12 14:30 (42 captions). Recover and finalize?"* — yes runs the Stop & Save flow against the existing partial; dismiss leaves the `.partial.md` in place untouched.
+4. **On crash recovery (next app launch).** `PartialRecovery` scans `.llmide/recovery/`. For each orphan whose `pid` is not alive (or doesn't match a fresh app launch), prompt: *"Found unfinished recording from 2026-05-12 14:30 (42 captions). Recover and finalize?"* — yes runs the Stop & Save flow against the existing partial; dismiss leaves the `.partial.md` in place untouched.
 
 ### 6.4 Index (thin SQLite)
 
 ```sql
--- <NotesFolder>/.meetnotes/index.sqlite
+-- <NotesFolder>/.llmide/index.sqlite
 CREATE TABLE meetings_index (
   id              TEXT PRIMARY KEY,
   path            TEXT NOT NULL,         -- relative to notes folder
@@ -310,7 +310,7 @@ Loading state: skeleton placeholders in detail pane while summarizing. Gist + TL
 ### 10.1 New files (client)
 
 ```
-mac/Sources/MeetNotesMac/
+mac/Sources/LlmIdeMac/
 ├── Views/
 │   ├── ContentView.swift                       MODIFIED: hosts AppShell when flag on
 │   ├── AppShell.swift                          NEW NavigationSplitView root

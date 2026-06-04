@@ -18,35 +18,35 @@
 
 | Path | Responsibility |
 |---|---|
-| `mac/Sources/MeetNotesMac/CodeGraph/MemoryStore.swift` | Read/seed `<repo>/graphify-out/memory/`. Phase A surface: `seedIfMissing(in:)`, `loadRepoNotes(at:)`, `saveRepoNotes(at:contents:)`, `listBugs(at:)`, `listQA(at:)`. |
-| `mac/Sources/MeetNotesMac/CodeGraph/GraphifyInstaller.swift` | Wraps `graphify install --platform <cli>` against the existing `ProcessLauncher`. Maps `AICliTool` rawValue → `--platform` argument. |
-| `mac/Sources/MeetNotesMac/Views/CodeGraph/MemoryTabView.swift` | The new tab content. Left list of memory files, right `FileDetailView` for the selected one, install-skill button, node-count badge. |
-| `mac/Tests/MeetNotesMacTests/MemoryStoreTests.swift` | Round-trip seed / load / save coverage on a tmp directory. |
-| `mac/Tests/MeetNotesMacTests/GraphifyInstallerTests.swift` | Mock-launcher assertions for argv + platform mapping. |
+| `mac/Sources/LlmIdeMac/CodeGraph/MemoryStore.swift` | Read/seed `<repo>/graphify-out/memory/`. Phase A surface: `seedIfMissing(in:)`, `loadRepoNotes(at:)`, `saveRepoNotes(at:contents:)`, `listBugs(at:)`, `listQA(at:)`. |
+| `mac/Sources/LlmIdeMac/CodeGraph/GraphifyInstaller.swift` | Wraps `graphify install --platform <cli>` against the existing `ProcessLauncher`. Maps `AICliTool` rawValue → `--platform` argument. |
+| `mac/Sources/LlmIdeMac/Views/CodeGraph/MemoryTabView.swift` | The new tab content. Left list of memory files, right `FileDetailView` for the selected one, install-skill button, node-count badge. |
+| `mac/Tests/LlmIdeMacTests/MemoryStoreTests.swift` | Round-trip seed / load / save coverage on a tmp directory. |
+| `mac/Tests/LlmIdeMacTests/GraphifyInstallerTests.swift` | Mock-launcher assertions for argv + platform mapping. |
 
 **Modify:**
 
 | Path | Why |
 |---|---|
-| `mac/Sources/MeetNotesMac/Views/CodeGraph/GraphifyView.swift:29-78` | Add `.memory` to `Mode` enum; metadata (`displayName: "Memory"`, `icon: "books.vertical"`, `tint: theme.accent3`). |
-| `mac/Sources/MeetNotesMac/Views/CodeGraph/GraphifyView.swift` (itemsPanel switch) | Add a `case .memory:` arm rendering `MemoryTabView(repoRoot: …)`. |
+| `mac/Sources/LlmIdeMac/Views/CodeGraph/GraphifyView.swift:29-78` | Add `.memory` to `Mode` enum; metadata (`displayName: "Memory"`, `icon: "books.vertical"`, `tint: theme.accent3`). |
+| `mac/Sources/LlmIdeMac/Views/CodeGraph/GraphifyView.swift` (itemsPanel switch) | Add a `case .memory:` arm rendering `MemoryTabView(repoRoot: …)`. |
 
 ---
 
 ## Task 1: Seed + load `MemoryStore` (read-only surface)
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeGraph/MemoryStore.swift`
-- Create: `mac/Tests/MeetNotesMacTests/MemoryStoreTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeGraph/MemoryStore.swift`
+- Create: `mac/Tests/LlmIdeMacTests/MemoryStoreTests.swift`
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `mac/Tests/MeetNotesMacTests/MemoryStoreTests.swift`:
+Create `mac/Tests/LlmIdeMacTests/MemoryStoreTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct MemoryStoreTests {
     /// Helper — create a unique tmp dir scoped to this test method.
@@ -135,7 +135,7 @@ struct MemoryStoreTests {
 - [ ] **Step 2: Run tests — expect failures because MemoryStore doesn't exist**
 
 ```
-cd /Users/dinsmallade/Desktop/meet-notes/mac
+cd /Users/dinsmallade/Desktop/llm-ide/mac
 swift test --filter MemoryStoreTests
 ```
 
@@ -143,7 +143,7 @@ Expected: FAIL with `cannot find 'MemoryStore' in scope`.
 
 - [ ] **Step 3: Implement MemoryStore**
 
-Create `mac/Sources/MeetNotesMac/CodeGraph/MemoryStore.swift`:
+Create `mac/Sources/LlmIdeMac/CodeGraph/MemoryStore.swift`:
 
 ```swift
 // Read/write Graphify's memory dir under <repo>/graphify-out/memory/.
@@ -260,7 +260,7 @@ Expected: 6 / 6 PASS.
 - [ ] **Step 5: Commit**
 
 ```
-git add mac/Sources/MeetNotesMac/CodeGraph/MemoryStore.swift mac/Tests/MeetNotesMacTests/MemoryStoreTests.swift
+git add mac/Sources/LlmIdeMac/CodeGraph/MemoryStore.swift mac/Tests/LlmIdeMacTests/MemoryStoreTests.swift
 git commit -m "feat(memory): MemoryStore seeds + reads graphify-out/memory/
 
 Phase A.1 of the agent memory + feedback work. Read-only surface
@@ -274,17 +274,17 @@ the Memory tab will consume. Write methods for bugs (phase B) and Q&A
 ## Task 2: `GraphifyInstaller`
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeGraph/GraphifyInstaller.swift`
-- Create: `mac/Tests/MeetNotesMacTests/GraphifyInstallerTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeGraph/GraphifyInstaller.swift`
+- Create: `mac/Tests/LlmIdeMacTests/GraphifyInstallerTests.swift`
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `mac/Tests/MeetNotesMacTests/GraphifyInstallerTests.swift`:
+Create `mac/Tests/LlmIdeMacTests/GraphifyInstallerTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct GraphifyInstallerTests {
     final class MockLauncher: ProcessLauncher, @unchecked Sendable {
@@ -365,7 +365,7 @@ Expected: FAIL — `GraphifyInstaller` doesn't exist.
 
 - [ ] **Step 3: Implement GraphifyInstaller**
 
-Create `mac/Sources/MeetNotesMac/CodeGraph/GraphifyInstaller.swift`:
+Create `mac/Sources/LlmIdeMac/CodeGraph/GraphifyInstaller.swift`:
 
 ```swift
 // One-time install of the Graphify "skill" file into the user's CLI
@@ -438,7 +438,7 @@ Expected: 6 / 6 PASS.
 - [ ] **Step 5: Commit**
 
 ```
-git add mac/Sources/MeetNotesMac/CodeGraph/GraphifyInstaller.swift mac/Tests/MeetNotesMacTests/GraphifyInstallerTests.swift
+git add mac/Sources/LlmIdeMac/CodeGraph/GraphifyInstaller.swift mac/Tests/LlmIdeMacTests/GraphifyInstallerTests.swift
 git commit -m "feat(memory): GraphifyInstaller wraps \`graphify install --platform <cli>\`
 
 Maps AICliTool → graphify's --platform whitelist with one explicit
@@ -451,7 +451,7 @@ ProcessLauncher seam for tests."
 ## Task 3: Add `.memory` to `Mode` enum
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Views/CodeGraph/GraphifyView.swift:29-78` (the `Mode` enum)
+- Modify: `mac/Sources/LlmIdeMac/Views/CodeGraph/GraphifyView.swift:29-78` (the `Mode` enum)
 
 - [ ] **Step 1: Build to confirm clean baseline**
 
@@ -463,7 +463,7 @@ Expected: `Build complete!`.
 
 - [ ] **Step 2: Extend Mode**
 
-In `mac/Sources/MeetNotesMac/Views/CodeGraph/GraphifyView.swift`, find the `Mode` enum (around line 29) and replace it with:
+In `mac/Sources/LlmIdeMac/Views/CodeGraph/GraphifyView.swift`, find the `Mode` enum (around line 29) and replace it with:
 
 ```swift
     enum Mode: String, Identifiable, CaseIterable {
@@ -625,7 +625,7 @@ Expected: `Build complete!`. Exhaustive-switch errors gone.
 - [ ] **Step 5: Commit**
 
 ```
-git add mac/Sources/MeetNotesMac/Views/CodeGraph/GraphifyView.swift
+git add mac/Sources/LlmIdeMac/Views/CodeGraph/GraphifyView.swift
 git commit -m "feat(memory): add .memory case to Graphify Mode enum
 
 Wires through every exhaustive switch (canRun, runLabel, statusBlock,
@@ -638,12 +638,12 @@ yet — the tab itself lands in the next commit."
 ## Task 4: `MemoryTabView`
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Views/CodeGraph/MemoryTabView.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/CodeGraph/GraphifyView.swift` (itemsPanel + canvasPanel switches)
+- Create: `mac/Sources/LlmIdeMac/Views/CodeGraph/MemoryTabView.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/CodeGraph/GraphifyView.swift` (itemsPanel + canvasPanel switches)
 
 - [ ] **Step 1: Implement MemoryTabView**
 
-Create `mac/Sources/MeetNotesMac/Views/CodeGraph/MemoryTabView.swift`:
+Create `mac/Sources/LlmIdeMac/Views/CodeGraph/MemoryTabView.swift`:
 
 ```swift
 // The Memory tab content shown when GraphifyView's Mode is .memory.
@@ -915,8 +915,8 @@ Expected: `Build complete!`.
 
 ```
 ./build_app.sh
-pkill -f MeetNotesMac.app; sleep 1
-open -n MeetNotesMac.app
+pkill -f LlmIdeMac.app; sleep 1
+open -n LlmIdeMac.app
 ```
 
 Then in the app:
@@ -929,7 +929,7 @@ Then in the app:
 - [ ] **Step 6: Commit**
 
 ```
-git add mac/Sources/MeetNotesMac/Views/CodeGraph/MemoryTabView.swift mac/Sources/MeetNotesMac/Views/CodeGraph/GraphifyView.swift
+git add mac/Sources/LlmIdeMac/Views/CodeGraph/MemoryTabView.swift mac/Sources/LlmIdeMac/Views/CodeGraph/GraphifyView.swift
 git commit -m "feat(memory): Memory tab in Graphify view
 
 Surfaces graphify-out/memory/ as a third tab next to Graphify and
@@ -954,7 +954,7 @@ Expected: the MemoryStore + GraphifyInstaller test cases pass; the 2 pre-existin
 - [ ] **Step 2: End-to-end smoke test**
 
 ```
-./build_app.sh && pkill -f MeetNotesMac.app; sleep 1; open -n MeetNotesMac.app
+./build_app.sh && pkill -f LlmIdeMac.app; sleep 1; open -n LlmIdeMac.app
 ```
 
 Walk:
@@ -987,7 +987,7 @@ Walk:
 ### Task 6: Code + doc node-count badge
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Views/CodeGraph/MemoryTabView.swift` (header)
+- Modify: `mac/Sources/LlmIdeMac/Views/CodeGraph/MemoryTabView.swift` (header)
 
 - [ ] **Step 1: Extend MemoryTabView header**
 
@@ -1030,7 +1030,7 @@ In the header VStack, add a small line under the install-status block:
 - [ ] **Step 2: Build + manual check**
 
 ```
-swift build && ./build_app.sh && pkill -f MeetNotesMac.app; sleep 1; open -n MeetNotesMac.app
+swift build && ./build_app.sh && pkill -f LlmIdeMac.app; sleep 1; open -n LlmIdeMac.app
 ```
 
 In Memory tab, after a previous `graphify update` run against the repo, badge should read e.g. "1667 code · 228 doc nodes in graph.json".
@@ -1038,7 +1038,7 @@ In Memory tab, after a previous `graphify update` run against the repo, badge sh
 - [ ] **Step 3: Commit**
 
 ```
-git add mac/Sources/MeetNotesMac/Views/CodeGraph/MemoryTabView.swift
+git add mac/Sources/LlmIdeMac/Views/CodeGraph/MemoryTabView.swift
 git commit -m "feat(memory): node-count badge in Memory tab header
 
 Reads cached graph.json and shows 'N code · M doc nodes' so the user

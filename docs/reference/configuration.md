@@ -5,13 +5,13 @@ applies_to: server, mac, extension
 
 # Configuration reference
 
-Every configurable setting in Meet Notes, mapped to the store that owns
+Every configurable setting in LLM IDE, mapped to the store that owns
 it. If you're adding a new setting, use the [decision tree](#where-does-this-go)
 at the bottom to pick where it lives.
 
 ## UI preferences (macOS)
 
-Owned by `AppConfig` (`mac/Sources/MeetNotesMac/Models/Config.swift`) and
+Owned by `AppConfig` (`mac/Sources/LlmIdeMac/Models/Config.swift`) and
 written through `UserDefaults`. `@Published` for SwiftUI binding.
 
 | Setting | Store | Default | Notes |
@@ -20,9 +20,9 @@ written through `UserDefaults`. `@Published` for SwiftUI binding.
 | `themeID` | UserDefaults | `Theme.dark.id` | One of the registered themes in `Theme.swift`. |
 | `autoCaptureOnMeeting` | UserDefaults | `false` | Auto-arm when Zoom/Teams becomes frontmost. |
 | `pollIntervalMs` | UserDefaults | `250` | AX caption poll cadence in ms. |
-| `MEETNOTES_CURRENT_CHAT_SESSION_ID` | `@AppStorage` | `""` | Last-opened Code Assistant chat. `CodeAssistantPanel.swift`. |
-| `MEETNOTES_CHAT_PANEL_WIDTH` | `@AppStorage` | `200` | Persisted splitter width. `ReviewView.swift`. |
-| `MEETNOTES_LEGACY_PROMPT_SUPPRESSED` | `@AppStorage` | `false` | Whether the legacy-data prompt was dismissed. `AppShell.swift`. |
+| `LLMIDE_CURRENT_CHAT_SESSION_ID` | `@AppStorage` | `""` | Last-opened Code Assistant chat. `CodeAssistantPanel.swift`. |
+| `LLMIDE_CHAT_PANEL_WIDTH` | `@AppStorage` | `200` | Persisted splitter width. `ReviewView.swift`. |
+| `LLMIDE_LEGACY_PROMPT_SUPPRESSED` | `@AppStorage` | `false` | Whether the legacy-data prompt was dismissed. `AppShell.swift`. |
 
 ## GitLab integration (macOS)
 
@@ -35,7 +35,7 @@ written through `UserDefaults`. `@Published` for SwiftUI binding.
 
 ## Auth / secrets (macOS)
 
-Owned by `KeychainStore.swift`. Service identifier: `com.meetnotes.macapp`.
+Owned by `KeychainStore.swift`. Service identifier: `com.llmide.macapp`.
 
 | Setting | Store | Default | Notes |
 |---|---|---|---|
@@ -78,23 +78,23 @@ two starred entries are required in production.
 | Env var | Default | Notes |
 |---|---|---|
 | `NODE_ENV` | `development` | `production` requires the two secrets below. |
-| `MEETNOTES_JWT_SECRET` *required in prod* | dev-persisted in `kb/.dev-secrets.json` | ≥ 32 chars. Rotating invalidates all sessions. |
-| `MEETNOTES_VAULT_KEY` *required in prod* | dev-persisted in `kb/.dev-secrets.json` | ≥ 32 chars. Rotating strands stored vault secrets. |
-| `MEETNOTES_HOST` | `127.0.0.1` | Loopback by default. |
-| `MEETNOTES_PORT` | `3456` | |
-| `MEETNOTES_BODY_LIMIT_MB` | `2` | Per-request body cap. |
-| `MEETNOTES_TRUST_PROXY` | `false` | Enable only behind a trusted reverse proxy. |
-| `MEETNOTES_DB_PATH` | `<repo>/kb/data.db` | SQLite path. |
-| `MEETNOTES_JWT_ISSUER` | `meetnotes` | `iss` claim. |
-| `MEETNOTES_ACCESS_TTL_SEC` | `900` (15 m) | |
-| `MEETNOTES_REFRESH_TTL_SEC` | `2592000` (30 d) | |
-| `MEETNOTES_BCRYPT_COST` | `12` | Clamped to 10–14. |
-| `MEETNOTES_LOG_LEVEL` | `info` (prod) / `debug` (dev) | `trace`–`error`. |
-| `MEETNOTES_LOG_JSON` | `true` (prod) / `false` (dev) | Force JSON log output. |
-| `MEETNOTES_DISABLE_REGISTRATION` | `false` | Close `/auth/register` after bootstrap. |
-| `MEETNOTES_CORS_ORIGINS` | `""` | Extra comma-separated allowed origins. |
-| `MEETNOTES_MODEL` | `claude-sonnet-4-6` | Default Claude model id. |
-| `MEETNOTES_SUMMARIZE_MODEL` | `claude-opus-4-7` | Override for meeting summaries. |
+| `LLMIDE_JWT_SECRET` *required in prod* | dev-persisted in `kb/.dev-secrets.json` | ≥ 32 chars. Rotating invalidates all sessions. |
+| `LLMIDE_VAULT_KEY` *required in prod* | dev-persisted in `kb/.dev-secrets.json` | ≥ 32 chars. Rotating strands stored vault secrets. |
+| `LLMIDE_HOST` | `127.0.0.1` | Loopback by default. |
+| `LLMIDE_PORT` | `3456` | |
+| `LLMIDE_BODY_LIMIT_MB` | `2` | Per-request body cap. |
+| `LLMIDE_TRUST_PROXY` | `false` | Enable only behind a trusted reverse proxy. |
+| `LLMIDE_DB_PATH` | `<repo>/kb/data.db` | SQLite path. |
+| `LLMIDE_JWT_ISSUER` | `llmide` | `iss` claim. |
+| `LLMIDE_ACCESS_TTL_SEC` | `900` (15 m) | |
+| `LLMIDE_REFRESH_TTL_SEC` | `2592000` (30 d) | |
+| `LLMIDE_BCRYPT_COST` | `12` | Clamped to 10–14. |
+| `LLMIDE_LOG_LEVEL` | `info` (prod) / `debug` (dev) | `trace`–`error`. |
+| `LLMIDE_LOG_JSON` | `true` (prod) / `false` (dev) | Force JSON log output. |
+| `LLMIDE_DISABLE_REGISTRATION` | `false` | Close `/auth/register` after bootstrap. |
+| `LLMIDE_CORS_ORIGINS` | `""` | Extra comma-separated allowed origins. |
+| `LLMIDE_MODEL` | `claude-sonnet-4-6` | Default Claude model id. |
+| `LLMIDE_SUMMARIZE_MODEL` | `claude-opus-4-7` | Override for meeting summaries. |
 | `BIND_HOST` | `127.0.0.1` | Used by `start.sh` only; container deployments set `0.0.0.0`. |
 
 ## Agent skills
@@ -115,8 +115,8 @@ JS code.
 
 | Setting | Store | Default | Notes |
 |---|---|---|---|
-| `MEETNOTES_SIGN_IDENTITY` | shell env | `-` (ad-hoc) | Passed to `codesign -s`. Use a Developer ID for distribution. |
-| `MEETNOTES_NOTARY_PROFILE` | shell env | unset | Keychain profile name for `xcrun notarytool`. Notarize step skips if unset. |
+| `LLMIDE_SIGN_IDENTITY` | shell env | `-` (ad-hoc) | Passed to `codesign -s`. Use a Developer ID for distribution. |
+| `LLMIDE_NOTARY_PROFILE` | shell env | unset | Keychain profile name for `xcrun notarytool`. Notarize step skips if unset. |
 
 See `mac/Scripts/` for the per-phase build scripts.
 
@@ -126,7 +126,7 @@ See `mac/Scripts/` for the per-phase build scripts.
 new setting
 ├── User-tweakable + non-secret + macOS UI
 │       → AppConfig (@Published + UserDefaults)
-│         …unless the value is purely view-local: @AppStorage("MEETNOTES_*")
+│         …unless the value is purely view-local: @AppStorage("LLMIDE_*")
 │
 ├── Secret (token, password, API key)
 │       → KeychainStore (Mac) / per-user vault (server)

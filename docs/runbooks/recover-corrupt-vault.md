@@ -19,16 +19,16 @@ applies_to: server
 ## What this means
 
 Vault entries are encrypted with AES-256-GCM using a key derived from
-the server's `MEETNOTES_VAULT_KEY` master key and the user's id:
+the server's `LLMIDE_VAULT_KEY` master key and the user's id:
 
 ```
-data_key = HKDF-SHA256(master, salt=user_id, info='meetnotes-vault-v1', length=32)
+data_key = HKDF-SHA256(master, salt=user_id, info='llmide-vault-v1', length=32)
 ciphertext = version(1) || iv(12) || AES-256-GCM(data_key, plaintext) || tag(16)
 ```
 
 Decryption fails when ANY of:
 
-1. The master key changed (someone rotated `MEETNOTES_VAULT_KEY` without
+1. The master key changed (someone rotated `LLMIDE_VAULT_KEY` without
    following the [rotate-vault-key](rotate-vault-key.md) procedure).
 2. The user id changed (this should be impossible; user ids are
    permanent in the schema, but if you restored from a backup that
@@ -61,7 +61,7 @@ sqlite3 "$DB" \
 
 ### Case 1: Master key was changed without rotation
 
-Restore the original `MEETNOTES_VAULT_KEY` from your secret store and
+Restore the original `LLMIDE_VAULT_KEY` from your secret store and
 restart the server. If the original is unrecoverable, the encrypted
 secrets are unrecoverable — proceed to Case 3.
 
@@ -111,7 +111,7 @@ sqlite3 "$DB" \
 
 ## Prevention
 
-- Treat `MEETNOTES_VAULT_KEY` like a production secret: store it in a
+- Treat `LLMIDE_VAULT_KEY` like a production secret: store it in a
   secret manager, NEVER inline in shell history or scripts.
 - Use the [rotate-vault-key](rotate-vault-key.md) procedure if you
   need to change it — never swap directly.

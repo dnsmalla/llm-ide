@@ -1,6 +1,6 @@
-# Contributing to Meet Notes
+# Contributing to LLM IDE
 
-This guide is for engineers landing changes in the Meet Notes
+This guide is for engineers landing changes in the LLM IDE
 repository. Read it once; refer back when you're unsure where a new
 file belongs.
 
@@ -10,7 +10,7 @@ For setup, see `README.md`. For architecture, see
 ## Repo layout
 
 ```
-meet-notes/
+llm-ide/
 ├── extension/        Chrome MV3 extension + local Node server
 │   ├── core/           Framework-free primitives (config, utils, errors, logger)
 │   ├── server/         HTTP server (no framework), routing, middleware
@@ -22,7 +22,7 @@ meet-notes/
 │   ├── src/            React side-panel + popup UI (TS + Vite)
 │   └── tests/          Node test runner
 ├── mac/              Native macOS SwiftUI app
-│   ├── Sources/MeetNotesMac/  Models, Services, Views, ViewModels
+│   ├── Sources/LlmIdeMac/  Models, Services, Views, ViewModels
 │   ├── Scripts/        Phased build pipeline (build / sign / notarize / dmg)
 │   ├── Tests/          XCTest target
 │   └── build_app.sh    Backward-compat shim for the old monolithic build
@@ -34,7 +34,7 @@ meet-notes/
 ## Mac code conventions
 
 We use suffixes to communicate the *role* of a type. When you add a
-new top-level type under `mac/Sources/MeetNotesMac/Services/`, pick
+new top-level type under `mac/Sources/LlmIdeMac/Services/`, pick
 the suffix that matches its job — code review will ask you to rename
 if it doesn't fit.
 
@@ -47,7 +47,7 @@ if it doesn't fit.
   `SessionStore`.
 - **`*Client`** — wraps an external HTTP / IPC API. No state beyond a
   base URL and an auth token. Examples: `GitLabClient`,
-  `MeetNotesAPIClient`.
+  `LlmIdeAPIClient`.
 - **`*Manager`** — controls a system resource that needs lifecycle
   management (process, file watcher, child binary). Examples:
   `RepoManager`, `BackendManager`.
@@ -134,7 +134,7 @@ surfaces the content is relevant to.
 ```text
 new file
 ├── persists user data
-│       → mac/Sources/MeetNotesMac/Services/<Name>Store.swift
+│       → mac/Sources/LlmIdeMac/Services/<Name>Store.swift
 │       → or server-side: a new table in extension/kb/migrations/
 │
 ├── wraps an external API

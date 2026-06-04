@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a Cursor-style bottom terminal panel to the Meet Notes Mac app with a real PTY-backed shell, multiple tabs, drag-to-resize, and Ctrl+` toggle.
+**Goal:** Add a Cursor-style bottom terminal panel to the LLM IDE Mac app with a real PTY-backed shell, multiple tabs, drag-to-resize, and Ctrl+` toggle.
 
 **Architecture:** `TerminalSession` owns one `LocalProcessTerminalView` (SwiftTerm AppKit view) per tab. `TerminalPanelState` manages the list of sessions and panel open/height state. `TerminalPanelView` renders the resize handle + tab bar + a ZStack of session views (kept alive off-screen to preserve scrollback). Wired into `AppShell` above `StatusBar`.
 
@@ -14,14 +14,14 @@
 
 | Action | Path | Responsibility |
 |--------|------|----------------|
-| Create | `mac/Sources/MeetNotesMac/Views/Terminal/TerminalSession.swift` | PTY session model — owns `LocalProcessTerminalView`, lifecycle |
-| Create | `mac/Sources/MeetNotesMac/Views/Terminal/TerminalPanelState.swift` | Panel state — open/height/tabs/active index |
-| Create | `mac/Sources/MeetNotesMac/Views/Terminal/TerminalSessionView.swift` | `NSViewRepresentable` bridging SwiftTerm into SwiftUI |
-| Create | `mac/Sources/MeetNotesMac/Views/Terminal/TerminalTabBar.swift` | Tab pills + `+` button |
-| Create | `mac/Sources/MeetNotesMac/Views/Terminal/TerminalPanelView.swift` | Outer panel: handle + tab bar + session views |
+| Create | `mac/Sources/LlmIdeMac/Views/Terminal/TerminalSession.swift` | PTY session model — owns `LocalProcessTerminalView`, lifecycle |
+| Create | `mac/Sources/LlmIdeMac/Views/Terminal/TerminalPanelState.swift` | Panel state — open/height/tabs/active index |
+| Create | `mac/Sources/LlmIdeMac/Views/Terminal/TerminalSessionView.swift` | `NSViewRepresentable` bridging SwiftTerm into SwiftUI |
+| Create | `mac/Sources/LlmIdeMac/Views/Terminal/TerminalTabBar.swift` | Tab pills + `+` button |
+| Create | `mac/Sources/LlmIdeMac/Views/Terminal/TerminalPanelView.swift` | Outer panel: handle + tab bar + session views |
 | Modify | `mac/Package.swift` | Add SwiftTerm SPM dependency |
-| Modify | `mac/Sources/MeetNotesMac/Views/AppShell.swift` | Add terminal state, panel in VStack, keyboard shortcut |
-| Modify | `mac/Sources/MeetNotesMac/Views/Shell/StatusBar.swift` | Add `>_` toggle button |
+| Modify | `mac/Sources/LlmIdeMac/Views/AppShell.swift` | Add terminal state, panel in VStack, keyboard shortcut |
+| Modify | `mac/Sources/LlmIdeMac/Views/Shell/StatusBar.swift` | Add `>_` toggle button |
 
 ---
 
@@ -39,12 +39,12 @@ Open `mac/Package.swift` and make these two edits:
 import PackageDescription
 
 let package = Package(
-    name: "MeetNotesMac",
+    name: "LlmIdeMac",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "MeetNotesMac", targets: ["MeetNotesMac"])
+        .executable(name: "LlmIdeMac", targets: ["LlmIdeMac"])
     ],
     dependencies: [
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"),
@@ -53,13 +53,13 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "MeetNotesMac",
+            name: "LlmIdeMac",
             dependencies: [
                 "Yams",
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
             ],
-            path: "Sources/MeetNotesMac",
+            path: "Sources/LlmIdeMac",
             resources: [
                 .copy("Resources/note_template.docx"),
                 .copy("Resources/generate_meeting_note.py"),
@@ -69,9 +69,9 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "MeetNotesMacTests",
-            dependencies: ["MeetNotesMac"],
-            path: "Tests/MeetNotesMacTests",
+            name: "LlmIdeMacTests",
+            dependencies: ["LlmIdeMac"],
+            path: "Tests/LlmIdeMacTests",
             swiftSettings: [
                 .unsafeFlags([
                     "-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
@@ -119,15 +119,15 @@ git commit -m "feat(mac): add SwiftTerm SPM dependency for integrated terminal"
 ## Task 2: TerminalSession Model
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Views/Terminal/TerminalSession.swift`
+- Create: `mac/Sources/LlmIdeMac/Views/Terminal/TerminalSession.swift`
 
 - [ ] **Step 1: Create the Terminal directory and TerminalSession.swift**
 
 ```bash
-mkdir -p mac/Sources/MeetNotesMac/Views/Terminal
+mkdir -p mac/Sources/LlmIdeMac/Views/Terminal
 ```
 
-Create `mac/Sources/MeetNotesMac/Views/Terminal/TerminalSession.swift`:
+Create `mac/Sources/LlmIdeMac/Views/Terminal/TerminalSession.swift`:
 
 ```swift
 import Foundation
@@ -241,7 +241,7 @@ Expected: No errors related to `TerminalSession`. If SwiftTerm's delegate protoc
 - [ ] **Step 3: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Views/Terminal/TerminalSession.swift
+git add mac/Sources/LlmIdeMac/Views/Terminal/TerminalSession.swift
 git commit -m "feat(mac): add TerminalSession model (PTY session lifecycle)"
 ```
 
@@ -250,7 +250,7 @@ git commit -m "feat(mac): add TerminalSession model (PTY session lifecycle)"
 ## Task 3: TerminalPanelState Model
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Views/Terminal/TerminalPanelState.swift`
+- Create: `mac/Sources/LlmIdeMac/Views/Terminal/TerminalPanelState.swift`
 
 - [ ] **Step 1: Create TerminalPanelState.swift**
 
@@ -340,7 +340,7 @@ Expected: No errors.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Views/Terminal/TerminalPanelState.swift
+git add mac/Sources/LlmIdeMac/Views/Terminal/TerminalPanelState.swift
 git commit -m "feat(mac): add TerminalPanelState (panel open/height/tabs)"
 ```
 
@@ -349,7 +349,7 @@ git commit -m "feat(mac): add TerminalPanelState (panel open/height/tabs)"
 ## Task 4: TerminalSessionView (NSViewRepresentable)
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Views/Terminal/TerminalSessionView.swift`
+- Create: `mac/Sources/LlmIdeMac/Views/Terminal/TerminalSessionView.swift`
 
 - [ ] **Step 1: Create TerminalSessionView.swift**
 
@@ -418,7 +418,7 @@ Expected: No errors.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Views/Terminal/TerminalSessionView.swift
+git add mac/Sources/LlmIdeMac/Views/Terminal/TerminalSessionView.swift
 git commit -m "feat(mac): add TerminalSessionView NSViewRepresentable bridge"
 ```
 
@@ -427,7 +427,7 @@ git commit -m "feat(mac): add TerminalSessionView NSViewRepresentable bridge"
 ## Task 5: TerminalTabBar
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Views/Terminal/TerminalTabBar.swift`
+- Create: `mac/Sources/LlmIdeMac/Views/Terminal/TerminalTabBar.swift`
 
 - [ ] **Step 1: Create TerminalTabBar.swift**
 
@@ -535,7 +535,7 @@ Expected: No errors. `ThemeStore` and `TerminalPanelState` are already defined i
 - [ ] **Step 3: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Views/Terminal/TerminalTabBar.swift
+git add mac/Sources/LlmIdeMac/Views/Terminal/TerminalTabBar.swift
 git commit -m "feat(mac): add TerminalTabBar with tab pills and new-tab button"
 ```
 
@@ -544,7 +544,7 @@ git commit -m "feat(mac): add TerminalTabBar with tab pills and new-tab button"
 ## Task 6: TerminalPanelView
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Views/Terminal/TerminalPanelView.swift`
+- Create: `mac/Sources/LlmIdeMac/Views/Terminal/TerminalPanelView.swift`
 
 - [ ] **Step 1: Create TerminalPanelView.swift**
 
@@ -643,7 +643,7 @@ Expected: No errors.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Views/Terminal/TerminalPanelView.swift
+git add mac/Sources/LlmIdeMac/Views/Terminal/TerminalPanelView.swift
 git commit -m "feat(mac): add TerminalPanelView with resize handle and ZStack tab layout"
 ```
 
@@ -652,7 +652,7 @@ git commit -m "feat(mac): add TerminalPanelView with resize handle and ZStack ta
 ## Task 7: AppShell Integration
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Views/AppShell.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/AppShell.swift`
 
 - [ ] **Step 1: Add TerminalPanelState to AppShell**
 
@@ -757,7 +757,7 @@ Expected: Clean build. Resolve any type errors (e.g., if `existingShellContent` 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Views/AppShell.swift
+git add mac/Sources/LlmIdeMac/Views/AppShell.swift
 git commit -m "feat(mac): wire TerminalPanelView into AppShell with Ctrl+\` shortcut"
 ```
 
@@ -766,7 +766,7 @@ git commit -m "feat(mac): wire TerminalPanelView into AppShell with Ctrl+\` shor
 ## Task 8: StatusBar Toggle Button
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Views/Shell/StatusBar.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/Shell/StatusBar.swift`
 
 - [ ] **Step 1: Add TerminalPanelState environment and toggle button**
 
@@ -836,7 +836,7 @@ Expected: No errors.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Views/Shell/StatusBar.swift
+git add mac/Sources/LlmIdeMac/Views/Shell/StatusBar.swift
 git commit -m "feat(mac): add terminal toggle button to StatusBar"
 ```
 
@@ -855,7 +855,7 @@ Expected: `Build complete!`
 - [ ] **Step 2: Run the app**
 
 ```bash
-cd mac && .build/release/MeetNotesMac
+cd mac && .build/release/LlmIdeMac
 ```
 
 Or build and run via `mac/Scripts/build.sh` if that script is preferred.

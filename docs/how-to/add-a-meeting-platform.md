@@ -7,7 +7,7 @@ applies_to: extension
 
 ## Goal
 
-Make Meet Notes capture captions from a platform the scraper does not yet know about.
+Make LLM IDE capture captions from a platform the scraper does not yet know about.
 
 ## Steps
 

@@ -1,5 +1,5 @@
-site_name: Meet Notes — Engineering Docs
-site_description: Internal engineering documentation for the Meet Notes system.
+site_name: LLM IDE — Engineering Docs
+site_description: Internal engineering documentation for the LLM IDE system.
 site_url: https://grid-devs.gitlab.io/personal/dinesh/notes-extension/
 repo_url: https://gitlab.com/grid-devs/personal/dinesh/notes-extension
 edit_uri: edit/main/docs/

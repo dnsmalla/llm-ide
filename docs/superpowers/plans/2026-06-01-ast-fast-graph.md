@@ -14,7 +14,7 @@
 
 ## File Structure
 
-### New files (`mac/Sources/MeetNotesMac/CodeNotes/`)
+### New files (`mac/Sources/LlmIdeMac/CodeNotes/`)
 
 | File | Responsibility |
 |------|---------------|
@@ -31,8 +31,8 @@
 | File | Change |
 |------|--------|
 | `mac/Package.swift` | Add `Resources/code_ast_scan.py` to target resources |
-| `mac/Sources/MeetNotesMac/CodeNotes/CodeNoteService.swift` | New flow: structure→graph→background notes; `@Published var graph`; concurrency |
-| `mac/Sources/MeetNotesMac/Views/CodeGraph/UAGraphView.swift` | Observe `codeNoteService.$graph`; update progress labels |
+| `mac/Sources/LlmIdeMac/CodeNotes/CodeNoteService.swift` | New flow: structure→graph→background notes; `@Published var graph`; concurrency |
+| `mac/Sources/LlmIdeMac/Views/CodeGraph/UAGraphView.swift` | Observe `codeNoteService.$graph`; update progress labels |
 
 ### Deleted (after unreferenced)
 
@@ -53,12 +53,12 @@ This Mac has CommandLineTools only (no `xctest`), so `swift test` builds but doe
 ## Task 1: Bundle the Python AST script + Package.swift resource
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/Resources/code_ast_scan.py`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/Resources/code_ast_scan.py`
 - Modify: `mac/Package.swift`
 
 - [ ] **Step 1: Create the self-contained Python analyzer**
 
-`mac/Sources/MeetNotesMac/CodeNotes/Resources/code_ast_scan.py`:
+`mac/Sources/LlmIdeMac/CodeNotes/Resources/code_ast_scan.py`:
 
 ```python
 #!/usr/bin/env python3
@@ -132,7 +132,7 @@ if __name__ == "__main__":
 
 - [ ] **Step 2: Register the resource in Package.swift**
 
-In `mac/Package.swift`, the `MeetNotesMac` target already has a `resources:` array with `.copy("Resources/note_template.docx")` and `.copy("Resources/generate_meeting_note.py")`. Add a third entry:
+In `mac/Package.swift`, the `LlmIdeMac` target already has a `resources:` array with `.copy("Resources/note_template.docx")` and `.copy("Resources/generate_meeting_note.py")`. Add a third entry:
 
 ```swift
             resources: [
@@ -144,7 +144,7 @@ In `mac/Package.swift`, the `MeetNotesMac` target already has a `resources:` arr
 
 - [ ] **Step 3: Verify the script runs standalone**
 
-Run: `python3 mac/Sources/MeetNotesMac/CodeNotes/Resources/code_ast_scan.py mac/Sources/MeetNotesMac/CodeNotes 2>&1 | head -c 300`
+Run: `python3 mac/Sources/LlmIdeMac/CodeNotes/Resources/code_ast_scan.py mac/Sources/LlmIdeMac/CodeNotes 2>&1 | head -c 300`
 Expected: JSON output (may be `{}` if no `.py` files there — that's fine; just confirm it doesn't error).
 
 - [ ] **Step 4: Build**
@@ -155,8 +155,8 @@ Expected: `Build complete!`
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
-git add mac/Sources/MeetNotesMac/CodeNotes/Resources/code_ast_scan.py mac/Package.swift
+cd /Users/dinesh.malla/Desktop/llm-ide
+git add mac/Sources/LlmIdeMac/CodeNotes/Resources/code_ast_scan.py mac/Package.swift
 git commit -m "feat(codenotes): bundle stdlib-ast Python scanner script"
 ```
 
@@ -165,7 +165,7 @@ git commit -m "feat(codenotes): bundle stdlib-ast Python scanner script"
 ## Task 2: RawFileStructure intermediate type
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/RawFileStructure.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/RawFileStructure.swift`
 
 - [ ] **Step 1: Create the type**
 
@@ -214,8 +214,8 @@ Expected: `Build complete!`
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
-git add mac/Sources/MeetNotesMac/CodeNotes/RawFileStructure.swift
+cd /Users/dinesh.malla/Desktop/llm-ide
+git add mac/Sources/LlmIdeMac/CodeNotes/RawFileStructure.swift
 git commit -m "feat(codenotes): add RawFileStructure + RawImport intermediate types"
 ```
 
@@ -224,15 +224,15 @@ git commit -m "feat(codenotes): add RawFileStructure + RawImport intermediate ty
 ## Task 3: PythonASTExtractor
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/PythonASTExtractor.swift`
-- Test: `mac/Tests/MeetNotesMacTests/PythonASTExtractorTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/PythonASTExtractor.swift`
+- Test: `mac/Tests/LlmIdeMacTests/PythonASTExtractorTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct PythonASTExtractorTests {
     @Test func parsesScriptJSONIntoRawStructures() throws {
@@ -356,8 +356,8 @@ Expected: `Build complete!`
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
-git add mac/Sources/MeetNotesMac/CodeNotes/PythonASTExtractor.swift mac/Tests/MeetNotesMacTests/PythonASTExtractorTests.swift
+cd /Users/dinesh.malla/Desktop/llm-ide
+git add mac/Sources/LlmIdeMac/CodeNotes/PythonASTExtractor.swift mac/Tests/LlmIdeMacTests/PythonASTExtractorTests.swift
 git commit -m "feat(codenotes): add PythonASTExtractor (bundled stdlib-ast scanner)"
 ```
 
@@ -368,14 +368,14 @@ git commit -m "feat(codenotes): add PythonASTExtractor (bundled stdlib-ast scann
 Produces `RawFileStructure` for non-Python files. The process orchestration calls `git ls-files` + `rg`; the line-parsing helpers are pure and unit-tested.
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/RipgrepExtractor.swift`
-- Test: `mac/Tests/MeetNotesMacTests/RipgrepExtractorTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/RipgrepExtractor.swift`
+- Test: `mac/Tests/LlmIdeMacTests/RipgrepExtractorTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import Testing
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct RipgrepExtractorTests {
     @Test func detectsLanguageByExtension() {
@@ -582,8 +582,8 @@ Expected: `Build complete!`
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
-git add mac/Sources/MeetNotesMac/CodeNotes/RipgrepExtractor.swift mac/Tests/MeetNotesMacTests/RipgrepExtractorTests.swift
+cd /Users/dinesh.malla/Desktop/llm-ide
+git add mac/Sources/LlmIdeMac/CodeNotes/RipgrepExtractor.swift mac/Tests/LlmIdeMacTests/RipgrepExtractorTests.swift
 git commit -m "feat(codenotes): add RipgrepExtractor (git ls-files + per-language line parsers)"
 ```
 
@@ -592,14 +592,14 @@ git commit -m "feat(codenotes): add RipgrepExtractor (git ls-files + per-languag
 ## Task 5: ImportResolver
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/ImportResolver.swift`
-- Test: `mac/Tests/MeetNotesMacTests/ImportResolverTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/ImportResolver.swift`
+- Test: `mac/Tests/LlmIdeMacTests/ImportResolverTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import Testing
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct ImportResolverTests {
     private let files: Set<String> = [
@@ -732,8 +732,8 @@ Expected: `Build complete!`
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
-git add mac/Sources/MeetNotesMac/CodeNotes/ImportResolver.swift mac/Tests/MeetNotesMacTests/ImportResolverTests.swift
+cd /Users/dinesh.malla/Desktop/llm-ide
+git add mac/Sources/LlmIdeMac/CodeNotes/ImportResolver.swift mac/Tests/LlmIdeMacTests/ImportResolverTests.swift
 git commit -m "feat(codenotes): add ImportResolver (Python dotted + TS relative resolution)"
 ```
 
@@ -742,15 +742,15 @@ git commit -m "feat(codenotes): add ImportResolver (Python dotted + TS relative 
 ## Task 6: StructureGraphBuilder (ScanResult → CGData + note merge)
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/StructureGraphBuilder.swift`
-- Test: `mac/Tests/MeetNotesMacTests/StructureGraphBuilderTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/StructureGraphBuilder.swift`
+- Test: `mac/Tests/LlmIdeMacTests/StructureGraphBuilderTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct StructureGraphBuilderTests {
     private func sampleScan() -> ScanResult {
@@ -931,8 +931,8 @@ Expected: `Build complete!`
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
-git add mac/Sources/MeetNotesMac/CodeNotes/StructureGraphBuilder.swift mac/Tests/MeetNotesMacTests/StructureGraphBuilderTests.swift
+cd /Users/dinesh.malla/Desktop/llm-ide
+git add mac/Sources/LlmIdeMac/CodeNotes/StructureGraphBuilder.swift mac/Tests/LlmIdeMacTests/StructureGraphBuilderTests.swift
 git commit -m "feat(codenotes): add StructureGraphBuilder (ScanResult -> CGData + note merge)"
 ```
 
@@ -941,15 +941,15 @@ git commit -m "feat(codenotes): add StructureGraphBuilder (ScanResult -> CGData 
 ## Task 7: StructureScanner
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeNotes/StructureScanner.swift`
-- Test: `mac/Tests/MeetNotesMacTests/StructureScannerTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeNotes/StructureScanner.swift`
+- Test: `mac/Tests/LlmIdeMacTests/StructureScannerTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct StructureScannerTests {
     @Test func assemblesScanResultAndResolvesImports() {
@@ -1046,8 +1046,8 @@ Expected: `Build complete!`
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
-git add mac/Sources/MeetNotesMac/CodeNotes/StructureScanner.swift mac/Tests/MeetNotesMacTests/StructureScannerTests.swift
+cd /Users/dinesh.malla/Desktop/llm-ide
+git add mac/Sources/LlmIdeMac/CodeNotes/StructureScanner.swift mac/Tests/LlmIdeMacTests/StructureScannerTests.swift
 git commit -m "feat(codenotes): add StructureScanner (hybrid extract + resolve -> ScanResult)"
 ```
 
@@ -1056,7 +1056,7 @@ git commit -m "feat(codenotes): add StructureScanner (hybrid extract + resolve -
 ## Task 8: Rewrite CodeNoteService (fast graph + background notes)
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/CodeNotes/CodeNoteService.swift`
+- Modify: `mac/Sources/LlmIdeMac/CodeNotes/CodeNoteService.swift`
 
 - [ ] **Step 1: Replace the file contents**
 
@@ -1260,8 +1260,8 @@ Expected: errors only from the view referencing removed `Progress` cases (`.scan
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
-git add mac/Sources/MeetNotesMac/CodeNotes/CodeNoteService.swift
+cd /Users/dinesh.malla/Desktop/llm-ide
+git add mac/Sources/LlmIdeMac/CodeNotes/CodeNoteService.swift
 git commit -m "feat(codenotes): rewrite CodeNoteService for instant graph + background note enrichment"
 ```
 
@@ -1270,7 +1270,7 @@ git commit -m "feat(codenotes): rewrite CodeNoteService for instant graph + back
 ## Task 9: Update the view (observe $graph, new progress labels)
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Views/CodeGraph/UAGraphView.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/CodeGraph/UAGraphView.swift`
 
 - [ ] **Step 1: Make generateCodeNotes rely on published graph**
 
@@ -1340,7 +1340,7 @@ Find `codeNotesProgressView` (around line 1209). Replace its `switch` body with 
 
 - [ ] **Step 4: Fix any other references to old Progress cases**
 
-Run: `cd mac && grep -n 'codeNoteService.progress\|\.scanning\|\.analyzing\|\.deriving' Sources/MeetNotesMac/Views/CodeGraph/UAGraphView.swift`
+Run: `cd mac && grep -n 'codeNoteService.progress\|\.scanning\|\.analyzing\|\.deriving' Sources/LlmIdeMac/Views/CodeGraph/UAGraphView.swift`
 Fix any remaining match that referenced the old `.scanning`/`.analyzing`/`.deriving`/`.done` cases to use the new ones (only `codeNotesProgressView` should reference them).
 
 - [ ] **Step 5: Build**
@@ -1351,8 +1351,8 @@ Expected: `Build complete!` (fix any remaining mismatches).
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
-git add mac/Sources/MeetNotesMac/Views/CodeGraph/UAGraphView.swift
+cd /Users/dinesh.malla/Desktop/llm-ide
+git add mac/Sources/LlmIdeMac/Views/CodeGraph/UAGraphView.swift
 git commit -m "feat(ui): render structural graph instantly, observe background enrichment"
 ```
 
@@ -1371,11 +1371,11 @@ Expected: matches only inside the four files about to be deleted. If any other f
 - [ ] **Step 2: Delete**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
-git rm mac/Sources/MeetNotesMac/CodeNotes/ScanPhase.swift
-git rm mac/Tests/MeetNotesMacTests/ScanPhaseTests.swift
-git rm mac/Sources/MeetNotesMac/CodeNotes/EdgeRecovery.swift
-git rm mac/Tests/MeetNotesMacTests/EdgeRecoveryTests.swift
+cd /Users/dinesh.malla/Desktop/llm-ide
+git rm mac/Sources/LlmIdeMac/CodeNotes/ScanPhase.swift
+git rm mac/Tests/LlmIdeMacTests/ScanPhaseTests.swift
+git rm mac/Sources/LlmIdeMac/CodeNotes/EdgeRecovery.swift
+git rm mac/Tests/LlmIdeMacTests/EdgeRecoveryTests.swift
 ```
 
 - [ ] **Step 3: Build + build tests**
@@ -1386,7 +1386,7 @@ Expected: both `Build complete!`.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git commit -m "chore(codenotes): remove ScanPhase + EdgeRecovery (superseded by structural pipeline)"
 ```
 
@@ -1402,22 +1402,22 @@ Expected: both `Build complete!`.
 - [ ] **Step 2: Build the app bundle**
 
 Run: `cd mac && bash Scripts/build.sh 2>&1 | tail -3`
-Expected: `[build] ok — …/MeetNotesMac.app`.
+Expected: `[build] ok — …/LlmIdeMac.app`.
 
 - [ ] **Step 3: Confirm the Python script is bundled**
 
-Run: `ls mac/MeetNotesMac.app/Contents/Resources/code_ast_scan.py && echo OK`
-Expected: the path prints, then `OK`. (build.sh rsyncs `Sources/.../Resources`; if the SPM resource lands elsewhere, also check `find mac/MeetNotesMac.app -name code_ast_scan.py`.)
+Run: `ls mac/LlmIdeMac.app/Contents/Resources/code_ast_scan.py && echo OK`
+Expected: the path prints, then `OK`. (build.sh rsyncs `Sources/.../Resources`; if the SPM resource lands elsewhere, also check `find mac/LlmIdeMac.app -name code_ast_scan.py`.)
 
 - [ ] **Step 4: Launch + smoke test**
 
-Run: `pkill -9 MeetNotesMac 2>/dev/null; sleep 1; open mac/MeetNotesMac.app`
+Run: `pkill -9 LlmIdeMac 2>/dev/null; sleep 1; open mac/LlmIdeMac.app`
 Verify: select a repo → Code Graph → **Generate Code Graph**. The graph appears within seconds ("Extracting structure… → Building graph…"), then "Enriching notes N/M…" updates in the background. Click a file node → its content shows in the detail panel; once its note lands, the summary appears too.
 
 - [ ] **Step 5: Final commit + push**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes
+cd /Users/dinesh.malla/Desktop/llm-ide
 git add -A && git commit -m "chore: fast AST code graph complete" --allow-empty
 git push origin main
 ```

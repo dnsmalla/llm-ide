@@ -12,9 +12,9 @@
 ## Task 1: Auto-reopen regressed bugs
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Services/RegressionRunner.swift`
-- Modify: `mac/Tests/MeetNotesMacTests/RegressionRunnerTests.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/Regression/RegressionView.swift` (badge for "auto-reopened")
+- Modify: `mac/Sources/LlmIdeMac/Services/RegressionRunner.swift`
+- Modify: `mac/Tests/LlmIdeMacTests/RegressionRunnerTests.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/Regression/RegressionView.swift` (badge for "auto-reopened")
 
 - [ ] **Step 1: Extend `RegressionRunner.Result` with an `autoReopened` flag** (defaults false).
 - [ ] **Step 2: In `run(at:)`, when verdict resolves to `.regressed`, call `store.updateBugStatus(at: bugURL, to: .open)` and set `autoReopened = true` on the result.** Wrap in `try?` — file-write failure must not break the run.
@@ -25,10 +25,10 @@
 ## Task 2: Menu-bar status pill
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Models/Config.swift` (add `lastRegressionRunAt` + `lastRegressionRegressedCount`)
-- Modify: `mac/Sources/MeetNotesMac/Services/RegressionRunner.swift` (write those AppConfig fields at end of run)
-- Modify: `mac/Sources/MeetNotesMac/MeetNotesMacApp.swift` (`MenuBarMenu` gains rows + click handlers)
-- Modify: `mac/Sources/MeetNotesMac/Views/AppShell.swift` (Notification.Name + onReceive to switch sections)
+- Modify: `mac/Sources/LlmIdeMac/Models/Config.swift` (add `lastRegressionRunAt` + `lastRegressionRegressedCount`)
+- Modify: `mac/Sources/LlmIdeMac/Services/RegressionRunner.swift` (write those AppConfig fields at end of run)
+- Modify: `mac/Sources/LlmIdeMac/LlmIdeMacApp.swift` (`MenuBarMenu` gains rows + click handlers)
+- Modify: `mac/Sources/LlmIdeMac/Views/AppShell.swift` (Notification.Name + onReceive to switch sections)
 
 - [ ] **Step 1: AppConfig — two new `@Published`s.**
   - `lastRegressionRunAt: Date?` (UserDefaults key `lastRegressionRunAt` as Double timeIntervalSince1970)
@@ -41,7 +41,7 @@
   - `Last regression: N drifted · <relative date>` → opens `.regression`
   - Suppress each row when its value is zero AND `lastRegressionRunAt == nil`.
 - [ ] **Step 6: Make `MenuBarMenu` rows clickable** — wrap each in `Button { post .openSection(rawValue) }`. Use `.buttonStyle(.plain)` so menu styling is preserved.
-- [ ] **Step 7: Wire `.environmentObject(config)` on the `MenuBarExtra` content** in `MeetNotesMacApp.body` (next to existing theme/session/capture).
+- [ ] **Step 7: Wire `.environmentObject(config)` on the `MenuBarExtra` content** in `LlmIdeMacApp.body` (next to existing theme/session/capture).
 - [ ] **Step 8: Commit.**
 
 ## Task 3: Verification

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Meet Notes are tracked here. Format loosely follows
+All notable changes to LLM IDE are tracked here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project does not
 yet have published releases so dates are commit-day-of-merge.
 

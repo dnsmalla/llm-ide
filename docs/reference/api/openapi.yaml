@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
-  title: Meet Notes API
+  title: LLM IDE API
   version: '2.10.0'
   description: |
-    Multi-user, self-hostable backend for the Meet Notes conversation-driven
+    Multi-user, self-hostable backend for the LLM IDE conversation-driven
     project system.  Every state-mutating endpoint requires a JWT access
     token; data is scoped per user (tenant) at the SQL layer.
 
@@ -13,7 +13,7 @@ info:
 servers:
   - url: https://{host}
     variables:
-      host: { default: meetnotes.example.com }
+      host: { default: llmide.example.com }
 
 security:
   - bearerAuth: []

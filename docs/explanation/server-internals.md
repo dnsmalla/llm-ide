@@ -98,7 +98,7 @@ Every owned row carries a `user_id` foreign key.  The tenancy contract:
 ## Identity
 
 - **Access token** — HS256 JWT, 15 min default, signed with
-  `MEETNOTES_JWT_SECRET`.  Claims: `iss`, `sub` (userId), `role`,
+  `LLMIDE_JWT_SECRET`.  Claims: `iss`, `sub` (userId), `role`,
   `typ='access'`, `iat`, `exp`.  Issuer is verified, alg is locked
   to HS256, and signature compare is constant-time.
 - **Refresh token** — opaque random base64url string, hashed
@@ -113,7 +113,7 @@ Every owned row carries a `user_id` foreign key.  The tenancy contract:
 - `user_secrets(user_id, secret_key, ciphertext)` — `ciphertext` is
   `version_byte || iv(12) || aes-256-gcm(plaintext) || tag(16)`.
 - **Per-user data key** = `HKDF-SHA256(masterKey, salt=userId,
-  info='meetnotes-vault-v1', length=32)`.  An attacker who reads the
+  info='llmide-vault-v1', length=32)`.  An attacker who reads the
   DB can't decrypt without the master key, and a leak of one user's
   rows doesn't help against another.
 - Allow-listed keys: `github.token`, `backlog.apiKey`,
@@ -161,7 +161,7 @@ Every owned row carries a `user_id` foreign key.  The tenancy contract:
 ## Observability
 
 - **Logs**: structured JSON-per-line in production
-  (`MEETNOTES_LOG_JSON=1`), pretty in dev TTY.  Every log line
+  (`LLMIDE_LOG_JSON=1`), pretty in dev TTY.  Every log line
   includes `requestId` so a single user action can be traced through
   the agent layer and external API calls.
 - **Metrics**: Prometheus text format at `GET /metrics`.  Counters

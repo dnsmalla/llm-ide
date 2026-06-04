@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Bridge Claude Code's plugin ecosystem into Meet Notes so users can discover, import, and toggle Claude plugins alongside native ones.
+**Goal:** Bridge Claude Code's plugin ecosystem into LLM IDE so users can discover, import, and toggle Claude plugins alongside native ones.
 
-**Architecture:** A server-side adapter module (`claude-adapter.mjs`) scans `~/.claude/plugins/` for installed plugins and marketplace catalogs, converts Claude's `package.json` format into Meet Notes' `plugin.json` format, and copies skill/command files through the existing validation pipeline. Four new API routes expose this to the Mac app, which adds a "Import from Claude Code" sheet to the unified PLUGINS section.
+**Architecture:** A server-side adapter module (`claude-adapter.mjs`) scans `~/.claude/plugins/` for installed plugins and marketplace catalogs, converts Claude's `package.json` format into LLM IDE' `plugin.json` format, and copies skill/command files through the existing validation pipeline. Four new API routes expose this to the Mac app, which adds a "Import from Claude Code" sheet to the unified PLUGINS section.
 
 **Tech Stack:** Node.js (server-side adapter + routes), Swift/SwiftUI (Mac app UI), `node:test` (tests)
 
@@ -369,13 +369,13 @@ function makeFakeClaudeWithSkills() {
   return root;
 }
 
-test('importPlugin converts Claude plugin into MeetNotes format', () => {
+test('importPlugin converts Claude plugin into LLM IDE format', () => {
   const claudeRoot = makeFakeClaudeWithSkills();
   const mnRoot = mkdtempSync(join(tmpdir(), 'mn-plugins-'));
   try {
     const result = importPlugin({
       claudeRoot,
-      meetnotesPluginDir: mnRoot,
+      llmidePluginDir: mnRoot,
       source: 'marketplace',
       name: 'code-review',
     });
@@ -383,14 +383,14 @@ test('importPlugin converts Claude plugin into MeetNotes format', () => {
     assert.equal(result.plugin.name, 'claude-code-review');
     assert.ok(result.plugin.skillCount >= 1);
     assert.ok(result.plugin.commandCount >= 1);
-    // Verify the MeetNotes plugin was created with correct manifest
+    // Verify the LLM IDE plugin was created with correct manifest
     const manifest = JSON.parse(readFileSync(join(mnRoot, 'claude-code-review', 'plugin.json'), 'utf8'));
     assert.equal(manifest.name, 'claude-code-review');
     assert.equal(manifest.origin, 'claude');
     assert.equal(manifest.sourcePlugin, 'code-review');
-    // Verify the plugin loads through MeetNotes loader
+    // Verify the plugin loads through LLM IDE loader
     const { plugins, warnings } = loadPlugins({ pluginDir: mnRoot });
-    assert.ok(plugins.has('claude-code-review'), 'plugin not loaded by MeetNotes loader');
+    assert.ok(plugins.has('claude-code-review'), 'plugin not loaded by LLM IDE loader');
   } finally {
     rmSync(claudeRoot, { recursive: true, force: true });
     rmSync(mnRoot, { recursive: true, force: true });
@@ -403,7 +403,7 @@ test('importPlugin rejects if plugin not found in Claude dirs', () => {
   try {
     const result = importPlugin({
       claudeRoot,
-      meetnotesPluginDir: mnRoot,
+      llmidePluginDir: mnRoot,
       source: 'marketplace',
       name: 'nonexistent',
     });
@@ -433,18 +433,18 @@ import { defaultPluginDir } from './loader.mjs';
 import { loadPlugins } from './loader.mjs';
 
 /**
- * Import a Claude Code plugin into Meet Notes' plugin directory.
+ * Import a Claude Code plugin into LLM IDE' plugin directory.
  *
  * @param {object} opts
  * @param {string} [opts.claudeRoot] - Override Claude plugins root
- * @param {string} [opts.meetnotesPluginDir] - Override MeetNotes plugin dir
+ * @param {string} [opts.llmidePluginDir] - Override LLM IDE plugin dir
  * @param {'installed'|'marketplace'} opts.source - Where to find the plugin
  * @param {string} opts.name - Plugin name (e.g. 'code-review')
  * @returns {{ ok: boolean, plugin?: object, error?: string }}
  */
 export function importPlugin(opts) {
   const claudeRoot = opts.claudeRoot || claudePluginsRoot();
-  const mnDir = opts.meetnotesPluginDir || defaultPluginDir();
+  const mnDir = opts.llmidePluginDir || defaultPluginDir();
   const { source, name } = opts;
 
   // 1. Locate the source plugin directory
@@ -453,7 +453,7 @@ export function importPlugin(opts) {
     return { ok: false, error: `Plugin '${name}' not found in Claude ${source} directory` };
   }
 
-  // 2. Build Meet Notes plugin name and target dir
+  // 2. Build LLM IDE plugin name and target dir
   const mnName = `claude-${name}`;
   const targetDir = join(mnDir, mnName);
 
@@ -481,7 +481,7 @@ export function importPlugin(opts) {
   };
   writeFileSync(join(targetDir, 'plugin.json'), JSON.stringify(manifest, null, 2), 'utf8');
 
-  // 5. Copy skills — Claude format: skills/<name>/SKILL.md → MeetNotes: skills/<name>.md
+  // 5. Copy skills — Claude format: skills/<name>/SKILL.md → LLM IDE: skills/<name>.md
   let skillCount = 0;
   const skillsDir = join(sourceDir, 'skills');
   if (existsSync(skillsDir)) {
@@ -567,8 +567,8 @@ function findMarketplaceName(root, pluginName) {
 }
 
 /**
- * Copy Claude skill files into MeetNotes format.
- * Claude: skills/<name>/SKILL.md  →  MeetNotes: skills/<name>.md
+ * Copy Claude skill files into LLM IDE format.
+ * Claude: skills/<name>/SKILL.md  →  LLM IDE: skills/<name>.md
  * Also handles flat skills/<name>.md directly.
  */
 function copySkills(src, dst) {
@@ -625,7 +625,7 @@ Expected: PASS
 
 ```bash
 git add extension/plugins/claude-adapter.mjs extension/tests/claude-adapter.test.mjs
-git commit -m "feat(plugins): importPlugin converts Claude plugins to MeetNotes format"
+git commit -m "feat(plugins): importPlugin converts Claude plugins to LLM IDE format"
 ```
 
 ---
@@ -653,13 +653,13 @@ test('full round-trip: scan → import → verify', () => {
     // Import
     const result = importPlugin({
       claudeRoot,
-      meetnotesPluginDir: mnRoot,
+      llmidePluginDir: mnRoot,
       source: 'marketplace',
       name: 'code-review',
     });
     assert.equal(result.ok, true);
 
-    // Verify via MeetNotes loader
+    // Verify via LLM IDE loader
     const { plugins } = loadPlugins({ pluginDir: mnRoot });
     const imported = plugins.get('claude-code-review');
     assert.ok(imported, 'imported plugin not found in loader');
@@ -684,13 +684,13 @@ Add after the existing `DELETE /auth/me/plugins/uninstall/` block (around line 6
   // ── Claude Plugin Bridge ───────────────────────────────────────────
   // GET  /auth/me/claude-plugins/installed   → scan Claude Code installed plugins
   // GET  /auth/me/claude-plugins/marketplace → scan Claude marketplace cache
-  // POST /auth/me/claude-plugins/import      → import a plugin into MeetNotes
+  // POST /auth/me/claude-plugins/import      → import a plugin into LLM IDE
   // POST /auth/me/claude-plugins/refresh     → re-scan Claude dirs
 
   if (method === 'GET' && url.split('?')[0] === '/auth/me/claude-plugins/installed') {
     const { scanInstalled } = await import('../plugins/claude-adapter.mjs');
     const plugins = scanInstalled();
-    // Cross-reference with MeetNotes installed plugins to mark already-imported
+    // Cross-reference with LLM IDE installed plugins to mark already-imported
     const { loadPlugins: mnPlugins } = await import('../plugins/loader.mjs');
     const mnInstalled = mnPlugins();
     for (const p of plugins) {
@@ -774,7 +774,7 @@ git commit -m "feat(plugins): add Claude plugin bridge API routes"
 ### Task 6: Mac API Client — Claude plugin methods
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Services/API/MeetNotesAPIClient+Auth.swift`
+- Modify: `mac/Sources/LlmIdeMac/Services/API/LlmIdeAPIClient+Auth.swift`
 
 - [ ] **Step 1: Add response types**
 
@@ -857,7 +857,7 @@ struct ClaudeImportResponse: Decodable {
 
 - [ ] **Step 2: Add API methods**
 
-Add to the `MeetNotesAPIClient` extension in the same file:
+Add to the `LlmIdeAPIClient` extension in the same file:
 
 ```swift
     // MARK: - Claude Plugin Bridge
@@ -888,13 +888,13 @@ Add to the `MeetNotesAPIClient` extension in the same file:
 
 - [ ] **Step 3: Build to verify compilation**
 
-Run: `cd mac && swift build -c release --product MeetNotesMac 2>&1 | grep -E "error:|Build of product"`
-Expected: `Build of product 'MeetNotesMac' complete!`
+Run: `cd mac && swift build -c release --product LlmIdeMac 2>&1 | grep -E "error:|Build of product"`
+Expected: `Build of product 'LlmIdeMac' complete!`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Services/API/MeetNotesAPIClient+Auth.swift
+git add mac/Sources/LlmIdeMac/Services/API/LlmIdeAPIClient+Auth.swift
 git commit -m "feat(mac): add Claude plugin bridge API client methods"
 ```
 
@@ -903,7 +903,7 @@ git commit -m "feat(mac): add Claude plugin bridge API client methods"
 ### Task 7: Mac UI — Claude Import Sheet
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Views/Library/ClaudePluginImportSheet.swift`
+- Create: `mac/Sources/LlmIdeMac/Views/Library/ClaudePluginImportSheet.swift`
 
 - [ ] **Step 1: Create the import sheet view**
 
@@ -914,7 +914,7 @@ import SwiftUI
 /// "Installed" (plugins already in Claude Code) and "Marketplace"
 /// (available from Claude plugin catalogs).
 struct ClaudePluginImportSheet: View {
-    let api: MeetNotesAPIClient
+    let api: LlmIdeAPIClient
     let onDismiss: () -> Void
     let onImported: () -> Void
 
@@ -1183,13 +1183,13 @@ struct ClaudePluginImportSheet: View {
 
 - [ ] **Step 2: Build to verify compilation**
 
-Run: `cd mac && swift build -c release --product MeetNotesMac 2>&1 | grep -E "error:|Build of product"`
-Expected: `Build of product 'MeetNotesMac' complete!`
+Run: `cd mac && swift build -c release --product LlmIdeMac 2>&1 | grep -E "error:|Build of product"`
+Expected: `Build of product 'LlmIdeMac' complete!`
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Views/Library/ClaudePluginImportSheet.swift
+git add mac/Sources/LlmIdeMac/Views/Library/ClaudePluginImportSheet.swift
 git commit -m "feat(mac): add ClaudePluginImportSheet for browsing and importing"
 ```
 
@@ -1198,9 +1198,9 @@ git commit -m "feat(mac): add ClaudePluginImportSheet for browsing and importing
 ### Task 8: Mac UI — Wire import sheet into PLUGINS section + Claude badge
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Views/Library/LibraryView.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/Library/PluginLibraryRow.swift`
-- Modify: `mac/Sources/MeetNotesMac/Views/Library/PluginDetailView.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/Library/LibraryView.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/Library/PluginLibraryRow.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/Library/PluginDetailView.swift`
 
 - [ ] **Step 1: Add "Import from Claude Code" to the plugin install menu in LibraryView.swift**
 
@@ -1267,15 +1267,15 @@ In the `header` section, after the version/author `HStack`, add:
 
 - [ ] **Step 4: Build to verify compilation**
 
-Run: `cd mac && swift build -c release --product MeetNotesMac 2>&1 | grep -E "error:|Build of product"`
-Expected: `Build of product 'MeetNotesMac' complete!`
+Run: `cd mac && swift build -c release --product LlmIdeMac 2>&1 | grep -E "error:|Build of product"`
+Expected: `Build of product 'LlmIdeMac' complete!`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add mac/Sources/MeetNotesMac/Views/Library/LibraryView.swift \
-        mac/Sources/MeetNotesMac/Views/Library/PluginLibraryRow.swift \
-        mac/Sources/MeetNotesMac/Views/Library/PluginDetailView.swift
+git add mac/Sources/LlmIdeMac/Views/Library/LibraryView.swift \
+        mac/Sources/LlmIdeMac/Views/Library/PluginLibraryRow.swift \
+        mac/Sources/LlmIdeMac/Views/Library/PluginDetailView.swift
 git commit -m "feat(mac): wire Claude import sheet, add Claude badge to plugin rows"
 ```
 
@@ -1297,8 +1297,8 @@ Expected: All tests pass (existing 4 known failures in path-traversal + password
 
 - [ ] **Step 3: Build the Mac app**
 
-Run: `cd mac && swift build -c release --product MeetNotesMac 2>&1 | grep -E "error:|Build of product"`
-Expected: `Build of product 'MeetNotesMac' complete!`
+Run: `cd mac && swift build -c release --product LlmIdeMac 2>&1 | grep -E "error:|Build of product"`
+Expected: `Build of product 'LlmIdeMac' complete!`
 
 - [ ] **Step 4: Build the extension**
 
@@ -1307,7 +1307,7 @@ Expected: Clean build with no errors.
 
 - [ ] **Step 5: Deploy and verify UI**
 
-Run: `cd mac && bash Scripts/build.sh && open MeetNotesMac.app`
+Run: `cd mac && bash Scripts/build.sh && open LlmIdeMac.app`
 Verify:
 1. Profile menu → PLUGINS → `+` button shows "Import from Claude Code…"
 2. Clicking opens the import sheet with two tabs

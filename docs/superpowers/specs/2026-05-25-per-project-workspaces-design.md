@@ -6,7 +6,7 @@
 
 ## Why
 
-Today Meet Notes is configured globally: one notes folder, one set of linked
+Today LLM IDE is configured globally: one notes folder, one set of linked
 repos, one active CLI, one set of plugins enabled. A user with three side
 projects has to switch the GitLab "active" flag, swap notes folder, possibly
 re-enable a different plugin — every time they context-switch.
@@ -31,8 +31,8 @@ Two storage locations:
 
 | Location | Contents | Rationale |
 |---|---|---|
-| `<projectFolder>/.meetnotes/project.json` | identity + bundle (see schema below) | Travels with the folder. User can git-track it. Move folder → settings move with it. |
-| `~/Library/Application Support/MeetNotes/projects.json` | recent-projects list, active id, app-wide migration state | App-wide bookkeeping. Survives folder moves. |
+| `<projectFolder>/.llmide/project.json` | identity + bundle (see schema below) | Travels with the folder. User can git-track it. Move folder → settings move with it. |
+| `~/Library/Application Support/LLM IDE/projects.json` | recent-projects list, active id, app-wide migration state | App-wide bookkeeping. Survives folder moves. |
 
 ## Data shapes
 
@@ -42,7 +42,7 @@ Two storage locations:
 {
   "schemaVersion": 1,
   "id": "01HBYZ...",                     // ULID-like, stable
-  "displayName": "Meet Notes Mac",
+  "displayName": "LLM IDE Mac",
   "createdAt": "2026-05-25T11:00:00Z",
   "settings": {
     "language": "en",
@@ -77,7 +77,7 @@ list". A folder move updates the path in `projects.json` but the id stays.
   "schemaVersion": 1,
   "activeId": "01HBYZ...",                // null = Welcome screen
   "recents": [
-    { "id": "01HBYZ...", "path": "/Users/.../meet-notes", "lastOpenedAt": "2026-05-25T11:00:00Z" },
+    { "id": "01HBYZ...", "path": "/Users/.../llm-ide", "lastOpenedAt": "2026-05-25T11:00:00Z" },
     { "id": "01HBZ0...", "path": "/Users/.../other-proj", "lastOpenedAt": "2026-05-24T16:30:00Z" }
   ],
   "migrationCompleted": false              // see Migration section
@@ -161,7 +161,7 @@ switches. Esc cancels. (Reuses the same data as the sidebar dropdown.)
 ### Opening a folder
 
 1. User picks folder via `NSOpenPanel` or recent-list click.
-2. If `<folder>/.meetnotes/project.json` exists: load it. Validate schema
+2. If `<folder>/.llmide/project.json` exists: load it. Validate schema
    version; refuse-and-show-error if newer than what we understand.
 3. If missing: create defaults inherited from `AppConfig` (today's "global"
    values become this new project's defaults). Show a one-time "Set up" sheet
@@ -211,7 +211,7 @@ approach is reversible.
 
 1. Enumerate `config.gitLabSavedProjects` and `config.gitHubSavedRepos`.
 2. For each entry with a non-empty `localPath` AND `isActive`, create a
-   Project at that path (writes `.meetnotes/project.json` with settings
+   Project at that path (writes `.llmide/project.json` with settings
    inherited from current `AppConfig`).
 3. The most-recently-active becomes the new `activeId`.
 4. Set `migrationCompleted = true`.
@@ -228,14 +228,14 @@ New files:
 
 | File | Purpose |
 |---|---|
-| `Sources/MeetNotesMac/Models/Project.swift` | Codable `Project` struct + `ProjectSettings` |
-| `Sources/MeetNotesMac/Services/ProjectStore.swift` | `@MainActor`, owns recents + active, reads/writes both JSON files atomically, posts `Notification.Name.activeProjectChanged` |
-| `Sources/MeetNotesMac/Services/ProjectMigrator.swift` | One-shot migration from legacy saved-projects |
-| `Sources/MeetNotesMac/Views/Welcome/WelcomeView.swift` | First-launch + no-active screen |
-| `Sources/MeetNotesMac/Views/Welcome/RecentProjectsList.swift` | Reusable list (also used in Cmd-P) |
-| `Sources/MeetNotesMac/Views/Shell/ProjectSwitcher.swift` | Sidebar dropdown |
-| `Sources/MeetNotesMac/Views/Shell/QuickSwitcherSheet.swift` | Cmd-P HUD |
-| `Sources/MeetNotesMac/Views/Shell/StatusBar.swift` | Bottom status bar |
+| `Sources/LlmIdeMac/Models/Project.swift` | Codable `Project` struct + `ProjectSettings` |
+| `Sources/LlmIdeMac/Services/ProjectStore.swift` | `@MainActor`, owns recents + active, reads/writes both JSON files atomically, posts `Notification.Name.activeProjectChanged` |
+| `Sources/LlmIdeMac/Services/ProjectMigrator.swift` | One-shot migration from legacy saved-projects |
+| `Sources/LlmIdeMac/Views/Welcome/WelcomeView.swift` | First-launch + no-active screen |
+| `Sources/LlmIdeMac/Views/Welcome/RecentProjectsList.swift` | Reusable list (also used in Cmd-P) |
+| `Sources/LlmIdeMac/Views/Shell/ProjectSwitcher.swift` | Sidebar dropdown |
+| `Sources/LlmIdeMac/Views/Shell/QuickSwitcherSheet.swift` | Cmd-P HUD |
+| `Sources/LlmIdeMac/Views/Shell/StatusBar.swift` | Bottom status bar |
 
 Touched files (boundaries shift, not full rewrite):
 
@@ -246,14 +246,14 @@ Touched files (boundaries shift, not full rewrite):
 | `Views/AppShell.swift` | Mount Welcome when active is nil; otherwise existing shell |
 | `Views/CodeAssistantPanel.swift` | `buildAgentContext` reads from active project, not `config.gitLabSavedProjects` |
 | `Services/AutoCodeUpdateService.swift` | `resolveBackendAndProject` reads active project |
-| `MeetNotesMacApp.swift` | Inject `ProjectStore` into environment; wire keyboard shortcut for Cmd-P |
+| `LlmIdeMacApp.swift` | Inject `ProjectStore` into environment; wire keyboard shortcut for Cmd-P |
 
 ## Error handling
 
 | Failure | Behavior |
 |---|---|
 | `project.json` corrupt | Archive as `.corrupt.<unix>.json`; offer to reinitialize from defaults (same pattern as `ProcessedActionsRegistry`) |
-| `project.json` schema version newer than client supports | Refuse to load; show "Update Meet Notes to open this project." message |
+| `project.json` schema version newer than client supports | Refuse to load; show "Update LLM IDE to open this project." message |
 | Folder no longer exists when user clicks recent | Mark recent as `unreachable: true`; offer "Remove from recents" |
 | Folder permission denied | Surface NSError to status bar; allow re-pick |
 | `projects.json` corrupt | Same archive pattern as `project.json` |
@@ -283,7 +283,7 @@ Listed here so reviewers don't expect them:
 
 - Multi-window (one project per window)
 - Per-project plugin enable set (currently per-user only)
-- Per-project regression baselines stored in `<project>/.meetnotes/regression/`.
+- Per-project regression baselines stored in `<project>/.llmide/regression/`.
   Phase 1 keeps the current location (`<project>/graphify-out/memory/bugs/`),
   which is already effectively per-project since the path is repo-relative —
   no functional change for Phase 1. Phase 2 standardizes the path.

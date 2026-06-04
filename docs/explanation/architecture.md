@@ -5,7 +5,7 @@ status: stable
 
 # System architecture
 
-System-wide architecture for Meet Notes. For server-internal details (request pipeline, vault, audit log, tenancy invariants), see [`server-internals.md`](server-internals.md).
+System-wide architecture for LLM IDE. For server-internal details (request pipeline, vault, audit log, tenancy invariants), see [`server-internals.md`](server-internals.md).
 
 ## Goals
 
@@ -40,7 +40,7 @@ flowchart TB
 3. **Notes & extraction.** When the meeting ends, the client calls `/generate-notes`, `/extract-entities`, and (on request) `/generate-questions`. The server wraps user content in `<<<BEGIN>>>…<<<END>>>` fences and shells out to `claude -p`.
 4. **Planning.** `/kb/generate-plan` grounds the planner in KB search results. `/kb/analyze-risks` and `/kb/code-sync` (FTS5 against indexed code) annotate each task.
 5. **Action.** `/kb/generate-code` produces a diff; the guardrail engine inspects it for secrets, PII, path traversal, and destructive ops. Findings push the item to the review queue (`review_items`).
-6. **Dispatch.** On approval, agents in `extension/agents/` open a draft GitHub PR (`meetnotes/auto/<task>` branch, files under `.meetnotes-auto/<task>/`), file a ticket, or send a Slack webhook.
+6. **Dispatch.** On approval, agents in `extension/agents/` open a draft GitHub PR (`llmide/auto/<task>` branch, files under `.llmide-auto/<task>/`), file a ticket, or send a Slack webhook.
 7. **Outcome polling.** `outcome-watcher.mjs` polls GitHub / Backlog / Linear at a slow cadence and writes the result back into the `outcomes` table.
 
 ## Tenancy
@@ -60,7 +60,7 @@ Pre-existing rows from earlier single-user installs are back-filled to `user_id 
 | Network | Bound to `127.0.0.1`. CORS allowlist: `chrome-extension://<id>`, `localhost`, `127.0.0.1`. Origin is echoed, never `*`. |
 | Auth | JWT HS256, 15-minute access tokens. Refresh tokens are opaque base64url, hashed (sha256) at rest, rotate on every refresh. |
 | Password | Bcrypt cost 12. Unknown-email login compares against a sentinel hash so timing can't reveal account existence. |
-| Vault | `user_secrets(user_id, key, ciphertext)` where ciphertext = `version || iv(12) || aes-256-gcm(plaintext) || tag(16)`. Per-user data key = `HKDF-SHA256(masterKey, salt=userId, info='meetnotes-vault-v1')`. |
+| Vault | `user_secrets(user_id, key, ciphertext)` where ciphertext = `version || iv(12) || aes-256-gcm(plaintext) || tag(16)`. Per-user data key = `HKDF-SHA256(masterKey, salt=userId, info='llmide-vault-v1')`. |
 | Allowed secret keys | `claude.apiKey`, `github.token`, `backlog.apiKey`, `linear.apiKey`, `slack.webhookUrl` |
 | Rate limiting | Token-bucket per `(profile, scope)`. Scope = `userId` for authed routes, remote IP for unauthed. 429 carries `Retry-After`. |
 | Guardrails | 7 secret patterns, 5 PII patterns, 5 destructive-op patterns. Run at submit AND at approval. |
@@ -118,11 +118,11 @@ description says to start.
 - **`extension/src/`** — React 18 + TS + Vite. The side panel and
   the floating popup mount the same bundle (ADR-0010). Start at
   `src/main.tsx`.
-- **`mac/Sources/MeetNotesMac/`** — SwiftUI app. Sub-divides into
+- **`mac/Sources/LlmIdeMac/`** — SwiftUI app. Sub-divides into
   `Models/`, `Services/`, `Views/`, `ViewModels/`. Services follow
   the suffix taxonomy in `CONTRIBUTING.md` (`*Store`, `*Service`,
   `*Client`, `*Manager`, `*Mirror`, `*Router`). Start at
-  `MeetNotesMacApp.swift`.
+  `LlmIdeMacApp.swift`.
 - **`kb/`** — runtime data only: SQLite db, dev secrets, per-user
   vault payloads. Never read this directly from code; go through
   `extension/kb/db.mjs`.
@@ -145,7 +145,7 @@ route — but reflects what's actually wired today.
 - `GET  /kb/outcomes/<sessionId>` — poll outcome-watcher results
 
 **Mac app** uses (subset; full list in
-`MeetNotesAPIClient.swift`):
+`LlmIdeAPIClient.swift`):
 - `POST /auth/{login,refresh}`
 - `GET  /kb/sessions` — list captured meetings
 - `POST /code-assist` — Code Assistant chat turn

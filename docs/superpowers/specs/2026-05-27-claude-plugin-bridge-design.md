@@ -6,27 +6,27 @@
 
 ## Summary
 
-Bridge Claude Code's plugin ecosystem into Meet Notes so users can:
+Bridge Claude Code's plugin ecosystem into LLM IDE so users can:
 
 1. **Discover** plugins from Claude Code marketplaces (anthropics/claude-plugins-official, obra/superpowers)
 2. **Auto-detect** Claude Code plugins already installed locally (`~/.claude/plugins/cache/`)
-3. **Import** Claude plugins into Meet Notes' native plugin system with full validation
+3. **Import** Claude plugins into LLM IDE' native plugin system with full validation
 4. **Toggle** each imported plugin between active (agent uses skills at runtime) and passive (reference only)
 
 ## Approach: Adapter Layer
 
-A thin adapter module reads Claude Code's plugin format and converts it into Meet Notes' format. Imported plugins go through the existing validation pipeline (injection scanning, size limits) and appear alongside native plugins in the unified PLUGINS section.
+A thin adapter module reads Claude Code's plugin format and converts it into LLM IDE' format. Imported plugins go through the existing validation pipeline (injection scanning, size limits) and appear alongside native plugins in the unified PLUGINS section.
 
-No changes to the core plugin loader or agent runtime — the adapter produces standard Meet Notes plugins.
+No changes to the core plugin loader or agent runtime — the adapter produces standard LLM IDE plugins.
 
 ## Architecture
 
 ```
-Meet Notes App
+LLM IDE App
 ├── Library UI
 │   └── PLUGINS section (unified: native + claude-origin)
 ├── Plugin Loader (existing, unchanged)
-│   └── reads ~/Library/Application Support/MeetNotes/plugins/
+│   └── reads ~/Library/Application Support/LLM IDE/plugins/
 ├── Agent Runtime (existing, unchanged)
 │   └── merges enabled plugin skills into system prompt
 │
@@ -52,13 +52,13 @@ Returns for each plugin:
 - `marketplace` — which marketplace it came from (e.g. "superpowers-dev")
 - `skillCount` — number of .md files in skills/
 - `commandCount` — number of .md files in commands/
-- `alreadyImported` — boolean, true if `claude-<name>` exists in Meet Notes plugins dir
+- `alreadyImported` — boolean, true if `claude-<name>` exists in LLM IDE plugins dir
 
 ### `scanMarketplace() → MarketplacePlugin[]`
 
 Reads `~/.claude/plugins/marketplaces/*/plugins/` directories.
 
-**Fallback:** If `~/.claude/plugins/marketplaces/` is missing or empty, fetch the directory listing from `https://api.github.com/repos/anthropics/claude-plugins-official/contents/plugins` (unauthenticated, public repo). Cache the response for 24 hours in Meet Notes' data dir.
+**Fallback:** If `~/.claude/plugins/marketplaces/` is missing or empty, fetch the directory listing from `https://api.github.com/repos/anthropics/claude-plugins-official/contents/plugins` (unauthenticated, public repo). Cache the response for 24 hours in LLM IDE' data dir.
 
 Returns for each plugin:
 - `name` — directory name
@@ -73,7 +73,7 @@ The core conversion pipeline:
 
 1. **Locate source:** Find plugin directory in `cache/` (for installed) or `marketplaces/` (for catalog)
 2. **Read manifest:** Parse `package.json` if present; infer from directory name if absent
-3. **Generate Meet Notes manifest:**
+3. **Generate LLM IDE manifest:**
    ```json
    {
      "name": "claude-code-review",
@@ -93,7 +93,7 @@ The core conversion pipeline:
 5. **Copy commands:** Each `commands/<name>.md` → `commands/<name>.md` with:
    - Size check (max 16KB)
    - Same sanitization
-6. **Write to Meet Notes plugin dir:** `~/Library/Application Support/MeetNotes/plugins/claude-<name>/`
+6. **Write to LLM IDE plugin dir:** `~/Library/Application Support/LLM IDE/plugins/claude-<name>/`
 7. **Return** validated PluginInfo for the API response
 
 ### `checkForUpdates() → UpdateInfo[]`
@@ -140,7 +140,7 @@ A sheet with two tabs presented from the PLUGINS header menu:
 **Tab 2 — "Marketplace"**
 - Lists plugins from `GET /claude-plugins/marketplace`
 - Each row: name, description, badges for skills/commands
-- Button: "Import" (copies from marketplace dir into Meet Notes)
+- Button: "Import" (copies from marketplace dir into LLM IDE)
 - If not installed in Claude Code: button still works (reads directly from marketplace cache)
 
 ### Library PLUGINS section changes
@@ -171,7 +171,7 @@ The existing enable/disable toggle works unchanged. When a Claude plugin is:
 
 - All imported content goes through existing `stripInjectionFences()` and `scanForSuspiciousContent()`
 - Size limits enforced: 32KB/skill, 16KB/command, 50 files/plugin
-- `claude-` prefix prevents shadowing native Meet Notes plugins
+- `claude-` prefix prevents shadowing native LLM IDE plugins
 - GitHub fallback uses unauthenticated API (public repos), rate-limited to 60 req/hr
 - No server-side URL fetching for plugin content — only GitHub API for directory listings
 
@@ -181,7 +181,7 @@ The existing enable/disable toggle works unchanged. When a Claude plugin is:
 |----------|----------|
 | Claude Code not installed | `~/.claude/plugins/` missing → empty lists, hint in UI |
 | Plugin already imported | Show checkmark; show "Update" if source version is newer |
-| Plugin removed from Claude | Meet Notes keeps its copy; detail view shows "Source no longer available" |
+| Plugin removed from Claude | LLM IDE keeps its copy; detail view shows "Source no longer available" |
 | No package.json in source | Infer name from directory name, version defaults to "0.0.0" |
 | Skill name collision | Namespaced by plugin name: `claude-code-review/debug` vs `my-plugin/debug` |
 | GitHub API rate limit hit | Return cached data with "cache may be stale" warning |
@@ -189,9 +189,9 @@ The existing enable/disable toggle works unchanged. When a Claude plugin is:
 
 ## Out of Scope (v1)
 
-- Publishing Meet Notes plugins to Claude marketplace
-- Two-way sync (Meet Notes edits don't propagate to Claude dirs)
-- Installing Claude Code from Meet Notes
+- Publishing LLM IDE plugins to Claude marketplace
+- Two-way sync (LLM IDE edits don't propagate to Claude dirs)
+- Installing Claude Code from LLM IDE
 - Marketplace search/filter (flat list only)
 - Importing Claude Code hooks or agents (skills and commands only)
 
@@ -207,4 +207,4 @@ The existing enable/disable toggle works unchanged. When a Claude plugin is:
 | `mac/.../LibraryView.swift` | Modified | Add Claude badge to plugin rows |
 | `mac/.../PluginDetailView.swift` | Modified | Add source/update info for Claude plugins |
 | `mac/.../PluginLibraryRow.swift` | Modified | Add Claude badge rendering |
-| `mac/.../MeetNotesAPIClient.swift` | Modified | Add Claude plugin API methods |
+| `mac/.../LlmIdeAPIClient.swift` | Modified | Add Claude plugin API methods |

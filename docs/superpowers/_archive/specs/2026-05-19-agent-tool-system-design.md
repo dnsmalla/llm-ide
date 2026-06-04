@@ -32,7 +32,7 @@ This spec gives the agent two new capabilities:
 - Streaming tokens during the tool loop. The user sees the final reply when the loop exits.
 - Multiple write tools in a single agent turn.
 - Other writers (open PR, comment on issue, dispatch agent run, modify Library).
-- User-installable agent skills at runtime (`~/.meetnotes/agent-skills/`).
+- User-installable agent skills at runtime (`~/.llmide/agent-skills/`).
 - Per-user skill enable/disable toggles.
 - Persisting a pending tool call across an app relaunch.
 - Anthropic API tool_use native protocol — we stay on the `claude -p` CLI shell-out and use a fence convention. Migrating to the native protocol is a future option, not in scope.
@@ -105,7 +105,7 @@ Built by the Mac client, sent in the request body as `agentContext`, inlined int
 - Default branch: main
 
 ## Indexed code repositories (from the user's Library)
-- notes-extension     (path: ~/Developer/MeetNotes/notes-extension)
+- notes-extension     (path: ~/Developer/LLM IDE/notes-extension)
 ```
 
 When fields are empty, the block still renders with explicit `(none configured)` markers so the agent can give the user a useful pointer rather than fall apart silently.

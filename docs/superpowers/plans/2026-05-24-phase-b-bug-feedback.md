@@ -18,35 +18,35 @@
 
 | Path | Responsibility |
 |---|---|
-| `mac/Sources/MeetNotesMac/CodeGraph/BugReport.swift` | `BugReport` struct + `BugSeverity` + `BugStatus` enums + frontmatter encode/decode. Pure data, no I/O. |
-| `mac/Sources/MeetNotesMac/Views/CodeAssistant/ReportBugSheet.swift` | Compose sheet — severity picker, prompt (read-only), response (editable), notes textarea, tags, severity. Writes via `MemoryStore`. |
-| `mac/Tests/MeetNotesMacTests/BugReportTests.swift` | Round-trip frontmatter encode/decode tests. |
-| `mac/Tests/MeetNotesMacTests/MemoryStoreWritesTests.swift` | `writeBug` + `updateBugStatus` round-trip on tmp dir. |
+| `mac/Sources/LlmIdeMac/CodeGraph/BugReport.swift` | `BugReport` struct + `BugSeverity` + `BugStatus` enums + frontmatter encode/decode. Pure data, no I/O. |
+| `mac/Sources/LlmIdeMac/Views/CodeAssistant/ReportBugSheet.swift` | Compose sheet — severity picker, prompt (read-only), response (editable), notes textarea, tags, severity. Writes via `MemoryStore`. |
+| `mac/Tests/LlmIdeMacTests/BugReportTests.swift` | Round-trip frontmatter encode/decode tests. |
+| `mac/Tests/LlmIdeMacTests/MemoryStoreWritesTests.swift` | `writeBug` + `updateBugStatus` round-trip on tmp dir. |
 
 **Modify:**
 
 | Path | Why |
 |---|---|
-| `mac/Sources/MeetNotesMac/CodeGraph/MemoryStore.swift` | Add `writeBug(at:_:)`, `loadBug(at:)`, `updateBugStatus(at:_:_:)`. |
-| `mac/Sources/MeetNotesMac/Views/CodeAssistantPanel.swift:543-566` (`turnView`) | Add "Report this" button on assistant turns. Track the most recent user prompt to pre-fill the sheet. |
-| `mac/Sources/MeetNotesMac/Views/CodeGraph/MemoryTabView.swift` | Bug-row status picker; "N open bug reports" badge in the header alongside the existing node-count badge. |
+| `mac/Sources/LlmIdeMac/CodeGraph/MemoryStore.swift` | Add `writeBug(at:_:)`, `loadBug(at:)`, `updateBugStatus(at:_:_:)`. |
+| `mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift:543-566` (`turnView`) | Add "Report this" button on assistant turns. Track the most recent user prompt to pre-fill the sheet. |
+| `mac/Sources/LlmIdeMac/Views/CodeGraph/MemoryTabView.swift` | Bug-row status picker; "N open bug reports" badge in the header alongside the existing node-count badge. |
 
 ---
 
 ## Task 1: `BugReport` model + frontmatter encode/decode
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/CodeGraph/BugReport.swift`
-- Create: `mac/Tests/MeetNotesMacTests/BugReportTests.swift`
+- Create: `mac/Sources/LlmIdeMac/CodeGraph/BugReport.swift`
+- Create: `mac/Tests/LlmIdeMacTests/BugReportTests.swift`
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `mac/Tests/MeetNotesMacTests/BugReportTests.swift`:
+Create `mac/Tests/LlmIdeMacTests/BugReportTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct BugReportTests {
     @Test func encodeAndDecodeRoundTrip() throws {
@@ -142,7 +142,7 @@ struct BugReportTests {
 - [ ] **Step 2: Run tests, expect failures (`BugReport` doesn't exist)**
 
 ```
-cd /Users/dinsmallade/Desktop/meet-notes/mac
+cd /Users/dinsmallade/Desktop/llm-ide/mac
 swift test --filter BugReportTests
 ```
 
@@ -150,7 +150,7 @@ Expected: FAIL — `cannot find 'BugReport' in scope`.
 
 - [ ] **Step 3: Implement BugReport**
 
-Create `mac/Sources/MeetNotesMac/CodeGraph/BugReport.swift`:
+Create `mac/Sources/LlmIdeMac/CodeGraph/BugReport.swift`:
 
 ```swift
 // User-reported bug feedback. Persisted as a markdown file with YAML
@@ -348,7 +348,7 @@ swift test --filter BugReportTests
 - [ ] **Step 5: Commit**
 
 ```
-git add mac/Sources/MeetNotesMac/CodeGraph/BugReport.swift mac/Tests/MeetNotesMacTests/BugReportTests.swift
+git add mac/Sources/LlmIdeMac/CodeGraph/BugReport.swift mac/Tests/LlmIdeMacTests/BugReportTests.swift
 git commit -m "feat(memory): BugReport model with YAML-frontmatter markdown round-trip
 
 Phase B.1. Plain markdown so the user can open / edit the file in any
@@ -362,17 +362,17 @@ status flips don't disturb user edits."
 ## Task 2: Extend `MemoryStore` with writes
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/CodeGraph/MemoryStore.swift`
-- Create: `mac/Tests/MeetNotesMacTests/MemoryStoreWritesTests.swift`
+- Modify: `mac/Sources/LlmIdeMac/CodeGraph/MemoryStore.swift`
+- Create: `mac/Tests/LlmIdeMacTests/MemoryStoreWritesTests.swift`
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `mac/Tests/MeetNotesMacTests/MemoryStoreWritesTests.swift`:
+Create `mac/Tests/LlmIdeMacTests/MemoryStoreWritesTests.swift`:
 
 ```swift
 import Testing
 import Foundation
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 
 struct MemoryStoreWritesTests {
     private func tmpRepoDir() throws -> URL {
@@ -447,7 +447,7 @@ Expected: FAIL — `value of type 'MemoryStore' has no member 'writeBug'`.
 
 - [ ] **Step 3: Extend MemoryStore**
 
-In `mac/Sources/MeetNotesMac/CodeGraph/MemoryStore.swift`, add these methods at the end of the struct (before the closing brace, before the template constant):
+In `mac/Sources/LlmIdeMac/CodeGraph/MemoryStore.swift`, add these methods at the end of the struct (before the closing brace, before the template constant):
 
 ```swift
     // MARK: - Bug writes (Phase B)
@@ -492,7 +492,7 @@ swift test --filter MemoryStoreWritesTests
 - [ ] **Step 5: Commit**
 
 ```
-git add mac/Sources/MeetNotesMac/CodeGraph/MemoryStore.swift mac/Tests/MeetNotesMacTests/MemoryStoreWritesTests.swift
+git add mac/Sources/LlmIdeMac/CodeGraph/MemoryStore.swift mac/Tests/LlmIdeMacTests/MemoryStoreWritesTests.swift
 git commit -m "feat(memory): MemoryStore.writeBug + updateBugStatus
 
 Phase B.2. Adds the write surface the bug-report sheet will call —
@@ -506,17 +506,17 @@ disturbing the notes body."
 ## Task 3: `ReportBugSheet` view
 
 **Files:**
-- Create: `mac/Sources/MeetNotesMac/Views/CodeAssistant/ReportBugSheet.swift`
+- Create: `mac/Sources/LlmIdeMac/Views/CodeAssistant/ReportBugSheet.swift`
 
 - [ ] **Step 1: Create the dir + view file**
 
 Run:
 
 ```
-mkdir -p mac/Sources/MeetNotesMac/Views/CodeAssistant
+mkdir -p mac/Sources/LlmIdeMac/Views/CodeAssistant
 ```
 
-Create `mac/Sources/MeetNotesMac/Views/CodeAssistant/ReportBugSheet.swift`:
+Create `mac/Sources/LlmIdeMac/Views/CodeAssistant/ReportBugSheet.swift`:
 
 ```swift
 // Compose sheet shown when the user clicks "Report this" on an
@@ -694,7 +694,7 @@ Expected: `Build complete!`.
 - [ ] **Step 3: Commit**
 
 ```
-git add mac/Sources/MeetNotesMac/Views/CodeAssistant/ReportBugSheet.swift
+git add mac/Sources/LlmIdeMac/Views/CodeAssistant/ReportBugSheet.swift
 git commit -m "feat(memory): ReportBugSheet — compose UI for bug reports
 
 Phase B.3. Pre-fills the agent's response + prompt from the chat
@@ -709,11 +709,11 @@ report-time (best-effort — no git fork)."
 ## Task 4: Wire "Report this" button into `CodeAssistantPanel`
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Views/CodeAssistantPanel.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift`
 
 - [ ] **Step 1: Add state for the bug sheet**
 
-Read `mac/Sources/MeetNotesMac/Views/CodeAssistantPanel.swift`. Find the `@State` block around line 30 and add:
+Read `mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift`. Find the `@State` block around line 30 and add:
 
 ```swift
     @State private var reportingBug: BugReportContext?
@@ -734,7 +734,7 @@ Find `private func turnView(_ turn:)` (around line 543). Replace the function bo
 
 ```swift
     @ViewBuilder
-    private func turnView(_ turn: MeetNotesAPIClient.CodeAssistTurn) -> some View {
+    private func turnView(_ turn: LlmIdeAPIClient.CodeAssistTurn) -> some View {
         let isUser = turn.role == .user
         HStack(alignment: .top, spacing: Spacing.sm) {
             if isUser { Spacer(minLength: 40) }
@@ -775,7 +775,7 @@ Find `private func turnView(_ turn:)` (around line 543). Replace the function bo
     /// Walk backwards from `turn`'s position in `history` and return the
     /// most recent user message. Falls back to empty when the assistant
     /// answered without a preceding user turn (rare; agent self-prompts).
-    private func prevUserPrompt(before turn: MeetNotesAPIClient.CodeAssistTurn) -> String? {
+    private func prevUserPrompt(before turn: LlmIdeAPIClient.CodeAssistTurn) -> String? {
         guard let idx = history.firstIndex(where: { $0.id == turn.id }) else { return nil }
         for i in stride(from: idx - 1, through: 0, by: -1) {
             if history[i].role == .user { return history[i].content }
@@ -833,7 +833,7 @@ Expected: `Build complete!`.
 - [ ] **Step 5: Commit**
 
 ```
-git add mac/Sources/MeetNotesMac/Views/CodeAssistantPanel.swift
+git add mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift
 git commit -m "feat(memory): wire 'Report this' button into CodeAssistantPanel
 
 Phase B.4. Each assistant turn gains a small 'Report this' affordance
@@ -847,7 +847,7 @@ from the chat history at that moment."
 ## Task 5: Memory tab — bug status picker + open-count badge
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Views/CodeGraph/MemoryTabView.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/CodeGraph/MemoryTabView.swift`
 
 - [ ] **Step 1: Track open-bug count**
 
@@ -963,7 +963,7 @@ Expected: `Build complete!`.
 - [ ] **Step 5: Commit**
 
 ```
-git add mac/Sources/MeetNotesMac/Views/CodeGraph/MemoryTabView.swift
+git add mac/Sources/LlmIdeMac/Views/CodeGraph/MemoryTabView.swift
 git commit -m "feat(memory): bug-status pickers + open-count badge in Memory tab
 
 Phase B.5. Each bug row gains a status pill (Open / Acknowledged /
@@ -992,7 +992,7 @@ Expected: all four suites pass.
 - [ ] **Step 2: End-to-end manual walk**
 
 ```
-./build_app.sh && pkill -f MeetNotesMac.app; sleep 1; open -n MeetNotesMac.app
+./build_app.sh && pkill -f LlmIdeMac.app; sleep 1; open -n LlmIdeMac.app
 ```
 
 Then:

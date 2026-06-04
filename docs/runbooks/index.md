@@ -4,7 +4,7 @@ title: Runbooks
 
 # Runbooks
 
-Incident-response and recovery procedures for the Meet Notes server. Each
+Incident-response and recovery procedures for the LLM IDE server. Each
 runbook follows the same shape:
 
 1. **Symptom** — what the operator sees
@@ -24,13 +24,13 @@ machine running `node server.mjs` and read access to `kb/data.db`.
 | `node server.mjs` exits before listen, or `/health` 5xx at boot | [Server won't start](server-wont-start.md) |
 | Need to recover a deleted user / corrupted DB | [Restore from backup](restore-from-backup.md) |
 | `Vault decrypt failed` errors for a user | [Recover corrupt vault](recover-corrupt-vault.md) |
-| Need to rotate `MEETNOTES_VAULT_KEY` | [Rotate vault key](rotate-vault-key.md) |
-| Need to rotate `MEETNOTES_JWT_SECRET` | [Rotate JWT secret](../how-to/rotate-jwt-secret.md) |
+| Need to rotate `LLMIDE_VAULT_KEY` | [Rotate vault key](rotate-vault-key.md) |
+| Need to rotate `LLMIDE_JWT_SECRET` | [Rotate JWT secret](../how-to/rotate-jwt-secret.md) |
 
 ## Conventions
 
 - `$ROOT` = the directory containing `extension/server.mjs`
-- `$DB` = `$MEETNOTES_DB_PATH` (default: `$ROOT/kb/data.db`)
+- `$DB` = `$LLMIDE_DB_PATH` (default: `$ROOT/kb/data.db`)
 - `$BACKUPS` = `$(dirname $DB)/backups/` (default location for
   `POST /admin/backup`)
 - Commands assume macOS/Linux. Substitute equivalents on other platforms.

@@ -1,6 +1,6 @@
-# Meet Notes — macOS App
+# LLM IDE — macOS App
 
-> Native SwiftUI client for the Meet Notes system. Captures live captions from Zoom and Microsoft Teams, surfaces the full knowledge base, and adds a native GitLab Issues board and Gantt chart — all backed by the same local server as the Chrome extension.
+> Native SwiftUI client for the LLM IDE system. Captures live captions from Zoom and Microsoft Teams, surfaces the full knowledge base, and adds a native GitLab Issues board and Gantt chart — all backed by the same local server as the Chrome extension.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue.svg)](#requirements)
 [![Swift](https://img.shields.io/badge/swift-5.9-orange.svg)](#tech-stack)
@@ -28,7 +28,7 @@
 | | |
 |---|---|
 | **OS** | macOS 14 Sonoma or newer |
-| **Backend** | Meet Notes server running at `127.0.0.1:3456` (API v15+) |
+| **Backend** | LLM IDE server running at `127.0.0.1:3456` (API v15+) |
 | **GitLab** | Personal Access Token with `api` scope (for Issues / Gantt) |
 
 ---
@@ -38,7 +38,7 @@
 ### 1 — Start the backend server
 
 ```bash
-cd /path/to/meet-notes/extension
+cd /path/to/llm-ide/extension
 npm install          # first time only
 node server.mjs      # keep this terminal open
 ```
@@ -48,9 +48,9 @@ Verify: `curl http://127.0.0.1:3456/health` should return `status: "ok"`.
 ### 2 — Build and launch the app
 
 ```bash
-cd /path/to/meet-notes/mac
-./build_app.sh       # compiles, bundles, signs, produces MeetNotesMac.app + DMG
-open MeetNotesMac.app
+cd /path/to/llm-ide/mac
+./build_app.sh       # compiles, bundles, signs, produces LlmIdeMac.app + DMG
+open LlmIdeMac.app
 ```
 
 ### 3 — Grant Accessibility access
@@ -59,7 +59,7 @@ The app reads captions from Zoom and Teams via the macOS Accessibility API. On f
 
 1. Click **Open System Settings**
 2. Go to **Privacy & Security → Accessibility**
-3. Toggle **MeetNotesMac** on (authenticate if prompted)
+3. Toggle **LlmIdeMac** on (authenticate if prompted)
 4. **Quit and relaunch** the app — macOS caches AX trust per-process, so the current instance won't see the change until restart
 
 ### 4 — Sign in
@@ -67,7 +67,7 @@ The app reads captions from Zoom and Teams via the macOS Accessibility API. On f
 - **New server:** Register — the first user is automatically promoted to `admin`
 - **Existing server:** Sign in with your credentials
 
-The refresh token is stored in the macOS Keychain under `com.meetnotes.macapp`. Subsequent launches skip the login screen and silently mint a fresh access token.
+The refresh token is stored in the macOS Keychain under `com.llmide.macapp`. Subsequent launches skip the login screen and silently mint a fresh access token.
 
 ### 5 — Connect GitLab (optional)
 
@@ -123,7 +123,7 @@ All editable from the **Settings** tab.
 
 ### Keychain
 
-- **Service:** `com.meetnotes.macapp`
+- **Service:** `com.llmide.macapp`
 - **Account:** `<server-host>::refresh_token`
 - **Accessibility:** `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` — does not sync via iCloud
 
@@ -140,8 +140,8 @@ All editable from the **Settings** tab.
 ```
 Package.swift
 build_app.sh
-Sources/MeetNotesMac/
-├── MeetNotesMacApp.swift              # @main · environment graph · MenuBarExtra
+Sources/LlmIdeMac/
+├── LlmIdeMacApp.swift              # @main · environment graph · MenuBarExtra
 ├── Models/
 │   ├── Config.swift                   # UserDefaults-backed prefs + GitLab saved projects
 │   ├── Theme.swift                    # dark / light / midnight palettes
@@ -154,10 +154,10 @@ Sources/MeetNotesMac/
 │   ├── SessionStore.swift             # @Published session, coalesced refresh
 │   ├── PermissionsService.swift       # AX / Screen Recording / Microphone probes
 │   ├── ShellState.swift
-│   ├── API/                           # MeetNotesAPIClient split by domain
-│   │   ├── MeetNotesAPIClient+Auth.swift
-│   │   ├── MeetNotesAPIClient+Agent.swift
-│   │   ├── MeetNotesAPIClient+KB.swift
+│   ├── API/                           # LlmIdeAPIClient split by domain
+│   │   ├── LlmIdeAPIClient+Auth.swift
+│   │   ├── LlmIdeAPIClient+Agent.swift
+│   │   ├── LlmIdeAPIClient+KB.swift
 │   │   └── …
 │   └── CaptionScraper/
 │       ├── CaptionScraper.swift       # protocol + CaptionOrchestrator
@@ -233,10 +233,10 @@ The orchestrator's `tick()` picks it up automatically on the next recording star
 
 ```bash
 # Server
-MEETNOTES_LOG_LEVEL=debug node server.mjs
+LLMIDE_LOG_LEVEL=debug node server.mjs
 ```
 
-Open **Console.app** and filter on subsystem `com.meetnotes.macapp` for capture, session, and API logs from the app.
+Open **Console.app** and filter on subsystem `com.llmide.macapp` for capture, session, and API logs from the app.
 
 ---
 
@@ -252,9 +252,9 @@ The default `build_app.sh` produces an **ad-hoc signed** build, which Gatekeeper
    ```
 3. **Notarize:**
    ```bash
-   xcrun notarytool submit MeetNotesMac_v0.1.0.dmg \
+   xcrun notarytool submit LlmIdeMac_v0.1.0.dmg \
      --keychain-profile "AC_PASSWORD" --wait
-   xcrun stapler staple MeetNotesMac.app
+   xcrun stapler staple LlmIdeMac.app
    ```
 4. **Auto-update:** wire [Sparkle](https://sparkle-project.org/) — the DMG is already UDZO format and Sparkle-compatible
 5. **Skip the Mac App Store** — Accessibility-based caption scraping conflicts with MAS sandbox requirements

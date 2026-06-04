@@ -10,7 +10,7 @@ applies_to: mac
 2. Developer ID Application certificate installed in your login Keychain. Get it from `developer.apple.com → Certificates, IDs & Profiles`.
 3. Notarization-capable Apple ID (the email tied to your Developer account), with an app-specific password stored in Keychain via:
    ```
-   xcrun notarytool store-credentials "MeetNotes-Notarize" \
+   xcrun notarytool store-credentials "LLM IDE-Notarize" \
        --apple-id you@example.com \
        --team-id ABCDEFG123
    ```
@@ -27,7 +27,7 @@ You should see one entry like `Developer ID Application: Your Name (ABCDEFG123)`
 For local-dev builds the existing ad-hoc signing is fine. For distribution:
 ```
 codesign --force --deep --options runtime --timestamp \
-  --entitlements "$PROJ_DIR/MeetNotesMac.entitlements" \
+  --entitlements "$PROJ_DIR/LlmIdeMac.entitlements" \
   --sign "Developer ID Application: Your Name (ABCDEFG123)" \
   "$APP_DIR"
 ```
@@ -36,10 +36,10 @@ codesign --force --deep --options runtime --timestamp \
 ```
 ditto -c -k --keepParent "$APP_DIR" "$APP_NAME.zip"
 xcrun notarytool submit "$APP_NAME.zip" \
-    --keychain-profile "MeetNotes-Notarize" \
+    --keychain-profile "LLM IDE-Notarize" \
     --wait
 ```
-Successful submission takes 1–15 minutes. If it fails, run `xcrun notarytool log <submission-id> --keychain-profile MeetNotes-Notarize` to see the rejection reason.
+Successful submission takes 1–15 minutes. If it fails, run `xcrun notarytool log <submission-id> --keychain-profile LLM IDE-Notarize` to see the rejection reason.
 
 ### 4. Staple
 ```

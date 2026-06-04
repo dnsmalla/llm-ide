@@ -19,12 +19,12 @@ npm run server      # node server.mjs
 
 For verbose logging:
 ```bash
-MEETNOTES_LOG_LEVEL=debug npm run server
+LLMIDE_LOG_LEVEL=debug npm run server
 ```
 
 For JSON logs:
 ```bash
-MEETNOTES_LOG_JSON=1 npm run server
+LLMIDE_LOG_JSON=1 npm run server
 ```
 
 ## Verification

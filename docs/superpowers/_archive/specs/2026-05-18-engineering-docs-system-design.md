@@ -9,7 +9,7 @@ date: 2026-05-18
 
 ## Context
 
-Meet Notes is heading toward productisation: multiple surfaces (Chrome extension, macOS app, planned dashboard), a growing engineering team, and four eventual audiences (end users, integrators, customers/admins, internal engineering). The current documentation is good content trapped in an unscalable shape:
+LLM IDE is heading toward productisation: multiple surfaces (Chrome extension, macOS app, planned dashboard), a growing engineering team, and four eventual audiences (end users, integrators, customers/admins, internal engineering). The current documentation is good content trapped in an unscalable shape:
 
 - The top-level `README.md` references files that didn't exist at the stated paths (recently fixed).
 - The same architecture diagram lives in three places.
@@ -65,7 +65,7 @@ This spec defines a structured documentation system that scales with the project
 
 ```
 docs/
-├── index.md                       Landing — what is Meet Notes, where to go
+├── index.md                       Landing — what is LLM IDE, where to go
 │
 ├── tutorials/                     Learning-oriented
 │   ├── 01-first-meeting.md
@@ -147,7 +147,7 @@ docs/
 **Repo additions:**
 
 ```
-meet-notes/
+llm-ide/
 ├── docs/                          (content — IA above)
 ├── mkdocs.yml                     site config
 ├── docs-requirements.txt          pinned Python deps

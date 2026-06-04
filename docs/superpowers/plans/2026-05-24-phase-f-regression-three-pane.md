@@ -18,8 +18,8 @@
 ## Task 1: `RegressionRunner` streams log lines + accepts a filtered URL list
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Services/RegressionRunner.swift`
-- Modify: `mac/Tests/MeetNotesMacTests/RegressionRunnerTests.swift`
+- Modify: `mac/Sources/LlmIdeMac/Services/RegressionRunner.swift`
+- Modify: `mac/Tests/LlmIdeMacTests/RegressionRunnerTests.swift`
 
 - [ ] `@Published private(set) var log: [LogLine] = []` with `struct LogLine { let id = UUID(); let at: Date; let text: String; let level: Level (info|warn|error) }`.
 - [ ] `run(at:)` accepts an optional `only: Set<URL>? = nil`. When non-nil, only bugs whose URL is in the set get re-asked.
@@ -34,7 +34,7 @@
 ## Task 2: Three-pane `RegressionView`
 
 **Files:**
-- Modify: `mac/Sources/MeetNotesMac/Views/Regression/RegressionView.swift`
+- Modify: `mac/Sources/LlmIdeMac/Views/Regression/RegressionView.swift`
 
 Split the file into four `View` types in the same file so it stays navigable:
 

@@ -12,7 +12,7 @@ The credential vault holds GitHub tokens, Slack webhook URLs, and other per-user
 
 ## Decision
 
-A per-user data key is derived: `HKDF-SHA256(masterKey, salt=userId, info='meetnotes-vault-v1', length=32)`. Each ciphertext is `version_byte || iv(12) || aes-256-gcm(plaintext) || tag(16)`. The master key is `MEETNOTES_VAULT_KEY` (env var; auto-generated and persisted in dev).
+A per-user data key is derived: `HKDF-SHA256(masterKey, salt=userId, info='llmide-vault-v1', length=32)`. Each ciphertext is `version_byte || iv(12) || aes-256-gcm(plaintext) || tag(16)`. The master key is `LLMIDE_VAULT_KEY` (env var; auto-generated and persisted in dev).
 
 ## Consequences
 

@@ -192,7 +192,7 @@ The "Code Graph" tab:
 
 ## Components & File Structure
 
-New files (`mac/Sources/MeetNotesMac/CodeNotes/`):
+New files (`mac/Sources/LlmIdeMac/CodeNotes/`):
 
 | File | Responsibility |
 |------|---------------|

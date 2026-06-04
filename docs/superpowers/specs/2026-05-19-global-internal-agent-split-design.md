@@ -86,7 +86,7 @@ extension/
 │
 └── agent-skills/                           — DELETED in the same MR
 
-mac/Sources/MeetNotesMac/
+mac/Sources/LlmIdeMac/
 └── Agent/                                  — NEW group (was scattered)
     ├── Models/
     │   └── AgentTypes.swift                — moved from Models/
@@ -161,9 +161,9 @@ Mac client receives {reply, pendingTool}, renders, confirms if write
 ### Prompt (`extension/llm_agent/global/prompt.md`)
 
 ```markdown
-You are the Code Assistant for Meet Notes. You answer the user
+You are the Code Assistant for LLM IDE. You answer the user
 directly using your general engineering knowledge, and delegate
-to the internal Meet Notes agent when the user's request touches
+to the internal LLM IDE agent when the user's request touches
 THIS specific app — its project, library, issues, meetings, or
 any other application state.
 
@@ -234,7 +234,7 @@ schema:
 
 # ask-internal
 
-Delegate to the Meet Notes internal agent — the only authority on
+Delegate to the LLM IDE internal agent — the only authority on
 this app's state.
 
 ## When to use
@@ -265,7 +265,7 @@ One delegation, one final reply, one safety buffer. Beyond 3, route.mjs returns 
 ### Prompt (`extension/llm_agent/internal/prompt.md`)
 
 ```markdown
-You are the Meet Notes internal agent. You answer questions and
+You are the LLM IDE internal agent. You answer questions and
 perform actions about THIS specific app's state — its GitLab
 project, library, issues, meetings, action items, decisions, and
 indexed code — on behalf of an upstream caller (the global
@@ -366,7 +366,7 @@ Server side (one task per item):
 
 Mac side:
 
-12. Create `mac/Sources/MeetNotesMac/Agent/{Models,Views}/` subgroups. Move `AgentTypes.swift`, `PendingActionCard.swift`, `CreateGitLabIssueSheet.swift`. Verify `swift build` is clean.
+12. Create `mac/Sources/LlmIdeMac/Agent/{Models,Views}/` subgroups. Move `AgentTypes.swift`, `PendingActionCard.swift`, `CreateGitLabIssueSheet.swift`. Verify `swift build` is clean.
 
 Tests:
 

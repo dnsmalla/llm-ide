@@ -14,32 +14,32 @@
 
 | File | Action |
 |---|---|
-| `Sources/MeetNotesMac/Models/NoteAction.swift` | **Create** — `NoteAction` struct + `NoteActionExtractor` |
-| `Sources/MeetNotesMac/Models/ProcessedActionsRegistry.swift` | **Create** — JSON-backed registry with status tracking |
-| `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift` | **Create** — hourly timer, run loop, CLI subprocess dispatch |
-| `Sources/MeetNotesMac/Views/Settings/AutoCodeSettingsSection.swift` | **Create** — toggle, status, Run Now button |
-| `Sources/MeetNotesMac/Models/Config.swift` | **Modify** — add `autoCodeUpdateEnabled`, `autoCodeUpdateLookbackCount` |
-| `Sources/MeetNotesMac/Models/AICliTool.swift` | **Modify** — add `cliExecutable: String` |
-| `Sources/MeetNotesMac/Views/SettingsView.swift` | **Modify** — add `AutoCodeSettingsSection()` |
-| `Sources/MeetNotesMac/MeetNotesMacApp.swift` | **Modify** — instantiate + inject `AutoCodeUpdateService` |
-| `Tests/MeetNotesMacTests/NoteActionExtractorTests.swift` | **Create** |
-| `Tests/MeetNotesMacTests/ProcessedActionsRegistryTests.swift` | **Create** |
+| `Sources/LlmIdeMac/Models/NoteAction.swift` | **Create** — `NoteAction` struct + `NoteActionExtractor` |
+| `Sources/LlmIdeMac/Models/ProcessedActionsRegistry.swift` | **Create** — JSON-backed registry with status tracking |
+| `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift` | **Create** — hourly timer, run loop, CLI subprocess dispatch |
+| `Sources/LlmIdeMac/Views/Settings/AutoCodeSettingsSection.swift` | **Create** — toggle, status, Run Now button |
+| `Sources/LlmIdeMac/Models/Config.swift` | **Modify** — add `autoCodeUpdateEnabled`, `autoCodeUpdateLookbackCount` |
+| `Sources/LlmIdeMac/Models/AICliTool.swift` | **Modify** — add `cliExecutable: String` |
+| `Sources/LlmIdeMac/Views/SettingsView.swift` | **Modify** — add `AutoCodeSettingsSection()` |
+| `Sources/LlmIdeMac/LlmIdeMacApp.swift` | **Modify** — instantiate + inject `AutoCodeUpdateService` |
+| `Tests/LlmIdeMacTests/NoteActionExtractorTests.swift` | **Create** |
+| `Tests/LlmIdeMacTests/ProcessedActionsRegistryTests.swift` | **Create** |
 
 ---
 
 ## Task 1: NoteAction model + NoteActionExtractor
 
 **Files:**
-- Create: `Sources/MeetNotesMac/Models/NoteAction.swift`
-- Create: `Tests/MeetNotesMacTests/NoteActionExtractorTests.swift`
+- Create: `Sources/LlmIdeMac/Models/NoteAction.swift`
+- Create: `Tests/LlmIdeMacTests/NoteActionExtractorTests.swift`
 
 - [ ] **Step 1.1: Write failing tests**
 
-Create `Tests/MeetNotesMacTests/NoteActionExtractorTests.swift`:
+Create `Tests/LlmIdeMacTests/NoteActionExtractorTests.swift`:
 
 ```swift
 import Testing
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 import Foundation
 
 final class NoteActionExtractorTests {
@@ -141,14 +141,14 @@ final class NoteActionExtractorTests {
 - [ ] **Step 1.2: Run tests — expect failure**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift test --filter NoteActionExtractorTests 2>&1 | tail -10
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift test --filter NoteActionExtractorTests 2>&1 | tail -10
 ```
 
 Expected: compile error — `NoteActionExtractor` not defined yet.
 
 - [ ] **Step 1.3: Create `NoteAction.swift`**
 
-Create `Sources/MeetNotesMac/Models/NoteAction.swift`:
+Create `Sources/LlmIdeMac/Models/NoteAction.swift`:
 
 ```swift
 import Foundation
@@ -213,7 +213,7 @@ enum NoteActionExtractor {
 - [ ] **Step 1.4: Run tests — expect pass**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift test --filter NoteActionExtractorTests 2>&1 | tail -5
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift test --filter NoteActionExtractorTests 2>&1 | tail -5
 ```
 
 Expected: `Test run with 5 tests passed`.
@@ -221,7 +221,7 @@ Expected: `Test run with 5 tests passed`.
 - [ ] **Step 1.5: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && git add Sources/MeetNotesMac/Models/NoteAction.swift Tests/MeetNotesMacTests/NoteActionExtractorTests.swift && git commit -m "feat: add NoteAction model and NoteActionExtractor"
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && git add Sources/LlmIdeMac/Models/NoteAction.swift Tests/LlmIdeMacTests/NoteActionExtractorTests.swift && git commit -m "feat: add NoteAction model and NoteActionExtractor"
 ```
 
 ---
@@ -229,16 +229,16 @@ cd /Users/dinesh.malla/Desktop/meet-notes/mac && git add Sources/MeetNotesMac/Mo
 ## Task 2: ProcessedActionsRegistry
 
 **Files:**
-- Create: `Sources/MeetNotesMac/Models/ProcessedActionsRegistry.swift`
-- Create: `Tests/MeetNotesMacTests/ProcessedActionsRegistryTests.swift`
+- Create: `Sources/LlmIdeMac/Models/ProcessedActionsRegistry.swift`
+- Create: `Tests/LlmIdeMacTests/ProcessedActionsRegistryTests.swift`
 
 - [ ] **Step 2.1: Write failing tests**
 
-Create `Tests/MeetNotesMacTests/ProcessedActionsRegistryTests.swift`:
+Create `Tests/LlmIdeMacTests/ProcessedActionsRegistryTests.swift`:
 
 ```swift
 import Testing
-@testable import MeetNotesMac
+@testable import LlmIdeMac
 import Foundation
 
 final class ProcessedActionsRegistryTests {
@@ -334,14 +334,14 @@ final class ProcessedActionsRegistryTests {
 - [ ] **Step 2.2: Run tests — expect failure**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift test --filter ProcessedActionsRegistryTests 2>&1 | tail -5
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift test --filter ProcessedActionsRegistryTests 2>&1 | tail -5
 ```
 
 Expected: compile error — `ProcessedActionsRegistry` not defined yet.
 
 - [ ] **Step 2.3: Create `ProcessedActionsRegistry.swift`**
 
-Create `Sources/MeetNotesMac/Models/ProcessedActionsRegistry.swift`:
+Create `Sources/LlmIdeMac/Models/ProcessedActionsRegistry.swift`:
 
 ```swift
 import Foundation
@@ -465,7 +465,7 @@ final class ProcessedActionsRegistry {
 - [ ] **Step 2.4: Run tests — expect pass**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift test --filter ProcessedActionsRegistryTests 2>&1 | tail -5
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift test --filter ProcessedActionsRegistryTests 2>&1 | tail -5
 ```
 
 Expected: `Test run with 8 tests passed`.
@@ -473,7 +473,7 @@ Expected: `Test run with 8 tests passed`.
 - [ ] **Step 2.5: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && git add Sources/MeetNotesMac/Models/ProcessedActionsRegistry.swift Tests/MeetNotesMacTests/ProcessedActionsRegistryTests.swift && git commit -m "feat: add ProcessedActionsRegistry with JSON persistence"
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && git add Sources/LlmIdeMac/Models/ProcessedActionsRegistry.swift Tests/LlmIdeMacTests/ProcessedActionsRegistryTests.swift && git commit -m "feat: add ProcessedActionsRegistry with JSON persistence"
 ```
 
 ---
@@ -481,12 +481,12 @@ cd /Users/dinesh.malla/Desktop/meet-notes/mac && git add Sources/MeetNotesMac/Mo
 ## Task 3: AppConfig + AICliTool additions
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Models/Config.swift`
-- Modify: `Sources/MeetNotesMac/Models/AICliTool.swift`
+- Modify: `Sources/LlmIdeMac/Models/Config.swift`
+- Modify: `Sources/LlmIdeMac/Models/AICliTool.swift`
 
 - [ ] **Step 3.1: Add `autoCodeUpdateEnabled` and `autoCodeUpdateLookbackCount` to AppConfig**
 
-In `Sources/MeetNotesMac/Models/Config.swift`, add after the `defaultModelId` property (around line 60):
+In `Sources/LlmIdeMac/Models/Config.swift`, add after the `defaultModelId` property (around line 60):
 
 ```swift
     /// When true, the hourly Auto Code Update loop is active.
@@ -509,7 +509,7 @@ In the `private init`, after the `self.defaultModelId = ...` line, add:
 
 - [ ] **Step 3.2: Add `cliExecutable` to AICliTool**
 
-In `Sources/MeetNotesMac/Models/AICliTool.swift`, add after the `defaultModelId` computed property:
+In `Sources/LlmIdeMac/Models/AICliTool.swift`, add after the `defaultModelId` computed property:
 
 ```swift
     /// The shell binary name used to invoke this CLI non-interactively.
@@ -528,7 +528,7 @@ In `Sources/MeetNotesMac/Models/AICliTool.swift`, add after the `defaultModelId`
 - [ ] **Step 3.3: Build to confirm no compile errors**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift build 2>&1 | grep -E "error:|Build complete"
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift build 2>&1 | grep -E "error:|Build complete"
 ```
 
 Expected: `Build complete!`
@@ -536,7 +536,7 @@ Expected: `Build complete!`
 - [ ] **Step 3.4: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && git add Sources/MeetNotesMac/Models/Config.swift Sources/MeetNotesMac/Models/AICliTool.swift && git commit -m "feat: add autoCodeUpdate config fields and AICliTool.cliExecutable"
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && git add Sources/LlmIdeMac/Models/Config.swift Sources/LlmIdeMac/Models/AICliTool.swift && git commit -m "feat: add autoCodeUpdate config fields and AICliTool.cliExecutable"
 ```
 
 ---
@@ -544,11 +544,11 @@ cd /Users/dinesh.malla/Desktop/meet-notes/mac && git add Sources/MeetNotesMac/Mo
 ## Task 4: AutoCodeUpdateService
 
 **Files:**
-- Create: `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift`
+- Create: `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift`
 
 - [ ] **Step 4.1: Create the service**
 
-Create `Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift`:
+Create `Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift`:
 
 ```swift
 import Foundation
@@ -578,7 +578,7 @@ final class AutoCodeUpdateService: ObservableObject {
     private let gitlab: GitLabClient
     private let registry: ProcessedActionsRegistry
     private var timer: Timer?
-    private let log = Logger(subsystem: "com.meetnotes.macapp", category: "AutoCodeUpdate")
+    private let log = Logger(subsystem: "com.llmide.macapp", category: "AutoCodeUpdate")
 
     // MARK: - Init
 
@@ -587,7 +587,7 @@ final class AutoCodeUpdateService: ObservableObject {
         self.gitlab = GitLabClient()
         let storeURL = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("MeetNotes/processed-actions.json")
+            .appendingPathComponent("LLM IDE/processed-actions.json")
         self.registry = ProcessedActionsRegistry(storeURL: storeURL)
     }
 
@@ -667,7 +667,7 @@ final class AutoCodeUpdateService: ObservableObject {
             do {
                 let payload = GitLabIssuePayload(
                     title: action.text,
-                    description: "From meeting: **\(action.meetingTitle)**\n\nAuto-generated by Meet Notes Auto Code Update."
+                    description: "From meeting: **\(action.meetingTitle)**\n\nAuto-generated by LLM IDE Auto Code Update."
                 )
                 let issue = try await gitlab.createIssue(projectId: projectId, payload: payload)
                 registry.register(action: action, issueIid: issue.iid)
@@ -717,7 +717,7 @@ final class AutoCodeUpdateService: ObservableObject {
     private func extractRecentActions() -> [NoteAction] {
         let notesFolderConfig = NotesFolderConfig()
         let folder = notesFolderConfig.currentFolder
-        let indexURL = folder.appendingPathComponent(".meetnotes/index.sqlite")
+        let indexURL = folder.appendingPathComponent(".llmide/index.sqlite")
         guard let index = try? MeetingIndex(url: indexURL) else { return [] }
         let rows = ((try? index.list()) ?? [])
             .sorted { $0.startedAt > $1.startedAt }
@@ -737,7 +737,7 @@ final class AutoCodeUpdateService: ObservableObject {
         """
 
         let logDir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Logs/MeetNotes")
+            .appendingPathComponent("Logs/LLM IDE")
         try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
         let logURL = logDir.appendingPathComponent("auto-code-\(iid).log")
         // FileHandle(forWritingTo:) requires the file to already exist
@@ -803,7 +803,7 @@ final class AutoCodeUpdateService: ObservableObject {
 - [ ] **Step 4.2: Build to confirm it compiles**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift build 2>&1 | grep -E "error:|Build complete"
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift build 2>&1 | grep -E "error:|Build complete"
 ```
 
 Expected: `Build complete!`
@@ -811,7 +811,7 @@ Expected: `Build complete!`
 - [ ] **Step 4.3: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && git add Sources/MeetNotesMac/Services/AutoCodeUpdateService.swift && git commit -m "feat: add AutoCodeUpdateService with hourly timer and CLI subprocess dispatch"
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && git add Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift && git commit -m "feat: add AutoCodeUpdateService with hourly timer and CLI subprocess dispatch"
 ```
 
 ---
@@ -819,11 +819,11 @@ cd /Users/dinesh.malla/Desktop/meet-notes/mac && git add Sources/MeetNotesMac/Se
 ## Task 5: AutoCodeSettingsSection UI
 
 **Files:**
-- Create: `Sources/MeetNotesMac/Views/Settings/AutoCodeSettingsSection.swift`
+- Create: `Sources/LlmIdeMac/Views/Settings/AutoCodeSettingsSection.swift`
 
 - [ ] **Step 5.1: Create the settings section**
 
-Create `Sources/MeetNotesMac/Views/Settings/AutoCodeSettingsSection.swift`:
+Create `Sources/LlmIdeMac/Views/Settings/AutoCodeSettingsSection.swift`:
 
 ```swift
 import SwiftUI
@@ -922,7 +922,7 @@ struct AutoCodeSettingsSection: View {
 - [ ] **Step 5.2: Build to confirm it compiles**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift build 2>&1 | grep -E "error:|Build complete"
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift build 2>&1 | grep -E "error:|Build complete"
 ```
 
 Expected: `Build complete!`
@@ -930,7 +930,7 @@ Expected: `Build complete!`
 - [ ] **Step 5.3: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && git add Sources/MeetNotesMac/Views/Settings/AutoCodeSettingsSection.swift && git commit -m "feat: add AutoCodeSettingsSection UI"
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && git add Sources/LlmIdeMac/Views/Settings/AutoCodeSettingsSection.swift && git commit -m "feat: add AutoCodeSettingsSection UI"
 ```
 
 ---
@@ -938,12 +938,12 @@ cd /Users/dinesh.malla/Desktop/meet-notes/mac && git add Sources/MeetNotesMac/Vi
 ## Task 6: Wire into App
 
 **Files:**
-- Modify: `Sources/MeetNotesMac/Views/SettingsView.swift`
-- Modify: `Sources/MeetNotesMac/MeetNotesMacApp.swift`
+- Modify: `Sources/LlmIdeMac/Views/SettingsView.swift`
+- Modify: `Sources/LlmIdeMac/LlmIdeMacApp.swift`
 
 - [ ] **Step 6.1: Add section to SettingsView**
 
-In `Sources/MeetNotesMac/Views/SettingsView.swift`, add `AutoCodeSettingsSection()` after `AgentSettingsSection(api: api)`:
+In `Sources/LlmIdeMac/Views/SettingsView.swift`, add `AutoCodeSettingsSection()` after `AgentSettingsSection(api: api)`:
 
 ```swift
                 AgentSettingsSection(api: api)
@@ -951,9 +951,9 @@ In `Sources/MeetNotesMac/Views/SettingsView.swift`, add `AutoCodeSettingsSection
                 GeneratePlanSettingsSection(api: api, prefsLanguage: prefsLanguage)
 ```
 
-- [ ] **Step 6.2: Add service to MeetNotesMacApp**
+- [ ] **Step 6.2: Add service to LlmIdeMacApp**
 
-In `Sources/MeetNotesMac/MeetNotesMacApp.swift`:
+In `Sources/LlmIdeMac/LlmIdeMacApp.swift`:
 
 **a)** Add the state object declaration after `@StateObject private var liveMirror: LiveSessionMirror`:
 
@@ -990,7 +990,7 @@ In `Sources/MeetNotesMac/MeetNotesMacApp.swift`:
 - [ ] **Step 6.3: Build**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift build 2>&1 | grep -E "error:|Build complete"
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift build 2>&1 | grep -E "error:|Build complete"
 ```
 
 Expected: `Build complete!`
@@ -998,7 +998,7 @@ Expected: `Build complete!`
 - [ ] **Step 6.4: Run all tests**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && swift test 2>&1 | tail -5
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && swift test 2>&1 | tail -5
 ```
 
 Expected: all tests pass.
@@ -1006,7 +1006,7 @@ Expected: all tests pass.
 - [ ] **Step 6.5: Commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && git add Sources/MeetNotesMac/Views/SettingsView.swift Sources/MeetNotesMac/MeetNotesMacApp.swift && git commit -m "feat: wire AutoCodeUpdateService into app and settings"
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && git add Sources/LlmIdeMac/Views/SettingsView.swift Sources/LlmIdeMac/LlmIdeMacApp.swift && git commit -m "feat: wire AutoCodeUpdateService into app and settings"
 ```
 
 ---
@@ -1016,7 +1016,7 @@ cd /Users/dinesh.malla/Desktop/meet-notes/mac && git add Sources/MeetNotesMac/Vi
 - [ ] **Step 7.1: Build the .app bundle**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && bash build_app.sh 2>&1 | grep -E "error:|✓|FAILED"
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && bash build_app.sh 2>&1 | grep -E "error:|✓|FAILED"
 ```
 
 Expected: `✓ Build Successful!`
@@ -1033,6 +1033,6 @@ Expected: `✓ Build Successful!`
 - [ ] **Step 7.3: Final commit**
 
 ```bash
-cd /Users/dinesh.malla/Desktop/meet-notes/mac && git add -A && git status
+cd /Users/dinesh.malla/Desktop/llm-ide/mac && git add -A && git status
 # Only commit if there are unexpected stray changes
 ```

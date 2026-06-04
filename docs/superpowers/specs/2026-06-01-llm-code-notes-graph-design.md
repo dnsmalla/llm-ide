@@ -6,7 +6,7 @@
 
 ## Summary
 
-Build a new in-app code-understanding system for the meet-notes macOS app
+Build a new in-app code-understanding system for the llm-ide macOS app
 that generates **InfiniteBrain-style atomic markdown notes** for project
 code and derives an accurate knowledge graph from them. The Mac app
 orchestrates the user's installed AI coding CLI (Claude Code, Gemini, etc.)
@@ -229,7 +229,7 @@ New code in a new `CodeNotes/` group. Existing `CGData`,
 and `AICliTool` are reused unchanged.
 
 ```
-mac/Sources/MeetNotesMac/CodeNotes/
+mac/Sources/LlmIdeMac/CodeNotes/
 ├── CodeNoteService.swift   — orchestrator: drives 4 phases, @Published
 │                             progress, async + cancellable
 ├── ScanPhase.swift         — builds scan prompt, parses scan.json

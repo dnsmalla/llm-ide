@@ -7,11 +7,11 @@
 
 ## Goal
 
-Add a Cursor-style integrated terminal panel to the Meet Notes Mac app: a resizable bottom panel with a real PTY-backed shell, multiple tabs, and a `Ctrl+\`` keyboard shortcut to toggle it.
+Add a Cursor-style integrated terminal panel to the LLM IDE Mac app: a resizable bottom panel with a real PTY-backed shell, multiple tabs, and a `Ctrl+\`` keyboard shortcut to toggle it.
 
 ## Architecture
 
-Four new Swift files in `mac/Sources/MeetNotesMac/Views/Terminal/`:
+Four new Swift files in `mac/Sources/LlmIdeMac/Views/Terminal/`:
 
 ### `TerminalSession.swift`
 `@Observable` class owning one PTY session.
@@ -60,7 +60,7 @@ SwiftUI outer panel container.
 
 ## SwiftTerm Dependency
 
-Add to `mac/Package.swift` (or `MeetNotesMac.xcodeproj`):
+Add to `mac/Package.swift` (or `LlmIdeMac.xcodeproj`):
 
 ```swift
 .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.2.0")

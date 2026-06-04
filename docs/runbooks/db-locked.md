@@ -105,5 +105,5 @@ sqlite3 "$DB" "PRAGMA integrity_check;" | head -20
 
 - Don't run `sqlite3 $DB` against a live server; copy via
   `POST /admin/backup` and inspect the backup file instead.
-- Set `MEETNOTES_DB_PATH` to a fast local SSD path. Network-mounted
+- Set `LLMIDE_DB_PATH` to a fast local SSD path. Network-mounted
   volumes (NFS, SMB) routinely produce `SQLITE_BUSY` under load.

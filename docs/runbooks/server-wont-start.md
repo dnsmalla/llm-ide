@@ -30,7 +30,7 @@ Map the message to a fix:
 | Last line | Cause | Section |
 |---|---|---|
 | `Error [ERR_MODULE_NOT_FOUND]: Cannot find module 'better-sqlite3'` | npm deps not installed | A |
-| `MEETNOTES_JWT_SECRET and MEETNOTES_VAULT_KEY must be set in production` | missing env vars | B |
+| `LLMIDE_JWT_SECRET and LLMIDE_VAULT_KEY must be set in production` | missing env vars | B |
 | `EADDRINUSE: ... 127.0.0.1:3456` | port already bound | C |
 | `Migration <file> failed: ...` | DB migration error | D |
 | `db_open_failed_at_boot` | DB file unreachable or corrupt | E |
@@ -50,15 +50,15 @@ cd $ROOT/extension && npm ci
 ### B. Missing env vars
 
 The server refuses to start in production without
-`MEETNOTES_JWT_SECRET` and `MEETNOTES_VAULT_KEY` (each ≥32 chars).
+`LLMIDE_JWT_SECRET` and `LLMIDE_VAULT_KEY` (each ≥32 chars).
 
 ```bash
 # Generate two strong secrets
 openssl rand -base64 48
 openssl rand -base64 48
 
-export MEETNOTES_JWT_SECRET="<first>"
-export MEETNOTES_VAULT_KEY="<second>"
+export LLMIDE_JWT_SECRET="<first>"
+export LLMIDE_VAULT_KEY="<second>"
 ```
 
 Store these in your supervisor's secret file (systemd
@@ -97,7 +97,7 @@ to the matching version.
 
 ```bash
 sqlite3 "$DB" "PRAGMA integrity_check;"
-# "ok" → DB is fine; the path is wrong. Check MEETNOTES_DB_PATH and
+# "ok" → DB is fine; the path is wrong. Check LLMIDE_DB_PATH and
 # file permissions.
 # Anything else → see restore-from-backup.md.
 ```
@@ -113,8 +113,8 @@ revert:
 ```bash
 git log --oneline | head -10
 # Find the last known-good commit; check it out into a working tree
-git worktree add /tmp/meetnotes-rollback <commit-sha>
-cd /tmp/meetnotes-rollback/extension && npm ci && node server.mjs
+git worktree add /tmp/llmide-rollback <commit-sha>
+cd /tmp/llmide-rollback/extension && npm ci && node server.mjs
 ```
 
 ## Postmortem hooks

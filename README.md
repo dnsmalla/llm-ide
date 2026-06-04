@@ -1,4 +1,4 @@
-# Meet Notes
+# LLM IDE
 
 > End-to-end AI meeting intelligence — from live transcription to dispatched tickets, draft PRs, and a self-learning knowledge base. Runs entirely on `127.0.0.1`.
 
@@ -14,8 +14,8 @@ A Chrome extension + native macOS app + local Node server that captures meetings
 ## Quick start
 
 ```bash
-git clone <repo-url> meet-notes
-cd meet-notes
+git clone <repo-url> llm-ide
+cd llm-ide
 ./setup.sh
 cd extension && npm run server
 ```
@@ -37,7 +37,7 @@ Common entry points:
 ## Project layout
 
 ```
-meet-notes/
+llm-ide/
 ├── docs/         engineering docs — see docs site
 ├── extension/    Chrome extension + local Node server
 ├── mac/          SwiftUI macOS app
