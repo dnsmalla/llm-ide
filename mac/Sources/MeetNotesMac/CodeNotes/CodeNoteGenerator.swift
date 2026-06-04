@@ -1,5 +1,6 @@
 import Foundation
 import GraphKit
+import os
 
 /// Generates deterministic, human-readable code notes from a ScanResult.
 /// No AI — notes are produced directly from structural facts (imports, types,
@@ -15,6 +16,8 @@ import GraphKit
 /// and `graph.json` are always rebuilt (whole-repo, cheap). Notes for files no
 /// longer present are pruned.
 public enum CodeNoteGenerator {
+
+    private static let log = Logger(subsystem: "com.meetnotes.macapp", category: "CodeNoteGenerator")
 
     /// Write all artifacts. Returns the number of per-file notes (re)written.
     @discardableResult
@@ -35,10 +38,16 @@ public enum CodeNoteGenerator {
             }
             let content = noteMarkdown(path: file.path, scan: scan, usedBy: usedBy)
             let noteURL = notesRoot.appendingPathComponent(file.path + ".md")
-            try? FileManager.default.createDirectory(
-                at: noteURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? content.write(to: noteURL, atomically: true, encoding: .utf8)
-            written += 1
+            do {
+                try FileManager.default.createDirectory(
+                    at: noteURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try content.write(to: noteURL, atomically: true, encoding: .utf8)
+                written += 1
+            } catch {
+                // Don't fail the whole run for one note — but surface it so a
+                // silent permissions/disk-full failure is observable.
+                log.error("note write failed path=\(file.path, privacy: .public) err=\(error.localizedDescription, privacy: .public)")
+            }
         }
 
         pruneOrphanNotes(notesRoot: notesRoot, validPaths: Set(codeFiles.map(\.path)))
@@ -160,7 +169,7 @@ public enum CodeNoteGenerator {
         out.append("## Files by Role")
         out.append("")
         for role in byRole.keys.sorted() {
-            let files = byRole[role]!.sorted { $0.path < $1.path }
+            let files = (byRole[role] ?? []).sorted { $0.path < $1.path }
             out.append("### \(role) (\(files.count) files)")
             out.append("")
             for f in files {

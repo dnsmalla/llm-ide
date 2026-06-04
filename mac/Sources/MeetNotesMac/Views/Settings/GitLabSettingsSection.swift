@@ -210,7 +210,7 @@ struct GitLabSettingsSection: View {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 13))
                         .foregroundStyle(t.accent3)
-                        .help("Resolved — project ID \(p.resolvedId!)")
+                        .help("Resolved — project ID \(p.resolvedId.map(String.init) ?? "—")")
                 } else if resolveError != nil {
                     Image(systemName: "exclamationmark.circle")
                         .font(.system(size: 13))

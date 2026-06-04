@@ -86,7 +86,13 @@ enum MarkdownRenderer {
       html = html.replace(/(<li>.*<\\/li>\\n?)+/g, '<ul>$&</ul>');
       html = html.replace(/^\\d+\\. (.+)$/gm, '<li>$1</li>');
       html = html.replace(/~~(.+?)~~/g, '<del>$1</del>');
-      html = html.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2">$1</a>');
+      html = html.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, function(_m, text, url) {
+        // Block dangerous URL schemes (javascript:, data:, vbscript:) and
+        // escape the href so a crafted link can't break out of the attribute.
+        var u = String(url).trim();
+        var safe = /^(https?:\\/\\/|mailto:|#|\\/|\\.|[^:]+$)/i.test(u) ? u : '#';
+        return '<a href="' + escAttr(safe) + '">' + text + '</a>';
+      });
       html = html.replace(/\\n\\n/g, '</p><p>');
       html = '<p>' + html + '</p>';
       html = html.replace(/\\n/g, '<br>');
@@ -94,6 +100,7 @@ enum MarkdownRenderer {
       return html;
     }
     function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function escAttr(s) { return escHtml(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
     document.getElementById('content').innerHTML = parseMarkdown(raw);
     </script>
     </body>

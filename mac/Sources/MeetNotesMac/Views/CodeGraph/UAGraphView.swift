@@ -1282,8 +1282,10 @@ struct UAGraphView: View {
         status = .running
         runTask = Task.detached(priority: .userInitiated) {
             let mem = MemoryGenerator.generate(files: urls)
+            if Task.isCancelled { return }
             let initial = CodeGraphLayout.compute(mem.graph,
                                                   canvasSize: CGSize(width: 1200, height: 800))
+            if Task.isCancelled { return }
             await MainActor.run {
                 self.selectedNode = nil
                 self.memoryChunks = mem.chunks
@@ -1303,10 +1305,22 @@ struct UAGraphView: View {
     /// raw circular rings. No-op for trivially small graphs. The `expectedMode`
     /// guard drops the result if the user switched tabs mid-settle.
     private func settlePhysics(from initial: CGData, expectedMode: Mode) {
-        guard initial.nodes.count > 2 else { return }
+        let count = initial.nodes.count
+        guard count > 2 else { return }
+        // Each tick is O(n log n) (Barnes-Hut). Scale iterations down for large
+        // graphs so a 1k-node settle doesn't run hundreds of heavy ticks — the
+        // early-exit on low velocity usually stops sooner anyway.
+        let maxIterations: Int
+        switch count {
+        case ..<300:   maxIterations = 200
+        case ..<700:   maxIterations = 140
+        case ..<1200:  maxIterations = 90
+        default:       maxIterations = 60
+        }
         Task.detached(priority: .userInitiated) {
             let sim = CGSimulation(data: initial)
-            sim.settle(maxIterations: 200)
+            sim.settle(maxIterations: maxIterations)
+            if Task.isCancelled { return }
             let settled = sim.appliedData(to: initial)
             await MainActor.run {
                 guard self.mode == expectedMode,

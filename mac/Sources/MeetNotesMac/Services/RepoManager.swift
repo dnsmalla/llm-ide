@@ -48,7 +48,9 @@ final class RepoManager {
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
 
         // Clone with a clean URL; auth travels in the process environment.
-        _ = try await git(["clone", "--depth", "1", remoteURL, destination.path],
+        // `--` terminates option parsing so a remoteURL beginning with `-`
+        // can't be interpreted as a git flag (arg-injection guard).
+        _ = try await git(["clone", "--depth", "1", "--", remoteURL, destination.path],
                           cwd: parent, token: token, backend: backend)
         log.info("repo_cloned path=\(destination.path, privacy: .public)")
 

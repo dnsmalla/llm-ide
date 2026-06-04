@@ -188,7 +188,7 @@ struct GitHubSettingsSection: View {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 13))
                         .foregroundStyle(t.accent3)
-                        .help("Resolved — repo ID \(r.resolvedId!)")
+                        .help("Resolved — repo ID \(r.resolvedId.map(String.init) ?? "—")")
                 } else if resolveError != nil {
                     Image(systemName: "exclamationmark.circle")
                         .font(.system(size: 13))

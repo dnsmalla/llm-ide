@@ -86,7 +86,9 @@ enum PluginGitInstaller {
         // Shallow clone — we don't need history for installing.
         var args = ["clone", "--depth", "1", "--single-branch"]
         if let ref, !ref.isEmpty { args += ["--branch", ref] }
-        args += [normalizedURL, clonedDir.path]
+        // `--` terminates option parsing — a URL starting with `-` can't be
+        // smuggled in as a git flag (arg-injection guard).
+        args += ["--", normalizedURL, clonedDir.path]
 
         let cloneRes = try await runProcess("/usr/bin/git", args: args, timeoutSec: 60)
         guard cloneRes.code == 0 else {
