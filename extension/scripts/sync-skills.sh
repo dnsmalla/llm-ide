@@ -27,5 +27,9 @@ else
 fi
 
 echo "central skills repo: $central"
+# Domain tools → internal/skills (full mirror).
 "$central/scripts/sync-agent-tools.sh" "$TARGET"
-echo "llm-ide agent-tool definitions refreshed from central (handlers unchanged)."
+# Always-on global tools → global/ (copies the .md defs; the app-local
+# system prompt.md and compose-prompt.mjs in that dir are preserved).
+"$central/scripts/sync-agent-globals.sh" "$PWD/llm_agent/global"
+echo "llm-ide agent-tool + agent-global definitions refreshed from central (handlers unchanged)."
