@@ -130,6 +130,10 @@ final class MeetNotesAPIClient {
     /// /chat, /generate-*, /agent/*). 240 s matches the server's
     /// Claude CLI ceiling plus headroom.
     private let llmSession: URLSession
+    /// Test seam: when set, every request is routed here instead of the real
+    /// URLSessions. Production code never sets this (defaults to nil).
+    typealias DataFetcher = @Sendable (URLRequest) async throws -> (Data, URLResponse)
+    private let fetchOverride: DataFetcher?
     private let log = Logger(subsystem: "com.meetnotes.macapp", category: "API")
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
@@ -141,8 +145,10 @@ final class MeetNotesAPIClient {
     /// matches existing rows and the server treats absence as such.
     private weak var projectStore: ProjectStore?
 
-    init(baseURL: String, sessionStore: SessionStore? = nil) {
+    init(baseURL: String, sessionStore: SessionStore? = nil,
+         fetchOverride: DataFetcher? = nil) {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        self.fetchOverride = fetchOverride
 
         let authCfg = URLSessionConfiguration.default
         authCfg.timeoutIntervalForRequest = 10
@@ -201,7 +207,7 @@ final class MeetNotesAPIClient {
         }
         req.httpBody = bytes
         let (data, response): (Data, URLResponse)
-        do { (data, response) = try await session(for: path).data(for: req) }
+        do { (data, response) = try await fetch(req, path: path) }
         catch { throw APIError.network(error) }
         guard let http = response as? HTTPURLResponse else {
             throw APIError.network(URLError(.badServerResponse))
@@ -261,7 +267,7 @@ final class MeetNotesAPIClient {
             let data: Data
             let response: URLResponse
             do {
-                (data, response) = try await session(for: path).data(for: req)
+                (data, response) = try await fetch(req, path: path)
             } catch {
                 if isGET, attempt < maxAttempts, Self.isTransient(error) {
                     try? await Task.sleep(nanoseconds: Self.backoffNanos(attempt))
@@ -377,5 +383,12 @@ final class MeetNotesAPIClient {
     /// through to the long-timeout LLM session.
     func session(for path: String) -> URLSession {
         path.hasPrefix("/auth/") ? authSession : llmSession
+    }
+
+    /// Single fetch entry point — honors the test override, else picks the
+    /// right URLSession for the path.
+    func fetch(_ req: URLRequest, path: String) async throws -> (Data, URLResponse) {
+        if let fetchOverride { return try await fetchOverride(req) }
+        return try await session(for: path).data(for: req)
     }
 }
