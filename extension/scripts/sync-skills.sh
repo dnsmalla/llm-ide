@@ -21,8 +21,17 @@ elif [ -d "$HOME/Desktop/skills/agent-tools" ]; then
     central="$HOME/Desktop/skills"
 else
     cache="$HOME/.cache/dnsmalla-skills"
-    if [ -d "$cache/.git" ]; then git -C "$cache" pull --ff-only
+    if [ -d "$cache/.git" ]; then git -C "$cache" fetch --tags --depth 1 origin
     else git clone --depth 1 https://github.com/dnsmalla/skills.git "$cache"; fi
+    # Optional pin for reproducible builds: SKILLS_REF=<tag|branch|sha>.
+    # Defaults to the latest main.
+    ref="${SKILLS_REF:-}"
+    if [ -n "$ref" ]; then
+        git -C "$cache" fetch --depth 1 origin "$ref" 2>/dev/null || true
+        git -C "$cache" checkout -q "$ref"
+    else
+        git -C "$cache" checkout -q main && git -C "$cache" pull --ff-only origin main
+    fi
     central="$cache"
 fi
 
