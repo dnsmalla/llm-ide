@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# Meet Notes Automated Deployment Script
+# LLM IDE Automated Deployment Script
 # This script handles resolving all dependencies, compiling native binaries,
 # and initializing the Node server seamlessly for the end-user.
 
 set -e
 
 echo "========================================="
-echo "   Meet Notes Extension Initialization   "
+echo "   LLM IDE Extension Initialization   "
 echo "========================================="
 echo ""
 
@@ -51,12 +51,12 @@ fi
 
 echo ""
 # 4. Verify Claude CLI (required — see docs/decisions/0001-claude-cli-not-api-key.md)
-# Meet Notes shells out to the `claude` CLI authenticated as the user.
+# LLM IDE shells out to the `claude` CLI authenticated as the user.
 # ANTHROPIC_API_KEY is NOT required and NOT used.
 if ! command -v claude &> /dev/null; then
     echo "❌ Error: the 'claude' CLI is not installed or not on PATH."
     echo ""
-    echo "Meet Notes uses the Claude CLI (authenticated via 'claude login') to talk to the model."
+    echo "LLM IDE uses the Claude CLI (authenticated via 'claude login') to talk to the model."
     echo "We do NOT use an Anthropic API key."
     echo ""
     echo "Install instructions: https://docs.claude.com/en/docs/claude-code/quickstart"
