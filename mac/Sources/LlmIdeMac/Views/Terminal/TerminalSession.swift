@@ -17,9 +17,12 @@ final class TerminalSession: NSObject {
     var workingDirectory: URL
     private(set) var termView: LocalProcessTerminalView?
     private(set) var spawnError: String?
-    /// Weak-unsafe copy used only in `deinit` (which is nonisolated).
-    /// Assigned once on the main actor when the PTY starts; read only after
-    /// all main-actor references are gone, so no concurrent mutation is possible.
+    /// Copy read only in `deinit` (which is nonisolated). Assigned once on the
+    /// main actor when the PTY starts; the deinit hands it back to the main actor
+    /// to terminate, so the PTY teardown stays main-actor-isolated. Not observed —
+    /// `@ObservationIgnored` keeps the macro from wrapping it so `nonisolated(unsafe)`
+    /// applies cleanly for the deinit read.
+    @ObservationIgnored
     private nonisolated(unsafe) var termViewForDeinit: LocalProcessTerminalView?
 
     enum SessionStatus { case running, dead }
@@ -84,8 +87,12 @@ final class TerminalSession: NSObject {
     deinit {
         // If the session is released while the shell is still running
         // (e.g., app quit without closing tabs), ensure the PTY is stopped
-        // so we don't leave orphaned processes behind.
-        termViewForDeinit?.terminate()
+        // so we don't leave orphaned processes behind. terminate() is
+        // main-actor-isolated, so hand the view (not self) to the main actor;
+        // capturing it keeps it alive until the task runs.
+        if let tv = termViewForDeinit {
+            Task { @MainActor in tv.terminate() }
+        }
     }
 
     // MARK: - Private helpers
