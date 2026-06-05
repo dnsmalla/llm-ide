@@ -6,7 +6,8 @@
 # llm_agent/internal/skills/ so the server loads the canonical set. The read-tool
 # HANDLERS (llm_agent/runtime/handlers/*.mjs) stay local and are resolved by name.
 #
-# Central repo located via: $SKILLS_REPO, then ~/Desktop/skills, then a cached clone.
+# Central repo located via: $SKILLS_REPO, then ~/skills (canonical; then
+# ~/Desktop/skills for back-compat), then a cached clone.
 #
 # Usage:  npm run sync:skills   (or: bash scripts/sync-skills.sh)
 set -euo pipefail
@@ -17,6 +18,8 @@ TARGET="$PWD/llm_agent/internal/skills"
 central=""
 if [ -n "${SKILLS_REPO:-}" ] && [ -d "$SKILLS_REPO/agent-tools" ]; then
     central="$SKILLS_REPO"
+elif [ -d "$HOME/skills/agent-tools" ]; then
+    central="$HOME/skills"
 elif [ -d "$HOME/Desktop/skills/agent-tools" ]; then
     central="$HOME/Desktop/skills"
 else
