@@ -152,7 +152,9 @@ final class RepoManager {
     /// `GIT_CONFIG_*` keys. These are applied like `-c http.extraHeader=…`
     /// but live ONLY in the child process environment — never in argv
     /// (invisible to `ps`) and never written to `.git/config`.
-    private static func authEnv(token: String, backend: Backend) -> [String: String] {
+    // Pure helper — builds a credential env dict from inputs, no main-actor state,
+    // so callable off the main actor (it runs during background process setup).
+    private nonisolated static func authEnv(token: String, backend: Backend) -> [String: String] {
         let header: String
         switch backend {
         case .gitlab:

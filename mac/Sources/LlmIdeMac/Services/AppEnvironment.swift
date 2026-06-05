@@ -56,7 +56,9 @@ final class AppEnvironment {
         }
     }
 
-    private static func countMarkdownFiles(in root: URL) -> Int {
+    // Pure filesystem helper — no main-actor state, so callable off the main actor
+    // (it runs on a background queue).
+    private nonisolated static func countMarkdownFiles(in root: URL) -> Int {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(at: root,
                                              includingPropertiesForKeys: nil,
