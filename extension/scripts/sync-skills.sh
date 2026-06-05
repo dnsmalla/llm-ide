@@ -44,4 +44,6 @@ echo "central skills repo: $central"
 # Always-on global tools → global/ (copies the .md defs; the app-local
 # system prompt.md and compose-prompt.mjs in that dir are preserved).
 "$central/scripts/sync-agent-globals.sh" "$PWD/llm_agent/global"
-echo "llm-ide agent-tool + agent-global definitions refreshed from central (handlers unchanged)."
+# Record the synced central commit for reproducible builds / drift checks.
+git -C "$central" rev-parse HEAD > "$PWD/.skills-lock" 2>/dev/null || true
+echo "llm-ide agent-tool + agent-global definitions refreshed from central @ $(cut -c1-9 "$PWD/.skills-lock" 2>/dev/null) (handlers unchanged)."
