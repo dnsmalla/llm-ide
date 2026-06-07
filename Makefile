@@ -17,6 +17,22 @@ build:
 clean:
 	rm -rf extension/dist extension/extension-v*.zip
 
+# --- mac app -----------------------------------------------------------------
+
+.PHONY: test-mac regression
+
+# Full Swift test suite for the desktop app (faults model, MemoryStore,
+# RegressionRunner, CSV export, on-disk migration, etc.).
+test-mac:
+	cd mac && swift build && swift test
+
+# Pre-upgrade / pre-production regression gate. Runs the Swift suite that
+# guards the fault + regression machinery. Pair with the in-app Regression
+# view (re-checks every `status: fixed` fault against the current agent and
+# refreshes `<repo>/.understand-anything/memory/faults.csv`) before shipping
+# an upgrade — the CSV's `status` column is the release checklist.
+regression: test-mac
+
 # --- docs --------------------------------------------------------------------
 
 VENV_DOCS := .venv-docs

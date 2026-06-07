@@ -1,13 +1,13 @@
 // Theme tint for the status dot / pill — same colors everywhere
-// the four BugStatus states are rendered (Memory tab, Regression
+// the four FaultStatus states are rendered (Memory tab, Regression
 // sidebar). One source of truth so the two views can't drift.
 //
-// Lives in a separate file from BugReport.swift so the model stays
+// Lives in a separate file from FaultReport.swift so the model stays
 // free of a SwiftUI import.
 
 import SwiftUI
 
-extension BugStatus {
+extension FaultStatus {
     func tint(_ t: Theme) -> Color {
         switch self {
         case .open:         return t.danger

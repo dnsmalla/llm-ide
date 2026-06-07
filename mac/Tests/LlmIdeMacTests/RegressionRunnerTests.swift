@@ -22,16 +22,16 @@ struct RegressionRunnerTests {
         return url
     }
 
-    private func writeBug(_ store: MemoryStore, at repo: URL,
-                         prompt: String, response: String, status: BugStatus) throws -> URL {
-        let bug = BugReport(
+    private func writeFault(_ store: MemoryStore, at repo: URL,
+                         prompt: String, response: String, status: FaultStatus) throws -> URL {
+        let fault = FaultReport(
             prompt: prompt, response: response, notes: "",
             severity: .major,
             reportedAt: Date(timeIntervalSince1970: 1_716_465_600),
             gitHead: nil, appVersion: "0.1", agent: "claude_code",
             status: status, tags: []
         )
-        return try store.writeBug(at: repo, bug)
+        return try store.writeFault(at: repo, fault)
     }
 
     @Test func unchangedWhenAnswerMatchesAfterWhitespaceNormalisation() {
@@ -50,16 +50,16 @@ struct RegressionRunnerTests {
         #expect(v == .regressed)
     }
 
-    @Test func runIteratesOnlyFixedBugsAndPopulatesResults() async throws {
+    @Test func runIteratesOnlyFixedFaultsAndPopulatesResults() async throws {
         let repo = try tmpRepo()
         defer { try? FileManager.default.removeItem(at: repo) }
         let store = MemoryStore()
 
-        _ = try writeBug(store, at: repo, prompt: "fixed-q",
+        _ = try writeFault(store, at: repo, prompt: "fixed-q",
                          response: "fixed-answer", status: .fixed)
-        _ = try writeBug(store, at: repo, prompt: "open-q",
+        _ = try writeFault(store, at: repo, prompt: "open-q",
                          response: "open-answer", status: .open)
-        _ = try writeBug(store, at: repo, prompt: "wontfix-q",
+        _ = try writeFault(store, at: repo, prompt: "wontfix-q",
                          response: "wf-answer", status: .wontFix)
 
         let prompter = FakePrompter()
@@ -73,11 +73,11 @@ struct RegressionRunnerTests {
         #expect(runner.results.first?.verdict == .unchanged)
     }
 
-    @Test func regressedBugIsAutoReopenedOnDisk() async throws {
+    @Test func regressedFaultIsAutoReopenedOnDisk() async throws {
         let repo = try tmpRepo()
         defer { try? FileManager.default.removeItem(at: repo) }
         let store = MemoryStore()
-        let url = try writeBug(store, at: repo, prompt: "q",
+        let url = try writeFault(store, at: repo, prompt: "q",
                                response: "original-answer", status: .fixed)
         let prompter = FakePrompter()
         prompter.replies["q"] = "drifted-answer"
@@ -88,15 +88,15 @@ struct RegressionRunnerTests {
         #expect(runner.results.first?.verdict == .regressed)
         #expect(runner.results.first?.autoReopened == true)
         // The frontmatter on disk is now `status: open`.
-        let reloaded = try store.loadBug(at: url)
+        let reloaded = try store.loadFault(at: url)
         #expect(reloaded.status == .open)
     }
 
-    @Test func unchangedBugStaysFixed() async throws {
+    @Test func unchangedFaultStaysFixed() async throws {
         let repo = try tmpRepo()
         defer { try? FileManager.default.removeItem(at: repo) }
         let store = MemoryStore()
-        let url = try writeBug(store, at: repo, prompt: "q",
+        let url = try writeFault(store, at: repo, prompt: "q",
                                response: "the-answer", status: .fixed)
         let prompter = FakePrompter()
         prompter.replies["q"] = "the-answer"
@@ -105,17 +105,17 @@ struct RegressionRunnerTests {
         await runner.run(at: repo)
 
         #expect(runner.results.first?.autoReopened == false)
-        let reloaded = try store.loadBug(at: url)
+        let reloaded = try store.loadFault(at: url)
         #expect(reloaded.status == .fixed)
     }
 
-    @Test func runWithOnlyFilterAsksOnlySelectedBugs() async throws {
+    @Test func runWithOnlyFilterAsksOnlySelectedFaults() async throws {
         let repo = try tmpRepo()
         defer { try? FileManager.default.removeItem(at: repo) }
         let store = MemoryStore()
-        let urlA = try writeBug(store, at: repo, prompt: "a",
+        let urlA = try writeFault(store, at: repo, prompt: "a",
                                 response: "a-answer", status: .fixed)
-        _ = try writeBug(store, at: repo, prompt: "b",
+        _ = try writeFault(store, at: repo, prompt: "b",
                          response: "b-answer", status: .fixed)
         let prompter = FakePrompter()
         prompter.replies["a"] = "a-answer"
@@ -132,7 +132,7 @@ struct RegressionRunnerTests {
         let repo = try tmpRepo()
         defer { try? FileManager.default.removeItem(at: repo) }
         let store = MemoryStore()
-        _ = try writeBug(store, at: repo, prompt: "x",
+        _ = try writeFault(store, at: repo, prompt: "x",
                          response: "answer", status: .fixed)
         let prompter = FakePrompter()
         prompter.replies["x"] = "answer"
@@ -149,7 +149,7 @@ struct RegressionRunnerTests {
         let repo = try tmpRepo()
         defer { try? FileManager.default.removeItem(at: repo) }
         let store = MemoryStore()
-        _ = try writeBug(store, at: repo, prompt: "drifted-q",
+        _ = try writeFault(store, at: repo, prompt: "drifted-q",
                          response: "old-answer", status: .fixed)
 
         final class ThrowingPrompter: RegressionPrompter {

@@ -319,7 +319,7 @@ struct PathsSettingsSection: View {
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
             }
-            Text("Lives inside each repo as bugs/, q&a/, repo.md, graph-notes.md. Default `.understand-anything/memory` matches the convention the Understand-Anything skill expects.")
+            Text("Lives inside each repo as faults/, q&a/, repo.md, graph-notes.md. Default `.understand-anything/memory` matches the convention the Understand-Anything skill expects.")
                 .font(Typography.caption)
                 .foregroundStyle(theme.current.textMuted)
         }

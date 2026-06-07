@@ -2,15 +2,15 @@
 //
 //   ┌────────────────┬────────────────────────────┬────────────────┐
 //   │ Sources        │ Detail                     │ Log            │
-//   │  • Bug reports │  Top: Run button + verdict │ Streamed lines │
-//   │    (checkbox)  │  Body: bug frontmatter +   │ from the most  │
+//   │  • Fault reports │  Top: Run button + verdict │ Streamed lines │
+//   │    (checkbox)  │  Body: fault frontmatter +   │ from the most  │
 //   │  • Repo files  │        notes, or code      │ recent run,    │
 //   │                │        preview             │ newest-bottom  │
 //   └────────────────┴────────────────────────────┴────────────────┘
 //
 // Selection in the left pane drives what the middle pane renders.
-// Checkboxes on bug rows drive what the Run button targets — empty
-// selection falls back to "all fixed bugs" (Phase D behaviour).
+// Checkboxes on fault rows drive what the Run button targets — empty
+// selection falls back to "all fixed faults" (Phase D behaviour).
 
 import SwiftUI
 
@@ -24,13 +24,13 @@ struct RegressionView: View {
 
     @State private var selected: SourceSelection?
     @State private var checked: Set<URL> = []
-    @State private var allBugs: [URL] = []
-    @State private var bugStatuses: [URL: BugStatus] = [:]
+    @State private var allFaults: [URL] = []
+    @State private var faultStatuses: [URL: FaultStatus] = [:]
 
-    /// What the middle pane is rendering. `.bug` for a bug report,
+    /// What the middle pane is rendering. `.fault` for a fault report,
     /// `.file` for a peeked repo file (read-only preview).
     enum SourceSelection: Equatable {
-        case bug(URL)
+        case fault(URL)
         case file(URL)
     }
 
@@ -44,8 +44,8 @@ struct RegressionView: View {
         HSplitView {
             RegressionSourcesPane(
                 repoRoot: activeRepoRoot,
-                bugs: allBugs,
-                bugStatuses: bugStatuses,
+                faults: allFaults,
+                faultStatuses: faultStatuses,
                 checked: $checked,
                 selected: $selected,
                 results: runner.results
@@ -82,20 +82,20 @@ struct RegressionView: View {
 
     private func refresh() async {
         guard let repo = activeRepoRoot else {
-            allBugs = []
-            bugStatuses = [:]
+            allFaults = []
+            faultStatuses = [:]
             return
         }
         let store = config.memoryStore
-        let urls = store.listBugs(at: repo)
-        var statuses: [URL: BugStatus] = [:]
+        let urls = store.listFaults(at: repo)
+        var statuses: [URL: FaultStatus] = [:]
         for u in urls {
-            if let bug = try? store.loadBug(at: u) {
-                statuses[u] = bug.status
+            if let fault = try? store.loadFault(at: u) {
+                statuses[u] = fault.status
             }
         }
-        allBugs = urls
-        bugStatuses = statuses
+        allFaults = urls
+        faultStatuses = statuses
         // Drop dangling checked URLs (files renamed / deleted).
         let live = Set(urls.map { $0.standardizedFileURL.path })
         checked = checked.filter { live.contains($0.standardizedFileURL.path) }
@@ -112,8 +112,8 @@ struct RegressionView: View {
 
 private struct RegressionSourcesPane: View {
     let repoRoot: URL?
-    let bugs: [URL]
-    let bugStatuses: [URL: BugStatus]
+    let faults: [URL]
+    let faultStatuses: [URL: FaultStatus]
     @Binding var checked: Set<URL>
     @Binding var selected: RegressionView.SourceSelection?
     let results: [RegressionRunner.Result]
@@ -128,20 +128,20 @@ private struct RegressionSourcesPane: View {
             header
             Divider().background(t.border)
             List {
-                // Bug-reports section — header mirrors Library tab's
+                // Fault-reports section — header mirrors Library tab's
                 // colored-icon + SectionLabel style.
                 Section {
-                    if bugs.isEmpty {
-                        Text("No bug reports yet")
+                    if faults.isEmpty {
+                        Text("No fault reports yet")
                             .font(Typography.fileMeta)
                             .foregroundStyle(.quaternary)
                             .listRowSeparator(.hidden)
                     } else {
-                        ForEach(bugs, id: \.self) { url in
-                            bugRow(url)
+                        ForEach(faults, id: \.self) { url in
+                            faultRow(url)
                         }
                     }
-                } header: { bugsSectionHeader }
+                } header: { faultsSectionHeader }
 
                 // CODE section — drives off LibraryItemStore so the
                 // contents match Library tab's CODE section exactly
@@ -186,26 +186,26 @@ private struct RegressionSourcesPane: View {
                 Spacer()
                 if let repo = repoRoot {
                     Button {
-                        let dir = repo.appendingPathComponent(".understand-anything/memory/bugs",
+                        let dir = repo.appendingPathComponent(".understand-anything/memory/faults",
                                                               isDirectory: true)
                         NSWorkspace.shared.activateFileViewerSelecting([dir])
                     } label: {
-                        Label("Bugs folder", systemImage: "folder")
+                        Label("Faults folder", systemImage: "folder")
                             .font(Typography.captionStrong)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .help("Reveal the bugs/ directory in Finder")
+                    .help("Reveal the faults/ directory in Finder")
                 }
             }
             if let repo = repoRoot {
-                Text(repo.appendingPathComponent(".understand-anything/memory/bugs").path)
+                Text(repo.appendingPathComponent(".understand-anything/memory/faults").path)
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(t.textMuted)
                     .lineLimit(1)
                     .truncationMode(.middle)
             } else {
-                Text("Pick an active repo in Settings to surface bug reports.")
+                Text("Pick an active repo in Settings to surface fault reports.")
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
             }
@@ -216,7 +216,7 @@ private struct RegressionSourcesPane: View {
 
     // MARK: - Section headers (match Library style)
 
-    private var bugsSectionHeader: some View {
+    private var faultsSectionHeader: some View {
         // Same shape as FileTreePanel.sectionHeader: small colored
         // icon + SectionLabel — gives the Regression sidebar visual
         // parity with Library's CODE / DATA / NOTES headers.
@@ -224,7 +224,7 @@ private struct RegressionSourcesPane: View {
             Image(systemName: "ant.fill")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(theme.current.danger)
-            SectionLabel("Bug reports (\(bugs.count))")
+            SectionLabel("Fault reports (\(faults.count))")
             Spacer(minLength: 0)
         }
     }
@@ -250,19 +250,19 @@ private struct RegressionSourcesPane: View {
         buildCategoryTrees(items: libraryStore.items(for: .code))
     }
 
-    // MARK: - Bug row
+    // MARK: - Fault row
 
     @ViewBuilder
-    private func bugRow(_ url: URL) -> some View {
+    private func faultRow(_ url: URL) -> some View {
         let t = theme.current
-        let status = bugStatuses[url] ?? .open
-        let verdict = results.first(where: { $0.bugURL.standardizedFileURL.path == url.standardizedFileURL.path })?.verdict
+        let status = faultStatuses[url] ?? .open
+        let verdict = results.first(where: { $0.faultURL.standardizedFileURL.path == url.standardizedFileURL.path })?.verdict
         let isSelected: Bool = {
-            if case .bug(let u) = selected, u == url { return true }
+            if case .fault(let u) = selected, u == url { return true }
             return false
         }()
         Button {
-            selected = .bug(url)
+            selected = .fault(url)
         } label: {
             HStack(spacing: 4) {
                 Toggle("", isOn: Binding(
@@ -275,7 +275,7 @@ private struct RegressionSourcesPane: View {
                 .disabled(status != .fixed)
                 .help(status == .fixed
                       ? "Include in the next regression run"
-                      : "Only bugs with status: fixed can be re-checked")
+                      : "Only faults with status: fixed can be re-checked")
                 Image(systemName: "ant")
                     .font(.system(size: 11))
                     .foregroundStyle(status.tint(t))
@@ -348,7 +348,7 @@ private struct RegressionDetailPane: View {
         let t = theme.current
         let label = running
             ? "Running…"
-            : (checkedCount == 0 ? "Run all fixed bugs" : "Run \(checkedCount) selected")
+            : (checkedCount == 0 ? "Run all fixed faults" : "Run \(checkedCount) selected")
         return HStack(spacing: Spacing.md) {
             Button(action: onRun) {
                 Label(label, systemImage: "play.fill")
@@ -358,8 +358,8 @@ private struct RegressionDetailPane: View {
             .controlSize(.small)
             .disabled(running || !hasRepo)
             Spacer()
-            if case .bug(let url) = selected,
-               let r = results.first(where: { $0.bugURL.standardizedFileURL.path == url.standardizedFileURL.path }) {
+            if case .fault(let url) = selected,
+               let r = results.first(where: { $0.faultURL.standardizedFileURL.path == url.standardizedFileURL.path }) {
                 verdictBadge(r)
             }
         }
@@ -370,40 +370,40 @@ private struct RegressionDetailPane: View {
     @ViewBuilder
     private var content: some View {
         switch selected {
-        case .bug(let url):  bugDetail(url)
+        case .fault(let url):  faultDetail(url)
         case .file(let url): fileDetail(url)
         case nil:            placeholder
         }
     }
 
     @ViewBuilder
-    private func bugDetail(_ url: URL) -> some View {
+    private func faultDetail(_ url: URL) -> some View {
         let t = theme.current
         let store = config.memoryStore
-        if let bug = try? store.loadBug(at: url) {
+        if let fault = try? store.loadFault(at: url) {
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.md) {
                     Text(url.lastPathComponent)
                         .font(Typography.title)
                         .foregroundStyle(t.text)
-                    fmGrid(bug)
+                    fmGrid(fault)
                     Divider().background(t.border)
                     sectionHeader("Prompt")
-                    Text(bug.prompt)
+                    Text(fault.prompt)
                         .font(Typography.body)
                         .foregroundStyle(t.text)
                         .textSelection(.enabled)
                     sectionHeader("Response (when fixed)")
-                    Text(bug.response)
+                    Text(fault.response)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(t.text)
                         .textSelection(.enabled)
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(RoundedRectangle(cornerRadius: 6).fill(t.surface))
-                    if !bug.notes.isEmpty {
+                    if !fault.notes.isEmpty {
                         sectionHeader("Notes")
-                        Text(bug.notes)
+                        Text(fault.notes)
                             .font(Typography.body)
                             .foregroundStyle(t.text)
                             .textSelection(.enabled)
@@ -418,16 +418,16 @@ private struct RegressionDetailPane: View {
     }
 
     @ViewBuilder
-    private func fmGrid(_ bug: BugReport) -> some View {
+    private func fmGrid(_ fault: FaultReport) -> some View {
         let t = theme.current
         let pairs: [(String, String)] = [
-            ("severity",   bug.severity.displayName),
-            ("status",     bug.status.displayName),
-            ("reported",   bug.reportedAt.iso8601String),
-            ("git",        bug.gitHead ?? "—"),
-            ("app",        bug.appVersion),
-            ("agent",      bug.agent),
-            ("tags",       bug.tags.isEmpty ? "—" : bug.tags.joined(separator: ", "))
+            ("severity",   fault.severity.displayName),
+            ("status",     fault.status.displayName),
+            ("reported",   fault.reportedAt.iso8601String),
+            ("git",        fault.gitHead ?? "—"),
+            ("app",        fault.appVersion),
+            ("agent",      fault.agent),
+            ("tags",       fault.tags.isEmpty ? "—" : fault.tags.joined(separator: ", "))
         ]
         LazyVGrid(columns: [
             GridItem(.fixed(80), alignment: .topLeading),
@@ -477,7 +477,7 @@ private struct RegressionDetailPane: View {
 
     @ViewBuilder
     private var placeholder: some View {
-        placeholder(text: "Select a bug report or repo file on the left.")
+        placeholder(text: "Select a fault report or repo file on the left.")
     }
 
     @ViewBuilder

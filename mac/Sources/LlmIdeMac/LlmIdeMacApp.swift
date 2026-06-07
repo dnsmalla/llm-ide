@@ -5,7 +5,7 @@ import os.log
 // by SwiftUI — they die into ~/Library/Logs/DiagnosticReports/ where
 // users never look. Wire them through Apple's unified logging so the
 // crash text appears in Console.app under the llmide subsystem,
-// which we can pull into a bug report.
+// which we can pull into a fault report.
 fileprivate let crashLog = Logger(subsystem: "com.llmide.macapp", category: "Crash")
 fileprivate func installCrashHandlers() {
     NSSetUncaughtExceptionHandler { exception in
@@ -304,10 +304,10 @@ struct MenuBarMenu: View {
     @EnvironmentObject var config: AppConfig
     let api: LlmIdeAPIClient
 
-    /// Open-bug count cached on appear + every 30s. Counting bugs is
+    /// Open-fault count cached on appear + every 30s. Counting faults is
     /// disk-bound (decode every frontmatter); recomputing on every
     /// menu render would flicker and stutter.
-    @State private var openBugCount: Int = 0
+    @State private var openFaultCount: Int = 0
     @State private var refreshTimer: Timer?
 
     var body: some View {
@@ -323,17 +323,17 @@ struct MenuBarMenu: View {
         // Status pill — only the rows that have non-zero signal.
         // Each row opens the relevant tab and brings the window
         // forward via .openSection.
-        if openBugCount > 0 || config.lastRegressionRunAt != nil {
+        if openFaultCount > 0 || config.lastRegressionRunAt != nil {
             Divider()
         }
-        if openBugCount > 0 {
+        if openFaultCount > 0 {
             Button {
                 NotificationCenter.default.post(
                     name: .openSection,
                     object: ShellState.Section.codeGraph.rawValue
                 )
             } label: {
-                Text("🐜 \(openBugCount) open bug report\(openBugCount == 1 ? "" : "s")")
+                Text("🐜 \(openFaultCount) open fault report\(openFaultCount == 1 ? "" : "s")")
             }
         }
         if let last = config.lastRegressionRunAt {
@@ -369,7 +369,7 @@ struct MenuBarMenu: View {
         // sits open, hence the timer.
         EmptyView()
             .onAppear {
-                refreshOpenBugCount()
+                refreshOpenFaultCount()
                 if refreshTimer == nil {
                     // Timer.scheduledTimer retains its target via the run
                     // loop, so we MUST invalidate on disappear. Without
@@ -377,7 +377,7 @@ struct MenuBarMenu: View {
                     // the entire app process, performing disk I/O every
                     // 30s for the lifetime of the app.
                     refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
-                        Task { @MainActor in refreshOpenBugCount() }
+                        Task { @MainActor in refreshOpenFaultCount() }
                     }
                 }
             }
@@ -387,14 +387,14 @@ struct MenuBarMenu: View {
             }
     }
 
-    private func refreshOpenBugCount() {
+    private func refreshOpenFaultCount() {
         guard let repo = config.activeRepoLocalURL else {
-            openBugCount = 0
+            openFaultCount = 0
             return
         }
         let store = config.memoryStore
-        let bugs = store.listBugs(at: repo)
-        openBugCount = bugs.compactMap { try? store.loadBug(at: $0) }
+        let bugs = store.listFaults(at: repo)
+        openFaultCount = bugs.compactMap { try? store.loadFault(at: $0) }
             .filter { $0.status == .open }
             .count
     }

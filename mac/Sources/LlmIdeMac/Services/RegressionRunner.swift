@@ -1,7 +1,7 @@
-// Phase D driver. Iterates all `status: fixed` BugReports under
-// <repo>/.understand-anything/memory/bugs/, re-asks the agent each
+// Phase D driver. Iterates all `status: fixed` FaultReports under
+// <repo>/.understand-anything/memory/faults/, re-asks the agent each
 // question, and compares the new answer to the one saved on the
-// bug. Verdicts publish via @Published so the view can stream them
+// fault. Verdicts publish via @Published so the view can stream them
 // as work progresses.
 //
 // The agent invocation is abstracted via the RegressionPrompter
@@ -28,12 +28,12 @@ final class RegressionRunner: ObservableObject {
 
     struct Result: Identifiable, Equatable {
         let id = UUID()
-        let bugURL: URL
+        let faultURL: URL
         let prompt: String
         let originalAnswer: String
         var currentAnswer: String?
         var verdict: Verdict
-        /// True when this run flipped the bug's frontmatter from
+        /// True when this run flipped the fault's frontmatter from
         /// `status: fixed` back to `status: open` because the verdict
         /// came back `.regressed`. The badge in RegressionView uses
         /// this so the user can tell the auto-fix-up happened.
@@ -43,6 +43,10 @@ final class RegressionRunner: ObservableObject {
     @Published private(set) var results: [Result] = []
     @Published private(set) var running: Bool = false
     @Published private(set) var log: [LogLine] = []
+    /// URL of the faults registry CSV exported at the end of the last
+    /// run. nil when no run has completed or the export failed (the
+    /// export is best-effort and never blocks the run).
+    @Published private(set) var lastCSVURL: URL?
 
     /// One line of streaming run output, surfaced in the Regression
     /// view's Log pane. Newest entries appended.
@@ -73,13 +77,13 @@ final class RegressionRunner: ObservableObject {
     }
 
     /// Execute the run. Safe to call repeatedly — resets state each
-    /// call. Bails out cleanly when there are no fixed bugs (or none
+    /// call. Bails out cleanly when there are no fixed faults (or none
     /// in the `only` filter).
     ///
     /// - Parameters:
-    ///   - repoRoot: repo to scan for `bugs/*.md` files.
-    ///   - only: when non-nil, restrict the run to bugs whose URL
-    ///     appears in the set. When nil, every `status: fixed` bug
+    ///   - repoRoot: repo to scan for `faults/*.md` files.
+    ///   - only: when non-nil, restrict the run to faults whose URL
+    ///     appears in the set. When nil, every `status: fixed` fault
     ///     is re-asked.
     func run(at repoRoot: URL, only: Set<URL>? = nil) async {
         running = true
@@ -90,25 +94,25 @@ final class RegressionRunner: ObservableObject {
             config?.lastRegressionRegressedCount = regressed
             config?.lastRegressionRunAt = Date()
         }
-        let urls = store.listBugs(at: repoRoot)
+        let urls = store.listFaults(at: repoRoot)
         // /tmp/ vs /private/tmp/ and other symlink prefixes mean URL
         // identity isn't reliable. Match by canonical filesystem path.
         let onlyPaths: Set<String>? = only.map { Set($0.map { $0.standardizedFileURL.path }) }
-        let fixed: [(URL, BugReport)] = urls.compactMap { url in
-            guard let bug = try? store.loadBug(at: url) else { return nil }
-            guard bug.status == .fixed else { return nil }
+        let fixed: [(URL, FaultReport)] = urls.compactMap { url in
+            guard let fault = try? store.loadFault(at: url) else { return nil }
+            guard fault.status == .fixed else { return nil }
             if let onlyPaths,
                !onlyPaths.contains(url.standardizedFileURL.path) { return nil }
-            return (url, bug)
+            return (url, fault)
         }
         results = fixed.map {
-            Result(bugURL: $0.0,
+            Result(faultURL: $0.0,
                    prompt: $0.1.prompt,
                    originalAnswer: $0.1.response,
                    currentAnswer: nil,
                    verdict: .pending)
         }
-        let selectedNote = only == nil ? "all fixed bugs" : "\(fixed.count) selected"
+        let selectedNote = only == nil ? "all fixed faults" : "\(fixed.count) selected"
         appendLog(.info, "Run started · \(fixed.count) to check (\(selectedNote))")
         for (idx, pair) in fixed.enumerated() {
             let preview = String(pair.1.prompt.prefix(60))
@@ -121,7 +125,7 @@ final class RegressionRunner: ObservableObject {
                 switch v {
                 case .unchanged: appendLog(.info, "  → unchanged")
                 case .regressed:
-                    if (try? store.updateBugStatus(at: pair.0, to: .open)) != nil {
+                    if (try? store.updateFaultStatus(at: pair.0, to: .open)) != nil {
                         results[idx].autoReopened = true
                         appendLog(.warn, "  → REGRESSED · auto-reopened")
                     } else {
@@ -136,6 +140,12 @@ final class RegressionRunner: ObservableObject {
         }
         let summary = "Run complete · regressed: \(results.filter { $0.verdict == .regressed }.count) · unchanged: \(results.filter { $0.verdict == .unchanged }.count) · failed: \(results.filter { if case .failed = $0.verdict { return true }; return false }.count) · elapsed: \(String(format: "%.1fs", Date().timeIntervalSince(startedAt)))"
         appendLog(.info, summary)
+
+        // Refresh the faults registry CSV so it always reflects the
+        // post-run state. Regressed faults were auto-reopened above, so
+        // their status column flips to `open` here. Best-effort — a
+        // failed export must not fail the run.
+        lastCSVURL = try? store.exportFaultsCSV(at: repoRoot)
     }
 
     private func appendLog(_ level: LogLine.Level, _ text: String) {

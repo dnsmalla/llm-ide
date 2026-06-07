@@ -2,14 +2,14 @@
 // assistant turn in CodeAssistantPanel. Pre-fills the prompt and
 // response from the chat history; user adds notes + severity + tags
 // and submits, which writes a markdown file under
-// <repo>/.understand-anything/memory/bugs/.
+// <repo>/.understand-anything/memory/faults/.
 //
-// The sheet is purely a UI concern. The data model (BugReport) and
-// the persistence path (MemoryStore.writeBug) live in CodeGraph/.
+// The sheet is purely a UI concern. The data model (FaultReport) and
+// the persistence path (MemoryStore.writeFault) live in CodeGraph/.
 
 import SwiftUI
 
-struct ReportBugSheet: View {
+struct ReportFaultSheet: View {
     /// Prefilled prompt the agent was asked. Read-only — if the user
     /// wants to amend context, they put it in the notes field.
     let prompt: String
@@ -17,7 +17,7 @@ struct ReportBugSheet: View {
     /// strip irrelevant chrome before saving.
     @State var response: String
     /// Active repo root. The sheet writes into
-    /// `<repoRoot>/.understand-anything/memory/bugs/`. Required — caller must
+    /// `<repoRoot>/.understand-anything/memory/faults/`. Required — caller must
     /// have confirmed a repo is selected before presenting the sheet.
     let repoRoot: URL
     /// `AICliTool.rawValue` of the agent that produced the response.
@@ -27,10 +27,10 @@ struct ReportBugSheet: View {
     var onDismiss: () -> Void
     /// Optional: when supplied, the sheet shows a "Also file as issue"
     /// toggle. After the local markdown save succeeds, if the toggle is
-    /// on we call this closure with the saved BugReport. Returning the
+    /// on we call this closure with the saved FaultReport. Returning the
     /// new issue's web URL lets us surface a clickable confirmation.
     /// A nil return means the closure decided not to file (no-op).
-    var onFileIssue: ((BugReport) async throws -> URL?)?
+    var onFileIssue: ((FaultReport) async throws -> URL?)?
     /// Display name of the issue tracker (e.g. "meet-notes (GitLab)").
     /// Used as the toggle's label. Required when `onFileIssue` is set.
     var fileIssueTargetLabel: String = ""
@@ -38,7 +38,7 @@ struct ReportBugSheet: View {
     @EnvironmentObject var theme: ThemeStore
 
     @State private var notes: String = ""
-    @State private var severity: BugSeverity = .major
+    @State private var severity: FaultSeverity = .major
     @State private var tagsField: String = ""
     @State private var submitting = false
     @State private var submitError: String?
@@ -52,10 +52,10 @@ struct ReportBugSheet: View {
         let t = theme.current
         VStack(alignment: .leading, spacing: Spacing.md) {
             HStack {
-                Text("Report a bug").font(Typography.title).foregroundStyle(t.text)
+                Text("Report a fault").font(Typography.title).foregroundStyle(t.text)
                 Spacer()
                 Picker("", selection: $severity) {
-                    ForEach(BugSeverity.allCases) { s in
+                    ForEach(FaultSeverity.allCases) { s in
                         Text(s.displayName).tag(s)
                     }
                 }
@@ -152,7 +152,7 @@ struct ReportBugSheet: View {
             .split(whereSeparator: { $0.isWhitespace || $0 == "," })
             .map { String($0).trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        let bug = BugReport(
+        let fault = FaultReport(
             prompt: prompt,
             response: response,
             notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -165,13 +165,13 @@ struct ReportBugSheet: View {
             tags: tags
         )
         do {
-            let url = try store.writeBug(at: repoRoot, bug)
+            let url = try store.writeFault(at: repoRoot, fault)
             // If the user opted in, also create an upstream issue.
             // Local save is the source of truth: any upstream failure is
             // reported but does NOT undo the local file.
             if fileAsIssue, let filer = onFileIssue {
                 do {
-                    if let issueURL = try await filer(bug) {
+                    if let issueURL = try await filer(fault) {
                         filedIssueURL = issueURL
                     }
                 } catch {
@@ -181,7 +181,7 @@ struct ReportBugSheet: View {
             }
             onSubmitted(url)
         } catch {
-            submitError = "Couldn't save bug report: \(error.localizedDescription)"
+            submitError = "Couldn't save fault report: \(error.localizedDescription)"
         }
     }
 }

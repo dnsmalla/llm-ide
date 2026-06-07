@@ -60,30 +60,49 @@ struct MemoryStoreTests {
         #expect(contents.contains("# Project facts"))
     }
 
-    @Test func listBugsAndQAReturnEmptyWhenAbsent() throws {
+    @Test func listFaultsAndQAReturnEmptyWhenAbsent() throws {
         let repo = try tmpRepoDir()
         defer { try? FileManager.default.removeItem(at: repo) }
         let store = MemoryStore()
-        #expect(store.listBugs(at: repo).isEmpty)
+        #expect(store.listFaults(at: repo).isEmpty)
         #expect(store.listQA(at: repo).isEmpty)
     }
 
-    @Test func listBugsAndQAReturnMarkdownFilesSorted() throws {
+    @Test func listFaultsAndQAReturnMarkdownFilesSorted() throws {
         let repo = try tmpRepoDir()
         defer { try? FileManager.default.removeItem(at: repo) }
-        let bugs = repo.appendingPathComponent(".understand-anything/memory/bugs", isDirectory: true)
+        let faults = repo.appendingPathComponent(".understand-anything/memory/faults", isDirectory: true)
         let qa   = repo.appendingPathComponent(".understand-anything/memory/q&a", isDirectory: true)
-        try FileManager.default.createDirectory(at: bugs, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: faults, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: qa,   withIntermediateDirectories: true)
-        try "b".write(to: bugs.appendingPathComponent("2026-05-23-flow.md"), atomically: true, encoding: .utf8)
-        try "b".write(to: bugs.appendingPathComponent("2026-05-22-auth.md"), atomically: true, encoding: .utf8)
+        try "b".write(to: faults.appendingPathComponent("2026-05-23-flow.md"), atomically: true, encoding: .utf8)
+        try "b".write(to: faults.appendingPathComponent("2026-05-22-auth.md"), atomically: true, encoding: .utf8)
         try "q".write(to: qa.appendingPathComponent("deploy.md"), atomically: true, encoding: .utf8)
-        try "ignored".write(to: bugs.appendingPathComponent("not-markdown.txt"), atomically: true, encoding: .utf8)
+        try "ignored".write(to: faults.appendingPathComponent("not-markdown.txt"), atomically: true, encoding: .utf8)
 
         let store = MemoryStore()
-        let listedBugs = store.listBugs(at: repo).map { $0.lastPathComponent }
+        let listedFaults = store.listFaults(at: repo).map { $0.lastPathComponent }
         let listedQA = store.listQA(at: repo).map { $0.lastPathComponent }
-        #expect(listedBugs == ["2026-05-22-auth.md", "2026-05-23-flow.md"])   // sorted ascending by file name
+        #expect(listedFaults == ["2026-05-22-auth.md", "2026-05-23-flow.md"])   // sorted ascending by file name
         #expect(listedQA == ["deploy.md"])
+    }
+
+    @Test func seedMigratesLegacyBugsDirToFaults() throws {
+        let repo = try tmpRepoDir()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        // Seed a legacy `bugs/` dir with a fault file but no `faults/` dir.
+        let legacy = repo.appendingPathComponent(".understand-anything/memory/bugs", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        try "x".write(to: legacy.appendingPathComponent("2026-05-22-auth.md"),
+                      atomically: true, encoding: .utf8)
+
+        let store = MemoryStore()
+        try store.seedIfMissing(in: repo)
+
+        let faults = repo.appendingPathComponent(".understand-anything/memory/faults")
+        #expect(FileManager.default.fileExists(atPath: faults.path))
+        #expect(!FileManager.default.fileExists(atPath: legacy.path))
+        let listed = store.listFaults(at: repo).map { $0.lastPathComponent }
+        #expect(listed == ["2026-05-22-auth.md"])
     }
 }

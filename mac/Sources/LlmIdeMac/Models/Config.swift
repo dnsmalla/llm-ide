@@ -152,7 +152,7 @@ final class AppConfig: ObservableObject {
             }
         }
     }
-    /// Number of bugs the last regression run flipped from fixed
+    /// Number of faults the last regression run flipped from fixed
     /// to open. 0 when nothing drifted. The pill suppresses the
     /// row when this is 0 and we've never run.
     @Published var lastRegressionRegressedCount: Int {
@@ -181,7 +181,7 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(infiniteBrainSubdir, forKey: "infiniteBrainSubdir") }
     }
     /// Per-repo subdir inside the active repo where memory artifacts
-    /// live (bugs/, q&a/, repo.md, graph-notes.md). Unlike the
+    /// live (faults/, q&a/, repo.md, graph-notes.md). Unlike the
     /// global subfolders above, this is relative to whichever repo
     /// is selected — it doesn't live under dataRoot.
     @Published var memorySubdir: String {
@@ -224,9 +224,9 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(autoCodeRunReviewConflicts, forKey: "autoCodeRunReviewConflicts") }
     }
     /// Whether the Auto Code Update run also fires a regression sweep
-    /// against `<repo>/.understand-anything/memory/bugs/` (re-asks every
-    /// `status: fixed` bug, auto-reopens regressions). Off by default
-    /// — the sweep can be slow on a big bug archive and uses LLM
+    /// against `<repo>/.understand-anything/memory/faults/` (re-asks every
+    /// `status: fixed` fault, auto-reopens regressions). Off by default
+    /// — the sweep can be slow on a big fault archive and uses LLM
     /// turns, so users opt in.
     @Published var autoCodeRunRegression: Bool {
         didSet { defaults.set(autoCodeRunRegression, forKey: "autoCodeRunRegression") }

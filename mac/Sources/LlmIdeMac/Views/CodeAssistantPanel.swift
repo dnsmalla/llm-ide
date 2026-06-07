@@ -46,7 +46,7 @@ struct CodeAssistantPanel: View {
     @State private var showingCommentSheet: Bool = false
     @State private var showingReviewCodeSheet: Bool = false
     @State private var showingUpdateFileSheet: Bool = false
-    @State private var reportingBug: BugReportContext?
+    @State private var reportingFault: FaultReportContext?
     @StateObject private var session = CodeAssistantSession()
     /// Captured at the moment the banner appears so Save uses the
     /// prompt+answer that triggered the threshold, not whatever the
@@ -55,10 +55,10 @@ struct CodeAssistantPanel: View {
     @State private var savingQA = false
     @State private var qaSaveError: String?
 
-    /// Context passed to ReportBugSheet — captured at the moment the
+    /// Context passed to ReportFaultSheet — captured at the moment the
     /// user clicks "Report this" so the sheet sees the prompt + answer
     /// that were on screen, not a later edit.
-    struct BugReportContext: Identifiable {
+    struct FaultReportContext: Identifiable {
         let id = UUID()
         let prompt: String
         let response: String
@@ -325,18 +325,18 @@ struct CodeAssistantPanel: View {
                 .padding(20)
             }
         }
-        .sheet(item: $reportingBug) { ctx in
+        .sheet(item: $reportingFault) { ctx in
             if let repoRoot = activeRepoRoot {
                 let target = resolveIssueTarget()
-                ReportBugSheet(
+                ReportFaultSheet(
                     prompt: ctx.prompt,
                     response: ctx.response,
                     repoRoot: repoRoot,
                     agent: config.activeCLI,
-                    onSubmitted: { _ in reportingBug = nil },
-                    onDismiss: { reportingBug = nil },
+                    onSubmitted: { _ in reportingFault = nil },
+                    onDismiss: { reportingFault = nil },
                     onFileIssue: target.map { tgt in
-                        { bug in try await fileBugAsIssue(bug, target: tgt) }
+                        { fault in try await fileFaultAsIssue(fault, target: tgt) }
                     },
                     fileIssueTargetLabel: target?.label ?? ""
                 )
@@ -346,10 +346,10 @@ struct CodeAssistantPanel: View {
         }
     }
 
-    // MARK: - Bug → Issue routing
+    // MARK: - Fault → Issue routing
 
     /// Resolves the currently-active issue tracker target — used by the
-    /// "Also file as issue" toggle in ReportBugSheet. Precedence matches
+    /// "Also file as issue" toggle in ReportFaultSheet. Precedence matches
     /// `config.activeRepoLocalURL`: GitLab project first, then GitHub.
     /// Returns nil when nothing is configured or the active project is
     /// missing the bits we need (token, resolved ID).
@@ -372,33 +372,35 @@ struct CodeAssistantPanel: View {
         return nil
     }
 
-    /// Build a RepoIssuePayload from the local BugReport and POST it via
+    /// Build a RepoIssuePayload from the local FaultReport and POST it via
     /// the matching RepoBackend. Returns the new issue's web URL on
     /// success.
-    private func fileBugAsIssue(_ bug: BugReport, target: IssueTarget) async throws -> URL? {
-        let title = bug.notes
+    private func fileFaultAsIssue(_ fault: FaultReport, target: IssueTarget) async throws -> URL? {
+        let title = fault.notes
             .split(whereSeparator: { $0.isNewline })
             .first.map(String.init)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            ?? "Bug report"
+            ?? "Fault report"
         let body = """
-        **Severity:** \(bug.severity.displayName)
-        **Agent:** \(bug.agent)
-        **App version:** \(bug.appVersion)
-        \(bug.gitHead.map { "**Git HEAD:** `\($0)`" } ?? "")
+        **Severity:** \(fault.severity.displayName)
+        **Agent:** \(fault.agent)
+        **App version:** \(fault.appVersion)
+        \(fault.gitHead.map { "**Git HEAD:** `\($0)`" } ?? "")
 
         ### Notes
-        \(bug.notes)
+        \(fault.notes)
 
         ### Prompt
         ```
-        \(bug.prompt.prefix(4000))
+        \(fault.prompt.prefix(4000))
         ```
 
         ### Response
-        \(bug.response.prefix(8000))
+        \(fault.response.prefix(8000))
         """
-        let labels = bug.tags + ["bug", "meet-notes"]
+        // "bug" stays as the conventional issue-tracker label so existing
+        // tracker filters/automation keep matching.
+        let labels = fault.tags + ["bug", "meet-notes"]
         let payload = RepoIssuePayload(
             title: String(title.prefix(140)),
             body: body,
@@ -679,7 +681,7 @@ struct CodeAssistantPanel: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if !isUser, activeRepoRoot != nil {
                     Button {
-                        reportingBug = BugReportContext(
+                        reportingFault = FaultReportContext(
                             prompt: prevUserPrompt(before: turn) ?? "",
                             response: turn.content
                         )
@@ -689,7 +691,7 @@ struct CodeAssistantPanel: View {
                             .foregroundStyle(theme.current.textMuted)
                     }
                     .buttonStyle(.plain)
-                    .help("Save this answer as a bug report")
+                    .help("Save this answer as a fault report")
                 }
             }
             if !isUser { Spacer(minLength: 40) }
@@ -707,7 +709,7 @@ struct CodeAssistantPanel: View {
         return nil
     }
 
-    /// Active+cloned repo root for bug-report / Q&A writes. The
+    /// Active+cloned repo root for fault-report / Q&A writes. The
     /// "Report this" button is hidden when nil. Backed by the shared
     /// `AppConfig.activeRepoLocalURL` so RegressionView sees the
     /// same repo we do.

@@ -301,15 +301,15 @@ struct AutoCodeView: View {
                 Text("What this does")
                     .font(Typography.section)
                     .foregroundStyle(t.textMuted)
-                Text("Re-asks every `status: fixed` bug report saved under `<repo>/.understand-anything/memory/bugs/` and flips any that come back with a different answer back to `status: open` so they show up in the next code review.")
+                Text("Re-asks every `status: fixed` fault report saved under `<repo>/.understand-anything/memory/faults/` and flips any that come back with a different answer back to `status: open` so they show up in the next code review.")
                     .font(Typography.body)
                     .foregroundStyle(t.text)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Prompts come from the saved bug reports themselves, not from a template — so there's nothing to edit here. Use the standalone Regression tab to run an ad-hoc sweep with a UI that streams progress per bug.")
+                Text("Prompts come from the saved fault reports themselves, not from a template — so there's nothing to edit here. Use the standalone Regression tab to run an ad-hoc sweep with a UI that streams progress per fault.")
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Off by default. Toggling it on adds a regression pass to the end of every Auto Code run — typically a few seconds per fixed bug, multiplied by however many you have. Skip if your bug archive is large or if you're on a flaky network.")
+                Text("Off by default. Toggling it on adds a regression pass to the end of every Auto Code run — typically a few seconds per fixed fault, multiplied by however many you have. Skip if your fault archive is large or if you're on a flaky network.")
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -352,9 +352,9 @@ enum AutoTask: String, CaseIterable, Identifiable {
     case reviewCode
     case reviewDoc
     case reviewConflicts
-    /// Re-asks past `status: fixed` BugReports and flips regressed
+    /// Re-asks past `status: fixed` FaultReports and flips regressed
     /// ones back to `status: open`. Has no editable prompt template
-    /// because the prompts come from the saved bug reports themselves.
+    /// because the prompts come from the saved fault reports themselves.
     case regression
 
     var id: String { rawValue }
@@ -378,7 +378,7 @@ enum AutoTask: String, CaseIterable, Identifiable {
     }
 
     /// Structural tasks (regression) don't have a user-editable
-    /// prompt template — the prompt comes from saved bug reports.
+    /// prompt template — the prompt comes from saved fault reports.
     /// Callers should hide the template editor when this returns nil.
     func templateBinding(config: AppConfig) -> Binding<String>? {
         switch self {

@@ -1,5 +1,5 @@
-// User-reported bug feedback. Persisted as a markdown file with YAML
-// frontmatter under <repo>/.understand-anything/memory/bugs/<slug>.md.
+// User-reported fault feedback. Persisted as a markdown file with YAML
+// frontmatter under <repo>/.understand-anything/memory/faults/<slug>.md.
 //
 // Format chosen to be:
 //   • Human-readable (open in any text editor).
@@ -13,7 +13,7 @@
 import Foundation
 import Yams
 
-enum BugSeverity: String, Codable, CaseIterable, Identifiable {
+enum FaultSeverity: String, Codable, CaseIterable, Identifiable {
     case info
     case minor
     case major
@@ -27,7 +27,7 @@ enum BugSeverity: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum BugStatus: String, Codable, CaseIterable, Identifiable {
+enum FaultStatus: String, Codable, CaseIterable, Identifiable {
     case open
     case acknowledged
     case fixed
@@ -44,11 +44,11 @@ enum BugStatus: String, Codable, CaseIterable, Identifiable {
 }
 
 
-struct BugReport: Equatable {
+struct FaultReport: Equatable {
     var prompt: String
     var response: String
     var notes: String
-    var severity: BugSeverity
+    var severity: FaultSeverity
     var reportedAt: Date
     /// Short git SHA at time of report. Optional — git may not be
     /// available or the repo path may not be a working tree.
@@ -56,7 +56,7 @@ struct BugReport: Equatable {
     var appVersion: String
     /// `AICliTool.rawValue` of the agent that produced the response.
     var agent: String
-    var status: BugStatus
+    var status: FaultStatus
     var tags: [String]
 
     enum DecodeError: Error, Equatable {
@@ -118,7 +118,7 @@ struct BugReport: Equatable {
         return "---\n\(yaml)---\n\(notes)"
     }
 
-    static func fromMarkdown(_ source: String) throws -> BugReport {
+    static func fromMarkdown(_ source: String) throws -> FaultReport {
         guard source.hasPrefix("---\n") else {
             throw DecodeError.missingFrontmatter
         }
@@ -136,16 +136,16 @@ struct BugReport: Equatable {
         guard let prompt = dict["prompt"] as? String,
               let response = dict["response"] as? String,
               let severityRaw = dict["severity"] as? String,
-              let severity = BugSeverity(rawValue: severityRaw),
+              let severity = FaultSeverity(rawValue: severityRaw),
               let reportedAt = Self.coerceDate(dict["reported_at"]),
               let appVersion = dict["app_version"] as? String,
               let agent = dict["agent"] as? String
         else { throw DecodeError.invalidYAML("missing required field") }
-        let statusRaw = (dict["status"] as? String) ?? BugStatus.open.rawValue
-        let status = BugStatus(rawValue: statusRaw) ?? .open
+        let statusRaw = (dict["status"] as? String) ?? FaultStatus.open.rawValue
+        let status = FaultStatus(rawValue: statusRaw) ?? .open
         let gitHead = dict["git_head"] as? String
         let tags = (dict["tags"] as? [String]) ?? []
-        return BugReport(
+        return FaultReport(
             prompt: prompt, response: response, notes: notes,
             severity: severity, reportedAt: reportedAt, gitHead: gitHead,
             appVersion: appVersion, agent: agent, status: status, tags: tags
@@ -155,9 +155,9 @@ struct BugReport: Equatable {
     /// Read existing markdown, rewrite only the status field, return the
     /// new source. Keeps the notes body byte-identical so user edits
     /// outside the frontmatter aren't disturbed.
-    static func rewritingStatus(in source: String, to newStatus: BugStatus) throws -> String {
-        let bug = try fromMarkdown(source)
-        var copy = bug
+    static func rewritingStatus(in source: String, to newStatus: FaultStatus) throws -> String {
+        let fault = try fromMarkdown(source)
+        var copy = fault
         copy.status = newStatus
         return try copy.toMarkdown()
     }

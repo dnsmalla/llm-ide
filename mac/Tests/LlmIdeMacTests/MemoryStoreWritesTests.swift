@@ -10,8 +10,8 @@ struct MemoryStoreWritesTests {
         return url
     }
 
-    private func sampleBug() -> BugReport {
-        BugReport(
+    private func sampleFault() -> FaultReport {
+        FaultReport(
             prompt: "explain auth", response: "answer", notes: "wrong",
             severity: .major, reportedAt: Date(timeIntervalSince1970: 1_716_465_600),
             gitHead: "abc123", appVersion: "0.1.0", agent: "claude_code",
@@ -19,47 +19,47 @@ struct MemoryStoreWritesTests {
         )
     }
 
-    @Test func writeBugCreatesBugsDirAndFile() throws {
+    @Test func writeFaultCreatesFaultsDirAndFile() throws {
         let repo = try tmpRepoDir()
         defer { try? FileManager.default.removeItem(at: repo) }
         let store = MemoryStore()
-        let url = try store.writeBug(at: repo, sampleBug())
+        let url = try store.writeFault(at: repo, sampleFault())
 
-        let bugsDir = repo.appendingPathComponent(".understand-anything/memory/bugs")
-        #expect(FileManager.default.fileExists(atPath: bugsDir.path))
+        let faultsDir = repo.appendingPathComponent(".understand-anything/memory/faults")
+        #expect(FileManager.default.fileExists(atPath: faultsDir.path))
         #expect(FileManager.default.fileExists(atPath: url.path))
         #expect(url.lastPathComponent.hasSuffix(".md"))
     }
 
-    @Test func loadBugReturnsRoundTrippedReport() throws {
+    @Test func loadFaultReturnsRoundTrippedReport() throws {
         let repo = try tmpRepoDir()
         defer { try? FileManager.default.removeItem(at: repo) }
         let store = MemoryStore()
-        let written = sampleBug()
-        let url = try store.writeBug(at: repo, written)
+        let written = sampleFault()
+        let url = try store.writeFault(at: repo, written)
 
-        let loaded = try store.loadBug(at: url)
+        let loaded = try store.loadFault(at: url)
         #expect(loaded.prompt == written.prompt)
         #expect(loaded.status == .open)
     }
 
-    @Test func updateBugStatusFlipsFieldAndPersists() throws {
+    @Test func updateFaultStatusFlipsFieldAndPersists() throws {
         let repo = try tmpRepoDir()
         defer { try? FileManager.default.removeItem(at: repo) }
         let store = MemoryStore()
-        let url = try store.writeBug(at: repo, sampleBug())
+        let url = try store.writeFault(at: repo, sampleFault())
 
-        try store.updateBugStatus(at: url, to: .fixed)
-        let loaded = try store.loadBug(at: url)
+        try store.updateFaultStatus(at: url, to: .fixed)
+        let loaded = try store.loadFault(at: url)
         #expect(loaded.status == .fixed)
     }
 
-    @Test func listBugsSurfacesNewFile() throws {
+    @Test func listFaultsSurfacesNewFile() throws {
         let repo = try tmpRepoDir()
         defer { try? FileManager.default.removeItem(at: repo) }
         let store = MemoryStore()
-        #expect(store.listBugs(at: repo).isEmpty)
-        _ = try store.writeBug(at: repo, sampleBug())
-        #expect(store.listBugs(at: repo).count == 1)
+        #expect(store.listFaults(at: repo).isEmpty)
+        _ = try store.writeFault(at: repo, sampleFault())
+        #expect(store.listFaults(at: repo).count == 1)
     }
 }

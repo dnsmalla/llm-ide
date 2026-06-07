@@ -320,8 +320,8 @@ final class AutoCodeUpdateService: ObservableObject {
             }
         }
 
-        // 7. Regression sweep — re-asks every `status: fixed` BugReport
-        // saved under <repo>/.understand-anything/memory/bugs/ and flips any
+        // 7. Regression sweep — re-asks every `status: fixed` FaultReport
+        // saved under <repo>/.understand-anything/memory/faults/ and flips any
         // regressed ones back to `status: open`. Structural task; uses
         // the same prompter the standalone Regression view does (server
         // /code-assist). Off by default; opt-in via Settings.
@@ -336,7 +336,7 @@ final class AutoCodeUpdateService: ObservableObject {
     /// Drives RegressionRunner once against the active repo. Failure
     /// modes — no API client wired, no local repo, runner throws —
     /// surface in taskErrors so the AutoCodeView card flips the
-    /// regression row to ⚠. The runner itself publishes per-bug
+    /// regression row to ⚠. The runner itself publishes per-fault
     /// progress to its own @Published state; this entry point waits
     /// for the run to finish then records a summary line.
     private func runRegressionSweep(localPath: String?) async {
@@ -680,7 +680,7 @@ final class AutoCodeUpdateService: ObservableObject {
         // Active project's linkedRepo is authoritative when set. If the
         // matching token is missing we return nil (and log) instead of
         // falling through to a legacy repo from a different workflow —
-        // silent fall-through there was the bug code review caught: a user
+        // silent fall-through there was the fault code review caught: a user
         // who linked a GitHub repo to their active project but forgot to
         // add a GitHub token would have seen auto-update target their
         // legacy GitLab project instead.

@@ -1,8 +1,8 @@
 // User-saved Q&A pair. Persisted as markdown with YAML frontmatter
-// under <repo>/.understand-anything/memory/q&a/<slug>.md, alongside bug
+// under <repo>/.understand-anything/memory/q&a/<slug>.md, alongside fault
 // reports. Phase C's repeated-command detection writes these.
 //
-// We share slugify + the ISO formatter with BugReport — both files
+// We share slugify + the ISO formatter with FaultReport — both files
 // live in the same module so there's no visibility concern.
 
 import Foundation
@@ -20,7 +20,7 @@ struct QAEntry: Equatable {
         let fm: [String: Any] = [
             "question": question,
             "answer": answer,
-            "saved_at": BugReport.isoFormatter.string(from: savedAt),
+            "saved_at": FaultReport.isoFormatter.string(from: savedAt),
             "ask_count": askCount,
             "agent": agent
         ]
@@ -30,7 +30,7 @@ struct QAEntry: Equatable {
     }
 
     func suggestedFileName() -> String {
-        let ts = BugReport.fsTimestampFormatter.string(from: savedAt)
-        return "\(ts)-\(BugReport.slugify(question)).md"
+        let ts = FaultReport.fsTimestampFormatter.string(from: savedAt)
+        return "\(ts)-\(FaultReport.slugify(question)).md"
     }
 }
