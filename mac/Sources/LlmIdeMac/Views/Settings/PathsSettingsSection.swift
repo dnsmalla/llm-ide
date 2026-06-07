@@ -33,6 +33,7 @@ struct PathsSettingsSection: View {
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
     @Environment(AppEnvironment.self) private var env
+    @Environment(LibraryItemStore.self) private var library
 
     @State private var createStatus: String?
     @State private var createError: String?
@@ -76,6 +77,10 @@ struct PathsSettingsSection: View {
                 Divider().background(theme.current.border)
 
                 uaBinaryRow
+
+                Divider().background(theme.current.border)
+
+                localCodeFoldersSection
             }
         }
     }
@@ -506,6 +511,104 @@ struct PathsSettingsSection: View {
         try? await Task.detached(priority: .utility) { @MainActor in
             try env.indexer.fullScan()
         }.value
+    }
+
+    // MARK: - Local code folders
+
+    @ViewBuilder
+    private var localCodeFoldersSection: some View {
+        let t = theme.current
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Local code folders")
+                        .font(Typography.captionStrong)
+                        .foregroundStyle(t.text)
+                    Text("Source-code directories for Code Graph — scanned directly without cloning.")
+                        .font(Typography.caption)
+                        .foregroundStyle(t.textMuted)
+                }
+                Spacer()
+                Button {
+                    addLocalCodeFolder()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 11))
+                        Text("Add folder")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(t.accent)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if config.localCodeFolders.isEmpty {
+                Text("No local code folders added yet.")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+                    .padding(.vertical, 2)
+            } else {
+                VStack(spacing: 4) {
+                    ForEach(config.localCodeFolders, id: \.self) { path in
+                        HStack(spacing: 8) {
+                            Image(systemName: "folder.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(t.accent)
+                            Text(path)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(t.textMuted)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer(minLength: 4)
+                            Button {
+                                NSWorkspace.shared.activateFileViewerSelecting(
+                                    [URL(fileURLWithPath: path)])
+                            } label: {
+                                Image(systemName: "folder")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(t.textMuted)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Reveal in Finder")
+                            Button {
+                                removeLocalCodeFolder(path)
+                            } label: {
+                                Image(systemName: "minus.circle")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(t.danger.opacity(0.8))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Remove folder")
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(t.surface2))
+                        .overlay(RoundedRectangle(cornerRadius: 6)
+                            .stroke(t.border.opacity(0.4), lineWidth: 1))
+                    }
+                }
+            }
+        }
+    }
+
+    private func addLocalCodeFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a source-code folder to add to the Code Graph library."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let path = url.path
+        guard !config.localCodeFolders.contains(path) else { return }
+        config.localCodeFolders.append(path)
+        library.addFolder(url: url, category: .code)
+    }
+
+    private func removeLocalCodeFolder(_ path: String) {
+        config.localCodeFolders.removeAll { $0 == path }
+        let folderName = URL(fileURLWithPath: path).lastPathComponent
+        library.removeFolder(folderOrigin: folderName)
     }
 }
 

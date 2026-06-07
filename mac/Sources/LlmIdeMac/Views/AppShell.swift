@@ -189,10 +189,12 @@ struct AppShell: View {
         }
         .onAppear {
             pruneCodeLibrary()
+            seedLocalCodeFolders()
             redirectIfSectionHidden()
         }
         .onChange(of: config.gitLabSavedProjects)     { _, _ in pruneCodeLibrary() }
         .onChange(of: config.gitHubSavedRepos)        { _, _ in pruneCodeLibrary() }
+        .onChange(of: config.localCodeFolders)        { _, _ in pruneCodeLibrary(); seedLocalCodeFolders() }
         .onChange(of: config.hiddenSidebarSections)   { _, _ in redirectIfSectionHidden() }
         .task { await checkRecovery() }
         .task { await checkLegacyPrompt() }
@@ -562,6 +564,12 @@ struct AppShell: View {
                 paths.insert(path)
             }
         }
+        // Local code folders are always allowed — they're user-managed, not
+        // tied to any GitLab/GitHub entry.
+        for path in config.localCodeFolders {
+            slugs.insert(URL(fileURLWithPath: path).lastPathComponent)
+            paths.insert(path)
+        }
         let allowed = names.union(slugs)
         let prefixes = paths
         // Defer the mutation to the next run-loop pass so it never fires
@@ -578,6 +586,24 @@ struct AppShell: View {
         // before the prune mutates the item list.
         DispatchQueue.main.async { [itemStore] in
             itemStore.pruneCodeItems(allowedFolders: allowed, allowedPathPrefixes: prefixes)
+        }
+    }
+
+    /// Ensures every path in `config.localCodeFolders` is indexed in the
+    /// library as a .code folder. Called on appear and whenever the list
+    /// changes so new additions take effect without relaunch.
+    private func seedLocalCodeFolders() {
+        let fm = FileManager.default
+        for path in config.localCodeFolders {
+            let url = URL(fileURLWithPath: path)
+            guard fm.fileExists(atPath: path) else { continue }
+            let folderName = url.lastPathComponent
+            let alreadyIndexed = itemStore.items.contains { $0.folderOrigin == folderName }
+            if !alreadyIndexed {
+                DispatchQueue.main.async { [itemStore] in
+                    itemStore.addFolder(url: url, category: .code)
+                }
+            }
         }
     }
 

@@ -192,6 +192,16 @@ final class AppConfig: ObservableObject {
     @Published var uaBinaryOverride: String {
         didSet { defaults.set(uaBinaryOverride, forKey: "uaBinaryOverride") }
     }
+    /// Absolute paths to local source-code folders added directly by the user
+    /// (outside of the GitHub/GitLab clone flow). Each path is indexed into
+    /// the Library as a .code item so the Code Graph can scan it.
+    @Published var localCodeFolders: [String] {
+        didSet {
+            if let data = try? AppJSON.encoder.encode(localCodeFolders) {
+                defaults.set(data, forKey: "localCodeFolders")
+            }
+        }
+    }
 
     // Defaults — single source of truth.
     static let defaultMemorySubdir = ".understand-anything/memory"
@@ -305,6 +315,12 @@ final class AppConfig: ObservableObject {
         let storedMem = defaults.string(forKey: "memorySubdir") ?? ""
         self.memorySubdir = storedMem.isEmpty ? AppConfig.defaultMemorySubdir : storedMem
         self.uaBinaryOverride = defaults.string(forKey: "uaBinaryOverride") ?? ""
+        if let data = defaults.data(forKey: "localCodeFolders"),
+           let decoded = try? AppJSON.decoder.decode([String].self, from: data) {
+            self.localCodeFolders = decoded
+        } else {
+            self.localCodeFolders = []
+        }
         let baseURLForInit = defaults.string(forKey: "gitLabBaseURL") ?? "https://gitlab.com"
         self.gitLabBaseURL = baseURLForInit
         if let migrated = defaults.string(forKey: "gitLabToken"), !migrated.isEmpty {
