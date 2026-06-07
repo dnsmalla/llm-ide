@@ -121,6 +121,16 @@ final class LibraryItemStore {
         save()
     }
 
+    /// Removes every item that lives under a specific directory path.
+    /// Keyed on the absolute path (not `folderOrigin`, which is the
+    /// basename) so two distinct folders sharing a name — e.g.
+    /// `/a/proj` and `/b/proj` — are removed independently.
+    func removeFolder(underPath path: String) {
+        let prefix = path.hasSuffix("/") ? path : path + "/"
+        items.removeAll { $0.path == path || $0.path.hasPrefix(prefix) }
+        save()
+    }
+
     /// Drops stale code items whose folder group is tracked by a
     /// saved GitLab/GitHub project but whose on-disk path no longer
     /// matches the active clone location.

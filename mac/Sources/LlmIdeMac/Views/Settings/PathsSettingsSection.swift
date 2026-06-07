@@ -607,8 +607,7 @@ struct PathsSettingsSection: View {
 
     private func removeLocalCodeFolder(_ path: String) {
         config.localCodeFolders.removeAll { $0 == path }
-        let folderName = URL(fileURLWithPath: path).lastPathComponent
-        library.removeFolder(folderOrigin: folderName)
+        library.removeFolder(underPath: path)
     }
 }
 

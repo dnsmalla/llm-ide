@@ -597,8 +597,10 @@ struct AppShell: View {
         for path in config.localCodeFolders {
             let url = URL(fileURLWithPath: path)
             guard fm.fileExists(atPath: path) else { continue }
-            let folderName = url.lastPathComponent
-            let alreadyIndexed = itemStore.items.contains { $0.folderOrigin == folderName }
+            // Key on the absolute path, not the basename, so two folders
+            // with the same name (/a/proj, /b/proj) both index.
+            let prefix = path.hasSuffix("/") ? path : path + "/"
+            let alreadyIndexed = itemStore.items.contains { $0.path.hasPrefix(prefix) }
             if !alreadyIndexed {
                 DispatchQueue.main.async { [itemStore] in
                     itemStore.addFolder(url: url, category: .code)
