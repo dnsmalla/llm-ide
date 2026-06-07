@@ -33,6 +33,13 @@ test-mac:
 # an upgrade — the CSV's `status` column is the release checklist.
 regression: test-mac
 
+# Enable the repo's git hooks (.githooks/). The pre-push hook runs the
+# regression gate before any push that touches mac/. Run once per clone.
+.PHONY: hooks
+hooks:
+	git config core.hooksPath .githooks
+	@echo "✓ git hooks enabled (.githooks). pre-push runs 'make regression' for mac/ changes; bypass with --no-verify."
+
 # --- docs --------------------------------------------------------------------
 
 VENV_DOCS := .venv-docs

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Pre-push regression gate.
+#
+# Runs the mac app's build + fault/regression test suite (`make regression`)
+# before a push that includes changes under mac/, so a broken build or a
+# regressed fault never reaches the remote. Pushes that don't touch mac/
+# skip the gate and return immediately.
+#
+# Enable once per clone:  make hooks
+# Bypass for one push:    git push --no-verify
+set -uo pipefail
+
+zero=0000000000000000000000000000000000000000
+mac_changed=0
+
+# stdin: <local_ref> <local_sha> <remote_ref> <remote_sha> per pushed ref.
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ "$local_sha" = "$zero" ] && continue   # branch deletion — nothing to test
+    if [ "$remote_sha" = "$zero" ]; then
+        # New branch on the remote: diff against origin/main when available,
+        # otherwise be safe and run the gate.
+        if git rev-parse --verify --quiet origin/main >/dev/null; then
+            files=$(git diff --name-only "origin/main...$local_sha" 2>/dev/null || echo mac/)
+        else
+            files="mac/"
+        fi
+    else
+        files=$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || echo mac/)
+    fi
+    if printf '%s\n' "$files" | grep -q '^mac/'; then
+        mac_changed=1
+    fi
+done
+
+if [ "$mac_changed" -eq 1 ]; then
+    echo "pre-push: mac/ changed — running regression gate (make regression)…"
+    if ! make regression; then
+        echo "pre-push: regression gate FAILED — push aborted." >&2
+        echo "          Fix the failure, or bypass with: git push --no-verify" >&2
+        exit 1
+    fi
+fi
+exit 0
