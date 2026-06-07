@@ -157,7 +157,13 @@ final class LibraryItemStore {
                 return true
             }
             if !Self.isCodeRelevant(url: itemURL) { return true }
-            if allowedPathPrefixes.contains(where: { !$0.isEmpty && item.path.hasPrefix($0) }) {
+            // Match on a directory boundary (trailing "/") so an allowed
+            // "/a/proj" doesn't also shield "/a/proj-2/…".
+            if allowedPathPrefixes.contains(where: { prefix in
+                guard !prefix.isEmpty else { return false }
+                let dir = prefix.hasSuffix("/") ? prefix : prefix + "/"
+                return item.path == prefix || item.path.hasPrefix(dir)
+            }) {
                 return false
             }
             if let origin = item.folderOrigin,
