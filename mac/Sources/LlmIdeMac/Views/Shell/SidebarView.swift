@@ -52,7 +52,7 @@ struct SidebarView: View {
                 }
             }
             // ── Data (purple family) ─────────────────────
-            let dataSections: [ShellState.Section] = [.issues, .gantt]
+            let dataSections: [ShellState.Section] = [.issues, .gantt, .visual]
             let visibleData = dataSections.filter(isVisible)
             if !visibleData.isEmpty {
                 Section(isCompact ? "" : "Data") {

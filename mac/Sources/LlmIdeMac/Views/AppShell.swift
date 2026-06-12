@@ -341,6 +341,7 @@ struct AppShell: View {
         case .conflicts: ReviewView(api: api, config: .conflicts)
         case .issues:    issuesRoute
         case .gantt:     ganttRoute
+        case .visual:    VisualView(api: api)
         case .docGen:    DocGenView(api: api)
         case .autoCode:  AutoCodeView()
         case .codeGraph: UAGraphView()

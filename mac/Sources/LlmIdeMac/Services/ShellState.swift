@@ -6,7 +6,7 @@ import SwiftUI
 @Observable
 final class ShellState {
     enum Section: String, Hashable, CaseIterable {
-        case library, live, review, plans, conflicts, issues, gantt, docGen, autoCode, codeGraph, regression, settings
+        case library, live, review, plans, conflicts, issues, gantt, visual, docGen, autoCode, codeGraph, regression, settings
 
         /// User-friendly label — single source of truth so the sidebar
         /// row, the settings toggle and any future menu item agree.
@@ -19,6 +19,7 @@ final class ShellState {
             case .conflicts: return "Review Conflicts"
             case .issues:    return "Issues"
             case .gantt:     return "Gantt"
+            case .visual:    return "Visual"
             case .docGen:    return "Doc Gen"
             case .autoCode:  return "Auto Tasks"
             case .codeGraph: return "Code Graph"
@@ -36,6 +37,7 @@ final class ShellState {
             case .conflicts: return "exclamationmark.triangle"
             case .issues:    return "checklist"
             case .gantt:     return "chart.bar.doc.horizontal"
+            case .visual:    return "photo.on.rectangle.angled"
             case .docGen:    return "wand.and.stars"
             case .autoCode:  return "arrow.triangle.2.circlepath.circle"
             case .codeGraph: return "point.3.connected.trianglepath.dotted"
@@ -50,7 +52,7 @@ final class ShellState {
         /// turned off. `.live` is already conditional on capture state
         /// so it doesn't appear here either.
         static let userHideable: [Section] = [
-            .review, .plans, .conflicts, .issues, .gantt, .docGen, .autoCode, .codeGraph, .regression
+            .review, .plans, .conflicts, .issues, .gantt, .visual, .docGen, .autoCode, .codeGraph, .regression
         ]
     }
 
@@ -95,6 +97,7 @@ extension ShellState.Section {
         case "transcript": self = .live
         case "history":    self = .library
         case "review":     self = .review
+        case "visual":     self = .visual
         case "plan":       self = .plans
         case "settings":   self = .settings
         default:           return nil
@@ -131,6 +134,7 @@ extension ShellState.Section {
         // ── Data (purple family) ─────────────────────────
         case .issues:     return .purple
         case .gantt:      return .indigo
+        case .visual:     return Color(red: 0.62, green: 0.40, blue: 0.90) // violet
 
         // ── Neutral ──────────────────────────────────────
         case .settings:   return .gray
@@ -143,7 +147,7 @@ extension ShellState.Section {
         switch self {
         case .library, .live, .docGen:                               return "Notes"
         case .review, .plans, .conflicts, .autoCode, .codeGraph, .regression: return "Code"
-        case .issues, .gantt:                                        return "Data"
+        case .issues, .gantt, .visual:                               return "Data"
         case .settings:                                              return "App"
         }
     }
