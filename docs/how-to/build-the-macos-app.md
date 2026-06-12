@@ -19,6 +19,7 @@ cd mac
 This compiles via Swift Package Manager, packages an `.app` bundle, and opens it. The app expects the server at `127.0.0.1:3456`.
 
 For a release DMG:
+
 ```bash
 cd mac
 ./build_app.sh --release
@@ -30,4 +31,4 @@ The app launches and the Knowledge Base panel populates from the server. If "Ser
 
 ## See also
 
-- [mac/README.md](../../mac/README.md)
+- [mac/README.md](https://github.com/dnsmalla/llm-ide/blob/main/mac/README.md)

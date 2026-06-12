@@ -13,7 +13,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ## Caption scraper (`extension/src/content/caption-scraper.ts`)
 
-### ✅ MUST preserve:
+### ✅ MUST preserve
 
 - **Per-speaker state map** — `speakerState: Map<speaker, { sessionId, text, lastSeen }>`.
 - **New session when:** first sighting OR silent >5s (`SESSION_GAP_MS`). That's it.
@@ -28,7 +28,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 - **`GET_CAPTION_STATUS` reply** — on demand, reply with the current status so late-mounting contexts (popup opened after recording started) sync up.
 - **Prompt-injection-safe text** — `sanitizeLine()` strips control chars + the delimiters `<<<BEGIN>>>` / `<<<END>>>` that server prompts use as fences.
 
-### ❌ MUST filter out (historical bug reports):
+### ❌ MUST filter out (historical bug reports)
 
 | Category | Examples | Filter |
 |----------|----------|--------|
@@ -42,7 +42,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 | Toolbar buttons | `Turn off microphone`, `Open caption settings`, `Live captions`, `Font size` | `MEET_UI_PATTERNS` |
 | Effects panel | `Reframe`, `Backgrounds and effects`, `Portrait`, `Blur` | `MEET_UI_PATTERNS` |
 
-### ❌ DO NOT do these (caused regressions):
+### ❌ DO NOT do these (caused regressions)
 
 - **Do NOT reintroduce `dedupeRepeatedPhrases` or similar text-munging.**
 - **Do NOT reintroduce "longest text per tick" or "prefix sentence dropping".**
@@ -56,7 +56,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ## Speaker detector (`extension/src/content/speaker-detector.ts`)
 
-### ✅ MUST preserve:
+### ✅ MUST preserve
 
 - **`cleanup()` resets `lastSpeaker = ''`** — otherwise BFCache restores a stale value and the first post-restore turn gets suppressed.
 - Still used by mic mode to enrich utterances with active-speaker metadata.
@@ -65,14 +65,14 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ## Message protocol (`extension/src/lib/messages.ts`)
 
-### ✅ MUST preserve:
+### ✅ MUST preserve
 
 - **`MsgType` enum covers ALL message types** — `START_CAPTION_SCRAPING`, `STOP_CAPTION_SCRAPING`, `PING`, `CAPTION_FINAL`, `CAPTION_STATUS`, `GET_CAPTION_STATUS`, `CAPTION_SCRAPER_READY`, `ACTIVE_SPEAKER`, `PARTICIPANTS_LIST`, `ERROR`.
 - **`Message` union type is strongly typed** — every variant declares its payload fields.
 - **`isMessage()` guard validates `type` is a known `MsgType` enum member** — not just any string.
 - **Caption messages must include `sessionId`** — the side panel groups updates into one transcript line by sessionId.
 
-### ❌ DO NOT do these:
+### ❌ DO NOT do these
 
 - **Do NOT use string literals** like `{ type: 'START_CAPTION_SCRAPING' }`. Always use `MsgType.*`.
 - **Do NOT accept `message: any` in listeners.** Use `unknown` + `isMessage()` guard so an injected message doesn't crash the app.
@@ -81,7 +81,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ## Transcript persistence (`extension/src/lib/storage.ts` + useTranscript)
 
-### ✅ MUST preserve:
+### ✅ MUST preserve
 
 - **`SavedTranscript` shape includes `segments` (raw), not just the rendered string.** Loading a past session must rebuild the live UI exactly — speaker renames, sessionIds, timestamps — so future LLM calls (Generate Notes, Chat, Questions) work on the real data.
 - **`saveTranscript()` is called in `stopRecording()`** — auto-persists when `segments.length > 0`. Reads snapshot values from refs (`segmentsRef`, `speakerNamesRef`, `meetingTitleRef`, `elapsedRef`, `primaryLangRef`) so the callback's deps stay minimal.
@@ -90,7 +90,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 - **Storage errors are non-fatal** — `.catch(() => {})` on persist; the live UI is the user's source of truth during a session.
 - **Type-only import in storage.ts** — `import type { TranscriptSegment }` avoids a runtime cycle with `useTranscript.ts`.
 
-### ❌ DO NOT do these:
+### ❌ DO NOT do these
 
 - **Do NOT store only the rendered transcript string.** Loading a session needs segments to rebuild speaker grouping, subtitle export, etc.
 - **Do NOT put segments/elapsed/etc. into `stopRecording`'s useCallback deps.** That re-registers the message listener on every caption, leaking handlers.
@@ -100,7 +100,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ## Side panel hook: useTranscript (`extension/src/sidepanel/hooks/useTranscript.ts`)
 
-### ✅ MUST preserve:
+### ✅ MUST preserve
 
 - **Session-based segment updates** — when a `CAPTION_FINAL` arrives with the same `sessionId` as the last segment, update in place instead of appending.
 - **Speaker name sanitization** — trim, clamp to 50 chars before storing.
@@ -112,7 +112,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 - **CAPTION_STATUS listener + mount-time `GET_CAPTION_STATUS`** — when the floating popup mounts, it asks the content script whether capture is active and syncs state.
 - **`Diagnostics` export** — captionsReceived count + lastCaption timestamp + platform, consumed by Settings tab's Diagnostics grid.
 
-### ❌ DO NOT do these:
+### ❌ DO NOT do these
 
 - **Do NOT recreate the speech recognition callback chain on every render.** Use refs.
 - **Do NOT register `chrome.runtime.onMessage` listeners outside `useEffect` with cleanup.** Memory leaks + double handlers.
@@ -122,7 +122,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ## Side panel hooks: useNotes / useChat / useQuestions (`extension/src/sidepanel/hooks/*.ts`)
 
-### ✅ MUST preserve:
+### ✅ MUST preserve
 
 - **Every LLM hook accepts a `language?: string` parameter** and forwards it in the request body. `App.tsx` threads `transcript.primaryLang` in.
 - **AbortController on every request** — cancel-on-unmount via `useEffect` cleanup; cancel-on-clear for `useNotes`.
@@ -133,7 +133,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 - **Chat history has NO retention cap.** The user owns their conversation; we persist the full array to `chatMessages`. On `QUOTA_BYTES` errors we surface `quotaWarning` through the hook and render a yellow banner in ChatView — we never silently drop old messages.
 - **`MAX_HISTORY = 10` is a PROMPT-SIZE bound, not a storage bound.** It caps how many prior messages travel to `/chat` as context. Do not conflate the two.
 
-### ❌ DO NOT do these:
+### ❌ DO NOT do these
 
 - **Do NOT hardcode `REQUEST_TIMEOUT_MS`.** Import from `extension/src/lib/config.ts`.
 - **Do NOT silently swallow the `language` param** in any future LLM hook — add it to the body, or LLM output will regress to English for all non-English users.
@@ -143,7 +143,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ## Side panel App (`extension/src/sidepanel/App.tsx`)
 
-### ✅ MUST preserve:
+### ✅ MUST preserve
 
 - **`REQUIRED_ENDPOINTS` array + `serverStale` banner** — `checkServer()` parses the health response's `endpoints` array; if any required endpoint is missing OR the field is absent entirely, show a yellow "restart server" banner.
 - **Health check every `TIMING.SERVER_HEALTH_CHECK_INTERVAL_MS`** — user sees server state go offline/online without manual refresh.
@@ -153,7 +153,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 - **`language` threaded to every AI consumer** — `notes.generate(..., primaryLang)`, `ExportMenu language={primaryLang}`, `questions.generate(..., primaryLang)`, `chat.sendMessage(..., primaryLang)`.
 - **Copy-cmd button** on the offline banner copies `node server.mjs` to clipboard.
 
-### ❌ DO NOT do these:
+### ❌ DO NOT do these
 
 - **Do NOT hardcode the server URL.** Always `await getServerUrl()`.
 - **Do NOT pop out without passing `chrome.runtime.getURL(...)`** — hard-coded URLs break on reload.
@@ -162,14 +162,14 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ## Service worker (`extension/src/background/service-worker.ts`)
 
-### ✅ MUST preserve:
+### ✅ MUST preserve
 
 - **Auto-inject content scripts on existing tabs** — `chrome.scripting.executeScript` with file paths read from manifest. Handles the case where the extension is loaded AFTER a meeting tab is open.
 - **`PING` health check** before injecting — avoid double-injection.
 - **Read script paths from `chrome.runtime.getManifest().content_scripts[].js`** — hashed filenames change every build; never hardcode.
 - **200 ms delay after injection** before the first `START_CAPTION_SCRAPING` — gives the script time to register its listener.
 
-### ❌ DO NOT do these:
+### ❌ DO NOT do these
 
 - **Do NOT re-broadcast messages** from the service worker. Content scripts' `sendMessage` reaches the side panel directly. Historical bug: double-sent messages.
 - **Do NOT add multiple `onMessage.addListener` calls.** One listener routes all messages; multiples cause `sendResponse` conflicts.
@@ -178,7 +178,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ## Local server (`extension/server.mjs`)
 
-### ✅ MUST preserve:
+### ✅ MUST preserve
 
 - **CORS is a strict allowlist** — `chrome-extension://<id>` + `localhost` / `127.0.0.1`. The `Access-Control-Allow-Origin` header echoes the request's `Origin` (never `*`), and is only set when the origin is in the allowlist.
 - **Server binds to `127.0.0.1` by default** — a non-loopback `LLMIDE_HOST` is REFUSED at startup unless `LLMIDE_ALLOW_REMOTE=1` is also set (the operator opting into a TLS-terminating proxy). The server itself terminates no TLS.
@@ -195,7 +195,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 - **RFC 5987 Content-Disposition** — `filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}` for non-ASCII meeting titles (Japanese 議事録.docx etc.).
 - **404 catch-all** that lists real endpoints + a "restart node server.mjs" hint.
 
-### ❌ DO NOT do these:
+### ❌ DO NOT do these
 
 - **Do NOT add wildcard `Access-Control-Allow-Origin: *`.** Any site on the user's network could call the local server and steal transcripts.
 - **Do NOT accept an API key as a request parameter or store it unencrypted.** A per-user `claude.apiKey` is allowed ONLY via the encrypted vault (`server/vault.mjs`, AES-256-GCM) and is injected into the agent as `ANTHROPIC_API_KEY` per call — never logged, never echoed in errors (it is redacted), never persisted in plaintext.
@@ -208,7 +208,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ## DOCX export (`extension/generate-docx.mjs`)
 
-### ✅ MUST preserve:
+### ✅ MUST preserve
 
 - **Japanese font `MS Gothic`** for CJK support.
 - **Claude generates structured JSON first**, then the server fills the DOCX template. Do not merge these steps — merging leaks Claude's reasoning into the file.
@@ -216,7 +216,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 - **Array fields (`decisions`, `todos`, `agenda`, `minutes`, `qa`) defaulted to `['']`** when empty — `docx` crashes on empty cell arrays.
 - **Language directive in the JSON-generation prompt** so decisions/todos/minutes come back in the meeting's language.
 
-### ❌ DO NOT do these:
+### ❌ DO NOT do these
 
 - **Do NOT re-import `fs`** — dead import removed; file is streamed in memory.
 - **Do NOT bypass `capText` / `capLines`.** Word opens but looks broken if a cell has 50 k chars.
@@ -225,14 +225,14 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ## Client library (`extension/src/lib/config.ts`, `extension/src/lib/anthropic.ts`, `extension/src/lib/messages.ts`)
 
-### ✅ MUST preserve:
+### ✅ MUST preserve
 
 - **`isSafeServerUrl()` accepts ONLY** `http(s)://localhost`, `http(s)://127.0.0.1`, `http(s)://[::1]` (with optional port). Used by `setServerUrl()` (throws on unsafe) and `getServerUrl()` (silently falls back).
 - **`getServerUrl()` strips trailing slashes** — request URLs concatenate `${url}/endpoint`, a trailing slash produces `//endpoint` and a 404.
 - **`generateMeetingNotes()` signature**: `(transcript, meetingTitle?, participants?, externalSignal?, language?)` — AbortSignal is threaded through so the UI can cancel.
 - **`HEALTH_CHECK_TIMEOUT_MS` is short (few seconds)** and `REQUEST_TIMEOUT_MS` is long — don't unify them.
 
-### ❌ DO NOT do these:
+### ❌ DO NOT do these
 
 - **Do NOT accept arbitrary URLs in `setServerUrl`.** An attacker-controlled remote URL could receive all transcripts.
 - **Do NOT add `http://0.0.0.0`** to the safe list — it's not local on all platforms.
@@ -241,7 +241,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ## UI / UX / CSS
 
-### ✅ MUST preserve:
+### ✅ MUST preserve
 
 - **Responsive layout down to 280 px width.**
   - `.app { height: 100vh; display: flex; flex-direction: column }` adapts vertically.
@@ -259,7 +259,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 - **ExportMenu** accepts `language` prop and forwards to `/generate-docx`.
 - **Focus rings** via `:focus-visible` with `outline: 2px solid var(--color-primary)`.
 
-### ❌ DO NOT do these:
+### ❌ DO NOT do these
 
 - **Do NOT ask for microphone permission on side panel load.** Only request on Start Recording AND only when in mic mode.
 - **Do NOT show a raw API key input in the side panel Settings.** The optional per-user `claude.apiKey` is managed only through the authenticated credential-vault flow (`/auth` vault endpoints), which encrypts it at rest — it is never entered or held in the side panel UI.
@@ -271,13 +271,13 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ## Floating popup (`chrome.windows.create`)
 
-### ✅ MUST preserve:
+### ✅ MUST preserve
 
 - **`type: 'popup'`, `width: 420`, `height: 680`** as defaults. Chrome-natively resizable and maximizable.
 - **Popup mounts the same React bundle** as the side panel (`extension/src/sidepanel/index.html`). It must share state via `chrome.storage.local` + `chrome.runtime.onMessage` — do NOT fork a separate component tree.
 - **Mount-time `GET_CAPTION_STATUS`** query so the popup catches up if it opens after recording started.
 
-### ❌ DO NOT do these:
+### ❌ DO NOT do these
 
 - **Do NOT open the popup with `chrome.tabs.create`.** Pop-up windows are intentional — they stay on top.
 - **Do NOT pass `focused: false`** or the pop-out loses keyboard focus and users type into the meeting tab instead.
@@ -299,6 +299,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 Run through this against a real meeting before merging:
 
 ### Caption fidelity
+
 - [ ] Short Japanese captions (`はい。`, `ハロー！`) appear in transcript
 - [ ] Long multi-sentence captions appear as ONE transcript line (not many)
 - [ ] Same speaker talking continuously stays on one line (sub-5 s pauses don't split)
@@ -313,6 +314,7 @@ Run through this against a real meeting before merging:
 - [ ] Falls back to mic-based Web Speech API on unsupported platforms
 
 ### LLM output
+
 - [ ] Change primary language → Notes heading + bullets come back in that language
 - [ ] Change primary language → Chat reply comes back in that language (even if user typed English)
 - [ ] Change primary language → Questions H2 headings are localized (対立/要確認/要説明 etc.)
@@ -320,17 +322,20 @@ Run through this against a real meeting before merging:
 - [ ] Stale server (pre–`/generate-questions`) shows the yellow "restart" banner, not a raw 404
 
 ### Cross-context sync
+
 - [ ] Start recording in side panel → pop out → popup shows `isRecording: true` and live captions
 - [ ] Rename speaker in popup → side panel reflects the rename
 - [ ] Chat in side panel → popup shows the same history
 
 ### Responsive
+
 - [ ] Side panel at 280 px: tabs horizontally scroll, controls wrap, no clipping
 - [ ] Floating popup at default (420×680): everything fits, no horizontal scroll
 - [ ] Popup maximized: content fills vertically, export buttons wrap cleanly
 - [ ] Popup resized to 300×400: chat input stays pinned to bottom
 
 ### Security
+
 - [ ] `GET http://evil.example/` with the extension running does NOT reach the server (CORS)
 - [ ] `setServerUrl('http://evil.example')` throws and UI shows the rejection
 - [ ] Server terminal shows access log lines for each browser request
@@ -340,7 +345,7 @@ Run through this against a real meeting before merging:
 
 ## SQLite concurrency model (`extension/kb/db.mjs`)
 
-### ✅ MUST understand:
+### ✅ MUST understand
 
 - **better-sqlite3 is a single-writer library.** All writes are serialized by the V8 event loop — there is no connection pool and no write concurrency within a single Node process. This is by design and is safe for a localhost server serving one user.
 - **WAL mode is enabled.** Readers never block writers and writers never block readers in WAL mode; concurrent read + write is safe as long as there is only one writer process (which is always true here).
@@ -348,7 +353,7 @@ Run through this against a real meeting before merging:
 - **All multi-step mutations must use `db.transaction()`** — for example `mergeTaskMeta()` and `registerUser()`. better-sqlite3 transactions are the only mechanism that provides atomicity + isolation against interleaved event-loop ticks.
 - **`getDb()` returns a module-singleton** — the same `Database` instance is reused for the server's lifetime. Do not close and re-open it within a request handler.
 
-### ❌ DO NOT do these:
+### ❌ DO NOT do these
 
 - **Do NOT run `node scripts/backup.mjs` while the server is up without quiescing writes.** The backup script is WAL-aware (`VACUUM INTO`) and safe to run concurrently for reads, but verify before adding writes to the backup path.
 - **Do NOT fork child processes that open the DB.** Use the in-process `kb/db.mjs` API from the same event loop instead.
@@ -358,14 +363,14 @@ Run through this against a real meeting before merging:
 
 ## GitHub PR / codegen-apply (`extension/agents/github-pr.mjs`)
 
-### ✅ MUST understand:
+### ✅ MUST understand
 
 - **`git push` uses the user's ambient credentials.** The PR flow calls `git push -u origin <branch>` using whatever git config / credential helper the user has set up on their machine (SSH key, HTTPS keychain, etc.). No token is passed to the server; the server never stores one.
 - **The working tree must be clean before `openPullRequest()`** — the function now checks `git status --porcelain` and throws if there are uncommitted changes outside `.llmide-auto/`. This prevents codegen-generated files from accidentally staging the user's WIP alongside the auto-generated artifacts.
 - **Branch names are prefixed `llmide/auto/<slug>`** — the slug is derived from `taskId` (lowercase alphanumeric + `-_`) so the branch name is deterministic and safe. A branch with the same name existing locally causes an explicit error; the user must delete or rename it before retrying.
 - **The function stages ONLY `.llmide-auto/<taskId>/`** — it never stages the rest of the repo.
 
-### ❌ DO NOT do these:
+### ❌ DO NOT do these
 
 - **Do NOT pass a `ghToken` to `execGit` as an env var or argument.** Token handling is GitHub API only (PR creation); git transport uses the system credential helper.
 - **Do NOT call `git stash` inside `openPullRequest()`.** Stashing is destructive and non-obvious to the user. Instead, fail fast with the `status --porcelain` check and let the user resolve it.

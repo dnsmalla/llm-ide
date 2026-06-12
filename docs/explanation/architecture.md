@@ -60,7 +60,7 @@ Pre-existing rows from earlier single-user installs are back-filled to `user_id 
 | Network | Bound to `127.0.0.1`. CORS allowlist: `chrome-extension://<id>`, `localhost`, `127.0.0.1`. Origin is echoed, never `*`. |
 | Auth | JWT HS256, 15-minute access tokens. Refresh tokens are opaque base64url, hashed (sha256) at rest, rotate on every refresh. |
 | Password | Bcrypt cost 12. Unknown-email login compares against a sentinel hash so timing can't reveal account existence. |
-| Vault | `user_secrets(user_id, key, ciphertext)` where ciphertext = `version || iv(12) || aes-256-gcm(plaintext) || tag(16)`. Per-user data key = `HKDF-SHA256(masterKey, salt=userId, info='llmide-vault-v1')`. |
+| Vault | `user_secrets(user_id, key, ciphertext)` where ciphertext = `version \|\| iv(12) \|\| aes-256-gcm(plaintext) \|\| tag(16)`. Per-user data key =`HKDF-SHA256(masterKey, salt=userId, info='llmide-vault-v1')`. |
 | Allowed secret keys | `claude.apiKey`, `github.token`, `backlog.apiKey`, `linear.apiKey`, `slack.webhookUrl` |
 | Rate limiting | Token-bucket per `(profile, scope)`. Scope = `userId` for authed routes, remote IP for unauthed. 429 carries `Retry-After`. |
 | Guardrails | 7 secret patterns, 5 PII patterns, 5 destructive-op patterns. Run at submit AND at approval. |
@@ -136,6 +136,7 @@ The split below is not enforced — either client could call any
 route — but reflects what's actually wired today.
 
 **Chrome extension** uses:
+
 - `POST /auth/{login,register,refresh,logout}`
 - `POST /kb/live/<id>/append` — streaming caption ingest
 - `POST /generate-notes`, `/extract-entities`, `/generate-questions`
@@ -146,6 +147,7 @@ route — but reflects what's actually wired today.
 
 **Mac app** uses (subset; full list in
 `LlmIdeAPIClient.swift`):
+
 - `POST /auth/{login,refresh}`
 - `GET  /kb/sessions` — list captured meetings
 - `POST /code-assist` — Code Assistant chat turn
@@ -213,7 +215,7 @@ keyed by the same `id`.
 ## Out of scope (today)
 
 - **Cloud deployment.** The architecture is local-first by design. Self-hosting on a VPS is possible but not the default path.
-- **Self-hosted in-meeting bot.** Earlier drafts of the README described a `bot-worker/` Playwright service. That code is not yet in the tree; the [`meeting-agent`](../extension/docs/meeting-agent-plan.md) currently ships as a co-pilot only (questions appear as `[agent ?]` rows in your transcript, never typed into the meeting).
+- **Self-hosted in-meeting bot.** Earlier drafts of the README described a `bot-worker/` Playwright service. That code is not yet in the tree; the [`meeting-agent`](https://github.com/dnsmalla/llm-ide/blob/main/extension/docs/meeting-agent-plan.md) currently ships as a co-pilot only (questions appear as `[agent ?]` rows in your transcript, never typed into the meeting).
 
 ## See also
 

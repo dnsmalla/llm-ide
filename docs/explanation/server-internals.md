@@ -10,7 +10,7 @@ structured project work and tracks outcomes back into a knowledge base.
 
 ## Layers
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │  Chrome side panel  (React 18 + TS)                             │
 │  Auth: stores access token in memory; refresh in chrome.storage │

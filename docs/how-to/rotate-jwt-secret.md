@@ -48,7 +48,7 @@ rotation you would:
    only with the new one).
 2. Deploy the code change with both env vars set.
 3. Run for `accessTokenTTLSec` + `refreshTokenTTLSec` (default: 15min
-   + 30d = 30 days, 15min). During this window every minted token is
+   - 30d = 30 days, 15min). During this window every minted token is
    signed with the new secret; tokens minted before are still
    verifiable.
 4. Remove the `_PREVIOUS` env var and redeploy.
@@ -108,7 +108,7 @@ systemctl restart llmide        # or launchctl, or your runner
 
 Watch the boot log:
 
-```
+```text
 {"level":"info","msg":"server_started", ..., "jwtSecretDigest":"<digest>"}
 ```
 
@@ -152,5 +152,5 @@ re-login". This is the expected hard-cutover behavior.
   rotation during a low-traffic window.
 - **Mac app's auto-restart loop may show several `--- Server started
   ---` lines in quick succession** as it adopts the new server. Not a
-  bug; that's the [BackendManager auto-restart](../../mac/Sources/LlmIdeMac/Services/BackendManager.swift)
+  bug; that's the [BackendManager auto-restart](https://github.com/dnsmalla/llm-ide/blob/main/mac/Sources/LlmIdeMac/Services/BackendManager.swift)
   doing its job.

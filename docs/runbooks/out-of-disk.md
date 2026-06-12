@@ -60,7 +60,7 @@ find "$BACKUPS" -name 'data-*.db' -mtime +14 -delete
 
 Add to `crontab -e`:
 
-```
+```text
 0 3 * * * find /path/to/kb/backups -name 'data-*.db' -mtime +14 -delete
 ```
 

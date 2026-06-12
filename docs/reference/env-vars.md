@@ -66,7 +66,7 @@ Strongly recommended for any deployment that's not your laptop:
 ## Complete table
 
 Below is the full list extracted from
-[`extension/core/config.mjs`](../../extension/core/config.mjs). The
+[`extension/core/config.mjs`](https://github.com/dnsmalla/llm-ide/blob/main/extension/core/config.mjs). The
 preceding sections curate the same variables with operator-facing
 context; this table is the unannotated canonical reference.
 
@@ -116,7 +116,7 @@ RestartSec=5s
 
 Where `/etc/llmide/env.secret` (chmod 600, root-only) contains:
 
-```
+```text
 LLMIDE_JWT_SECRET=<48-char output of `openssl rand -base64 48`>
 LLMIDE_VAULT_KEY=<48-char output of `openssl rand -base64 48`>
 ```

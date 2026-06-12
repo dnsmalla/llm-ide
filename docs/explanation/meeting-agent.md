@@ -61,7 +61,7 @@ service, not a new product line.
 
 ## 4. Architecture
 
-```
+```text
               ┌─────────────────────────┐
               │   Google Meet (tab)     │
               │   captions panel        │
@@ -127,7 +127,7 @@ The meeting agent follows the same pattern. The question loop in
 
 ## 5. The agent loop (the actual logic)
 
-```
+```text
 on session detected (sessionId picked from listActiveSessions):
     plan = getPlan(active or selected by user)
     cooldown = 0
