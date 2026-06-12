@@ -160,7 +160,7 @@ export function useLiveSync({
         } catch { /* ignore */ }
         setSyncStatus('idle');
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // deps intentionally narrow — re-run only on recording transitions
   }, [isRecording]);
 
   // Clean up retry timer on unmount.

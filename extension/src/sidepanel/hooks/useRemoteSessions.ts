@@ -79,7 +79,7 @@ export function useRemoteSessions() {
 
     return () => {
       active = false;
-      try { reader?.cancel().catch(() => {}); } catch {}
+      try { reader?.cancel().catch(() => {}); } catch { /* reader already closed */ }
     };
   }, []);
 

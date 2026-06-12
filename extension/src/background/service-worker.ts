@@ -47,11 +47,9 @@ async function ensureContentScriptInjected(tabId: number, url: string): Promise<
       // page world. Returns true if any of the three content scripts
       // has set its sentinel.
       func: () => Boolean(
-        // @ts-ignore window augmentation lives in each content script
+        // window augmentation lives in each content script; `as any` covers it
         (window as any).__llmideCaptionScraperInjected
-          // @ts-ignore
           || (window as any).__llmideSpeakerDetectorInjected
-          // @ts-ignore
           || (window as any).__llmideFloatingOverlayInjected
       ),
     });
@@ -101,7 +99,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // than spawning a Chrome window.
   if (type === MsgType.OPEN_POPUP) {
     if (_sender.tab?.windowId) {
-      // @ts-ignore SidePanel API might not be fully typed depending on standard Chrome TS typings
       if (chrome.sidePanel && chrome.sidePanel.open) {
         chrome.sidePanel.open({ windowId: _sender.tab.windowId }).catch(console.error);
       }

@@ -104,7 +104,7 @@ export function useRemoteTranscript({
       cancelledRef.current = true;
       if (timer) clearTimeout(timer);
       if (reader) {
-        try { reader.cancel().catch(() => {}); } catch {}
+        try { reader.cancel().catch(() => {}); } catch { /* reader already closed */ }
       }
     };
   }, [sessionId, isMirroring]);

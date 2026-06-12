@@ -174,7 +174,7 @@ export default function App() {
     if (!transcript.isRecording) return;
     if (plan.plan) return;                      // already have a plan
     plan.createStub({ language: transcript.primaryLang });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // deps intentionally narrow (see comments) — only react to these transitions
   }, [agentEnabled, transcript.isRecording]);
 
   // Auto-attach: when recording starts AND there's an active plan,
@@ -192,14 +192,13 @@ export default function App() {
     // We intentionally omit `agent` from deps to avoid re-firing on
     // every busy/error tick — we only react to (recording, planId,
     // enabled) transitions.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transcript.isRecording, agentEnabled, plan.plan?.id, agent.runs.length]);
   // Flipping the toggle OFF mid-meeting detaches any active run so
   // the agent stops drafting questions immediately.
   useEffect(() => {
     if (agentEnabled) return;
     for (const r of agent.runs) agent.stop(r.sessionId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // deps intentionally narrow — only the toggle transition matters here
   }, [agentEnabled]);
   // Mirror agent contributions from /kb/live/<sessionId> into the
   // transcript view.  Only polls while at least one run is attached.
