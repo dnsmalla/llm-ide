@@ -73,6 +73,13 @@ if ! claude --version &> /dev/null; then
     echo "    run: claude login"
 fi
 
+# Enable the repo's git hooks (same as `make hooks`). The pre-push hook runs
+# `make regression` when mac/ changes; bypass with `git push --no-verify`.
+if [ -d .githooks ]; then
+    git config core.hooksPath .githooks
+    echo "✅ git hooks enabled (.githooks)"
+fi
+
 echo ""
 echo "========================================="
 echo "🎉 Setup Complete!"
