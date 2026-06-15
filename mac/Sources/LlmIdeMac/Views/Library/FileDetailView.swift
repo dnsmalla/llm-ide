@@ -598,18 +598,15 @@ struct QuickLookDetailView: View {
 ///   2. `internalState != QLPreviewDeactivatedInternalState` — calling
 ///      setPreviewItem while the view is being torn down by its host
 ///
-/// Both can fire when LibraryItemStore.pruneCodeItems() removes items
-/// while a QuickLook preview is on screen: SwiftUI re-renders the
-/// parent list, tears down the old QLPreviewBox (deactivating the
-/// QLPreviewView), and fires updateNSView one final time during the
+/// Both can fire when a `rescan()` (e.g. after `remove(id:)` or a folder
+/// un-link) drops items while a QuickLook preview is on screen: SwiftUI
+/// re-renders the parent list, tears down the old QLPreviewBox (deactivating
+/// the QLPreviewView), and fires updateNSView one final time during the
 /// same layout transaction.
 ///
 /// Defence layers:
 ///   - `dismantleNSView` clears the preview item before teardown
 ///   - `updateNSView` checks file existence + skips same-URL no-ops
-///   - `AppShell.pruneCodeLibrary` defers mutation via
-///     `DispatchQueue.main.async` so it lands after the current
-///     SwiftUI render pass
 private struct QLPreviewBox: NSViewRepresentable {
     let url: URL
 
@@ -622,7 +619,7 @@ private struct QLPreviewBox: NSViewRepresentable {
 
     func updateNSView(_ nsView: QLPreviewView, context: Context) {
         // Guard 1: skip if the file no longer exists on disk.
-        // pruneCodeItems() can delete the backing file while the
+        // A delete (remove(id:)) can remove the backing file while the
         // preview is on screen.
         guard FileManager.default.fileExists(atPath: url.path) else { return }
 

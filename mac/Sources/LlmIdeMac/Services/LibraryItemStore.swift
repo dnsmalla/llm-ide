@@ -34,9 +34,10 @@ final class LibraryItemStore {
             .appendingPathComponent("LLM IDE/library_items.json")
     }
 
-    /// The live index now comes from `rescan()` against the bound project.
-    /// `load()`/`save()`/`StoreFile` are retained ONLY for the one-time
-    /// legacy migration (see `migrateLegacyIndexIfNeeded`).
+    /// The live index now comes from `rescan()` against the bound project
+    /// and never persists.  `storeURL`/`StoreFile` are retained ONLY to
+    /// DECODE the legacy `library_items.json` during the one-time migration
+    /// (see `migrateLegacyIndexIfNeeded`).
     init() {}
 
     func items(for category: LibraryItem.Category) -> [LibraryItem] {
@@ -132,7 +133,7 @@ final class LibraryItemStore {
     /// referenced in place, never copied).  Each file becomes a `.code`
     /// item with `folderOrigin` = the folder's name so the sidebar groups
     /// it.  Applies the same noise-dir + code-relevance filters as the scan.
-    func externalFolderItems() -> [LibraryItem] {
+    private func externalFolderItems() -> [LibraryItem] {
         let fm = FileManager.default
         var result: [LibraryItem] = []
         for path in externalCodeFolders {
@@ -199,17 +200,28 @@ final class LibraryItemStore {
     /// to persist it, then rescans.
     func addFolder(url: URL, category: LibraryItem.Category) {
         guard category == .code else { return }
-        let path = url.standardizedFileURL.path
+        let path = Self.standardize(url.path)
         guard !externalCodeFolders.contains(path) else { return }
         externalCodeFolders.append(path)
         onExternalCodeFoldersChanged?(externalCodeFolders)
         rescan()
     }
 
+    /// The single place external-folder paths are normalized.  Standardizes
+    /// each path (resolves `..`, `~`, trailing slash) so membership checks and
+    /// dedup compare standardized-vs-standardized — avoiding duplicate refs
+    /// that differ only by a trailing slash or unresolved component.
+    static func standardize(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
     private static func dedupePreservingOrder(_ paths: [String]) -> [String] {
         var seen = Set<String>()
         var out: [String] = []
-        for p in paths where seen.insert(p).inserted { out.append(p) }
+        for raw in paths {
+            let p = standardize(raw)
+            if seen.insert(p).inserted { out.append(p) }
+        }
         return out
     }
 
@@ -258,9 +270,30 @@ final class LibraryItemStore {
         "csv", "tsv"
     ]
 
+    /// Delete a single indexed item under the single-source model.  Since
+    /// `items` is a derived scan, mutating it in memory is futile (the next
+    /// `rescan()` resurrects the file) — the deletion has to happen on disk.
+    ///
+    ///   - Item INSIDE the bound project → delete the backing file from disk,
+    ///     then `rescan()` so `items` reflects the removal.
+    ///   - Item in an EXTERNAL referenced folder (not inside the project) →
+    ///     NO-OP.  We never delete the user's external files; deleting an
+    ///     individual file out of a referenced code repo isn't supported.
+    ///     Whole-folder un-linking goes through `removeFolder(...)`.
     func remove(id: String) {
-        items.removeAll { $0.id == id }
-        save()
+        guard let root = projectRoot,
+              let item = items.first(where: { $0.id == id }) else { return }
+        // External (out-of-project) files are referenced in place — never
+        // delete the user's file. Single-file delete is unsupported for them.
+        guard ProjectPaths.isInside(item.url, root: root) else { return }
+        do {
+            try FileManager.default.removeItem(at: item.url)
+        } catch {
+            os_log(.error, "LibraryItemStore: failed to delete %{public}@: %{public}@",
+                   item.path, "\(error)")
+            return
+        }
+        rescan()
     }
 
     /// Un-link the external code folder(s) whose basename matches
@@ -296,53 +329,9 @@ final class LibraryItemStore {
         rescan()
     }
 
-    /// Drops stale code items whose folder group is tracked by a
-    /// saved GitLab/GitHub project but whose on-disk path no longer
-    /// matches the active clone location.
-    ///
-    /// Decision per item (code category only — other categories
-    /// untouched):
-    ///   1. Path starts with an active clone path → KEEP. Strong
-    ///      signal; always wins.
-    ///   2. folderOrigin matches a tracked clone name AND we have
-    ///      active clones → DROP. The item belonged to an earlier
-    ///      clone at a different path; the Library tree would mix
-    ///      old + new and widen its commonAncestor up to `~/`.
-    ///   3. Otherwise → KEEP. User added this via Library "+", not
-    ///      a clone — we have no clone-path to compare against.
-    func pruneCodeItems(allowedFolders: Set<String>, allowedPathPrefixes: Set<String>) {
-        let before = items.count
-        items.removeAll { item in
-            guard item.category == .code else { return false }
-            // Drop items that aren't code-relevant (images, binaries,
-            // files inside build / cache dirs). Catches items added
-            // before the addFolder filter existed.
-            let itemURL = URL(fileURLWithPath: item.path)
-            if itemURL.pathComponents.contains(where: Self.noiseDirectoryNames.contains) {
-                return true
-            }
-            if !Self.isCodeRelevant(url: itemURL) { return true }
-            // Match on a directory boundary (trailing "/") so an allowed
-            // "/a/proj" doesn't also shield "/a/proj-2/…".
-            if allowedPathPrefixes.contains(where: { prefix in
-                guard !prefix.isEmpty else { return false }
-                let dir = prefix.hasSuffix("/") ? prefix : prefix + "/"
-                return item.path == prefix || item.path.hasPrefix(dir)
-            }) {
-                return false
-            }
-            if let origin = item.folderOrigin,
-               allowedFolders.contains(origin),
-               !allowedPathPrefixes.isEmpty {
-                return true
-            }
-            return false
-        }
-        if items.count != before { save() }
-    }
-
-    /// On-disk envelope. New writes always use this shape; legacy
-    /// bare-array files still decode through the fallback in `load()`.
+    /// On-disk envelope used ONLY to DECODE the legacy `library_items.json`
+    /// during the one-time migration (see `decodeLegacyItems`).  The live
+    /// index no longer persists, so nothing encodes this anymore.
     /// See `docs/reference/persistence.md` for the migration policy.
     private struct StoreFile: Codable {
         var storeVersion: Int = 1
@@ -417,23 +406,6 @@ final class LibraryItemStore {
                        url.path, "\(error)")
             }
             return nil
-        }
-    }
-
-    private func save() {
-        guard let url = storeURL else {
-            os_log(.error, "LibraryItemStore: applicationSupportDirectory unavailable, skipping save")
-            return
-        }
-        let dir = url.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let file = StoreFile(items: items)
-        do {
-            let data = try AppJSON.encoder.encode(file)
-            try data.write(to: url)
-        } catch {
-            os_log(.error, "LibraryItemStore: failed to save index: %{public}@",
-                   error.localizedDescription)
         }
     }
 }

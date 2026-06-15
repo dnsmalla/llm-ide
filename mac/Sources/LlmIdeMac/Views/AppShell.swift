@@ -189,13 +189,10 @@ struct AppShell: View {
         }
         .onAppear {
             bindLibraryStore()
-            pruneCodeLibrary()
             seedLocalCodeFolders()
             redirectIfSectionHidden()
         }
-        .onChange(of: config.gitLabSavedProjects)     { _, _ in pruneCodeLibrary() }
-        .onChange(of: config.gitHubSavedRepos)        { _, _ in pruneCodeLibrary() }
-        .onChange(of: config.localCodeFolders)        { _, _ in pruneCodeLibrary(); seedLocalCodeFolders() }
+        .onChange(of: config.localCodeFolders)        { _, _ in seedLocalCodeFolders() }
         .onChange(of: config.hiddenSidebarSections)   { _, _ in redirectIfSectionHidden() }
         .task { await checkRecovery() }
         .task { await checkLegacyPrompt() }
@@ -547,52 +544,6 @@ struct AppShell: View {
         }
     }
 
-    private func pruneCodeLibrary() {
-        var names = Set<String>()
-        var slugs = Set<String>()
-        var paths = Set<String>()
-
-        for p in config.gitLabSavedProjects {
-            let trimmed = p.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { names.insert(trimmed) }
-            if let path = p.localPath {
-                slugs.insert(URL(fileURLWithPath: path).lastPathComponent)
-                paths.insert(path)
-            }
-        }
-        for r in config.gitHubSavedRepos {
-            let trimmed = r.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { names.insert(trimmed) }
-            if let path = r.localPath {
-                slugs.insert(URL(fileURLWithPath: path).lastPathComponent)
-                paths.insert(path)
-            }
-        }
-        // Local code folders are always allowed — they're user-managed, not
-        // tied to any GitLab/GitHub entry.
-        for path in config.localCodeFolders {
-            slugs.insert(URL(fileURLWithPath: path).lastPathComponent)
-            paths.insert(path)
-        }
-        let allowed = names.union(slugs)
-        let prefixes = paths
-        // Defer the mutation to the next run-loop pass so it never fires
-        // inside a SwiftUI render cycle.  Mutating @Observable state
-        // synchronously during a layout pass triggers a synchronous
-        // re-render of every observing view — including QLPreviewBox —
-        // which crashes QLPreviewView via _QLRaiseAssert if a QuickLook
-        // document is currently on screen.
-        //
-        // Task { @MainActor } can still land inside the same CA
-        // transaction if the run loop hasn't yielded. Use GCD's
-        // DispatchQueue.main.async which guarantees a full run-loop
-        // iteration boundary — the QLPreviewView update completes
-        // before the prune mutates the item list.
-        DispatchQueue.main.async { [itemStore] in
-            itemStore.pruneCodeItems(allowedFolders: allowed, allowedPathPrefixes: prefixes)
-        }
-    }
-
     /// Bind the Library store to the active project root (single source of
     /// truth) and seed its external code-folder references from
     /// `config.localCodeFolders`.  Also installs the write-back so any
@@ -603,8 +554,8 @@ struct AppShell: View {
         // Persist store-originated external-folder mutations back into the
         // durable config list.  AppShell mediates config ↔ store so the
         // store stays free of an AppConfig dependency.
-        itemStore.onExternalCodeFoldersChanged = { [config] paths in
-            config.localCodeFolders = paths
+        itemStore.onExternalCodeFoldersChanged = { [weak config] paths in
+            config?.localCodeFolders = paths
         }
         let root = projectStore.activeProject
             .map { URL(fileURLWithPath: $0.localPath) }

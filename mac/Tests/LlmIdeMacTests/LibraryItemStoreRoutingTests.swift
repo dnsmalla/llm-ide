@@ -236,6 +236,58 @@ struct LibraryItemStoreRoutingTests {
         #expect(!store.items(for: .code).contains { $0.name == "lib.swift" })
     }
 
+    // MARK: - remove(id:) deletes the in-project file from disk
+
+    /// Under scan-as-index, remove(id:) must delete the backing file on disk;
+    /// an in-memory-only remove would be resurrected by the next rescan().
+    @Test func removeInProjectFileDeletesFromDiskAndIndex() throws {
+        let root = try makeProject(files: ["notes/scratch.md": "x"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = LibraryItemStore()
+        store.bindProject(root: root)
+
+        let noteURL = root.appendingPathComponent("notes/scratch.md")
+        let item = try #require(store.items(for: .notes).first { $0.name == "scratch.md" })
+        #expect(FileManager.default.fileExists(atPath: noteURL.path))
+
+        store.remove(id: item.id)
+
+        // File is gone from disk and from the index.
+        #expect(!FileManager.default.fileExists(atPath: noteURL.path))
+        #expect(!store.items(for: .notes).contains { $0.name == "scratch.md" })
+
+        // A rescan must NOT resurrect it (the bug being guarded against).
+        store.rescan()
+        #expect(!store.items(for: .notes).contains { $0.name == "scratch.md" })
+    }
+
+    /// remove(id:) on an external referenced file is a no-op: we never delete
+    /// the user's out-of-project files (whole-folder removal goes through
+    /// removeFolder).
+    @Test func removeExternalFileIsNoOp() throws {
+        let root = try makeProject()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let extRepo = FileManager.default.temporaryDirectory
+            .appendingPathComponent("llmide-repo-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: extRepo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: extRepo) }
+        let extFile = extRepo.appendingPathComponent("lib.swift")
+        try "import Foundation".write(to: extFile, atomically: true, encoding: .utf8)
+
+        let store = LibraryItemStore()
+        store.bindProject(root: root)
+        store.addFolder(url: extRepo, category: .code)
+        let item = try #require(store.items(for: .code).first { $0.name == "lib.swift" })
+
+        store.remove(id: item.id)
+
+        // The user's external file is untouched and still indexed.
+        #expect(FileManager.default.fileExists(atPath: extFile.path))
+        #expect(store.items(for: .code).contains { $0.name == "lib.swift" })
+    }
+
     /// The relocate contract: removeFolder(old) then addFolder(new) leaves
     /// only the new folder referenced — the old ref must not linger.
     @Test func relocateClearsOldRefAndKeepsOnlyNew() throws {

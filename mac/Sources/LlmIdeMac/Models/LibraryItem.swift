@@ -1,7 +1,6 @@
 import Foundation
 
 struct LibraryItem: Identifiable, Codable, Hashable {
-    var id: String = UUID().uuidString
     var name: String
     var path: String
     var category: Category
@@ -9,6 +8,14 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     /// Non-nil when this file was imported as part of a folder import.
     /// Stores the display name of the root folder so files can be grouped.
     var folderOrigin: String? = nil
+
+    /// Identity is DERIVED from `path` (not a stored random UUID) so it is
+    /// STABLE across rescans.  `items` is now a scan of the project folder,
+    /// rebuilt on every `rescan()`; a fresh `UUID()` per construction would
+    /// churn identity on each scan, breaking SwiftUI list diffing and
+    /// id-based lookups (e.g. `remove(id:)`).  Not a `CodingKey`, so legacy
+    /// JSON carrying an "id" key still decodes (the key is simply ignored).
+    var id: String { path }
 
     var url: URL { URL(fileURLWithPath: path) }
     var ext: String { url.pathExtension.lowercased() }
@@ -32,6 +39,7 @@ struct LibraryItem: Identifiable, Codable, Hashable {
 
     }
 
-    static func == (lhs: LibraryItem, rhs: LibraryItem) -> Bool { lhs.id == rhs.id }
-    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    // Equality/identity by path (== `id`), consistent with the derived id.
+    static func == (lhs: LibraryItem, rhs: LibraryItem) -> Bool { lhs.path == rhs.path }
+    func hash(into hasher: inout Hasher) { hasher.combine(path) }
 }
