@@ -69,6 +69,15 @@ final class RepoManager {
         log.info("repo_pulled path=\(repoURL.path, privacy: .public)")
     }
 
+    // MARK: - Fetch
+
+    func fetch(at repoURL: URL, token: String, backend: Backend = .gitlab, remote: String = "origin") async throws {
+        // Defensively strip any baked-in credentials, then authenticate via env.
+        try await stripRemoteCredentials(at: repoURL, remote: remote)
+        _ = try await git(["fetch", remote], cwd: repoURL, token: token, backend: backend)
+        log.info("repo_fetched path=\(repoURL.path, privacy: .public)")
+    }
+
     // MARK: - Branch operations
 
     func createAndCheckout(branch: String, at repoURL: URL, from base: String) async throws {

@@ -108,6 +108,12 @@ struct AppShell: View {
 
     /// Working directory for new terminal tabs.
     private var projectDirectory: URL {
+        // Prefer the active Source Control repo so the terminal's git matches
+        // the SCM panel; fall back to the active project folder, then home.
+        if let repo = config.activeRepoLocalURL,
+           FileManager.default.fileExists(atPath: repo.path) {
+            return repo
+        }
         if let path = projectStore.activeProject?.localPath,
            !path.isEmpty,
            FileManager.default.fileExists(atPath: path) {

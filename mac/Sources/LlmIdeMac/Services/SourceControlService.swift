@@ -16,6 +16,14 @@ final class SourceControlService {
     private(set) var state = State()
     private let repo: RepoManager
 
+    /// Resolves the active repo's auth backend + token. Set by the view
+    /// (which owns AppConfig) so this service stays config-agnostic. Returns
+    /// nil when the repo has no saved credentials.
+    var resolveCredentials: ((URL) -> (token: String, backend: RepoManager.Backend)?)?
+
+    /// True while a remote/branch operation is in flight (drives UI disabling).
+    private(set) var isBusy = false
+
     /// Designated initialiser for injection (tests, previews, etc.)
     init(repo: RepoManager) { self.repo = repo }
 
@@ -86,6 +94,61 @@ final class SourceControlService {
 
     func commit(root: URL, message: String) async {
         do { try await repo.commit(at: root, message: message) }
+        catch { state.error = error.localizedDescription }
+        await refresh(root: root)
+    }
+
+    // MARK: - Remote operations
+
+    /// Pull (--ff-only) from origin using the repo's saved credentials.
+    func pull(root: URL) async {
+        guard let c = resolveCredentials?(root), !c.token.isEmpty else {
+            state.error = "No credentials configured for this repo."; return
+        }
+        isBusy = true; defer { isBusy = false }
+        do { try await repo.pull(at: root, token: c.token, backend: c.backend) }
+        catch { state.error = error.localizedDescription }
+        await refresh(root: root)
+    }
+
+    /// Push the current branch (with upstream tracking) to origin.
+    func push(root: URL) async {
+        guard let c = resolveCredentials?(root), !c.token.isEmpty else {
+            state.error = "No credentials configured for this repo."; return
+        }
+        guard let branch = state.branch else { state.error = "No branch to push."; return }
+        isBusy = true; defer { isBusy = false }
+        do { try await repo.push(at: root, branch: branch, token: c.token, backend: c.backend) }
+        catch { state.error = error.localizedDescription }
+        await refresh(root: root)
+    }
+
+    /// Fetch from origin (no merge), then refresh status / ahead-behind.
+    func sync(root: URL) async {
+        guard let c = resolveCredentials?(root), !c.token.isEmpty else {
+            state.error = "No credentials configured for this repo."; return
+        }
+        isBusy = true; defer { isBusy = false }
+        do { try await repo.fetch(at: root, token: c.token, backend: c.backend) }
+        catch { state.error = error.localizedDescription }
+        await refresh(root: root)
+    }
+
+    // MARK: - Branch operations
+
+    /// Local branch names (no leading marker), via `git branch --format`.
+    func listBranches(root: URL) async -> [String] {
+        guard let out = try? await repo.runGit(
+            ["branch", "--format=%(refname:short)"], at: root) else { return [] }
+        return out.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// Check out an existing local branch, then refresh.
+    func checkout(root: URL, branch: String) async {
+        isBusy = true; defer { isBusy = false }
+        do { _ = try await repo.runGit(["checkout", branch], at: root) }
         catch { state.error = error.localizedDescription }
         await refresh(root: root)
     }

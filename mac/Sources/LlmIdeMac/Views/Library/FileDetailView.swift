@@ -171,11 +171,63 @@ struct ImageDetailView: View {
 struct CodeDetailView: View {
     let url: URL
     @EnvironmentObject private var theme: ThemeStore
+    @EnvironmentObject private var config: AppConfig
+
+    @State private var changedLines: [Int: GitGutter.Mark] = [:]
 
     var body: some View {
-        EditableTextDetailView(url: url) { content in
-            CodeWebView(code: content, language: url.pathExtension, isDark: theme.current.isDark)
+        EditableTextDetailView(url: url, onSaved: { await refreshGutter() }) { content in
+            CodeWebView(code: content,
+                        language: url.pathExtension,
+                        isDark: theme.current.isDark,
+                        changedLines: changedLines)
         }
+        .task(id: url) { await refreshGutter() }
+    }
+
+    /// Compute git change markers for `url`'s containing repo. No-op (empty
+    /// map) when the file isn't inside a git repo — never blocks the editor.
+    @MainActor
+    private func refreshGutter() async {
+        guard let repo = Self.containingRepo(of: url, preferred: config.activeRepoLocalURL) else {
+            changedLines = [:]
+            return
+        }
+        let relPath = Self.relativePath(of: url, inside: repo)
+        let manager = RepoManager()
+        let marks = await GitGutter.changedLines(repo: repo, filePath: relPath) { args, cwd in
+            try await manager.runGit(args, at: cwd)
+        }
+        changedLines = marks
+    }
+
+    /// Resolve the git repo that contains `url`: prefer `preferred` when the
+    /// file lives inside it, else walk up parent directories looking for `.git`.
+    private static func containingRepo(of url: URL, preferred: URL?) -> URL? {
+        let filePath = url.standardizedFileURL.path
+        if let preferred {
+            let root = preferred.standardizedFileURL.path
+            if filePath == root || filePath.hasPrefix(root + "/") { return preferred }
+        }
+        var dir = url.standardizedFileURL.deletingLastPathComponent()
+        let fm = FileManager.default
+        while true {
+            let gitPath = dir.appendingPathComponent(".git").path
+            if fm.fileExists(atPath: gitPath) { return dir }
+            let parent = dir.deletingLastPathComponent()
+            if parent.path == dir.path { return nil }  // reached filesystem root
+            dir = parent
+        }
+    }
+
+    /// Path of `url` relative to `repo` (falls back to last path component).
+    private static func relativePath(of url: URL, inside repo: URL) -> String {
+        let root = repo.standardizedFileURL.path
+        let file = url.standardizedFileURL.path
+        if file.hasPrefix(root + "/") {
+            return String(file.dropFirst(root.count + 1))
+        }
+        return url.lastPathComponent
     }
 }
 
@@ -187,6 +239,7 @@ struct CodeDetailView: View {
 /// Tracks dirty state and saves to disk via Cmd+S or the Save button.
 struct EditableTextDetailView<Preview: View>: View {
     let url: URL
+    var onSaved: (() async -> Void)? = nil
     let preview: (String) -> Preview
 
     @State private var content: String = ""
@@ -346,6 +399,7 @@ struct EditableTextDetailView<Preview: View>: View {
         do {
             try content.write(to: url, atomically: true, encoding: .utf8)
             savedContent = content
+            await onSaved?()
         } catch {
             saveError = "Save failed: \(error.localizedDescription)"
         }
@@ -376,6 +430,7 @@ struct CodeWebView: NSViewRepresentable {
     let code: String
     let language: String
     let isDark: Bool
+    var changedLines: [Int: GitGutter.Mark] = [:]
 
     func makeNSView(context: Context) -> WKWebView {
         let wv = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
@@ -388,24 +443,8 @@ struct CodeWebView: NSViewRepresentable {
         wv.loadHTMLString(html(), baseURL: nil)
     }
 
-    /// Map a file extension to the highlight.js language id. Hint only —
-    /// hljs.highlightAuto() handles unknown extensions reasonably.
-    private static let hljsLanguageMap: [String: String] = [
-        "swift": "swift", "ts": "typescript", "tsx": "typescript",
-        "js": "javascript", "mjs": "javascript", "cjs": "javascript", "jsx": "javascript",
-        "py": "python", "rb": "ruby", "go": "go", "rs": "rust",
-        "java": "java", "kt": "kotlin",
-        "c": "c", "h": "c", "cpp": "cpp", "hpp": "cpp", "cc": "cpp",
-        "m": "objectivec", "mm": "objectivec",
-        "json": "json", "md": "markdown", "yml": "yaml", "yaml": "yaml",
-        "sh": "bash", "bash": "bash", "zsh": "bash",
-        "html": "xml", "css": "css", "scss": "scss",
-        "sql": "sql", "toml": "ini", "ini": "ini", "xml": "xml",
-        "env": "bash", "dockerfile": "dockerfile", "makefile": "makefile",
-    ]
-
     private var hljsLanguage: String {
-        Self.hljsLanguageMap[language.lowercased()] ?? ""
+        HljsLanguage.id(for: language)
     }
 
     // highlight.js v11.9.0 is vendored under Resources/ and inlined below —
@@ -441,6 +480,13 @@ struct CodeWebView: NSViewRepresentable {
             .replacingOccurrences(of: ">", with: "&gt;")
 
         let classAttr = hljsLanguage.isEmpty ? "" : " class=\"language-\(hljsLanguage)\""
+
+        // Serialize the change map into a JS object literal: { lineNo: "g-add"|"g-mod" }.
+        let markEntries = changedLines
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key):\"\($0.value == .added ? "g-add" : "g-mod")\"" }
+            .joined(separator: ",")
+        let marksLiteral = "{\(markEntries)}"
 
         return """
         <!DOCTYPE html>
@@ -484,6 +530,12 @@ struct CodeWebView: NSViewRepresentable {
           .code-col { padding: 0 24px 0 14px; overflow-x: auto; }
           .ln, .row { display: block; }
           .row:hover, .ln:hover { background: \(hoverBg); }
+          /* Cursor-style change bars on the line-number cell. A transparent
+             baseline border keeps every row's text alignment identical so
+             marked lines don't shift horizontally. */
+          .ln { border-left: 3px solid transparent; }
+          .ln.g-add { border-left-color: #2ea043; }
+          .ln.g-mod { border-left-color: #2f81f7; }
           /* hljs adds .hljs to <code>; reset its own background so the
              page background shows through cleanly. */
           .code-col code, .code-col code.hljs { background: transparent !important; padding: 0; }
@@ -509,9 +561,12 @@ struct CodeWebView: NSViewRepresentable {
             // gutter doesn't show a phantom number.
             if (lines.length && lines[lines.length - 1] === '') lines.pop();
             var ln = document.getElementById('ln');
+            var marks = \(marksLiteral);
             var out = '';
             for (var i = 0; i < lines.length; i++) {
-              out += '<span class="ln">' + (i + 1) + '</span>\\n';
+              var n = i + 1;
+              var cls = marks[n] ? ('ln ' + marks[n]) : 'ln';
+              out += '<span class="' + cls + '">' + n + '</span>\\n';
             }
             ln.innerHTML = out || '<span class="ln">1</span>';
           })();
