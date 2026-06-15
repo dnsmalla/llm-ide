@@ -174,15 +174,64 @@ struct CodeDetailView: View {
     @EnvironmentObject private var config: AppConfig
 
     @State private var changedLines: [Int: GitGutter.Mark] = [:]
+    @State private var blameOn = false
+    @State private var blame: [Int: BlameInfo] = [:]
+    /// Per-file blame can be large; only the first `blameCap` lines are
+    /// annotated so a huge file doesn't bloat the injected HTML.
+    private let blameCap = 5000
 
     var body: some View {
-        EditableTextDetailView(url: url, onSaved: { await refreshGutter() }) { content in
+        EditableTextDetailView(
+            url: url,
+            onSaved: {
+                await refreshGutter()
+                if blameOn { await refreshBlame() }
+            },
+            accessory: {
+                Toggle(isOn: blameToggleBinding) {
+                    Label("Blame", systemImage: "person.text.rectangle")
+                }
+                .toggleStyle(.button)
+                .controlSize(.regular)
+                .help("Show git blame (commit · author) per line")
+            }
+        ) { content in
             CodeWebView(code: content,
                         language: url.pathExtension,
                         isDark: theme.current.isDark,
-                        changedLines: changedLines)
+                        changedLines: changedLines,
+                        blame: blameOn ? blame : [:])
         }
         .task(id: url) { await refreshGutter() }
+    }
+
+    /// Toggling blame on lazily loads annotations; toggling off clears them.
+    private var blameToggleBinding: Binding<Bool> {
+        Binding(
+            get: { blameOn },
+            set: { on in
+                blameOn = on
+                if on { Task { await refreshBlame() } } else { blame = [:] }
+            }
+        )
+    }
+
+    /// Compute `git blame` annotations for `url`, capped at `blameCap` lines.
+    /// No-op (empty map) when the file isn't inside a git repo.
+    @MainActor
+    private func refreshBlame() async {
+        guard let repo = Self.containingRepo(of: url, preferred: config.activeRepoLocalURL) else {
+            blame = [:]
+            return
+        }
+        let relPath = Self.relativePath(of: url, inside: repo)
+        let service = SourceControlService()
+        let lines = await service.blame(root: repo, path: relPath)
+        var map: [Int: BlameInfo] = [:]
+        for l in lines where l.line <= blameCap {
+            map[l.line] = BlameInfo(shortSha: l.shortSha, author: l.author)
+        }
+        blame = map
     }
 
     /// Compute git change markers for `url`'s containing repo. No-op (empty
@@ -237,10 +286,23 @@ struct CodeDetailView: View {
 /// monospaced editor; users toggle to the read-only renderer
 /// (syntax-highlighted code, rendered markdown) via the toolbar.
 /// Tracks dirty state and saves to disk via Cmd+S or the Save button.
-struct EditableTextDetailView<Preview: View>: View {
+struct EditableTextDetailView<Preview: View, Accessory: View>: View {
     let url: URL
     var onSaved: (() async -> Void)? = nil
+    /// Optional toolbar accessory rendered just left of Revert/Save
+    /// (e.g. the code view's blame toggle).
+    let accessory: () -> Accessory
     let preview: (String) -> Preview
+
+    init(url: URL,
+         onSaved: (() async -> Void)? = nil,
+         @ViewBuilder accessory: @escaping () -> Accessory,
+         @ViewBuilder preview: @escaping (String) -> Preview) {
+        self.url = url
+        self.onSaved = onSaved
+        self.accessory = accessory
+        self.preview = preview
+    }
 
     @State private var content: String = ""
     @State private var savedContent: String = ""
@@ -333,6 +395,7 @@ struct EditableTextDetailView<Preview: View>: View {
                 Text(err).font(.caption).foregroundStyle(.red).lineLimit(1).truncationMode(.middle)
             }
             Spacer()
+            accessory()
             Button { showRevertConfirm = true } label: {
                 Label("Revert", systemImage: "arrow.uturn.backward")
                     .foregroundStyle(isDirty ? .red : .secondary)
@@ -426,11 +489,27 @@ struct EditableTextDetailView<Preview: View>: View {
     }
 }
 
+/// Blame annotation for one line in the code gutter.
+struct BlameInfo: Hashable {
+    let shortSha: String
+    let author: String
+}
+
+extension EditableTextDetailView where Accessory == EmptyView {
+    /// Convenience init for callers that don't need a toolbar accessory.
+    init(url: URL,
+         onSaved: (() async -> Void)? = nil,
+         @ViewBuilder preview: @escaping (String) -> Preview) {
+        self.init(url: url, onSaved: onSaved, accessory: { EmptyView() }, preview: preview)
+    }
+}
+
 struct CodeWebView: NSViewRepresentable {
     let code: String
     let language: String
     let isDark: Bool
     var changedLines: [Int: GitGutter.Mark] = [:]
+    var blame: [Int: BlameInfo] = [:]
 
     func makeNSView(context: Context) -> WKWebView {
         let wv = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
@@ -488,6 +567,30 @@ struct CodeWebView: NSViewRepresentable {
             .joined(separator: ",")
         let marksLiteral = "{\(markEntries)}"
 
+        // Serialize blame into a JS object literal: { lineNo: "<sha> · <author>" }.
+        // JSON-escape each label so quotes/backslashes in author names are safe.
+        func jsString(_ s: String) -> String {
+            var out = ""
+            for ch in s {
+                switch ch {
+                case "\\": out += "\\\\"
+                case "\"": out += "\\\""
+                case "\n": out += "\\n"
+                case "\r": out += "\\r"
+                default: out.append(ch)
+                }
+            }
+            return "\"\(out)\""
+        }
+        let blameEntries = blame
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key):\(jsString("\($0.value.shortSha) · \($0.value.author)"))" }
+            .joined(separator: ",")
+        let blameLiteral = "{\(blameEntries)}"
+        let blameOn = blame.isEmpty ? "false" : "true"
+        let blameFg = isDark ? "#6b7280" : "#9ca3af"
+        let blameBg = isDark ? "#1b1f24" : "#f5f5f5"
+
         return """
         <!DOCTYPE html>
         <html>
@@ -503,18 +606,32 @@ struct CodeWebView: NSViewRepresentable {
             line-height: 1.6;
             color: \(fg);
           }
-          /* Grid: [line-number] [code] — line numbers stay aligned even
-             after hljs wraps tokens in nested spans. */
+          /* Grid: [line-number] [blame?] [code] — line numbers stay aligned
+             even after hljs wraps tokens in nested spans. The blame column is
+             only present when blame is toggled on. */
           .editor {
             display: grid;
-            grid-template-columns: auto 1fr;
+            grid-template-columns: \(blame.isEmpty ? "auto 1fr" : "auto auto 1fr");
             min-width: 100%;
           }
-          .ln-col, .code-col {
+          .ln-col, .code-col, .blame-col {
             white-space: pre;
             padding: 0;
             font: inherit;
           }
+          .blame-col {
+            padding: 0 10px;
+            text-align: left;
+            color: \(blameFg);
+            background: \(blameBg);
+            border-right: 1px solid \(border);
+            user-select: none;
+            -webkit-user-select: none;
+            font-size: 11px;
+            max-width: 220px;
+            overflow: hidden;
+          }
+          .blame-col .bl { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
           .ln-col {
             position: sticky;
             left: 0;
@@ -544,6 +661,7 @@ struct CodeWebView: NSViewRepresentable {
         <body>
         <div class="editor">
           <div class="ln-col" id="ln"></div>
+          \(blame.isEmpty ? "" : "<div class=\"blame-col\" id=\"blame\"></div>")
           <div class="code-col"><pre><code\(classAttr) id="code">\(escaped)</code></pre></div>
         </div>
         <script>\(hljsJS)</script>
@@ -569,6 +687,22 @@ struct CodeWebView: NSViewRepresentable {
               out += '<span class="' + cls + '">' + n + '</span>\\n';
             }
             ln.innerHTML = out || '<span class="ln">1</span>';
+            // Blame column (only present when toggled on).
+            var blameOn = \(blameOn);
+            if (blameOn) {
+              var blame = \(blameLiteral);
+              var bEl = document.getElementById('blame');
+              if (bEl) {
+                var bout = '';
+                function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+                for (var j = 0; j < lines.length; j++) {
+                  var bn = j + 1;
+                  var label = blame[bn] || '';
+                  bout += '<span class="bl" title="' + esc(label) + '">' + esc(label) + '</span>\\n';
+                }
+                bEl.innerHTML = bout;
+              }
+            }
           })();
         </script>
         </body>

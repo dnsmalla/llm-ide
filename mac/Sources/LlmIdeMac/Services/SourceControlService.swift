@@ -11,6 +11,8 @@ final class SourceControlService {
         var files: [FileChange] = []
         var isLoading = false
         var error: String?
+        /// Whether the current branch tracks an upstream (drives Publish visibility).
+        var hasUpstream: Bool = false
     }
 
     private(set) var state = State()
@@ -23,6 +25,11 @@ final class SourceControlService {
 
     /// True while a remote/branch operation is in flight (drives UI disabling).
     private(set) var isBusy = false
+
+    /// Bumped on every completed refresh. Views key branch-list reloads off
+    /// this so external/terminal branch changes (and deletes that don't move
+    /// HEAD) are reflected, not just current-branch changes.
+    private(set) var refreshTick = 0
 
     /// Designated initialiser for injection (tests, previews, etc.)
     init(repo: RepoManager) { self.repo = repo }
@@ -39,7 +46,7 @@ final class SourceControlService {
     func refresh(root: URL?) async {
         guard let root, isGitRepo(root) else { state = State(); return }
         state.isLoading = true; state.error = nil
-        defer { state.isLoading = false }
+        defer { state.isLoading = false; refreshTick &+= 1 }
         // Retroactively self-ignore generated artifact dirs so their contents
         // stop flooding status (fixes already-generated trees without regen).
         ensureGeneratedIgnores(root)
@@ -50,6 +57,11 @@ final class SourceControlService {
             state.branch = try? await repo.runGit(
                 ["rev-parse", "--abbrev-ref", "HEAD"], at: root)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+            // Upstream tracking: resolves only when the branch has one (best-effort).
+            let upstream = try? await repo.runGit(
+                ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], at: root)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            state.hasUpstream = !(upstream?.isEmpty ?? true)
             // ahead/behind vs upstream (best-effort; no upstream → 0/0)
             if let counts = try? await repo.runGit(
                 ["rev-list", "--count", "--left-right", "@{u}...HEAD"], at: root) {
@@ -101,15 +113,21 @@ final class SourceControlService {
     /// Commit-all-aware (Cursor-style): if nothing is staged but there ARE
     /// changes, stage everything (`git add -A`) first, then commit; otherwise
     /// commit what's already staged. Refresh afterwards either way.
-    func commit(root: URL, message: String) async {
+    @discardableResult
+    func commit(root: URL, message: String) async -> Bool {
+        var ok = true
         do {
             if stagedFiles.isEmpty && !state.files.isEmpty {
                 _ = try await repo.runGit(["add", "-A"], at: root)
             }
             try await repo.commit(at: root, message: message)
         }
-        catch { state.error = error.localizedDescription }
+        // Capture success locally — `refresh` below resets state.error, so a
+        // caller can't reliably read it afterwards (this is why commitAndPush
+        // checks the return value, not state.error).
+        catch { state.error = error.localizedDescription; ok = false }
         await refresh(root: root)
+        return ok
     }
 
     // MARK: - Remote operations
@@ -165,6 +183,172 @@ final class SourceControlService {
         do { _ = try await repo.runGit(["checkout", branch], at: root) }
         catch { state.error = error.localizedDescription }
         await refresh(root: root)
+    }
+
+    /// Create a new branch off HEAD and switch to it, then refresh.
+    func createBranch(root: URL, name: String) async {
+        await run(["checkout", "-b", name], root)
+    }
+
+    /// Delete a local branch (safe `-d` by default; `-D` when forced), then refresh.
+    func deleteBranch(root: URL, name: String, force: Bool = false) async {
+        await run(["branch", force ? "-D" : "-d", name], root)
+    }
+
+    /// Publish the current branch to origin, setting upstream tracking.
+    /// Reuses the same credential resolution as `push()`.
+    func publish(root: URL) async {
+        guard let c = resolveCredentials?(root), !c.token.isEmpty else {
+            state.error = "No credentials configured for this repo."; return
+        }
+        guard let branch = state.branch else { state.error = "No branch to publish."; return }
+        isBusy = true; defer { isBusy = false }
+        do { try await repo.push(at: root, branch: branch, token: c.token, backend: c.backend) }
+        catch { state.error = error.localizedDescription }
+        await refresh(root: root)
+    }
+
+    // MARK: - History
+
+    /// Commit history for `root`, newest first. Returns [] on error.
+    func log(root: URL, limit: Int = 100) async -> [Commit] {
+        guard let out = try? await repo.runGit(
+            ["log", "--pretty=%H%x1f%h%x1f%an%x1f%ar%x1f%s", "-n", "\(limit)"], at: root)
+        else { return [] }
+        return GitLog.parse(out)
+    }
+
+    /// Unified diff for a single commit. `--format=` suppresses the commit
+    /// header so only the diff body is parsed. Returns [] on error.
+    func commitDiff(root: URL, sha: String) async -> [DiffHunk] {
+        guard let raw = try? await repo.runGit(["show", "--format=", sha], at: root)
+        else { return [] }
+        return UnifiedDiffParser.parse(raw)
+    }
+
+    // MARK: - Stash
+
+    /// One entry from `git stash list`.
+    struct Stash: Identifiable, Hashable {
+        let index: Int
+        let message: String
+        var id: Int { index }
+    }
+
+    /// Pure parser for `git stash list`. Each line looks like
+    /// `stash@{N}: <message>`; we take N as the index and the text after the
+    /// first ": " as the message. Lines that don't match are skipped.
+    nonisolated static func parseStashList(_ out: String) -> [Stash] {
+        out.split(separator: "\n", omittingEmptySubsequences: true).compactMap { line in
+            let s = String(line)
+            guard s.hasPrefix("stash@{"),
+                  let close = s.firstIndex(of: "}"),
+                  let n = Int(s[s.index(s.startIndex, offsetBy: 7)..<close])
+            else { return nil }
+            // Message is whatever follows the first ": " after the ref.
+            let afterClose = s.index(after: close)
+            let rest = s[afterClose...]
+            let message: String
+            if let colon = rest.range(of: ": ") {
+                message = String(rest[colon.upperBound...])
+            } else {
+                message = String(rest).trimmingCharacters(in: .whitespaces)
+            }
+            return Stash(index: n, message: message)
+        }
+    }
+
+    /// Stash working-tree + untracked changes (`stash push -u`), with an
+    /// optional message, then refresh.
+    func stashPush(root: URL, message: String) async {
+        var args = ["stash", "push", "-u"]
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { args += ["-m", trimmed] }
+        isBusy = true; defer { isBusy = false }
+        await run(args, root)
+    }
+
+    /// Current stash entries, newest first. Returns [] on error.
+    func stashList(root: URL) async -> [Stash] {
+        guard let out = try? await repo.runGit(["stash", "list"], at: root) else { return [] }
+        return Self.parseStashList(out)
+    }
+
+    /// Pop a stash by index (`stash pop "stash@{N}"`), then refresh.
+    func stashPop(root: URL, index: Int) async {
+        isBusy = true; defer { isBusy = false }
+        await run(["stash", "pop", "stash@{\(index)}"], root)
+    }
+
+    // MARK: - Amend / Commit & Push / Discard-all
+
+    /// Amend the last commit. A non-empty message replaces the commit message
+    /// (`-m`); an empty message keeps it (`--no-edit`). Refresh afterwards.
+    func amend(root: URL, message: String) async {
+        isBusy = true; defer { isBusy = false }
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let args = trimmed.isEmpty
+            ? ["commit", "--amend", "--no-edit"]
+            : ["commit", "--amend", "-m", trimmed]
+        do { _ = try await repo.runGit(args, at: root) }
+        catch { state.error = error.localizedDescription }
+        await refresh(root: root)
+    }
+
+    /// Commit (commit-all-aware) then push the current branch. Both steps
+    /// refresh on their own.
+    func commitAndPush(root: URL, message: String) async {
+        // Only push if the commit actually succeeded — otherwise we'd publish
+        // a previous/unintended HEAD. Checks the return value, not state.error,
+        // which commit's trailing refresh would have cleared.
+        guard await commit(root: root, message: message) else { return }
+        await push(root: root)
+    }
+
+    /// Discard ALL working-tree changes: restore tracked files
+    /// (`checkout -- .`) and delete untracked files/dirs (`clean -fd`), then
+    /// refresh. DESTRUCTIVE — caller must confirm.
+    func discardAll(root: URL) async {
+        isBusy = true; defer { isBusy = false }
+        do {
+            _ = try await repo.runGit(["checkout", "--", "."], at: root)
+            _ = try await repo.runGit(["clean", "-fd"], at: root)
+        } catch { state.error = error.localizedDescription }
+        await refresh(root: root)
+    }
+
+    // MARK: - Merge / Tags / Blame
+
+    /// Merge `branch` into the current branch, then refresh. On failure
+    /// (e.g. conflicts) the error is captured into `state.error`; the status
+    /// refresh will surface conflicted (`U`) files.
+    func merge(root: URL, branch: String) async {
+        isBusy = true; defer { isBusy = false }
+        do { _ = try await repo.runGit(["merge", branch], at: root) }
+        catch { state.error = error.localizedDescription }
+        await refresh(root: root)
+    }
+
+    /// Tag names, newest first (`git tag --sort=-creatordate`). Returns [] on error.
+    func tags(root: URL) async -> [String] {
+        guard let out = try? await repo.runGit(["tag", "--sort=-creatordate"], at: root)
+        else { return [] }
+        return out.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// Create a lightweight tag at HEAD, then refresh.
+    func createTag(root: URL, name: String) async {
+        await run(["tag", name], root)
+    }
+
+    /// Blame annotations for `path` (relative to `root`), one per line.
+    /// Returns [] on error.
+    func blame(root: URL, path: String) async -> [BlameLine] {
+        guard let out = try? await repo.runGit(
+            ["blame", "--line-porcelain", "--", path], at: root) else { return [] }
+        return GitLog.parseBlame(out)
     }
 
     private func run(_ args: [String], _ root: URL) async {
