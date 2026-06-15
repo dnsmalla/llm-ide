@@ -181,4 +181,93 @@ struct LibraryItemStoreRoutingTests {
         #expect(!FileManager.default.fileExists(
             atPath: root.appendingPathComponent("code/lib.swift").path))
     }
+
+    // MARK: - Folder removal clears the external reference (no resurrection)
+
+    @Test func removeFolderByOriginClearsExternalRefAndRescanDoesNotResurrect() throws {
+        let root = try makeProject()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let extRepo = FileManager.default.temporaryDirectory
+            .appendingPathComponent("llmide-repo-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: extRepo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: extRepo) }
+        try "import Foundation".write(
+            to: extRepo.appendingPathComponent("lib.swift"), atomically: true, encoding: .utf8)
+
+        let store = LibraryItemStore()
+        var persisted: [String] = []
+        store.onExternalCodeFoldersChanged = { persisted = $0 }
+        store.bindProject(root: root)
+        store.addFolder(url: extRepo, category: .code)
+        #expect(store.items(for: .code).contains { $0.name == "lib.swift" })
+
+        // Remove by the sidebar group name (the folder's basename).
+        store.removeFolder(folderOrigin: extRepo.lastPathComponent)
+
+        // The external reference is gone and the owner was notified.
+        #expect(store.externalCodeFolders.isEmpty)
+        #expect(persisted.isEmpty)
+        // rescan() must NOT resurrect the removed folder's items.
+        #expect(!store.items(for: .code).contains { $0.name == "lib.swift" })
+        store.rescan()
+        #expect(!store.items(for: .code).contains { $0.name == "lib.swift" })
+    }
+
+    @Test func removeFolderByPathClearsExternalRef() throws {
+        let root = try makeProject()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let extRepo = FileManager.default.temporaryDirectory
+            .appendingPathComponent("llmide-repo-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: extRepo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: extRepo) }
+        try "import Foundation".write(
+            to: extRepo.appendingPathComponent("lib.swift"), atomically: true, encoding: .utf8)
+
+        let store = LibraryItemStore()
+        store.bindProject(root: root)
+        store.addFolder(url: extRepo, category: .code)
+        #expect(store.items(for: .code).contains { $0.name == "lib.swift" })
+
+        store.removeFolder(underPath: extRepo.standardizedFileURL.path)
+
+        #expect(store.externalCodeFolders.isEmpty)
+        #expect(!store.items(for: .code).contains { $0.name == "lib.swift" })
+    }
+
+    /// The relocate contract: removeFolder(old) then addFolder(new) leaves
+    /// only the new folder referenced — the old ref must not linger.
+    @Test func relocateClearsOldRefAndKeepsOnlyNew() throws {
+        let root = try makeProject()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // Old and new clone locations share the same repo basename "myrepo".
+        let oldParent = FileManager.default.temporaryDirectory
+            .appendingPathComponent("llmide-old-\(UUID().uuidString)", isDirectory: true)
+        let newParent = FileManager.default.temporaryDirectory
+            .appendingPathComponent("llmide-new-\(UUID().uuidString)", isDirectory: true)
+        let oldRepo = oldParent.appendingPathComponent("myrepo", isDirectory: true)
+        let newRepo = newParent.appendingPathComponent("myrepo", isDirectory: true)
+        try FileManager.default.createDirectory(at: oldRepo, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: newRepo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: oldParent) }
+        defer { try? FileManager.default.removeItem(at: newParent) }
+        try "old".write(to: oldRepo.appendingPathComponent("a.swift"), atomically: true, encoding: .utf8)
+        try "new".write(to: newRepo.appendingPathComponent("a.swift"), atomically: true, encoding: .utf8)
+
+        let store = LibraryItemStore()
+        store.bindProject(root: root)
+        store.addFolder(url: oldRepo, category: .code)
+
+        // Relocate: the call sites pass the (shared) basename then add the new path.
+        store.removeFolder(folderOrigin: newRepo.lastPathComponent)
+        store.addFolder(url: newRepo, category: .code)
+
+        // Only the new path is referenced; the old one is gone.
+        #expect(store.externalCodeFolders == [newRepo.standardizedFileURL.path])
+        let codePaths = Set(store.items(for: .code).map(\.path))
+        #expect(codePaths.contains(newRepo.appendingPathComponent("a.swift").path))
+        #expect(!codePaths.contains(oldRepo.appendingPathComponent("a.swift").path))
+    }
 }

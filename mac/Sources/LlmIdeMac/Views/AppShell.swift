@@ -182,10 +182,10 @@ struct AppShell: View {
         // always reflects the current notes/ folder — not just the tab
         // that happens to contain LibraryView.
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
-            if let env = appEnv {
-                itemStore.syncMeetingNotes(from: env.notesOutputFolder)
-                itemStore.syncMeetingTranscripts(from: env.meetingsFolder)
-            }
+            // rescan() is authoritative for the bound project's meetings/ and
+            // notes/ folders — route the refresh through it so we don't race
+            // the scan by mutating items directly.
+            itemStore.rescan()
         }
         .onAppear {
             bindLibraryStore()
@@ -400,11 +400,9 @@ struct AppShell: View {
             self.appEnv = try AppEnvironment(indexRootURL: indexRoot)
             // Populate the NOTES and MEETINGS sections immediately so every
             // view that reads LibraryItemStore has the correct files before
-            // any notification fires.
-            if let env = self.appEnv {
-                itemStore.syncMeetingNotes(from: env.notesOutputFolder)
-                itemStore.syncMeetingTranscripts(from: env.meetingsFolder)
-            }
+            // any notification fires.  rescan() enumerates the bound project's
+            // meetings/ and notes/ folders authoritatively.
+            itemStore.rescan()
         } catch {
             self.envInitError = error.localizedDescription
         }

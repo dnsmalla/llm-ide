@@ -327,14 +327,12 @@ struct FileTreePanel: View {
         }
     }
 
-    /// Sync notes / transcripts from their folders when this panel
-    /// displays those categories — mirrors AppShell's central sync.
+    /// Refresh the index when this panel displays notes / meetings —
+    /// mirrors AppShell's central refresh.  rescan() is authoritative for
+    /// the bound project's notes/ and meetings/ folders.
     private func syncIfNeeded() {
-        if categories.contains(.notes) {
-            store.syncMeetingNotes(from: env.notesOutputFolder)
-        }
-        if categories.contains(.meetings) {
-            store.syncMeetingTranscripts(from: env.meetingsFolder)
+        if categories.contains(.notes) || categories.contains(.meetings) {
+            store.rescan()
         }
     }
 

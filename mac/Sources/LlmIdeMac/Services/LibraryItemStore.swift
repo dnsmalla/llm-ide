@@ -263,21 +263,37 @@ final class LibraryItemStore {
         save()
     }
 
-    /// Removes every item that was imported as part of the named folder group.
-    /// Use when un-linking a code repository or any folder import as a unit.
+    /// Un-link the external code folder(s) whose basename matches
+    /// `folderOrigin` (the sidebar group name).  Authoritative under the
+    /// single-source model: drop the matching `externalCodeFolders`
+    /// reference(s), notify the owner so the durable list is rewritten,
+    /// then rescan so `items` reflects the removal — instead of mutating
+    /// `items` directly (which the next rescan would resurrect).
     func removeFolder(folderOrigin: String) {
-        items.removeAll { $0.folderOrigin == folderOrigin }
-        save()
+        let remaining = externalCodeFolders.filter {
+            URL(fileURLWithPath: $0).lastPathComponent != folderOrigin
+        }
+        guard remaining.count != externalCodeFolders.count else { return }
+        externalCodeFolders = remaining
+        onExternalCodeFoldersChanged?(externalCodeFolders)
+        rescan()
     }
 
-    /// Removes every item that lives under a specific directory path.
-    /// Keyed on the absolute path (not `folderOrigin`, which is the
-    /// basename) so two distinct folders sharing a name — e.g.
-    /// `/a/proj` and `/b/proj` — are removed independently.
+    /// Un-link the external code folder(s) at (or under) a specific
+    /// directory path.  Keyed on the absolute path — not the basename —
+    /// so two distinct folders sharing a name (`/a/proj`, `/b/proj`) are
+    /// removed independently.  Like `removeFolder(folderOrigin:)` this is
+    /// authoritative: it clears the matching `externalCodeFolders`
+    /// reference(s), notifies the owner, then rescans.
     func removeFolder(underPath path: String) {
         let prefix = path.hasSuffix("/") ? path : path + "/"
-        items.removeAll { $0.path == path || $0.path.hasPrefix(prefix) }
-        save()
+        let remaining = externalCodeFolders.filter {
+            $0 != path && !$0.hasPrefix(prefix)
+        }
+        guard remaining.count != externalCodeFolders.count else { return }
+        externalCodeFolders = remaining
+        onExternalCodeFoldersChanged?(externalCodeFolders)
+        rescan()
     }
 
     /// Drops stale code items whose folder group is tracked by a
@@ -323,107 +339,6 @@ final class LibraryItemStore {
             return false
         }
         if items.count != before { save() }
-    }
-
-    /// Sync the NOTES section from `folder`.
-    ///
-    /// Files are added with `folderOrigin` set to the folder's name so
-    /// they appear inside a DisclosureGroup in the sidebar that is
-    /// **collapsed by default** — users expand it to browse their notes.
-    ///
-    /// This is a full clear-and-resync: stale entries (deleted files)
-    /// are removed and the current folder contents replace them.
-    func syncMeetingNotes(from folder: URL) {
-        let fm = FileManager.default
-        var newItems: [LibraryItem] = []
-        let folderName = folder.lastPathComponent   // e.g. "notes"
-        if let enumerator = fm.enumerator(
-            at: folder,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
-        ) {
-            for case let url as URL in enumerator {
-                let ext  = url.pathExtension.lowercased()
-                let name = url.lastPathComponent
-                // Accept .docx (template-generated) and .md (manual/fallback).
-                // Skip .partial.md drafts and the reference template.md itself.
-                let isNote = ext == "docx"
-                    || (ext == "md"
-                        && !name.hasSuffix(".partial.md")
-                        && name != "template.md")
-                guard isNote,
-                      (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
-                else { continue }
-
-                var item = LibraryItem(name: name, path: url.path, category: .notes)
-                item.folderOrigin = folderName   // folderOrigin != nil → collapsed DisclosureGroup
-                newItems.append(item)
-            }
-        }
-        // Skip the rebuild + JSON write when the file set is unchanged (the common
-        // case — a live transcript's content grows but its path doesn't).
-        guard Set(newItems.map(\.path)) != Set(items.filter { $0.category == .notes }.map(\.path))
-        else { return }
-        items.removeAll { $0.category == .notes }
-        items.append(contentsOf: newItems)
-        save()
-    }
-
-    /// Sync the MEETINGS section from `folder` (the `meetings/` directory).
-    ///
-    /// Enumerates recursively so files inside month sub-directories
-    /// (e.g. `2026-05/`) are captured.  Each sub-directory becomes a
-    /// collapsed `folderOrigin` group in the sidebar tree.
-    /// `.partial.md` drafts and `template.md` are excluded.
-    ///
-    /// Full clear-and-resync: stale entries are pruned automatically.
-    func syncMeetingTranscripts(from folder: URL) {
-        let fm = FileManager.default
-        var newItems: [LibraryItem] = []
-        if let enumerator = fm.enumerator(
-            at: folder,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) {
-        for case let url as URL in enumerator {
-            let name = url.lastPathComponent
-            let ext  = url.pathExtension.lowercased()
-            guard ext == "md",
-                  !name.hasSuffix(".partial.md"),
-                  name != "template.md",
-                  (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
-            else { continue }
-
-            // Build a human-readable group name from the path relative to
-            // the meetings root.  The canonical layout is:
-            //   meetings/2026/05/file.md  → group "2026-05"
-            //   meetings/file.md          → no group (nil)
-            //   meetings/other/file.md    → group "other"
-            let parent      = url.deletingLastPathComponent()
-            let grandparent = parent.deletingLastPathComponent()
-            let folderOrigin: String?
-            if parent.path == folder.path {
-                // Direct child of meetings/ — no grouping.
-                folderOrigin = nil
-            } else if grandparent.path == folder.path {
-                // One level deep — use the folder name as-is.
-                folderOrigin = parent.lastPathComponent
-            } else {
-                // Two levels deep (year/month) — combine into "YYYY-MM".
-                folderOrigin = "\(grandparent.lastPathComponent)-\(parent.lastPathComponent)"
-            }
-
-            var item = LibraryItem(name: name, path: url.path, category: .meetings)
-            item.folderOrigin = folderOrigin
-            newItems.append(item)
-        }
-        }
-        // Skip the rebuild + JSON write when the file set is unchanged.
-        guard Set(newItems.map(\.path)) != Set(items.filter { $0.category == .meetings }.map(\.path))
-        else { return }
-        items.removeAll { $0.category == .meetings }
-        items.append(contentsOf: newItems)
-        save()
     }
 
     /// On-disk envelope. New writes always use this shape; legacy
