@@ -52,8 +52,20 @@ final class SourceControlService {
         }
     }
 
-    func diff(root: URL, path: String, staged: Bool) async -> [DiffHunk] {
-        let args = staged ? ["diff", "--cached", "--", path] : ["diff", "--", path]
+    func diff(root: URL, file: FileChange) async -> [DiffHunk] {
+        if file.status == .untracked {
+            let url = root.appendingPathComponent(file.path)
+            guard let content = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+            let lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            // Drop a trailing empty element from a final newline so we don't show a phantom row.
+            let trimmed = (lines.last == "" ? Array(lines.dropLast()) : lines)
+            let rows = trimmed.enumerated().map { i, text in
+                DiffRow(kind: .insert, oldLine: nil, newLine: i + 1, text: text)
+            }
+            guard !rows.isEmpty else { return [] }
+            return [DiffHunk(header: "@@ -0,0 +1,\(rows.count) @@", rows: rows)]
+        }
+        let args = file.staged ? ["diff", "--cached", "--", file.path] : ["diff", "--", file.path]
         guard let raw = try? await repo.runGit(args, at: root) else { return [] }
         return UnifiedDiffParser.parse(raw)
     }

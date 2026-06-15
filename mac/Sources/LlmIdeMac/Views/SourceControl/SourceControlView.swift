@@ -46,7 +46,7 @@ struct SourceControlView: View {
                          ?? files.first(where: { $0.path == sel.path && $0.staged })
             if let resolved {
                 selected = resolved
-                Task { hunks = await scm.diff(root: root, path: resolved.path, staged: resolved.staged) }
+                Task { hunks = await scm.diff(root: root, file: resolved) }
             } else {
                 selected = nil
                 hunks = []
@@ -54,7 +54,7 @@ struct SourceControlView: View {
         }
         .onChange(of: selected) { _, sel in
             guard let sel, let root else { hunks = []; return }
-            Task { hunks = await scm.diff(root: root, path: sel.path, staged: sel.staged) }
+            Task { hunks = await scm.diff(root: root, file: sel) }
         }
         .confirmationDialog("Discard changes?", isPresented: Binding(
             get: { confirmDiscard != nil }, set: { if !$0 { confirmDiscard = nil } }
