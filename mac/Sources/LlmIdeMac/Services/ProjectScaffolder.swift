@@ -108,10 +108,8 @@ enum ProjectScaffolder {
                 withIntermediateDirectories: true)
         }
 
-        // 2. .gitignore — only create if absent so user edits are preserved
-        writeIfAbsent(
-            at: folderURL.appendingPathComponent(".llmide/.gitignore"),
-            content: gitignoreContent)
+        // 2. Root .gitignore — append managed block once; never clobber user rules
+        ensureRootGitignore(at: folderURL)
 
         // 3. .gitkeep markers so empty directories survive `git add .`
         for dir in ["notes", "assets"] {
@@ -165,16 +163,36 @@ enum ProjectScaffolder {
 
     // MARK: - .gitignore
 
-    private static let gitignoreContent = """
-    # LLM IDE — auto-generated / ephemeral files
-    .llmide/sync.json
+    private static let managedGitignoreBlock = """
+    # >>> LLM IDE managed (auto-generated / ephemeral) — edit your own rules above
+    .code-notes/
+    .understand-anything/
     .llmide/cache/
+    .llmide/sync.json
     .llmide/index.sqlite
     .llmide/index.sqlite-shm
     .llmide/index.sqlite-wal
     *.partial.md
-
+    # <<< LLM IDE managed
     """
+
+    /// Ensure the project-root .gitignore contains the managed block. Creates
+    /// the file if absent; appends the block once if the marker is missing;
+    /// no-ops if already present. Never rewrites the user's own rules.
+    private static func ensureRootGitignore(at folderURL: URL) {
+        let url = folderURL.appendingPathComponent(".gitignore")
+        let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        if existing.contains("# >>> LLM IDE managed") { return }
+        let combined: String
+        if existing.isEmpty {
+            combined = managedGitignoreBlock + "\n"
+        } else {
+            let sep = existing.hasSuffix("\n") ? "\n" : "\n\n"
+            combined = existing + sep + managedGitignoreBlock + "\n"
+        }
+        do { try combined.write(to: url, atomically: true, encoding: .utf8) }
+        catch { log.error("gitignore write failed: \(error.localizedDescription, privacy: .public)") }
+    }
 
     // MARK: - README
 
