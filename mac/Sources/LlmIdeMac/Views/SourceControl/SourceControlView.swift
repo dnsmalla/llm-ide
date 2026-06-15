@@ -22,8 +22,23 @@ struct SourceControlView: View {
     @State private var mode: PaneMode = .changes
     @State private var commits: [Commit] = []
     @State private var selectedCommit: Commit?
+    /// In-flight diff load. Cancelled before starting a new one so rapid
+    /// file/commit selection can't race (last-to-finish overwriting the
+    /// current selection's diff).
+    @State private var diffTask: Task<Void, Never>?
 
     private enum PaneMode: String, CaseIterable { case changes = "Changes", history = "History" }
+
+    /// Load `hunks` from an async producer, cancelling any prior load first
+    /// and discarding the result if this load was superseded.
+    private func loadHunks(_ produce: @escaping () async -> [DiffHunk]) {
+        diffTask?.cancel()
+        diffTask = Task {
+            let h = await produce()
+            if Task.isCancelled { return }
+            hunks = h
+        }
+    }
 
     private var root: URL? { config.activeRepoLocalURL }
 
@@ -67,6 +82,9 @@ struct SourceControlView: View {
                 }
                 return nil
             }
+            // Clear any selection carried over from a previous repo.
+            selectedCommit = nil
+            selected = nil
             await scm.refresh(root: root)
         }
         // Fix 1: refresh when window becomes key (picks up external changes)
@@ -96,7 +114,7 @@ struct SourceControlView: View {
                          ?? files.first(where: { $0.path == sel.path && $0.staged })
             if let resolved {
                 selected = resolved
-                Task { hunks = await scm.diff(root: root, file: resolved) }
+                loadHunks { await scm.diff(root: root, file: resolved) }
             } else {
                 selected = nil
                 hunks = []
@@ -104,7 +122,7 @@ struct SourceControlView: View {
         }
         .onChange(of: selected) { _, sel in
             guard let sel, let root else { hunks = []; return }
-            Task { hunks = await scm.diff(root: root, file: sel) }
+            loadHunks { await scm.diff(root: root, file: sel) }
         }
         // History: load the commit list when entering History mode and clear
         // the file selection so file vs commit diffs never clobber each other.
@@ -124,7 +142,7 @@ struct SourceControlView: View {
         // Load the selected commit's diff into the shared right pane.
         .onChange(of: selectedCommit) { _, c in
             guard let c, let root else { hunks = []; return }
-            Task { hunks = await scm.commitDiff(root: root, sha: c.sha) }
+            loadHunks { await scm.commitDiff(root: root, sha: c.sha) }
         }
         .confirmationDialog("Discard changes?", isPresented: Binding(
             get: { confirmDiscard != nil }, set: { if !$0 { confirmDiscard = nil } }
