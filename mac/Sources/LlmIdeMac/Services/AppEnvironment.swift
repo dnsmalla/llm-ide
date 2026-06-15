@@ -80,14 +80,15 @@ final class AppEnvironment {
     ///
     /// - When a project is active this is `<projectRoot>/notes/` — the
     ///   canonical, scaffolded location that the Library's NOTES scan covers.
-    /// - When no project is active (standalone mode) it falls back to
-    ///   `<meetingsFolder>/../notes` so existing behaviour is preserved.
+    /// - When no project is active it falls back to a `notes/` folder under
+    ///   the notes-config default root. In practice `AppEnvironment` is only
+    ///   constructed with an active project (the shell shows WelcomeView
+    ///   otherwise), so this branch is purely defensive.
     var notesOutputFolder: URL {
         if let root = projectRoot {
             return root.appendingPathComponent("notes", isDirectory: true)
         }
-        return notesConfig.currentFolder          // …/notes-extension/meetings
-            .deletingLastPathComponent()          // …/notes-extension
+        return notesConfig.defaultFolder()
             .appendingPathComponent("notes", isDirectory: true)
     }
 
