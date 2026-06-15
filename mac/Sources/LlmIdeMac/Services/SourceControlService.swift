@@ -45,6 +45,7 @@ final class SourceControlService {
                 let nums = counts.split(whereSeparator: { $0 == "\t" || $0 == " " })
                     .compactMap { Int($0) }
                 if nums.count == 2 { state.behind = nums[0]; state.ahead = nums[1] }
+                else { state.ahead = 0; state.behind = 0 }
             } else { state.ahead = 0; state.behind = 0 }
         } catch {
             state.error = error.localizedDescription
