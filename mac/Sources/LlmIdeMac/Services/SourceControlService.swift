@@ -26,6 +26,11 @@ final class SourceControlService {
     /// True while a remote/branch operation is in flight (drives UI disabling).
     private(set) var isBusy = false
 
+    /// Bumped on every completed refresh. Views key branch-list reloads off
+    /// this so external/terminal branch changes (and deletes that don't move
+    /// HEAD) are reflected, not just current-branch changes.
+    private(set) var refreshTick = 0
+
     /// Designated initialiser for injection (tests, previews, etc.)
     init(repo: RepoManager) { self.repo = repo }
 
@@ -41,7 +46,7 @@ final class SourceControlService {
     func refresh(root: URL?) async {
         guard let root, isGitRepo(root) else { state = State(); return }
         state.isLoading = true; state.error = nil
-        defer { state.isLoading = false }
+        defer { state.isLoading = false; refreshTick &+= 1 }
         // Retroactively self-ignore generated artifact dirs so their contents
         // stop flooding status (fixes already-generated trees without regen).
         ensureGeneratedIgnores(root)

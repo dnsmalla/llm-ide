@@ -225,7 +225,9 @@ struct SourceControlView: View {
         .fixedSize()
         .disabled(scm.isBusy)
         .onAppear { Task { branches = await scm.listBranches(root: root) } }
-        .onChange(of: scm.state.branch) { _, _ in
+        // Reload on every refresh (poll/manual/op) so branch deletes and
+        // external/terminal branch changes are reflected, not just HEAD moves.
+        .onChange(of: scm.refreshTick) { _, _ in
             Task { branches = await scm.listBranches(root: root) }
         }
     }
