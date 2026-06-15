@@ -499,7 +499,20 @@ struct RepoIssuesView: View {
         issuesError = nil
         defer { issuesLoading = false }
         do {
-            issues = try await currentClient.listIssues(projectId: project.id, filter: filter, page: 1)
+            // Page through results instead of stopping at page 1 — large
+            // repos were silently truncated to a single backend page
+            // (GitHub 50 / GitLab 100). Dedup by id and cap pages so a
+            // backend that clamps an out-of-range page can't loop forever.
+            var all: [RepoIssue] = []
+            var seen = Set<String>()
+            let maxPages = 20
+            for page in 1...maxPages {
+                let batch = try await currentClient.listIssues(projectId: project.id, filter: filter, page: page)
+                let fresh = batch.filter { seen.insert($0.id).inserted }
+                if fresh.isEmpty { break }   // empty page or repeated content → done
+                all.append(contentsOf: fresh)
+            }
+            issues = all
         } catch {
             issuesError = error.localizedDescription
         }

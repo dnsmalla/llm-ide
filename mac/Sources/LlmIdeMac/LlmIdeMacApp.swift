@@ -57,7 +57,9 @@ struct LlmIdeMacApp: App {
         let cfg = AppConfig.shared
         let store = SessionStore(server: cfg.serverURL)
         let client = LlmIdeAPIClient(baseURL: cfg.serverURL, sessionStore: store)
-        let orchestrator = CaptionOrchestrator()
+        // Honour the user's Capture → poll-interval setting (stored in ms).
+        let orchestrator = CaptionOrchestrator(
+            pollInterval: max(0.05, TimeInterval(cfg.pollIntervalMs) / 1000.0))
         let themeStore = ThemeStore(initial: Theme.find(id: cfg.themeID))
         let router = DeepLinkRouter()
         let mirror = LiveSessionMirror(api: client)
@@ -166,7 +168,7 @@ struct LlmIdeMacApp: App {
                     await session.bootstrap(api: api)
                     autoCapture.start()
                     if config.autoCodeUpdateEnabled { autoCodeUpdate.start() }
-                    autoStartBackend()
+                    if config.backendAutoStart { autoStartBackend() }
                 }
                 // Start / stop the live caption mirror in lockstep
                 // with authentication.  When signed out, polling

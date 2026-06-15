@@ -586,9 +586,23 @@ struct IssueBoardView: View {
         issuesError   = nil
         defer { issuesLoading = false }
         do {
-            let batch = try await gitlab.listIssues(projectId: project.id, filter: filter, page: 1)
-            issues  = batch
-            hasMore = batch.count == 50
+            // Page through all issues instead of showing only the first
+            // backend page. Dedup by id and cap pages so a clamped
+            // out-of-range page can't loop forever.
+            var all: [GitLabIssue] = []
+            var seen = Set<Int>()
+            let maxPages = 20
+            var lastPage = 1
+            for page in 1...maxPages {
+                lastPage = page
+                let batch = try await gitlab.listIssues(projectId: project.id, filter: filter, page: page)
+                let fresh = batch.filter { seen.insert($0.id).inserted }
+                if fresh.isEmpty { break }
+                all.append(contentsOf: fresh)
+            }
+            issues  = all
+            currentPage = lastPage
+            hasMore = false   // everything is loaded now
         } catch {
             issuesError = error.localizedDescription
         }

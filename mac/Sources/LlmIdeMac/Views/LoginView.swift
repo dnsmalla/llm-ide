@@ -16,6 +16,7 @@ struct LoginView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var displayName = ""
+    @State private var revealPassword = false
     @State private var busy = false
     @State private var error: String?
     @State private var serverUnreachable = false   // true iff last error was a network error
@@ -68,7 +69,7 @@ struct LoginView: View {
                       text: $email, secure: false, isEmail: true, field: .email)
                 field(label: "Password",
                       placeholder: mode == .register ? "At least 10 characters" : "",
-                      text: $password, secure: true, field: .password)
+                      text: $password, secure: true, field: .password, revealable: true)
 
                 if let error {
                     errorBanner(message: error)
@@ -223,32 +224,57 @@ struct LoginView: View {
         }
     }
 
+    /// Renders a labelled text/secure field.  When `revealable` is true a
+    /// trailing eye button toggles between a masked `SecureField` and a plain
+    /// `TextField` so the user can show/hide what they typed.
     @ViewBuilder
     private func field(label: String, placeholder: String, text: Binding<String>,
-                       secure: Bool, isEmail: Bool = false, field: Field) -> some View {
+                       secure: Bool, isEmail: Bool = false, field: Field,
+                       revealable: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             SectionLabel(label, size: 11, tracking: 0.4)
-            Group {
-                if secure {
-                    SecureField(placeholder, text: text)
-                        .focused($focused, equals: field)
-                        .onSubmit { submit() }
-                } else {
-                    TextField(placeholder, text: text)
-                        .textContentType(isEmail ? .emailAddress : nil)
-                        .focused($focused, equals: field)
-                        .onSubmit {
-                            switch field {
-                            case .displayName: focused = .email
-                            case .email:       focused = .password
-                            case .password:    submit()
+            HStack(spacing: Spacing.sm) {
+                Group {
+                    if secure && !(revealable && revealPassword) {
+                        SecureField(placeholder, text: text)
+                            .focused($focused, equals: field)
+                            .onSubmit { submit() }
+                    } else if secure {
+                        TextField(placeholder, text: text)
+                            .focused($focused, equals: field)
+                            .onSubmit { submit() }
+                    } else {
+                        TextField(placeholder, text: text)
+                            .textContentType(isEmail ? .emailAddress : nil)
+                            .focused($focused, equals: field)
+                            .onSubmit {
+                                switch field {
+                                case .displayName: focused = .email
+                                case .email:       focused = .password
+                                case .password:    submit()
+                                }
                             }
-                        }
+                    }
+                }
+                .textFieldStyle(.plain)
+                .font(Typography.body)
+                .foregroundStyle(theme.current.text)
+
+                if revealable {
+                    Button {
+                        revealPassword.toggle()
+                        focused = field
+                    } label: {
+                        Image(systemName: revealPassword ? "eye.slash.fill" : "eye.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(theme.current.textMuted)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(revealPassword ? "Hide password" : "Show password")
+                    .accessibilityLabel(revealPassword ? "Hide password" : "Show password")
                 }
             }
-            .textFieldStyle(.plain)
-            .font(Typography.body)
-            .foregroundStyle(theme.current.text)
             .padding(.horizontal, Spacing.md)
             .padding(.vertical, Spacing.sm + 2)
             .background(

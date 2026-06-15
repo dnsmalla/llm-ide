@@ -37,7 +37,7 @@ struct ReviewConfig {
         treeLabel: "Files",
         emptyIcon: "exclamationmark.triangle",
         emptyTitle: "Select a file to view",
-        emptyHint: "Import code or notes to compare against meeting history.\nThe AI will surface conflicts and undecided items.",
+        emptyHint: "Import code or notes, then ask the assistant to compare them\nand flag conflicts or undecided items.",
         emptyHintWidth: 320
     )
 }

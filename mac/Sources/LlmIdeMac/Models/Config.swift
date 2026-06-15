@@ -158,6 +158,13 @@ final class AppConfig: ObservableObject {
     @Published var lastRegressionRegressedCount: Int {
         didSet { defaults.set(lastRegressionRegressedCount, forKey: "lastRegressionRegressedCount") }
     }
+    /// When true, a regressed verdict reopens the fault on disk
+    /// (`fixed` → `open`). Default OFF: the verdict is a heuristic
+    /// text comparison, so the run reports drift but never mutates
+    /// files unless the user opts in.
+    @Published var regressionAutoReopen: Bool {
+        didSet { defaults.set(regressionAutoReopen, forKey: "regressionAutoReopen") }
+    }
 
     // ── Paths (Phase G + H) ───────────────────────────────────────────
     /// Absolute workspace root. Every named subfolder below resolves
@@ -294,7 +301,20 @@ final class AppConfig: ObservableObject {
         self.autoCaptureOnMeeting = defaults.object(forKey: "autoCaptureOnMeeting") as? Bool ?? false
         self.pollIntervalMs = defaults.object(forKey: "pollIntervalMs") as? Int ?? 250
         self.activeCLI = defaults.string(forKey: "activeCLI") ?? AICliTool.claudeCode.rawValue
-        self.defaultModelId = defaults.string(forKey: "defaultModelId") ?? AICliTool.claudeCode.defaultModelId
+        // Migrate a persisted model id forward. A previously-stored choice
+        // can be a retired id (e.g. "claude-opus-4-7") or a tool no longer
+        // selectable (Gemini/Cursor) — sending either to the API would
+        // 404. Coerce anything not in a current selectable tool's list to
+        // a valid model so users who never reopen the picker don't break.
+        let selectableModelIds = Set(AICliTool.selectable.flatMap { $0.models.map(\.id) })
+        let storedModelId = defaults.string(forKey: "defaultModelId")
+        if let storedModelId, selectableModelIds.contains(storedModelId) {
+            self.defaultModelId = storedModelId
+        } else if storedModelId == "claude-opus-4-7" {
+            self.defaultModelId = "claude-opus-4-8"
+        } else {
+            self.defaultModelId = AICliTool.claudeCode.defaultModelId
+        }
         self.lastSeenAppVersion = defaults.string(forKey: "lastSeenAppVersion") ?? ""
         if defaults.object(forKey: "lastRegressionRunAt") != nil {
             let ts = defaults.double(forKey: "lastRegressionRunAt")
@@ -303,6 +323,7 @@ final class AppConfig: ObservableObject {
             self.lastRegressionRunAt = nil
         }
         self.lastRegressionRegressedCount = defaults.integer(forKey: "lastRegressionRegressedCount")
+        self.regressionAutoReopen = defaults.object(forKey: "regressionAutoReopen") as? Bool ?? false
         self.dataRoot = defaults.string(forKey: "dataRoot") ?? ""
         let storedNotes = defaults.string(forKey: "notesSubdir") ?? ""
         self.notesSubdir = storedNotes.isEmpty ? AppConfig.defaultNotesSubdir : storedNotes
@@ -375,7 +396,9 @@ final class AppConfig: ObservableObject {
         self.autoTaskTemplateReviewConflicts = defaults.string(forKey: "autoTaskTemplateReviewConflicts") ?? Self.defaultTemplateReviewConflicts
         self.backendNodePath = defaults.string(forKey: "backendNodePath") ?? ""
         self.backendWorkingDir = defaults.string(forKey: "backendWorkingDir") ?? ""
-        self.backendAutoStart = defaults.object(forKey: "backendAutoStart") as? Bool ?? false
+        // Default ON so the out-of-box experience (backend auto-starts on
+        // launch) is preserved now that the toggle actually gates it.
+        self.backendAutoStart = defaults.object(forKey: "backendAutoStart") as? Bool ?? true
         if let raw = defaults.array(forKey: "hiddenSidebarSections") as? [String] {
             // Drop rawValues that no longer match a real Section case —
             // keeps the persisted set from accumulating dead entries

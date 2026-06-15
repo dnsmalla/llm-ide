@@ -11,6 +11,12 @@ enum AICliTool: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Tools that are actually functional end-to-end. The backend only
+    /// speaks to the Claude CLI / Anthropic API today, so the others are
+    /// hidden from the picker — showing them would silently run Claude
+    /// under another tool's name. Add cases here when real support lands.
+    static var selectable: [AICliTool] { [.claudeCode] }
+
     var displayName: String {
         switch self {
         case .claudeCode: return "Claude Code"
@@ -43,7 +49,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .claudeCode:
             return [
                 AIModel(id: "claude-sonnet-4-6",         displayName: "Sonnet 4.6"),
-                AIModel(id: "claude-opus-4-7",            displayName: "Opus 4.7"),
+                AIModel(id: "claude-opus-4-8",            displayName: "Opus 4.8"),
                 AIModel(id: "claude-haiku-4-5-20251001",  displayName: "Haiku 4.5"),
             ]
         case .cursor:

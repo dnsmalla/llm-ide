@@ -51,7 +51,7 @@ struct RegressionGateTests {
         prompter.replies["steady-q"]  = "steady-answer"    // same → unchanged
 
         let runner = RegressionRunner(prompter: prompter, store: store)
-        await runner.run(at: repo)
+        await runner.run(at: repo, autoReopen: true)
 
         // The run exported a fresh CSV.
         let csvURL = try #require(runner.lastCSVURL)

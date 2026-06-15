@@ -85,7 +85,12 @@ final class RegressionRunner: ObservableObject {
     ///   - only: when non-nil, restrict the run to faults whose URL
     ///     appears in the set. When nil, every `status: fixed` fault
     ///     is re-asked.
-    func run(at repoRoot: URL, only: Set<URL>? = nil) async {
+    ///   - autoReopen: when true, a `.regressed` verdict flips the
+    ///     fault's frontmatter from `fixed` back to `open` on disk.
+    ///     Default `false` — the verdict comparison is heuristic
+    ///     (text-difference), so a run must NOT silently mutate files
+    ///     unless the user explicitly opts in.
+    func run(at repoRoot: URL, only: Set<URL>? = nil, autoReopen: Bool = false) async {
         running = true
         let startedAt = Date()
         defer {
@@ -125,7 +130,7 @@ final class RegressionRunner: ObservableObject {
                 switch v {
                 case .unchanged: appendLog(.info, "  → unchanged")
                 case .regressed:
-                    if (try? store.updateFaultStatus(at: pair.0, to: .open)) != nil {
+                    if autoReopen, (try? store.updateFaultStatus(at: pair.0, to: .open)) != nil {
                         results[idx].autoReopened = true
                         appendLog(.warn, "  → REGRESSED · auto-reopened")
                     } else {
@@ -142,8 +147,8 @@ final class RegressionRunner: ObservableObject {
         appendLog(.info, summary)
 
         // Refresh the faults registry CSV so it always reflects the
-        // post-run state. Regressed faults were auto-reopened above, so
-        // their status column flips to `open` here. Best-effort — a
+        // post-run state. When auto-reopen is on, regressed faults were
+        // flipped to `open` above and that shows here. Best-effort — a
         // failed export must not fail the run.
         lastCSVURL = try? store.exportFaultsCSV(at: repoRoot)
     }
