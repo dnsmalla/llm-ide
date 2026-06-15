@@ -202,6 +202,24 @@ final class SourceControlService {
         await refresh(root: root)
     }
 
+    // MARK: - History
+
+    /// Commit history for `root`, newest first. Returns [] on error.
+    func log(root: URL, limit: Int = 100) async -> [Commit] {
+        guard let out = try? await repo.runGit(
+            ["log", "--pretty=%H%x1f%h%x1f%an%x1f%ar%x1f%s", "-n", "\(limit)"], at: root)
+        else { return [] }
+        return GitLog.parse(out)
+    }
+
+    /// Unified diff for a single commit. `--format=` suppresses the commit
+    /// header so only the diff body is parsed. Returns [] on error.
+    func commitDiff(root: URL, sha: String) async -> [DiffHunk] {
+        guard let raw = try? await repo.runGit(["show", "--format=", sha], at: root)
+        else { return [] }
+        return UnifiedDiffParser.parse(raw)
+    }
+
     private func run(_ args: [String], _ root: URL) async {
         do { _ = try await repo.runGit(args, at: root); await refresh(root: root) }
         catch { state.error = error.localizedDescription }

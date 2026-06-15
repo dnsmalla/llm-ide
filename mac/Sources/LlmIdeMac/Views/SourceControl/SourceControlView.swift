@@ -19,8 +19,20 @@ struct SourceControlView: View {
     @State private var showCreateBranch = false
     @State private var newBranchName = ""
     @State private var confirmDeleteBranch: String?
+    @State private var mode: PaneMode = .changes
+    @State private var commits: [Commit] = []
+    @State private var selectedCommit: Commit?
+
+    private enum PaneMode: String, CaseIterable { case changes = "Changes", history = "History" }
 
     private var root: URL? { config.activeRepoLocalURL }
+
+    /// highlight.js language hint for the right diff pane: "diff" in History
+    /// mode (multi-file commit diff), else the selected file's extension.
+    private var diffLanguage: String {
+        if mode == .history { return "diff" }
+        return (selected?.path as NSString?)?.pathExtension ?? ""
+    }
 
     /// Whether the active repo has saved credentials (enables pull/push/sync).
     private var hasCredentials: Bool {
@@ -28,20 +40,20 @@ struct SourceControlView: View {
         return scm.resolveCredentials?(root) != nil
     }
 
-    var body: some View {
-        Group {
-            if let root {
-                HSplitView {
-                    leftPane(root).frame(minWidth: 280, idealWidth: 340, maxWidth: 520)
-                    UnifiedDiffView(
-                        hunks: hunks,
-                        fileExtension: (selected?.path as NSString?)?.pathExtension ?? ""
-                    ).frame(minWidth: 360)
-                }
-            } else {
-                emptyState
+    @ViewBuilder private var content: some View {
+        if let root {
+            HSplitView {
+                leftPane(root).frame(minWidth: 280, idealWidth: 340, maxWidth: 520)
+                UnifiedDiffView(hunks: hunks, fileExtension: diffLanguage)
+                    .frame(minWidth: 360)
             }
+        } else {
+            emptyState
         }
+    }
+
+    var body: some View {
+        content
         .background(theme.current.body)
         .task(id: root?.path) {
             scm.resolveCredentials = { repo in
@@ -74,6 +86,9 @@ struct SourceControlView: View {
         // Fix 2: re-resolve selection by path after any file-list mutation so the
         // diff pane stays correct after stage/unstage/discard
         .onChange(of: scm.state.files) { _, files in
+            // In History mode the right pane shows a commit diff; don't let a
+            // status refresh clobber it.
+            guard mode == .changes else { return }
             guard let sel = selected else { hunks = []; return }
             guard let root else { return }
             // Prefer the unstaged copy; fall back to staged (e.g. freshly staged file)
@@ -90,6 +105,26 @@ struct SourceControlView: View {
         .onChange(of: selected) { _, sel in
             guard let sel, let root else { hunks = []; return }
             Task { hunks = await scm.diff(root: root, file: sel) }
+        }
+        // History: load the commit list when entering History mode and clear
+        // the file selection so file vs commit diffs never clobber each other.
+        .onChange(of: mode) { _, new in
+            if new == .history {
+                selected = nil
+                if let root { Task { commits = await scm.log(root: root) } }
+            } else {
+                selectedCommit = nil
+                hunks = []
+            }
+        }
+        // Keep the history list fresh on every refresh while in History mode.
+        .onChange(of: scm.refreshTick) { _, _ in
+            if mode == .history, let root { Task { commits = await scm.log(root: root) } }
+        }
+        // Load the selected commit's diff into the shared right pane.
+        .onChange(of: selectedCommit) { _, c in
+            guard let c, let root else { hunks = []; return }
+            Task { hunks = await scm.commitDiff(root: root, sha: c.sha) }
         }
         .confirmationDialog("Discard changes?", isPresented: Binding(
             get: { confirmDiscard != nil }, set: { if !$0 { confirmDiscard = nil } }
@@ -141,14 +176,60 @@ struct SourceControlView: View {
         VStack(spacing: 0) {
             branchHeader(root)
             Divider().background(theme.current.border)
-            ScrollView {
-                if let err = scm.state.error { errorBanner(err) }
-                fileGroup("Staged Changes", scm.stagedFiles, root)
-                fileGroup("Changes", scm.unstagedFiles, root, showStageAll: true)
+            Picker("", selection: $mode) {
+                ForEach(PaneMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.sm)
             Divider().background(theme.current.border)
-            commitBox(root)
+            if mode == .changes {
+                ScrollView {
+                    if let err = scm.state.error { errorBanner(err) }
+                    fileGroup("Staged Changes", scm.stagedFiles, root)
+                    fileGroup("Changes", scm.unstagedFiles, root, showStageAll: true)
+                }
+                Divider().background(theme.current.border)
+                commitBox(root)
+            } else {
+                historyList(root)
+            }
         }
+    }
+
+    @ViewBuilder private func historyList(_ root: URL) -> some View {
+        ScrollView {
+            if let err = scm.state.error { errorBanner(err) }
+            if commits.isEmpty {
+                Text("No commits")
+                    .font(Typography.caption).foregroundStyle(theme.current.textMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Spacing.md).padding(.top, Spacing.sm)
+            }
+            ForEach(commits) { commit in
+                commitRow(commit)
+            }
+        }
+    }
+
+    private func commitRow(_ commit: Commit) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: Spacing.xs) {
+                Text(commit.shortSha)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(theme.current.textMuted)
+                Text(commit.subject)
+                    .font(Typography.caption).foregroundStyle(theme.current.text)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            Text("\(commit.author) · \(commit.relativeDate)")
+                .font(Typography.caption).foregroundStyle(theme.current.textMuted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.xs)
+        .background(selectedCommit == commit ? theme.current.accent.opacity(0.12) : .clear)
+        .contentShape(Rectangle())
+        .onTapGesture { selectedCommit = commit }
     }
 
     private func branchHeader(_ root: URL) -> some View {
