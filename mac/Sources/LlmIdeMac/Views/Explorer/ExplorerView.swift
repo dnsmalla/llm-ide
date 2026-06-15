@@ -8,7 +8,6 @@ import AppKit
 struct ExplorerView: View {
     let api: LlmIdeAPIClient
 
-    @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var projectStore: ProjectStore
     @EnvironmentObject private var config: AppConfig
 

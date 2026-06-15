@@ -84,11 +84,7 @@ struct CodeAssistantPanel: View {
         "sql", "sh", "bash", "html", "css", "scss",
         "vue", "svelte",
     ]
-    private static let skipDirs: Set<String> = [
-        "node_modules", ".git", "dist", "build", ".next", ".cache",
-        ".venv", "venv", "__pycache__", ".pytest_cache", "target",
-        ".llmide-auto",
-    ]
+    private static let skipDirs: Set<String> = IgnoreList.directories
 
     /// Live-tracked rendered width of the panel. Drives the compact-mode
     /// switch so controls collapse gracefully when the user drags the

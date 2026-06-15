@@ -15,7 +15,7 @@ final class SearchService {
 
     private static let maxFileBytes = 1_000_000
     private static let maxLineMatches = 1000
-    private static let noiseNames = FileSystemTree.noiseNames
+    private static let noiseNames = IgnoreList.directories
 
     /// Walk `root`, matching the query against file names and text-file
     /// contents (case-insensitive). Runs the blocking walk off the main

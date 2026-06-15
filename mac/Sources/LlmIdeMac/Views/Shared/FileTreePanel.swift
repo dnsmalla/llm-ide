@@ -312,18 +312,15 @@ struct FileTreePanel: View {
         .onAppear {
             syncIfNeeded()
             rebuildTreeCache()
-            autoExpand()
         }
         .onChange(of: store.items.count) { _, _ in
             rebuildTreeCache()
-            autoExpand()
         }
         // Mirror LibraryView: re-sync and rebuild the tree whenever
         // the meeting index changes (new note file, project switch, etc.).
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
             syncIfNeeded()
             rebuildTreeCache()
-            autoExpand()
         }
     }
 
@@ -471,23 +468,6 @@ struct FileTreePanel: View {
 
     private func buildTrees(for category: LibraryItem.Category) -> [FSNode] {
         buildCategoryTrees(items: store.items(for: category))
-    }
-
-    // MARK: - Auto-expand
-
-    private func autoExpand() {
-        for cat in categories {
-            let all = store.items(for: cat)
-            let grouped = Dictionary(grouping: all.filter { $0.folderOrigin != nil },
-                                     by: { $0.folderOrigin! })
-            for (folderName, items) in grouped {
-                _ = items
-                _ = folderName
-            }
-            // All folders start collapsed; the user expands what they
-            // care about. Auto-expanding the repo root + its immediate
-            // children floods the panel with file rows on every launch.
-        }
     }
 
     // MARK: - File / folder pickers

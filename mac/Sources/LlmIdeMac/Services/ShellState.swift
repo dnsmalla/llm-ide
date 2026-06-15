@@ -113,14 +113,6 @@ extension ShellState.Section {
 
 // Theme-aware tint for the section's SF Symbol. Lives on the enum so
 // the sidebar row and the Sidebar settings card can never drift.
-//
-// Colors follow a category-based scheme so users can tell at a glance
-// which group a section belongs to:
-//   Notes  (blue family)   — Library, Live, Doc Gen
-//   Code   (green family)  — Review Code, Review Doc, Conflicts,
-//                            Auto Tasks, Code Graph, Regression
-//   Data   (purple family) — Issues, Gantt
-//   Neutral                — Settings
 extension ShellState.Section {
     func tint(_ theme: Theme) -> Color {
         switch self {
@@ -147,17 +139,6 @@ extension ShellState.Section {
 
         // ── Neutral ──────────────────────────────────────
         case .settings:   return .gray
-        }
-    }
-
-    /// Category label for the section — used in Help to group sections
-    /// and for visual legend on the sidebar.
-    var category: String {
-        switch self {
-        case .library, .live, .docGen:                               return "Notes"
-        case .explorer, .search, .review, .plans, .conflicts, .sourceControl, .autoCode, .codeGraph, .regression: return "Code"
-        case .issues, .gantt, .visual:                               return "Data"
-        case .settings:                                              return "App"
         }
     }
 }

@@ -5,7 +5,7 @@ struct SearchView: View {
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var config: AppConfig
     @EnvironmentObject private var projectStore: ProjectStore
-    @State private var scm = SearchService()
+    @State private var searchService = SearchService()
     @State private var query = ""
     @State private var results: [SearchService.FileMatch] = []
     @State private var searching = false
@@ -95,7 +95,7 @@ struct SearchView: View {
             try? await Task.sleep(nanoseconds: 250_000_000)
             if Task.isCancelled { return }
             searching = true
-            let r = await scm.search(query: q, root: root)
+            let r = await searchService.search(query: q, root: root)
             if Task.isCancelled { return }
             results = r; searching = false
         }

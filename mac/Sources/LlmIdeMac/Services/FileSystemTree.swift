@@ -10,17 +10,8 @@ enum FileSystemTree {
         var id: String { url.path }
     }
 
-    /// Directories to never show (build/cache/VCS).
-    ///
-    /// Note: `LibraryItemStore.noiseDirectoryNames` carries the same set but
-    /// `LibraryItemStore` is `@MainActor`, so its `static let` is not
-    /// reachable from a nonisolated context. A local copy is inlined here
-    /// instead of referencing the store directly.
-    static let noiseNames: Set<String> = [
-        ".git", "node_modules", ".understand-anything", ".code-notes", ".build",
-        "DerivedData", ".swiftpm", "Pods", "build", "dist", ".next", ".venv",
-        "__pycache__", "target", "vendor", ".gradle", ".idea", ".vscode"
-    ]
+    /// Directories to never show (build/cache/VCS). See `IgnoreList`.
+    static let noiseNames: Set<String> = IgnoreList.directories
 
     /// Children of `dir`, directories first then files, case-insensitive by
     /// name, skipping hidden dotfiles and noise dirs. Empty on unreadable dir.
