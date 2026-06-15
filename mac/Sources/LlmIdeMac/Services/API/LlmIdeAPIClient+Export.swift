@@ -206,16 +206,30 @@ extension LlmIdeAPIClient {
         return resp.content
     }
 
-    func exportMarkdown(content: String, filename: String) throws -> URL {
-        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+    /// Write `content` to a `.md` file and return its URL.
+    ///
+    /// - When `projectRoot` is supplied the file is written into
+    ///   `<projectRoot>/plans/`, creating the directory if needed.
+    /// - When `projectRoot` is nil the file lands in the user's
+    ///   Downloads folder (existing behaviour for the no-project case).
+    func exportMarkdown(content: String, filename: String, projectRoot: URL? = nil) throws -> URL {
+        let fm = FileManager.default
+        let baseDir: URL
+        if let root = projectRoot {
+            let plansDir = root.appendingPathComponent("plans", isDirectory: true)
+            try fm.createDirectory(at: plansDir, withIntermediateDirectories: true)
+            baseDir = plansDir
+        } else {
+            baseDir = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first
+                ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        }
         let safeName = filename
             .replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: ":", with: "-")
-        var dest = downloads.appendingPathComponent("\(safeName).md")
+        var dest = baseDir.appendingPathComponent("\(safeName).md")
         var n = 1
-        while FileManager.default.fileExists(atPath: dest.path) {
-            dest = downloads.appendingPathComponent("\(safeName)-\(n).md")
+        while fm.fileExists(atPath: dest.path) {
+            dest = baseDir.appendingPathComponent("\(safeName)-\(n).md")
             n += 1
         }
         try content.write(to: dest, atomically: true, encoding: .utf8)

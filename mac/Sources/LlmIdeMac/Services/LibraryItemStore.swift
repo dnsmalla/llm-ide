@@ -126,7 +126,11 @@ final class LibraryItemStore {
             }
         }
         scanned.append(contentsOf: externalFolderItems())
-        items = scanned
+        // Dedup by path (preserving order) so an external code folder that
+        // overlaps with a scanned canonical subfolder can't produce two items
+        // with the same path — which would share an id and break SwiftUI ForEach.
+        var seenPaths = Set<String>()
+        items = scanned.filter { seenPaths.insert($0.path).inserted }
     }
 
     /// Index files from each external code-folder reference (folders are

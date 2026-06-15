@@ -7,6 +7,10 @@ final class AppEnvironment {
     let notesConfig: NotesFolderConfig
     let index: MeetingIndex
     let indexer: FolderIndexer
+    /// The active project root, if any.  Stored at init time so that
+    /// `notesOutputFolder` can return `<projectRoot>/notes/` when a project
+    /// is open instead of deriving the path from `meetingsFolder`.
+    private let projectRoot: URL?
 
     /// - Parameter indexRootURL: Directory that contains (or will contain)
     ///   the `.llmide/index.sqlite` file.  Pass the **project root** when
@@ -32,6 +36,7 @@ final class AppEnvironment {
         self.notesConfig = config
         self.index = idx
         self.indexer = indexer
+        self.projectRoot = indexRootURL?.standardizedFileURL
         // Spec §11: auto-rebuild when the on-disk file count diverges
         // from the index by more than max(5, 5%) — covers the case
         // where the user pasted files in via Finder while the app was
@@ -72,11 +77,17 @@ final class AppEnvironment {
     }
 
     /// The folder where formatted meeting notes (NOTES section) are written.
-    /// Always `<projectRoot>/notes/` — one level up from `meetings/` so the
-    /// FolderIndexer (MEETINGS) and the NOTES file-tree scan different dirs.
+    ///
+    /// - When a project is active this is `<projectRoot>/notes/` — the
+    ///   canonical, scaffolded location that the Library's NOTES scan covers.
+    /// - When no project is active (standalone mode) it falls back to
+    ///   `<meetingsFolder>/../notes` so existing behaviour is preserved.
     var notesOutputFolder: URL {
-        notesConfig.currentFolder          // …/notes-extension/meetings
-            .deletingLastPathComponent()   // …/notes-extension
+        if let root = projectRoot {
+            return root.appendingPathComponent("notes", isDirectory: true)
+        }
+        return notesConfig.currentFolder          // …/notes-extension/meetings
+            .deletingLastPathComponent()          // …/notes-extension
             .appendingPathComponent("notes", isDirectory: true)
     }
 

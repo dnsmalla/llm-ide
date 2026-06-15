@@ -5,6 +5,7 @@ struct DocGenEditorPanel: View {
     let api: LlmIdeAPIClient
 
     @EnvironmentObject private var theme: ThemeStore
+    @EnvironmentObject private var projectStore: ProjectStore
     @State private var editableContent: String = ""
 
     var body: some View {
@@ -113,7 +114,11 @@ struct DocGenEditorPanel: View {
                 }
                 .buttonStyle(.plain)
 
-                Button { vm.exportMarkdown(content: content, api: api) } label: {
+                Button {
+                    let root = projectStore.activeProject
+                        .map { URL(fileURLWithPath: $0.localPath) }
+                    vm.exportMarkdown(content: content, api: api, projectRoot: root)
+                } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "arrow.down.circle.fill").font(.system(size: 12))
                         Text("Export .md").font(.callout.weight(.semibold))
