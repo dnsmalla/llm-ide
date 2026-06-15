@@ -8,6 +8,7 @@ struct SourceControlView: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
+    @Environment(\.controlActiveState) private var controlActiveState
     @State private var scm = SourceControlService()
     @State private var selected: FileChange?
     @State private var hunks: [DiffHunk] = []
@@ -29,6 +30,28 @@ struct SourceControlView: View {
         }
         .background(theme.current.body)
         .task(id: root?.path) { await scm.refresh(root: root) }
+        // Fix 1: refresh when window becomes key (picks up external changes)
+        .onChange(of: controlActiveState) { _, new in
+            if new == .key, let root {
+                Task { await scm.refresh(root: root) }
+            }
+        }
+        // Fix 2: re-resolve selection by path after any file-list mutation so the
+        // diff pane stays correct after stage/unstage/discard
+        .onChange(of: scm.state.files) { _, files in
+            guard let sel = selected else { hunks = []; return }
+            guard let root else { return }
+            // Prefer the unstaged copy; fall back to staged (e.g. freshly staged file)
+            let resolved = files.first(where: { $0.path == sel.path && !$0.staged })
+                         ?? files.first(where: { $0.path == sel.path && $0.staged })
+            if let resolved {
+                selected = resolved
+                Task { hunks = await scm.diff(root: root, path: resolved.path, staged: resolved.staged) }
+            } else {
+                selected = nil
+                hunks = []
+            }
+        }
         .onChange(of: selected) { _, sel in
             guard let sel, let root else { hunks = []; return }
             Task { hunks = await scm.diff(root: root, path: sel.path, staged: sel.staged) }
