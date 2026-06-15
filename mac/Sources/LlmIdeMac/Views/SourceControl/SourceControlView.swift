@@ -256,7 +256,7 @@ struct SourceControlView: View {
             Divider().background(theme.current.border)
             if mode == .changes {
                 ScrollView {
-                    if let err = scm.state.error { errorBanner(err) }
+                    errorBanner()
                     fileGroup("Staged Changes", scm.stagedFiles, root)
                     fileGroup("Changes", scm.unstagedFiles, root, showStageAll: true)
                 }
@@ -270,7 +270,7 @@ struct SourceControlView: View {
 
     @ViewBuilder private func historyList(_ root: URL) -> some View {
         ScrollView {
-            if let err = scm.state.error { errorBanner(err) }
+            errorBanner()
             if commits.isEmpty {
                 Text("No commits")
                     .font(Typography.caption).foregroundStyle(theme.current.textMuted)
@@ -528,9 +528,26 @@ struct SourceControlView: View {
         .padding(Spacing.md)
     }
 
-    private func errorBanner(_ msg: String) -> some View {
-        Text(msg).font(Typography.caption).foregroundStyle(theme.current.danger)
+    /// Banner showing the sticky op error (priority) or the transient status
+    /// error. Op errors get a dismiss (×); status errors clear themselves on
+    /// the next refresh, so no button is needed. Returns nothing when both are
+    /// nil.
+    @ViewBuilder private func errorBanner() -> some View {
+        if let msg = scm.state.opError ?? scm.state.error {
+            HStack(alignment: .top, spacing: Spacing.xs) {
+                Text(msg).font(Typography.caption).foregroundStyle(theme.current.danger)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if scm.state.opError != nil {
+                    Button { scm.clearOpError() } label: {
+                        Image(systemName: "xmark").font(.system(size: 10))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(theme.current.textMuted)
+                    .help("Dismiss")
+                }
+            }
             .padding(Spacing.sm).frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private var emptyState: some View {
