@@ -40,24 +40,6 @@ enum Hljs {
             border   = isDark ? "#181a1f" : "#e5e5e5"
         }
     }
-
-    /// CSS shared by both views' `<head>`: the box-sizing reset, the
-    /// html/body background + monospace body font, and the hljs background
-    /// reset so the page background shows through highlighted tokens.
-    /// `fontSize`/`lineHeight` differ slightly between the two views, so they
-    /// are parameters (code: 12.5px/1.6, diff: 12px/1.55).
-    static func sharedCSS(palette p: Palette, fontSize: String, lineHeight: String) -> String {
-        """
-          * { margin:0; padding:0; box-sizing:border-box; }
-          html, body { height:100%; background:\(p.bg); }
-          body {
-            font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
-            font-size: \(fontSize);
-            line-height: \(lineHeight);
-            color: \(p.fg);
-          }
-        """
-    }
 }
 
 /// A WKWebView that renders a self-contained HTML string. Owns the
