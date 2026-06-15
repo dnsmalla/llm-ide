@@ -65,10 +65,20 @@ final class LibraryItemStore {
     /// `onExternalCodeFoldersChanged` — this is an inbound sync, not a
     /// store-originated mutation.  Triggers a rescan when the set changes.
     func setExternalCodeFolders(_ paths: [String]) {
-        let deduped = Self.dedupePreservingOrder(paths)
+        let deduped = Self.dedupePreservingOrder(paths).filter { !isInsideProject($0) }
         guard deduped != externalCodeFolders else { return }
         externalCodeFolders = deduped
         rescan()
+    }
+
+    /// True when `path` resolves to a location inside the bound project root.
+    /// Used to keep in-project folders OUT of `externalCodeFolders`: the
+    /// canonical-subfolder scan already covers them, and a second reference
+    /// would emit the same file twice (matching ids → broken SwiftUI ForEach).
+    /// False when no project is bound (nothing to be "inside").
+    private func isInsideProject(_ path: String) -> Bool {
+        guard let root = projectRoot else { return false }
+        return ProjectPaths.isInside(URL(fileURLWithPath: path), root: root)
     }
 
     // MARK: - Scan-as-index
@@ -205,6 +215,13 @@ final class LibraryItemStore {
     func addFolder(url: URL, category: LibraryItem.Category) {
         guard category == .code else { return }
         let path = Self.standardize(url.path)
+        // A folder inside the active project is already covered by the
+        // canonical-subfolder scan; referencing it externally would emit each
+        // file twice (duplicate path → duplicate id). Re-index instead.
+        if isInsideProject(path) {
+            rescan()
+            return
+        }
         guard !externalCodeFolders.contains(path) else { return }
         externalCodeFolders.append(path)
         onExternalCodeFoldersChanged?(externalCodeFolders)

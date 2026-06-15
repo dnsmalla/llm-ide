@@ -182,6 +182,37 @@ struct LibraryItemStoreRoutingTests {
             atPath: root.appendingPathComponent("code/lib.swift").path))
     }
 
+    // MARK: - In-project overlap never produces duplicate ids
+
+    /// An external code-folder reference that points INSIDE the bound project
+    /// root overlaps the canonical `code/` scan: the same file would be emitted
+    /// once by the subfolder scan and once by externalFolderItems(). Both the
+    /// entry-point guard (rejecting in-project refs) and the rescan() path-dedup
+    /// must ensure `items` carries no two entries with the same id (== path) —
+    /// duplicate Identifiable ids are undefined behavior in SwiftUI ForEach.
+    @Test func externalFolderInsideProjectProducesNoDuplicateIds() throws {
+        let root = try makeProject(files: ["code/main.swift": "import Foundation"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = LibraryItemStore()
+        store.bindProject(root: root)
+
+        // Reference the project's own code/ subtree as an "external" folder.
+        let inProjectCode = root.appendingPathComponent("code", isDirectory: true)
+        store.addFolder(url: inProjectCode, category: .code)
+        // Also force it through the inbound-sync path to cover both entry points.
+        store.setExternalCodeFolders([inProjectCode.path])
+        store.rescan()
+
+        // The overlapping file is still indexed exactly once...
+        #expect(store.items(for: .code).filter { $0.name == "main.swift" }.count == 1)
+        // ...and no two items share an id anywhere in the index.
+        let ids = store.items.map(\.id)
+        #expect(Set(ids).count == ids.count)
+        // The in-project ref was rejected, not retained.
+        #expect(store.externalCodeFolders.isEmpty)
+    }
+
     // MARK: - Folder removal clears the external reference (no resurrection)
 
     @Test func removeFolderByOriginClearsExternalRefAndRescanDoesNotResurrect() throws {
