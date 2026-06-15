@@ -40,6 +40,9 @@ final class SourceControlService {
         guard let root, isGitRepo(root) else { state = State(); return }
         state.isLoading = true; state.error = nil
         defer { state.isLoading = false }
+        // Retroactively self-ignore generated artifact dirs so their contents
+        // stop flooding status (fixes already-generated trees without regen).
+        ensureGeneratedIgnores(root)
         do {
             let porcelain = try await repo.runGit(
                 ["status", "--porcelain=v1", "--untracked-files=all"], at: root)
@@ -81,6 +84,9 @@ final class SourceControlService {
     func stage(root: URL, path: String) async { await run(["add", "--", path], root) }
     func unstage(root: URL, path: String) async { await run(["restore", "--staged", "--", path], root) }
 
+    /// Stage everything (`git add -A`), then refresh. Cursor-style "Stage All".
+    func stageAll(root: URL) async { await run(["add", "-A"], root) }
+
     /// Discard working-tree changes. Untracked files are deleted; tracked files
     /// are restored. Caller must confirm — this is destructive.
     func discard(root: URL, file: FileChange) async {
@@ -92,8 +98,16 @@ final class SourceControlService {
         await refresh(root: root)
     }
 
+    /// Commit-all-aware (Cursor-style): if nothing is staged but there ARE
+    /// changes, stage everything (`git add -A`) first, then commit; otherwise
+    /// commit what's already staged. Refresh afterwards either way.
     func commit(root: URL, message: String) async {
-        do { try await repo.commit(at: root, message: message) }
+        do {
+            if stagedFiles.isEmpty && !state.files.isEmpty {
+                _ = try await repo.runGit(["add", "-A"], at: root)
+            }
+            try await repo.commit(at: root, message: message)
+        }
         catch { state.error = error.localizedDescription }
         await refresh(root: root)
     }
@@ -160,5 +174,22 @@ final class SourceControlService {
 
     private func isGitRepo(_ url: URL) -> Bool {
         FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path)
+    }
+
+    /// For each known generated-artifact dir (`.code-notes`, `.understand-anything`),
+    /// if the dir exists but has no `.gitignore`, drop in a self-ignoring `*`
+    /// marker so git stops listing its contents regardless of the repo's root
+    /// .gitignore. Best-effort: never fails the refresh.
+    private func ensureGeneratedIgnores(_ root: URL) {
+        let fm = FileManager.default
+        for dir in [".code-notes", ".understand-anything"] {
+            let dirURL = root.appendingPathComponent(dir, isDirectory: true)
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: dirURL.path, isDirectory: &isDir), isDir.boolValue else { continue }
+            let ignoreURL = dirURL.appendingPathComponent(".gitignore")
+            if !fm.fileExists(atPath: ignoreURL.path) {
+                try? "*\n".write(to: ignoreURL, atomically: true, encoding: .utf8)
+            }
+        }
     }
 }

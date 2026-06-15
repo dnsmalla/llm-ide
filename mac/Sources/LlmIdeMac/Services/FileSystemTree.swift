@@ -17,9 +17,9 @@ enum FileSystemTree {
     /// reachable from a nonisolated context. A local copy is inlined here
     /// instead of referencing the store directly.
     static let noiseNames: Set<String> = [
-        ".git", "node_modules", ".understand-anything", ".build", "DerivedData",
-        ".swiftpm", "Pods", "build", "dist", ".next", ".venv", "__pycache__",
-        "target", "vendor", ".gradle", ".idea", ".vscode"
+        ".git", "node_modules", ".understand-anything", ".code-notes", ".build",
+        "DerivedData", ".swiftpm", "Pods", "build", "dist", ".next", ".venv",
+        "__pycache__", "target", "vendor", ".gradle", ".idea", ".vscode"
     ]
 
     /// Children of `dir`, directories first then files, case-insensitive by

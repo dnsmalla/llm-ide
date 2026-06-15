@@ -99,7 +99,7 @@ struct SourceControlView: View {
             ScrollView {
                 if let err = scm.state.error { errorBanner(err) }
                 fileGroup("Staged Changes", scm.stagedFiles, root)
-                fileGroup("Changes", scm.unstagedFiles, root)
+                fileGroup("Changes", scm.unstagedFiles, root, showStageAll: true)
             }
             Divider().background(theme.current.border)
             commitBox(root)
@@ -165,12 +165,24 @@ struct SourceControlView: View {
         }
     }
 
-    @ViewBuilder private func fileGroup(_ title: String, _ files: [FileChange], _ root: URL) -> some View {
+    @ViewBuilder private func fileGroup(_ title: String, _ files: [FileChange], _ root: URL,
+                                        showStageAll: Bool = false) -> some View {
         if !files.isEmpty {
-            Text("\(title) (\(files.count))")
-                .font(Typography.caption).foregroundStyle(theme.current.textMuted)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Spacing.md).padding(.top, Spacing.sm)
+            HStack(spacing: Spacing.xs) {
+                Text("\(title) (\(files.count))")
+                    .font(Typography.caption).foregroundStyle(theme.current.textMuted)
+                Spacer()
+                if showStageAll {
+                    Button { Task { await scm.stageAll(root: root) } } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(scm.isBusy)
+                    .help("Stage All")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Spacing.md).padding(.top, Spacing.sm)
             ForEach(files) { file in
                 fileRow(file, root)
             }
@@ -210,7 +222,11 @@ struct SourceControlView: View {
                 Task { await scm.commit(root: root, message: msg); message = "" }
             } label: { Text("Commit").frame(maxWidth: .infinity) }
             .buttonStyle(.borderedProminent)
-            .disabled(scm.stagedFiles.isEmpty || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            // Commit-all-aware: enabled when there's a message AND any change
+            // (staged or not) — commit() stages all first if nothing is staged.
+            .disabled(scm.isBusy
+                      || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      || (scm.stagedFiles.isEmpty && scm.unstagedFiles.isEmpty))
         }
         .padding(Spacing.md)
     }

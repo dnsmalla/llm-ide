@@ -10,6 +10,7 @@ struct ExplorerView: View {
 
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var projectStore: ProjectStore
+    @EnvironmentObject private var config: AppConfig
 
     // Lazy tree state: which folders are expanded, and a cache of each
     // expanded folder's children (filled on first expand so repeated
@@ -21,10 +22,13 @@ struct ExplorerView: View {
     @State private var tabs: [URL] = []
     @State private var activeTab: URL?
 
-    /// The active project's local folder, or nil when no project is open.
+    /// Prefer the active CODE repo (matching Source Control / terminal); fall
+    /// back to the active project's local folder. nil when neither is set.
     private var root: URL? {
-        guard let path = projectStore.activeProject?.localPath else { return nil }
-        return URL(fileURLWithPath: path)
+        if let repo = config.activeRepoLocalURL,
+           FileManager.default.fileExists(atPath: repo.path) { return repo }
+        if let path = projectStore.activeProject?.localPath { return URL(fileURLWithPath: path) }
+        return nil
     }
 
     var body: some View {
@@ -185,7 +189,7 @@ struct ExplorerView: View {
             Image(systemName: "folder")
                 .font(.system(size: 40, weight: .thin))
                 .foregroundStyle(.quaternary)
-            Text("Open a project to browse files")
+            Text("Open a project or activate a repo to browse files.")
                 .font(Typography.emptyTitle)
                 .foregroundStyle(.tertiary)
         }
