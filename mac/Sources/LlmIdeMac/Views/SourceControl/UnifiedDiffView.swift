@@ -1,5 +1,4 @@
 import SwiftUI
-import WebKit
 
 /// Read-only unified diff renderer backed by a `WKWebView` + vendored
 /// highlight.js — the same offline highlighter scaffold `CodeWebView`
@@ -41,20 +40,13 @@ struct UnifiedDiffView: View {
 /// Renders a parsed unified diff as a highlighted HTML table. Mirrors
 /// `CodeWebView`'s vendored highlight.js loading: the JS + theme CSS are
 /// inlined from `Bundle.main` Resources (no remote CDN — offline + no MITM).
-private struct DiffWebView: NSViewRepresentable {
+private struct DiffWebView: View {
     let hunks: [DiffHunk]
     let language: String
     let isDark: Bool
 
-    func makeNSView(context: Context) -> WKWebView {
-        let wv = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
-        wv.setValue(false, forKey: "drawsBackground")
-        wv.loadHTMLString(html(), baseURL: nil)
-        return wv
-    }
-
-    func updateNSView(_ wv: WKWebView, context: Context) {
-        wv.loadHTMLString(html(), baseURL: nil)
+    var body: some View {
+        HljsWebView(html: html())
     }
 
     // MARK: extension → highlight.js language id
@@ -63,33 +55,17 @@ private struct DiffWebView: NSViewRepresentable {
         HljsLanguage.id(for: language)
     }
 
-    // MARK: vendored highlight.js (inlined from Resources)
-
-    private static let hljsJS: String       = bundledText("highlight.min", "js")
-    private static let hljsDarkCSS: String  = bundledText("atom-one-dark.min", "css")
-    private static let hljsLightCSS: String = bundledText("atom-one-light.min", "css")
-
-    private static func bundledText(_ name: String, _ ext: String) -> String {
-        guard let url = Bundle.main.url(forResource: name, withExtension: ext),
-              let s = try? String(contentsOf: url, encoding: .utf8) else { return "" }
-        return s
-    }
-
-    private static func escape(_ s: String) -> String {
-        s.replacingOccurrences(of: "&", with: "&amp;")
-         .replacingOccurrences(of: "<", with: "&lt;")
-         .replacingOccurrences(of: ">", with: "&gt;")
-    }
-
     private func html() -> String {
-        let themeCSS = isDark ? Self.hljsDarkCSS : Self.hljsLightCSS
-        let hljsJS   = Self.hljsJS
+        // Inlined theme + highlighter from the shared single-load `Hljs` cache.
+        let themeCSS = Hljs.themeCSS(isDark: isDark)
+        let hljsJS   = Hljs.js
+        let p        = Hljs.Palette(isDark: isDark)
 
-        let bg      = isDark ? "#1e1e1e" : "#fafafa"
-        let fg      = isDark ? "#abb2bf" : "#383a42"
-        let gutBg   = isDark ? "#21252b" : "#f0f0f0"
-        let gutFg   = isDark ? "#5c6370" : "#9d9d9d"
-        let border  = isDark ? "#181a1f" : "#e5e5e5"
+        let bg      = p.bg
+        let fg      = p.fg
+        let gutBg   = p.gutterBg
+        let gutFg   = p.gutterFg
+        let border  = p.border
         let hdrBg   = isDark ? "#2c313a" : "#eef1f5"
         let hdrFg   = isDark ? "#7f8694" : "#8a9099"
         // Row backgrounds — translucent so the hljs token colors still read.
@@ -102,7 +78,7 @@ private struct DiffWebView: NSViewRepresentable {
         var rowsHTML = ""
         for hunk in hunks {
             rowsHTML += """
-            <tr class="hdr"><td class="num"></td><td class="num"></td><td class="sign"></td><td class="code">\(Self.escape(hunk.header))</td></tr>
+            <tr class="hdr"><td class="num"></td><td class="num"></td><td class="sign"></td><td class="code">\(Hljs.escape(hunk.header))</td></tr>
             """
             for row in hunk.rows {
                 let cls: String
@@ -117,7 +93,7 @@ private struct DiffWebView: NSViewRepresentable {
                 // Keep at least one char so empty lines render with height.
                 let text = row.text.isEmpty ? " " : row.text
                 rowsHTML += """
-                <tr class="\(cls)"><td class="num">\(oldN)</td><td class="num">\(newN)</td><td class="sign">\(sign)</td><td class="code"><code class="hljs\(langClass)">\(Self.escape(text))</code></td></tr>
+                <tr class="\(cls)"><td class="num">\(oldN)</td><td class="num">\(newN)</td><td class="sign">\(sign)</td><td class="code"><code class="hljs\(langClass)">\(Hljs.escape(text))</code></td></tr>
                 """
             }
         }
