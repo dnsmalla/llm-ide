@@ -1,25 +1,25 @@
-// Settings → Paths. One workspace root at the top, named
-// subfolders below. Each row shows its effective absolute path
-// inline so the user sees what their setting resolves to.
+// Settings → Paths.
+//
+// When a project is open, the top panel shows that project's canonical
+// folder tree (meetings/plans/notes/assets/code/data) — read-only, with
+// Reveal-in-Finder per row and a "Rebuild missing folders" action. The
+// project owns these; they are not configurable here.
+//
+// Below that, the global settings: the default location for new projects
+// (dataRoot), the repo-clones subfolder under it, the per-repo memory
+// subdir (lives inside each repo, not under the root), and the UA binary
+// override. Each editable row shows its effective absolute path inline.
 //
 //   ┌─ Paths ──────────────────────────────────────────────────┐
-//   │ Root directory          ✓                                │
-//   │ /Users/you/LLM IDE                                     │
+//   │ 🔒 Folder paths are controlled by the active project.     │
+//   │   meetings/ plans/ notes/ assets/ code/ data/  [Reveal]   │
+//   │   [ Rebuild missing folders ]                             │
+//   │ ──────────────────────────────────────                   │
+//   │ Default location for new projects   ✓                    │
 //   │ [ /Users/you/LLM IDE              ] [ Choose… ]        │
-//   │ ──────────────────────────────────────                   │
-//   │ Workspace subfolders      [ Create missing folders ]     │
-//   │ Notes               ✓                                    │
-//   │ → /Users/you/LLM IDE/Notes                             │
-//   │ [ Notes                                              ]   │
-//   │ …Documents / Repo clones / InfiniteBrain follow the     │
-//   │  same pattern…                                           │
-//   │ ──────────────────────────────────────                   │
-//   │ Per-repo memory         ⚠                                │
-//   │ Lives inside each repo (not under root)                  │
-//   │ [ .understand-anything/memory                      ]     │
-//   │ ──────────────────────────────────────                   │
-//   │ UA binary               ✓                                │
-//   │ [ npx understand-anything           ] [ Choose… ]        │
+//   │ Repo clones            ✓   → …/Clones                    │
+//   │ Per-repo memory        ⚠   (inside each repo)            │
+//   │ UA binary              ✓   [ npx understand-anything ]    │
 //   └──────────────────────────────────────────────────────────┘
 //
 // Strictness: a row's Save stays disabled until the validator
