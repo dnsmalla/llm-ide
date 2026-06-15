@@ -59,24 +59,8 @@ private struct DiffWebView: NSViewRepresentable {
 
     // MARK: extension → highlight.js language id
 
-    /// Same map as `CodeWebView.hljsLanguageMap`. Hint only — hljs handles
-    /// unknown extensions reasonably; an empty id means "no language class".
-    private static let hljsLanguageMap: [String: String] = [
-        "swift": "swift", "ts": "typescript", "tsx": "typescript",
-        "js": "javascript", "mjs": "javascript", "cjs": "javascript", "jsx": "javascript",
-        "py": "python", "rb": "ruby", "go": "go", "rs": "rust",
-        "java": "java", "kt": "kotlin",
-        "c": "c", "h": "c", "cpp": "cpp", "hpp": "cpp", "cc": "cpp",
-        "m": "objectivec", "mm": "objectivec",
-        "json": "json", "md": "markdown", "yml": "yaml", "yaml": "yaml",
-        "sh": "bash", "bash": "bash", "zsh": "bash",
-        "html": "xml", "css": "css", "scss": "scss",
-        "sql": "sql", "toml": "ini", "ini": "ini", "xml": "xml",
-        "env": "bash", "dockerfile": "dockerfile", "makefile": "makefile",
-    ]
-
     private var hljsLanguage: String {
-        Self.hljsLanguageMap[language.lowercased()] ?? ""
+        HljsLanguage.id(for: language)
     }
 
     // MARK: vendored highlight.js (inlined from Resources)
