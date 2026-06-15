@@ -156,24 +156,9 @@ private struct FSNodeRow: View {
             if expanded { expandedPaths.remove(node.id) }
             else        { expandedPaths.insert(node.id) }
         } label: {
-            HStack(spacing: 4) {
-                if depth > 0 { Spacer().frame(width: CGFloat(depth) * 14) }
-                Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 10)
-                Image(systemName: expanded ? "folder.fill" : "folder")
-                    .font(Typography.filename)
-                    .foregroundStyle(category.folderTint)
-                    .frame(width: 16)
-                Text(node.name)
-                    .font(Typography.filename)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 2)
-            .contentShape(Rectangle())
+            TreeRowLabel(name: node.name, isFolder: true, isExpanded: expanded,
+                         depth: depth, isSelected: false,
+                         folderTint: category.folderTint)
         }
         .buttonStyle(.plain)
         .listRowSeparator(.hidden)
@@ -189,18 +174,8 @@ private struct FSNodeRow: View {
 
     private var fileRow: some View {
         let ext = URL(fileURLWithPath: node.name).pathExtension.lowercased()
-        return HStack(spacing: 4) {
-            Spacer().frame(width: CGFloat(depth) * 14 + 14)
-            Image(systemName: FileIconKit.icon(for: ext))
-                .font(.system(size: 11))
-                .foregroundStyle(FileIconKit.color(for: ext))
-                .frame(width: 16)
-            Text(node.name)
-                .font(Typography.filename)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 2)
+        return TreeRowLabel(name: node.name, isFolder: false, isExpanded: false,
+                            depth: depth, isSelected: false, fileExtension: ext)
         .help(node.name)
         .contextMenu {
             if category == .meetings {
