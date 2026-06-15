@@ -110,16 +110,7 @@ struct AppShell: View {
     private var projectDirectory: URL {
         // Prefer the active Source Control repo so the terminal's git matches
         // the SCM panel; fall back to the active project folder, then home.
-        if let repo = config.activeRepoLocalURL,
-           FileManager.default.fileExists(atPath: repo.path) {
-            return repo
-        }
-        if let path = projectStore.activeProject?.localPath,
-           !path.isEmpty,
-           FileManager.default.fileExists(atPath: path) {
-            return URL(fileURLWithPath: path)
-        }
-        return FileManager.default.homeDirectoryForCurrentUser
+        WorkspaceRoot.resolveOrHome(config: config, projectStore: projectStore)
     }
 
     /// Lazy persona-flag load. We avoid the network on every render —

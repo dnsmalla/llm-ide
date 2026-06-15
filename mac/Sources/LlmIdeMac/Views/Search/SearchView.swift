@@ -14,9 +14,7 @@ struct SearchView: View {
     @State private var debounce: Task<Void, Never>?
 
     private var root: URL? {
-        if let r = config.activeRepoLocalURL, FileManager.default.fileExists(atPath: r.path) { return r }
-        if let p = projectStore.activeProject?.localPath { return URL(fileURLWithPath: p) }
-        return nil
+        WorkspaceRoot.resolve(config: config, projectStore: projectStore)
     }
 
     var body: some View {

@@ -24,10 +24,7 @@ struct ExplorerView: View {
     /// Prefer the active CODE repo (matching Source Control / terminal); fall
     /// back to the active project's local folder. nil when neither is set.
     private var root: URL? {
-        if let repo = config.activeRepoLocalURL,
-           FileManager.default.fileExists(atPath: repo.path) { return repo }
-        if let path = projectStore.activeProject?.localPath { return URL(fileURLWithPath: path) }
-        return nil
+        WorkspaceRoot.resolve(config: config, projectStore: projectStore)
     }
 
     var body: some View {
