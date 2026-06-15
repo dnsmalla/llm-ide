@@ -6,6 +6,7 @@ struct LibraryView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(LibraryItemStore.self) private var itemStore
     @Environment(AgentCatalogStore.self) private var catalogStore
+    @EnvironmentObject private var projectStore: ProjectStore
     @State private var vm: LibraryViewModel?
     @State private var loadError: String?
     @FocusState private var filterFocused: Bool
@@ -273,9 +274,13 @@ struct LibraryView: View {
                 Button { pickFile(for: category) } label: {
                     Label("Add File", systemImage: "doc.badge.plus")
                 }
+                .disabled(projectStore.activeProject == nil)
+                .help(projectStore.activeProject == nil ? "Open a project first" : "")
                 Button { pickFolder(for: category) } label: {
                     Label("Add Folder", systemImage: "folder.badge.plus")
                 }
+                .disabled(projectStore.activeProject == nil)
+                .help(projectStore.activeProject == nil ? "Open a project first" : "")
                 if category == .meetings {
                     Divider()
                     Button {
