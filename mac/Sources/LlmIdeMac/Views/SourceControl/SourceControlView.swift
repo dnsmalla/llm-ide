@@ -22,6 +22,11 @@ struct SourceControlView: View {
     @State private var mode: PaneMode = .changes
     @State private var commits: [Commit] = []
     @State private var selectedCommit: Commit?
+    @State private var stashes: [SourceControlService.Stash] = []
+    @State private var showStashMessage = false
+    @State private var stashMessage = ""
+    @State private var amendOn = false
+    @State private var confirmDiscardAll = false
     /// In-flight diff load. Cancelled before starting a new one so rapid
     /// file/commit selection can't race (last-to-finish overwriting the
     /// current selection's diff).
@@ -68,6 +73,10 @@ struct SourceControlView: View {
     }
 
     var body: some View {
+        dialogs(mainBody)
+    }
+
+    private var mainBody: some View {
         content
         .background(theme.current.body)
         .task(id: root?.path) {
@@ -135,15 +144,24 @@ struct SourceControlView: View {
                 hunks = []
             }
         }
-        // Keep the history list fresh on every refresh while in History mode.
+        // Keep the history list fresh on every refresh while in History mode,
+        // and the stash list fresh while in Changes mode.
         .onChange(of: scm.refreshTick) { _, _ in
-            if mode == .history, let root { Task { commits = await scm.log(root: root) } }
+            guard let root else { return }
+            if mode == .history { Task { commits = await scm.log(root: root) } }
+            else { Task { stashes = await scm.stashList(root: root) } }
         }
         // Load the selected commit's diff into the shared right pane.
         .onChange(of: selectedCommit) { _, c in
             guard let c, let root else { hunks = []; return }
             loadHunks { await scm.commitDiff(root: root, sha: c.sha) }
         }
+    }
+
+    /// All sheets/alerts/confirmation dialogs, factored out of `body` to keep
+    /// the main view expression type-checkable.
+    @ViewBuilder private func dialogs<V: View>(_ base: V) -> some View {
+        base
         .confirmationDialog("Discard changes?", isPresented: Binding(
             get: { confirmDiscard != nil }, set: { if !$0 { confirmDiscard = nil } }
         ), presenting: confirmDiscard) { file in
@@ -175,6 +193,24 @@ struct SourceControlView: View {
         } message: { branch in
             Text("Branch “\(branch)” will be deleted (only if fully merged).")
         }
+        .alert("Stash changes", isPresented: $showStashMessage) {
+            TextField("Message (optional)", text: $stashMessage)
+            Button("Cancel", role: .cancel) {}
+            Button("Stash") {
+                let msg = stashMessage
+                guard let root else { return }
+                Task { await scm.stashPush(root: root, message: msg); stashMessage = "" }
+            }
+        } message: {
+            Text("Stash all working-tree changes (including untracked files).")
+        }
+        .confirmationDialog("Discard all changes?", isPresented: $confirmDiscardAll) {
+            Button("Discard All Changes", role: .destructive) {
+                if let root { Task { await scm.discardAll(root: root) } }
+            }
+        } message: {
+            Text("This permanently deletes all uncommitted changes AND untracked files.")
+        }
     }
 
     /// Start a visible-only refresh loop. Cancels any existing poll first so we
@@ -205,7 +241,7 @@ struct SourceControlView: View {
                 ScrollView {
                     if let err = scm.state.error { errorBanner(err) }
                     fileGroup("Staged Changes", scm.stagedFiles, root)
-                    fileGroup("Changes", scm.unstagedFiles, root, showStageAll: true)
+                    fileGroup("Changes", scm.unstagedFiles, root, showStageAll: true, showOverflow: true)
                 }
                 Divider().background(theme.current.border)
                 commitBox(root)
@@ -258,6 +294,7 @@ struct SourceControlView: View {
             if scm.state.ahead > 0 { Text("↑\(scm.state.ahead)").font(Typography.caption) }
             if scm.state.behind > 0 { Text("↓\(scm.state.behind)").font(Typography.caption) }
             Spacer()
+            if mode == .changes { stashMenu(root) }
             Button { Task { await scm.pull(root: root) } } label: {
                 Image(systemName: "arrow.down")
             }.buttonStyle(.plain)
@@ -331,8 +368,33 @@ struct SourceControlView: View {
         }
     }
 
+    private func stashMenu(_ root: URL) -> some View {
+        Menu {
+            Button("Stash Changes…") {
+                stashMessage = ""
+                showStashMessage = true
+            }
+            if !stashes.isEmpty {
+                Divider()
+                ForEach(stashes) { stash in
+                    Button("Pop: \(stash.message)") {
+                        Task { await scm.stashPop(root: root, index: stash.index) }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "tray.and.arrow.down").font(.system(size: 12))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(scm.isBusy)
+        .help("Stash")
+    }
+
     @ViewBuilder private func fileGroup(_ title: String, _ files: [FileChange], _ root: URL,
-                                        showStageAll: Bool = false) -> some View {
+                                        showStageAll: Bool = false,
+                                        showOverflow: Bool = false) -> some View {
         if !files.isEmpty {
             HStack(spacing: Spacing.xs) {
                 Text("\(title) (\(files.count))")
@@ -345,6 +407,20 @@ struct SourceControlView: View {
                     .buttonStyle(.plain)
                     .disabled(scm.isBusy)
                     .help("Stage All")
+                }
+                if showOverflow {
+                    Menu {
+                        Button("Discard All Changes", role: .destructive) {
+                            confirmDiscardAll = true
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .disabled(scm.isBusy)
+                    .help("More actions")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -378,21 +454,43 @@ struct SourceControlView: View {
     }
 
     private func commitBox(_ root: URL) -> some View {
-        VStack(spacing: Spacing.xs) {
+        // Amend with an empty message uses --no-edit, so the message-required
+        // gate is lifted when amend is on.
+        let noChanges = scm.stagedFiles.isEmpty && scm.unstagedFiles.isEmpty
+        let emptyMessage = message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let commitDisabled = scm.isBusy || (!amendOn && (emptyMessage || noChanges))
+        return VStack(spacing: Spacing.xs) {
             TextField("Commit message", text: $message, axis: .vertical)
                 .textFieldStyle(.plain).lineLimit(1...4)
                 .padding(Spacing.sm)
                 .background(theme.current.surface2).clipShape(RoundedRectangle(cornerRadius: Radius.sm))
-            Button {
-                let msg = message
-                Task { await scm.commit(root: root, message: msg); message = "" }
-            } label: { Text("Commit").frame(maxWidth: .infinity) }
-            .buttonStyle(.borderedProminent)
-            // Commit-all-aware: enabled when there's a message AND any change
-            // (staged or not) — commit() stages all first if nothing is staged.
-            .disabled(scm.isBusy
-                      || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                      || (scm.stagedFiles.isEmpty && scm.unstagedFiles.isEmpty))
+            Toggle("Amend last commit", isOn: $amendOn)
+                .font(Typography.caption)
+                .toggleStyle(.checkbox)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: Spacing.xs) {
+                Button {
+                    let msg = message
+                    Task {
+                        if amendOn { await scm.amend(root: root, message: msg) }
+                        else { await scm.commit(root: root, message: msg) }
+                        message = ""
+                    }
+                } label: { Text(amendOn ? "Amend" : "Commit").frame(maxWidth: .infinity) }
+                .buttonStyle(.borderedProminent)
+                .disabled(commitDisabled)
+                // Commit & Push: commit (commit-all-aware) then push the branch.
+                // Needs credentials and an actual change to commit; not offered
+                // for amend (push of a rewritten commit would need a force-push).
+                Button {
+                    let msg = message
+                    Task { await scm.commitAndPush(root: root, message: msg); message = "" }
+                } label: { Image(systemName: "arrow.up.circle") }
+                .buttonStyle(.bordered)
+                .disabled(scm.isBusy || amendOn || emptyMessage || noChanges || !hasCredentials)
+                .help(hasCredentials ? "Commit & Push"
+                      : "Configure a token in Settings → GitLab / GitHub")
+            }
         }
         .padding(Spacing.md)
     }

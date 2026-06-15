@@ -220,6 +220,92 @@ final class SourceControlService {
         return UnifiedDiffParser.parse(raw)
     }
 
+    // MARK: - Stash
+
+    /// One entry from `git stash list`.
+    struct Stash: Identifiable, Hashable {
+        let index: Int
+        let message: String
+        var id: Int { index }
+    }
+
+    /// Pure parser for `git stash list`. Each line looks like
+    /// `stash@{N}: <message>`; we take N as the index and the text after the
+    /// first ": " as the message. Lines that don't match are skipped.
+    nonisolated static func parseStashList(_ out: String) -> [Stash] {
+        out.split(separator: "\n", omittingEmptySubsequences: true).compactMap { line in
+            let s = String(line)
+            guard s.hasPrefix("stash@{"),
+                  let close = s.firstIndex(of: "}"),
+                  let n = Int(s[s.index(s.startIndex, offsetBy: 7)..<close])
+            else { return nil }
+            // Message is whatever follows the first ": " after the ref.
+            let afterClose = s.index(after: close)
+            let rest = s[afterClose...]
+            let message: String
+            if let colon = rest.range(of: ": ") {
+                message = String(rest[colon.upperBound...])
+            } else {
+                message = String(rest).trimmingCharacters(in: .whitespaces)
+            }
+            return Stash(index: n, message: message)
+        }
+    }
+
+    /// Stash working-tree + untracked changes (`stash push -u`), with an
+    /// optional message, then refresh.
+    func stashPush(root: URL, message: String) async {
+        var args = ["stash", "push", "-u"]
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { args += ["-m", trimmed] }
+        await run(args, root)
+    }
+
+    /// Current stash entries, newest first. Returns [] on error.
+    func stashList(root: URL) async -> [Stash] {
+        guard let out = try? await repo.runGit(["stash", "list"], at: root) else { return [] }
+        return Self.parseStashList(out)
+    }
+
+    /// Pop a stash by index (`stash pop "stash@{N}"`), then refresh.
+    func stashPop(root: URL, index: Int) async {
+        await run(["stash", "pop", "stash@{\(index)}"], root)
+    }
+
+    // MARK: - Amend / Commit & Push / Discard-all
+
+    /// Amend the last commit. A non-empty message replaces the commit message
+    /// (`-m`); an empty message keeps it (`--no-edit`). Refresh afterwards.
+    func amend(root: URL, message: String) async {
+        isBusy = true; defer { isBusy = false }
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let args = trimmed.isEmpty
+            ? ["commit", "--amend", "--no-edit"]
+            : ["commit", "--amend", "-m", trimmed]
+        do { _ = try await repo.runGit(args, at: root) }
+        catch { state.error = error.localizedDescription }
+        await refresh(root: root)
+    }
+
+    /// Commit (commit-all-aware) then push the current branch. Both steps
+    /// refresh on their own.
+    func commitAndPush(root: URL, message: String) async {
+        await commit(root: root, message: message)
+        await push(root: root)
+    }
+
+    /// Discard ALL working-tree changes: restore tracked files
+    /// (`checkout -- .`) and delete untracked files/dirs (`clean -fd`), then
+    /// refresh. DESTRUCTIVE — caller must confirm.
+    func discardAll(root: URL) async {
+        isBusy = true; defer { isBusy = false }
+        do {
+            _ = try await repo.runGit(["checkout", "--", "."], at: root)
+            _ = try await repo.runGit(["clean", "-fd"], at: root)
+        } catch { state.error = error.localizedDescription }
+        await refresh(root: root)
+    }
+
     private func run(_ args: [String], _ root: URL) async {
         do { _ = try await repo.runGit(args, at: root); await refresh(root: root) }
         catch { state.error = error.localizedDescription }

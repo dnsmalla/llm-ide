@@ -17,3 +17,29 @@ import Testing
         #expect(commits[1].subject == "Add feature")
     }
 }
+
+@Suite struct StashTests {
+    @Test func parsesStashList() {
+        let out = """
+        stash@{0}: WIP on main: 1a2b3c4 Fix bug
+        stash@{1}: On feature/x: my custom message
+        stash@{2}: WIP on main: 5d6e7f8 Add feature
+        """
+        let stashes = SourceControlService.parseStashList(out)
+        #expect(stashes.count == 3)
+        #expect(stashes[0].index == 0)
+        #expect(stashes[0].message == "WIP on main: 1a2b3c4 Fix bug")
+        #expect(stashes[1].index == 1)
+        #expect(stashes[1].message == "On feature/x: my custom message")
+        #expect(stashes[2].index == 2)
+        #expect(stashes[2].message == "WIP on main: 5d6e7f8 Add feature")
+    }
+
+    @Test func skipsMalformedLines() {
+        let out = "not a stash line\nstash@{0}: WIP on main: deadbee Edit\n"
+        let stashes = SourceControlService.parseStashList(out)
+        #expect(stashes.count == 1)
+        #expect(stashes[0].index == 0)
+        #expect(stashes[0].message == "WIP on main: deadbee Edit")
+    }
+}
