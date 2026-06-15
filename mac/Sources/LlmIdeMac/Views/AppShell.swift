@@ -344,6 +344,7 @@ struct AppShell: View {
         switch section {
         case .library:   LibraryDetailView(api: api)
         case .live:      TranscriptView(api: api)
+        case .explorer:  ExplorerView(api: api)
         case .review:    ReviewView(api: api, config: .code)
         case .plans:     ReviewView(api: api, config: .docs)
         case .conflicts: ReviewView(api: api, config: .conflicts)
