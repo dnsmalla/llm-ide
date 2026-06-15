@@ -258,6 +258,7 @@ final class SourceControlService {
         var args = ["stash", "push", "-u"]
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { args += ["-m", trimmed] }
+        isBusy = true; defer { isBusy = false }
         await run(args, root)
     }
 
@@ -269,6 +270,7 @@ final class SourceControlService {
 
     /// Pop a stash by index (`stash pop "stash@{N}"`), then refresh.
     func stashPop(root: URL, index: Int) async {
+        isBusy = true; defer { isBusy = false }
         await run(["stash", "pop", "stash@{\(index)}"], root)
     }
 
@@ -291,6 +293,10 @@ final class SourceControlService {
     /// refresh on their own.
     func commitAndPush(root: URL, message: String) async {
         await commit(root: root, message: message)
+        // Don't push if the commit failed (commit captures errors into
+        // state.error rather than throwing) — pushing would otherwise publish
+        // a previous/unintended HEAD.
+        guard state.error == nil else { return }
         await push(root: root)
     }
 
