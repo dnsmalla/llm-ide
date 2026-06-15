@@ -20,6 +20,8 @@ import os.log
 /// ├── plans/                ← date-slug-<id>.md + .json on export
 /// ├── notes/                ← free-form notes, user-managed
 /// ├── assets/               ← screenshots / diagrams, user-managed
+/// ├── code/                 ← source files routed from Code items
+/// ├── data/                 ← data files routed from Data items
 /// └── README.md             ← refreshed on every open
 /// ```
 enum ProjectScaffolder {
@@ -215,7 +217,9 @@ enum ProjectScaffolder {
         ├── meetings/     ← exported meeting transcripts & summaries (YYYY/MM/)
         ├── plans/        ← exported project plans (Markdown + JSON)
         ├── notes/        ← free-form notes (yours to use)
-        └── assets/       ← screenshots, diagrams, attachments (yours to use)
+        ├── assets/       ← screenshots, diagrams, attachments (yours to use)
+        ├── code/         ← source files routed from Code items
+        └── data/         ← data files routed from Data items
         ```
 
         ## Meetings
