@@ -190,6 +190,13 @@ final class RepoManager {
         return out
     }
 
+    /// Public entry point for local, non-authenticated git commands (status,
+    /// diff, add, restore, commit). Reuses the same hardened Process runner
+    /// (timeouts, deadlock-safe pipe drain). Returns stdout; throws on non-zero.
+    func runGit(_ args: [String], at cwd: URL) async throws -> String {
+        try await gitOutput(args, cwd: cwd)
+    }
+
     /// Run git. When `token` is supplied, credentials are injected via the
     /// process environment (see `authEnv`) and redacted from any error text.
     @discardableResult
