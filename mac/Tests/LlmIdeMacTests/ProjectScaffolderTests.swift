@@ -133,4 +133,26 @@ struct ProjectScaffolderTests {
         #expect(after.contains("Managed by **LLM IDE**"),
                 "a LLM IDE-managed README should be refreshed")
     }
+
+    @Test func gitignoreBlockWrittenToRootAndIdempotent() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gi-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        // Pre-existing user .gitignore must be preserved.
+        let root = tmp.appendingPathComponent(".gitignore")
+        try "build/\n".write(to: root, atomically: true, encoding: .utf8)
+
+        try ProjectScaffolder.scaffold(at: tmp, project: sampleProject())
+        let once = try String(contentsOf: root, encoding: .utf8)
+        #expect(once.contains("build/"))                 // user rule preserved
+        #expect(once.contains(".code-notes/"))           // managed block added
+        #expect(once.contains("# >>> LLM IDE managed"))
+
+        // Idempotent: a second scaffold must not duplicate the block.
+        try ProjectScaffolder.scaffold(at: tmp, project: sampleProject())
+        let twice = try String(contentsOf: root, encoding: .utf8)
+        let occurrences = twice.components(separatedBy: "# >>> LLM IDE managed").count - 1
+        #expect(occurrences == 1)
+    }
 }
