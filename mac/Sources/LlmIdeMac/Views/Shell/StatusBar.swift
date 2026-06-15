@@ -5,7 +5,23 @@ struct StatusBar: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var projectStore: ProjectStore
     @EnvironmentObject var session: SessionStore
+    @EnvironmentObject var config: AppConfig
     @Environment(TerminalPanelState.self) private var terminalState
+
+    /// Working directory for the terminal — mirrors AppShell.projectDirectory:
+    /// prefer the active SCM repo, then the project folder, then home.
+    private var terminalCwd: URL {
+        if let repo = config.activeRepoLocalURL,
+           FileManager.default.fileExists(atPath: repo.path) {
+            return repo
+        }
+        if let path = projectStore.activeProject?.localPath,
+           !path.isEmpty,
+           FileManager.default.fileExists(atPath: path) {
+            return URL(fileURLWithPath: path)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+    }
 
     var body: some View {
         // The bar is always visible IF the user is signed in — the
@@ -37,15 +53,7 @@ struct StatusBar: View {
     @ViewBuilder
     private var terminalToggleButton: some View {
         Button {
-            let dir: URL
-            if let path = projectStore.activeProject?.localPath,
-               !path.isEmpty,
-               FileManager.default.fileExists(atPath: path) {
-                dir = URL(fileURLWithPath: path)
-            } else {
-                dir = FileManager.default.homeDirectoryForCurrentUser
-            }
-            terminalState.toggle(projectDirectory: dir)
+            terminalState.toggle(projectDirectory: terminalCwd)
         } label: {
             Image(systemName: "terminal")
                 .font(.system(size: 11))

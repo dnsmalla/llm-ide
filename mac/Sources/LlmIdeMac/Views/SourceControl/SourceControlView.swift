@@ -22,7 +22,10 @@ struct SourceControlView: View {
             if let root {
                 HSplitView {
                     leftPane(root).frame(minWidth: 280, idealWidth: 340, maxWidth: 520)
-                    UnifiedDiffView(hunks: hunks).frame(minWidth: 360)
+                    UnifiedDiffView(
+                        hunks: hunks,
+                        fileExtension: (selected?.path as NSString?)?.pathExtension ?? ""
+                    ).frame(minWidth: 360)
                 }
             } else {
                 emptyState
