@@ -98,6 +98,8 @@ struct PathsSettingsSection: View {
         let plansURL    = projectURL.appendingPathComponent("plans")
         let notesURL    = projectURL.appendingPathComponent("notes")
         let assetsURL   = projectURL.appendingPathComponent("assets")
+        let codeURL     = projectURL.appendingPathComponent("code")
+        let dataURL     = projectURL.appendingPathComponent("data")
 
         VStack(alignment: .leading, spacing: Spacing.sm) {
             // Header
@@ -147,8 +149,45 @@ struct PathsSettingsSection: View {
                              note: "Screenshots, diagrams, attachments",
                              accent: t.textMuted)
 
+            projectFolderRow(label: "code/",
+                             icon: "chevron.left.forwardslash.chevron.right",
+                             url: codeURL,
+                             note: "Source files routed from Code items",
+                             accent: t.textMuted)
+
+            projectFolderRow(label: "data/",
+                             icon: "tablecells",
+                             url: dataURL,
+                             note: "Data files routed from Data items",
+                             accent: t.textMuted)
+
             // Actions strip for the meetings/ folder (index rebuild etc.)
             notesActionsStrip
+
+            HStack {
+                Spacer()
+                Button {
+                    rebuildProjectFolders(ap)
+                } label: {
+                    Label("Rebuild missing folders", systemImage: "folder.badge.plus")
+                        .font(Typography.captionStrong)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Re-create any of the project's canonical folders that are missing.")
+            }
+
+            if let status = createStatus {
+                Label(status, systemImage: "checkmark.circle.fill")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.accent3)
+            }
+            if let err = createError {
+                Label(err, systemImage: "exclamationmark.triangle.fill")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.danger)
+                    .lineLimit(3)
+            }
 
             Text("These folders belong to the active project. Global defaults are editable below.")
                 .font(Typography.caption)
@@ -200,19 +239,34 @@ struct PathsSettingsSection: View {
         }
     }
 
+    /// Re-create any of the active project's canonical folders that
+    /// are missing. Idempotent — ProjectScaffolder only creates what
+    /// isn't already there and preserves the project's README.
+    private func rebuildProjectFolders(_ ap: ProjectStore.ActiveProject) {
+        createError = nil
+        createStatus = nil
+        do {
+            try ProjectScaffolder.scaffold(
+                at: URL(fileURLWithPath: ap.localPath),
+                project: ap.bundle)
+            createStatus = "Project folders rebuilt."
+        } catch {
+            createError = "Couldn't rebuild folders: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Root
 
     @ViewBuilder
     private var rootRow: some View {
         PathRow(
-            label: "Root directory",
-            help: "Absolute path. All workspace subfolders below resolve under it.",
+            label: "Default location for new projects",
+            help: "Absolute path. New projects are created here, and repo clones land under it by default.",
             placeholder: "~/LLM IDE",
             initialValue: config.dataRoot,
             validate: PathValidator.absoluteDirectoryAllowMissing,
             onSave: { canonical in
                 config.dataRoot = canonical
-                applyNotesFolderFromPaths()
             },
             chooserKind: .directory
         )
@@ -252,36 +306,11 @@ struct PathsSettingsSection: View {
             }
 
             subfolderRow(
-                label: "Notes",
-                help: "Meeting notes, transcripts, summaries. FolderIndexer + the rest of the app start using this path on save.",
-                defaultName: AppConfig.defaultNotesSubdir,
-                value: config.notesSubdir,
-                onSave: { value in
-                    config.notesSubdir = value
-                    applyNotesFolderFromPaths()
-                }
-            )
-            notesActionsStrip
-            subfolderRow(
-                label: "Documents",
-                help: "Generated docs, plans, reviews. (Not yet consumed — DocGen/DocTemplateStore still use ~/Library/Application Support.)",
-                defaultName: AppConfig.defaultDocsSubdir,
-                value: config.docsSubdir,
-                onSave: { config.docsSubdir = $0 }
-            )
-            subfolderRow(
                 label: "Repo clones",
                 help: "Where GitLab / GitHub repos clone into by default. Wired: Clone button uses this path.",
                 defaultName: AppConfig.defaultClonesSubdir,
                 value: config.clonesSubdir,
                 onSave: { config.clonesSubdir = $0 }
-            )
-            subfolderRow(
-                label: "InfiniteBrain",
-                help: "Knowledge-graph store. (Not yet consumed — reserved for a future feature.)",
-                defaultName: AppConfig.defaultInfiniteBrainSubdir,
-                value: config.infiniteBrainSubdir,
-                onSave: { config.infiniteBrainSubdir = $0 }
             )
         }
     }
@@ -377,17 +406,20 @@ struct PathsSettingsSection: View {
             createError = "Couldn't create root: \(error.localizedDescription)"
             return
         }
-        for url in config.allResolvedSubfolders {
+        // Only the Repo clones subfolder remains a global workspace
+        // subdir — meeting/plan/note/asset/code/data folders are owned
+        // by the active project, not the global root.
+        if let url = config.resolvedClonesURL {
             if fm.fileExists(atPath: url.path) {
                 skipped.append(url.lastPathComponent)
-                continue
-            }
-            do {
-                try fm.createDirectory(at: url, withIntermediateDirectories: true)
-                created.append(url.lastPathComponent)
-            } catch {
-                createError = "Couldn't create \(url.lastPathComponent): \(error.localizedDescription)"
-                return
+            } else {
+                do {
+                    try fm.createDirectory(at: url, withIntermediateDirectories: true)
+                    created.append(url.lastPathComponent)
+                } catch {
+                    createError = "Couldn't create \(url.lastPathComponent): \(error.localizedDescription)"
+                    return
+                }
             }
         }
         let parts: [String] = [
@@ -395,40 +427,6 @@ struct PathsSettingsSection: View {
             skipped.isEmpty ? nil : "Already existed: \(skipped.joined(separator: ", "))"
         ].compactMap { $0 }
         createStatus = parts.isEmpty ? "Nothing to do." : parts.joined(separator: " · ")
-        // After creating, push the resolved notes folder into
-        // NotesFolderConfig too — most users hitting "Create
-        // missing folders" expect everything to start using the
-        // new locations.
-        applyNotesFolderFromPaths()
-    }
-
-    /// Push `config.resolvedNotesURL` into NotesFolderConfig so the
-    /// rest of the app (Notes Folder card, FolderIndexer, AutoCode)
-    /// starts reading/writing under the new path. Called whenever
-    /// dataRoot or notesSubdir is saved, and on "Create missing
-    /// folders". No-op when dataRoot isn't configured or when a
-    /// project is open (it controls the notes folder).
-    private func applyNotesFolderFromPaths() {
-        // When a project is active it owns the notes folder.
-        // Persist the setting in UserDefaults (AppConfig) so it's
-        // remembered for when the project is closed, but don't
-        // override NotesFolderConfig while the project is live.
-        guard projectStore.activeProject == nil else { return }
-        guard let target = config.resolvedNotesURL else { return }
-        let cfg = NotesFolderConfig()
-        // Skip if already pointed at the resolved URL — avoids
-        // double-firing the notesFolderChanged notification and
-        // wiping a still-good bookmark.
-        if cfg.currentFolder.standardizedFileURL.path
-            == target.standardizedFileURL.path {
-            return
-        }
-        do {
-            try cfg.setFolderFromPath(target)
-            NotificationCenter.default.post(name: .notesFolderChanged, object: nil)
-        } catch {
-            createError = "Couldn't apply Notes folder: \(error.localizedDescription)"
-        }
     }
 
     // MARK: - Notes actions strip

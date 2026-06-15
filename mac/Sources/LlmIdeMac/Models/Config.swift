@@ -167,25 +167,18 @@ final class AppConfig: ObservableObject {
     }
 
     // ── Paths (Phase G + H) ───────────────────────────────────────────
-    /// Absolute workspace root. Every named subfolder below resolves
-    /// to `dataRoot / <subfolder>`. Empty string = "not yet
-    /// configured" — subsystems gracefully fall back to their legacy
-    /// per-feature settings (notes folder bookmark, GitLab clone
-    /// paths, etc.) until the user picks a root.
+    /// Default location for new projects — the directory new project
+    /// folders are created under, and where repo clones land by
+    /// default (`dataRoot / clonesSubdir`). Empty string = "not yet
+    /// configured"; clones then fall back to `defaultClonesFallback`.
+    /// Each project owns its own canonical folder tree
+    /// (meetings/plans/notes/assets/code/data) under its own folder —
+    /// not under this root.
     @Published var dataRoot: String {
         didSet { defaults.set(dataRoot, forKey: "dataRoot") }
     }
-    @Published var notesSubdir: String {
-        didSet { defaults.set(notesSubdir, forKey: "notesSubdir") }
-    }
-    @Published var docsSubdir: String {
-        didSet { defaults.set(docsSubdir, forKey: "docsSubdir") }
-    }
     @Published var clonesSubdir: String {
         didSet { defaults.set(clonesSubdir, forKey: "clonesSubdir") }
-    }
-    @Published var infiniteBrainSubdir: String {
-        didSet { defaults.set(infiniteBrainSubdir, forKey: "infiniteBrainSubdir") }
     }
     /// Per-repo subdir inside the active repo where memory artifacts
     /// live (faults/, q&a/, repo.md, graph-notes.md). Unlike the
@@ -212,10 +205,7 @@ final class AppConfig: ObservableObject {
 
     // Defaults — single source of truth.
     static let defaultMemorySubdir = ".understand-anything/memory"
-    static let defaultNotesSubdir = "Notes"
-    static let defaultDocsSubdir = "Docs"
     static let defaultClonesSubdir = "Clones"
-    static let defaultInfiniteBrainSubdir = "InfiniteBrain"
 
     // ── Auto Code Update ──────────────────────────────────────────────
     /// When true, the app automatically scans recent meeting notes for
@@ -325,14 +315,8 @@ final class AppConfig: ObservableObject {
         self.lastRegressionRegressedCount = defaults.integer(forKey: "lastRegressionRegressedCount")
         self.regressionAutoReopen = defaults.object(forKey: "regressionAutoReopen") as? Bool ?? false
         self.dataRoot = defaults.string(forKey: "dataRoot") ?? ""
-        let storedNotes = defaults.string(forKey: "notesSubdir") ?? ""
-        self.notesSubdir = storedNotes.isEmpty ? AppConfig.defaultNotesSubdir : storedNotes
-        let storedDocs = defaults.string(forKey: "docsSubdir") ?? ""
-        self.docsSubdir = storedDocs.isEmpty ? AppConfig.defaultDocsSubdir : storedDocs
         let storedClones = defaults.string(forKey: "clonesSubdir") ?? ""
         self.clonesSubdir = storedClones.isEmpty ? AppConfig.defaultClonesSubdir : storedClones
-        let storedIB = defaults.string(forKey: "infiniteBrainSubdir") ?? ""
-        self.infiniteBrainSubdir = storedIB.isEmpty ? AppConfig.defaultInfiniteBrainSubdir : storedIB
         let storedMem = defaults.string(forKey: "memorySubdir") ?? ""
         self.memorySubdir = storedMem.isEmpty ? AppConfig.defaultMemorySubdir : storedMem
         self.uaBinaryOverride = defaults.string(forKey: "uaBinaryOverride") ?? ""
@@ -467,14 +451,10 @@ extension AppConfig {
         return URL(fileURLWithPath: expanded)
     }
 
-    var resolvedNotesURL: URL? { dataRootURL?.appendingPathComponent(notesSubdir, isDirectory: true) }
-    var resolvedDocsURL: URL? { dataRootURL?.appendingPathComponent(docsSubdir, isDirectory: true) }
     var resolvedClonesURL: URL? { dataRootURL?.appendingPathComponent(clonesSubdir, isDirectory: true) }
-    var resolvedInfiniteBrainURL: URL? { dataRootURL?.appendingPathComponent(infiniteBrainSubdir, isDirectory: true) }
 
-    /// Default clones location when no Paths root is configured. Unlike notes/
-    /// docs (which are workspace data and stay unset until a root is chosen),
-    /// clones just need somewhere on disk — so they get a sensible default.
+    /// Default clones location when no Paths root is configured. Clones just
+    /// need somewhere on disk — so they get a sensible default.
     static let defaultClonesFallback: URL = FileManager.default
         .homeDirectoryForCurrentUser
         .appendingPathComponent("Documents/LLM IDE/Clones", isDirectory: true)
@@ -484,12 +464,6 @@ extension AppConfig {
     /// cloning works out of the box — and even while a project is active, when
     /// the global Paths root can't be edited.
     var effectiveClonesURL: URL { resolvedClonesURL ?? AppConfig.defaultClonesFallback }
-
-    /// Every resolved subfolder the user has configured. Used by
-    /// "Create missing folders" in PathsSettingsSection.
-    var allResolvedSubfolders: [URL] {
-        [resolvedNotesURL, resolvedDocsURL, resolvedClonesURL, resolvedInfiniteBrainURL].compactMap { $0 }
-    }
 }
 
 extension AppConfig {
