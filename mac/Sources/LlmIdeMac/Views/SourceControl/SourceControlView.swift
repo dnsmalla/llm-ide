@@ -14,8 +14,15 @@ struct SourceControlView: View {
     @State private var hunks: [DiffHunk] = []
     @State private var message: String = ""
     @State private var confirmDiscard: FileChange?
+    @State private var branches: [String] = []
 
     private var root: URL? { config.activeRepoLocalURL }
+
+    /// Whether the active repo has saved credentials (enables pull/push/sync).
+    private var hasCredentials: Bool {
+        guard let root else { return false }
+        return scm.resolveCredentials?(root) != nil
+    }
 
     var body: some View {
         Group {
@@ -32,7 +39,20 @@ struct SourceControlView: View {
             }
         }
         .background(theme.current.body)
-        .task(id: root?.path) { await scm.refresh(root: root) }
+        .task(id: root?.path) {
+            scm.resolveCredentials = { repo in
+                if config.gitLabSavedProjects.contains(where: { $0.localPath == repo.path }),
+                   !config.gitLabToken.isEmpty {
+                    return (config.gitLabToken, .gitlab)
+                }
+                if config.gitHubSavedRepos.contains(where: { $0.localPath == repo.path }),
+                   !config.gitHubToken.isEmpty {
+                    return (config.gitHubToken, .github)
+                }
+                return nil
+            }
+            await scm.refresh(root: root)
+        }
         // Fix 1: refresh when window becomes key (picks up external changes)
         .onChange(of: controlActiveState) { _, new in
             if new == .key, let root {
@@ -87,18 +107,62 @@ struct SourceControlView: View {
     }
 
     private func branchHeader(_ root: URL) -> some View {
-        HStack(spacing: Spacing.sm) {
+        let credHelp = "Configure a token in Settings → GitLab / GitHub"
+        return HStack(spacing: Spacing.sm) {
             Image(systemName: "arrow.triangle.branch").font(.system(size: 12))
-            Text(scm.state.branch ?? "—").font(Typography.bodyStrong)
+            branchMenu(root)
             if scm.state.ahead > 0 { Text("↑\(scm.state.ahead)").font(Typography.caption) }
             if scm.state.behind > 0 { Text("↓\(scm.state.behind)").font(Typography.caption) }
             Spacer()
+            Button { Task { await scm.pull(root: root) } } label: {
+                Image(systemName: "arrow.down")
+            }.buttonStyle(.plain)
+                .disabled(scm.isBusy || !hasCredentials)
+                .help(hasCredentials ? "Pull" : credHelp)
+            Button { Task { await scm.push(root: root) } } label: {
+                Image(systemName: "arrow.up")
+            }.buttonStyle(.plain)
+                .disabled(scm.isBusy || !hasCredentials)
+                .help(hasCredentials ? "Push" : credHelp)
+            Button { Task { await scm.sync(root: root) } } label: {
+                Image(systemName: "arrow.triangle.2.circlepath")
+            }.buttonStyle(.plain)
+                .disabled(scm.isBusy || !hasCredentials)
+                .help(hasCredentials ? "Sync (fetch)" : credHelp)
             Button { Task { await scm.refresh(root: root) } } label: {
                 Image(systemName: "arrow.clockwise")
-            }.buttonStyle(.plain).help("Refresh")
+            }.buttonStyle(.plain).disabled(scm.isBusy).help("Refresh")
         }
         .foregroundStyle(theme.current.text)
         .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.sm)
+    }
+
+    private func branchMenu(_ root: URL) -> some View {
+        Menu {
+            ForEach(branches, id: \.self) { b in
+                Button {
+                    Task { await scm.checkout(root: root, branch: b) }
+                } label: {
+                    if b == scm.state.branch {
+                        Label(b, systemImage: "checkmark")
+                    } else {
+                        Text(b)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 2) {
+                Text(scm.state.branch ?? "—").font(Typography.bodyStrong)
+                Image(systemName: "chevron.down").font(.system(size: 9))
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(scm.isBusy)
+        .onAppear { Task { branches = await scm.listBranches(root: root) } }
+        .onChange(of: scm.state.branch) { _, _ in
+            Task { branches = await scm.listBranches(root: root) }
+        }
     }
 
     @ViewBuilder private func fileGroup(_ title: String, _ files: [FileChange], _ root: URL) -> some View {
