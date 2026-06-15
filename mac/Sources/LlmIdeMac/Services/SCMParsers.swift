@@ -95,13 +95,14 @@ enum UnifiedDiffParser {
 
     /// Parse "@@ -a,b +c,d @@" → (a, c).
     private static func hunkStarts(_ header: String) -> (Int, Int) {
-        // Grab the "-a,b +c,d" segment between the @@ markers.
+        // parts[0]=="@@", parts[1]=="-a[,b]", parts[2]=="+c[,d]", parts[3...]=="@@" + optional context
+        // Only read the two fixed-position range tokens; the trailing function-context text
+        // (e.g. "func add() -> Int {") can contain "-" / "+" tokens that would otherwise
+        // clobber oldStart / newStart when iterating over all parts.
         let parts = header.split(separator: " ")
-        var oldStart = 0, newStart = 0
-        for p in parts {
-            if p.hasPrefix("-") { oldStart = Int(p.dropFirst().split(separator: ",").first ?? "0") ?? 0 }
-            if p.hasPrefix("+") { newStart = Int(p.dropFirst().split(separator: ",").first ?? "0") ?? 0 }
-        }
-        return (oldStart, newStart)
+        guard parts.count >= 3 else { return (0, 0) }
+        let old = Int(parts[1].dropFirst().split(separator: ",").first ?? "0") ?? 0
+        let new = Int(parts[2].dropFirst().split(separator: ",").first ?? "0") ?? 0
+        return (old, new)
     }
 }

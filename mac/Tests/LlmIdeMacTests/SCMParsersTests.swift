@@ -64,4 +64,20 @@ import Foundation
     @Test func emptyDiffYieldsNoHunks() {
         #expect(UnifiedDiffParser.parse("").isEmpty)
     }
+
+    @Test func hunkHeaderWithFunctionContextDoesNotClobberLineNumbers() {
+        let diff = """
+        @@ -10,3 +12,3 @@ func add() -> Int {
+         let a = 1
+        -let b = 2
+        +let b = 20
+         let c = 3
+        """
+        let hunks = UnifiedDiffParser.parse(diff)
+        #expect(hunks.count == 1)
+        let rows = hunks[0].rows
+        #expect(rows[0].oldLine == 10 && rows[0].newLine == 12)   // not 0
+        #expect(rows.contains { $0.kind == .delete && $0.oldLine == 11 })
+        #expect(rows.contains { $0.kind == .insert && $0.newLine == 13 })
+    }
 }
