@@ -312,6 +312,40 @@ final class SourceControlService {
         await refresh(root: root)
     }
 
+    // MARK: - Merge / Tags / Blame
+
+    /// Merge `branch` into the current branch, then refresh. On failure
+    /// (e.g. conflicts) the error is captured into `state.error`; the status
+    /// refresh will surface conflicted (`U`) files.
+    func merge(root: URL, branch: String) async {
+        isBusy = true; defer { isBusy = false }
+        do { _ = try await repo.runGit(["merge", branch], at: root) }
+        catch { state.error = error.localizedDescription }
+        await refresh(root: root)
+    }
+
+    /// Tag names, newest first (`git tag --sort=-creatordate`). Returns [] on error.
+    func tags(root: URL) async -> [String] {
+        guard let out = try? await repo.runGit(["tag", "--sort=-creatordate"], at: root)
+        else { return [] }
+        return out.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// Create a lightweight tag at HEAD, then refresh.
+    func createTag(root: URL, name: String) async {
+        await run(["tag", name], root)
+    }
+
+    /// Blame annotations for `path` (relative to `root`), one per line.
+    /// Returns [] on error.
+    func blame(root: URL, path: String) async -> [BlameLine] {
+        guard let out = try? await repo.runGit(
+            ["blame", "--line-porcelain", "--", path], at: root) else { return [] }
+        return GitLog.parseBlame(out)
+    }
+
     private func run(_ args: [String], _ root: URL) async {
         do { _ = try await repo.runGit(args, at: root); await refresh(root: root) }
         catch { state.error = error.localizedDescription }

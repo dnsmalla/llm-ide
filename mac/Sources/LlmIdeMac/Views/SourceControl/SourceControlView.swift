@@ -27,6 +27,9 @@ struct SourceControlView: View {
     @State private var stashMessage = ""
     @State private var amendOn = false
     @State private var confirmDiscardAll = false
+    @State private var tags: [String] = []
+    @State private var showCreateTag = false
+    @State private var newTagName = ""
     /// In-flight diff load. Cancelled before starting a new one so rapid
     /// file/commit selection can't race (last-to-finish overwriting the
     /// current selection's diff).
@@ -149,7 +152,10 @@ struct SourceControlView: View {
         .onChange(of: scm.refreshTick) { _, _ in
             guard let root else { return }
             if mode == .history { Task { commits = await scm.log(root: root) } }
-            else { Task { stashes = await scm.stashList(root: root) } }
+            else {
+                Task { stashes = await scm.stashList(root: root) }
+                Task { tags = await scm.tags(root: root) }
+            }
         }
         // Load the selected commit's diff into the shared right pane.
         .onChange(of: selectedCommit) { _, c in
@@ -210,6 +216,17 @@ struct SourceControlView: View {
             }
         } message: {
             Text("This permanently deletes all uncommitted changes AND untracked files.")
+        }
+        .alert("New tag", isPresented: $showCreateTag) {
+            TextField("Tag name", text: $newTagName)
+            Button("Cancel", role: .cancel) {}
+            Button("Create") {
+                let name = newTagName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty, let root else { return }
+                Task { await scm.createTag(root: root, name: name) }
+            }
+        } message: {
+            Text("Create a lightweight tag at the current HEAD.")
         }
     }
 
@@ -341,11 +358,19 @@ struct SourceControlView: View {
                     Task { await scm.publish(root: root) }
                 }
             }
-            // Delete is offered only for non-current branches (current can't be deleted).
-            let deletable = branches.filter { $0 != scm.state.branch }
-            if !deletable.isEmpty {
+            // Merge / Delete are offered only for non-current branches
+            // (you can't merge or delete the branch you're on).
+            let others = branches.filter { $0 != scm.state.branch }
+            if !others.isEmpty {
                 Divider()
-                ForEach(deletable, id: \.self) { b in
+                Menu("Merge into current") {
+                    ForEach(others, id: \.self) { b in
+                        Button("Merge “\(b)”") {
+                            Task { await scm.merge(root: root, branch: b) }
+                        }
+                    }
+                }
+                ForEach(others, id: \.self) { b in
                     Button("Delete \(b)", role: .destructive) {
                         confirmDeleteBranch = b
                     }
@@ -410,6 +435,19 @@ struct SourceControlView: View {
                 }
                 if showOverflow {
                     Menu {
+                        Button("Create Tag…") {
+                            newTagName = ""
+                            showCreateTag = true
+                        }
+                        if !tags.isEmpty {
+                            Menu("Tags") {
+                                ForEach(tags, id: \.self) { t in
+                                    // Read-only listing; tags carry no action.
+                                    Text(t)
+                                }
+                            }
+                        }
+                        Divider()
                         Button("Discard All Changes", role: .destructive) {
                             confirmDiscardAll = true
                         }
