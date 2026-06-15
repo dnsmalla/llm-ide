@@ -188,6 +188,7 @@ struct AppShell: View {
             }
         }
         .onAppear {
+            bindLibraryStore()
             pruneCodeLibrary()
             seedLocalCodeFolders()
             redirectIfSectionHidden()
@@ -227,6 +228,10 @@ struct AppShell: View {
             appEnv?.indexer.stopWatching()
             appEnv = nil
             envInitError = nil
+            // Re-point the Library store at the new project root (or nil on
+            // close). bindProject runs the one-time legacy migration and a
+            // fresh scan, so the index follows the active project.
+            bindLibraryStore()
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             shell.section = .settings
@@ -590,24 +595,32 @@ struct AppShell: View {
         }
     }
 
-    /// Ensures every path in `config.localCodeFolders` is indexed in the
-    /// library as a .code folder. Called on appear and whenever the list
-    /// changes so new additions take effect without relaunch.
-    private func seedLocalCodeFolders() {
-        let fm = FileManager.default
-        for path in config.localCodeFolders {
-            let url = URL(fileURLWithPath: path)
-            guard fm.fileExists(atPath: path) else { continue }
-            // Key on the absolute path, not the basename, so two folders
-            // with the same name (/a/proj, /b/proj) both index.
-            let prefix = path.hasSuffix("/") ? path : path + "/"
-            let alreadyIndexed = itemStore.items.contains { $0.path.hasPrefix(prefix) }
-            if !alreadyIndexed {
-                DispatchQueue.main.async { [itemStore] in
-                    itemStore.addFolder(url: url, category: .code)
-                }
-            }
+    /// Bind the Library store to the active project root (single source of
+    /// truth) and seed its external code-folder references from
+    /// `config.localCodeFolders`.  Also installs the write-back so any
+    /// folder the store adds (legacy migration, future "+ folder") persists
+    /// back into config.  Idempotent — safe to call on every appear and
+    /// project change.
+    private func bindLibraryStore() {
+        // Persist store-originated external-folder mutations back into the
+        // durable config list.  AppShell mediates config ↔ store so the
+        // store stays free of an AppConfig dependency.
+        itemStore.onExternalCodeFoldersChanged = { [config] paths in
+            config.localCodeFolders = paths
         }
+        let root = projectStore.activeProject
+            .map { URL(fileURLWithPath: $0.localPath) }
+        itemStore.bindProject(root: root)
+        itemStore.setExternalCodeFolders(config.localCodeFolders)
+    }
+
+    /// Ensures every path in `config.localCodeFolders` is referenced by the
+    /// Library store as an external `.code` folder. Called on appear and
+    /// whenever the list changes so new additions take effect without
+    /// relaunch.  The store references folders in place (no copy) and
+    /// rescans when the set changes.
+    private func seedLocalCodeFolders() {
+        itemStore.setExternalCodeFolders(config.localCodeFolders)
     }
 
     private func rescanIndex() async {
