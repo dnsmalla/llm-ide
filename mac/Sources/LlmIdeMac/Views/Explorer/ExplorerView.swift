@@ -8,7 +8,6 @@ import AppKit
 struct ExplorerView: View {
     let api: LlmIdeAPIClient
 
-    @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var projectStore: ProjectStore
     @EnvironmentObject private var config: AppConfig
 
@@ -25,10 +24,7 @@ struct ExplorerView: View {
     /// Prefer the active CODE repo (matching Source Control / terminal); fall
     /// back to the active project's local folder. nil when neither is set.
     private var root: URL? {
-        if let repo = config.activeRepoLocalURL,
-           FileManager.default.fileExists(atPath: repo.path) { return repo }
-        if let path = projectStore.activeProject?.localPath { return URL(fileURLWithPath: path) }
-        return nil
+        WorkspaceRoot.resolve(config: config, projectStore: projectStore)
     }
 
     var body: some View {
@@ -97,24 +93,8 @@ struct ExplorerView: View {
         Button {
             toggle(node)
         } label: {
-            HStack(spacing: 4) {
-                if depth > 0 { Spacer().frame(width: CGFloat(depth) * 14) }
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 10)
-                Image(systemName: isExpanded ? "folder.fill" : "folder")
-                    .font(Typography.filename)
-                    .foregroundStyle(FileIconKit.folderColor)
-                    .frame(width: 16)
-                Text(node.name)
-                    .font(Typography.filename)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 2)
-            .contentShape(Rectangle())
+            TreeRowLabel(name: node.name, isFolder: true, isExpanded: isExpanded,
+                         depth: depth, isSelected: false)
         }
         .buttonStyle(.plain)
         .help(node.name)
@@ -131,19 +111,8 @@ struct ExplorerView: View {
         return Button {
             open(node.url)
         } label: {
-            HStack(spacing: 4) {
-                Spacer().frame(width: CGFloat(depth) * 14 + 14)
-                Image(systemName: FileIconKit.icon(for: ext))
-                    .font(.system(size: 11))
-                    .foregroundStyle(FileIconKit.color(for: ext))
-                    .frame(width: 16)
-                Text(node.name)
-                    .font(Typography.filename)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 2)
-            .contentShape(Rectangle())
+            TreeRowLabel(name: node.name, isFolder: false, isExpanded: false,
+                         depth: depth, isSelected: selected, fileExtension: ext)
         }
         .buttonStyle(.plain)
         .background(selected ? Color.accentColor.opacity(0.18) : Color.clear)

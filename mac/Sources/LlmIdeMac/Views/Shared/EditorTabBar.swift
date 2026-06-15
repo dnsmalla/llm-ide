@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - EditorTabBar
 
-/// Horizontal editor tab strip shared by Review Code and the Explorer.
+/// Horizontal editor tab strip shared by Review Code, the Explorer, and Search.
 /// Operates purely on the two bindings: closing a tab removes it and
 /// re-selects a neighbor so the caller never has to special-case the
 /// close behavior.

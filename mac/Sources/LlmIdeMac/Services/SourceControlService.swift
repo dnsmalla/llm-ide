@@ -10,7 +10,14 @@ final class SourceControlService {
         var behind: Int = 0
         var files: [FileChange] = []
         var isLoading = false
+        /// Transient status/refresh error. Cleared at the start of every
+        /// refresh (and the 3s poll), so it never lingers.
         var error: String?
+        /// Sticky op error (push/pull/merge/credential/etc). NOT cleared by
+        /// refresh, so the poll can't wipe it before the user reads it. Each
+        /// mutating op clears it at its own start; the banner shows it with
+        /// priority and offers a manual dismiss.
+        var opError: String? = nil
         /// Whether the current branch tracks an upstream (drives Publish visibility).
         var hasUpstream: Bool = false
     }
@@ -115,6 +122,7 @@ final class SourceControlService {
     /// commit what's already staged. Refresh afterwards either way.
     @discardableResult
     func commit(root: URL, message: String) async -> Bool {
+        state.opError = nil
         var ok = true
         do {
             if stagedFiles.isEmpty && !state.files.isEmpty {
@@ -122,10 +130,10 @@ final class SourceControlService {
             }
             try await repo.commit(at: root, message: message)
         }
-        // Capture success locally — `refresh` below resets state.error, so a
-        // caller can't reliably read it afterwards (this is why commitAndPush
-        // checks the return value, not state.error).
-        catch { state.error = error.localizedDescription; ok = false }
+        // Failure lands in the sticky `opError` (survives the refresh below)
+        // AND flips `ok` to false. commitAndPush gates on the Bool return —
+        // clearer than reading state, and now opError is reliable too.
+        catch { state.opError = error.localizedDescription; ok = false }
         await refresh(root: root)
         return ok
     }
@@ -134,35 +142,38 @@ final class SourceControlService {
 
     /// Pull (--ff-only) from origin using the repo's saved credentials.
     func pull(root: URL) async {
+        state.opError = nil
         guard let c = resolveCredentials?(root), !c.token.isEmpty else {
-            state.error = "No credentials configured for this repo."; return
+            state.opError = "No credentials configured for this repo."; return
         }
         isBusy = true; defer { isBusy = false }
         do { try await repo.pull(at: root, token: c.token, backend: c.backend) }
-        catch { state.error = error.localizedDescription }
+        catch { state.opError = error.localizedDescription }
         await refresh(root: root)
     }
 
     /// Push the current branch (with upstream tracking) to origin.
     func push(root: URL) async {
+        state.opError = nil
         guard let c = resolveCredentials?(root), !c.token.isEmpty else {
-            state.error = "No credentials configured for this repo."; return
+            state.opError = "No credentials configured for this repo."; return
         }
-        guard let branch = state.branch else { state.error = "No branch to push."; return }
+        guard let branch = state.branch else { state.opError = "No branch to push."; return }
         isBusy = true; defer { isBusy = false }
         do { try await repo.push(at: root, branch: branch, token: c.token, backend: c.backend) }
-        catch { state.error = error.localizedDescription }
+        catch { state.opError = error.localizedDescription }
         await refresh(root: root)
     }
 
     /// Fetch from origin (no merge), then refresh status / ahead-behind.
     func sync(root: URL) async {
+        state.opError = nil
         guard let c = resolveCredentials?(root), !c.token.isEmpty else {
-            state.error = "No credentials configured for this repo."; return
+            state.opError = "No credentials configured for this repo."; return
         }
         isBusy = true; defer { isBusy = false }
         do { try await repo.fetch(at: root, token: c.token, backend: c.backend) }
-        catch { state.error = error.localizedDescription }
+        catch { state.opError = error.localizedDescription }
         await refresh(root: root)
     }
 
@@ -179,10 +190,7 @@ final class SourceControlService {
 
     /// Check out an existing local branch, then refresh.
     func checkout(root: URL, branch: String) async {
-        isBusy = true; defer { isBusy = false }
-        do { _ = try await repo.runGit(["checkout", branch], at: root) }
-        catch { state.error = error.localizedDescription }
-        await refresh(root: root)
+        await run(["checkout", branch], root)
     }
 
     /// Create a new branch off HEAD and switch to it, then refresh.
@@ -198,13 +206,14 @@ final class SourceControlService {
     /// Publish the current branch to origin, setting upstream tracking.
     /// Reuses the same credential resolution as `push()`.
     func publish(root: URL) async {
+        state.opError = nil
         guard let c = resolveCredentials?(root), !c.token.isEmpty else {
-            state.error = "No credentials configured for this repo."; return
+            state.opError = "No credentials configured for this repo."; return
         }
-        guard let branch = state.branch else { state.error = "No branch to publish."; return }
+        guard let branch = state.branch else { state.opError = "No branch to publish."; return }
         isBusy = true; defer { isBusy = false }
         do { try await repo.push(at: root, branch: branch, token: c.token, backend: c.backend) }
-        catch { state.error = error.localizedDescription }
+        catch { state.opError = error.localizedDescription }
         await refresh(root: root)
     }
 
@@ -264,7 +273,6 @@ final class SourceControlService {
         var args = ["stash", "push", "-u"]
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { args += ["-m", trimmed] }
-        isBusy = true; defer { isBusy = false }
         await run(args, root)
     }
 
@@ -276,7 +284,6 @@ final class SourceControlService {
 
     /// Pop a stash by index (`stash pop "stash@{N}"`), then refresh.
     func stashPop(root: URL, index: Int) async {
-        isBusy = true; defer { isBusy = false }
         await run(["stash", "pop", "stash@{\(index)}"], root)
     }
 
@@ -285,13 +292,14 @@ final class SourceControlService {
     /// Amend the last commit. A non-empty message replaces the commit message
     /// (`-m`); an empty message keeps it (`--no-edit`). Refresh afterwards.
     func amend(root: URL, message: String) async {
+        state.opError = nil
         isBusy = true; defer { isBusy = false }
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         let args = trimmed.isEmpty
             ? ["commit", "--amend", "--no-edit"]
             : ["commit", "--amend", "-m", trimmed]
         do { _ = try await repo.runGit(args, at: root) }
-        catch { state.error = error.localizedDescription }
+        catch { state.opError = error.localizedDescription }
         await refresh(root: root)
     }
 
@@ -309,24 +317,22 @@ final class SourceControlService {
     /// (`checkout -- .`) and delete untracked files/dirs (`clean -fd`), then
     /// refresh. DESTRUCTIVE — caller must confirm.
     func discardAll(root: URL) async {
+        state.opError = nil
         isBusy = true; defer { isBusy = false }
         do {
             _ = try await repo.runGit(["checkout", "--", "."], at: root)
             _ = try await repo.runGit(["clean", "-fd"], at: root)
-        } catch { state.error = error.localizedDescription }
+        } catch { state.opError = error.localizedDescription }
         await refresh(root: root)
     }
 
     // MARK: - Merge / Tags / Blame
 
     /// Merge `branch` into the current branch, then refresh. On failure
-    /// (e.g. conflicts) the error is captured into `state.error`; the status
-    /// refresh will surface conflicted (`U`) files.
+    /// (e.g. conflicts) the error is captured into the sticky `opError`; the
+    /// status refresh will surface conflicted (`U`) files.
     func merge(root: URL, branch: String) async {
-        isBusy = true; defer { isBusy = false }
-        do { _ = try await repo.runGit(["merge", branch], at: root) }
-        catch { state.error = error.localizedDescription }
-        await refresh(root: root)
+        await run(["merge", branch], root)
     }
 
     /// Tag names, newest first (`git tag --sort=-creatordate`). Returns [] on error.
@@ -351,10 +357,24 @@ final class SourceControlService {
         return GitLog.parseBlame(out)
     }
 
+    /// Single chokepoint for local mutating git ops. Sets `isBusy` for the
+    /// duration (so the poll skips), clears the sticky `opError` at the start,
+    /// and refreshes on BOTH success and failure so the file list / branch
+    /// always reflect reality. A failure lands in `opError` (sticky) rather
+    /// than `error` (transient), so the poll can't wipe it.
     private func run(_ args: [String], _ root: URL) async {
+        isBusy = true; defer { isBusy = false }
+        state.opError = nil
         do { _ = try await repo.runGit(args, at: root); await refresh(root: root) }
-        catch { state.error = error.localizedDescription }
+        catch {
+            state.opError = error.localizedDescription
+            await refresh(root: root)
+        }
     }
+
+    /// Dismiss the sticky op error from the UI (banner ×). `state` is
+    /// `private(set)`, so the view can't clear it directly.
+    func clearOpError() { state.opError = nil }
 
     private func isGitRepo(_ url: URL) -> Bool {
         FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path)

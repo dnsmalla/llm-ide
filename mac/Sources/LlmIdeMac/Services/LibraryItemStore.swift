@@ -247,13 +247,8 @@ final class LibraryItemStore {
     }
 
     /// Dirs we never want to walk into when indexing a code repo.
-    /// Same shape as RepoFileTreeRow.defaultIgnoreNames; kept here
-    /// independently so the store doesn't depend on a view file.
-    static let noiseDirectoryNames: Set<String> = [
-        ".git", "node_modules", ".understand-anything", ".build", "DerivedData",
-        ".swiftpm", "Pods", "build", "dist", ".next", ".venv", "__pycache__",
-        "target", "vendor", ".gradle", ".idea", ".vscode"
-    ]
+    /// Thin alias for the canonical `IgnoreList.directories`.
+    static let noiseDirectoryNames: Set<String> = IgnoreList.directories
 
     /// True when `url` is a file the app can meaningfully preview as
     /// code/text/docs/config. The check is on the extension; files

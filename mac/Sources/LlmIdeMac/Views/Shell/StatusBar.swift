@@ -11,16 +11,7 @@ struct StatusBar: View {
     /// Working directory for the terminal — mirrors AppShell.projectDirectory:
     /// prefer the active SCM repo, then the project folder, then home.
     private var terminalCwd: URL {
-        if let repo = config.activeRepoLocalURL,
-           FileManager.default.fileExists(atPath: repo.path) {
-            return repo
-        }
-        if let path = projectStore.activeProject?.localPath,
-           !path.isEmpty,
-           FileManager.default.fileExists(atPath: path) {
-            return URL(fileURLWithPath: path)
-        }
-        return FileManager.default.homeDirectoryForCurrentUser
+        WorkspaceRoot.resolveOrHome(config: config, projectStore: projectStore)
     }
 
     var body: some View {

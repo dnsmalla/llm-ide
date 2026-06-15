@@ -504,59 +504,38 @@ extension EditableTextDetailView where Accessory == EmptyView {
     }
 }
 
-struct CodeWebView: NSViewRepresentable {
+struct CodeWebView: View {
     let code: String
     let language: String
     let isDark: Bool
     var changedLines: [Int: GitGutter.Mark] = [:]
     var blame: [Int: BlameInfo] = [:]
 
-    func makeNSView(context: Context) -> WKWebView {
-        let wv = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
-        wv.setValue(false, forKey: "drawsBackground")
-        wv.loadHTMLString(html(), baseURL: nil)
-        return wv
-    }
-
-    func updateNSView(_ wv: WKWebView, context: Context) {
-        wv.loadHTMLString(html(), baseURL: nil)
+    var body: some View {
+        HljsWebView(html: html())
     }
 
     private var hljsLanguage: String {
         HljsLanguage.id(for: language)
     }
 
-    // highlight.js v11.9.0 is vendored under Resources/ and inlined below —
-    // no remote CDN, so code preview works offline and can't be tampered
-    // with in transit (closes a MITM/XSS vector against local file content).
-    private static let hljsJS: String      = bundledText("highlight.min", "js")
-    private static let hljsDarkCSS: String  = bundledText("atom-one-dark.min", "css")
-    private static let hljsLightCSS: String = bundledText("atom-one-light.min", "css")
-
-    private static func bundledText(_ name: String, _ ext: String) -> String {
-        guard let url = Bundle.main.url(forResource: name, withExtension: ext),
-              let s = try? String(contentsOf: url, encoding: .utf8) else { return "" }
-        return s
-    }
-
     private func html() -> String {
-        // Inlined, locally-bundled theme + highlighter (atom-one-dark/light).
-        let themeCSS = isDark ? Self.hljsDarkCSS : Self.hljsLightCSS
-        let hljsJS   = Self.hljsJS
+        // Inlined, locally-bundled theme + highlighter (atom-one-dark/light)
+        // from the shared single-load `Hljs` cache.
+        let themeCSS = Hljs.themeCSS(isDark: isDark)
+        let hljsJS   = Hljs.js
+        let p        = Hljs.Palette(isDark: isDark)
 
-        let bg     = isDark ? "#1e1e1e" : "#fafafa"
-        let fg     = isDark ? "#abb2bf" : "#383a42"
-        let gutBg  = isDark ? "#21252b" : "#f0f0f0"
-        let gutFg  = isDark ? "#5c6370" : "#9d9d9d"
-        let border = isDark ? "#181a1f" : "#e5e5e5"
+        let bg     = p.bg
+        let fg     = p.fg
+        let gutBg  = p.gutterBg
+        let gutFg  = p.gutterFg
+        let border = p.border
         let hoverBg = isDark ? "#2c313a" : "#f0f0f0"
 
         // HTML-escape the body once; the <pre><code class="language-X">
         // wrapper lets highlight.js process it after DOMContentLoaded.
-        let escaped = code
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
+        let escaped = Hljs.escape(code)
 
         let classAttr = hljsLanguage.isEmpty ? "" : " class=\"language-\(hljsLanguage)\""
 
