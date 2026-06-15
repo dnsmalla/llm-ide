@@ -26,6 +26,13 @@ public enum CodeNoteGenerator {
         let notesRoot = repoRoot.appendingPathComponent(".code-notes/notes", isDirectory: true)
         try? FileManager.default.createDirectory(at: notesRoot, withIntermediateDirectories: true)
 
+        // Self-ignoring marker: makes git ignore everything under `.code-notes`
+        // in ANY repo, regardless of the repo's root .gitignore. Idempotent /
+        // write-always (cheap), so generated notes never flood Source Control.
+        let codeNotesRoot = repoRoot.appendingPathComponent(".code-notes", isDirectory: true)
+        try? "*\n".write(to: codeNotesRoot.appendingPathComponent(".gitignore"),
+                         atomically: true, encoding: .utf8)
+
         let usedBy = buildUsedBy(scan: scan)
         let codeFiles = scan.files.filter { $0.language != "other" }
 
