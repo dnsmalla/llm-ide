@@ -113,15 +113,21 @@ final class SourceControlService {
     /// Commit-all-aware (Cursor-style): if nothing is staged but there ARE
     /// changes, stage everything (`git add -A`) first, then commit; otherwise
     /// commit what's already staged. Refresh afterwards either way.
-    func commit(root: URL, message: String) async {
+    @discardableResult
+    func commit(root: URL, message: String) async -> Bool {
+        var ok = true
         do {
             if stagedFiles.isEmpty && !state.files.isEmpty {
                 _ = try await repo.runGit(["add", "-A"], at: root)
             }
             try await repo.commit(at: root, message: message)
         }
-        catch { state.error = error.localizedDescription }
+        // Capture success locally — `refresh` below resets state.error, so a
+        // caller can't reliably read it afterwards (this is why commitAndPush
+        // checks the return value, not state.error).
+        catch { state.error = error.localizedDescription; ok = false }
         await refresh(root: root)
+        return ok
     }
 
     // MARK: - Remote operations
@@ -292,11 +298,10 @@ final class SourceControlService {
     /// Commit (commit-all-aware) then push the current branch. Both steps
     /// refresh on their own.
     func commitAndPush(root: URL, message: String) async {
-        await commit(root: root, message: message)
-        // Don't push if the commit failed (commit captures errors into
-        // state.error rather than throwing) — pushing would otherwise publish
-        // a previous/unintended HEAD.
-        guard state.error == nil else { return }
+        // Only push if the commit actually succeeded — otherwise we'd publish
+        // a previous/unintended HEAD. Checks the return value, not state.error,
+        // which commit's trailing refresh would have cleared.
+        guard await commit(root: root, message: message) else { return }
         await push(root: root)
     }
 
