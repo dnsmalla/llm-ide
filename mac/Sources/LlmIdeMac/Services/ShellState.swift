@@ -6,7 +6,7 @@ import SwiftUI
 @Observable
 final class ShellState {
     enum Section: String, Hashable, CaseIterable {
-        case library, live, review, plans, conflicts, issues, gantt, visual, docGen, autoCode, codeGraph, regression, settings
+        case library, live, review, plans, conflicts, sourceControl, issues, gantt, visual, docGen, autoCode, codeGraph, regression, settings
 
         /// User-friendly label — single source of truth so the sidebar
         /// row, the settings toggle and any future menu item agree.
@@ -17,6 +17,7 @@ final class ShellState {
             case .review:    return "Review Code"
             case .plans:     return "Review Doc"
             case .conflicts: return "Review Conflicts"
+            case .sourceControl: return "Source Control"
             case .issues:    return "Issues"
             case .gantt:     return "Gantt"
             case .visual:    return "Visual"
@@ -35,6 +36,7 @@ final class ShellState {
             case .review:    return "checkmark.shield"
             case .plans:     return "doc.text.magnifyingglass"
             case .conflicts: return "exclamationmark.triangle"
+            case .sourceControl: return "arrow.triangle.branch"
             case .issues:    return "checklist"
             case .gantt:     return "chart.bar.doc.horizontal"
             case .visual:    return "photo.on.rectangle.angled"
@@ -52,7 +54,7 @@ final class ShellState {
         /// turned off. `.live` is already conditional on capture state
         /// so it doesn't appear here either.
         static let userHideable: [Section] = [
-            .review, .plans, .conflicts, .issues, .gantt, .visual, .docGen, .autoCode, .codeGraph, .regression
+            .review, .plans, .conflicts, .sourceControl, .issues, .gantt, .visual, .docGen, .autoCode, .codeGraph, .regression
         ]
     }
 
@@ -127,6 +129,7 @@ extension ShellState.Section {
         case .review:     return Color(red: 0.22, green: 0.70, blue: 0.45) // green
         case .plans:      return Color(red: 0.30, green: 0.65, blue: 0.55) // teal-green
         case .conflicts:  return Color(red: 0.50, green: 0.72, blue: 0.30) // lime-green
+        case .sourceControl: return Color(red: 0.30, green: 0.70, blue: 0.45) // green
         case .autoCode:   return .teal
         case .codeGraph:  return Color(red: 0.15, green: 0.68, blue: 0.65) // cyan-green
         case .regression: return Color(red: 0.40, green: 0.75, blue: 0.50) // mint-green
@@ -146,7 +149,7 @@ extension ShellState.Section {
     var category: String {
         switch self {
         case .library, .live, .docGen:                               return "Notes"
-        case .review, .plans, .conflicts, .autoCode, .codeGraph, .regression: return "Code"
+        case .review, .plans, .conflicts, .sourceControl, .autoCode, .codeGraph, .regression: return "Code"
         case .issues, .gantt, .visual:                               return "Data"
         case .settings:                                              return "App"
         }

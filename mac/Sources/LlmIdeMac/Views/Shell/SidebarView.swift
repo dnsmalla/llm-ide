@@ -44,7 +44,7 @@ struct SidebarView: View {
             }
             // ── Code (green family) ──────────────────────
             let codeSections: [ShellState.Section] =
-                [.review, .plans, .conflicts, .autoCode, .codeGraph, .regression]
+                [.review, .plans, .conflicts, .sourceControl, .autoCode, .codeGraph, .regression]
             let visibleCode = codeSections.filter(isVisible)
             if !visibleCode.isEmpty {
                 Section(isCompact ? "" : "Code") {
