@@ -37,6 +37,8 @@ enum ProjectScaffolder {
         "plans",
         "notes",
         "assets",
+        "code",            // source files routed from Code-type items
+        "data",            // data files routed from Data-type items
     ]
 
     // MARK: - Public entry point
@@ -67,6 +69,9 @@ enum ProjectScaffolder {
         if fm.fileExists(atPath: legacyJSON.path) { return }
 
         // 2. Has all required top-level dirs (migrated / manually created).
+        // NOTE: "code" and "data" are intentionally absent here — adding them
+        // would reject legacy projects that pre-date those folders.  The
+        // idempotent scaffold call on every project open fills them in safely.
         let topLevelRequired = ["meetings", "notes", "plans"]
         let allPresent = topLevelRequired.allSatisfy { dir in
             var isDir: ObjCBool = false

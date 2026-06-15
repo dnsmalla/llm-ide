@@ -96,6 +96,18 @@ struct ProjectScaffolderTests {
         }
     }
 
+    @Test func scaffoldCreatesCodeAndDataFolders() throws {
+        let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        try ProjectScaffolder.scaffold(at: dir, project: sampleProject())
+        let fm = FileManager.default
+        for sub in ["meetings", "plans", "notes", "assets", "code", "data"] {
+            var isDir: ObjCBool = false
+            let exists = fm.fileExists(
+                atPath: dir.appendingPathComponent(sub).path, isDirectory: &isDir)
+            #expect(exists && isDir.boolValue, "missing dir: \(sub)")
+        }
+    }
+
     @Test func scaffoldPreservesForeignReadme() throws {
         let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
         let readme = dir.appendingPathComponent("README.md")
