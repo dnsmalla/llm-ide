@@ -35,6 +35,15 @@ struct ExplorerView: View {
             editorArea
                 .frame(minWidth: 360, maxWidth: .infinity)
         }
+        // Reset all per-project state when the active project changes, so the
+        // tree, cache, and open tabs never show a previous project's files
+        // (and the cache can't grow unbounded across switches).
+        .onChange(of: root?.path) { _, _ in
+            expanded.removeAll()
+            childrenCache.removeAll()
+            tabs.removeAll()
+            activeTab = nil
+        }
     }
 
     // MARK: - Tree pane
