@@ -11,6 +11,8 @@ final class SourceControlService {
         var files: [FileChange] = []
         var isLoading = false
         var error: String?
+        /// Whether the current branch tracks an upstream (drives Publish visibility).
+        var hasUpstream: Bool = false
     }
 
     private(set) var state = State()
@@ -50,6 +52,11 @@ final class SourceControlService {
             state.branch = try? await repo.runGit(
                 ["rev-parse", "--abbrev-ref", "HEAD"], at: root)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+            // Upstream tracking: resolves only when the branch has one (best-effort).
+            let upstream = try? await repo.runGit(
+                ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], at: root)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            state.hasUpstream = !(upstream?.isEmpty ?? true)
             // ahead/behind vs upstream (best-effort; no upstream → 0/0)
             if let counts = try? await repo.runGit(
                 ["rev-list", "--count", "--left-right", "@{u}...HEAD"], at: root) {
@@ -163,6 +170,29 @@ final class SourceControlService {
     func checkout(root: URL, branch: String) async {
         isBusy = true; defer { isBusy = false }
         do { _ = try await repo.runGit(["checkout", branch], at: root) }
+        catch { state.error = error.localizedDescription }
+        await refresh(root: root)
+    }
+
+    /// Create a new branch off HEAD and switch to it, then refresh.
+    func createBranch(root: URL, name: String) async {
+        await run(["checkout", "-b", name], root)
+    }
+
+    /// Delete a local branch (safe `-d` by default; `-D` when forced), then refresh.
+    func deleteBranch(root: URL, name: String, force: Bool = false) async {
+        await run(["branch", force ? "-D" : "-d", name], root)
+    }
+
+    /// Publish the current branch to origin, setting upstream tracking.
+    /// Reuses the same credential resolution as `push()`.
+    func publish(root: URL) async {
+        guard let c = resolveCredentials?(root), !c.token.isEmpty else {
+            state.error = "No credentials configured for this repo."; return
+        }
+        guard let branch = state.branch else { state.error = "No branch to publish."; return }
+        isBusy = true; defer { isBusy = false }
+        do { try await repo.push(at: root, branch: branch, token: c.token, backend: c.backend) }
         catch { state.error = error.localizedDescription }
         await refresh(root: root)
     }

@@ -15,6 +15,10 @@ struct SourceControlView: View {
     @State private var message: String = ""
     @State private var confirmDiscard: FileChange?
     @State private var branches: [String] = []
+    @State private var pollTask: Task<Void, Never>?
+    @State private var showCreateBranch = false
+    @State private var newBranchName = ""
+    @State private var confirmDeleteBranch: String?
 
     private var root: URL? { config.activeRepoLocalURL }
 
@@ -59,6 +63,14 @@ struct SourceControlView: View {
                 Task { await scm.refresh(root: root) }
             }
         }
+        // Refresh every time the panel appears (fixes terminal branch changes not
+        // showing) and start a visible-only poll so external git ops (e.g. a
+        // `git checkout` in the integrated terminal) surface without a focus change.
+        .onAppear {
+            if let root { Task { await scm.refresh(root: root) } }
+            startPoll()
+        }
+        .onDisappear { pollTask?.cancel(); pollTask = nil }
         // Fix 2: re-resolve selection by path after any file-list mutation so the
         // diff pane stays correct after stage/unstage/discard
         .onChange(of: scm.state.files) { _, files in
@@ -89,6 +101,39 @@ struct SourceControlView: View {
             Text(file.status == .untracked
                  ? "“\(file.displayPath)” will be deleted."
                  : "Changes to “\(file.displayPath)” will be lost.")
+        }
+        .alert("New branch", isPresented: $showCreateBranch) {
+            TextField("Branch name", text: $newBranchName)
+            Button("Cancel", role: .cancel) {}
+            Button("Create") {
+                let name = newBranchName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty, let root else { return }
+                Task { await scm.createBranch(root: root, name: name) }
+            }
+        } message: {
+            Text("Create a new branch from the current HEAD and switch to it.")
+        }
+        .confirmationDialog("Delete branch?", isPresented: Binding(
+            get: { confirmDeleteBranch != nil }, set: { if !$0 { confirmDeleteBranch = nil } }
+        ), presenting: confirmDeleteBranch) { branch in
+            Button("Delete \(branch)", role: .destructive) {
+                if let root { Task { await scm.deleteBranch(root: root, name: branch); confirmDeleteBranch = nil } }
+            }
+        } message: { branch in
+            Text("Branch “\(branch)” will be deleted (only if fully merged).")
+        }
+    }
+
+    /// Start a visible-only refresh loop. Cancels any existing poll first so we
+    /// never run two concurrently. Skips refreshes while an op is in flight
+    /// (`isBusy`) to avoid fighting in-flight stage/commit/push work.
+    private func startPoll() {
+        pollTask?.cancel()
+        pollTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                if let root, !scm.isBusy { await scm.refresh(root: root) }
+            }
         }
     }
 
@@ -147,6 +192,26 @@ struct SourceControlView: View {
                         Label(b, systemImage: "checkmark")
                     } else {
                         Text(b)
+                    }
+                }
+            }
+            Divider()
+            Button("Create Branch…") {
+                newBranchName = ""
+                showCreateBranch = true
+            }
+            if !scm.state.hasUpstream {
+                Button("Publish Branch") {
+                    Task { await scm.publish(root: root) }
+                }
+            }
+            // Delete is offered only for non-current branches (current can't be deleted).
+            let deletable = branches.filter { $0 != scm.state.branch }
+            if !deletable.isEmpty {
+                Divider()
+                ForEach(deletable, id: \.self) { b in
+                    Button("Delete \(b)", role: .destructive) {
+                        confirmDeleteBranch = b
                     }
                 }
             }
