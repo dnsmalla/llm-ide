@@ -258,7 +258,7 @@ struct SourceControlView: View {
                 ScrollView {
                     if let err = scm.state.error { errorBanner(err) }
                     fileGroup("Staged Changes", scm.stagedFiles, root)
-                    fileGroup("Changes", scm.unstagedFiles, root, showStageAll: true, showOverflow: true)
+                    fileGroup("Changes", scm.unstagedFiles, root, showStageAll: true)
                 }
                 Divider().background(theme.current.border)
                 commitBox(root)
@@ -303,6 +303,28 @@ struct SourceControlView: View {
         .onTapGesture { selectedCommit = commit }
     }
 
+    /// Tree-state-independent overflow: tag create/list + discard-all. Lives in
+    /// the branch header so tags stay reachable even with a clean working tree.
+    private func overflowMenu(_ root: URL) -> some View {
+        Menu {
+            Button("Create Tag…") { newTagName = ""; showCreateTag = true }
+            if !tags.isEmpty {
+                Menu("Tags") {
+                    ForEach(tags, id: \.self) { Text($0) }   // read-only listing
+                }
+            }
+            Divider()
+            Button("Discard All Changes", role: .destructive) { confirmDiscardAll = true }
+        } label: {
+            Image(systemName: "ellipsis")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(scm.isBusy)
+        .help("More actions (tags, discard all)")
+    }
+
     private func branchHeader(_ root: URL) -> some View {
         let credHelp = "Configure a token in Settings → GitLab / GitHub"
         return HStack(spacing: Spacing.sm) {
@@ -330,6 +352,7 @@ struct SourceControlView: View {
             Button { Task { await scm.refresh(root: root) } } label: {
                 Image(systemName: "arrow.clockwise")
             }.buttonStyle(.plain).disabled(scm.isBusy).help("Refresh")
+            overflowMenu(root)
         }
         .foregroundStyle(theme.current.text)
         .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.sm)
@@ -418,8 +441,7 @@ struct SourceControlView: View {
     }
 
     @ViewBuilder private func fileGroup(_ title: String, _ files: [FileChange], _ root: URL,
-                                        showStageAll: Bool = false,
-                                        showOverflow: Bool = false) -> some View {
+                                        showStageAll: Bool = false) -> some View {
         if !files.isEmpty {
             HStack(spacing: Spacing.xs) {
                 Text("\(title) (\(files.count))")
@@ -432,33 +454,6 @@ struct SourceControlView: View {
                     .buttonStyle(.plain)
                     .disabled(scm.isBusy)
                     .help("Stage All")
-                }
-                if showOverflow {
-                    Menu {
-                        Button("Create Tag…") {
-                            newTagName = ""
-                            showCreateTag = true
-                        }
-                        if !tags.isEmpty {
-                            Menu("Tags") {
-                                ForEach(tags, id: \.self) { t in
-                                    // Read-only listing; tags carry no action.
-                                    Text(t)
-                                }
-                            }
-                        }
-                        Divider()
-                        Button("Discard All Changes", role: .destructive) {
-                            confirmDiscardAll = true
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .disabled(scm.isBusy)
-                    .help("More actions")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
