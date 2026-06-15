@@ -14,8 +14,9 @@ import os.log
 /// │   ├── project.json      ← project metadata (written by ProjectStore)
 /// │   ├── sync.json         ← last export info  (written by ProjectExporter)
 /// │   ├── index.sqlite      ← meeting full-text index (written by AppEnvironment)
-/// │   ├── cache/            ← runtime cache, git-ignored
-/// │   └── .gitignore        ← ignores sync.json, cache/, index.sqlite, *.partial.md
+/// │   └── cache/            ← runtime cache, git-ignored
+/// ├── .gitignore            ← project-root; LLM IDE managed block ignores
+/// │                            .code-notes/, .understand-anything/, cache, etc.
 /// ├── meetings/             ← live captures + YYYY/MM/date-slug-<id>.md on export
 /// ├── plans/                ← date-slug-<id>.md + .json on export
 /// ├── notes/                ← free-form notes, user-managed
