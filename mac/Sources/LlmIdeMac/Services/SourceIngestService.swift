@@ -85,13 +85,13 @@ struct SourceIngestService {
                 // doesn't re-import the successes. Do NOT advance the
                 // high-water mark — the window is retried next time.
                 config.recordSeenEmailIds(importedIds)
-                NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
+                await rescanAndNotify()
                 return .failure(error.localizedDescription)
             }
         }
 
         config.recordSeenEmailIds(importedIds)
-        NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
+        await rescanAndNotify()
         // Only advance the high-water mark when the window is fully drained;
         // if capped, leave it so the remainder re-fetches next run.
         if !capped { advanceHighWater(to: fetchStart) }
@@ -105,71 +105,72 @@ struct SourceIngestService {
         config.emailSource = s
     }
 
+    /// One full re-index after the batch (not per note — that's up to 50
+    /// scans on a drain) + the Library refresh. The scan is run off-main
+    /// since it walks the notes folder.
+    private func rescanAndNotify() async {
+        let indexer = self.indexer
+        await Task.detached(priority: .background) { try? indexer.fullScan() }.value
+        NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
+    }
+
     /// Mirror of `AppShell.generateNoteForLiveSession`: create a `.md`
-    /// transcript via `MeetingFileStore`, finalize it, force a re-index,
-    /// then run `MeetingSummarizationService` to attach the AI summary +
-    /// `.docx` note. The email body plays the role of the transcript.
+    /// transcript via `MeetingFileStore`, finalize it, then run
+    /// `MeetingSummarizationService` to attach the AI summary + `.docx` note.
+    /// The email body plays the role of the transcript. All file + summarize
+    /// work runs OFF the main actor (like AppShell does) so importing a batch
+    /// doesn't block the UI; only the dedup/notify touches `config` on-main.
     private func makeNote(from msg: EmailMessage) async throws {
+        // Resolve everything to Sendable primitives on the main actor first,
+        // then hand off to a detached task (capturing no main-actor state).
         let startedAt = AppDateFormatter.parseISO(msg.date) ?? Date()
         let title = msg.subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "Email"
             : msg.subject
-        // Participants = the sender. The address is kept verbatim so the
-        // Library shows exactly who the mail came from.
         let participants = msg.from.isEmpty ? [] : [msg.from]
-        // The note "transcript" is the email rendered as plain text with a
-        // short header — same shape the summarizer expects from a meeting.
+        let speaker = msg.from.isEmpty ? "Email" : msg.from
+        let body = msg.text
         let transcript = """
         From: \(msg.from)
         Subject: \(msg.subject)
         Date: \(msg.date)
 
-        \(msg.text)
+        \(body)
         """
+        let id = msg.messageId.isEmpty ? UUID().uuidString : msg.messageId
+        let root = self.root
+        let notesOutputFolder = self.notesOutputFolder
+        let api = self.api
 
-        let store = MeetingFileStore(root: root)
-        // 1. Create the partial .md. Use the message-id as the meeting id
-        //    so re-runs would overwrite rather than duplicate on disk.
-        let handle = try store.createPartial(
-            id: msg.messageId.isEmpty ? UUID().uuidString : msg.messageId,
-            startedAt: startedAt,
-            platform: "email",
-            language: "")
-        // 2. Write the email body as a single caption block. The sender is
-        //    the speaker so the markdown viewer renders "**from**: body".
-        try handle.appendCaption(timestamp: startedAt,
-                                 speaker: msg.from.isEmpty ? "Email" : msg.from,
-                                 text: msg.text)
-        try handle.flush()
+        try await Task.detached(priority: .background) {
+            let store = MeetingFileStore(root: root)
+            // Use the message-id as the meeting id so re-runs overwrite on
+            // disk rather than duplicating.
+            let handle = try store.createPartial(
+                id: id, startedAt: startedAt, platform: "email", language: "")
+            // Email body as one caption block; sender is the speaker so the
+            // markdown viewer renders "**from**: body".
+            try handle.appendCaption(timestamp: startedAt, speaker: speaker, text: body)
+            try handle.flush()
+            let url = try store.finalize(
+                handle: handle, title: title, endedAt: startedAt, participants: participants)
 
-        // 3. Rename .partial.md → dated .md.
-        let url = try store.finalize(
-            handle: handle,
-            title: title,
-            endedAt: startedAt,
-            participants: participants)
-
-        // 4. Make the Library pick up the file now.
-        try? indexer.fullScan()
-
-        // 5. AI summary + .docx note (non-fatal inside the service).
-        let dateSlug = AppDateFormatter.dateHourMinuteLocal(startedAt)
-        let idSuffix = (msg.messageId.isEmpty ? UUID().uuidString : msg.messageId).prefix(8)
-        let docxURL = notesOutputFolder.appendingPathComponent(
-            "\(dateSlug)-\(idSuffix)-email-notes.docx")
-        await MeetingSummarizationService.run(
-            api: api,
-            transcript: transcript,
-            title: title,
-            language: "",
-            startedAt: startedAt,
-            durationSeconds: nil,
-            participants: participants,
-            transcriptFileURL: url,
-            docxOutputURL: docxURL,
-            root: root)
-
-        // 6. Re-scan so the index reflects the frontmatter the summary wrote.
-        try? indexer.fullScan()
+            // AI summary + .docx note (non-fatal inside the service).
+            let dateSlug = AppDateFormatter.dateHourMinuteLocal(startedAt)
+            let idSuffix = id.prefix(8)
+            let docxURL = notesOutputFolder.appendingPathComponent(
+                "\(dateSlug)-\(idSuffix)-email-notes.docx")
+            await MeetingSummarizationService.run(
+                api: api,
+                transcript: transcript,
+                title: title,
+                language: "",
+                startedAt: startedAt,
+                durationSeconds: nil,
+                participants: participants,
+                transcriptFileURL: url,
+                docxOutputURL: docxURL,
+                root: root)
+        }.value
     }
 }

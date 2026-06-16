@@ -25,6 +25,7 @@ import { runClaude } from '../agents/runtime.mjs';
 import { iterateUserMeetings } from './exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails } from '../agents/email-source.mjs';
+import { logger } from '../core/logger.mjs';
 import { sendJSON, readBody, parseJSON, sanitizeForPrompt } from '../core/utils.mjs';
 
 // SSE concurrency tracking now lives in routes/live.mjs alongside
@@ -276,24 +277,33 @@ export async function handleKB(req, res) {
       if (url === '/kb/email/test') {
         try {
           const r = await testConnection({ host, port, secure, user, password, mailbox });
+          logger.info('email_test', { userId, mailbox: r.mailbox, total: r.total });
           sendJSON(res, 200, r);
         } catch (e) {
+          // Log host/user only — never the password or raw auth blob.
+          logger.error('email_test_failed', { userId, host, reason: e.message });
           sendJSON(res, 502, { error: { code: 'EMAIL_CONNECT_FAILED', message: e.message } });
         }
         return true;
       }
 
       // url === '/kb/email/fetch'
+      const started = Date.now();
       try {
         const messages = await fetchRecentEmails({
-          host, port, secure, user, password, mailbox,
+          host, port, secure, user, mailbox, password,
           lookbackDays: body.lookbackDays,
-          sinceISO: body.sinceISO,
-          unreadOnly: body.unreadOnly,
-          fromFilter: body.fromFilter,
+          sinceISO: typeof body.sinceISO === 'string' ? body.sinceISO : undefined,
+          unreadOnly: body.unreadOnly !== false,           // default true
+          fromFilter: typeof body.fromFilter === 'string' ? body.fromFilter : '',
+        });
+        logger.info('email_fetch', {
+          userId, mailbox: mailbox || 'INBOX',
+          count: messages.length, durationMs: Date.now() - started,
         });
         sendJSON(res, 200, { messages });
       } catch (e) {
+        logger.error('email_fetch_failed', { userId, host, reason: e.message });
         sendJSON(res, 502, { error: { code: 'EMAIL_FETCH_FAILED', message: e.message } });
       }
       return true;

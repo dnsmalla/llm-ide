@@ -131,7 +131,10 @@ function rateLimitProfile(url, method) {
   if (url.startsWith('/kb/review/'))     return 'kbWrite';
   if (url.startsWith('/kb/plan-task/'))  return 'kbWrite';
   if (url === '/kb/ingest')              return 'kbWrite';
-  if (url === '/kb/email/test' || url === '/kb/email/fetch') return 'kbWrite';
+  // Email routes open outbound IMAP connections + parse mail — expensive and
+  // externally-directed, so throttle them like other external-API writes
+  // (dispatch: ~1/10s burst 4) rather than the cheap kbWrite bucket.
+  if (url === '/kb/email/test' || url === '/kb/email/fetch') return 'dispatch';
   return null;
 }
 

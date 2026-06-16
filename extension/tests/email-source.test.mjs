@@ -6,7 +6,7 @@ process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
 // Pure helpers only — we never open a real IMAP connection here.
-const { normalizeParsed, stripHtml, resolveSince } = await import('../agents/email-source.mjs');
+const { normalizeParsed, stripHtml, resolveSince, isPrivateAddress } = await import('../agents/email-source.mjs');
 
 test('normalizeParsed maps a complete message', () => {
   const parsed = {
@@ -59,4 +59,25 @@ test('resolveSince falls back to lookbackDays on missing/invalid sinceISO', () =
   // Within a few seconds of "now - 7d" for both the absent and invalid cases.
   assert.ok(Math.abs(d1.getTime() - before) < 5000);
   assert.ok(Math.abs(d2.getTime() - before) < 5000);
+});
+
+test('resolveSince clamps lookbackDays to 1..60 server-side', () => {
+  const tooBig = resolveSince({ lookbackDays: 100000 });
+  const cap = Date.now() - 60 * 86400000;
+  assert.ok(Math.abs(tooBig.getTime() - cap) < 5000, 'clamped to 60 days');
+  const tooSmall = resolveSince({ lookbackDays: 0 });
+  const oneDay = Date.now() - 1 * 86400000; // 0 clamps up to the 1-day floor
+  assert.ok(Math.abs(tooSmall.getTime() - oneDay) < 5000);
+});
+
+test('isPrivateAddress flags loopback/private/link-local/ULA, allows public', () => {
+  for (const ip of ['127.0.0.1', '10.0.0.5', '192.168.1.1', '172.16.0.1',
+                    '169.254.169.254', '100.64.0.1', '0.0.0.0',
+                    '::1', '::', 'fe80::1', 'fc00::1', 'fd12::3',
+                    '::ffff:10.0.0.1']) {
+    assert.equal(isPrivateAddress(ip), true, `${ip} should be private`);
+  }
+  for (const ip of ['8.8.8.8', '142.250.80.1', '1.1.1.1', '2607:f8b0::1']) {
+    assert.equal(isPrivateAddress(ip), false, `${ip} should be public`);
+  }
 });
