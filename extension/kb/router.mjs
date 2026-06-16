@@ -23,6 +23,8 @@ import { handleReviewRoutes } from './routes/review.mjs';
 import { summarizeTranscript } from '../agents/summarize.mjs';
 import { runClaude } from '../agents/runtime.mjs';
 import { iterateUserMeetings } from './exporter.mjs';
+import { getSecret } from '../server/vault.mjs';
+import { testConnection, fetchRecentEmails } from '../agents/email-source.mjs';
 import { sendJSON, readBody, parseJSON, sanitizeForPrompt } from '../core/utils.mjs';
 
 // SSE concurrency tracking now lives in routes/live.mjs alongside
@@ -249,6 +251,44 @@ export async function handleKB(req, res) {
         sendJSON(res, 200, { ok: true, ...result });
       } catch (err) {
         sendJSON(res, 400, { error: { code: 'TICKETS_INDEX_FAILED', message: err.message } });
+      }
+      return true;
+    }
+
+    // Email input source — thin IMAP fetcher. The app password lives in the
+    // encrypted vault (key 'email.imapPassword'); it is read here and passed
+    // to the fetcher so it never travels on the request body. Connect/fetch
+    // failures map to a 502 since they're upstream (IMAP server) problems.
+    if (req.method === 'POST' && (url === '/kb/email/test' || url === '/kb/email/fetch')) {
+      const body = parseJSON(await readBody(req)) || {};
+      const { host, port, secure, user, mailbox } = body;
+      if (typeof host !== 'string' || !host.trim() ||
+          typeof user !== 'string' || !user.trim()) {
+        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'host and user are required' } });
+        return true;
+      }
+      const password = getSecret(kb.getDb(), userId, 'email.imapPassword');
+      if (!password) {
+        sendJSON(res, 400, { error: { code: 'EMAIL_NO_PASSWORD', message: 'No app password saved for email. Save one first.' } });
+        return true;
+      }
+
+      if (url === '/kb/email/test') {
+        try {
+          const r = await testConnection({ host, port, secure, user, password, mailbox });
+          sendJSON(res, 200, r);
+        } catch (e) {
+          sendJSON(res, 502, { error: { code: 'EMAIL_CONNECT_FAILED', message: e.message } });
+        }
+        return true;
+      }
+
+      // url === '/kb/email/fetch'
+      try {
+        const messages = await fetchRecentEmails({ host, port, secure, user, password, mailbox, lookbackDays: body.lookbackDays });
+        sendJSON(res, 200, { messages });
+      } catch (e) {
+        sendJSON(res, 502, { error: { code: 'EMAIL_FETCH_FAILED', message: e.message } });
       }
       return true;
     }

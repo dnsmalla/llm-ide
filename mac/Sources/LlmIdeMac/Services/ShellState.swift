@@ -6,7 +6,7 @@ import SwiftUI
 @Observable
 final class ShellState {
     enum Section: String, Hashable, CaseIterable {
-        case library, live, explorer, search, review, plans, conflicts, sourceControl, issues, gantt, visual, docGen, autoCode, codeGraph, regression, settings
+        case library, live, sources, explorer, search, review, plans, conflicts, sourceControl, issues, gantt, visual, docGen, autoCode, codeGraph, regression, settings
 
         /// User-friendly label — single source of truth so the sidebar
         /// row, the settings toggle and any future menu item agree.
@@ -14,6 +14,7 @@ final class ShellState {
             switch self {
             case .library:   return "Library"
             case .live:      return "Live"
+            case .sources:   return "Sources"
             case .explorer:  return "Explorer"
             case .search:    return "Search"
             case .review:    return "Review Code"
@@ -35,6 +36,7 @@ final class ShellState {
             switch self {
             case .library:   return "books.vertical"
             case .live:      return "waveform"
+            case .sources:   return "tray.and.arrow.down"
             case .explorer:  return "folder"
             case .search:    return "magnifyingglass"
             case .review:    return "checkmark.shield"
@@ -58,7 +60,7 @@ final class ShellState {
         /// turned off. `.live` is already conditional on capture state
         /// so it doesn't appear here either.
         static let userHideable: [Section] = [
-            .explorer, .search, .review, .plans, .conflicts, .sourceControl, .issues, .gantt, .visual, .docGen, .autoCode, .codeGraph, .regression
+            .sources, .explorer, .search, .review, .plans, .conflicts, .sourceControl, .issues, .gantt, .visual, .docGen, .autoCode, .codeGraph, .regression
         ]
     }
 
@@ -120,6 +122,7 @@ extension ShellState.Section {
         case .library:    return .blue
         case .live:       return Color(red: 0.20, green: 0.45, blue: 0.95) // vivid blue; red dot overlays when recording
         case .docGen:     return Color(red: 0.35, green: 0.55, blue: 0.95) // soft blue
+        case .sources:    return Color(red: 0.10, green: 0.55, blue: 0.85) // sky blue — inputs feed the notes pipeline
 
         // ── Code (green family) ──────────────────────────
         case .explorer:   return Color(red: 0.25, green: 0.68, blue: 0.40) // forest green
