@@ -1,9 +1,14 @@
 import SwiftUI
 
-/// "Sources" section — lists the input sources that feed the Library.
-/// Today: Meetings (auto-captured) and Email (fetched via the server and
-/// ingested through the meeting pipeline). More sources are stubbed as a
-/// muted footer note so the section reads as intentionally extensible.
+/// "Inputs" hub — the single home for every source that feeds the Library.
+///
+/// Each source is a uniform add-on card (`InputSourceCard`): Meetings
+/// (auto-captured), Email (fetched via the server and ingested through the
+/// meeting pipeline), and a registry of planned sources shown as upcoming.
+/// This is the only place input capture is *configured* — the old
+/// Settings → "Capture" card was folded into the Meetings add-on here so
+/// there is exactly one switch per setting. The `.live` section remains a
+/// separate runtime view (the live transcript while recording).
 struct SourcesView: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var config: AppConfig
@@ -16,21 +21,35 @@ struct SourcesView: View {
     @State private var lastEmailResult: String?
     /// True when `lastEmailResult` describes an error (drives the colour).
     @State private var lastEmailWasError = false
+    /// Meetings "Advanced" (poll interval) disclosure, collapsed by default.
+    @State private var showMeetingAdvanced = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.lg) {
-                Text("Sources")
-                    .font(Typography.title)
-                    .foregroundStyle(theme.current.textMuted)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sources")
+                        .font(Typography.title)
+                        .foregroundStyle(theme.current.text)
+                    Text("Connect the sources that feed your Library.")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                }
 
                 meetingsCard
                 emailCard
 
-                Text("More sources coming soon.")
-                    .font(Typography.caption)
+                Text("More inputs")
+                    .font(Typography.section)
                     .foregroundStyle(theme.current.textMuted)
-                    .padding(.top, Spacing.xs)
+                    .padding(.top, Spacing.sm)
+
+                ForEach(InputSourceRegistry.planned) { src in
+                    InputSourceCard(icon: src.icon, title: src.title,
+                                    subtitle: src.subtitle,
+                                    badgeText: "Coming soon", badgeTone: .neutral,
+                                    isAvailable: false)
+                }
             }
             .padding(Spacing.lg)
             .frame(maxWidth: 720, alignment: .leading)
@@ -52,64 +71,86 @@ struct SourcesView: View {
         }
     }
 
-    // MARK: - Meetings card
+    // MARK: - Meetings add-on
 
-    /// Surfaces the existing auto-capture toggle — does NOT change capture
-    /// behaviour, it just exposes `config.autoCaptureOnMeeting` here so the
-    /// Sources view is the single place to reason about all inputs.
+    /// The single home for meeting capture config: the auto-capture toggle
+    /// plus the poll interval (migrated here from the deleted Settings →
+    /// Capture card). Drives `config.autoCaptureOnMeeting` / `pollIntervalMs`
+    /// — the same properties the capture runtime reads, so behaviour is
+    /// unchanged; only the config UI moved.
     private var meetingsCard: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            cardHeader(icon: "waveform", title: "Meetings (Google Meet · Teams · Zoom)")
-            Text("Captured automatically during calls.")
-                .font(Typography.caption)
-                .foregroundStyle(theme.current.textMuted)
-
+        InputSourceCard(
+            icon: "waveform",
+            title: "Meetings",
+            subtitle: "Google Meet · Teams · Zoom",
+            badgeText: config.autoCaptureOnMeeting ? "On" : "Off",
+            badgeTone: config.autoCaptureOnMeeting ? .positive : .neutral
+        ) {
             Toggle(isOn: $config.autoCaptureOnMeeting) {
-                Text("Auto-capture when a meeting app is frontmost")
-                    .font(Typography.body)
-            }
-            .toggleStyle(.switch)
-            .padding(.top, Spacing.xs)
-        }
-        .card(padding: Spacing.lg)
-    }
-
-    // MARK: - Email card
-
-    private var emailCard: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            cardHeader(icon: "envelope", title: "Email")
-
-            // Status line.
-            if let s = config.emailSource {
-                HStack(spacing: 6) {
-                    Image(systemName: s.enabled ? "checkmark.circle.fill" : "pause.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(s.enabled ? theme.current.accent3 : theme.current.textMuted)
-                    Text(s.user.isEmpty ? (s.displayName.isEmpty ? "Configured" : s.displayName) : s.user)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Auto-capture when a meeting app is frontmost")
                         .font(Typography.body)
                         .foregroundStyle(theme.current.text)
-                    if !s.enabled {
-                        Text("(paused)")
+                    Text("Starts recording automatically once Zoom or Teams becomes the active app.")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                }
+            }
+            .toggleStyle(.switch)
+
+            DisclosureGroup(isExpanded: $showMeetingAdvanced) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Poll interval")
+                            .font(Typography.body)
+                            .foregroundStyle(theme.current.text)
+                        Text("\(config.pollIntervalMs) ms — how often the scraper reads each meeting app's caption panel. Applies on next launch.")
                             .font(Typography.caption)
                             .foregroundStyle(theme.current.textMuted)
                     }
+                    Spacer()
+                    Stepper("\(config.pollIntervalMs)",
+                            value: $config.pollIntervalMs,
+                            in: 100...2000, step: 50)
+                        .labelsHidden()
+                        .controlSize(.small)
                 }
-            } else {
-                Text("Not configured")
-                    .font(Typography.body)
+                .padding(.top, Spacing.xs)
+            } label: {
+                Text("Advanced")
+                    .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
             }
+            .padding(.top, Spacing.xs)
+        }
+    }
 
-            // Actions.
+    // MARK: - Email add-on
+
+    private var emailCard: some View {
+        let configured = config.emailSource != nil
+        let enabled = config.emailSource?.enabled == true
+        return InputSourceCard(
+            icon: "envelope",
+            title: "Email",
+            subtitle: "Fetch messages and turn them into notes",
+            badgeText: !configured ? "Not set up" : (enabled ? "Connected" : "Paused"),
+            badgeTone: !configured ? .accent : (enabled ? .positive : .neutral)
+        ) {
+            if let s = config.emailSource {
+                Text(s.user.isEmpty ? (s.displayName.isEmpty ? "Configured" : s.displayName) : s.user)
+                    .font(Typography.body)
+                    .foregroundStyle(theme.current.text)
+            }
+
             HStack(spacing: Spacing.sm) {
-                Button(config.emailSource == nil ? "Configure…" : "Edit…") {
+                Button(configured ? "Edit…" : "Configure…") {
                     showingEmailSheet = true
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
 
-                if let s = config.emailSource, s.enabled {
+                if enabled {
                     Button(fetching ? "Fetching…" : "Fetch now") {
                         Task { await runImport() }
                     }
@@ -130,21 +171,9 @@ struct SourcesView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .card(padding: Spacing.lg)
     }
 
     // MARK: - Helpers
-
-    private func cardHeader(icon: String, title: String) -> some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(theme.current.accent2)
-            Text(title)
-                .font(Typography.bodyStrong)
-                .foregroundStyle(theme.current.text)
-        }
-    }
 
     /// Run the email import flow and reflect the outcome on the card.
     private func runImport() async {

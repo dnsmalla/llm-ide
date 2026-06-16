@@ -24,7 +24,6 @@ struct SettingsView: View {
                         BackendSettingsSection()
                         AppearanceSettingsSection()
                         SidebarVisibilitySection()
-                        CaptureSettingsSection()
                         UpdatesSettingsSection()
                         AboutSettingsSection()
                     }
