@@ -5,6 +5,9 @@
 import { execFile } from 'child_process';
 import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
+import { logger } from '../core/logger.mjs';
+
+const log = logger.child({ component: 'claude-runtime' });
 
 const CLAUDE_TIMEOUT_MS = 90_000;        // 90 s per CLI attempt.  Planning
                                          // prompts are large but two retries
@@ -16,6 +19,16 @@ const CLAUDE_TIMEOUT_MS = 90_000;        // 90 s per CLI attempt.  Planning
                                          // both the URLSession (240 s) and the
                                          // route timeout before the fix.
 const DEFAULT_MODEL = process.env.LLMIDE_MODEL || 'claude-sonnet-4-6';
+// Floor for the context-overflow retry: halving the output budget below
+// this produces summaries/answers too truncated to be useful, so we
+// stop retrying and surface the error instead.
+const MIN_OVERFLOW_TOKENS = 256;
+// Anthropic API version header.  2023-06-01 is the current stable
+// version; overridable so a future version bump is a config change,
+// not a deploy.  Prompt caching is GA on this version — the old
+// `anthropic-beta: prompt-caching-2024-07-31` header is no longer
+// needed and has been dropped.
+const ANTHROPIC_VERSION = process.env.LLMIDE_ANTHROPIC_VERSION || '2023-06-01';
 
 // Anthropic 529 "overloaded" responses usually clear within 5-30s.
 // Retry transient capacity errors (529, 503) with jittered backoff
@@ -25,8 +38,9 @@ const RETRY_DELAYS_MS = [1_000, 3_000];  // attempt 1 → 2 (after 1s),
                                           // attempt 2 → 3 (after 3s).
                                           // 3 attempts total.
 
-function jittered(ms) {
-  // ±25% jitter to avoid thundering-herd retries from concurrent calls.
+// ±25% jitter to avoid thundering-herd retries from concurrent calls.
+// Exported — the dispatcher's retry backoff uses the same strategy.
+export function jittered(ms) {
   const factor = 0.75 + Math.random() * 0.5;
   return Math.round(ms * factor);
 }
@@ -110,19 +124,23 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
     }
 
     // HTTP path with backoff on transient 529/503.
+    // attemptMaxTokens can be lowered mid-flight: a 400 caused by
+    // input + max_tokens exceeding the context window is retried once
+    // with a halved output budget (see overflow handling below).
+    let attemptMaxTokens = resolvedMaxTokens;
+    let overflowRetried = false;
     for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
       try {
         const response = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: {
             'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-            'anthropic-beta': 'prompt-caching-2024-07-31',
+            'anthropic-version': ANTHROPIC_VERSION,
             'content-type': 'application/json'
           },
           body: JSON.stringify({
             model: resolvedModel,
-            max_tokens: resolvedMaxTokens,
+            max_tokens: attemptMaxTokens,
             messages,
           }),
           // Hard ceiling on a single HTTP attempt — without this the
@@ -136,20 +154,65 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
         if (response.ok) {
           const data = await response.json();
           if (data.content && data.content.length > 0) {
+            // Structured usage line so operators can track token spend
+            // and spot prompts creeping toward the context window.
+            if (data.usage) {
+              log.info('runClaude usage', {
+                model: resolvedModel,
+                inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens,
+                cacheReadTokens: data.usage.cache_read_input_tokens ?? 0,
+              });
+            }
             return data.content[0].text;
           }
           if (userScopedKey) {
             throw new Error('Anthropic API returned empty content for user-scoped key');
           }
-          break; // empty content, fall through to CLI for operator default
+          // Empty content on HTTP 200 is abnormal (stop_reason quirk or
+          // extreme context pressure) — log loudly before the CLI
+          // fallback so the condition is visible, not silent.
+          log.warn('runClaude HTTP 200 with empty content, falling back to CLI', { model: resolvedModel, stopReason: data.stop_reason ?? null });
+          break; // fall through to CLI for operator default
         }
 
         const transient = response.status === 529 || response.status === 503;
         if (transient && attempt < RETRY_DELAYS_MS.length) {
           const delay = jittered(RETRY_DELAYS_MS[attempt]);
-          process.stderr.write(JSON.stringify({ level: 'warn', msg: '[runClaude] retry', attempt: attempt + 1, status: response.status, delayMs: delay }) + '\n');
+          log.warn('runClaude retry', { attempt: attempt + 1, status: response.status, delayMs: delay });
           await sleep(delay);
           continue;
+        }
+
+        // 400s carry an explanation in the body. Two cases deserve
+        // dedicated handling instead of a generic failure:
+        //   - context overflow where max_tokens + input exceeds the
+        //     window → retry once with a halved output budget;
+        //   - model not found (retired/typo'd model id) → name the
+        //     configured model in the error so the operator can fix
+        //     LLMIDE_MODEL instead of chasing a generic 400.
+        if (response.status === 400 || response.status === 404) {
+          let bodyText = '';
+          try { bodyText = (await response.text()).slice(0, 500); } catch { /* ignore */ }
+          const overflow = /max_tokens|too long|context/i.test(bodyText);
+          if (overflow && !overflowRetried && attemptMaxTokens > MIN_OVERFLOW_TOKENS) {
+            overflowRetried = true;
+            attemptMaxTokens = Math.max(MIN_OVERFLOW_TOKENS, Math.floor(attemptMaxTokens / 2));
+            log.warn('runClaude context overflow, retrying with reduced max_tokens', { maxTokens: attemptMaxTokens });
+            continue;
+          }
+          const modelRejected = /model/i.test(bodyText) && /not found|invalid|unknown|deprecat/i.test(bodyText);
+          if (userScopedKey) {
+            throw new Error(modelRejected
+              ? `Anthropic API rejected model '${resolvedModel}' (${response.status}): ${redactKey(bodyText.slice(0, 200), apiKey)} — check LLMIDE_MODEL`
+              : `Anthropic API failed (${response.status}) for user-scoped key: ${redactKey(bodyText.slice(0, 200), apiKey)}`);
+          }
+          const logFields = { status: response.status, detail: redactKey(bodyText.slice(0, 200), apiKey) };
+          if (modelRejected) {
+            log.error(`runClaude model '${resolvedModel}' rejected by API — check LLMIDE_MODEL; falling back to CLI`, logFields);
+          } else {
+            log.warn('runClaude HTTP API failed, falling back to CLI', logFields);
+          }
+          break;
         }
 
         if (userScopedKey) {
@@ -157,7 +220,7 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
           try { detail = redactKey((await response.text()).slice(0, 200), apiKey); } catch { /* ignore */ }
           throw new Error(`Anthropic API failed (${response.status}) for user-scoped key${detail ? `: ${detail}` : ''}`);
         }
-        process.stderr.write(JSON.stringify({ level: 'warn', msg: '[runClaude] HTTP API failed, falling back to CLI', status: response.status }) + '\n');
+        log.warn('runClaude HTTP API failed, falling back to CLI', { status: response.status });
         break;
       } catch (err) {
         // AbortSignal.timeout fires a DOMException named 'TimeoutError'
@@ -167,14 +230,14 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
         const isAbort = err && (err.name === 'TimeoutError' || err.name === 'AbortError');
         if (isAbort && attempt < RETRY_DELAYS_MS.length) {
           const delay = jittered(RETRY_DELAYS_MS[attempt]);
-          process.stderr.write(JSON.stringify({ level: 'warn', msg: '[runClaude] retry', attempt: attempt + 1, reason: 'abort', delayMs: delay }) + '\n');
+          log.warn('runClaude retry', { attempt: attempt + 1, reason: 'abort', delayMs: delay });
           await sleep(delay);
           continue;
         }
         if (userScopedKey) {
           throw err;
         }
-        process.stderr.write(JSON.stringify({ level: 'warn', msg: '[runClaude] HTTP API threw error, falling back to CLI', error: redactKey(err.message, apiKey) }) + '\n');
+        log.warn('runClaude HTTP API threw error, falling back to CLI', { error: redactKey(err.message, apiKey) });
         break;
       }
     }
@@ -237,7 +300,7 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
       lastError = err;
       if (err.overloaded && attempt < RETRY_DELAYS_MS.length) {
         const delay = jittered(RETRY_DELAYS_MS[attempt]);
-        process.stderr.write(JSON.stringify({ level: 'warn', msg: '[runClaude] CLI retry', attempt: attempt + 1, reason: 'overloaded', delayMs: delay }) + '\n');
+        log.warn('runClaude CLI retry', { attempt: attempt + 1, reason: 'overloaded', delayMs: delay });
         await sleep(delay);
         continue;
       }
@@ -302,8 +365,7 @@ export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheT
         method: 'POST',
         headers: {
           'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-beta': 'prompt-caching-2024-07-31',
+          'anthropic-version': ANTHROPIC_VERSION,
           'content-type': 'application/json',
         },
         body: JSON.stringify({
@@ -317,7 +379,7 @@ export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheT
     } catch (err) {
       // Network error or abort — fall back to buffered.
       if (userScopedKey) throw err;
-      process.stderr.write(JSON.stringify({ level: 'warn', msg: '[runClaudeStream] fetch threw, falling back to buffered', error: err?.message }) + '\n');
+      log.warn('runClaudeStream fetch threw, falling back to buffered', { error: err?.message });
       return fallbackBuffered();
     }
 
@@ -329,18 +391,26 @@ export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheT
     const transient = response.status === 529 || response.status === 503;
     if (transient && attempt === 0) {
       const delay = jittered(2_000);
-      process.stderr.write(JSON.stringify({ level: 'warn', msg: '[runClaudeStream] retry', status: response.status, delayMs: delay }) + '\n');
+      log.warn('runClaudeStream retry', { status: response.status, delayMs: delay });
       await sleep(delay);
       continue;
     }
 
     // Non-transient or second failure.
+    let detail = '';
+    try { detail = redactKey((await response.text()).slice(0, 300), apiKey); } catch { /* */ }
+    // Context overflow: the buffered path can recover (runClaude retries
+    // with a halved output budget), so route BOTH key types through it
+    // instead of failing the stream. The user key stays in play —
+    // fallbackBuffered passes the same userId through to runClaude.
+    if (response.status === 400 && /max_tokens|too long|context/i.test(detail)) {
+      log.warn('runClaudeStream context overflow, retrying via buffered path', { status: response.status });
+      return fallbackBuffered();
+    }
     if (userScopedKey) {
-      let detail = '';
-      try { detail = redactKey((await response.text()).slice(0, 200), apiKey); } catch { /* */ }
       throw new Error(`Anthropic streaming failed (${response.status})${detail ? `: ${detail}` : ''}`);
     }
-    process.stderr.write(JSON.stringify({ level: 'warn', msg: '[runClaudeStream] API failed, falling back to buffered', status: response.status }) + '\n');
+    log.warn('runClaudeStream API failed, falling back to buffered', { status: response.status });
     return fallbackBuffered();
   }
 
@@ -357,7 +427,13 @@ async function _readAnthropicStream(response, onChunk, signal) {
 
   // If the caller's signal fires, cancel the reader so we stop
   // consuming tokens from the Anthropic API.
-  const onAbort = () => { reader.cancel().catch(() => {}); };
+  const onAbort = () => {
+    reader.cancel().catch((err) => {
+      // A failed cancel can leak the socket — surface it instead of
+      // swallowing so FD-exhaustion shows up in logs.
+      log.warn('runClaudeStream reader cancel failed', { error: err?.message });
+    });
+  };
   signal?.addEventListener('abort', onAbort, { once: true });
 
   try {

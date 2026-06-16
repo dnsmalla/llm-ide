@@ -94,7 +94,7 @@ struct BuiltinAgentDetailView: View {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.callout)
-                        .foregroundStyle(.green)
+                        .foregroundStyle(theme.current.success)
                         .padding(.top, 1)
                     Text(cap)
                         .font(.callout)
@@ -110,7 +110,7 @@ struct BuiltinAgentDetailView: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "lock.shield")
                 .font(.callout)
-                .foregroundStyle(.orange)
+                .foregroundStyle(theme.current.warning)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Core Agent — cannot be removed")

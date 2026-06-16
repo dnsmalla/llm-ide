@@ -6,7 +6,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { runAgentLoop } from '../loop.mjs';
-import { searchKb, redactFence } from './search-kb.mjs';
+import { searchKb } from './search-kb.mjs';
+import { redactFence } from '../redaction.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const INTERNAL_ROLE_PROMPT_PATH = join(__dirname, '..', '..', 'internal', 'prompt.md');
@@ -14,7 +15,10 @@ const INTERNAL_ROLE_PROMPT_PATH = join(__dirname, '..', '..', 'internal', 'promp
 // Cache the static role-and-rules prompt once per process.
 const internalRolePrompt = readFileSync(INTERNAL_ROLE_PROMPT_PATH, 'utf8').trim();
 
-const INTERNAL_HANDLERS = { 'search-kb': searchKb };
+// Exported so route.mjs can verify at startup that every core 'read'
+// skill has a registered handler — a missing handler should fail loud
+// at boot, not surface as "no read handler" mid-session.
+export const INTERNAL_HANDLERS = { 'search-kb': searchKb };
 
 export async function askInternal(args, ctx) {
   // Build internal's "base" string: role + rules from internal/prompt.md
@@ -40,6 +44,10 @@ export async function askInternal(args, ctx) {
     kb: ctx.kb,
     userId: ctx.userId,
     handlers: INTERNAL_HANDLERS,
+    // Sub-model routing: route.mjs passes LLMIDE_INTERNAL_MODEL here
+    // so internal can run on a different tier than global.
+    model: ctx.model,
+    depth: ctx.depth ?? 1,
     // Internal sub-loop deadline: 120 s.  The outer global loop has a
     // 180 s deadline (set in route.mjs).  Keeping this at 120 s leaves
     // ~60 s for the outer loop to compose its final reply after the

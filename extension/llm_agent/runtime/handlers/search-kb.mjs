@@ -5,16 +5,10 @@
 // `ctx.kb.search(userId, { q, kind, limit })` returns an array of
 // hits, each shaped roughly { kind, id, title, snippet }.
 
-// Neutralise fence sentinels (`<<<` / `>>>`) in user-supplied text so
-// that a malicious meeting title or issue snippet cannot escape the
-// `<<<TOOL_RESULT>>>...<<<END_TOOL_RESULT>>>` fence and inject a forged
-// `<<<TOOL_CALL>>>` block. Insert a zero-width joiner between the
-// brackets — visually identical but no longer a parseable sentinel.
-const ZWJ = '‍';
-export function redactFence(s) {
-  if (typeof s !== 'string') return s;
-  return s.replaceAll('<<<', `<<${ZWJ}<`).replaceAll('>>>', `>${ZWJ}>>`);
-}
+// Fence redaction lives in ../redaction.mjs; re-exported here for
+// backward compatibility with existing importers and tests.
+import { redactFence } from '../redaction.mjs';
+export { redactFence };
 
 export async function searchKb(args, ctx) {
   const raw = await Promise.resolve(ctx.kb.search(ctx.userId, {

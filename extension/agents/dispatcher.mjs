@@ -13,6 +13,10 @@
 import { getPlan, mergeTaskMeta, getTaskById } from '../kb/db.mjs';
 import { pMap } from '../core/p-map.mjs';
 import { SECRET_PATTERNS } from '../guardrails/rules.mjs';
+import { jittered } from './runtime.mjs';
+import { logger } from '../core/logger.mjs';
+
+const log = logger.child({ component: 'dispatcher' });
 
 // Strip API keys / tokens from external-API error bodies before surfacing
 // them in the response — provider APIs occasionally echo credentials back
@@ -275,11 +279,9 @@ const MAX_RETRY_ATTEMPTS = 5;
 // requests, exhausting file descriptors and hammering provider APIs.
 const MAX_CONCURRENT_RETRIES = 5;
 
-// ±25% jitter so a batch of failures doesn't all retry simultaneously
-// (thundering-herd prevention).
-function jitteredMs(ms) {
-  return Math.round(ms * (0.75 + Math.random() * 0.5));
-}
+// Absolute wall-clock cap on one retryFailedDispatches() sweep.
+const RETRY_SWEEP_DEADLINE_MS = 120_000;
+
 
 // Read the existing retry count from the DB so we advance the backoff
 // correctly even when the caller doesn't know the current attempt number.
@@ -303,7 +305,7 @@ function recordDispatchRetry(userId, taskId, target, error) {
     return;
   }
   const baseMs = RETRY_DELAYS_MS[Math.min(attempts - 1, RETRY_DELAYS_MS.length - 1)];
-  const nextRetryAt = new Date(Date.now() + jitteredMs(baseMs)).toISOString();
+  const nextRetryAt = new Date(Date.now() + jittered(baseMs)).toISOString();
   mergeTaskMeta(userId, taskId, {
     dispatchRetry: { attempts, nextRetryAt, lastError: String(error).slice(0, 300), target, gaveUp: false },
   });
@@ -338,7 +340,7 @@ export async function retryFailedDispatches(userId, config = {}) {
     return new Date(retry.nextRetryAt).getTime() <= now;
   });
 
-  let ok = 0, failed = 0;
+  let ok = 0, failed = 0, deferred = 0;
 
   // Process retries in batches of MAX_CONCURRENT_RETRIES to avoid
   // spawning an unbounded number of simultaneous outbound HTTP requests.
@@ -371,13 +373,23 @@ export async function retryFailedDispatches(userId, config = {}) {
   }
 
   // Enforce MAX_CONCURRENT_RETRIES: slice `due` into batches and await
-  // each batch before starting the next.
+  // each batch before starting the next.  The sweep also has an
+  // absolute wall-clock deadline — with a large failed backlog and a
+  // slow provider, batch × 15 s timeouts could otherwise hold this
+  // request open for minutes. Tasks not reached stay due and are
+  // picked up by the next sweep.
+  const sweepDeadline = Date.now() + RETRY_SWEEP_DEADLINE_MS;
   for (let i = 0; i < due.length; i += MAX_CONCURRENT_RETRIES) {
+    if (Date.now() > sweepDeadline) {
+      deferred = due.length - i;
+      log.warn('retry sweep hit deadline', { userId, processed: i, deferred });
+      break;
+    }
     const batch = due.slice(i, i + MAX_CONCURRENT_RETRIES);
     await Promise.all(batch.map(retryOne));
   }
 
-  return { retried: due.length, ok, failed };
+  return { retried: due.length - deferred, ok, failed, deferred };
 }
 
 // --- Public entry ---------------------------------------------------------
@@ -401,18 +413,22 @@ export async function dispatchPlan(userId, { planId, target = 'preview', taskIds
   if (target === 'preview') {
     return { target, plan: { id: plan.id, title: plan.title }, results: dispatchPreview({ plan, tasks }) };
   }
-  if (target === 'github') {
-    const raw = await dispatchGithub(userId, { plan, tasks, ...config });
-    return { target, plan: { id: plan.id, title: plan.title }, results: withRetryTracking(userId, target, raw) };
+  // Audit trail: every external dispatch logs who dispatched what,
+  // where, and (below) how it went. Preview mode never reaches here.
+  log.info('dispatch_plan_start', { userId, planId, target, taskCount: tasks.length });
+  let raw;
+  if (target === 'github')       raw = await dispatchGithub(userId, { plan, tasks, ...config });
+  else if (target === 'backlog') raw = await dispatchBacklog(userId, { plan, tasks, ...config });
+  else if (target === 'linear')  raw = await dispatchLinear(userId, { plan, tasks, ...config });
+  else throw new Error('Unhandled dispatch target'); // should be unreachable
+
+  const results = withRetryTracking(userId, target, raw);
+  const counts = { ok: 0, errored: 0, skipped: 0 };
+  for (const r of results) {
+    if (r.status === 'ok') counts.ok += 1;
+    else if (r.status === 'error') counts.errored += 1;
+    else if (r.status === 'skipped') counts.skipped += 1;
   }
-  if (target === 'backlog') {
-    const raw = await dispatchBacklog(userId, { plan, tasks, ...config });
-    return { target, plan: { id: plan.id, title: plan.title }, results: withRetryTracking(userId, target, raw) };
-  }
-  if (target === 'linear') {
-    const raw = await dispatchLinear(userId, { plan, tasks, ...config });
-    return { target, plan: { id: plan.id, title: plan.title }, results: withRetryTracking(userId, target, raw) };
-  }
-  // Should be unreachable.
-  throw new Error('Unhandled dispatch target');
+  log.info('dispatch_plan_result', { userId, planId, target, ...counts });
+  return { target, plan: { id: plan.id, title: plan.title }, results };
 }

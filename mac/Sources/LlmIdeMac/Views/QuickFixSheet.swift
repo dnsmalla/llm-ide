@@ -88,7 +88,7 @@ struct QuickFixSheet: View {
     private var header: some View {
         HStack(spacing: 10) {
             Image(systemName: "bolt.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(theme.current.warning)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Quick Fix").font(.headline)
                 Text(project.displayName).font(.caption).foregroundStyle(.secondary)
@@ -134,7 +134,7 @@ struct QuickFixSheet: View {
                             .font(.callout)
                             .padding(10)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.blue.opacity(0.08))
+                            .background(theme.current.info.opacity(0.08))
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                 }
@@ -161,7 +161,7 @@ struct QuickFixSheet: View {
         VStack(spacing: 16) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 48))
-                .foregroundStyle(.green)
+                .foregroundStyle(theme.current.success)
             Text("Done!").font(.title2.weight(.semibold))
             VStack(alignment: .leading, spacing: 6) {
                 if !svc.branchName.isEmpty {

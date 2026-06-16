@@ -279,23 +279,23 @@ struct ReviewView: View {
                 if config.treeCategories.contains(.code) {
                     if let repo = linkedCodeRepo {
                         HStack(spacing: 6) {
-                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.system(size: 12))
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.current.success).font(.system(size: 12))
                             Text("Linked: **\(repo.displayName)** · \(repo.backend.displayName)")
                                 .font(Typography.caption).foregroundStyle(.secondary)
                         }
                         .padding(.horizontal, 14).padding(.vertical, 8)
-                        .background(Color.green.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                        .background(theme.current.success.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
                     } else {
                         // Tailor the hint to whichever backend(s) the user
                         // has configured so they don't get pointed at a
                         // setup path that's irrelevant to them.
                         HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.circle").foregroundStyle(.orange).font(.system(size: 12))
+                            Image(systemName: "exclamationmark.circle").foregroundStyle(theme.current.warning).font(.system(size: 12))
                             Text(LocalizedStringKey(emptyRepoHint))
                                 .font(Typography.caption).foregroundStyle(.secondary)
                         }
                         .padding(.horizontal, 14).padding(.vertical, 8)
-                        .background(Color.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                        .background(theme.current.warning.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
                     }
                 }
                 Image(systemName: config.emptyIcon).font(.system(size: 40, weight: .thin)).foregroundStyle(.quaternary)

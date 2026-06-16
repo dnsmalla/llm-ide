@@ -4,7 +4,7 @@
 
 import { parseFence, validateArgs } from './fence.mjs';
 import { composeSystemContext } from '../internal/context/compose.mjs';
-import { redactFence } from './handlers/search-kb.mjs';
+import { redactFence } from './redaction.mjs';
 
 // Recursively redact fence sentinels from any value that will be
 // JSON-embedded into the next-iteration prompt.  Without this, a KB
@@ -22,7 +22,9 @@ function redactDeep(val) {
   return val;
 }
 
-export async function runReadHandler(name, args, ctx) {
+// Internal — only the loop dispatches read handlers; nothing imports
+// this (was previously exported with no users).
+async function runReadHandler(name, args, ctx) {
   const handler = ctx.handlers && ctx.handlers[name];
   if (typeof handler !== 'function') {
     return { error: `no read handler for '${name}'` };
@@ -46,8 +48,29 @@ const DEFAULT_MAX_ITERATIONS = 10;
 // on average which is ample for most Claude responses.
 const DEFAULT_DEADLINE_MS = 180_000;
 
+// Aggregate cap on skill bodies in one system prompt. Each skill file
+// is individually capped at 32 KB by the loader, but a user with many
+// enabled plugins could still stack enough of them to crowd out the
+// context window. 128 KB ≈ 4 max-size skills; core sets use ~8 KB.
+const MAX_TOTAL_SKILL_BYTES = 131_072;
+
 export function buildSystemPrompt({ base, skills, agentContextBlock }) {
-  const skillBodies = [...skills.values()].map((s) => s.body).join('\n\n---\n\n');
+  const bodies = [];
+  let totalBytes = 0;
+  let dropped = 0;
+  for (const s of skills.values()) {
+    const size = Buffer.byteLength(s.body, 'utf8');
+    if (totalBytes + size > MAX_TOTAL_SKILL_BYTES) {
+      dropped += 1;
+      continue;
+    }
+    totalBytes += size;
+    bodies.push(s.body);
+  }
+  if (dropped > 0) {
+    console.warn(`[llm_agent] system prompt skill budget exceeded — dropped ${dropped} skill(s) beyond ${MAX_TOTAL_SKILL_BYTES} bytes (core skills load first and are unaffected)`);
+  }
+  const skillBodies = bodies.join('\n\n---\n\n');
   return [
     base,
     agentContextBlock,
@@ -97,12 +120,22 @@ function buildIterationPrompt({ systemPrompt, history, userMessage, prevOutput, 
 // iteration's prompt and could be used to exhaust Claude token budgets.
 const MAX_USER_MESSAGE_BYTES = 500_000; // 500 KB
 
+// Maximum agent-loop nesting: global (0) → internal/subagent (1) → one
+// more level of delegation (2). Today's handler wiring tops out at
+// depth 1, but the guard makes "a future handler registers a nested
+// agent that can call back" a bounded mistake instead of unbounded
+// recursion burning tokens until the deadline.
+const MAX_LOOP_DEPTH = 2;
+
 export async function runAgentLoop({
   skills, userMessage, history, agentContext, runClaude, kb, userId, handlers,
-  maxIterations, deadlineMs,
+  maxIterations, deadlineMs, model, maxTokens, depth = 0,
 }) {
   if (typeof userMessage === 'string' && userMessage.length > MAX_USER_MESSAGE_BYTES) {
     throw new Error(`userMessage exceeds ${MAX_USER_MESSAGE_BYTES} byte limit`);
+  }
+  if (depth > MAX_LOOP_DEPTH) {
+    throw new Error(`agent loop nesting exceeds depth ${MAX_LOOP_DEPTH}`);
   }
   const cap = Number.isFinite(maxIterations) && maxIterations > 0 ? maxIterations : DEFAULT_MAX_ITERATIONS;
   const deadline = Number.isFinite(deadlineMs) && deadlineMs > 0 ? deadlineMs : DEFAULT_DEADLINE_MS;
@@ -149,8 +182,15 @@ export async function runAgentLoop({
 
     // Pass userId so the HTTP path uses the user's own Anthropic key
     // when available, rather than silently falling back to the operator
-    // key for every agent loop call.
-    const out = await runClaude(prompt, { userId, maxTokens: 2048 });
+    // key for every agent loop call.  `model` lets callers route this
+    // loop to a specific (sub-)model — global, internal, and plugin
+    // subagents can each run on a different tier; undefined falls
+    // through to runClaude's LLMIDE_MODEL default.
+    const out = await runClaude(prompt, {
+      userId,
+      model,
+      maxTokens: (Number.isFinite(maxTokens) && maxTokens > 0) ? maxTokens : 2048,
+    });
     prevOutput = out;
     const { text, fence, parseError } = parseFence(out);
     preToolText += text;
@@ -189,7 +229,11 @@ export async function runAgentLoop({
       result = readCache.get(cacheKey);
       cacheHits += 1;
     } else {
-      result = await runReadHandler(skill.name, validation.value, { userId, kb, handlers });
+      // ctx.depth is the depth any sub-loop spawned by this handler must
+      // run at. The +1 happens HERE — the single enforcement point — so
+      // handler authors forward ctx.depth verbatim and can't forget the
+      // increment (forgetting it would silently disable the nesting cap).
+      result = await runReadHandler(skill.name, validation.value, { userId, kb, handlers, depth: depth + 1 });
       if (!result.error) {
         if (readCache.size >= MAX_CACHE_SIZE) {
           readCache.delete(readCache.keys().next().value);

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct DocTemplateManagerSheet: View {
+    @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var store: DocTemplateStore
     @Environment(\.dismiss) private var dismiss
 
@@ -115,7 +116,7 @@ struct DocTemplateManagerSheet: View {
                                     binding.wrappedValue.sections.removeAll { $0 == section }
                                 } label: {
                                     Image(systemName: "minus.circle")
-                                        .foregroundStyle(.red.opacity(0.8))
+                                        .foregroundStyle(theme.current.danger.opacity(0.8))
                                 }
                                 .buttonStyle(.borderless)
                             }

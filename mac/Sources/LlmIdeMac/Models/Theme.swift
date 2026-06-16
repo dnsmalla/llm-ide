@@ -84,6 +84,17 @@ struct Theme: Equatable, Identifiable {
     }
 }
 
+// MARK: - Semantic aliases
+//
+// Views should express intent (success/warning/info) rather than slot
+// names, and must never use raw system colors (.green/.orange/.red) —
+// those ignore the active palette and look wrong in Midnight.
+extension Theme {
+    var success: Color { accent3 }
+    var warning: Color { accent4 }
+    var info: Color { accent2 }
+}
+
 /// Convenience wrapper so views can read the active theme via
 /// `@EnvironmentObject` and react to changes through Combine.
 final class ThemeStore: ObservableObject {

@@ -43,7 +43,7 @@ struct ServerSettingsSection: View {
                         Text("Unencrypted connection — tokens sent in plaintext.")
                             .font(Typography.caption)
                     }
-                    .foregroundStyle(Color.yellow)
+                    .foregroundStyle(theme.current.warning)
                 }
                 SettingsHint("Changing the server signs you out. Sign in again to link your account.")
             }

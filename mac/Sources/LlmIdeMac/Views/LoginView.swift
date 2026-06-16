@@ -15,6 +15,7 @@ struct LoginView: View {
     @State private var mode: Mode = .login
     @State private var email = ""
     @State private var password = ""
+    @State private var showPassword = false
     @State private var displayName = ""
     @State private var busy = false
     @State private var error: String?
@@ -178,16 +179,27 @@ struct LoginView: View {
                     .foregroundStyle(theme.current.textMuted)
             }
         } else if !config.backendNodePath.isEmpty && !config.backendWorkingDir.isEmpty {
-            Button(action: startServer) {
-                HStack(spacing: 4) {
-                    Image(systemName: "play.fill").font(.system(size: 10))
-                    Text("Start Server")
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Button(action: startServer) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "play.fill").font(.system(size: 10))
+                        Text("Start Server")
+                    }
+                    .font(Typography.caption)
                 }
-                .font(Typography.caption)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.mini)
+                .tint(theme.current.accent)
+                // A failed start previously only logged to Settings →
+                // Backend — from this screen the click looked like a
+                // silent no-op. Show the reason where the user clicked.
+                if let startErr = backend.lastError {
+                    Text(startErr)
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.mini)
-            .tint(theme.current.accent)
         } else {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: "gearshape")
@@ -230,9 +242,31 @@ struct LoginView: View {
             SectionLabel(label, size: 11, tracking: 0.4)
             Group {
                 if secure {
-                    SecureField(placeholder, text: text)
+                    HStack(spacing: Spacing.sm) {
+                        Group {
+                            if showPassword {
+                                TextField(placeholder, text: text)
+                            } else {
+                                SecureField(placeholder, text: text)
+                            }
+                        }
                         .focused($focused, equals: field)
                         .onSubmit { submit() }
+                        Button {
+                            showPassword.toggle()
+                            // Swapping SecureField <-> TextField drops
+                            // first-responder status — restore it so the
+                            // user keeps typing without re-clicking.
+                            focused = field
+                        } label: {
+                            Image(systemName: showPassword ? "eye.slash" : "eye")
+                                .font(.system(size: 12))
+                                .foregroundStyle(theme.current.textMuted)
+                        }
+                        .buttonStyle(.plain)
+                        .help(showPassword ? "Hide password" : "Show password")
+                        .accessibilityLabel(showPassword ? "Hide password" : "Show password")
+                    }
                 } else {
                     TextField(placeholder, text: text)
                         .textContentType(isEmail ? .emailAddress : nil)
@@ -281,8 +315,12 @@ struct LoginView: View {
     // MARK: - Actions
 
     /// Launch the local backend from the login screen.
-    /// Mirrors the exact call BackendSettingsSection makes.
+    /// Mirrors the call BackendSettingsSection makes, but first repairs
+    /// stale stored paths (repo moved/renamed since they were saved) so
+    /// the button still works when the config predates the current
+    /// checkout location.
     private func startServer() {
+        BackendManager.resolveLaunchPaths(config: config)
         backend.start(
             nodePath: config.backendNodePath,
             workingDirectory: config.backendWorkingDir)

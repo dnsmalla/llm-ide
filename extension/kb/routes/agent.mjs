@@ -12,7 +12,7 @@ import * as kb from '../db.mjs';
 import { dispatchAgent, stopAgent, listRuns, getDiagnostics } from '../../agents/meeting-agent.mjs';
 import { runClaude } from '../../agents/runtime.mjs';
 import { sendJSON, readBody, parseJSON, sanitizeForPrompt } from '../../core/utils.mjs';
-import { listAllSkills, listInstalledPlugins } from '../../llm_agent/runtime/route.mjs';
+import { listAllSkills, listInstalledPlugins } from '../../llm_agent/skills/index.mjs';
 import { sanitizePersonaSuffix, personaConfigBlock } from '../../agents/prompt-utils.mjs';
 
 export async function handleAgentRoutes(req, res, ctx) {

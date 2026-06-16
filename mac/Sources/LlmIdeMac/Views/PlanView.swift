@@ -294,7 +294,7 @@ struct PlanView: View {
                 }
             }
             if let reason = task.riskReason, !reason.isEmpty {
-                Text("⚠ " + reason)
+                Label(reason, systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(theme.current.accent4)
             }

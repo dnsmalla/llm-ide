@@ -265,12 +265,12 @@ struct DocGenEditorPanel: View {
         HStack(alignment: .top, spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(done ? Color.green.opacity(0.15) : theme.current.accent.opacity(0.1))
+                    .fill(done ? theme.current.success.opacity(0.15) : theme.current.accent.opacity(0.1))
                     .frame(width: 24, height: 24)
                 if done {
                     Image(systemName: "checkmark")
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.green)
+                        .foregroundStyle(theme.current.success)
                 } else {
                     Text(number)
                         .font(.system(size: 11, weight: .bold, design: .rounded))
@@ -290,13 +290,13 @@ struct DocGenEditorPanel: View {
         }
         .padding(12)
         .background(
-            done ? Color.green.opacity(0.04) : Color(nsColor: .windowBackgroundColor),
+            done ? theme.current.success.opacity(0.04) : Color(nsColor: .windowBackgroundColor),
             in: RoundedRectangle(cornerRadius: 10)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(
-                    done ? Color.green.opacity(0.18) : Color.secondary.opacity(0.08),
+                    done ? theme.current.success.opacity(0.18) : Color.secondary.opacity(0.08),
                     lineWidth: 1)
         )
         .animation(.easeInOut(duration: 0.2), value: done)
@@ -373,7 +373,7 @@ struct DocGenEditorPanel: View {
     private func doneView(text: String, skipped: [String] = []) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.current.success)
                 Text("Document ready — edit or export")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
@@ -385,13 +385,13 @@ struct DocGenEditorPanel: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(Color.green.opacity(0.06))
+            .background(theme.current.success.opacity(0.06))
 
             if !skipped.isEmpty {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.caption2)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(theme.current.warning)
                     Text("\(skipped.count) source\(skipped.count == 1 ? "" : "s") could not be read and were skipped: \(skipped.joined(separator: ", "))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -399,7 +399,7 @@ struct DocGenEditorPanel: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                .background(Color.orange.opacity(0.08))
+                .background(theme.current.warning.opacity(0.08))
             }
 
             Divider()
@@ -422,11 +422,11 @@ struct DocGenEditorPanel: View {
         VStack(spacing: 20) {
             ZStack {
                 Circle()
-                    .fill(Color.red.opacity(0.1))
+                    .fill(theme.current.danger.opacity(0.1))
                     .frame(width: 64, height: 64)
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 24))
-                    .foregroundStyle(.red.opacity(0.7))
+                    .foregroundStyle(theme.current.danger.opacity(0.7))
             }
             VStack(spacing: 6) {
                 Text("Generation Failed").font(.headline)

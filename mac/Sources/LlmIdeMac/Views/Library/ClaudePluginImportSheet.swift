@@ -5,6 +5,7 @@ import SwiftUI
 /// (available from Claude plugin catalogs).
 /// Includes search/filter and "Update" vs "Import" distinction.
 struct ClaudePluginImportSheet: View {
+    @EnvironmentObject private var theme: ThemeStore
     let api: LlmIdeAPIClient
     let onDismiss: () -> Void
     let onImported: () -> Void
@@ -99,7 +100,7 @@ struct ClaudePluginImportSheet: View {
             if let msg = importMessage {
                 HStack {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(theme.current.success)
                     Text(msg).font(.caption)
                     Spacer()
                 }
@@ -204,7 +205,7 @@ struct ClaudePluginImportSheet: View {
                     if plugin.hasUpdate {
                         Text("\u{00B7}").foregroundStyle(.tertiary)
                         Text("update available")
-                            .font(.caption2).foregroundStyle(.orange)
+                            .font(.caption2).foregroundStyle(theme.current.warning)
                     }
                 }
             }
@@ -258,10 +259,10 @@ struct ClaudePluginImportSheet: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .tint(.orange)
+            .tint(theme.current.warning)
         } else if alreadyImported {
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(theme.current.success)
                 .help("Already imported")
         } else {
             Button("Import") {

@@ -13,6 +13,7 @@ enum AgentRowKind {
 /// Sidebar row for any agent entry in the Library: built-in core
 /// agents, user personas, or plugin-contributed subagents.
 struct AgentLibraryRow: View {
+    @EnvironmentObject private var theme: ThemeStore
     let title: String
     let subtitle: String?
     var kind: AgentRowKind = .persona(isActive: false)
@@ -63,7 +64,7 @@ struct AgentLibraryRow: View {
         case .persona(let isActive) where isActive:
             Image(systemName: "star.fill")
                 .font(.caption2)
-                .foregroundStyle(.yellow)
+                .foregroundStyle(theme.current.warning)
         case .plugin:
             Image(systemName: "puzzlepiece.extension.fill")
                 .font(.caption2)

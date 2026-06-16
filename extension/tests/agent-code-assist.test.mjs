@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runAgentLoop } from '../llm_agent/runtime/loop.mjs';
-import { loadSkills } from '../llm_agent/runtime/skill-loader.mjs';
+import { loadSkills } from '../llm_agent/skills/loader.mjs';
 import { searchKb } from '../llm_agent/runtime/handlers/search-kb.mjs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'node:path';

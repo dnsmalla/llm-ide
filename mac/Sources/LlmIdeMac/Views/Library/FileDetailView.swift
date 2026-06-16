@@ -241,7 +241,7 @@ struct EditableTextDetailView<Preview: View>: View {
     private var savedToast: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(theme.current.success)
             Text("Saved \(url.lastPathComponent)")
                 .font(.system(size: 12, weight: .medium))
         }
@@ -253,7 +253,7 @@ struct EditableTextDetailView<Preview: View>: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.green.opacity(0.35), lineWidth: 1)
+                .stroke(theme.current.success.opacity(0.35), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
     }
@@ -277,15 +277,15 @@ struct EditableTextDetailView<Preview: View>: View {
                 Text("Saved").font(.caption).foregroundStyle(.secondary)
             }
             if let err = saveError {
-                Text(err).font(.caption).foregroundStyle(.red).lineLimit(1).truncationMode(.middle)
+                Text(err).font(.caption).foregroundStyle(theme.current.danger).lineLimit(1).truncationMode(.middle)
             }
             Spacer()
             Button { showRevertConfirm = true } label: {
                 Label("Revert", systemImage: "arrow.uturn.backward")
-                    .foregroundStyle(isDirty ? .red : .secondary)
+                    .foregroundStyle(isDirty ? theme.current.danger : .secondary)
             }
             .buttonStyle(.bordered)
-            .tint(.red)
+            .tint(theme.current.danger)
             .disabled(!isDirty || saving)
             .help("Discard unsaved changes")
 

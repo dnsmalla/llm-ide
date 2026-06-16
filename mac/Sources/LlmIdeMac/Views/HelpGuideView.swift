@@ -438,7 +438,7 @@ struct HelpGuideView: View {
         let t = theme.current
         return HStack(alignment: .top, spacing: Spacing.sm) {
             Image(systemName: "lightbulb.fill")
-                .foregroundStyle(.yellow)
+                .foregroundStyle(t.warning)
                 .font(.system(size: 14))
                 .padding(.top, 2)
             Text(text)
@@ -447,14 +447,14 @@ struct HelpGuideView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(Spacing.md)
-        .background(Color.yellow.opacity(t.isDark ? 0.08 : 0.06), in: RoundedRectangle(cornerRadius: Radius.sm))
+        .background(t.warning.opacity(t.isDark ? 0.08 : 0.06), in: RoundedRectangle(cornerRadius: Radius.sm))
     }
 
     private func helpWarning(_ text: String) -> some View {
         let t = theme.current
         return HStack(alignment: .top, spacing: Spacing.sm) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(t.danger)
                 .font(.system(size: 14))
                 .padding(.top, 2)
             Text(text)
@@ -463,7 +463,7 @@ struct HelpGuideView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(Spacing.md)
-        .background(Color.orange.opacity(t.isDark ? 0.08 : 0.06), in: RoundedRectangle(cornerRadius: Radius.sm))
+        .background(t.danger.opacity(t.isDark ? 0.08 : 0.06), in: RoundedRectangle(cornerRadius: Radius.sm))
     }
 
     private func shortcutRow(_ keys: String, _ description: String) -> some View {

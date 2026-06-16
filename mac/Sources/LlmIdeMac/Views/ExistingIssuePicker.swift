@@ -55,14 +55,14 @@ struct ExistingIssuePicker: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
+                        .foregroundStyle(theme.current.danger)
                     Text(err)
                         .font(.callout)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.red.opacity(0.08))
+                .background(theme.current.danger.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 Button("Retry") { Task { await load() } }
             }

@@ -16,6 +16,20 @@ protocol RegressionPrompter: AnyObject {
     func ask(prompt: String) async throws -> String
 }
 
+/// Second-stage semantic comparison, consulted only when the fresh
+/// answer differs textually from the saved one. LLM answers are
+/// nondeterministic — re-asking the same question routinely produces
+/// reworded prose — so exact-match alone flags false regressions on
+/// nearly every run. The judge asks "same facts and conclusions?"
+/// and only a semantic NO counts as a regression.
+///
+/// Optional by design: tests and offline runs leave it nil and get
+/// the original exact-match behaviour.
+protocol RegressionJudge: AnyObject {
+    /// Returns true when the two answers are semantically equivalent.
+    func sameMeaning(prompt: String, original: String, current: String) async throws -> Bool
+}
+
 @MainActor
 final class RegressionRunner: ObservableObject {
     enum Verdict: Equatable {
@@ -61,6 +75,7 @@ final class RegressionRunner: ObservableObject {
     func clearLog() { log.removeAll() }
 
     private let prompter: RegressionPrompter
+    private let judge: RegressionJudge?
     private let store: MemoryStore
     /// Optional handle to the app's config so completed runs can
     /// publish their summary to the menu-bar pill. Set once after
@@ -69,9 +84,11 @@ final class RegressionRunner: ObservableObject {
     weak var config: AppConfig?
 
     init(prompter: RegressionPrompter,
+         judge: RegressionJudge? = nil,
          store: MemoryStore = MemoryStore(),
          config: AppConfig? = nil) {
         self.prompter = prompter
+        self.judge = judge
         self.store = store
         self.config = config
     }
@@ -119,7 +136,27 @@ final class RegressionRunner: ObservableObject {
             appendLog(.info, "[\(idx + 1)/\(fixed.count)] asking: \(preview)")
             do {
                 let reply = try await prompter.ask(prompt: pair.1.prompt)
-                let v = Self.verdict(originalAnswer: pair.1.response, currentAnswer: reply)
+                var v = Self.verdict(originalAnswer: pair.1.response, currentAnswer: reply)
+                // Stage 2: textual mismatch alone isn't a regression when
+                // a semantic judge is available — LLM answers re-word
+                // themselves run to run. Only a judge NO regresses; a
+                // judge failure is surfaced as .failed (conservative: we
+                // can't tell, so we neither reopen nor mark green).
+                if v == .regressed, let judge {
+                    do {
+                        if try await judge.sameMeaning(
+                            prompt: pair.1.prompt,
+                            original: pair.1.response,
+                            current: reply
+                        ) {
+                            v = .unchanged
+                            appendLog(.info, "  → reworded, semantically unchanged (judge)")
+                        }
+                    } catch {
+                        v = .failed("answers differ textually; semantic judge unavailable: \(error.localizedDescription)")
+                        appendLog(.error, "  → judge unavailable — verdict undecided (not reopened)")
+                    }
+                }
                 results[idx].currentAnswer = reply
                 results[idx].verdict = v
                 switch v {
@@ -196,5 +233,74 @@ final class CodeAssistPrompter: RegressionPrompter {
             agentContext: nil
         )
         return resp.reply
+    }
+}
+
+/// Production semantic judge — one constrained codeAssist call per
+/// textually-drifted fault, answered YES/NO. Cheap by construction:
+/// inputs are truncated and the reply is a single word, so this is a
+/// natural fit for the deployment's sub-model tier
+/// (LLMIDE_SUBAGENT_MODEL) rather than the full chat model.
+final class CodeAssistJudge: RegressionJudge {
+    enum JudgeError: LocalizedError {
+        case ambiguousReply(String)
+        var errorDescription: String? {
+            if case .ambiguousReply(let raw) = self {
+                return "judge returned neither YES nor NO: \(String(raw.prefix(80)))"
+            }
+            return nil
+        }
+    }
+
+    let api: LlmIdeAPIClient
+    /// Bound so two long answers can't blow the prompt budget.
+    private static let maxAnswerChars = 4_000
+
+    init(api: LlmIdeAPIClient) {
+        self.api = api
+    }
+
+    static func buildPrompt(prompt: String, original: String, current: String) -> String {
+        """
+        You are comparing two answers to the same question for semantic equivalence.
+
+        Question:
+        \(String(prompt.prefix(1_000)))
+
+        Answer A (saved when the fault was marked fixed):
+        \(String(original.prefix(maxAnswerChars)))
+
+        Answer B (fresh):
+        \(String(current.prefix(maxAnswerChars)))
+
+        Do A and B state the same key facts and conclusions? Differences in \
+        wording, ordering, formatting, or level of detail do NOT matter — only \
+        contradictions or missing/changed facts do. Reply with exactly one \
+        word: YES or NO.
+        """
+    }
+
+    /// Strict reply parsing: anything that doesn't lead with YES/NO is
+    /// an error, not a guess — the runner surfaces it as .failed
+    /// rather than silently picking a side.
+    static func parseReply(_ raw: String) throws -> Bool {
+        let head = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        if head.hasPrefix("YES") { return true }
+        if head.hasPrefix("NO") { return false }
+        throw JudgeError.ambiguousReply(raw)
+    }
+
+    func sameMeaning(prompt: String, original: String, current: String) async throws -> Bool {
+        let resp = try await api.codeAssist(
+            message: Self.buildPrompt(prompt: prompt, original: original, current: current),
+            language: "en",
+            model: nil,
+            history: [],
+            attachments: [],
+            agentContext: nil
+        )
+        return try Self.parseReply(resp.reply)
     }
 }

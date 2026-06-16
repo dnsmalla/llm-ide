@@ -515,61 +515,64 @@ export function findContext(userId, query, limit = 5) {
   // FTS5 indexes hits regardless of tenant, so we hydrate every match
   // through the owning table with WHERE user_id = ? — non-owned hits
   // are dropped during hydration.
-  const sliceMeetings = (k) => {
-    const hits = lazyPrepare(db, `
+  //
+  // Overshoot strategy: first pass fetches cap*4 ranked hits. In a
+  // multi-tenant DB, other users' rows can dominate the top of the
+  // global ranking and starve the requesting user even when they have
+  // matches deeper down — so if the filtered result comes up short AND
+  // the first pass hit its LIMIT (i.e. more rows exist), re-fetch once
+  // with a deeper, hard-bounded window. Both passes are LIMIT-bounded;
+  // worst case is two indexed FTS queries, never a full scan.
+  const OVERSHOOT_DEEP_LIMIT = 400;
+  const fetchRanked = (sql, binds, filterOwned) => {
+    const shallow = cap * 4;
+    let hits = lazyPrepare(db, sql).all(...binds, shallow);
+    if (hits.length === 0) return [];
+    let owned = filterOwned(hits);
+    if (owned.length < cap && hits.length === shallow) {
+      hits = lazyPrepare(db, sql).all(...binds, OVERSHOOT_DEEP_LIMIT);
+      owned = filterOwned(hits);
+    }
+    return owned.slice(0, cap);
+  };
+
+  const RANKED_SQL_BY_KIND = `
       SELECT meeting_id, entity_id, kind, title, body, bm25(search) AS rank
       FROM search WHERE search MATCH ? AND kind = ?
       ORDER BY rank LIMIT ?
-    `).all(expr, k, cap * 4);  // overshoot for tenant filtering
-    if (hits.length === 0) return [];
+    `;
+
+  const sliceMeetings = (k) => fetchRanked(RANKED_SQL_BY_KIND, [expr, k], (hits) => {
     const ids = [...new Set(hits.map((h) => h.meeting_id))];
     const ph = ids.map(() => '?').join(',');
     const owned = new Set(
       db.prepare(`SELECT id FROM meetings WHERE user_id = ? AND id IN (${ph})`)
         .all(userId, ...ids).map((r) => r.id),
     );
-    return hits.filter((h) => owned.has(h.meeting_id)).slice(0, cap);
-  };
+    return hits.filter((h) => owned.has(h.meeting_id));
+  });
 
-  const sliceEntities = (kind) => {
-    const hits = lazyPrepare(db, `
-      SELECT meeting_id, entity_id, kind, title, body, bm25(search) AS rank
-      FROM search WHERE search MATCH ? AND kind = ?
-      ORDER BY rank LIMIT ?
-    `).all(expr, kind, cap * 4);
-    if (hits.length === 0) return [];
+  const sliceEntities = (kind) => fetchRanked(RANKED_SQL_BY_KIND, [expr, kind], (hits) => {
     const ids = [...new Set(hits.map((h) => h.entity_id))];
     const ph = ids.map(() => '?').join(',');
     const owned = new Set(
       db.prepare(`SELECT id FROM entities WHERE user_id = ? AND id IN (${ph})`)
         .all(userId, ...ids).map((r) => r.id),
     );
-    return hits.filter((h) => owned.has(h.entity_id)).slice(0, cap);
-  };
+    return hits.filter((h) => owned.has(h.entity_id));
+  });
 
-  const sliceTasks = () => {
-    const hits = lazyPrepare(db, `
-      SELECT meeting_id, entity_id, kind, title, body, bm25(search) AS rank
-      FROM search WHERE search MATCH ? AND kind = 'task'
-      ORDER BY rank LIMIT ?
-    `).all(expr, cap * 4);
-    if (hits.length === 0) return [];
+  const sliceTasks = () => fetchRanked(RANKED_SQL_BY_KIND, [expr, 'task'], (hits) => {
     const ids = [...new Set(hits.map((h) => h.entity_id))];
     const ph = ids.map(() => '?').join(',');
     const owned = new Set(
       db.prepare(`SELECT id FROM plan_tasks WHERE user_id = ? AND id IN (${ph})`)
         .all(userId, ...ids).map((r) => r.id),
     );
-    return hits.filter((h) => owned.has(h.entity_id)).slice(0, cap);
-  };
+    return hits.filter((h) => owned.has(h.entity_id));
+  });
 
-  const sliceCode = () => {
-    const hits = lazyPrepare(db, `
-      SELECT meeting_id, entity_id, kind, title, body, bm25(search) AS rank
-      FROM search WHERE search MATCH ? AND kind = 'code'
-      ORDER BY rank LIMIT ?
-    `).all(expr, cap * 4);
-    if (hits.length === 0) return [];
+  const sliceCode = () => fetchRanked(RANKED_SQL_BY_KIND, [expr, 'code'], (hits) => {
     const ids = [...new Set(hits.map((h) => Number(h.entity_id)).filter(Number.isFinite))];
     if (ids.length === 0) return [];
     const ph = ids.map(() => '?').join(',');
@@ -579,17 +582,10 @@ export function findContext(userId, query, limit = 5) {
     );
     return hits
       .filter((h) => refByOwnedId.has(h.entity_id))
-      .map((h) => ({ ...h, ref: refByOwnedId.get(h.entity_id) }))
-      .slice(0, cap);
-  };
+      .map((h) => ({ ...h, ref: refByOwnedId.get(h.entity_id) }));
+  });
 
-  const sliceTickets = () => {
-    const hits = lazyPrepare(db, `
-      SELECT meeting_id, entity_id, kind, title, body, bm25(search) AS rank
-      FROM search WHERE search MATCH ? AND kind = 'ticket'
-      ORDER BY rank LIMIT ?
-    `).all(expr, cap * 4);
-    if (hits.length === 0) return [];
+  const sliceTickets = () => fetchRanked(RANKED_SQL_BY_KIND, [expr, 'ticket'], (hits) => {
     const ids = [...new Set(hits.map((h) => Number(h.entity_id)).filter(Number.isFinite))];
     if (ids.length === 0) return [];
     const ph = ids.map(() => '?').join(',');
@@ -597,8 +593,8 @@ export function findContext(userId, query, limit = 5) {
       db.prepare(`SELECT id FROM sources WHERE user_id = ? AND id IN (${ph})`)
         .all(userId, ...ids).map((r) => String(r.id)),
     );
-    return hits.filter((h) => owned.has(h.entity_id)).slice(0, cap);
-  };
+    return hits.filter((h) => owned.has(h.entity_id));
+  });
 
   return {
     meetings: sliceMeetings('meeting'),

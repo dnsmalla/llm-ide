@@ -6,6 +6,7 @@ import SwiftUI
 /// user there. Toggle is inline here so the most common action
 /// (flip enabled) doesn't require navigating away.
 struct PluginDetailView: View {
+    @EnvironmentObject private var theme: ThemeStore
     let api: LlmIdeAPIClient
     let pluginName: String
     @Environment(ShellState.self) private var shell
@@ -23,7 +24,7 @@ struct PluginDetailView: View {
                 if !loaded {
                     ProgressView().controlSize(.small)
                 } else if let err = loadError {
-                    Text(err).foregroundStyle(.red).font(.callout)
+                    Text(err).foregroundStyle(theme.current.danger).font(.callout)
                 } else if let plugin {
                     descriptionBlock(plugin)
                     commandsBlock(plugin)

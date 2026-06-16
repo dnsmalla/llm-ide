@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { askInternal } from '../llm_agent/runtime/handlers/ask-internal.mjs';
 import { composeGlobalPrompt } from '../llm_agent/global/compose-prompt.mjs';
-import { loadSkills } from '../llm_agent/runtime/skill-loader.mjs';
+import { loadSkills } from '../llm_agent/skills/loader.mjs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 

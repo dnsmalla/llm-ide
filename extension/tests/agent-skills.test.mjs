@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadSkills } from '../llm_agent/runtime/skill-loader.mjs';
+import { loadSkills } from '../llm_agent/skills/loader.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

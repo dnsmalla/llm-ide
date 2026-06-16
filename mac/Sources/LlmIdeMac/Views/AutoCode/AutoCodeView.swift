@@ -335,7 +335,7 @@ struct AutoCodeView: View {
                 .accessibilityLabel("Implementing")
         case .done:
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(theme.current.success)
                 .accessibilityLabel("Done")
         case .failed:
             Image(systemName: "exclamationmark.circle.fill")

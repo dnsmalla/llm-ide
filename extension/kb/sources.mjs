@@ -81,8 +81,13 @@ export function deleteSourcesByPrefix(userId, kind, refPrefix) {
   requireUser(userId);
   if (!ALLOWED_SOURCE_KINDS.has(kind)) return 0;
   const db = getDb();
+  // Escape LIKE wildcards in the prefix so it matches literally.
+  // Without this, an `_` in a repo path (e.g. /x/my_repo/) matches ANY
+  // character and the delete can take out rows belonging to a sibling
+  // path like /x/myXrepo/.
+  const escaped = String(refPrefix).replace(/[\\%_]/g, (c) => `\\${c}`);
   const info = db.prepare(
-    'DELETE FROM sources WHERE user_id = ? AND kind = ? AND ref LIKE ?'
-  ).run(userId, String(kind), `${refPrefix}%`);
+    "DELETE FROM sources WHERE user_id = ? AND kind = ? AND ref LIKE ? ESCAPE '\\'"
+  ).run(userId, String(kind), `${escaped}%`);
   return info.changes;
 }

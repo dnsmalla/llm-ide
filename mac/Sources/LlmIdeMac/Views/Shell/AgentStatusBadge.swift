@@ -32,7 +32,7 @@ struct AgentStatusBadge: View {
         } label: {
             HStack(spacing: 5) {
                 Circle()
-                    .fill(runs.hasRunning ? Color.green : theme.current.textMuted)
+                    .fill(runs.hasRunning ? theme.current.success : theme.current.textMuted)
                     .frame(width: 7, height: 7)
                     .modifier(PulseModifier(active: runs.hasRunning))
                 Image(systemName: "sparkle")
@@ -79,7 +79,7 @@ struct AgentStatusBadge: View {
             if let err = lastError {
                 Text(err)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(theme.current.danger)
                     .lineLimit(2)
             }
         }
@@ -94,7 +94,7 @@ struct AgentStatusBadge: View {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(runs.runs.prefix(3)) { run in
                     HStack(spacing: 6) {
-                        Circle().fill(isRunRunning(run) ? Color.green : Color.gray)
+                        Circle().fill(isRunRunning(run) ? theme.current.success : theme.current.textMuted)
                             .frame(width: 6, height: 6)
                         Text(run.sessionId.prefix(8) + "…")
                             .font(.system(size: 11, design: .monospaced))

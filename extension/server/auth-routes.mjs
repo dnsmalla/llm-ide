@@ -578,7 +578,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
 
   if (method === 'POST' && url === '/auth/me/plugins/reload') {
     try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
-    const { reloadPlugins } = await import('../llm_agent/runtime/route.mjs');
+    const { reloadPlugins } = await import('../llm_agent/skills/index.mjs');
     const result = reloadPlugins();
     safeAudit(db, {
       userId: req.user.id, requestId, ip, userAgent: ua,

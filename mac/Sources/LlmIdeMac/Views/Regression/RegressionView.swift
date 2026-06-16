@@ -37,7 +37,12 @@ struct RegressionView: View {
     init(api: LlmIdeAPIClient) {
         self.api = api
         let prompter = CodeAssistPrompter(api: api, agent: "claude_code")
-        _runner = StateObject(wrappedValue: RegressionRunner(prompter: prompter))
+        // Semantic judge: textual drift between nondeterministic LLM
+        // answers only counts as a regression when the judge confirms
+        // the meaning changed — without it every reworded answer
+        // auto-reopens its fault.
+        let judge = CodeAssistJudge(api: api)
+        _runner = StateObject(wrappedValue: RegressionRunner(prompter: prompter, judge: judge))
     }
 
     var body: some View {

@@ -6,6 +6,7 @@ import SwiftUI
 /// description. A lock icon distinguishes built-in (core / global)
 /// skills from plugin-contributed ones.
 struct SkillLibraryRow: View {
+    @EnvironmentObject private var theme: ThemeStore
     let skill: LlmIdeAPIClient.SkillEntry
     /// When non-nil the row shows a plugin badge instead of a lock.
     let pluginName: String?
@@ -45,7 +46,7 @@ struct SkillLibraryRow: View {
         }
     }
 
-    private var kindColor: Color { skill.kind == "write" ? .orange : .blue }
+    private var kindColor: Color { skill.kind == "write" ? theme.current.warning : theme.current.info }
     private var kindIcon: String  { skill.kind == "write" ? "pencil" : "magnifyingglass" }
 
     // MARK: - Source badge (lock = built-in, puzzle = plugin)

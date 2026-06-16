@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { claudePluginsRoot, scanInstalled, scanMarketplace, importPlugin, listImportedNames, getImportedVersion, checkForUpdates } from '../plugins/claude-adapter.mjs';
 import { loadPlugins } from '../plugins/loader.mjs';
-import { loadSkills } from '../llm_agent/runtime/skill-loader.mjs';
+import { loadSkills } from '../llm_agent/skills/loader.mjs';
 
 test('claudePluginsRoot returns ~/.claude/plugins on macOS', () => {
   const root = claudePluginsRoot();

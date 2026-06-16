@@ -1966,7 +1966,8 @@ a:focus-visible {
 }
 
 .help-nav-icon {
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
   line-height: 1;
 }
 
@@ -2016,7 +2017,9 @@ a:focus-visible {
   margin-bottom: var(--space-4);
 }
 .help-page-header-icon {
-  font-size: 28px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-primary);
   line-height: 1;
   flex-shrink: 0;
   margin-top: 2px;
@@ -2049,6 +2052,13 @@ a:focus-visible {
   color: var(--color-text-muted);
   line-height: 1.45;
 }
+.help-pill-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  position: relative;
+  top: 2px;
+  color: var(--color-primary);
+}
 .help-page-pill strong {
   color: var(--color-text);
   white-space: nowrap;
@@ -2070,7 +2080,13 @@ a:focus-visible {
   border-color: rgba(129, 201, 149, 0.3);
 }
 .help-tip::before {
-  content: '💡 ';
+  content: 'TIP';
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--color-success);
+  margin-bottom: var(--space-1);
 }
 
 /* ── Warning callout (amber-tinted card) ───────────────────────── */
@@ -2079,7 +2095,13 @@ a:focus-visible {
   border-color: rgba(251, 188, 4, 0.3);
 }
 .help-warning::before {
-  content: '⚠️ ';
+  content: 'NOTE';
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--color-warning);
+  margin-bottom: var(--space-1);
 }
 
 /* ── Example scenario block ────────────────────────────────────── */

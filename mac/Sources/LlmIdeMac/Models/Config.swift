@@ -32,6 +32,12 @@ final class AppConfig: ObservableObject {
     static let shared = AppConfig()
 
     private let defaults: UserDefaults
+    /// False for isolated instances (tests, previews) constructed with a
+    /// non-standard UserDefaults. Gates every KeychainStore read/write so
+    /// a test config can NEVER clobber the user's real tokens — a test
+    /// fixture once overwrote the user's GitHub PAT with
+    /// "ghp_test_token_for_test" through exactly this hole.
+    private let persistsSecrets: Bool
 
     @Published var serverURL: String {
         didSet {
@@ -77,6 +83,7 @@ final class AppConfig: ObservableObject {
     /// Personal Access Token with api scope. Stored in Keychain.
     @Published var gitLabToken: String {
         didSet {
+            guard persistsSecrets else { return }
             if gitLabToken.isEmpty {
                 KeychainStore.deleteGitLabToken(host: gitLabBaseURL)
             } else {
@@ -88,7 +95,7 @@ final class AppConfig: ObservableObject {
     @Published var gitLabBaseURL: String {
         didSet {
             defaults.set(gitLabBaseURL, forKey: "gitLabBaseURL")
-            if !gitLabToken.isEmpty {
+            if persistsSecrets, !gitLabToken.isEmpty {
                 KeychainStore.deleteGitLabToken(host: oldValue)
                 KeychainStore.saveGitLabToken(gitLabToken, host: gitLabBaseURL)
             }
@@ -115,6 +122,7 @@ final class AppConfig: ObservableObject {
     /// PAT (classic or fine-grained). Stored in Keychain.
     @Published var gitHubToken: String {
         didSet {
+            guard persistsSecrets else { return }
             if gitHubToken.isEmpty {
                 KeychainStore.deleteGitHubToken()
             } else {
@@ -288,6 +296,7 @@ final class AppConfig: ObservableObject {
     /// defaults. Production code uses the `shared` singleton.
     init(userDefaults defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        self.persistsSecrets = (defaults === UserDefaults.standard)
         self.serverURL = (defaults.string(forKey: "serverURL")
             ?? "http://127.0.0.1:\(BackendManager.defaultBackendPort)")
         self.themeID = defaults.string(forKey: "themeID") ?? Theme.dark.id
@@ -323,7 +332,9 @@ final class AppConfig: ObservableObject {
         }
         let baseURLForInit = defaults.string(forKey: "gitLabBaseURL") ?? "https://gitlab.com"
         self.gitLabBaseURL = baseURLForInit
-        if let migrated = defaults.string(forKey: "gitLabToken"), !migrated.isEmpty {
+        if !self.persistsSecrets {
+            self.gitLabToken = ""
+        } else if let migrated = defaults.string(forKey: "gitLabToken"), !migrated.isEmpty {
             KeychainStore.saveGitLabToken(migrated, host: baseURLForInit)
             defaults.removeObject(forKey: "gitLabToken")
             self.gitLabToken = migrated
@@ -357,7 +368,7 @@ final class AppConfig: ObservableObject {
             self.gitLabSavedProjects = []
         }
         // GitHub: token from Keychain, saved repos from UserDefaults.
-        self.gitHubToken = KeychainStore.loadGitHubToken() ?? ""
+        self.gitHubToken = self.persistsSecrets ? (KeychainStore.loadGitHubToken() ?? "") : ""
         if let data = defaults.data(forKey: "gitHubSavedRepos"),
            let decoded = try? AppJSON.decoder.decode([SavedGitHubRepo].self, from: data) {
             self.gitHubSavedRepos = decoded

@@ -253,45 +253,17 @@ struct LlmIdeMacApp: App {
     }
 
     /// Always tries to start the backend on app launch:
-    ///   1. Fill in any missing config paths from well-known locations.
+    ///   1. Validate-and-repair the configured paths (stale paths from a
+    ///      moved/renamed repo are re-detected, not just empty ones).
     ///   2. If both paths resolve to a real server.mjs + node binary,
     ///      call backend.start(). BackendManager handles the adopt-vs-
     ///      spawn decision via its /health probe.
     /// Failures are surfaced in Settings → Backend, not as alerts.
     @MainActor
     private func autoStartBackend() {
-        if config.backendNodePath.isEmpty, let detected = BackendManager.autoDetectNode() {
-            config.backendNodePath = detected
-        }
-        if config.backendWorkingDir.isEmpty {
-            for candidate in autoDetectProjectFolders() {
-                if FileManager.default.fileExists(atPath: candidate.appendingPathComponent("server.mjs").path) {
-                    config.backendWorkingDir = candidate.path
-                    break
-                }
-            }
-        }
+        BackendManager.resolveLaunchPaths(config: config)
         guard !config.backendNodePath.isEmpty, !config.backendWorkingDir.isEmpty else { return }
         backend.start(nodePath: config.backendNodePath, workingDirectory: config.backendWorkingDir)
-    }
-
-    /// Project-folder guesses, in order of likelihood:
-    ///   - the directory the app was built from (Bundle path)
-    ///   - the user's Developer/LLM IDE/<…>/extension hideouts
-    ///   - a sibling Desktop/meet-notes/extension (typical local clone)
-    private func autoDetectProjectFolders() -> [URL] {
-        let fm = FileManager.default
-        var out: [URL] = []
-        let home = fm.homeDirectoryForCurrentUser
-        out.append(home.appendingPathComponent("Desktop/meet-notes/extension"))
-        out.append(home.appendingPathComponent("Developer/meet-notes/extension"))
-        out.append(home.appendingPathComponent("Developer/LLM IDE/notes-extension/extension"))
-        // Sibling of the running app bundle: handy when the app is run
-        // from inside the repo (e.g., via mac/build_app.sh).
-        if let bundleParent = Bundle.main.bundleURL.deletingLastPathComponent() as URL? {
-            out.append(bundleParent.deletingLastPathComponent().appendingPathComponent("extension"))
-        }
-        return out
     }
 }
 

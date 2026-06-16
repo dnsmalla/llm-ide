@@ -125,7 +125,30 @@ function renderReviewDecided(reviewItem) {
   ].filter(Boolean).join('\n');
 }
 
-export async function notifySlack({ webhookUrl, kind, payload }) {
+// Short-window duplicate suppression. Webhook sends have no provider-
+// side idempotency, so a client retry or double-click posts the same
+// notification twice. Callers pass a stable `dedupeKey` (e.g.
+// "<userId>:plan:<planId>"); a repeat within the window is acknowledged
+// without re-posting. In-memory is fine — the window is short and a
+// process restart losing it only risks one duplicate, not a miss.
+const DEDUPE_WINDOW_MS = 60_000;
+const recentSends = new Map(); // dedupeKey -> sentAt epoch ms
+function isDuplicateSend(dedupeKey) {
+  if (!dedupeKey) return false;
+  const now = Date.now();
+  // Opportunistic sweep keeps the map from growing unboundedly.
+  for (const [k, t] of recentSends) {
+    if (now - t > DEDUPE_WINDOW_MS) recentSends.delete(k);
+  }
+  if (recentSends.has(dedupeKey)) return true;
+  recentSends.set(dedupeKey, now);
+  return false;
+}
+
+export async function notifySlack({ webhookUrl, kind, payload, dedupeKey }) {
+  if (isDuplicateSend(dedupeKey)) {
+    return { ok: true, deduped: true };
+  }
   let text;
   if (kind === 'plan')          text = renderPlanSummary(payload);
   else if (kind === 'dispatch') text = renderDispatchResult(payload);

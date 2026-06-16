@@ -282,7 +282,7 @@ struct CodeWorkflowSheet: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: file.isNew ? "plus.circle.fill" : "pencil.circle.fill")
-                            .foregroundStyle(file.isNew ? .green : .blue)
+                            .foregroundStyle(file.isNew ? theme.current.success : theme.current.info)
                             .font(.caption)
                         Text(file.path)
                             .font(.system(size: 12, design: .monospaced))
@@ -290,8 +290,8 @@ struct CodeWorkflowSheet: View {
                         Text(file.isNew ? "new" : "modify")
                             .font(.caption2)
                             .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(file.isNew ? Color.green.opacity(0.12) : Color.blue.opacity(0.12))
-                            .foregroundStyle(file.isNew ? .green : .blue)
+                            .background((file.isNew ? theme.current.success : theme.current.info).opacity(0.12))
+                            .foregroundStyle(file.isNew ? theme.current.success : theme.current.info)
                             .clipShape(Capsule())
                     }
                 }
@@ -382,7 +382,7 @@ struct CodeWorkflowSheet: View {
         VStack(spacing: 18) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 56))
-                .foregroundStyle(.green)
+                .foregroundStyle(theme.current.success)
             Text("Change submitted!")
                 .font(.title2.weight(.semibold))
 
@@ -467,8 +467,8 @@ struct CodeWorkflowSheet: View {
         Text(closed ? "Closed" : "Open")
             .font(.caption.weight(.semibold))
             .padding(.horizontal, 8).padding(.vertical, 2)
-            .background((closed ? Color.green : Color.orange).opacity(0.18))
-            .foregroundStyle(closed ? Color.green : Color.orange)
+            .background((closed ? theme.current.success : theme.current.warning).opacity(0.18))
+            .foregroundStyle(closed ? theme.current.success : theme.current.warning)
             .clipShape(Capsule())
     }
 

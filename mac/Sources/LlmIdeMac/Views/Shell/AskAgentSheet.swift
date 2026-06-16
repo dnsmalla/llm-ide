@@ -84,7 +84,7 @@ struct AskAgentSheet: View {
     private var statusStrip: some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(runs.hasRunning ? Color.green : theme.current.textMuted)
+                .fill(runs.hasRunning ? theme.current.success : theme.current.textMuted)
                 .frame(width: 8, height: 8)
             Text(runs.hasRunning ? "Agent is running on \(runs.runningCount) session\(runs.runningCount == 1 ? "" : "s")" : "Agent is idle")
                 .font(.callout)
@@ -130,7 +130,7 @@ struct AskAgentSheet: View {
                     if let err = lastError {
                         Text(err)
                             .font(.callout)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(theme.current.danger)
                             .padding(.horizontal, 10)
                     }
                 }

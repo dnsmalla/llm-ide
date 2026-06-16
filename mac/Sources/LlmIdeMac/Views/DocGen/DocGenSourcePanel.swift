@@ -378,7 +378,7 @@ struct DocGenSourcePanel: View {
                 if failedFileIDs.contains(item.id) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.caption2)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(theme.current.warning)
                         .help("Could not read this file")
                 }
             }

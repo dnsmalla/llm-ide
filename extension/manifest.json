@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Notes Extension - AI Meeting Notes",
+  "name": "LLM IDE — AI Meeting Notes",
   "version": "2.3.0",
   "description": "AI-powered meeting notes for Google Meet, Teams, Zoom & more. Transcribes live captions and summarizes with Claude.",
   "author": "Dinesh Bahadur Malla",
@@ -62,7 +62,7 @@
     "128": "public/icons/icon128.png"
   },
   "action": {
-    "default_title": "Notes Extension"
+    "default_title": "LLM IDE"
   },
   "web_accessible_resources": []
 }

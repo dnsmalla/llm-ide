@@ -463,7 +463,13 @@ export async function handleKB(req, res) {
             return true;
           }
         }
-        const result = await notifySlack({ webhookUrl, kind: body.kind, payload });
+        // Dedupe key suppresses double-sends from client retries for
+        // entity-addressed notifications; custom messages have no
+        // stable identity and are sent as-is.
+        const dedupeKey = body.kind === 'plan' && body.planId
+          ? `${userId}:plan:${body.planId}`
+          : (body.kind === 'review' && payload?.id ? `${userId}:review:${payload.id}:${payload.status || ''}` : null);
+        const result = await notifySlack({ webhookUrl, kind: body.kind, payload, dedupeKey });
         sendJSON(res, 200, result);
       } catch (err) {
         sendJSON(res, 400, { error: { code: 'SLACK_NOTIFY_FAILED', message: err.message || 'Slack notify failed' } });

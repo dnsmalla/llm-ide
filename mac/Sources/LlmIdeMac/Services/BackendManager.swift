@@ -104,6 +104,55 @@ final class BackendManager {
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
+    /// Project-folder guesses for the server's working directory, in
+    /// order of likelihood. Single source of truth — app launch and the
+    /// login screen both resolve through here.
+    ///   - current repo layout (llm-ide), then legacy clones (meet-notes)
+    ///   - sibling of the running app bundle: handy when the app is run
+    ///     from inside the repo (e.g., via mac/build_app.sh)
+    static func defaultProjectFolders() -> [URL] {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser
+        var out: [URL] = [
+            home.appendingPathComponent("llm-ide/extension"),
+            home.appendingPathComponent("Developer/llm-ide/extension"),
+            home.appendingPathComponent("Desktop/llm-ide/extension"),
+            home.appendingPathComponent("Desktop/meet-notes/extension"),
+            home.appendingPathComponent("Developer/meet-notes/extension"),
+            home.appendingPathComponent("Developer/LLM IDE/notes-extension/extension"),
+        ]
+        let bundleParent = Bundle.main.bundleURL.deletingLastPathComponent()
+        out.append(bundleParent.deletingLastPathComponent().appendingPathComponent("extension"))
+        return out
+    }
+
+    /// Validate-and-repair the configured backend paths in place.
+    ///
+    /// A stored `backendWorkingDir` that no longer contains `server.mjs`
+    /// (the repo moved or was renamed — e.g. the meet-notes → llm-ide
+    /// rename) previously broke auto-start forever: the launch path only
+    /// filled paths when EMPTY, so a stale value was never re-detected
+    /// and every start attempt failed at the "server.mjs not found"
+    /// guard. Same idea for a node binary that is no longer executable.
+    @MainActor
+    static func resolveLaunchPaths(config: AppConfig) {
+        let fm = FileManager.default
+        if config.backendNodePath.isEmpty || !fm.isExecutableFile(atPath: config.backendNodePath) {
+            if let detected = autoDetectNode() {
+                config.backendNodePath = detected
+            }
+        }
+        let hasServer = { (dir: String) -> Bool in
+            !dir.isEmpty && fm.fileExists(
+                atPath: URL(fileURLWithPath: dir).appendingPathComponent("server.mjs").path)
+        }
+        if !hasServer(config.backendWorkingDir) {
+            if let found = defaultProjectFolders().first(where: { hasServer($0.path) }) {
+                config.backendWorkingDir = found.path
+            }
+        }
+    }
+
     func start(nodePath: String, workingDirectory: String) {
         if case .running = status { return }
         if case .starting = status { return }

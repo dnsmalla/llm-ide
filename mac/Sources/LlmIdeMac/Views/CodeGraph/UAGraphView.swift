@@ -1358,7 +1358,7 @@ struct UAGraphView: View {
             Text("\(f) files · \(e) edges" + (reused > 0 ? " · \(reused) cached" : ""))
                 .font(Typography.caption).foregroundStyle(t.accent3)
         case .failed(let msg):
-            Text(msg).font(Typography.caption).foregroundStyle(.red)
+            Text(msg).font(Typography.caption).foregroundStyle(theme.current.danger)
         }
     }
 

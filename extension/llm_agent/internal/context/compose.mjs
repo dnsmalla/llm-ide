@@ -10,7 +10,7 @@ import { renderActiveProject } from './render-active-project.mjs';
 import { renderIndexedRepos } from './render-indexed-repos.mjs';
 import { renderRecentIssues } from './render-recent-issues.mjs';
 import { renderRecentMeetings } from './render-recent-meetings.mjs';
-import { renderGraphifyMemory } from './render-graphify-memory.mjs';
+import { renderGraphifyMemory } from '../../../graphkit/index.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const APP_CAPABILITIES_PATH = join(__dirname, 'app-capabilities.md');

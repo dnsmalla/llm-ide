@@ -168,3 +168,139 @@ struct RegressionRunnerTests {
         }
     }
 }
+
+// MARK: - Semantic judge
+
+@MainActor
+struct RegressionJudgeTests {
+    final class FakePrompter: RegressionPrompter {
+        var replies: [String: String] = [:]
+        func ask(prompt: String) async throws -> String { replies[prompt] ?? "" }
+    }
+
+    /// Scripted judge: returns the canned equivalence verdict, or
+    /// throws when `error` is set.
+    final class FakeJudge: RegressionJudge {
+        var equivalent: Bool
+        var error: Error?
+        var calls = 0
+        init(equivalent: Bool, error: Error? = nil) {
+            self.equivalent = equivalent
+            self.error = error
+        }
+        func sameMeaning(prompt: String, original: String, current: String) async throws -> Bool {
+            calls += 1
+            if let error { throw error }
+            return equivalent
+        }
+    }
+
+    private func tmpRepo() throws -> URL {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("regression-judge-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func writeFixedFault(_ store: MemoryStore, at repo: URL,
+                                 prompt: String, response: String) throws -> URL {
+        let fault = FaultReport(
+            prompt: prompt, response: response, notes: "",
+            severity: .major,
+            reportedAt: Date(timeIntervalSince1970: 1_716_465_600),
+            gitHead: nil, appVersion: "0.1", agent: "claude_code",
+            status: .fixed, tags: []
+        )
+        return try store.writeFault(at: repo, fault)
+    }
+
+    @Test func rewordedAnswerStaysUnchangedWhenJudgeSaysEquivalent() async throws {
+        let repo = try tmpRepo()
+        let store = MemoryStore()
+        let url = try writeFixedFault(store, at: repo,
+                                      prompt: "How does auth work?",
+                                      response: "Auth uses JWT tokens.")
+        let prompter = FakePrompter()
+        prompter.replies["How does auth work?"] = "Authentication is JWT-based."
+        let judge = FakeJudge(equivalent: true)
+        let runner = RegressionRunner(prompter: prompter, judge: judge, store: store)
+
+        await runner.run(at: repo)
+
+        #expect(judge.calls == 1)
+        #expect(runner.results.first?.verdict == .unchanged)
+        #expect(runner.results.first?.autoReopened == false)
+        let onDisk = try store.loadFault(at: url)
+        #expect(onDisk.status == .fixed)
+    }
+
+    @Test func judgeConfirmedRegressionStillAutoReopens() async throws {
+        let repo = try tmpRepo()
+        let store = MemoryStore()
+        let url = try writeFixedFault(store, at: repo,
+                                      prompt: "How does auth work?",
+                                      response: "Auth uses JWT tokens.")
+        let prompter = FakePrompter()
+        prompter.replies["How does auth work?"] = "Auth uses plain session cookies."
+        let judge = FakeJudge(equivalent: false)
+        let runner = RegressionRunner(prompter: prompter, judge: judge, store: store)
+
+        await runner.run(at: repo)
+
+        #expect(runner.results.first?.verdict == .regressed)
+        #expect(runner.results.first?.autoReopened == true)
+        let onDisk = try store.loadFault(at: url)
+        #expect(onDisk.status == .open)
+    }
+
+    @Test func judgeFailureLeavesVerdictFailedAndFaultFixed() async throws {
+        let repo = try tmpRepo()
+        let store = MemoryStore()
+        let url = try writeFixedFault(store, at: repo,
+                                      prompt: "How does auth work?",
+                                      response: "Auth uses JWT tokens.")
+        let prompter = FakePrompter()
+        prompter.replies["How does auth work?"] = "Different wording."
+        let judge = FakeJudge(equivalent: false,
+                              error: NSError(domain: "test", code: 1,
+                                             userInfo: [NSLocalizedDescriptionKey: "offline"]))
+        let runner = RegressionRunner(prompter: prompter, judge: judge, store: store)
+
+        await runner.run(at: repo)
+
+        guard case .failed = runner.results.first?.verdict else {
+            Issue.record("expected .failed, got \(String(describing: runner.results.first?.verdict))")
+            return
+        }
+        #expect(runner.results.first?.autoReopened == false)
+        let onDisk = try store.loadFault(at: url)
+        #expect(onDisk.status == .fixed)
+    }
+
+    @Test func exactMatchSkipsTheJudgeEntirely() async throws {
+        let repo = try tmpRepo()
+        let store = MemoryStore()
+        _ = try writeFixedFault(store, at: repo,
+                                prompt: "How does auth work?",
+                                response: "Auth uses JWT tokens.")
+        let prompter = FakePrompter()
+        prompter.replies["How does auth work?"] = "Auth   uses JWT tokens.\n"
+        let judge = FakeJudge(equivalent: false) // would regress if consulted
+        let runner = RegressionRunner(prompter: prompter, judge: judge, store: store)
+
+        await runner.run(at: repo)
+
+        #expect(judge.calls == 0)
+        #expect(runner.results.first?.verdict == .unchanged)
+    }
+
+    @Test func judgeReplyParsing() throws {
+        #expect(try CodeAssistJudge.parseReply("YES") == true)
+        #expect(try CodeAssistJudge.parseReply("  yes — same facts.") == true)
+        #expect(try CodeAssistJudge.parseReply("No.") == false)
+        #expect(try CodeAssistJudge.parseReply("NO, B contradicts A.") == false)
+        #expect(throws: CodeAssistJudge.JudgeError.self) {
+            _ = try CodeAssistJudge.parseReply("The answers are mostly similar.")
+        }
+    }
+}

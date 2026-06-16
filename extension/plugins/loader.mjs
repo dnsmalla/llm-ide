@@ -146,11 +146,20 @@ function parseSubagentFile(path) {
     ? Math.min(fm.maxIterations, 5)
     : 3;
 
+  // Optional sub-model override, e.g. `model: claude-haiku-4-5` to run
+  // a leaf subagent on a cheaper tier. Strict charset so the value is
+  // safe to embed in an API request; bad values are dropped (the
+  // subagent then inherits the deployment default), not fatal.
+  const model = (typeof fm.model === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(fm.model))
+    ? fm.model
+    : undefined;
+
   return {
     subagent: {
       description: typeof fm.description === 'string' ? fm.description.slice(0, 300) : '',
       allowedTools,
       maxIterations: maxIters,
+      model,
       systemPrompt: body,
     },
     suspicious,

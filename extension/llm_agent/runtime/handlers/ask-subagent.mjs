@@ -20,7 +20,8 @@
 //   /^[a-z][a-z0-9-]{0,40}$/ — safe to interpolate.
 
 import { runAgentLoop } from '../loop.mjs';
-import { searchKb, redactFence } from './search-kb.mjs';
+import { searchKb } from './search-kb.mjs';
+import { redactFence } from '../redaction.mjs';
 
 // Same registry as ask-internal — extend here when new read tools
 // become available to subagents.
@@ -94,6 +95,12 @@ export async function askSubagent(args, ctx) {
     userId: ctx.userId,
     handlers,
     maxIterations: subagent.maxIterations,
+    // Sub-model routing: a subagent's own frontmatter `model:` wins,
+    // then the deployment-wide LLMIDE_SUBAGENT_MODEL, then the
+    // runClaude default.  Leaf calls are the natural place to run a
+    // cheaper/faster tier.
+    model: subagent.model || ctx.defaultModel,
+    depth: ctx.depth ?? 1,
     deadlineMs: 90_000,         // tight — subagents are leaf calls
   });
 
