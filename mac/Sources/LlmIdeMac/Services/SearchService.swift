@@ -26,7 +26,13 @@ final class SearchService {
         // Group before adding word boundaries so alternation in a regex query
         // (e.g. `foo|bar`) binds inside the \b…\b, not as `\bfoo|bar\b`.
         if options.wholeWord { pattern = "\\b(?:" + pattern + ")\\b" }
-        let opts: NSRegularExpression.Options = options.caseSensitive ? [] : [.caseInsensitive]
+        // `.anchorsMatchLines` makes ^/$ match at every line boundary. This is
+        // required for consistency: search matches per-line (so ^/$ are line
+        // anchors), but replace matches the full file string — without this,
+        // anchored regex would diverge and replaceOne could hit the wrong
+        // occurrence. With it, both sides see the same match ordering.
+        var opts: NSRegularExpression.Options = [.anchorsMatchLines]
+        if !options.caseSensitive { opts.insert(.caseInsensitive) }
         return try? NSRegularExpression(pattern: pattern, options: opts)
     }
 

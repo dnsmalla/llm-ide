@@ -97,4 +97,45 @@ import Foundation
         #expect(SearchService.preserveCaseReplacement(matched: "Foo", replacement: "bar") == "Bar")
         #expect(SearchService.preserveCaseReplacement(matched: "foo", replacement: "bar") == "bar")
     }
+
+    @Test func replaceInFileLiteralAndPreserveCase() async throws {
+        let root = try tmp(); defer { try? FileManager.default.removeItem(at: root) }
+        let f = root.appendingPathComponent("r.txt")
+        let svc = SearchService()
+        // case-sensitive literal: only lowercase "foo" changes
+        try "foo Foo FOO\n".write(to: f, atomically: true, encoding: .utf8)
+        _ = await svc.replaceInFile(file: f, query: "foo", options: SearchOptions(caseSensitive: true), replacement: "bar", preserveCase: false)
+        #expect((try String(contentsOf: f, encoding: .utf8)) == "bar Foo FOO\n")
+        // preserve-case, case-insensitive: each match adapts
+        try "foo Foo FOO\n".write(to: f, atomically: true, encoding: .utf8)
+        _ = await svc.replaceInFile(file: f, query: "foo", options: SearchOptions(), replacement: "bar", preserveCase: true)
+        #expect((try String(contentsOf: f, encoding: .utf8)) == "bar Bar BAR\n")
+    }
+
+    @Test func replaceOneTargetsTheIndexedOccurrence() async throws {
+        let root = try tmp(); defer { try? FileManager.default.removeItem(at: root) }
+        let f = root.appendingPathComponent("o.txt")
+        try "aa zz aa zz aa\n".write(to: f, atomically: true, encoding: .utf8)
+        let svc = SearchService()
+        // replace only the 2nd "aa" (fileIndex 1, document order)
+        _ = await svc.replaceOne(file: f, fileIndex: 1, query: "aa", options: SearchOptions(caseSensitive: true), replacement: "QQ", preserveCase: false)
+        #expect((try String(contentsOf: f, encoding: .utf8)) == "aa zz QQ zz aa\n")
+    }
+
+    @Test func anchoredRegexReplaceMatchesPerLineLikeSearch() async throws {
+        // Regression guard: search indexes per-line; replace matches full text.
+        // `.anchorsMatchLines` keeps `$` a per-line anchor on BOTH sides so the
+        // fileIndex order matches and replaceOne targets the right occurrence.
+        let root = try tmp(); defer { try? FileManager.default.removeItem(at: root) }
+        let f = root.appendingPathComponent("a.txt")
+        try "foo end\nstart foo\nfoo\n".write(to: f, atomically: true, encoding: .utf8)
+        let svc = SearchService()
+        let opts = SearchOptions(caseSensitive: true, wholeWord: false, regex: true)
+        let r = await svc.search(query: "foo$", root: root, options: opts, include: "", exclude: "")
+        // search sees the line-2 and line-3 trailing "foo" (not line-1's, which has " end" after)
+        #expect(r.totalMatches == 2)
+        // replace-all-in-file changes exactly those two
+        _ = await svc.replaceInFile(file: f, query: "foo$", options: opts, replacement: "X", preserveCase: false)
+        #expect((try String(contentsOf: f, encoding: .utf8)) == "foo end\nstart X\nX\n")
+    }
 }
