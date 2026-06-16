@@ -30,6 +30,17 @@ const MIN_OVERFLOW_TOKENS = 256;
 // needed and has been dropped.
 const ANTHROPIC_VERSION = process.env.LLMIDE_ANTHROPIC_VERSION || '2023-06-01';
 
+// Caller-supplied model ids reach us straight from the client's picker,
+// which can also offer non-Anthropic options (Cursor/Copilot/Gemini) that
+// would 404 against the Anthropic API. Accept only well-formed Claude ids;
+// anything else (empty, stale, or a foreign provider) falls back to the
+// default rather than failing the request. A regex (not a fixed list)
+// keeps new Claude models working without a code change here.
+const CLAUDE_MODEL_RE = /^claude-[a-z0-9.\-]+$/;
+function resolveModel(model) {
+  return (typeof model === 'string' && CLAUDE_MODEL_RE.test(model)) ? model : DEFAULT_MODEL;
+}
+
 // Anthropic 529 "overloaded" responses usually clear within 5-30s.
 // Retry transient capacity errors (529, 503) with jittered backoff
 // before bubbling up to the user. Other errors (auth, 4xx, malformed
@@ -100,7 +111,7 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
   // default and is allowed to fall back to the CLI like before.
   const userScopedKey = userId ? safeLookupApiKey(userId) : null;
   const apiKey = userScopedKey || process.env.ANTHROPIC_API_KEY;
-  const resolvedModel = model || DEFAULT_MODEL;
+  const resolvedModel = resolveModel(model);
 
   if (apiKey) {
     // Build the messages array. When cacheTranscript is true, use
@@ -331,7 +342,7 @@ export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheT
   const resolvedMaxTokens = (Number.isFinite(maxTokens) && maxTokens > 0) ? maxTokens : 8192;
   const userScopedKey = userId ? safeLookupApiKey(userId) : null;
   const apiKey = userScopedKey || process.env.ANTHROPIC_API_KEY;
-  const resolvedModel = model || DEFAULT_MODEL;
+  const resolvedModel = resolveModel(model);
 
   // Helper: buffered fallback via runClaude. Delivers the entire result
   // as a single chunk so the caller still gets onChunk() called.

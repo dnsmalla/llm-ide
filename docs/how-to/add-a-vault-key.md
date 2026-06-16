@@ -24,6 +24,7 @@ curl -X POST http://127.0.0.1:3456/auth/me/secrets \
   -d '{"key":"notion.apiKey","value":"test"}' \
   -H 'Content-Type: application/json'
 ```
+
 Then check the row exists in `user_secrets` and is ciphertext, not plaintext.
 
 ## See also

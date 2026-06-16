@@ -112,6 +112,10 @@ const ALLOWED_KEYS = new Set([
   'backlog.apiKey',
   'linear.apiKey',
   'slack.webhookUrl',
+  // IMAP app password for the Email input source. The Mac client stores
+  // it here via /auth/me/secrets; the server reads it back when fetching
+  // recent messages so the password never travels on the fetch request.
+  'email.imapPassword',
   // Per-user Anthropic API key.  When present, agent calls run with
   // ANTHROPIC_API_KEY=<this> so each user's LLM spend is attributed
   // to their own account instead of the operator's Claude CLI login.

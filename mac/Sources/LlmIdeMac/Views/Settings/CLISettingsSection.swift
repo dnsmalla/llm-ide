@@ -10,10 +10,11 @@ struct CLISettingsSection: View {
                 SettingsHint("Active AI CLI and default model used in Code & Doc Review chat.")
 
                 VStack(spacing: 2) {
-                    ForEach(AICliTool.allCases) { cli in
+                    ForEach(AICliTool.selectable) { cli in
                         cliRow(cli)
                     }
                 }
+                .onAppear(perform: normalizeActiveCLI)
 
                 Divider().background(theme.current.border)
 
@@ -34,6 +35,15 @@ struct CLISettingsSection: View {
                 }
             }
         }
+    }
+
+    /// If a previously-persisted tool is no longer selectable (e.g. the
+    /// user had Cursor/Gemini selected before they were hidden), fall
+    /// back to Claude so the picker has a valid active row.
+    private func normalizeActiveCLI() {
+        guard !AICliTool.selectable.contains(where: { $0.rawValue == config.activeCLI }) else { return }
+        config.activeCLI = AICliTool.claudeCode.rawValue
+        config.defaultModelId = AICliTool.claudeCode.defaultModelId
     }
 
     private func cliRow(_ cli: AICliTool) -> some View {

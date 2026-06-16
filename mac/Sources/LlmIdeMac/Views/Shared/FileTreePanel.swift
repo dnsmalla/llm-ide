@@ -156,24 +156,9 @@ private struct FSNodeRow: View {
             if expanded { expandedPaths.remove(node.id) }
             else        { expandedPaths.insert(node.id) }
         } label: {
-            HStack(spacing: 4) {
-                if depth > 0 { Spacer().frame(width: CGFloat(depth) * 14) }
-                Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 10)
-                Image(systemName: expanded ? "folder.fill" : "folder")
-                    .font(Typography.filename)
-                    .foregroundStyle(category.folderTint)
-                    .frame(width: 16)
-                Text(node.name)
-                    .font(Typography.filename)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 2)
-            .contentShape(Rectangle())
+            TreeRowLabel(name: node.name, isFolder: true, isExpanded: expanded,
+                         depth: depth, isSelected: false,
+                         folderTint: category.folderTint)
         }
         .buttonStyle(.plain)
         .listRowSeparator(.hidden)
@@ -189,18 +174,8 @@ private struct FSNodeRow: View {
 
     private var fileRow: some View {
         let ext = URL(fileURLWithPath: node.name).pathExtension.lowercased()
-        return HStack(spacing: 4) {
-            Spacer().frame(width: CGFloat(depth) * 14 + 14)
-            Image(systemName: FileIconKit.icon(for: ext))
-                .font(.system(size: 11))
-                .foregroundStyle(FileIconKit.color(for: ext))
-                .frame(width: 16)
-            Text(node.name)
-                .font(Typography.filename)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 2)
+        return TreeRowLabel(name: node.name, isFolder: false, isExpanded: false,
+                            depth: depth, isSelected: false, fileExtension: ext)
         .help(node.name)
         .contextMenu {
             if category == .meetings {
@@ -312,29 +287,24 @@ struct FileTreePanel: View {
         .onAppear {
             syncIfNeeded()
             rebuildTreeCache()
-            autoExpand()
         }
         .onChange(of: store.items.count) { _, _ in
             rebuildTreeCache()
-            autoExpand()
         }
         // Mirror LibraryView: re-sync and rebuild the tree whenever
         // the meeting index changes (new note file, project switch, etc.).
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
             syncIfNeeded()
             rebuildTreeCache()
-            autoExpand()
         }
     }
 
-    /// Sync notes / transcripts from their folders when this panel
-    /// displays those categories — mirrors AppShell's central sync.
+    /// Refresh the index when this panel displays notes / meetings —
+    /// mirrors AppShell's central refresh.  rescan() is authoritative for
+    /// the bound project's notes/ and meetings/ folders.
     private func syncIfNeeded() {
-        if categories.contains(.notes) {
-            store.syncMeetingNotes(from: env.notesOutputFolder)
-        }
-        if categories.contains(.meetings) {
-            store.syncMeetingTranscripts(from: env.meetingsFolder)
+        if categories.contains(.notes) || categories.contains(.meetings) {
+            store.rescan()
         }
     }
 
@@ -473,23 +443,6 @@ struct FileTreePanel: View {
 
     private func buildTrees(for category: LibraryItem.Category) -> [FSNode] {
         buildCategoryTrees(items: store.items(for: category))
-    }
-
-    // MARK: - Auto-expand
-
-    private func autoExpand() {
-        for cat in categories {
-            let all = store.items(for: cat)
-            let grouped = Dictionary(grouping: all.filter { $0.folderOrigin != nil },
-                                     by: { $0.folderOrigin! })
-            for (folderName, items) in grouped {
-                _ = items
-                _ = folderName
-            }
-            // All folders start collapsed; the user expands what they
-            // care about. Auto-expanding the repo root + its immediate
-            // children floods the panel with file rows on every launch.
-        }
     }
 
     // MARK: - File / folder pickers

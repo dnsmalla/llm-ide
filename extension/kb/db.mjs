@@ -607,6 +607,74 @@ export function findContext(userId, query, limit = 5) {
 
 
 
+// --- email dedup + high-water (migration 0013) ----------------------------
+//
+// These replace the Mac client's per-device UserDefaults ledger. Keeping the
+// seen-set and the forward-only fetch boundary per-USER (not per-device) means
+// a second device doesn't re-import mail the first already turned into notes.
+// The message-id rule MUST stay in lockstep with email-source.mjs's
+// normalizeParsed (`messageId || email-uid-<uid>`) or the seen-set won't match.
+
+// Cap on how many ids we'll INSERT in one markEmailSeen call. A single fetch
+// is already bounded to MAX_MESSAGES (200) upstream, so this is purely a
+// defensive ceiling against a malformed/abusive client body — we never want an
+// unbounded array to fan out into one giant transaction.
+const EMAIL_SEEN_MAX_PER_CALL = 1000;
+
+// The forward-only fetch lower bound for this user, or null if never fetched.
+export function getEmailHighWater(userId) {
+  requireUser(userId);
+  const db = getDb();
+  const row = lazyPrepare(db,
+    'SELECT last_fetched_at FROM email_state WHERE user_id = ?',
+  ).get(userId);
+  return row?.last_fetched_at ?? null;
+}
+
+// Upsert the user's high-water mark. Caller validates that `iso` is a real
+// date; we just persist the string. No-op guard on a falsy userId so a missing
+// auth context can't silently write a null-keyed row.
+export function setEmailHighWater(userId, iso) {
+  if (!userId || typeof userId !== 'string') return;
+  const db = getDb();
+  lazyPrepare(db, `
+    INSERT INTO email_state (user_id, last_fetched_at) VALUES (?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET last_fetched_at = excluded.last_fetched_at
+  `).run(userId, typeof iso === 'string' ? iso : null);
+}
+
+// Every message-id this user has already imported. Returned as a plain array;
+// the caller builds a Set from it for O(1) membership tests during fetch.
+export function getEmailSeenIds(userId) {
+  requireUser(userId);
+  const db = getDb();
+  return lazyPrepare(db,
+    'SELECT message_id FROM email_seen WHERE user_id = ?',
+  ).all(userId).map((r) => r.message_id);
+}
+
+// Record message-ids as seen for this user. INSERT OR IGNORE makes re-marking
+// an id a harmless no-op (the composite PK dedups). We filter to non-empty
+// strings and cap the batch defensively, then run the whole batch in one
+// transaction like the other bulk inserts in this module.
+export function markEmailSeen(userId, messageIds) {
+  if (!userId || typeof userId !== 'string') return;
+  if (!Array.isArray(messageIds)) return;
+  const ids = messageIds
+    .filter((x) => typeof x === 'string' && x)
+    .slice(0, EMAIL_SEEN_MAX_PER_CALL);
+  if (ids.length === 0) return;
+  const db = getDb();
+  const stmt = lazyPrepare(db,
+    'INSERT OR IGNORE INTO email_seen (user_id, message_id) VALUES (?, ?)',
+  );
+  const tx = db.transaction((rows) => {
+    for (const mid of rows) stmt.run(userId, mid);
+  });
+  tx(ids);
+}
+
+
 /**
  * Wipe every row owned by `userId` across every user-scoped table,
  * then delete the user row. Runs in a single transaction so a
@@ -655,6 +723,10 @@ export function deleteUserCascade(userId) {
     // users row is gone (FK enforcement would block the user delete if
     // FK cascades were active — explicit delete avoids the assumption).
     counts.password_reset_tokens = del('DELETE FROM password_reset_tokens WHERE user_id = ?');
+    // migration 0013 — per-user email dedup + high-water state. No FK, so
+    // delete explicitly or the seen-set/high-water would outlive the account.
+    counts.email_seen      = del('DELETE FROM email_seen   WHERE user_id = ?');
+    counts.email_state     = del('DELETE FROM email_state  WHERE user_id = ?');
     // migration 0009 — rate_limit_buckets has no user_id column; the key
     // column stores "<profile>::<scope>" where scope == userId for
     // authenticated KB routes.  We match by suffix so all per-user

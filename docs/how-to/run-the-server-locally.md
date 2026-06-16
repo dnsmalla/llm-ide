@@ -18,11 +18,13 @@ npm run server      # node server.mjs
 ```
 
 For verbose logging:
+
 ```bash
 LLMIDE_LOG_LEVEL=debug npm run server
 ```
 
 For JSON logs:
+
 ```bash
 LLMIDE_LOG_JSON=1 npm run server
 ```
@@ -32,6 +34,7 @@ LLMIDE_LOG_JSON=1 npm run server
 ```bash
 curl -s http://127.0.0.1:3456/health | jq '.status'
 ```
+
 Expected: `"ok"`.
 
 ## See also

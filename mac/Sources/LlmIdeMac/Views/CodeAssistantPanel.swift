@@ -36,6 +36,13 @@ struct CodeAssistantPanel: View {
     @State private var error: String?
     @State private var prefLanguage: String = "en"
     @State private var didAttachInitial = false
+    /// Path of the file auto-attached from the tree selection (`initialURL`),
+    /// so a later selection can swap just that one without nuking files the
+    /// user attached manually.
+    @State private var autoAttachedPath: String?
+    /// Transient notice shown when a picked/selected file can't be attached
+    /// (e.g. an image or binary). Prevents the silent drop on the Visual page.
+    @State private var attachNotice: String?
     @State private var selectedModel: String = ""
     @State private var pendingTool: PendingTool?
     /// Snapshot of recent issues for the active project, refreshed on
@@ -77,11 +84,7 @@ struct CodeAssistantPanel: View {
         "sql", "sh", "bash", "html", "css", "scss",
         "vue", "svelte",
     ]
-    private static let skipDirs: Set<String> = [
-        "node_modules", ".git", "dist", "build", ".next", ".cache",
-        ".venv", "venv", "__pycache__", ".pytest_cache", "target",
-        ".llmide-auto",
-    ]
+    private static let skipDirs: Set<String> = IgnoreList.directories
 
     /// Live-tracked rendered width of the panel. Drives the compact-mode
     /// switch so controls collapse gracefully when the user drags the
@@ -97,6 +100,7 @@ struct CodeAssistantPanel: View {
             chatScroll
             Divider().background(theme.current.border)
             if !attachments.isEmpty { attachmentBar }
+            if let attachNotice { attachNoticeBar(attachNotice) }
             if let prompt = nudgePrompt, activeRepoRoot != nil {
                 nudgeBanner(prompt: prompt)
             }
@@ -144,7 +148,9 @@ struct CodeAssistantPanel: View {
             }
             if let url = initialURL, !didAttachInitial {
                 didAttachInitial = true
-                addFile(url: url)
+                if addFile(url: url) == .added {
+                    autoAttachedPath = displayPath(url)
+                }
             }
         }
         .onChange(of: history) { oldValue, newValue in
@@ -182,13 +188,31 @@ struct CodeAssistantPanel: View {
             session.reset()
             nudgePrompt = nil
             qaSaveError = nil
+            autoAttachedPath = nil
+            attachNotice = nil
         }
         .onChange(of: initialURL) { _, newURL in
-            // When the user selects a different file in the tree, swap the attachment.
-            if let url = newURL {
-                attachments.removeAll()
-                didAttachInitial = true
-                addFile(url: url)
+            // When the user selects a different file in the tree, swap ONLY
+            // the previously auto-attached file — files the user attached
+            // manually are preserved.
+            if let prev = autoAttachedPath {
+                attachments.removeAll { $0.path == prev }
+                autoAttachedPath = nil
+            }
+            attachNotice = nil
+            guard let url = newURL else { return }
+            didAttachInitial = true
+            switch addFile(url: url) {
+            case .added:
+                autoAttachedPath = displayPath(url)
+            case .notText:
+                // The Visual page selects images, which can't be sent as text.
+                // Say so instead of silently ignoring the selection.
+                attachNotice = "“\(url.lastPathComponent)” can’t be attached — images and binary files aren’t supported in chat yet."
+            case .unreadable:
+                attachNotice = "Couldn’t read “\(url.lastPathComponent)”."
+            case .duplicate:
+                break
             }
         }
         .sheet(isPresented: $showingIssueSheet) {
@@ -834,6 +858,32 @@ struct CodeAssistantPanel: View {
 
     // MARK: - Attachment bar
 
+    /// Dismissible inline notice for files that couldn't be attached.
+    private func attachNoticeBar(_ message: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.current.textMuted)
+            Text(message)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.current.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button {
+                attachNotice = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(theme.current.textMuted)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, 6)
+        .background(theme.current.surface.opacity(0.6))
+    }
+
     private var attachmentBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
@@ -1093,8 +1143,15 @@ struct CodeAssistantPanel: View {
         panel.message = "Attach files for Claude to read"
         panel.prompt = "Attach"
         if panel.runModal() == .OK {
+            attachNotice = nil
+            var rejected: [String] = []
             for url in panel.urls {
-                addFile(url: url)
+                if addFile(url: url) == .notText { rejected.append(url.lastPathComponent) }
+            }
+            if !rejected.isEmpty {
+                attachNotice = rejected.count == 1
+                    ? "“\(rejected[0])” can’t be attached — images and binary files aren’t supported in chat yet."
+                    : "\(rejected.count) files couldn’t be attached — images and binary files aren’t supported in chat yet."
             }
         }
     }
@@ -1111,20 +1168,27 @@ struct CodeAssistantPanel: View {
         }
     }
 
-    private func addFile(url: URL) {
+    enum AttachOutcome { case added, duplicate, notText, unreadable }
+
+    /// Attaches a file's text content. Returns why it did or didn't so
+    /// single-file callers can surface a notice instead of dropping
+    /// silently (the bug behind the "Visual" page ignoring images).
+    @discardableResult
+    private func addFile(url: URL) -> AttachOutcome {
         let path = displayPath(url)
         // Idempotent — re-adding the same file does nothing.
-        if attachments.contains(where: { $0.path == path }) { return }
+        if attachments.contains(where: { $0.path == path }) { return .duplicate }
         do {
             let data = try Data(contentsOf: url)
             // Reject obviously-binary files (≥1% NUL bytes in the first 4K).
             let probe = data.prefix(4096)
             let nulCount = probe.reduce(into: 0) { acc, b in if b == 0 { acc += 1 } }
-            if nulCount * 100 >= probe.count { return }
-            guard let text = String(data: data, encoding: .utf8) else { return }
+            if nulCount * 100 >= probe.count { return .notText }
+            guard let text = String(data: data, encoding: .utf8) else { return .notText }
             attachments.append(.init(path: path, content: text))
+            return .added
         } catch {
-            // Non-fatal — couldn't read, silently skip.
+            return .unreadable
         }
     }
 
@@ -1525,6 +1589,8 @@ struct CodeAssistantPanel: View {
         history = []
         draft = ""
         attachments.removeAll()
+        autoAttachedPath = nil
+        attachNotice = nil
         pendingTool = nil
         error = nil
     }
@@ -1536,6 +1602,8 @@ struct CodeAssistantPanel: View {
         history = session.history
         draft = ""
         attachments.removeAll()
+        autoAttachedPath = nil
+        attachNotice = nil
         pendingTool = nil
         error = nil
         // Bump lastUsedAt so this session moves to the top of the list.

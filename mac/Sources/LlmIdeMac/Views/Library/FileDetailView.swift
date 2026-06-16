@@ -77,7 +77,7 @@ struct MarkdownDetailView: View {
     @EnvironmentObject private var theme: ThemeStore
 
     var body: some View {
-        EditableTextDetailView(url: url) { content in
+        EditableTextDetailView(url: url, startInPreview: true) { content in
             MarkdownWebView(markdown: content, isDark: theme.current.isDark)
         }
     }
@@ -171,11 +171,113 @@ struct ImageDetailView: View {
 struct CodeDetailView: View {
     let url: URL
     @EnvironmentObject private var theme: ThemeStore
+    @EnvironmentObject private var config: AppConfig
+
+    @State private var changedLines: [Int: GitGutter.Mark] = [:]
+    @State private var blameOn = false
+    @State private var blame: [Int: BlameInfo] = [:]
+    /// Per-file blame can be large; only the first `blameCap` lines are
+    /// annotated so a huge file doesn't bloat the injected HTML.
+    private let blameCap = 5000
 
     var body: some View {
-        EditableTextDetailView(url: url) { content in
-            CodeWebView(code: content, language: url.pathExtension, isDark: theme.current.isDark)
+        EditableTextDetailView(
+            url: url,
+            onSaved: {
+                await refreshGutter()
+                if blameOn { await refreshBlame() }
+            },
+            startInPreview: true,   // open code highlighted (read-only); Edit is one toggle away
+            accessory: {
+                Toggle(isOn: blameToggleBinding) {
+                    Label("Blame", systemImage: "person.text.rectangle")
+                }
+                .toggleStyle(.button)
+                .controlSize(.regular)
+                .help("Show git blame (commit · author) per line")
+            }
+        ) { content in
+            CodeWebView(code: content,
+                        language: url.pathExtension,
+                        isDark: theme.current.isDark,
+                        changedLines: changedLines,
+                        blame: blameOn ? blame : [:])
         }
+        .task(id: url) { await refreshGutter() }
+    }
+
+    /// Toggling blame on lazily loads annotations; toggling off clears them.
+    private var blameToggleBinding: Binding<Bool> {
+        Binding(
+            get: { blameOn },
+            set: { on in
+                blameOn = on
+                if on { Task { await refreshBlame() } } else { blame = [:] }
+            }
+        )
+    }
+
+    /// Compute `git blame` annotations for `url`, capped at `blameCap` lines.
+    /// No-op (empty map) when the file isn't inside a git repo.
+    @MainActor
+    private func refreshBlame() async {
+        guard let repo = Self.containingRepo(of: url, preferred: config.activeRepoLocalURL) else {
+            blame = [:]
+            return
+        }
+        let relPath = Self.relativePath(of: url, inside: repo)
+        let service = SourceControlService()
+        let lines = await service.blame(root: repo, path: relPath)
+        var map: [Int: BlameInfo] = [:]
+        for l in lines where l.line <= blameCap {
+            map[l.line] = BlameInfo(shortSha: l.shortSha, author: l.author)
+        }
+        blame = map
+    }
+
+    /// Compute git change markers for `url`'s containing repo. No-op (empty
+    /// map) when the file isn't inside a git repo — never blocks the editor.
+    @MainActor
+    private func refreshGutter() async {
+        guard let repo = Self.containingRepo(of: url, preferred: config.activeRepoLocalURL) else {
+            changedLines = [:]
+            return
+        }
+        let relPath = Self.relativePath(of: url, inside: repo)
+        let manager = RepoManager()
+        let marks = await GitGutter.changedLines(repo: repo, filePath: relPath) { args, cwd in
+            try await manager.runGit(args, at: cwd)
+        }
+        changedLines = marks
+    }
+
+    /// Resolve the git repo that contains `url`: prefer `preferred` when the
+    /// file lives inside it, else walk up parent directories looking for `.git`.
+    private static func containingRepo(of url: URL, preferred: URL?) -> URL? {
+        let filePath = url.standardizedFileURL.path
+        if let preferred {
+            let root = preferred.standardizedFileURL.path
+            if filePath == root || filePath.hasPrefix(root + "/") { return preferred }
+        }
+        var dir = url.standardizedFileURL.deletingLastPathComponent()
+        let fm = FileManager.default
+        while true {
+            let gitPath = dir.appendingPathComponent(".git").path
+            if fm.fileExists(atPath: gitPath) { return dir }
+            let parent = dir.deletingLastPathComponent()
+            if parent.path == dir.path { return nil }  // reached filesystem root
+            dir = parent
+        }
+    }
+
+    /// Path of `url` relative to `repo` (falls back to last path component).
+    private static func relativePath(of url: URL, inside repo: URL) -> String {
+        let root = repo.standardizedFileURL.path
+        let file = url.standardizedFileURL.path
+        if file.hasPrefix(root + "/") {
+            return String(file.dropFirst(root.count + 1))
+        }
+        return url.lastPathComponent
     }
 }
 
@@ -185,15 +287,33 @@ struct CodeDetailView: View {
 /// monospaced editor; users toggle to the read-only renderer
 /// (syntax-highlighted code, rendered markdown) via the toolbar.
 /// Tracks dirty state and saves to disk via Cmd+S or the Save button.
-struct EditableTextDetailView<Preview: View>: View {
+struct EditableTextDetailView<Preview: View, Accessory: View>: View {
     let url: URL
+    var onSaved: (() async -> Void)? = nil
+    /// Optional toolbar accessory rendered just left of Revert/Save
+    /// (e.g. the code view's blame toggle).
+    let accessory: () -> Accessory
     let preview: (String) -> Preview
+
+    init(url: URL,
+         onSaved: (() async -> Void)? = nil,
+         startInPreview: Bool = false,
+         @ViewBuilder accessory: @escaping () -> Accessory,
+         @ViewBuilder preview: @escaping (String) -> Preview) {
+        self.url = url
+        self.onSaved = onSaved
+        self.accessory = accessory
+        self.preview = preview
+        // Code/markdown open in the rendered/highlighted Preview by default
+        // (the VS Code "view" experience); Edit is one toggle away.
+        _isPreview = State(initialValue: startInPreview)
+    }
 
     @State private var content: String = ""
     @State private var savedContent: String = ""
     @State private var loadError: String?
     @State private var saveError: String?
-    @State private var isPreview: Bool = false
+    @State private var isPreview: Bool
     @State private var saving: Bool = false
     @State private var showSavedToast: Bool = false
     @State private var showRevertConfirm: Bool = false
@@ -280,6 +400,7 @@ struct EditableTextDetailView<Preview: View>: View {
                 Text(err).font(.caption).foregroundStyle(theme.current.danger).lineLimit(1).truncationMode(.middle)
             }
             Spacer()
+            accessory()
             Button { showRevertConfirm = true } label: {
                 Label("Revert", systemImage: "arrow.uturn.backward")
                     .foregroundStyle(isDirty ? theme.current.danger : .secondary)
@@ -346,6 +467,7 @@ struct EditableTextDetailView<Preview: View>: View {
         do {
             try content.write(to: url, atomically: true, encoding: .utf8)
             savedContent = content
+            await onSaved?()
         } catch {
             saveError = "Save failed: \(error.localizedDescription)"
         }
@@ -372,75 +494,88 @@ struct EditableTextDetailView<Preview: View>: View {
     }
 }
 
-struct CodeWebView: NSViewRepresentable {
+/// Blame annotation for one line in the code gutter.
+struct BlameInfo: Hashable {
+    let shortSha: String
+    let author: String
+}
+
+extension EditableTextDetailView where Accessory == EmptyView {
+    /// Convenience init for callers that don't need a toolbar accessory.
+    init(url: URL,
+         onSaved: (() async -> Void)? = nil,
+         startInPreview: Bool = false,
+         @ViewBuilder preview: @escaping (String) -> Preview) {
+        self.init(url: url, onSaved: onSaved, startInPreview: startInPreview,
+                  accessory: { EmptyView() }, preview: preview)
+    }
+}
+
+struct CodeWebView: View {
     let code: String
     let language: String
     let isDark: Bool
+    var changedLines: [Int: GitGutter.Mark] = [:]
+    var blame: [Int: BlameInfo] = [:]
 
-    func makeNSView(context: Context) -> WKWebView {
-        let wv = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
-        wv.setValue(false, forKey: "drawsBackground")
-        wv.loadHTMLString(html(), baseURL: nil)
-        return wv
+    var body: some View {
+        HljsWebView(html: html())
     }
-
-    func updateNSView(_ wv: WKWebView, context: Context) {
-        wv.loadHTMLString(html(), baseURL: nil)
-    }
-
-    /// Map a file extension to the highlight.js language id. Hint only —
-    /// hljs.highlightAuto() handles unknown extensions reasonably.
-    private static let hljsLanguageMap: [String: String] = [
-        "swift": "swift", "ts": "typescript", "tsx": "typescript",
-        "js": "javascript", "mjs": "javascript", "cjs": "javascript", "jsx": "javascript",
-        "py": "python", "rb": "ruby", "go": "go", "rs": "rust",
-        "java": "java", "kt": "kotlin",
-        "c": "c", "h": "c", "cpp": "cpp", "hpp": "cpp", "cc": "cpp",
-        "m": "objectivec", "mm": "objectivec",
-        "json": "json", "md": "markdown", "yml": "yaml", "yaml": "yaml",
-        "sh": "bash", "bash": "bash", "zsh": "bash",
-        "html": "xml", "css": "css", "scss": "scss",
-        "sql": "sql", "toml": "ini", "ini": "ini", "xml": "xml",
-        "env": "bash", "dockerfile": "dockerfile", "makefile": "makefile",
-    ]
 
     private var hljsLanguage: String {
-        Self.hljsLanguageMap[language.lowercased()] ?? ""
-    }
-
-    // highlight.js v11.9.0 is vendored under Resources/ and inlined below —
-    // no remote CDN, so code preview works offline and can't be tampered
-    // with in transit (closes a MITM/XSS vector against local file content).
-    private static let hljsJS: String      = bundledText("highlight.min", "js")
-    private static let hljsDarkCSS: String  = bundledText("atom-one-dark.min", "css")
-    private static let hljsLightCSS: String = bundledText("atom-one-light.min", "css")
-
-    private static func bundledText(_ name: String, _ ext: String) -> String {
-        guard let url = Bundle.main.url(forResource: name, withExtension: ext),
-              let s = try? String(contentsOf: url, encoding: .utf8) else { return "" }
-        return s
+        HljsLanguage.id(for: language)
     }
 
     private func html() -> String {
-        // Inlined, locally-bundled theme + highlighter (atom-one-dark/light).
-        let themeCSS = isDark ? Self.hljsDarkCSS : Self.hljsLightCSS
-        let hljsJS   = Self.hljsJS
+        // Inlined, locally-bundled theme + highlighter (atom-one-dark/light)
+        // from the shared single-load `Hljs` cache.
+        let themeCSS = Hljs.themeCSS(isDark: isDark)
+        let hljsJS   = Hljs.js
+        let p        = Hljs.Palette(isDark: isDark)
 
-        let bg     = isDark ? "#1e1e1e" : "#fafafa"
-        let fg     = isDark ? "#abb2bf" : "#383a42"
-        let gutBg  = isDark ? "#21252b" : "#f0f0f0"
-        let gutFg  = isDark ? "#5c6370" : "#9d9d9d"
-        let border = isDark ? "#181a1f" : "#e5e5e5"
+        let bg     = p.bg
+        let fg     = p.fg
+        let gutBg  = p.gutterBg
+        let gutFg  = p.gutterFg
+        let border = p.border
         let hoverBg = isDark ? "#2c313a" : "#f0f0f0"
 
         // HTML-escape the body once; the <pre><code class="language-X">
         // wrapper lets highlight.js process it after DOMContentLoaded.
-        let escaped = code
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
+        let escaped = Hljs.escape(code)
 
         let classAttr = hljsLanguage.isEmpty ? "" : " class=\"language-\(hljsLanguage)\""
+
+        // Serialize the change map into a JS object literal: { lineNo: "g-add"|"g-mod" }.
+        let markEntries = changedLines
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key):\"\($0.value == .added ? "g-add" : "g-mod")\"" }
+            .joined(separator: ",")
+        let marksLiteral = "{\(markEntries)}"
+
+        // Serialize blame into a JS object literal: { lineNo: "<sha> · <author>" }.
+        // JSON-escape each label so quotes/backslashes in author names are safe.
+        func jsString(_ s: String) -> String {
+            var out = ""
+            for ch in s {
+                switch ch {
+                case "\\": out += "\\\\"
+                case "\"": out += "\\\""
+                case "\n": out += "\\n"
+                case "\r": out += "\\r"
+                default: out.append(ch)
+                }
+            }
+            return "\"\(out)\""
+        }
+        let blameEntries = blame
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key):\(jsString("\($0.value.shortSha) · \($0.value.author)"))" }
+            .joined(separator: ",")
+        let blameLiteral = "{\(blameEntries)}"
+        let blameOn = blame.isEmpty ? "false" : "true"
+        let blameFg = isDark ? "#6b7280" : "#9ca3af"
+        let blameBg = isDark ? "#1b1f24" : "#f5f5f5"
 
         return """
         <!DOCTYPE html>
@@ -457,18 +592,32 @@ struct CodeWebView: NSViewRepresentable {
             line-height: 1.6;
             color: \(fg);
           }
-          /* Grid: [line-number] [code] — line numbers stay aligned even
-             after hljs wraps tokens in nested spans. */
+          /* Grid: [line-number] [blame?] [code] — line numbers stay aligned
+             even after hljs wraps tokens in nested spans. The blame column is
+             only present when blame is toggled on. */
           .editor {
             display: grid;
-            grid-template-columns: auto 1fr;
+            grid-template-columns: \(blame.isEmpty ? "auto 1fr" : "auto auto 1fr");
             min-width: 100%;
           }
-          .ln-col, .code-col {
+          .ln-col, .code-col, .blame-col {
             white-space: pre;
             padding: 0;
             font: inherit;
           }
+          .blame-col {
+            padding: 0 10px;
+            text-align: left;
+            color: \(blameFg);
+            background: \(blameBg);
+            border-right: 1px solid \(border);
+            user-select: none;
+            -webkit-user-select: none;
+            font-size: 11px;
+            max-width: 220px;
+            overflow: hidden;
+          }
+          .blame-col .bl { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
           .ln-col {
             position: sticky;
             left: 0;
@@ -484,6 +633,12 @@ struct CodeWebView: NSViewRepresentable {
           .code-col { padding: 0 24px 0 14px; overflow-x: auto; }
           .ln, .row { display: block; }
           .row:hover, .ln:hover { background: \(hoverBg); }
+          /* Cursor-style change bars on the line-number cell. A transparent
+             baseline border keeps every row's text alignment identical so
+             marked lines don't shift horizontally. */
+          .ln { border-left: 3px solid transparent; }
+          .ln.g-add { border-left-color: #2ea043; }
+          .ln.g-mod { border-left-color: #2f81f7; }
           /* hljs adds .hljs to <code>; reset its own background so the
              page background shows through cleanly. */
           .code-col code, .code-col code.hljs { background: transparent !important; padding: 0; }
@@ -492,6 +647,7 @@ struct CodeWebView: NSViewRepresentable {
         <body>
         <div class="editor">
           <div class="ln-col" id="ln"></div>
+          \(blame.isEmpty ? "" : "<div class=\"blame-col\" id=\"blame\"></div>")
           <div class="code-col"><pre><code\(classAttr) id="code">\(escaped)</code></pre></div>
         </div>
         <script>\(hljsJS)</script>
@@ -509,11 +665,30 @@ struct CodeWebView: NSViewRepresentable {
             // gutter doesn't show a phantom number.
             if (lines.length && lines[lines.length - 1] === '') lines.pop();
             var ln = document.getElementById('ln');
+            var marks = \(marksLiteral);
             var out = '';
             for (var i = 0; i < lines.length; i++) {
-              out += '<span class="ln">' + (i + 1) + '</span>\\n';
+              var n = i + 1;
+              var cls = marks[n] ? ('ln ' + marks[n]) : 'ln';
+              out += '<span class="' + cls + '">' + n + '</span>\\n';
             }
             ln.innerHTML = out || '<span class="ln">1</span>';
+            // Blame column (only present when toggled on).
+            var blameOn = \(blameOn);
+            if (blameOn) {
+              var blame = \(blameLiteral);
+              var bEl = document.getElementById('blame');
+              if (bEl) {
+                var bout = '';
+                function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+                for (var j = 0; j < lines.length; j++) {
+                  var bn = j + 1;
+                  var label = blame[bn] || '';
+                  bout += '<span class="bl" title="' + esc(label) + '">' + esc(label) + '</span>\\n';
+                }
+                bEl.innerHTML = bout;
+              }
+            }
           })();
         </script>
         </body>
@@ -598,18 +773,15 @@ struct QuickLookDetailView: View {
 ///   2. `internalState != QLPreviewDeactivatedInternalState` — calling
 ///      setPreviewItem while the view is being torn down by its host
 ///
-/// Both can fire when LibraryItemStore.pruneCodeItems() removes items
-/// while a QuickLook preview is on screen: SwiftUI re-renders the
-/// parent list, tears down the old QLPreviewBox (deactivating the
-/// QLPreviewView), and fires updateNSView one final time during the
+/// Both can fire when a `rescan()` (e.g. after `remove(id:)` or a folder
+/// un-link) drops items while a QuickLook preview is on screen: SwiftUI
+/// re-renders the parent list, tears down the old QLPreviewBox (deactivating
+/// the QLPreviewView), and fires updateNSView one final time during the
 /// same layout transaction.
 ///
 /// Defence layers:
 ///   - `dismantleNSView` clears the preview item before teardown
 ///   - `updateNSView` checks file existence + skips same-URL no-ops
-///   - `AppShell.pruneCodeLibrary` defers mutation via
-///     `DispatchQueue.main.async` so it lands after the current
-///     SwiftUI render pass
 private struct QLPreviewBox: NSViewRepresentable {
     let url: URL
 
@@ -622,7 +794,7 @@ private struct QLPreviewBox: NSViewRepresentable {
 
     func updateNSView(_ nsView: QLPreviewView, context: Context) {
         // Guard 1: skip if the file no longer exists on disk.
-        // pruneCodeItems() can delete the backing file while the
+        // A delete (remove(id:)) can remove the backing file while the
         // preview is on screen.
         guard FileManager.default.fileExists(atPath: url.path) else { return }
 

@@ -26,45 +26,53 @@ struct SidebarView: View {
         capture.isRunning || liveMirror.activeSession != nil
     }
 
+    /// VS Code-style activity bar.  Three prominent primary
+    /// destinations (Explorer / Search / Source Control) drive
+    /// `shell.section` directly; every other section is reachable from
+    /// the ⋯ More overflow control below the divider.  `shell.section`
+    /// remains the single selection source — AppShell routing is
+    /// unchanged.
+    private static let primarySections: [ShellState.Section] =
+        [.explorer, .search, .sourceControl, .sources]
+
+    /// Sections offered in the ⋯ More overflow, in display order.  This
+    /// is every non-primary, non-settings destination; `isVisible`
+    /// filters out user-hidden ones at render time.  `.library` and
+    /// `.live` are never hidden (the first is the landing fallback, the
+    /// second is condition-driven).
+    private static let moreSections: [ShellState.Section] =
+        [.library, .live, .docGen, .review, .plans, .conflicts,
+         .autoCode, .codeGraph, .regression, .issues, .gantt, .visual]
+
+    /// True when the current selection lives in the ⋯ More overflow —
+    /// used to highlight the More control as active.
+    private var moreIsActive: Bool {
+        Self.moreSections.contains(shell.section)
+    }
+
     var body: some View {
         @Bindable var shell = shell
-        // Keep `List` as the *direct* sidebar content so the system
-        // sidebar insets (which inset section headers and row icons)
-        // are applied.  Wrapping the List in a VStack strips that
-        // styling and causes the "TINGS"/"ONS" clipping seen earlier.
-        List(selection: $shell.section) {
-            // ── Notes (blue family) ──────────────────────
-            Section(isCompact ? "" : "Notes") {
-                sidebarRow(section: .library)
-                if liveActive {
-                    sidebarRow(section: .live, trailing: AnyView(
-                        Circle().fill(theme.current.danger).frame(width: 7, height: 7)))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                // ── Primary destinations ─────────────────────
+                ForEach(Self.primarySections, id: \.self) { section in
+                    primaryButton(section)
                 }
-                if isVisible(.docGen) { sidebarRow(section: .docGen) }
+
+                Divider()
+                    .padding(.horizontal, isCompact ? 6 : 10)
+                    .padding(.vertical, 2)
+
+                // ── ⋯ More overflow ──────────────────────────
+                moreMenu
             }
-            // ── Code (green family) ──────────────────────
-            let codeSections: [ShellState.Section] =
-                [.review, .plans, .conflicts, .autoCode, .codeGraph, .regression]
-            let visibleCode = codeSections.filter(isVisible)
-            if !visibleCode.isEmpty {
-                Section(isCompact ? "" : "Code") {
-                    ForEach(visibleCode, id: \.self) { sidebarRow(section: $0) }
-                }
-            }
-            // ── Data (purple family) ─────────────────────
-            let dataSections: [ShellState.Section] = [.issues, .gantt]
-            let visibleData = dataSections.filter(isVisible)
-            if !visibleData.isEmpty {
-                Section(isCompact ? "" : "Data") {
-                    ForEach(visibleData, id: \.self) { sidebarRow(section: $0) }
-                }
-            }
-            // Settings reached via the profile menu in the footer.
+            .padding(.horizontal, isCompact ? 4 : 8)
+            .padding(.top, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .listStyle(.sidebar)
-        // Measure available width via a transparent background — keeps
-        // the List's native sidebar styling intact while letting us
-        // react to width changes for compact mode.
+        .scrollIndicators(.never)
+        // Measure available width via a transparent background so we
+        // can react to width changes for compact (icon-only) mode.
         .background(
             GeometryReader { geo in
                 Color.clear
@@ -92,9 +100,6 @@ struct SidebarView: View {
         .overlay(globalShortcuts)
     }
 
-    /// Sidebar row that adapts to compact mode.  Wide: icon + label
-    /// (+ optional trailing accessory).  Compact: icon only with the
-    /// label moved to a tooltip so it's still discoverable.
     /// Honours the user's visibility preference. `library`, `live`, and
     /// `settings` are never hidden by the user (the first is the fallback,
     /// the second is condition-driven, the third needs to stay reachable).
@@ -102,51 +107,132 @@ struct SidebarView: View {
         !config.hiddenSidebarSections.contains(section.rawValue)
     }
 
-    /// Convenience wrapper — pulls label + system image from the enum
-    /// so call sites stay short and metadata has a single home.
+    /// A prominent primary activity-bar button.  Sets `shell.section`
+    /// on tap and shows a tinted highlight while it's the active
+    /// section.  Wide: large icon + label.  Compact: icon only with the
+    /// label preserved as a tooltip.
     @ViewBuilder
-    private func sidebarRow(section: ShellState.Section,
-                            trailing: AnyView? = nil) -> some View {
-        sidebarRow(label: section.label,
-                   systemImage: section.systemImage,
-                   section: section,
-                   trailing: trailing)
+    private func primaryButton(_ section: ShellState.Section) -> some View {
+        let isActive = shell.section == section
+        let tint = section.tint(theme.current)
+        Button {
+            shell.section = section
+        } label: {
+            Group {
+                if isCompact {
+                    HStack {
+                        Spacer(minLength: 0)
+                        Image(systemName: section.systemImage)
+                            .font(.system(size: 18, weight: .medium))
+                            .symbolRenderingMode(.hierarchical)
+                            .frame(width: 26, height: 26)
+                        Spacer(minLength: 0)
+                    }
+                } else {
+                    HStack(spacing: 12) {
+                        Image(systemName: section.systemImage)
+                            .font(.system(size: 18, weight: .medium))
+                            .symbolRenderingMode(.hierarchical)
+                            .frame(width: 26)
+                        Text(section.label)
+                            .font(.body.weight(isActive ? .semibold : .regular))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+            .foregroundStyle(isActive ? tint : Color.primary)
+            .padding(.vertical, 9)
+            .padding(.horizontal, isCompact ? 4 : 10)
+            .frame(maxWidth: .infinity, alignment: isCompact ? .center : .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isActive ? tint.opacity(0.18) : Color.clear)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .help(section.label)
+        .accessibilityLabel(section.label)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 
+    /// The ⋯ More overflow.  Lists every visible non-primary section as
+    /// a menu; selecting one drives `shell.section`.  Highlights itself
+    /// when the active section lives in this overflow.  `.live` carries
+    /// the recording dot when `liveActive`.
     @ViewBuilder
-    private func sidebarRow(label: String, systemImage: String,
-                            section: ShellState.Section,
-                            trailing: AnyView? = nil) -> some View {
-        let tint = section.tint(theme.current)
-        if isCompact {
-            HStack {
-                Spacer(minLength: 0)
-                Image(systemName: systemImage)
-                    .font(.system(size: 16))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(tint)
-                    .frame(width: 22, height: 22)
-                Spacer(minLength: 0)
-                if let trailing = trailing { trailing }
-            }
-            .tag(section)
-            .help(label)
-            .accessibilityLabel(label)
-        } else {
-            HStack {
-                Label {
-                    Text(label)
-                } icon: {
-                    Image(systemName: systemImage)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(tint)
-                }
-                if let trailing = trailing {
-                    Spacer()
-                    trailing
+    private var moreMenu: some View {
+        let isActive = moreIsActive
+        let activeTint = isActive ? shell.section.tint(theme.current) : theme.current.accent
+        Menu {
+            ForEach(Self.moreSections, id: \.self) { section in
+                if section == .live {
+                    if liveActive { moreMenuItem(section) }
+                } else if isVisible(section) {
+                    moreMenuItem(section)
                 }
             }
-            .tag(section)
+        } label: {
+            Group {
+                if isCompact {
+                    HStack {
+                        Spacer(minLength: 0)
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.system(size: 18, weight: .medium))
+                                .symbolRenderingMode(.hierarchical)
+                                .frame(width: 26, height: 26)
+                            if liveActive {
+                                Circle().fill(theme.current.danger)
+                                    .frame(width: 7, height: 7)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                } else {
+                    HStack(spacing: 12) {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 18, weight: .medium))
+                            .symbolRenderingMode(.hierarchical)
+                            .frame(width: 26)
+                        Text(isActive ? shell.section.label : "More")
+                            .font(.body.weight(isActive ? .semibold : .regular))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        if liveActive {
+                            Circle().fill(theme.current.danger)
+                                .frame(width: 7, height: 7)
+                        }
+                    }
+                }
+            }
+            .foregroundStyle(isActive ? activeTint : Color.primary)
+            .padding(.vertical, 9)
+            .padding(.horizontal, isCompact ? 4 : 10)
+            .frame(maxWidth: .infinity, alignment: isCompact ? .center : .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isActive ? activeTint.opacity(0.18) : Color.clear)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .help(isActive ? shell.section.label : "More sections")
+        .accessibilityLabel(isActive ? "More sections, \(shell.section.label) selected" : "More sections")
+    }
+
+    /// One row in the ⋯ More menu.  Pulls label + icon from the enum so
+    /// the menu can never drift from the section metadata.  Appends a
+    /// recording marker to `.live` while capturing.
+    @ViewBuilder
+    private func moreMenuItem(_ section: ShellState.Section) -> some View {
+        Button {
+            shell.section = section
+        } label: {
+            Label(section == .live && liveActive ? "\(section.label) ●" : section.label,
+                  systemImage: section.systemImage)
         }
     }
 

@@ -36,6 +36,7 @@ npm run server
 ```
 
 Leave this terminal running. Verify in another:
+
 ```bash
 curl -s http://127.0.0.1:3456/health | jq .
 ```

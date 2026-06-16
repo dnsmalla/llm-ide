@@ -1,0 +1,67 @@
+name: Release
+
+# Tag-driven release: push a `v*` tag (e.g. `v3.0.0`) and this workflow
+# verifies the extension version matches, re-runs the extension gates,
+# packages the extension zip, and attaches it to a GitHub Release.
+# The mac app DMG is built/signed locally (see docs/how-to/release.md).
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Gate, package, publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Verify extension version matches the tag
+        run: |
+          pkg_ver=$(node -p "require('./package.json').version")
+          if [ "v$pkg_ver" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::extension/package.json ($pkg_ver) != tag (${GITHUB_REF_NAME})"
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npm run type-check
+      - run: npm run lint
+      - run: npm test
+      - name: Package extension
+        run: npm run package
+
+      - name: Extract this version's CHANGELOG section
+        working-directory: .
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          awk -v ver="$ver" '
+            $0 ~ "^## \\[" ver "\\]" {flag=1; next}
+            /^## \[/ {flag=0}
+            flag' CHANGELOG.md > release-notes.md
+          test -s release-notes.md || echo "See CHANGELOG.md." > release-notes.md
+
+      - name: Create GitHub Release with extension zip
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "llm-ide ${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md \
+            "extension/extension-v${ver}.zip"

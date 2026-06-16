@@ -58,6 +58,7 @@ cd extension
 npm run type-check
 npm test
 ```
+
 Both must pass before opening a PR.
 
 ## See also

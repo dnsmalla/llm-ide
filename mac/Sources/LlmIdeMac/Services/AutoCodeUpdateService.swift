@@ -351,7 +351,7 @@ final class AutoCodeUpdateService: ObservableObject {
         let repoRoot = URL(fileURLWithPath: localPath, isDirectory: true)
         let prompter = CodeAssistPrompter(api: api, agent: config.activeCLI)
         let runner = RegressionRunner(prompter: prompter, config: config)
-        await runner.run(at: repoRoot)
+        await runner.run(at: repoRoot, autoReopen: config.regressionAutoReopen)
         // RegressionRunner's published `results` lives on its own
         // lifetime — we read once after the await for the summary.
         let total = runner.results.count

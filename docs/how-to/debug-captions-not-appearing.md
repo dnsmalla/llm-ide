@@ -14,9 +14,11 @@ Localise why the side panel shows zero captions during a meeting.
 1. **Confirm CC is on in the meeting.** The scraper mirrors CC; without CC there is no input.
 2. **Check the side panel's Diagnostics tab.** `captionsReceived` should increment as you speak.
 3. **Enable debug logging** in the meeting tab's DevTools console:
+
    ```js
    localStorage.setItem('LLMIDE_DEBUG', '1');
    ```
+
    Then reload the meeting tab.
 4. **Look for the scraper logs.** You should see one block per 800 ms with the matched DOM container.
 5. **Common causes:**

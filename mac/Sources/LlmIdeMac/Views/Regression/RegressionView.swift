@@ -109,7 +109,7 @@ struct RegressionView: View {
     private func runSelected() async {
         guard let repo = activeRepoRoot else { return }
         let only = checked.isEmpty ? nil : checked
-        await runner.run(at: repo, only: only)
+        await runner.run(at: repo, only: only, autoReopen: config.regressionAutoReopen)
     }
 }
 
@@ -362,6 +362,17 @@ private struct RegressionDetailPane: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
             .disabled(running || !hasRepo)
+
+            Toggle(isOn: $config.regressionAutoReopen) {
+                Text("Auto-reopen regressed")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+            }
+            .toggleStyle(.checkbox)
+            .controlSize(.small)
+            .disabled(running)
+            .help("When on, a regressed verdict flips the fault back to “open” on disk. Off (default) reports drift without modifying any files — the verdict is a heuristic text comparison.")
+
             Spacer()
             if case .fault(let url) = selected,
                let r = results.first(where: { $0.faultURL.standardizedFileURL.path == url.standardizedFileURL.path }) {

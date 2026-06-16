@@ -31,17 +31,6 @@ extension LlmIdeAPIClient {
         let taskIds: [String]?
     }
 
-    /// Generates a DOCX of meeting minutes server-side and downloads it.
-    /// Server returns the binary directly with a Content-Disposition
-    /// filename; we save to the user's Downloads folder.  Returns the
-    /// saved file URL on success.
-    struct GenerateDocxRequest: Encodable {
-        let transcript: String
-        let meetingTitle: String?
-        let participants: [String]?
-        let language: String?
-    }
-
     private struct SummarizeReq: Encodable {
         let transcript: String
         let title: String
@@ -75,78 +64,6 @@ extension LlmIdeAPIClient {
         try await post("/kb/outcomes/refresh",
                        body: OutcomeRefreshRequest(creds: creds, taskIds: taskIds),
                        authenticated: true)
-    }
-
-    func generateDocx(
-        transcript: String,
-        meetingTitle: String?,
-        participants: [String]?,
-        language: String?,
-    ) async throws -> URL {
-        guard let url = URL(string: baseURL + "/generate-docx") else { throw APIError.invalidURL }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // Match the generic send() contract: an authenticated endpoint
-        // with no live token throws APIError.noSession instead of
-        // silently sending an unauthenticated request and getting a
-        // generic 401 back. Pulled to MainActor because SessionStore is
-        // @MainActor-isolated.
-        guard let store = _sessionStore,
-              let token = await MainActor.run(body: { store.accessToken })
-        else { throw APIError.noSession }
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let body = GenerateDocxRequest(
-            transcript: transcript,
-            meetingTitle: meetingTitle,
-            participants: participants,
-            language: language,
-        )
-        req.httpBody = try AppJSON.encoder.encode(body)
-        // Longer timeout: DOCX generation runs Claude end-to-end and
-        // can take 60–120 s on a real meeting.
-        let cfg = URLSessionConfiguration.default
-        cfg.timeoutIntervalForRequest = 240
-        let oneShot = URLSession(configuration: cfg)
-        let (data, response) = try await oneShot.data(for: req)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            let text = String(data: data, encoding: .utf8) ?? ""
-            throw APIError.http(
-                status: (response as? HTTPURLResponse)?.statusCode ?? -1,
-                code: "DOCX_FAILED",
-                message: text.isEmpty ? "DOCX generation failed" : text,
-                details: nil,
-            )
-        }
-        let filename = extractFilename(http) ?? "meeting-notes.docx"
-        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        // De-collide: append "-N" if a file with the same name exists.
-        var dest = downloads.appendingPathComponent(filename)
-        var n = 1
-        while FileManager.default.fileExists(atPath: dest.path) {
-            let stem = (filename as NSString).deletingPathExtension
-            let ext = (filename as NSString).pathExtension
-            dest = downloads.appendingPathComponent("\(stem)-\(n).\(ext)")
-            n += 1
-        }
-        try data.write(to: dest)
-        return dest
-    }
-
-    private func extractFilename(_ http: HTTPURLResponse) -> String? {
-        guard let disp = http.value(forHTTPHeaderField: "Content-Disposition") else { return nil }
-        // Prefer RFC 5987 `filename*=UTF-8''...` for non-ASCII titles.
-        if let r = disp.range(of: "filename\\*=UTF-8''([^;]+)", options: .regularExpression) {
-            let raw = String(disp[r]).replacingOccurrences(of: "filename*=UTF-8''", with: "")
-            return raw.removingPercentEncoding ?? raw
-        }
-        if let r = disp.range(of: "filename=\"([^\"]+)\"", options: .regularExpression) {
-            let raw = String(disp[r])
-            return raw.replacingOccurrences(of: "filename=\"", with: "")
-                      .replacingOccurrences(of: "\"", with: "")
-        }
-        return nil
     }
 
     // MARK: - Doc Gen
@@ -206,16 +123,30 @@ extension LlmIdeAPIClient {
         return resp.content
     }
 
-    func exportMarkdown(content: String, filename: String) throws -> URL {
-        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+    /// Write `content` to a `.md` file and return its URL.
+    ///
+    /// - When `projectRoot` is supplied the file is written into
+    ///   `<projectRoot>/plans/`, creating the directory if needed.
+    /// - When `projectRoot` is nil the file lands in the user's
+    ///   Downloads folder (existing behaviour for the no-project case).
+    func exportMarkdown(content: String, filename: String, projectRoot: URL? = nil) throws -> URL {
+        let fm = FileManager.default
+        let baseDir: URL
+        if let root = projectRoot {
+            let plansDir = root.appendingPathComponent("plans", isDirectory: true)
+            try fm.createDirectory(at: plansDir, withIntermediateDirectories: true)
+            baseDir = plansDir
+        } else {
+            baseDir = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first
+                ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        }
         let safeName = filename
             .replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: ":", with: "-")
-        var dest = downloads.appendingPathComponent("\(safeName).md")
+        var dest = baseDir.appendingPathComponent("\(safeName).md")
         var n = 1
-        while FileManager.default.fileExists(atPath: dest.path) {
-            dest = downloads.appendingPathComponent("\(safeName)-\(n).md")
+        while fm.fileExists(atPath: dest.path) {
+            dest = baseDir.appendingPathComponent("\(safeName)-\(n).md")
             n += 1
         }
         try content.write(to: dest, atomically: true, encoding: .utf8)

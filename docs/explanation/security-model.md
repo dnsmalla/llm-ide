@@ -27,7 +27,7 @@ Passwords are hashed with bcrypt at cost 12. To prevent timing-based account enu
 
 API credentials are stored in `user_secrets(user_id, secret_key, ciphertext)`. The ciphertext layout is:
 
-```
+```text
 version (1 byte) || iv (12 bytes) || AES-256-GCM(plaintext) || tag (16 bytes)
 ```
 

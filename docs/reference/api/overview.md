@@ -41,6 +41,7 @@ Human-readable summary of the LLM IDE server API. For the machine-readable spec 
 ## Authenticated routes
 
 ### Account
+
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/auth/me` | Current user profile |
@@ -50,6 +51,7 @@ Human-readable summary of the LLM IDE server API. For the machine-readable spec 
 | `POST` | `/auth/me/repos` | Manage local-repo allowlist for code-sync / PR generation |
 
 ### AI
+
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/generate-notes` | Structured meeting notes (language-aware) |
@@ -59,6 +61,7 @@ Human-readable summary of the LLM IDE server API. For the machine-readable spec 
 | `POST` | `/extract-entities` | Action / decision / blocker extraction |
 
 ### Knowledge base
+
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/kb/ingest` | Add a meeting and its entities |
@@ -68,6 +71,7 @@ Human-readable summary of the LLM IDE server API. For the machine-readable spec 
 | `GET` | `/kb/stats` | Counts by table |
 
 ### Connectors
+
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/kb/connect-git` | Index a local repo into `sources` |
@@ -76,6 +80,7 @@ Human-readable summary of the LLM IDE server API. For the machine-readable spec 
 | `POST` | `/kb/connect-qa` | Index QA pairs |
 
 ### Planning
+
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/kb/generate-plan` | KB-grounded plan from a meeting or query |
@@ -84,12 +89,14 @@ Human-readable summary of the LLM IDE server API. For the machine-readable spec 
 | `GET` | `/kb/plans` | List saved plans |
 
 ### Action
+
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/kb/dispatch` | Send a task to GitHub / Backlog / Linear / Slack |
 | `POST` | `/kb/generate-code` | Generate a code change for a task (queued for review) |
 
 ### Review
+
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/kb/review/submit` | Add an item to the review queue |
@@ -99,6 +106,7 @@ Human-readable summary of the LLM IDE server API. For the machine-readable spec 
 | `POST` | `/kb/review/delete` | Drop an item |
 
 ### Outcomes
+
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/kb/outcomes/refresh` | Trigger an outcome poll |
@@ -106,6 +114,7 @@ Human-readable summary of the LLM IDE server API. For the machine-readable spec 
 | `GET` | `/kb/outcomes/stats` | Aggregate outcome stats |
 
 ### Live session
+
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/kb/live/<id>/append` | Append a finalised utterance |
@@ -113,6 +122,7 @@ Human-readable summary of the LLM IDE server API. For the machine-readable spec 
 | `GET` | `/kb/live/<id>` | Read current state |
 
 ### Meeting agent
+
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/kb/agent/dispatch` | Start the agent against a session |

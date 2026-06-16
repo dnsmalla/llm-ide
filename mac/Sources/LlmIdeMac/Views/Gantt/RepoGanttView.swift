@@ -389,18 +389,40 @@ struct RepoGanttView: View {
         defer { loading = false }
         do {
             // Pull milestones + a wide set of issues (all states) so we
-            // can place closed items too. Two parallel requests.
+            // can place closed items too. Milestones and the first issue
+            // page run in parallel; remaining issue pages then drain so a
+            // long timeline isn't truncated to one backend page.
             async let msTask = currentClient.listMilestones(projectId: project.id)
-            async let issuesTask = currentClient.listIssues(
+            async let firstIssues = currentClient.listIssues(
                 projectId: project.id,
                 filter: RepoIssueFilter(state: .all),
                 page: 1
             )
             milestones = try await msTask
-            issues = try await issuesTask
+            issues = try await drainIssues(project: project, firstPage: firstIssues)
         } catch {
             loadError = error.localizedDescription
         }
+    }
+
+    /// Continues paging issues from page 2 onward, reusing the already-
+    /// fetched first page. Dedups by id and caps pages so an out-of-range
+    /// page that a backend clamps can't loop forever.
+    private func drainIssues(project: RepoProject,
+                             firstPage: [RepoIssue]) async throws -> [RepoIssue] {
+        var all: [RepoIssue] = []
+        var seen = Set<String>()
+        let maxPages = 20
+        all.append(contentsOf: firstPage.filter { seen.insert($0.id).inserted })
+        if firstPage.isEmpty { return all }
+        for page in 2...maxPages {
+            let batch = try await currentClient.listIssues(
+                projectId: project.id, filter: RepoIssueFilter(state: .all), page: page)
+            let fresh = batch.filter { seen.insert($0.id).inserted }
+            if fresh.isEmpty { break }
+            all.append(contentsOf: fresh)
+        }
+        return all
     }
 }
 

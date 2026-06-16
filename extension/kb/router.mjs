@@ -23,6 +23,9 @@ import { handleReviewRoutes } from './routes/review.mjs';
 import { summarizeTranscript } from '../agents/summarize.mjs';
 import { runClaude } from '../agents/runtime.mjs';
 import { iterateUserMeetings } from './exporter.mjs';
+import { getSecret } from '../server/vault.mjs';
+import { testConnection, fetchRecentEmails } from '../agents/email-source.mjs';
+import { logger } from '../core/logger.mjs';
 import { sendJSON, readBody, parseJSON, sanitizeForPrompt } from '../core/utils.mjs';
 
 // SSE concurrency tracking now lives in routes/live.mjs alongside
@@ -250,6 +253,86 @@ export async function handleKB(req, res) {
       } catch (err) {
         sendJSON(res, 400, { error: { code: 'TICKETS_INDEX_FAILED', message: err.message } });
       }
+      return true;
+    }
+
+    // Email input source — thin IMAP fetcher. The app password lives in the
+    // encrypted vault (key 'email.imapPassword'); it is read here and passed
+    // to the fetcher so it never travels on the request body. Connect/fetch
+    // failures map to a 502 since they're upstream (IMAP server) problems.
+    if (req.method === 'POST' && (url === '/kb/email/test' || url === '/kb/email/fetch')) {
+      const body = parseJSON(await readBody(req)) || {};
+      const { host, port, secure, user, mailbox } = body;
+      if (typeof host !== 'string' || !host.trim() ||
+          typeof user !== 'string' || !user.trim()) {
+        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'host and user are required' } });
+        return true;
+      }
+      const password = getSecret(kb.getDb(), userId, 'email.imapPassword');
+      if (!password) {
+        sendJSON(res, 400, { error: { code: 'EMAIL_NO_PASSWORD', message: 'No app password saved for email. Save one first.' } });
+        return true;
+      }
+
+      if (url === '/kb/email/test') {
+        try {
+          const r = await testConnection({ host, port, secure, user, password, mailbox });
+          logger.info('email_test', { userId, mailbox: r.mailbox, total: r.total });
+          sendJSON(res, 200, r);
+        } catch (e) {
+          // Log host/user only — never the password or raw auth blob.
+          logger.error('email_test_failed', { userId, host, reason: e.message });
+          sendJSON(res, 502, { error: { code: 'EMAIL_CONNECT_FAILED', message: e.message } });
+        }
+        return true;
+      }
+
+      // url === '/kb/email/fetch'
+      // Dedup + high-water now live server-side (migration 0013), so they're
+      // device-independent. We build the seen-set and the forward-only `since`
+      // bound from per-user state and IGNORE any client-supplied sinceISO —
+      // the client no longer owns that boundary.
+      const seenIds = kb.getEmailSeenIds(userId);
+      const highWater = kb.getEmailHighWater(userId);
+      const started = Date.now();
+      try {
+        const { messages, skipped } = await fetchRecentEmails({
+          host, port, secure, user, mailbox, password,
+          lookbackDays: body.lookbackDays,
+          sinceISO: highWater,                              // server-owned, not body.sinceISO
+          unreadOnly: body.unreadOnly !== false,            // default true
+          fromFilter: typeof body.fromFilter === 'string' ? body.fromFilter : '',
+          seenIds,
+        });
+        logger.info('email_fetch', {
+          userId, mailbox: mailbox || 'INBOX',
+          count: messages.length, durationMs: Date.now() - started, skipped,
+        });
+        sendJSON(res, 200, { messages, skipped });
+      } catch (e) {
+        logger.error('email_fetch_failed', { userId, host, reason: e.message });
+        sendJSON(res, 502, { error: { code: 'EMAIL_FETCH_FAILED', message: e.message } });
+      }
+      return true;
+    }
+
+    // Email dedup write-back. After the client turns fetched mail into notes
+    // it reports the imported message-ids (so a later fetch on ANY device skips
+    // them) and optionally advances the forward-only high-water mark. Pure
+    // local writes — no IMAP — so this is a cheap kbWrite (see server.mjs).
+    if (req.method === 'POST' && url === '/kb/email/seen') {
+      const body = parseJSON(await readBody(req)) || {};
+      const ids = Array.isArray(body.messageIds)
+        ? body.messageIds.filter((x) => typeof x === 'string' && x)
+        : [];
+      kb.markEmailSeen(userId, ids);
+      // Only advance the high-water mark if the client sent a parseable date —
+      // a bad value must never poison the per-user `since` bound.
+      if (typeof body.lastFetchedAt === 'string' && body.lastFetchedAt) {
+        const d = new Date(body.lastFetchedAt);
+        if (!Number.isNaN(d.getTime())) kb.setEmailHighWater(userId, body.lastFetchedAt);
+      }
+      sendJSON(res, 200, { ok: true });
       return true;
     }
 

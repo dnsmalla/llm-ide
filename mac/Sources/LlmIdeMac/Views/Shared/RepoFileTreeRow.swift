@@ -57,24 +57,8 @@ struct RepoFileTreeRow: View {
             if expanded { expandedPaths.remove(node.id) }
             else        { expandedPaths.insert(node.id) }
         } label: {
-            HStack(spacing: 4) {
-                if depth > 0 { Spacer().frame(width: CGFloat(depth) * 14) }
-                Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 10)
-                Image(systemName: expanded ? "folder.fill" : "folder")
-                    .font(Typography.filename)
-                    .foregroundStyle(FileIconKit.folderColor)
-                    .frame(width: 16)
-                Text(node.name)
-                    .font(Typography.filename)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 2)
-            .contentShape(Rectangle())
+            TreeRowLabel(name: node.name, isFolder: true, isExpanded: expanded,
+                         depth: depth, isSelected: false)
         }
         .buttonStyle(.plain)
         .listRowSeparator(.hidden)
@@ -94,19 +78,8 @@ struct RepoFileTreeRow: View {
         return Button {
             onSelect(node.url)
         } label: {
-            HStack(spacing: 4) {
-                Spacer().frame(width: CGFloat(depth) * 14 + 14)
-                Image(systemName: FileIconKit.icon(for: ext))
-                    .font(.system(size: 11))
-                    .foregroundStyle(FileIconKit.color(for: ext))
-                    .frame(width: 16)
-                Text(node.name)
-                    .font(Typography.filename)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 2)
-            .contentShape(Rectangle())
+            TreeRowLabel(name: node.name, isFolder: false, isExpanded: false,
+                         depth: depth, isSelected: selected, fileExtension: ext)
         }
         .buttonStyle(.plain)
         .listRowSeparator(.hidden)

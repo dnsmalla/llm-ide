@@ -16,20 +16,23 @@
 ## Build + test commands
 
 Run these from inside `extension/` for the server side:
-```
+
+```bash
 npm test                  # Full node:test suite, 248 tests at session start
 node --check kb/db.mjs    # Syntax check a single file
 ```
 
 For the Mac app:
-```
+
+```bash
 cd mac
 swift build -c release    # Release build; emits .build/release/LlmIdeMac
 bash Scripts/build.sh     # Produces LlmIdeMac.app bundle + vendors Sparkle
 ```
 
 For an installed-bundle launch (used to manually verify):
-```
+
+```bash
 pkill -f LlmIdeMac/Contents/MacOS 2>&1; sleep 1
 /Users/dinesh.malla/Desktop/llm-ide/mac/LlmIdeMac.app/Contents/MacOS/LlmIdeMac >/dev/null 2>&1 &
 ```
@@ -72,16 +75,19 @@ Each task is independent. Run tests + commit + push after each one.
 **Problem.** Mac client has ~197 `try?` sites and the server has ~57 naked `catch {}` blocks. Most are intentional graceful-degradation (a network blip shouldn't crash the UI), but a sample-sized review found at least three sites where silent failures hide bugs.
 
 **Acceptance.** Find 5–10 high-impact sites where `try?` / `catch {}` swallows information that should reach the user or the log. Convert each to either:
+
 - A structured `Logger.error(...)` call carrying the underlying message, OR
 - A user-visible status surface (alert, status banner, settings row).
 
 **Where to look first:**
+
 - `mac/Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift` — registry IO and CLI subprocess paths
 - `mac/Sources/LlmIdeMac/Services/ProjectStore.swift` — `try?` around bundle hydration
 - `mac/Sources/LlmIdeMac/Views/AskAgentSheet.swift` — history-load fallback
 - `extension/server/ai-routes.mjs` — best-effort `ingestGeneratedDoc` calls
 
 **Don't change** `try?` in:
+
 - Test files
 - Best-effort cleanup in `defer` blocks
 - File-system reveal helpers (it's OK if NSWorkspace.shared.activateFileViewerSelecting fails silently)
@@ -93,6 +99,7 @@ Each task is independent. Run tests + commit + push after each one.
 **Problem.** `extension/plugins/installer.mjs` does path-traversal checks and validates the manifest, but the plugin code itself runs in the same Node process as the server. There's no real sandbox.
 
 **Acceptance.** Document the trust boundary in `docs/explanation/security-model.md` (search for "plugin"). State explicitly:
+
 - What a malicious plugin can do (read env vars, fork processes, exfiltrate via outbound HTTP, touch the DB)
 - What it cannot do (modify another tenant's user_id rows? Actually it can — confirm and document)
 - What the install flow validates (manifest schema, path traversal, name regex)
@@ -105,6 +112,7 @@ Each task is independent. Run tests + commit + push after each one.
 **Problem.** Runbook `docs/runbooks/restore-from-backup.md` references a backup procedure but there's no `extension/scripts/backup.mjs` or equivalent. Users have to know `sqlite3 .backup` syntax by hand.
 
 **Acceptance.** Create `extension/scripts/backup.mjs`:
+
 - Takes `--db <path>` (default: `extension/kb/data.db` resolved from the standard config)
 - Takes `--out <path>` (default: `<dbpath>.bak-<iso-timestamp>.db`)
 - Uses better-sqlite3's `backup(destFile)` API (it handles WAL correctly)
@@ -136,6 +144,7 @@ If the test infra makes that hard, document the manual repro in `docs/runbooks/`
 **Problem.** This file is too big to scan top-to-bottom and its `@State private` properties block file-extension splits. The audit flagged it; the fix needs a real ViewModel migration.
 
 **Acceptance.** Lift the panel's state (history, draft, attachments, sessions, busy, error, pendingTool, recentIssues, etc.) into a new `@Observable @MainActor final class CodeAssistantViewModel`. The View becomes a thin shell that takes a `@Bindable` model. Keep the file size of CodeAssistantPanel itself under 600 LOC; the rest moves to:
+
 - `CodeAssistantViewModel.swift` (state + send/dispatch logic)
 - `CodeAssistantTranscript.swift` (the chat scroll view)
 - `CodeAssistantInputBar.swift` (the toolbar)
@@ -149,6 +158,7 @@ Verify with `swift build -c release` + `bash Scripts/build.sh` + the manual smok
 **Problem.** CI workflows exist but I haven't verified they actually run the full suite.
 
 **Acceptance.** Read `.github/workflows/ci.yml` and `.gitlab-ci.yml`. Confirm both:
+
 - Run `npm test` from `extension/` and fail on any test failure
 - Build the Mac app at least at `--package-path mac` level (full `.app` bundle is harder in CI)
 - Cache `node_modules` and SwiftPM artifacts
@@ -161,9 +171,11 @@ If anything is missing, add it. If a step is duplicating work between the two CI
 
 - **Commit messages:** imperative mood ("fix(mac): surface ProjectStore IO errors"). Use `feat(<scope>):`, `fix(<scope>):`, `chore(<scope>):`, `refactor(<scope>):`, `docs(<scope>):` prefixes. Multi-line bodies via HEREDOC.
 - **Sign commits with:**
-  ```
+
+  ```text
   Co-Authored-By: Codex <noreply@openai.com>
   ```
+
 - **Run tests before every commit.** If they fail, fix or revert before pushing.
 - **No new dependencies** without flagging in the commit body. better-sqlite3 stays the only native dep on the server side.
 - **Don't reformat unrelated lines.** Surgical edits only.
@@ -179,6 +191,7 @@ If anything is missing, add it. If a step is duplicating work between the two CI
 ## When you finish
 
 Run a final check:
+
 ```bash
 cd extension && npm test                                                                   # expect: 248+ tests pass
 cd ../mac && swift build -c release 2>&1 | grep -E "error:" | grep -v "Actor\|Sendable"   # expect: empty

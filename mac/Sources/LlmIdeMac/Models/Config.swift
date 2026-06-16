@@ -27,6 +27,45 @@ struct SavedGitLabProject: Codable, Identifiable, Equatable {
     var localURL: URL? { localPath.map { URL(fileURLWithPath: $0) } }
 }
 
+/// A configured Email input source. The IMAP **password is never stored
+/// here** — it lives in the server-side secrets vault under
+/// `email.imapPassword` (see `LlmIdeAPIClient.setSecret`). Everything in
+/// this struct is non-secret connection metadata, safe to persist in
+/// UserDefaults alongside the other saved-connection structs.
+struct SavedEmailSource: Codable, Equatable {
+    var displayName: String = ""
+    var host: String = "imap.gmail.com"
+    var port: Int = 993
+    var secure: Bool = true
+    var user: String = ""          // email address / IMAP username
+    var mailbox: String = "INBOX"
+    var lookbackDays: Int = 7      // clamp: never look back further than this
+    var enabled: Bool = true
+    /// Only import unread messages — the usual case (read mail is noise).
+    var unreadOnly: Bool = true
+    /// Optional sender substring filter (IMAP FROM search). Empty = all.
+    var fromFilter: String = ""
+
+    init() {}
+
+    /// Tolerant decoder: every field falls back to its default when absent,
+    /// so adding fields over time never invalidates a previously-saved
+    /// source (synthesized Codable would otherwise throw on a missing key).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        displayName  = try c.decodeIfPresent(String.self, forKey: .displayName) ?? ""
+        host         = try c.decodeIfPresent(String.self, forKey: .host) ?? "imap.gmail.com"
+        port         = try c.decodeIfPresent(Int.self, forKey: .port) ?? 993
+        secure       = try c.decodeIfPresent(Bool.self, forKey: .secure) ?? true
+        user         = try c.decodeIfPresent(String.self, forKey: .user) ?? ""
+        mailbox      = try c.decodeIfPresent(String.self, forKey: .mailbox) ?? "INBOX"
+        lookbackDays = try c.decodeIfPresent(Int.self, forKey: .lookbackDays) ?? 7
+        enabled      = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        unreadOnly   = try c.decodeIfPresent(Bool.self, forKey: .unreadOnly) ?? true
+        fromFilter   = try c.decodeIfPresent(String.self, forKey: .fromFilter) ?? ""
+    }
+}
+
 /// User-tunable settings persisted to UserDefaults.
 final class AppConfig: ObservableObject {
     static let shared = AppConfig()
@@ -142,6 +181,21 @@ final class AppConfig: ObservableObject {
         gitHubSavedRepos.first(where: { $0.isActive })?.resolvedId
     }
 
+    // ── External sources: Email ───────────────────────────────────────
+    /// The single configured Email source, or nil when not set up. JSON-
+    /// persisted exactly like `gitLabSavedProjects` — the IMAP password is
+    /// NOT part of this (it lives in the server vault). nil = "Not
+    /// configured" in the Sources view.
+    @Published var emailSource: SavedEmailSource? {
+        didSet {
+            if let s = emailSource, let data = try? AppJSON.encoder.encode(s) {
+                defaults.set(data, forKey: "emailSource")
+            } else {
+                defaults.removeObject(forKey: "emailSource")
+            }
+        }
+    }
+
     // ── Regression check (Phase D) ────────────────────────────────────
     /// Short app version (CFBundleShortVersionString) at the time of
     /// the last app launch. Arms the manual regression-run button
@@ -166,27 +220,27 @@ final class AppConfig: ObservableObject {
     @Published var lastRegressionRegressedCount: Int {
         didSet { defaults.set(lastRegressionRegressedCount, forKey: "lastRegressionRegressedCount") }
     }
+    /// When true, a regressed verdict reopens the fault on disk
+    /// (`fixed` → `open`). Default OFF: the verdict is a heuristic
+    /// text comparison, so the run reports drift but never mutates
+    /// files unless the user opts in.
+    @Published var regressionAutoReopen: Bool {
+        didSet { defaults.set(regressionAutoReopen, forKey: "regressionAutoReopen") }
+    }
 
     // ── Paths (Phase G + H) ───────────────────────────────────────────
-    /// Absolute workspace root. Every named subfolder below resolves
-    /// to `dataRoot / <subfolder>`. Empty string = "not yet
-    /// configured" — subsystems gracefully fall back to their legacy
-    /// per-feature settings (notes folder bookmark, GitLab clone
-    /// paths, etc.) until the user picks a root.
+    /// Default location for new projects — the directory new project
+    /// folders are created under, and where repo clones land by
+    /// default (`dataRoot / clonesSubdir`). Empty string = "not yet
+    /// configured"; clones then fall back to `defaultClonesFallback`.
+    /// Each project owns its own canonical folder tree
+    /// (meetings/plans/notes/assets/code/data) under its own folder —
+    /// not under this root.
     @Published var dataRoot: String {
         didSet { defaults.set(dataRoot, forKey: "dataRoot") }
     }
-    @Published var notesSubdir: String {
-        didSet { defaults.set(notesSubdir, forKey: "notesSubdir") }
-    }
-    @Published var docsSubdir: String {
-        didSet { defaults.set(docsSubdir, forKey: "docsSubdir") }
-    }
     @Published var clonesSubdir: String {
         didSet { defaults.set(clonesSubdir, forKey: "clonesSubdir") }
-    }
-    @Published var infiniteBrainSubdir: String {
-        didSet { defaults.set(infiniteBrainSubdir, forKey: "infiniteBrainSubdir") }
     }
     /// Per-repo subdir inside the active repo where memory artifacts
     /// live (faults/, q&a/, repo.md, graph-notes.md). Unlike the
@@ -213,10 +267,7 @@ final class AppConfig: ObservableObject {
 
     // Defaults — single source of truth.
     static let defaultMemorySubdir = ".understand-anything/memory"
-    static let defaultNotesSubdir = "Notes"
-    static let defaultDocsSubdir = "Docs"
     static let defaultClonesSubdir = "Clones"
-    static let defaultInfiniteBrainSubdir = "InfiniteBrain"
 
     // ── Auto Code Update ──────────────────────────────────────────────
     /// When true, the app automatically scans recent meeting notes for
@@ -299,11 +350,24 @@ final class AppConfig: ObservableObject {
         self.persistsSecrets = (defaults === UserDefaults.standard)
         self.serverURL = (defaults.string(forKey: "serverURL")
             ?? "http://127.0.0.1:\(BackendManager.defaultBackendPort)")
-        self.themeID = defaults.string(forKey: "themeID") ?? Theme.dark.id
+        self.themeID = defaults.string(forKey: "themeID") ?? Theme.light.id
         self.autoCaptureOnMeeting = defaults.object(forKey: "autoCaptureOnMeeting") as? Bool ?? false
         self.pollIntervalMs = defaults.object(forKey: "pollIntervalMs") as? Int ?? 250
         self.activeCLI = defaults.string(forKey: "activeCLI") ?? AICliTool.claudeCode.rawValue
-        self.defaultModelId = defaults.string(forKey: "defaultModelId") ?? AICliTool.claudeCode.defaultModelId
+        // Migrate a persisted model id forward. A previously-stored choice
+        // can be a retired id (e.g. "claude-opus-4-7") or a tool no longer
+        // selectable (Gemini/Cursor) — sending either to the API would
+        // 404. Coerce anything not in a current selectable tool's list to
+        // a valid model so users who never reopen the picker don't break.
+        let selectableModelIds = Set(AICliTool.selectable.flatMap { $0.models.map(\.id) })
+        let storedModelId = defaults.string(forKey: "defaultModelId")
+        if let storedModelId, selectableModelIds.contains(storedModelId) {
+            self.defaultModelId = storedModelId
+        } else if storedModelId == "claude-opus-4-7" {
+            self.defaultModelId = "claude-opus-4-8"
+        } else {
+            self.defaultModelId = AICliTool.claudeCode.defaultModelId
+        }
         self.lastSeenAppVersion = defaults.string(forKey: "lastSeenAppVersion") ?? ""
         if defaults.object(forKey: "lastRegressionRunAt") != nil {
             let ts = defaults.double(forKey: "lastRegressionRunAt")
@@ -312,15 +376,10 @@ final class AppConfig: ObservableObject {
             self.lastRegressionRunAt = nil
         }
         self.lastRegressionRegressedCount = defaults.integer(forKey: "lastRegressionRegressedCount")
+        self.regressionAutoReopen = defaults.object(forKey: "regressionAutoReopen") as? Bool ?? false
         self.dataRoot = defaults.string(forKey: "dataRoot") ?? ""
-        let storedNotes = defaults.string(forKey: "notesSubdir") ?? ""
-        self.notesSubdir = storedNotes.isEmpty ? AppConfig.defaultNotesSubdir : storedNotes
-        let storedDocs = defaults.string(forKey: "docsSubdir") ?? ""
-        self.docsSubdir = storedDocs.isEmpty ? AppConfig.defaultDocsSubdir : storedDocs
         let storedClones = defaults.string(forKey: "clonesSubdir") ?? ""
         self.clonesSubdir = storedClones.isEmpty ? AppConfig.defaultClonesSubdir : storedClones
-        let storedIB = defaults.string(forKey: "infiniteBrainSubdir") ?? ""
-        self.infiniteBrainSubdir = storedIB.isEmpty ? AppConfig.defaultInfiniteBrainSubdir : storedIB
         let storedMem = defaults.string(forKey: "memorySubdir") ?? ""
         self.memorySubdir = storedMem.isEmpty ? AppConfig.defaultMemorySubdir : storedMem
         self.uaBinaryOverride = defaults.string(forKey: "uaBinaryOverride") ?? ""
@@ -375,6 +434,12 @@ final class AppConfig: ObservableObject {
         } else {
             self.gitHubSavedRepos = []
         }
+        if let data = defaults.data(forKey: "emailSource"),
+           let decoded = try? AppJSON.decoder.decode(SavedEmailSource.self, from: data) {
+            self.emailSource = decoded
+        } else {
+            self.emailSource = nil
+        }
         self.autoCodeUpdateEnabled = defaults.object(forKey: "autoCodeUpdateEnabled") as? Bool ?? false
         self.autoCodeUpdateLookbackCount = defaults.object(forKey: "autoCodeUpdateLookbackCount") as? Int ?? 5
         self.autoCodeRunReviewCode = defaults.object(forKey: "autoCodeRunReviewCode") as? Bool ?? true
@@ -386,7 +451,9 @@ final class AppConfig: ObservableObject {
         self.autoTaskTemplateReviewConflicts = defaults.string(forKey: "autoTaskTemplateReviewConflicts") ?? Self.defaultTemplateReviewConflicts
         self.backendNodePath = defaults.string(forKey: "backendNodePath") ?? ""
         self.backendWorkingDir = defaults.string(forKey: "backendWorkingDir") ?? ""
-        self.backendAutoStart = defaults.object(forKey: "backendAutoStart") as? Bool ?? false
+        // Default ON so the out-of-box experience (backend auto-starts on
+        // launch) is preserved now that the toggle actually gates it.
+        self.backendAutoStart = defaults.object(forKey: "backendAutoStart") as? Bool ?? true
         if let raw = defaults.array(forKey: "hiddenSidebarSections") as? [String] {
             // Drop rawValues that no longer match a real Section case —
             // keeps the persisted set from accumulating dead entries
@@ -412,6 +479,8 @@ final class AppConfig: ObservableObject {
         return lower == "localhost" || lower == "127.0.0.1" || lower == "::1"
     }
 }
+
+// MARK: - Email source helpers
 
 // MARK: - Active repo helpers (memory/feedback features)
 
@@ -455,14 +524,10 @@ extension AppConfig {
         return URL(fileURLWithPath: expanded)
     }
 
-    var resolvedNotesURL: URL? { dataRootURL?.appendingPathComponent(notesSubdir, isDirectory: true) }
-    var resolvedDocsURL: URL? { dataRootURL?.appendingPathComponent(docsSubdir, isDirectory: true) }
     var resolvedClonesURL: URL? { dataRootURL?.appendingPathComponent(clonesSubdir, isDirectory: true) }
-    var resolvedInfiniteBrainURL: URL? { dataRootURL?.appendingPathComponent(infiniteBrainSubdir, isDirectory: true) }
 
-    /// Default clones location when no Paths root is configured. Unlike notes/
-    /// docs (which are workspace data and stay unset until a root is chosen),
-    /// clones just need somewhere on disk — so they get a sensible default.
+    /// Default clones location when no Paths root is configured. Clones just
+    /// need somewhere on disk — so they get a sensible default.
     static let defaultClonesFallback: URL = FileManager.default
         .homeDirectoryForCurrentUser
         .appendingPathComponent("Documents/LLM IDE/Clones", isDirectory: true)
@@ -472,12 +537,6 @@ extension AppConfig {
     /// cloning works out of the box — and even while a project is active, when
     /// the global Paths root can't be edited.
     var effectiveClonesURL: URL { resolvedClonesURL ?? AppConfig.defaultClonesFallback }
-
-    /// Every resolved subfolder the user has configured. Used by
-    /// "Create missing folders" in PathsSettingsSection.
-    var allResolvedSubfolders: [URL] {
-        [resolvedNotesURL, resolvedDocsURL, resolvedClonesURL, resolvedInfiniteBrainURL].compactMap { $0 }
-    }
 }
 
 extension AppConfig {

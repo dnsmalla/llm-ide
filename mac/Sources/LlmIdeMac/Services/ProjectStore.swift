@@ -318,6 +318,15 @@ final class ProjectStore: ObservableObject {
             log.error("Failed to decode project bundle at \(projectJSON.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return false
         }
+        // Scaffold the canonical folder tree on launch too (idempotent —
+        // only creates what's missing). Without this, a project restored on
+        // launch never gains newly-added canonical folders (e.g. code/, data/)
+        // until the user explicitly re-opens it. Non-fatal on failure.
+        do {
+            try ProjectScaffolder.scaffold(at: URL(fileURLWithPath: entry.path), project: project)
+        } catch {
+            log.error("scaffold failed on rehydrate at \(entry.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
         activeProject = ActiveProject(bundle: project, localPath: entry.path)
         // Sync NotesFolderConfig so AppEnvironment (constructed by AppShell
         // on first render) points at this project's meetings/ folder.

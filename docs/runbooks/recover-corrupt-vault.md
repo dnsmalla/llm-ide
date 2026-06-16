@@ -21,7 +21,7 @@ applies_to: server
 Vault entries are encrypted with AES-256-GCM using a key derived from
 the server's `LLMIDE_VAULT_KEY` master key and the user's id:
 
-```
+```text
 data_key = HKDF-SHA256(master, salt=user_id, info='llmide-vault-v1', length=32)
 ciphertext = version(1) || iv(12) || AES-256-GCM(data_key, plaintext) || tag(16)
 ```

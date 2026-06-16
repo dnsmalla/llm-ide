@@ -73,7 +73,7 @@ struct RegressionRunnerTests {
         #expect(runner.results.first?.verdict == .unchanged)
     }
 
-    @Test func regressedFaultIsAutoReopenedOnDisk() async throws {
+    @Test func regressedFaultIsAutoReopenedWhenOptedIn() async throws {
         let repo = try tmpRepo()
         defer { try? FileManager.default.removeItem(at: repo) }
         let store = MemoryStore()
@@ -83,13 +83,33 @@ struct RegressionRunnerTests {
         prompter.replies["q"] = "drifted-answer"
 
         let runner = RegressionRunner(prompter: prompter, store: store)
-        await runner.run(at: repo)
+        await runner.run(at: repo, autoReopen: true)
 
         #expect(runner.results.first?.verdict == .regressed)
         #expect(runner.results.first?.autoReopened == true)
         // The frontmatter on disk is now `status: open`.
         let reloaded = try store.loadFault(at: url)
         #expect(reloaded.status == .open)
+    }
+
+    @Test func regressedFaultIsNotMutatedByDefault() async throws {
+        let repo = try tmpRepo()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let store = MemoryStore()
+        let url = try writeFault(store, at: repo, prompt: "q",
+                               response: "original-answer", status: .fixed)
+        let prompter = FakePrompter()
+        prompter.replies["q"] = "drifted-answer"
+
+        let runner = RegressionRunner(prompter: prompter, store: store)
+        await runner.run(at: repo)   // autoReopen defaults to false
+
+        // Drift is still reported…
+        #expect(runner.results.first?.verdict == .regressed)
+        // …but the file is NOT touched.
+        #expect(runner.results.first?.autoReopened == false)
+        let reloaded = try store.loadFault(at: url)
+        #expect(reloaded.status == .fixed)
     }
 
     @Test func unchangedFaultStaysFixed() async throws {

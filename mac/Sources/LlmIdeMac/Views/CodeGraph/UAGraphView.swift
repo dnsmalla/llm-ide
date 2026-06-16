@@ -1,4 +1,5 @@
-// Three-panel Code Graph view (powered by Understand-Anything).
+// Three-panel Code Graph view (powered by the in-process GraphKit scanner
+// via CodeNoteService — not an external CLI).
 //
 //  ┌──────────────────────┬────────────────────────┬───────────────────┐
 //  │ Library tree         │ Generated artifacts    │ Graph canvas      │
@@ -12,7 +13,7 @@
 //  └──────────────────────┴────────────────────────┴───────────────────┘
 //
 // Mode is derived from the selected library item's Category:
-//   .code → Understand-Anything CLI on the item's folder root
+//   .code → CodeNoteService (GraphKit scan) on the item's folder root
 //   .data → MemoryGenerator on the selected file(s)
 //
 // All library data comes from LibraryItemStore — same source of truth as
@@ -86,7 +87,6 @@ struct UAGraphView: View {
         case running
         case loaded(nodeCount: Int, edgeCount: Int)
         case error(String)
-        case binaryMissing
     }
 
     @Environment(LibraryItemStore.self) private var library
@@ -106,7 +106,7 @@ struct UAGraphView: View {
     /// When true, the graph canvas is presented as a full-window overlay
     /// (side panels hidden) for distraction-free exploration.
     @State private var graphExpanded: Bool = false
-    /// Full graph as parsed from Understand-Anything. We filter this into `displayData`
+    /// Full graph as produced by the GraphKit scan. We filter this into `displayData`
     /// based on `showSymbols` so the canvas doesn't have to draw 1k+ nodes
     /// when the user just wants the file-level view.
     @State private var fullData: CGData = .empty
@@ -480,7 +480,7 @@ struct UAGraphView: View {
     }
 
     /// Compact one-click row per code repo. Lets the user kick off
-    /// Understand-Anything against a whole repo without drilling into the file
+    /// a GraphKit scan against a whole repo without drilling into the file
     /// tree. Highlighted state mirrors `codeTargetFolder` so it stays
     /// in sync with the file-tree selection.
     @ViewBuilder
@@ -632,13 +632,6 @@ struct UAGraphView: View {
             Label(m, systemImage: "exclamationmark.triangle.fill")
                 .font(Typography.caption).foregroundStyle(t.danger)
                 .lineLimit(3).truncationMode(.tail)
-        case .binaryMissing:
-            VStack(alignment: .leading, spacing: 6) {
-                Label("No knowledge graph found.", systemImage: "exclamationmark.triangle.fill")
-                    .font(Typography.caption).foregroundStyle(t.accent4)
-                Text("Run /understand in Claude Code to generate the graph.")
-                    .font(Typography.caption).foregroundStyle(t.textMuted)
-            }
         }
     }
 

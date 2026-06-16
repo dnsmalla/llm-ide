@@ -61,6 +61,7 @@ struct HelpGuideView: View {
         case .reviewDoc:       reviewDocContent
         case .issues:          issuesContent
         case .gantt:           ganttContent
+        case .visual:          visualContent
         case .docGen:          docGenContent
         case .autoTasks:       autoTasksContent
         case .codeGraph:        codeGraphContent
@@ -216,6 +217,24 @@ struct HelpGuideView: View {
             }
 
             helpTip("Link your repo in Settings first — the Gantt chart pulls milestone and issue data from GitLab or GitHub.")
+        }
+    }
+
+    // MARK: - Visual
+
+    private var visualContent: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            helpHeader("Visual", icon: "photo.on.rectangle.angled", tint: Color(red: 0.62, green: 0.40, blue: 0.90))
+
+            helpParagraph("Browse the images in your library side-by-side with an AI chat. Three panels: the library folder tree on the left, the image viewer in the middle, and the chat on the right.")
+
+            helpCard("How it works", icon: "rectangle.split.3x1") {
+                helpStep(1, "Add image or data folders to the Data section of the tree (the Code section mirrors your linked repos)")
+                helpStep(2, "Select an image to preview it — the thumbnail strip flips through other images in the same folder")
+                helpStep(3, "Ask the chat about the selected file — it's attached to the conversation automatically")
+            }
+
+            helpTip("Use the toolbar buttons to hide the tree or the chat when you want a bigger canvas for the image.")
         }
     }
 
@@ -492,6 +511,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
     case reviewDoc
     case issues
     case gantt
+    case visual
     case docGen
     case autoTasks
     case codeGraph
@@ -511,6 +531,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
         case .reviewDoc:       return "Review Doc"
         case .issues:          return "Issues"
         case .gantt:           return "Gantt"
+        case .visual:          return "Visual"
         case .docGen:          return "Doc Gen"
         case .autoTasks:       return "Auto Tasks"
         case .codeGraph:        return "Code Graph"
@@ -530,6 +551,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
         case .reviewDoc:       return "doc.text.magnifyingglass"
         case .issues:          return "checklist"
         case .gantt:           return "chart.bar.doc.horizontal"
+        case .visual:          return "photo.on.rectangle.angled"
         case .docGen:          return "wand.and.stars"
         case .autoTasks:       return "arrow.triangle.2.circlepath.circle"
         case .codeGraph:        return "point.3.connected.trianglepath.dotted"
@@ -560,6 +582,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
         // ── Data (purple family) ─────────────────────
         case .issues:          return .purple
         case .gantt:           return .indigo
+        case .visual:          return Color(red: 0.62, green: 0.40, blue: 0.90)
         // ── Neutral ──────────────────────────────────
         case .settings:        return .gray
         case .shortcuts:       return .blue

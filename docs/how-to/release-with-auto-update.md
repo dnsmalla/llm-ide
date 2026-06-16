@@ -27,7 +27,7 @@ TOOL_DIR=$(dirname "$SIGN_TOOL")
 
 Output:
 
-```
+```text
 A key has been generated and saved in your keychain. The public key is:
 <base64-public-key>
 ```
@@ -183,6 +183,6 @@ exactly this transition; that's outside the scope of this guide.
 ## See also
 
 - [Sparkle docs](https://sparkle-project.org/documentation/)
-- [`mac/Scripts/release.sh`](../../mac/Scripts/release.sh) — release pipeline
-- [`mac/Scripts/appcast.sh`](../../mac/Scripts/appcast.sh) — appcast item generator
-- [`mac/Scripts/build.sh`](../../mac/Scripts/build.sh) — where Sparkle env vars feed Info.plist
+- [`mac/Scripts/release.sh`](https://github.com/dnsmalla/llm-ide/blob/main/mac/Scripts/release.sh) — release pipeline
+- [`mac/Scripts/appcast.sh`](https://github.com/dnsmalla/llm-ide/blob/main/mac/Scripts/appcast.sh) — appcast item generator
+- [`mac/Scripts/build.sh`](https://github.com/dnsmalla/llm-ide/blob/main/mac/Scripts/build.sh) — where Sparkle env vars feed Info.plist

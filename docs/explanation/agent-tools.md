@@ -14,7 +14,7 @@ The Code Assistant is two agents sharing one engine:
 - **Global** — the front-line agent. Lean prompt: a role description and exactly one tool (`ask-internal`). Handles general engineering questions directly using its own knowledge. Delegates anything app-specific to internal.
 - **Internal** — the system-aware specialist. Receives the full `agentContext` snapshot (active GitLab project, indexed code repos, recent open issues, recent meetings, app capabilities) plus the action skills (`search-kb`, `create-gitlab-issue`, `comment-gitlab-issue`, `trigger-review-code`). Returns prose or a `pendingTool` to global.
 
-```
+```text
 Mac client ── POST /code-assist ──▶ extension/server/ai-routes.mjs
                                             │
                                             ▼

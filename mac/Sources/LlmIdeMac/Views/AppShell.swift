@@ -108,12 +108,9 @@ struct AppShell: View {
 
     /// Working directory for new terminal tabs.
     private var projectDirectory: URL {
-        if let path = projectStore.activeProject?.localPath,
-           !path.isEmpty,
-           FileManager.default.fileExists(atPath: path) {
-            return URL(fileURLWithPath: path)
-        }
-        return FileManager.default.homeDirectoryForCurrentUser
+        // Prefer the active Source Control repo so the terminal's git matches
+        // the SCM panel; fall back to the active project folder, then home.
+        WorkspaceRoot.resolveOrHome(config: config, projectStore: projectStore)
     }
 
     /// Lazy persona-flag load. We avoid the network on every render —
@@ -182,19 +179,17 @@ struct AppShell: View {
         // always reflects the current notes/ folder — not just the tab
         // that happens to contain LibraryView.
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
-            if let env = appEnv {
-                itemStore.syncMeetingNotes(from: env.notesOutputFolder)
-                itemStore.syncMeetingTranscripts(from: env.meetingsFolder)
-            }
+            // rescan() is authoritative for the bound project's meetings/ and
+            // notes/ folders — route the refresh through it so we don't race
+            // the scan by mutating items directly.
+            itemStore.rescan()
         }
         .onAppear {
-            pruneCodeLibrary()
+            bindLibraryStore()
             seedLocalCodeFolders()
             redirectIfSectionHidden()
         }
-        .onChange(of: config.gitLabSavedProjects)     { _, _ in pruneCodeLibrary() }
-        .onChange(of: config.gitHubSavedRepos)        { _, _ in pruneCodeLibrary() }
-        .onChange(of: config.localCodeFolders)        { _, _ in pruneCodeLibrary(); seedLocalCodeFolders() }
+        .onChange(of: config.localCodeFolders)        { _, _ in seedLocalCodeFolders() }
         .onChange(of: config.hiddenSidebarSections)   { _, _ in redirectIfSectionHidden() }
         .task { await checkRecovery() }
         .task { await checkLegacyPrompt() }
@@ -227,6 +222,10 @@ struct AppShell: View {
             appEnv?.indexer.stopWatching()
             appEnv = nil
             envInitError = nil
+            // Re-point the Library store at the new project root (or nil on
+            // close). bindProject runs the one-time legacy migration and a
+            // fresh scan, so the index follows the active project.
+            bindLibraryStore()
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             shell.section = .settings
@@ -336,11 +335,16 @@ struct AppShell: View {
         switch section {
         case .library:   LibraryDetailView(api: api)
         case .live:      TranscriptView(api: api)
+        case .sources:   SourcesView(api: api)
+        case .explorer:  ExplorerView(api: api)
+        case .search:    SearchView(api: api)
         case .review:    ReviewView(api: api, config: .code)
         case .plans:     ReviewView(api: api, config: .docs)
         case .conflicts: ReviewView(api: api, config: .conflicts)
+        case .sourceControl: SourceControlView(api: api)
         case .issues:    issuesRoute
         case .gantt:     ganttRoute
+        case .visual:    VisualView(api: api)
         case .docGen:    DocGenView(api: api)
         case .autoCode:  AutoCodeView()
         case .codeGraph: UAGraphView()
@@ -394,11 +398,9 @@ struct AppShell: View {
             self.appEnv = try AppEnvironment(indexRootURL: indexRoot)
             // Populate the NOTES and MEETINGS sections immediately so every
             // view that reads LibraryItemStore has the correct files before
-            // any notification fires.
-            if let env = self.appEnv {
-                itemStore.syncMeetingNotes(from: env.notesOutputFolder)
-                itemStore.syncMeetingTranscripts(from: env.meetingsFolder)
-            }
+            // any notification fires.  rescan() enumerates the bound project's
+            // meetings/ and notes/ folders authoritatively.
+            itemStore.rescan()
         } catch {
             self.envInitError = error.localizedDescription
         }
@@ -543,70 +545,32 @@ struct AppShell: View {
         }
     }
 
-    private func pruneCodeLibrary() {
-        var names = Set<String>()
-        var slugs = Set<String>()
-        var paths = Set<String>()
-
-        for p in config.gitLabSavedProjects {
-            let trimmed = p.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { names.insert(trimmed) }
-            if let path = p.localPath {
-                slugs.insert(URL(fileURLWithPath: path).lastPathComponent)
-                paths.insert(path)
-            }
+    /// Bind the Library store to the active project root (single source of
+    /// truth) and seed its external code-folder references from
+    /// `config.localCodeFolders`.  Also installs the write-back so any
+    /// folder the store adds (legacy migration, future "+ folder") persists
+    /// back into config.  Idempotent — safe to call on every appear and
+    /// project change.
+    private func bindLibraryStore() {
+        // Persist store-originated external-folder mutations back into the
+        // durable config list.  AppShell mediates config ↔ store so the
+        // store stays free of an AppConfig dependency.
+        itemStore.onExternalCodeFoldersChanged = { [weak config] paths in
+            config?.localCodeFolders = paths
         }
-        for r in config.gitHubSavedRepos {
-            let trimmed = r.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { names.insert(trimmed) }
-            if let path = r.localPath {
-                slugs.insert(URL(fileURLWithPath: path).lastPathComponent)
-                paths.insert(path)
-            }
-        }
-        // Local code folders are always allowed — they're user-managed, not
-        // tied to any GitLab/GitHub entry.
-        for path in config.localCodeFolders {
-            slugs.insert(URL(fileURLWithPath: path).lastPathComponent)
-            paths.insert(path)
-        }
-        let allowed = names.union(slugs)
-        let prefixes = paths
-        // Defer the mutation to the next run-loop pass so it never fires
-        // inside a SwiftUI render cycle.  Mutating @Observable state
-        // synchronously during a layout pass triggers a synchronous
-        // re-render of every observing view — including QLPreviewBox —
-        // which crashes QLPreviewView via _QLRaiseAssert if a QuickLook
-        // document is currently on screen.
-        //
-        // Task { @MainActor } can still land inside the same CA
-        // transaction if the run loop hasn't yielded. Use GCD's
-        // DispatchQueue.main.async which guarantees a full run-loop
-        // iteration boundary — the QLPreviewView update completes
-        // before the prune mutates the item list.
-        DispatchQueue.main.async { [itemStore] in
-            itemStore.pruneCodeItems(allowedFolders: allowed, allowedPathPrefixes: prefixes)
-        }
+        let root = projectStore.activeProject
+            .map { URL(fileURLWithPath: $0.localPath) }
+        itemStore.bindProject(root: root)
+        itemStore.setExternalCodeFolders(config.localCodeFolders)
     }
 
-    /// Ensures every path in `config.localCodeFolders` is indexed in the
-    /// library as a .code folder. Called on appear and whenever the list
-    /// changes so new additions take effect without relaunch.
+    /// Ensures every path in `config.localCodeFolders` is referenced by the
+    /// Library store as an external `.code` folder. Called on appear and
+    /// whenever the list changes so new additions take effect without
+    /// relaunch.  The store references folders in place (no copy) and
+    /// rescans when the set changes.
     private func seedLocalCodeFolders() {
-        let fm = FileManager.default
-        for path in config.localCodeFolders {
-            let url = URL(fileURLWithPath: path)
-            guard fm.fileExists(atPath: path) else { continue }
-            // Key on the absolute path, not the basename, so two folders
-            // with the same name (/a/proj, /b/proj) both index.
-            let prefix = path.hasSuffix("/") ? path : path + "/"
-            let alreadyIndexed = itemStore.items.contains { $0.path.hasPrefix(prefix) }
-            if !alreadyIndexed {
-                DispatchQueue.main.async { [itemStore] in
-                    itemStore.addFolder(url: url, category: .code)
-                }
-            }
-        }
+        itemStore.setExternalCodeFolders(config.localCodeFolders)
     }
 
     private func rescanIndex() async {

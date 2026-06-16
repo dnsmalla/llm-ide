@@ -69,6 +69,15 @@ final class RepoManager {
         log.info("repo_pulled path=\(repoURL.path, privacy: .public)")
     }
 
+    // MARK: - Fetch
+
+    func fetch(at repoURL: URL, token: String, backend: Backend = .gitlab, remote: String = "origin") async throws {
+        // Defensively strip any baked-in credentials, then authenticate via env.
+        try await stripRemoteCredentials(at: repoURL, remote: remote)
+        _ = try await git(["fetch", remote], cwd: repoURL, token: token, backend: backend)
+        log.info("repo_fetched path=\(repoURL.path, privacy: .public)")
+    }
+
     // MARK: - Branch operations
 
     func createAndCheckout(branch: String, at repoURL: URL, from base: String) async throws {
@@ -188,6 +197,13 @@ final class RepoManager {
     private func gitOutput(_ args: [String], cwd: URL) async throws -> String {
         let (out, _) = try await git(args, cwd: cwd)
         return out
+    }
+
+    /// Public entry point for local, non-authenticated git commands (status,
+    /// diff, add, restore, commit). Reuses the same hardened Process runner
+    /// (timeouts, deadlock-safe pipe drain). Returns stdout; throws on non-zero.
+    func runGit(_ args: [String], at cwd: URL) async throws -> String {
+        try await gitOutput(args, cwd: cwd)
     }
 
     /// Run git. When `token` is supplied, credentials are injected via the

@@ -21,7 +21,6 @@ struct AppConfigPathsTests {
         let c = makeConfig()
         #expect(c.dataRootURL == nil)
         #expect(c.resolvedClonesURL == nil)
-        #expect(c.resolvedNotesURL == nil)
     }
 
     @Test func dataRootURLExpandsTilde() {
@@ -48,25 +47,6 @@ struct AppConfigPathsTests {
         #expect(c.resolvedClonesURL?.path == "/tmp/workspace/Repos/Code")
     }
 
-    @Test func resolvedNotesURLFollowsDataRoot() {
-        let c = makeConfig()
-        c.dataRoot = "/Users/dinsmallade/Desktop/meet-note_folders"
-        c.notesSubdir = "Notes"
-        #expect(c.resolvedNotesURL?.path == "/Users/dinsmallade/Desktop/meet-note_folders/Notes")
-    }
-
-    @Test func allResolvedSubfoldersContainsAllFour() {
-        let c = makeConfig()
-        c.dataRoot = "/tmp/ws"
-        let urls = c.allResolvedSubfolders
-        let names = Set(urls.map { $0.lastPathComponent })
-        #expect(names.contains("Notes"))
-        #expect(names.contains("Docs"))
-        #expect(names.contains("Clones"))
-        #expect(names.contains("InfiniteBrain"))
-        #expect(urls.count == 4)
-    }
-
     @Test func effectiveClonesURLFallsBackWhenNoRoot() {
         let c = makeConfig()
         // No Paths root → resolved* stay nil, but clones still have a home so
@@ -82,17 +62,17 @@ struct AppConfigPathsTests {
         #expect(c.effectiveClonesURL.path == "/tmp/workspace/Clones")
     }
 
-    @Test func emptyDataRootSuppressesAllResolved() {
+    @Test func emptyDataRootSuppressesResolvedClones() {
         let c = makeConfig()
         c.dataRoot = ""
-        #expect(c.allResolvedSubfolders.isEmpty)
+        #expect(c.resolvedClonesURL == nil)
     }
 
-    @Test func whitespaceDataRootSuppressesAllResolved() {
+    @Test func whitespaceDataRootSuppressesResolvedClones() {
         let c = makeConfig()
         c.dataRoot = "   "
         #expect(c.dataRootURL == nil)
-        #expect(c.allResolvedSubfolders.isEmpty)
+        #expect(c.resolvedClonesURL == nil)
     }
 }
 

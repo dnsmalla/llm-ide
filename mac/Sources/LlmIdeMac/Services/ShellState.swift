@@ -6,7 +6,7 @@ import SwiftUI
 @Observable
 final class ShellState {
     enum Section: String, Hashable, CaseIterable {
-        case library, live, review, plans, conflicts, issues, gantt, docGen, autoCode, codeGraph, regression, settings
+        case library, live, sources, explorer, search, review, plans, conflicts, sourceControl, issues, gantt, visual, docGen, autoCode, codeGraph, regression, settings
 
         /// User-friendly label — single source of truth so the sidebar
         /// row, the settings toggle and any future menu item agree.
@@ -14,11 +14,16 @@ final class ShellState {
             switch self {
             case .library:   return "Library"
             case .live:      return "Live"
+            case .sources:   return "Sources"
+            case .explorer:  return "Explorer"
+            case .search:    return "Search"
             case .review:    return "Review Code"
             case .plans:     return "Review Doc"
             case .conflicts: return "Review Conflicts"
+            case .sourceControl: return "Source Control"
             case .issues:    return "Issues"
             case .gantt:     return "Gantt"
+            case .visual:    return "Visual"
             case .docGen:    return "Doc Gen"
             case .autoCode:  return "Auto Tasks"
             case .codeGraph: return "Code Graph"
@@ -31,11 +36,16 @@ final class ShellState {
             switch self {
             case .library:   return "books.vertical"
             case .live:      return "waveform"
+            case .sources:   return "tray.and.arrow.down"
+            case .explorer:  return "folder"
+            case .search:    return "magnifyingglass"
             case .review:    return "checkmark.shield"
             case .plans:     return "doc.text.magnifyingglass"
             case .conflicts: return "exclamationmark.triangle"
+            case .sourceControl: return "arrow.triangle.branch"
             case .issues:    return "checklist"
             case .gantt:     return "chart.bar.doc.horizontal"
+            case .visual:    return "photo.on.rectangle.angled"
             case .docGen:    return "wand.and.stars"
             case .autoCode:  return "arrow.triangle.2.circlepath.circle"
             case .codeGraph: return "point.3.connected.trianglepath.dotted"
@@ -50,7 +60,7 @@ final class ShellState {
         /// turned off. `.live` is already conditional on capture state
         /// so it doesn't appear here either.
         static let userHideable: [Section] = [
-            .review, .plans, .conflicts, .issues, .gantt, .docGen, .autoCode, .codeGraph, .regression
+            .sources, .explorer, .search, .review, .plans, .conflicts, .sourceControl, .issues, .gantt, .visual, .docGen, .autoCode, .codeGraph, .regression
         ]
     }
 
@@ -95,6 +105,7 @@ extension ShellState.Section {
         case "transcript": self = .live
         case "history":    self = .library
         case "review":     self = .review
+        case "visual":     self = .visual
         case "plan":       self = .plans
         case "settings":   self = .settings
         default:           return nil
@@ -104,14 +115,6 @@ extension ShellState.Section {
 
 // Theme-aware tint for the section's SF Symbol. Lives on the enum so
 // the sidebar row and the Sidebar settings card can never drift.
-//
-// Colors follow a category-based scheme so users can tell at a glance
-// which group a section belongs to:
-//   Notes  (blue family)   — Library, Live, Doc Gen
-//   Code   (green family)  — Review Code, Review Doc, Conflicts,
-//                            Auto Tasks, Code Graph, Regression
-//   Data   (purple family) — Issues, Gantt
-//   Neutral                — Settings
 extension ShellState.Section {
     func tint(_ theme: Theme) -> Color {
         switch self {
@@ -119,11 +122,15 @@ extension ShellState.Section {
         case .library:    return .blue
         case .live:       return Color(red: 0.20, green: 0.45, blue: 0.95) // vivid blue; red dot overlays when recording
         case .docGen:     return Color(red: 0.35, green: 0.55, blue: 0.95) // soft blue
+        case .sources:    return Color(red: 0.10, green: 0.55, blue: 0.85) // sky blue — inputs feed the notes pipeline
 
         // ── Code (green family) ──────────────────────────
+        case .explorer:   return Color(red: 0.25, green: 0.68, blue: 0.40) // forest green
+        case .search:     return Color(red: 0.35, green: 0.72, blue: 0.42) // green
         case .review:     return Color(red: 0.22, green: 0.70, blue: 0.45) // green
         case .plans:      return Color(red: 0.30, green: 0.65, blue: 0.55) // teal-green
         case .conflicts:  return Color(red: 0.50, green: 0.72, blue: 0.30) // lime-green
+        case .sourceControl: return Color(red: 0.30, green: 0.70, blue: 0.45) // green
         case .autoCode:   return .teal
         case .codeGraph:  return Color(red: 0.15, green: 0.68, blue: 0.65) // cyan-green
         case .regression: return Color(red: 0.40, green: 0.75, blue: 0.50) // mint-green
@@ -131,20 +138,10 @@ extension ShellState.Section {
         // ── Data (purple family) ─────────────────────────
         case .issues:     return .purple
         case .gantt:      return .indigo
+        case .visual:     return Color(red: 0.62, green: 0.40, blue: 0.90) // violet
 
         // ── Neutral ──────────────────────────────────────
         case .settings:   return .gray
-        }
-    }
-
-    /// Category label for the section — used in Help to group sections
-    /// and for visual legend on the sidebar.
-    var category: String {
-        switch self {
-        case .library, .live, .docGen:                               return "Notes"
-        case .review, .plans, .conflicts, .autoCode, .codeGraph, .regression: return "Code"
-        case .issues, .gantt:                                        return "Data"
-        case .settings:                                              return "App"
         }
     }
 }

@@ -8,6 +8,12 @@ yet have published releases so dates are commit-day-of-merge.
 
 ### Added
 
+- Visual section in the Mac app sidebar (Data group): three-panel layout
+  with the library folder tree (Data + Code), an image viewer with a
+  sibling-thumbnail strip (thumbnails decoded off the main thread,
+  downsampled via ImageIO), and the shared Code Assistant chat with the
+  selected file auto-attached. User-hideable, deep-linkable
+  (`?to=visual`), documented in the in-app Help guide.
 - Plugin system v1: skills, slash commands, and named subagents.
   Server-side install/uninstall via `POST /auth/me/plugins/install` (zip
   upload) and `DELETE /auth/me/plugins/uninstall/<name>`. Mac UI exposes
