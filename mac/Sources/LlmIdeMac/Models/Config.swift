@@ -27,6 +27,22 @@ struct SavedGitLabProject: Codable, Identifiable, Equatable {
     var localURL: URL? { localPath.map { URL(fileURLWithPath: $0) } }
 }
 
+/// A configured Email input source. The IMAP **password is never stored
+/// here** — it lives in the server-side secrets vault under
+/// `email.imapPassword` (see `LlmIdeAPIClient.setSecret`). Everything in
+/// this struct is non-secret connection metadata, safe to persist in
+/// UserDefaults alongside the other saved-connection structs.
+struct SavedEmailSource: Codable, Equatable {
+    var displayName: String = ""
+    var host: String = "imap.gmail.com"
+    var port: Int = 993
+    var secure: Bool = true
+    var user: String = ""          // email address / IMAP username
+    var mailbox: String = "INBOX"
+    var lookbackDays: Int = 7
+    var enabled: Bool = true
+}
+
 /// User-tunable settings persisted to UserDefaults.
 final class AppConfig: ObservableObject {
     static let shared = AppConfig()
@@ -133,6 +149,34 @@ final class AppConfig: ObservableObject {
     var gitHubActiveRepoId: Int? {
         gitHubSavedRepos.first(where: { $0.isActive })?.resolvedId
     }
+
+    // ── External sources: Email ───────────────────────────────────────
+    /// The single configured Email source, or nil when not set up. JSON-
+    /// persisted exactly like `gitLabSavedProjects` — the IMAP password is
+    /// NOT part of this (it lives in the server vault). nil = "Not
+    /// configured" in the Sources view.
+    @Published var emailSource: SavedEmailSource? {
+        didSet {
+            if let s = emailSource, let data = try? AppJSON.encoder.encode(s) {
+                defaults.set(data, forKey: "emailSource")
+            } else {
+                defaults.removeObject(forKey: "emailSource")
+            }
+        }
+    }
+    /// Message-IDs of emails already turned into meeting notes. Used to
+    /// dedup so re-fetching the same mailbox doesn't re-import. Bounded to
+    /// the last `emailSeenCap` ids on append — an unbounded list would
+    /// grow forever and bloat UserDefaults.
+    @Published var emailSeenMessageIds: [String] {
+        didSet {
+            if let data = try? AppJSON.encoder.encode(emailSeenMessageIds) {
+                defaults.set(data, forKey: "emailSeenMessageIds")
+            }
+        }
+    }
+    /// Upper bound on `emailSeenMessageIds`. Newest ids are kept.
+    static let emailSeenCap = 500
 
     // ── Regression check (Phase D) ────────────────────────────────────
     /// Short app version (CFBundleShortVersionString) at the time of
@@ -369,6 +413,18 @@ final class AppConfig: ObservableObject {
         } else {
             self.gitHubSavedRepos = []
         }
+        if let data = defaults.data(forKey: "emailSource"),
+           let decoded = try? AppJSON.decoder.decode(SavedEmailSource.self, from: data) {
+            self.emailSource = decoded
+        } else {
+            self.emailSource = nil
+        }
+        if let data = defaults.data(forKey: "emailSeenMessageIds"),
+           let decoded = try? AppJSON.decoder.decode([String].self, from: data) {
+            self.emailSeenMessageIds = decoded
+        } else {
+            self.emailSeenMessageIds = []
+        }
         self.autoCodeUpdateEnabled = defaults.object(forKey: "autoCodeUpdateEnabled") as? Bool ?? false
         self.autoCodeUpdateLookbackCount = defaults.object(forKey: "autoCodeUpdateLookbackCount") as? Int ?? 5
         self.autoCodeRunReviewCode = defaults.object(forKey: "autoCodeRunReviewCode") as? Bool ?? true
@@ -406,6 +462,24 @@ final class AppConfig: ObservableObject {
               let host = url.host, !host.isEmpty else { return false }
         let lower = host.lowercased()
         return lower == "localhost" || lower == "127.0.0.1" || lower == "::1"
+    }
+}
+
+// MARK: - Email source helpers
+
+extension AppConfig {
+    /// Append newly-imported message-ids to the dedup list, keeping it
+    /// bounded to the most recent `emailSeenCap`. Older ids fall off the
+    /// front — re-importing a months-old email is acceptable and rare,
+    /// whereas an unbounded list would grow without limit.
+    func recordSeenEmailIds(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        var merged = emailSeenMessageIds
+        merged.append(contentsOf: ids)
+        if merged.count > AppConfig.emailSeenCap {
+            merged.removeFirst(merged.count - AppConfig.emailSeenCap)
+        }
+        emailSeenMessageIds = merged
     }
 }
 

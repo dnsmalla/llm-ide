@@ -61,6 +61,8 @@ const ENDPOINTS = [
   '/kb/connect-github-issues',
   '/kb/connect-tickets-json',
   '/kb/connect-qa',
+  '/kb/email/test',
+  '/kb/email/fetch',
   '/kb/generate-plan',
   '/kb/analyze-risks',
   '/kb/code-sync',
@@ -129,6 +131,7 @@ function rateLimitProfile(url, method) {
   if (url.startsWith('/kb/review/'))     return 'kbWrite';
   if (url.startsWith('/kb/plan-task/'))  return 'kbWrite';
   if (url === '/kb/ingest')              return 'kbWrite';
+  if (url === '/kb/email/test' || url === '/kb/email/fetch') return 'kbWrite';
   return null;
 }
 
