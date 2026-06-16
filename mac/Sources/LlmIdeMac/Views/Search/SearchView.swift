@@ -311,6 +311,11 @@ struct SearchView: View {
 
     private func scheduleSearch() {
         debounce?.cancel()
+        // Dismissals are positional (path:line:fileIndex), so they're only valid
+        // for the current result set — clear them when the query/options/globs
+        // change, otherwise a dismissal can phantom-hide a different match at the
+        // same position in the new results.
+        dismissed.removeAll()
         guard let root else { results = SearchResults(); return }
         let q = query
         let opts = options
