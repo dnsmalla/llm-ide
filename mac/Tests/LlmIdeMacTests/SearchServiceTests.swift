@@ -63,9 +63,10 @@ import Foundation
         // case-sensitive plain "foo" → "foo" + the "foo" inside "foobar" = 2, not "Foo"
         let cs = await svc.search(query: "foo", root: root, options: SearchOptions(caseSensitive: true, wholeWord: false, regex: false), include: "", exclude: "")
         #expect(cs.totalMatches == 2)
-        // regex
+        // regex, case-sensitive: "fo+" matches "foo" (standalone) + "foo" inside
+        // "foobar" = 2; "Foo" does NOT match case-sensitively.
         let rx = await svc.search(query: "fo+", root: root, options: SearchOptions(caseSensitive: true, wholeWord: false, regex: true), include: "", exclude: "")
-        #expect(rx.totalMatches == 3)
+        #expect(rx.totalMatches == 2)
     }
 
     @Test func invalidRegexFlagsInvalidPattern() async throws {

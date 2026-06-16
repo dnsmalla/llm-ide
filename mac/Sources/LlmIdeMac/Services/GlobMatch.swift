@@ -9,7 +9,7 @@ enum GlobMatch {
         // Bare dir/prefix (no glob metachars, or trailing slash) → prefix match.
         if !pattern.contains(where: { "*?[".contains($0) }) {
             let p = pattern.hasSuffix("/") ? pattern : pattern + "/"
-            return path == pattern || path.hasPrefix(p) || path.hasPrefix(pattern + "/")
+            return path == pattern || path.hasPrefix(p)
         }
         let regex = "^" + globToRegex(pattern) + "$"
         return path.range(of: regex, options: .regularExpression) != nil
@@ -28,7 +28,15 @@ enum GlobMatch {
             switch c {
             case "*":
                 let next = glob.index(after: i)
-                if next < glob.endIndex && glob[next] == "*" { r += ".*"; i = glob.index(after: next); continue }
+                if next < glob.endIndex && glob[next] == "*" {
+                    // `**/` → optional path prefix so it also matches root-level
+                    // files (e.g. `**/*.swift` matches `c.swift`); bare `**` → any.
+                    let afterStar = glob.index(after: next)
+                    if afterStar < glob.endIndex && glob[afterStar] == "/" {
+                        r += "(.*/)?"; i = glob.index(after: afterStar); continue
+                    }
+                    r += ".*"; i = glob.index(after: next); continue
+                }
                 r += "[^/]*"
             case "?": r += "[^/]"
             case ".", "(", ")", "+", "|", "^", "$", "{", "}", "\\", "[", "]": r += "\\\(c)"

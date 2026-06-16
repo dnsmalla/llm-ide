@@ -23,7 +23,9 @@ final class SearchService {
 
     nonisolated static func makeRegex(query: String, options: SearchOptions) -> NSRegularExpression? {
         var pattern = options.regex ? query : NSRegularExpression.escapedPattern(for: query)
-        if options.wholeWord { pattern = "\\b" + pattern + "\\b" }
+        // Group before adding word boundaries so alternation in a regex query
+        // (e.g. `foo|bar`) binds inside the \b…\b, not as `\bfoo|bar\b`.
+        if options.wholeWord { pattern = "\\b(?:" + pattern + ")\\b" }
         let opts: NSRegularExpression.Options = options.caseSensitive ? [] : [.caseInsensitive]
         return try? NSRegularExpression(pattern: pattern, options: opts)
     }
