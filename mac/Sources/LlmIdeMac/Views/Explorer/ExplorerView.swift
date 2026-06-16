@@ -21,6 +21,10 @@ struct ExplorerView: View {
     @State private var tabs: [URL] = []
     @State private var activeTab: URL?
 
+    // Git status decorations for the file tree (VS Code-style coloring).
+    @State private var decorations = GitStatusStore()
+    @Environment(\.controlActiveState) private var controlActiveState
+
     /// Prefer the active CODE repo (matching Source Control / terminal); fall
     /// back to the active project's local folder. nil when neither is set.
     private var root: URL? {
@@ -43,6 +47,13 @@ struct ExplorerView: View {
             childrenCache.removeAll()
             tabs.removeAll()
             activeTab = nil
+        }
+        // Refresh decorations when the project root changes / on appear.
+        .task(id: root?.path) { await decorations.refresh(root: root) }
+        // Re-check git status when the window regains key focus (VS Code does
+        // the same — picks up edits made via terminal/other tools).
+        .onChange(of: controlActiveState) { _, state in
+            if state == .key { Task { await decorations.refresh(root: root) } }
         }
     }
 
@@ -90,11 +101,14 @@ struct ExplorerView: View {
     }
 
     private func folderRow(_ node: FileSystemTree.Node, depth: Int, expanded isExpanded: Bool) -> some View {
-        Button {
+        let deco = root.flatMap {
+            decorations.decoration(forAbsolute: node.url, root: $0, isDirectory: true)
+        }
+        return Button {
             toggle(node)
         } label: {
             TreeRowLabel(name: node.name, isFolder: true, isExpanded: isExpanded,
-                         depth: depth, isSelected: false)
+                         depth: depth, isSelected: false, gitStatus: deco)
         }
         .buttonStyle(.plain)
         .help(node.name)
@@ -108,14 +122,20 @@ struct ExplorerView: View {
     private func fileRow(_ node: FileSystemTree.Node, depth: Int) -> some View {
         let ext = node.url.pathExtension.lowercased()
         let selected = activeTab == node.url
+        let deco = root.flatMap {
+            decorations.decoration(forAbsolute: node.url, root: $0, isDirectory: false)
+        }
         return Button {
             open(node.url)
         } label: {
             TreeRowLabel(name: node.name, isFolder: false, isExpanded: false,
-                         depth: depth, isSelected: selected, fileExtension: ext)
+                         depth: depth, isSelected: selected, fileExtension: ext, gitStatus: deco)
         }
         .buttonStyle(.plain)
-        .background(selected ? Color.accentColor.opacity(0.18) : Color.clear)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(selected ? Color.accentColor.opacity(0.22) : Color.clear)
+        )
         .help(node.name)
         .contextMenu {
             Button("Reveal in Finder") {

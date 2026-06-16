@@ -77,7 +77,7 @@ struct MarkdownDetailView: View {
     @EnvironmentObject private var theme: ThemeStore
 
     var body: some View {
-        EditableTextDetailView(url: url) { content in
+        EditableTextDetailView(url: url, startInPreview: true) { content in
             MarkdownWebView(markdown: content, isDark: theme.current.isDark)
         }
     }
@@ -187,6 +187,7 @@ struct CodeDetailView: View {
                 await refreshGutter()
                 if blameOn { await refreshBlame() }
             },
+            startInPreview: true,   // open code highlighted (read-only); Edit is one toggle away
             accessory: {
                 Toggle(isOn: blameToggleBinding) {
                     Label("Blame", systemImage: "person.text.rectangle")
@@ -296,19 +297,23 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
 
     init(url: URL,
          onSaved: (() async -> Void)? = nil,
+         startInPreview: Bool = false,
          @ViewBuilder accessory: @escaping () -> Accessory,
          @ViewBuilder preview: @escaping (String) -> Preview) {
         self.url = url
         self.onSaved = onSaved
         self.accessory = accessory
         self.preview = preview
+        // Code/markdown open in the rendered/highlighted Preview by default
+        // (the VS Code "view" experience); Edit is one toggle away.
+        _isPreview = State(initialValue: startInPreview)
     }
 
     @State private var content: String = ""
     @State private var savedContent: String = ""
     @State private var loadError: String?
     @State private var saveError: String?
-    @State private var isPreview: Bool = false
+    @State private var isPreview: Bool
     @State private var saving: Bool = false
     @State private var showSavedToast: Bool = false
     @State private var showRevertConfirm: Bool = false
@@ -499,8 +504,10 @@ extension EditableTextDetailView where Accessory == EmptyView {
     /// Convenience init for callers that don't need a toolbar accessory.
     init(url: URL,
          onSaved: (() async -> Void)? = nil,
+         startInPreview: Bool = false,
          @ViewBuilder preview: @escaping (String) -> Preview) {
-        self.init(url: url, onSaved: onSaved, accessory: { EmptyView() }, preview: preview)
+        self.init(url: url, onSaved: onSaved, startInPreview: startInPreview,
+                  accessory: { EmptyView() }, preview: preview)
     }
 }
 
