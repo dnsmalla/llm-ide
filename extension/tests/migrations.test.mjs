@@ -47,6 +47,8 @@ test('migrations create expected core + multitenant tables', () => {
     'meetings', 'entities', 'sources', 'plans', 'plan_tasks',
     'review_items', 'outcomes', 'users', 'refresh_tokens',
     'user_secrets', 'audit_log',
+    // migration 0013 — server-side email dedup + high-water state.
+    'email_seen', 'email_state',
   ]) {
     assert.ok(tables.includes(t), `missing table: ${t}`);
   }

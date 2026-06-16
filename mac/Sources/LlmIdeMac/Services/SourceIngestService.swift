@@ -30,79 +30,72 @@ struct SourceIngestService {
 
     /// Outcome of one `importNewEmails()` run, surfaced on the Sources card.
     enum Result {
-        case imported(Int, pending: Int)   // N turned into notes; pending left (cap)
+        case imported(Int, moreAvailable: Int, oversize: Int) // N notes; more left; large skipped
         case none                          // fetched, but nothing new
         case noSource                      // no configured/enabled email source
         case failure(String)               // fetch or ingest error
     }
 
-    /// Fetch mail newer than the source's high-water mark, skip any already
-    /// imported, and turn each new one into a meeting note. Runs sequentially
-    /// so we don't hammer the summarizer with parallel calls.
+    /// Fetch NEW mail (the server owns the forward-only high-water mark and
+    /// the seen-ledger, so what comes back is already deduped and device-
+    /// independent), turn each into a meeting note, then tell the server which
+    /// ids landed + advance the high-water mark. Sequential so we don't hammer
+    /// the summarizer; honors task cancellation between notes.
     func importNewEmails() async -> Result {
         guard let source = config.emailSource, source.enabled else {
             return .noSource
         }
 
-        // Forward-only window: fetch since the high-water mark, but never
-        // further back than `lookbackDays` (so a long-dormant source doesn't
-        // suddenly pull weeks of mail). The fetch moment becomes the next
-        // high-water mark once we've fully drained it.
         let fetchStart = Date()
-        let clamp = fetchStart.addingTimeInterval(-Double(max(1, source.lookbackDays)) * 86_400)
-        let since = max(source.lastFetchedAt ?? clamp, clamp)
-        let sinceISO = AppDateFormatter.isoString(since)
-
-        let messages: [EmailMessage]
+        let result: LlmIdeAPIClient.EmailFetchResult
         do {
-            messages = try await api.fetchEmails(source, sinceISO: sinceISO)
+            result = try await api.fetchEmails(source)
         } catch {
             return .failure(error.localizedDescription)
         }
 
-        // Dedup against the bounded seen-ids list. The server always supplies
-        // a stable messageId (real Message-ID, else a synthesized
-        // "email-uid-<uid>"), so every message dedups reliably.
-        let seen = Set(config.emailSeenMessageIds)
-        let fresh = messages.filter { !seen.contains($0.messageId) }
-        guard !fresh.isEmpty else {
-            advanceHighWater(to: fetchStart)   // nothing new — window is drained
+        let messages = result.messages
+        guard !messages.isEmpty else {
+            // Nothing new — advance the high-water mark so the window moves
+            // forward (best-effort; a failure just means we re-scan next time).
+            try? await api.markEmailSeen(messageIds: [], lastFetchedAt: fetchStart)
             return .none
         }
 
-        // Import newest-first, capped. `fresh` is already newest-first
-        // (server sorts desc), so prefix keeps the most recent.
-        let batch = Array(fresh.prefix(Self.maxPerRun))
-        let capped = fresh.count > batch.count
+        // Import newest-first, capped. `messages` is newest-first (server
+        // sorts desc), so prefix keeps the most recent.
+        let batch = Array(messages.prefix(Self.maxPerRun))
+        let capped = messages.count > batch.count
 
         var importedIds: [String] = []
+        var failure: String?
         for msg in batch {
+            if Task.isCancelled { break }
             do {
                 try await makeNote(from: msg)
                 importedIds.append(msg.messageId)
             } catch {
-                // Record what we managed before bailing so a mid-run failure
-                // doesn't re-import the successes. Do NOT advance the
-                // high-water mark — the window is retried next time.
-                config.recordSeenEmailIds(importedIds)
-                await rescanAndNotify()
-                return .failure(error.localizedDescription)
+                failure = error.localizedDescription
+                break
             }
         }
+        let cancelled = Task.isCancelled
 
-        config.recordSeenEmailIds(importedIds)
         await rescanAndNotify()
-        // Only advance the high-water mark when the window is fully drained;
-        // if capped, leave it so the remainder re-fetches next run.
-        if !capped { advanceHighWater(to: fetchStart) }
-        return .imported(importedIds.count, pending: fresh.count - batch.count)
-    }
 
-    /// Move the source's forward-only high-water mark, persisting it.
-    private func advanceHighWater(to date: Date) {
-        guard var s = config.emailSource else { return }
-        s.lastFetchedAt = date
-        config.emailSource = s
+        // Record the ids that landed, and advance the high-water mark ONLY on
+        // a clean full drain (no cap, no failure, no cancellation) — otherwise
+        // leave it so the remainder re-fetches next run. Best-effort: a failed
+        // record just risks re-importing (notes are keyed by message-id, so a
+        // re-import overwrites on disk rather than duplicating).
+        let drained = !capped && failure == nil && !cancelled
+        try? await api.markEmailSeen(messageIds: importedIds,
+                                     lastFetchedAt: drained ? fetchStart : nil)
+
+        if let failure { return .failure(failure) }
+        let moreAvailable = (messages.count - batch.count) + result.skipped.overCap
+        return .imported(importedIds.count, moreAvailable: moreAvailable,
+                         oversize: result.skipped.oversize)
     }
 
     /// One full re-index after the batch (not per note — that's up to 50

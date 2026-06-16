@@ -63,6 +63,7 @@ const ENDPOINTS = [
   '/kb/connect-qa',
   '/kb/email/test',
   '/kb/email/fetch',
+  '/kb/email/seen',
   '/kb/generate-plan',
   '/kb/analyze-risks',
   '/kb/code-sync',
@@ -135,6 +136,9 @@ function rateLimitProfile(url, method) {
   // externally-directed, so throttle them like other external-API writes
   // (dispatch: ~1/10s burst 4) rather than the cheap kbWrite bucket.
   if (url === '/kb/email/test' || url === '/kb/email/fetch') return 'dispatch';
+  // /kb/email/seen is a cheap LOCAL write (dedup ledger + high-water) — no
+  // outbound IMAP — so it belongs on the kbWrite bucket, not dispatch.
+  if (url === '/kb/email/seen') return 'kbWrite';
   return null;
 }
 

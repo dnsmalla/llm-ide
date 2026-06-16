@@ -232,16 +232,27 @@ export function resolveSince({ sinceISO, lookbackDays }) {
 
 // Connect and return messages newer than the resolved `since`, optionally
 // limited to unread and/or a sender substring. Two-phase to bound work:
-//   1. cheap metadata pass (uid/size/date) — no bodies downloaded;
+//   1. cheap metadata pass (uid/size/message-id) — no bodies downloaded;
+//      we drop any message already in `seenIds` HERE so we never spend
+//      bandwidth re-downloading mail the user already imported, and so the
+//      MAX_MESSAGES cap counts only NEW mail;
 //   2. pick the newest MAX_MESSAGES that are also under MAX_SOURCE_BYTES,
 //      then download + parse only those.
-// Empty inbox / no matches → []. Throws a clean Error on connect/auth fail.
+// Returns { messages, skipped: { oversize, overCap } } so the caller can
+// report how much NEW mail we deliberately dropped (too big / over the cap).
+// Empty inbox / no matches → { messages: [], skipped: { oversize: 0, overCap: 0 } }.
+// Throws a clean Error on connect/auth fail.
 export async function fetchRecentEmails({
   host, port, secure, user, password, mailbox,
-  lookbackDays, sinceISO, unreadOnly, fromFilter,
+  lookbackDays, sinceISO, unreadOnly, fromFilter, seenIds,
 }) {
   const box = mailbox || 'INBOX';
   const since = resolveSince({ sinceISO, lookbackDays });
+
+  // Build the dedup set once. Accept either a Set or an array (the route
+  // passes an array straight from getEmailSeenIds). The id rule below MUST
+  // match normalizeParsed's (`messageId || email-uid-<uid>`).
+  const seen = seenIds instanceof Set ? seenIds : new Set(seenIds || []);
 
   // IMAP search criteria. `seen: false` = unread only; `from` is a substring
   // match the server runs. Empty filter → omitted (match all senders).
@@ -260,20 +271,29 @@ export async function fetchRecentEmails({
     await client.connect();
     lock = await client.getMailboxLock(box);
 
+    const skipped = { oversize: 0, overCap: 0 };
+
     // Phase 1 — metadata only (no `source`, so no body bytes cross the wire).
+    // We read the envelope's Message-ID here so we can drop already-seen mail
+    // BEFORE the size filter and the MAX_MESSAGES slice — that way the cap
+    // budgets NEW mail only and we never download a body we'd discard.
     const meta = [];
     for await (const msg of client.fetch(criteria, { uid: true, size: true, envelope: true, internalDate: true })) {
+      const mid = msg.envelope?.messageId || `email-uid-${msg.uid}`;
+      if (seen.has(mid)) continue;   // already imported on some device — skip entirely
       const when = msg.envelope?.date || msg.internalDate || null;
       meta.push({ uid: msg.uid, size: msg.size ?? 0, date: when ? new Date(when) : new Date(0) });
     }
-    if (meta.length === 0) return [];
+    if (meta.length === 0) return { messages: [], skipped };
 
-    // Newest first; keep those under the size bound; cap the count.
+    // Newest first; keep those under the size bound; cap the count. Count what
+    // we drop at each stage so the caller can surface "N too big, M over cap".
     meta.sort((a, b) => b.date - a.date);
-    const selected = meta
-      .filter((m) => m.size <= MAX_SOURCE_BYTES)
-      .slice(0, MAX_MESSAGES);
-    if (selected.length === 0) return [];
+    const underSize = meta.filter((m) => m.size <= MAX_SOURCE_BYTES);
+    skipped.oversize = meta.length - underSize.length;
+    const selected = underSize.slice(0, MAX_MESSAGES);
+    skipped.overCap = underSize.length - selected.length;
+    if (selected.length === 0) return { messages: [], skipped };
 
     // Phase 2 — download + parse the raw source for the selected uids only.
     const uidList = selected.map((m) => m.uid).join(',');
@@ -283,7 +303,7 @@ export async function fetchRecentEmails({
       messages.push(normalizeParsed(parsed, msg.uid));
     }
     messages.sort((a, b) => new Date(b.date) - new Date(a.date));
-    return messages;
+    return { messages, skipped };
   } catch (err) {
     throw new Error(timedOut ? 'IMAP fetch timed out' : friendlyError(err));
   } finally {

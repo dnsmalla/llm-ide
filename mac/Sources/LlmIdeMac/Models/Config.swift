@@ -45,11 +45,6 @@ struct SavedEmailSource: Codable, Equatable {
     var unreadOnly: Bool = true
     /// Optional sender substring filter (IMAP FROM search). Empty = all.
     var fromFilter: String = ""
-    /// High-water mark: the source captures mail *forward* from here. Set to
-    /// "now" when the source is first connected (so connecting doesn't import
-    /// a huge backlog — it behaves like meeting capture, which records from
-    /// when you turn it on) and advanced after each fully-drained fetch.
-    var lastFetchedAt: Date?
 
     init() {}
 
@@ -68,7 +63,6 @@ struct SavedEmailSource: Codable, Equatable {
         enabled      = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         unreadOnly   = try c.decodeIfPresent(Bool.self, forKey: .unreadOnly) ?? true
         fromFilter   = try c.decodeIfPresent(String.self, forKey: .fromFilter) ?? ""
-        lastFetchedAt = try c.decodeIfPresent(Date.self, forKey: .lastFetchedAt)
     }
 }
 
@@ -193,19 +187,6 @@ final class AppConfig: ObservableObject {
             }
         }
     }
-    /// Message-IDs of emails already turned into meeting notes. Used to
-    /// dedup so re-fetching the same mailbox doesn't re-import. Bounded to
-    /// the last `emailSeenCap` ids on append — an unbounded list would
-    /// grow forever and bloat UserDefaults.
-    @Published var emailSeenMessageIds: [String] {
-        didSet {
-            if let data = try? AppJSON.encoder.encode(emailSeenMessageIds) {
-                defaults.set(data, forKey: "emailSeenMessageIds")
-            }
-        }
-    }
-    /// Upper bound on `emailSeenMessageIds`. Newest ids are kept.
-    static let emailSeenCap = 500
 
     // ── Regression check (Phase D) ────────────────────────────────────
     /// Short app version (CFBundleShortVersionString) at the time of
@@ -448,12 +429,6 @@ final class AppConfig: ObservableObject {
         } else {
             self.emailSource = nil
         }
-        if let data = defaults.data(forKey: "emailSeenMessageIds"),
-           let decoded = try? AppJSON.decoder.decode([String].self, from: data) {
-            self.emailSeenMessageIds = decoded
-        } else {
-            self.emailSeenMessageIds = []
-        }
         self.autoCodeUpdateEnabled = defaults.object(forKey: "autoCodeUpdateEnabled") as? Bool ?? false
         self.autoCodeUpdateLookbackCount = defaults.object(forKey: "autoCodeUpdateLookbackCount") as? Int ?? 5
         self.autoCodeRunReviewCode = defaults.object(forKey: "autoCodeRunReviewCode") as? Bool ?? true
@@ -495,22 +470,6 @@ final class AppConfig: ObservableObject {
 }
 
 // MARK: - Email source helpers
-
-extension AppConfig {
-    /// Append newly-imported message-ids to the dedup list, keeping it
-    /// bounded to the most recent `emailSeenCap`. Older ids fall off the
-    /// front — re-importing a months-old email is acceptable and rare,
-    /// whereas an unbounded list would grow without limit.
-    func recordSeenEmailIds(_ ids: [String]) {
-        guard !ids.isEmpty else { return }
-        var merged = emailSeenMessageIds
-        merged.append(contentsOf: ids)
-        if merged.count > AppConfig.emailSeenCap {
-            merged.removeFirst(merged.count - AppConfig.emailSeenCap)
-        }
-        emailSeenMessageIds = merged
-    }
-}
 
 // MARK: - Active repo helpers (memory/feedback features)
 

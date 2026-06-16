@@ -23,6 +23,9 @@ struct SourcesView: View {
     @State private var lastEmailWasError = false
     /// Meetings "Advanced" (poll interval) disclosure, collapsed by default.
     @State private var showMeetingAdvanced = false
+    /// Handle for a manual "Fetch now" import so we can cancel it if the user
+    /// navigates away mid-import (the `.task` auto-fetch already auto-cancels).
+    @State private var importTask: Task<Void, Never>?
 
     var body: some View {
         ScrollView {
@@ -64,11 +67,14 @@ struct SourcesView: View {
         }
         // Light auto-fetch on appear (no global timer — periodic polling
         // can come later). Only runs when a source is configured + enabled.
+        // `.task` auto-cancels when the view disappears.
         .task {
             if config.emailSource?.enabled == true {
                 await runImport()
             }
         }
+        // Cancel an in-flight manual import if we navigate away.
+        .onDisappear { importTask?.cancel() }
     }
 
     // MARK: - Meetings add-on
@@ -152,7 +158,7 @@ struct SourcesView: View {
 
                 if enabled {
                     Button(fetching ? "Fetching…" : "Fetch now") {
-                        Task { await runImport() }
+                        importTask = Task { await runImport() }
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -188,10 +194,11 @@ struct SourcesView: View {
             notesOutputFolder: env.notesOutputFolder,
             indexer: env.indexer)
         switch await service.importNewEmails() {
-        case .imported(let n, let pending):
+        case .imported(let n, let moreAvailable, let oversize):
             lastEmailWasError = false
             lastEmailResult = "Imported \(n) new email\(n == 1 ? "" : "s")."
-                + (pending > 0 ? " \(pending) more pending — Fetch again to continue." : "")
+                + (moreAvailable > 0 ? " \(moreAvailable) more pending — Fetch again to continue." : "")
+                + (oversize > 0 ? " \(oversize) skipped (too large)." : "")
         case .none:
             lastEmailWasError = false
             lastEmailResult = "No new emails."

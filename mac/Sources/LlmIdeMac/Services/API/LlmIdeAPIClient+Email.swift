@@ -58,12 +58,26 @@ extension LlmIdeAPIClient {
                               authenticated: true)
     }
 
-    /// Fetch messages newer than `sinceISO` (the forward-only high-water
-    /// mark; falls back to `lookbackDays` server-side when nil) from the
-    /// configured mailbox, optionally filtered to unread / a sender. Dedup
-    /// against already-imported message-ids happens client-side in the
-    /// Sources ingest flow.
-    func fetchEmails(_ s: SavedEmailSource, sinceISO: String?) async throws -> [EmailMessage] {
+    /// Counts of messages the server fetched but did NOT return: `oversize`
+    /// (over the body-size cap) + `overCap` (beyond the per-fetch message cap).
+    struct EmailSkipped: Decodable {
+        let oversize: Int
+        let overCap: Int
+    }
+
+    /// `/kb/email/fetch` result: the new (server-deduped) messages plus the
+    /// skip counts to surface.
+    struct EmailFetchResult: Decodable {
+        let messages: [EmailMessage]
+        let skipped: EmailSkipped
+    }
+
+    /// Fetch NEW messages from the configured mailbox. The server owns the
+    /// forward-only high-water mark and the seen-ledger now, so it computes
+    /// the `since` window itself and returns only messages not yet imported
+    /// (no client-side dedup, device-independent). Optionally filtered to
+    /// unread / a sender.
+    func fetchEmails(_ s: SavedEmailSource) async throws -> EmailFetchResult {
         struct Req: Encodable {
             let host: String
             let port: Int
@@ -71,19 +85,28 @@ extension LlmIdeAPIClient {
             let user: String
             let mailbox: String
             let lookbackDays: Int
-            let sinceISO: String?
             let unreadOnly: Bool
             let fromFilter: String
         }
-        struct Resp: Decodable { let messages: [EmailMessage] }
-        let resp: Resp = try await post("/kb/email/fetch",
-                                        body: Req(host: s.host, port: s.port, secure: s.secure,
-                                                  user: s.user, mailbox: s.mailbox,
-                                                  lookbackDays: s.lookbackDays,
-                                                  sinceISO: sinceISO,
-                                                  unreadOnly: s.unreadOnly,
-                                                  fromFilter: s.fromFilter),
-                                        authenticated: true)
-        return resp.messages
+        return try await post("/kb/email/fetch",
+                              body: Req(host: s.host, port: s.port, secure: s.secure,
+                                        user: s.user, mailbox: s.mailbox,
+                                        lookbackDays: s.lookbackDays,
+                                        unreadOnly: s.unreadOnly,
+                                        fromFilter: s.fromFilter),
+                              authenticated: true)
+    }
+
+    /// Mark message-ids as imported (server-side dedup ledger) and, when
+    /// `lastFetchedAt` is non-nil, advance the forward-only high-water mark.
+    /// Called after a successful import; also used with empty ids +
+    /// `lastFetchedAt = now` to initialize forward-only capture on connect.
+    func markEmailSeen(messageIds: [String], lastFetchedAt: Date?) async throws {
+        struct Req: Encodable { let messageIds: [String]; let lastFetchedAt: String? }
+        struct Ack: Decodable { let ok: Bool }
+        let iso = lastFetchedAt.map { AppDateFormatter.isoString($0) }
+        let _: Ack = try await post("/kb/email/seen",
+                                    body: Req(messageIds: messageIds, lastFetchedAt: iso),
+                                    authenticated: true)
     }
 }

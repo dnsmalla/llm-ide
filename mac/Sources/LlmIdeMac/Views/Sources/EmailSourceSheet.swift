@@ -218,17 +218,19 @@ struct EmailSourceSheet: View {
                 return
             }
         }
-        var toSave = draft
-        // Preserve the live high-water mark, not the value captured when the
-        // sheet opened — a background fetch may have advanced it while the
-        // sheet was up, and saving the stale draft value would rewind it
-        // (harmless re-scan, but wasteful).
-        toSave.lastFetchedAt = config.emailSource?.lastFetchedAt ?? toSave.lastFetchedAt
-        // First connect → capture forward from now (no backlog import).
-        if !isEditing && toSave.lastFetchedAt == nil {
-            toSave.lastFetchedAt = Date()
+        // Initialize the server-side forward-only high-water mark to "now" on
+        // first connect — and also when an edit switches to a DIFFERENT account
+        // (host/user/mailbox), so the previous account's mark can't suppress
+        // the new one's mail. Best-effort; if it fails the per-run cap still
+        // bounds any catch-up.
+        let prev = config.emailSource
+        let identityChanged = prev?.host != draft.host
+            || prev?.user != draft.user
+            || prev?.mailbox != draft.mailbox
+        if !isEditing || identityChanged {
+            try? await api.markEmailSeen(messageIds: [], lastFetchedAt: Date())
         }
-        config.emailSource = toSave
+        config.emailSource = draft
         dismiss()
     }
 
