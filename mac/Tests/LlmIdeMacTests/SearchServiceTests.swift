@@ -90,4 +90,11 @@ import Foundation
         let sliced = (lm!.lineText as NSString).substring(with: m.nsRange)
         #expect(sliced == "出力調整禁止")
     }
+
+    @Test func preserveCaseTransform() {
+        // all-upper → upper; Capitalized → capitalize; lower/mixed → verbatim
+        #expect(SearchService.preserveCaseReplacement(matched: "FOO", replacement: "bar") == "BAR")
+        #expect(SearchService.preserveCaseReplacement(matched: "Foo", replacement: "bar") == "Bar")
+        #expect(SearchService.preserveCaseReplacement(matched: "foo", replacement: "bar") == "bar")
+    }
 }

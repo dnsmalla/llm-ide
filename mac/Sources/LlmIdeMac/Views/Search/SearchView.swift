@@ -19,10 +19,11 @@ struct SearchView: View {
     @State private var collapsed: Set<String> = []
     @State private var dismissed: Set<String> = []        // per-match key, view-only hide
 
-    // Replace state (Task 3 wires these; placeholder row only for now)
+    // Replace state
     @State private var replaceText = ""
     @State private var preserveCase = false
     @State private var showReplace = false
+    @State private var confirmReplaceAll = false
 
     // Editor pane
     @State private var tabs: [URL] = []
@@ -108,7 +109,10 @@ struct SearchView: View {
         }
     }
 
-    // Disabled placeholder — wiring is Task 3.
+    private var replaceAllDisabled: Bool {
+        replaceText.isEmpty || results.files.isEmpty || searching
+    }
+
     private var replaceRow: some View {
         HStack(spacing: 6) {
             Spacer().frame(width: 14)
@@ -117,16 +121,21 @@ struct SearchView: View {
                 .padding(.horizontal, 8).padding(.vertical, 6)
                 .background(theme.current.surface2)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.sm))
-                .disabled(true)
             toggle("AB", on: preserveCase, help: "Preserve case") { preserveCase.toggle() }
-                .disabled(true)
-            Button("Replace All") {}
+            Button("Replace All") { confirmReplaceAll = true }
                 .buttonStyle(.plain)
                 .font(Typography.caption)
-                .foregroundStyle(theme.current.textMuted)
-                .disabled(true)
+                .foregroundStyle(replaceAllDisabled ? theme.current.textMuted : theme.current.accent)
+                .disabled(replaceAllDisabled)
+                .help("Replace all matches")
+                .confirmationDialog(
+                    "Replace all matches in \(results.files.count) files?",
+                    isPresented: $confirmReplaceAll, titleVisibility: .visible
+                ) {
+                    Button("Replace All", role: .destructive) { replaceAllAction() }
+                    Button("Cancel", role: .cancel) {}
+                }
         }
-        .opacity(0.6)
     }
 
     private var includeExcludeFields: some View {
@@ -198,26 +207,15 @@ struct SearchView: View {
     }
 
     private func fileHeader(_ fm: FileMatch) -> some View {
-        let ext = fm.url.pathExtension
-        return HStack(spacing: 6) {
-            Image(systemName: FileIconKit.icon(for: ext))
-                .font(.system(size: 11))
-                .foregroundStyle(FileIconKit.color(for: ext))
-                .frame(width: 16)
-            Text(fm.displayPath)
-                .font(Typography.captionStrong)
-                .foregroundStyle(theme.current.text)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 4)
-            Text("\(fileBadgeCount(fm))")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(theme.current.textMuted)
-                .padding(.horizontal, 6).padding(.vertical, 1)
-                .background(theme.current.surface2)
-                .clipShape(Capsule())
-        }
-        .contentShape(Rectangle())
+        FileHeaderRow(
+            fm: fm,
+            badge: fileBadgeCount(fm),
+            canReplace: showReplace && !replaceText.isEmpty,
+            text: theme.current.text,
+            muted: theme.current.textMuted,
+            surface: theme.current.surface2,
+            onReplaceAll: { replaceInFileAction(fm) }
+        )
     }
 
     @ViewBuilder private func lineRow(_ fm: FileMatch, _ lm: LineMatch) -> some View {
@@ -236,7 +234,11 @@ struct SearchView: View {
         .padding(.horizontal, 6).padding(.vertical, 1)
         .contentShape(Rectangle())
         .onTapGesture { open(fm.url) }
-        .modifier(RowHoverDismiss(onDismiss: { dismiss(fm, lm) }))
+        .modifier(RowHoverActions(
+            canReplace: showReplace && !replaceText.isEmpty,
+            onReplace: { if let m = lm.matches.first { replaceOneAction(fm, fileIndex: m.fileIndex) } },
+            onDismiss: { dismiss(fm, lm) }
+        ))
     }
 
     // MARK: - Right pane
@@ -309,6 +311,32 @@ struct SearchView: View {
         activeTab = url
     }
 
+    // MARK: Replace actions (re-search after so results reflect the new state)
+
+    private func replaceAllAction() {
+        let files = results.files, q = query, opts = options, repl = replaceText, pc = preserveCase
+        Task {
+            _ = await searchService.replaceAll(in: files, query: q, options: opts, replacement: repl, preserveCase: pc)
+            scheduleSearch()
+        }
+    }
+
+    private func replaceInFileAction(_ fm: FileMatch) {
+        let url = fm.url, q = query, opts = options, repl = replaceText, pc = preserveCase
+        Task {
+            _ = await searchService.replaceInFile(file: url, query: q, options: opts, replacement: repl, preserveCase: pc)
+            scheduleSearch()
+        }
+    }
+
+    private func replaceOneAction(_ fm: FileMatch, fileIndex: Int) {
+        let url = fm.url, q = query, opts = options, repl = replaceText, pc = preserveCase
+        Task {
+            _ = await searchService.replaceOne(file: url, fileIndex: fileIndex, query: q, options: opts, replacement: repl, preserveCase: pc)
+            scheduleSearch()
+        }
+    }
+
     private func scheduleSearch() {
         debounce?.cancel()
         // Dismissals are positional (path:line:fileIndex), so they're only valid
@@ -333,26 +361,85 @@ struct SearchView: View {
     }
 }
 
-// MARK: - Row hover dismiss
+// MARK: - Row hover actions
 
-/// Shows a `×` button on hover that hides the matched row.
-private struct RowHoverDismiss: ViewModifier {
+/// On hover: an optional single-match Replace button plus the `×` dismiss.
+private struct RowHoverActions: ViewModifier {
+    let canReplace: Bool
+    let onReplace: () -> Void
     let onDismiss: () -> Void
     @State private var hovering = false
     func body(content: Content) -> some View {
         content
             .overlay(alignment: .trailing) {
                 if hovering {
-                    Button(action: onDismiss) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9, weight: .bold))
+                    HStack(spacing: 6) {
+                        if canReplace {
+                            Button(action: onReplace) {
+                                Image(systemName: "arrow.2.squarepath")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .help("Replace")
+                        }
+                        Button(action: onDismiss) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("Dismiss")
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
                     .padding(.trailing, 4)
-                    .help("Dismiss")
                 }
             }
             .onHover { hovering = $0 }
+    }
+}
+
+/// File-group disclosure label: icon, path, a hover-revealed "replace all in
+/// file" button, and the match-count badge.
+private struct FileHeaderRow: View {
+    let fm: FileMatch
+    let badge: Int
+    let canReplace: Bool
+    let text: Color
+    let muted: Color
+    let surface: Color
+    let onReplaceAll: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        let ext = fm.url.pathExtension
+        return HStack(spacing: 6) {
+            Image(systemName: FileIconKit.icon(for: ext))
+                .font(.system(size: 11))
+                .foregroundStyle(FileIconKit.color(for: ext))
+                .frame(width: 16)
+            Text(fm.displayPath)
+                .font(Typography.captionStrong)
+                .foregroundStyle(text)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 4)
+            if canReplace && hovering {
+                Button(action: onReplaceAll) {
+                    Image(systemName: "arrow.2.squarepath")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Replace all in file")
+            }
+            Text("\(badge)")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(muted)
+                .padding(.horizontal, 6).padding(.vertical, 1)
+                .background(surface)
+                .clipShape(Capsule())
+        }
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
     }
 }

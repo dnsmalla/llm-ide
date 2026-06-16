@@ -101,4 +101,93 @@ final class SearchService {
     nonisolated private static func isBinary(_ data: Data) -> Bool {
         data.prefix(4096).contains(0)
     }
+
+    // MARK: - Replace
+
+    /// Case-preserving transform for a single replacement. If the matched text
+    /// is all-uppercase (and contains letters) → uppercase the replacement;
+    /// else if it's Capitalized (first letter uppercase, not all-caps) →
+    /// uppercase the first character of the replacement, rest verbatim;
+    /// otherwise the replacement is returned unchanged. Pure + tested.
+    nonisolated static func preserveCaseReplacement(matched: String, replacement: String) -> String {
+        let hasLetters = matched.contains { $0.isLetter }
+        if hasLetters && matched == matched.uppercased() {
+            return replacement.uppercased()
+        }
+        if let first = matched.first, first.isUppercase, matched != matched.uppercased() {
+            return replacement.prefix(1).uppercased() + replacement.dropFirst()
+        }
+        return replacement
+    }
+
+    /// Replace every match of `query` in `file` with `replacement`, writing the
+    /// file back as UTF-8. Returns false if the file can't be read or the regex
+    /// is invalid. With `preserveCase` (non-regex only) each match is spliced
+    /// individually — in REVERSE order so earlier NSRanges stay valid — applying
+    /// `preserveCaseReplacement`. Otherwise a single
+    /// `stringByReplacingMatches` pass is used: in non-regex mode the replacement
+    /// is escaped as a literal template (so `$`/`\` are literal); in regex mode it
+    /// is passed through as a template (so `$1` etc. work).
+    func replaceInFile(file: URL, query: String, options: SearchOptions, replacement: String, preserveCase: Bool) async -> Bool {
+        guard let text = readText(file), let regex = Self.makeRegex(query: query, options: options) else { return false }
+        let ns = text as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        let out: String
+        if preserveCase && !options.regex {
+            let matches = regex.matches(in: text, options: [], range: full)
+            let mutable = NSMutableString(string: ns)
+            for h in matches.reversed() {
+                let matched = ns.substring(with: h.range)
+                mutable.replaceCharacters(in: h.range, with: Self.preserveCaseReplacement(matched: matched, replacement: replacement))
+            }
+            out = mutable as String
+        } else {
+            let template = options.regex ? replacement : NSRegularExpression.escapedTemplate(for: replacement)
+            out = regex.stringByReplacingMatches(in: text, options: [], range: full, withTemplate: template)
+        }
+        return write(out, to: file)
+    }
+
+    /// Replace only the `fileIndex`-th match (0-based, document order) of `query`
+    /// in `file`. A single splice, so ordering is moot. Returns false if the file
+    /// can't be read, the regex is invalid, or there's no such match.
+    func replaceOne(file: URL, fileIndex: Int, query: String, options: SearchOptions, replacement: String, preserveCase: Bool) async -> Bool {
+        guard let text = readText(file), let regex = Self.makeRegex(query: query, options: options) else { return false }
+        let ns = text as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        let matches = regex.matches(in: text, options: [], range: full)
+        guard fileIndex >= 0, fileIndex < matches.count else { return false }
+        let h = matches[fileIndex]
+        let replText: String
+        if preserveCase && !options.regex {
+            replText = Self.preserveCaseReplacement(matched: ns.substring(with: h.range), replacement: replacement)
+        } else if options.regex {
+            replText = regex.replacementString(for: h, in: text, offset: 0, template: replacement)
+        } else {
+            replText = replacement
+        }
+        let out = ns.replacingCharacters(in: h.range, with: replText)
+        return write(out, to: file)
+    }
+
+    /// Replace all matches in each file. Returns the count of files changed.
+    func replaceAll(in files: [FileMatch], query: String, options: SearchOptions, replacement: String, preserveCase: Bool) async -> Int {
+        var changed = 0
+        for fm in files {
+            if await replaceInFile(file: fm.url, query: query, options: options, replacement: replacement, preserveCase: preserveCase) {
+                changed += 1
+            }
+        }
+        return changed
+    }
+
+    private func readText(_ url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func write(_ text: String, to url: URL) -> Bool {
+        guard let data = text.data(using: .utf8) else { return false }
+        do { try data.write(to: url); return true } catch { return false }
+    }
 }
