@@ -7,7 +7,7 @@ struct SearchView: View {
     @EnvironmentObject private var projectStore: ProjectStore
     @State private var searchService = SearchService()
     @State private var query = ""
-    @State private var results: [SearchService.FileMatch] = []
+    @State private var results: [FileMatch] = []
     @State private var searching = false
     @State private var tabs: [URL] = []
     @State private var activeTab: URL?
@@ -50,15 +50,15 @@ struct SearchView: View {
         }
     }
 
-    @ViewBuilder private func fileGroup(_ fm: SearchService.FileMatch) -> some View {
+    @ViewBuilder private func fileGroup(_ fm: FileMatch) -> some View {
         Text(fm.displayPath).font(Typography.captionStrong).foregroundStyle(theme.current.text)
             .padding(.horizontal, 10).padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
             .onTapGesture { open(fm.url) }
-        ForEach(fm.lines, id: \.self) { lm in
+        ForEach(fm.lineMatches, id: \.self) { lm in
             HStack(spacing: 6) {
                 Text("\(lm.line)").font(.system(size: 10, design: .monospaced)).foregroundStyle(theme.current.textMuted).frame(width: 36, alignment: .trailing)
-                Text(lm.text).font(.system(size: 11, design: .monospaced)).foregroundStyle(theme.current.text).lineLimit(1)
+                Text(lm.lineText).font(.system(size: 11, design: .monospaced)).foregroundStyle(theme.current.text).lineLimit(1)
                 Spacer()
             }
             .padding(.horizontal, 10).padding(.vertical, 1)
@@ -93,9 +93,9 @@ struct SearchView: View {
             try? await Task.sleep(nanoseconds: 250_000_000)
             if Task.isCancelled { return }
             searching = true
-            let r = await searchService.search(query: q, root: root)
+            let r = await searchService.search(query: q, root: root, options: SearchOptions(), include: "", exclude: "")
             if Task.isCancelled { return }
-            results = r; searching = false
+            results = r.files; searching = false
         }
     }
 }
