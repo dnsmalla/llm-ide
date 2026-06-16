@@ -33,7 +33,7 @@ struct SidebarView: View {
     /// remains the single selection source — AppShell routing is
     /// unchanged.
     private static let primarySections: [ShellState.Section] =
-        [.explorer, .search, .sourceControl]
+        [.explorer, .search, .sourceControl, .sources]
 
     /// Sections offered in the ⋯ More overflow, in display order.  This
     /// is every non-primary, non-settings destination; `isVisible`
@@ -41,7 +41,7 @@ struct SidebarView: View {
     /// `.live` are never hidden (the first is the landing fallback, the
     /// second is condition-driven).
     private static let moreSections: [ShellState.Section] =
-        [.library, .live, .sources, .docGen, .review, .plans, .conflicts,
+        [.library, .live, .docGen, .review, .plans, .conflicts,
          .autoCode, .codeGraph, .regression, .issues, .gantt, .visual]
 
     /// True when the current selection lives in the ⋯ More overflow —
