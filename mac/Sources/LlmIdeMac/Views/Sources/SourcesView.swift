@@ -188,9 +188,10 @@ struct SourcesView: View {
             notesOutputFolder: env.notesOutputFolder,
             indexer: env.indexer)
         switch await service.importNewEmails() {
-        case .imported(let n):
+        case .imported(let n, let pending):
             lastEmailWasError = false
             lastEmailResult = "Imported \(n) new email\(n == 1 ? "" : "s")."
+                + (pending > 0 ? " \(pending) more pending — Fetch again to continue." : "")
         case .none:
             lastEmailWasError = false
             lastEmailResult = "No new emails."

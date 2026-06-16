@@ -26,6 +26,13 @@ const MAX_BODY_CHARS = 20000;
 // most recent ones since those are the most likely to be relevant.
 const MAX_MESSAGES = 200;
 
+// Skip messages whose raw size exceeds this. Large messages are almost
+// always big attachments (decks, images, zips) — downloading the full
+// RFC822 source for those wastes memory/bandwidth and the body text we
+// actually summarize is tiny. We learn the size from a cheap metadata pass
+// and only download the source for messages under this bound.
+const MAX_SOURCE_BYTES = 2_000_000;
+
 // HTML→plaintext for messages that ship only an HTML body. This is a
 // deliberately small, dependency-free pass — not a full HTML parser. It
 // drops script/style content entirely, turns the common block breaks into
@@ -142,13 +149,37 @@ export async function testConnection({ host, port, secure, user, password, mailb
   }
 }
 
-// Connect and return the recent messages (last `lookbackDays`, default 7)
-// as normalized rows. Empty inbox / no matches → []. Throws a clean Error
-// on connect/auth failure.
-export async function fetchRecentEmails({ host, port, secure, user, password, mailbox, lookbackDays }) {
-  const box = mailbox || 'INBOX';
+// Resolve the search lower-bound date. Prefer the client's forward-only
+// high-water mark (`sinceISO`); otherwise fall back to `lookbackDays`.
+// Exported for unit testing.
+export function resolveSince({ sinceISO, lookbackDays }) {
+  if (sinceISO) {
+    const d = new Date(sinceISO);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
   const days = Number(lookbackDays) > 0 ? Number(lookbackDays) : 7;
-  const since = new Date(Date.now() - days * 86400000);
+  return new Date(Date.now() - days * 86400000);
+}
+
+// Connect and return messages newer than the resolved `since`, optionally
+// limited to unread and/or a sender substring. Two-phase to bound work:
+//   1. cheap metadata pass (uid/size/date) — no bodies downloaded;
+//   2. pick the newest MAX_MESSAGES that are also under MAX_SOURCE_BYTES,
+//      then download + parse only those.
+// Empty inbox / no matches → []. Throws a clean Error on connect/auth fail.
+export async function fetchRecentEmails({
+  host, port, secure, user, password, mailbox,
+  lookbackDays, sinceISO, unreadOnly, fromFilter,
+}) {
+  const box = mailbox || 'INBOX';
+  const since = resolveSince({ sinceISO, lookbackDays });
+
+  // IMAP search criteria. `seen: false` = unread only; `from` is a substring
+  // match the server runs. Empty filter → omitted (match all senders).
+  const criteria = { since };
+  if (unreadOnly) criteria.seen = false;
+  const fromTrim = typeof fromFilter === 'string' ? fromFilter.trim() : '';
+  if (fromTrim) criteria.from = fromTrim;
 
   let client;
   let lock;
@@ -157,21 +188,30 @@ export async function fetchRecentEmails({ host, port, secure, user, password, ma
     await client.connect();
     lock = await client.getMailboxLock(box);
 
+    // Phase 1 — metadata only (no `source`, so no body bytes cross the wire).
+    const meta = [];
+    for await (const msg of client.fetch(criteria, { uid: true, size: true, envelope: true, internalDate: true })) {
+      const when = msg.envelope?.date || msg.internalDate || null;
+      meta.push({ uid: msg.uid, size: msg.size ?? 0, date: when ? new Date(when) : new Date(0) });
+    }
+    if (meta.length === 0) return [];
+
+    // Newest first; keep those under the size bound; cap the count.
+    meta.sort((a, b) => b.date - a.date);
+    const selected = meta
+      .filter((m) => m.size <= MAX_SOURCE_BYTES)
+      .slice(0, MAX_MESSAGES);
+    if (selected.length === 0) return [];
+
+    // Phase 2 — download + parse the raw source for the selected uids only.
+    const uidList = selected.map((m) => m.uid).join(',');
     const messages = [];
-    // `source: true` pulls the raw RFC822 bytes so mailparser can build the
-    // full structure (subject, from, text/html). `uid: true` gives us the
-    // stable id we expose. A `since`-only search that matches nothing simply
-    // yields no iterations → we return [].
-    for await (const msg of client.fetch({ since }, { uid: true, source: true })) {
+    for await (const msg of client.fetch(uidList, { uid: true, source: true }, { uid: true })) {
       const parsed = await simpleParser(msg.source);
       messages.push(normalizeParsed(parsed, msg.uid));
     }
-
-    // Bound the payload: keep the newest MAX_MESSAGES by date. Sorting here
-    // (rather than relying on IMAP order) makes "most recent" deterministic
-    // regardless of how the server returned the set.
     messages.sort((a, b) => new Date(b.date) - new Date(a.date));
-    return messages.slice(0, MAX_MESSAGES);
+    return messages;
   } catch (err) {
     throw new Error(friendlyError(err));
   } finally {

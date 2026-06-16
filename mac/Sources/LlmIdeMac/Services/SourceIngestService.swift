@@ -21,25 +21,41 @@ struct SourceIngestService {
     /// rather than waiting for the kqueue watcher tick.
     let indexer: FolderIndexer
 
+    /// Safety cap on notes created per fetch. Steady-state (forward-only)
+    /// fetches return a handful; this only bites on a first big drain, where
+    /// we import the newest `maxPerRun` and leave the rest for the next
+    /// "Fetch now" (the high-water mark is NOT advanced when capped, so the
+    /// remainder is re-fetched and drained incrementally rather than lost).
+    private static let maxPerRun = 50
+
     /// Outcome of one `importNewEmails()` run, surfaced on the Sources card.
     enum Result {
-        case imported(Int)      // N new emails turned into notes
-        case none               // fetched, but nothing new
-        case noSource           // no configured/enabled email source
-        case failure(String)    // fetch or ingest error
+        case imported(Int, pending: Int)   // N turned into notes; pending left (cap)
+        case none                          // fetched, but nothing new
+        case noSource                      // no configured/enabled email source
+        case failure(String)               // fetch or ingest error
     }
 
-    /// Fetch recent emails, skip any already imported, and turn each new
-    /// one into a meeting note. Runs sequentially so we don't hammer the
-    /// summarizer with parallel calls.
+    /// Fetch mail newer than the source's high-water mark, skip any already
+    /// imported, and turn each new one into a meeting note. Runs sequentially
+    /// so we don't hammer the summarizer with parallel calls.
     func importNewEmails() async -> Result {
         guard let source = config.emailSource, source.enabled else {
             return .noSource
         }
 
+        // Forward-only window: fetch since the high-water mark, but never
+        // further back than `lookbackDays` (so a long-dormant source doesn't
+        // suddenly pull weeks of mail). The fetch moment becomes the next
+        // high-water mark once we've fully drained it.
+        let fetchStart = Date()
+        let clamp = fetchStart.addingTimeInterval(-Double(max(1, source.lookbackDays)) * 86_400)
+        let since = max(source.lastFetchedAt ?? clamp, clamp)
+        let sinceISO = AppDateFormatter.isoString(since)
+
         let messages: [EmailMessage]
         do {
-            messages = try await api.fetchEmails(source)
+            messages = try await api.fetchEmails(source, sinceISO: sinceISO)
         } catch {
             return .failure(error.localizedDescription)
         }
@@ -49,16 +65,25 @@ struct SourceIngestService {
         // "email-uid-<uid>"), so every message dedups reliably.
         let seen = Set(config.emailSeenMessageIds)
         let fresh = messages.filter { !seen.contains($0.messageId) }
-        guard !fresh.isEmpty else { return .none }
+        guard !fresh.isEmpty else {
+            advanceHighWater(to: fetchStart)   // nothing new — window is drained
+            return .none
+        }
+
+        // Import newest-first, capped. `fresh` is already newest-first
+        // (server sorts desc), so prefix keeps the most recent.
+        let batch = Array(fresh.prefix(Self.maxPerRun))
+        let capped = fresh.count > batch.count
 
         var importedIds: [String] = []
-        for msg in fresh {
+        for msg in batch {
             do {
                 try await makeNote(from: msg)
                 importedIds.append(msg.messageId)
             } catch {
-                // Record what we managed before bailing so a mid-run
-                // failure doesn't re-import the successes next time.
+                // Record what we managed before bailing so a mid-run failure
+                // doesn't re-import the successes. Do NOT advance the
+                // high-water mark — the window is retried next time.
                 config.recordSeenEmailIds(importedIds)
                 NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
                 return .failure(error.localizedDescription)
@@ -67,7 +92,17 @@ struct SourceIngestService {
 
         config.recordSeenEmailIds(importedIds)
         NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
-        return .imported(importedIds.count)
+        // Only advance the high-water mark when the window is fully drained;
+        // if capped, leave it so the remainder re-fetches next run.
+        if !capped { advanceHighWater(to: fetchStart) }
+        return .imported(importedIds.count, pending: fresh.count - batch.count)
+    }
+
+    /// Move the source's forward-only high-water mark, persisting it.
+    private func advanceHighWater(to date: Date) {
+        guard var s = config.emailSource else { return }
+        s.lastFetchedAt = date
+        config.emailSource = s
     }
 
     /// Mirror of `AppShell.generateNoteForLiveSession`: create a `.md`

@@ -110,6 +110,22 @@ struct EmailSourceSheet: View {
                         }
                         .frame(width: 200)
                     }
+                    field("Unread only") {
+                        Toggle("", isOn: $draft.unreadOnly)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                    }
+                    field("From filter") {
+                        TextField("sender@example.com (optional)", text: $draft.fromFilter)
+                            .textFieldStyle(.roundedBorder)
+                            .disableAutocorrection(true)
+                    }
+                    field("Enabled") {
+                        Toggle("", isOn: $draft.enabled)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                    }
+                    SettingsHint("On connect, Email captures mail from now on (like meeting capture) — it won't import your whole backlog. \"Lookback days\" only caps how far back a catch-up fetch reaches.")
 
                     // Gmail helper — the most common gotcha is using the
                     // account password instead of an app password.
@@ -130,6 +146,12 @@ struct EmailSourceSheet: View {
             HStack {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
+                if isEditing {
+                    Button("Disconnect", role: .destructive) {
+                        Task { await disconnect() }
+                    }
+                    .help("Remove this source and delete the stored app password.")
+                }
                 Spacer()
                 Button(testing ? "Testing…" : "Test") {
                     Task { await test() }
@@ -196,7 +218,34 @@ struct EmailSourceSheet: View {
                 return
             }
         }
-        config.emailSource = draft
+        var toSave = draft
+        // Preserve the live high-water mark, not the value captured when the
+        // sheet opened — a background fetch may have advanced it while the
+        // sheet was up, and saving the stale draft value would rewind it
+        // (harmless re-scan, but wasteful).
+        toSave.lastFetchedAt = config.emailSource?.lastFetchedAt ?? toSave.lastFetchedAt
+        // First connect → capture forward from now (no backlog import).
+        if !isEditing && toSave.lastFetchedAt == nil {
+            toSave.lastFetchedAt = Date()
+        }
+        config.emailSource = toSave
+        dismiss()
+    }
+
+    /// Remove the source and delete the stored app password from the vault
+    /// (empty value = delete, per the secrets endpoint). The dedup ledger is
+    /// left intact so reconnecting the same account won't re-import old mail.
+    /// If clearing the secret fails we keep the source so the password isn't
+    /// silently orphaned in the vault.
+    private func disconnect() async {
+        do {
+            try await api.setSecret(key: "email.imapPassword", value: "")
+        } catch {
+            testWasError = true
+            testStatus = "Couldn't remove the stored password: \(error.localizedDescription)"
+            return
+        }
+        config.emailSource = nil
         dismiss()
     }
 }

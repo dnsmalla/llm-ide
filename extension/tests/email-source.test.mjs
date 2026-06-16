@@ -6,7 +6,7 @@ process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
 // Pure helpers only — we never open a real IMAP connection here.
-const { normalizeParsed, stripHtml } = await import('../agents/email-source.mjs');
+const { normalizeParsed, stripHtml, resolveSince } = await import('../agents/email-source.mjs');
 
 test('normalizeParsed maps a complete message', () => {
   const parsed = {
@@ -45,4 +45,18 @@ test('normalizeParsed falls back to stripped HTML when text is missing', () => {
 
 test('stripHtml decodes common entities', () => {
   assert.equal(stripHtml('a &amp; b &lt;c&gt;'), 'a & b <c>');
+});
+
+test('resolveSince prefers a valid sinceISO', () => {
+  const d = resolveSince({ sinceISO: '2026-01-02T03:04:05Z', lookbackDays: 7 });
+  assert.equal(d.toISOString(), '2026-01-02T03:04:05.000Z');
+});
+
+test('resolveSince falls back to lookbackDays on missing/invalid sinceISO', () => {
+  const before = Date.now() - 7 * 86400000;
+  const d1 = resolveSince({ lookbackDays: 7 });
+  const d2 = resolveSince({ sinceISO: 'not-a-date', lookbackDays: 7 });
+  // Within a few seconds of "now - 7d" for both the absent and invalid cases.
+  assert.ok(Math.abs(d1.getTime() - before) < 5000);
+  assert.ok(Math.abs(d2.getTime() - before) < 5000);
 });

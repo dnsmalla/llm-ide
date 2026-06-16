@@ -58,10 +58,12 @@ extension LlmIdeAPIClient {
                               authenticated: true)
     }
 
-    /// Fetch recent messages (within `lookbackDays`) from the configured
-    /// mailbox. Dedup against already-imported message-ids happens
-    /// client-side in the Sources ingest flow.
-    func fetchEmails(_ s: SavedEmailSource) async throws -> [EmailMessage] {
+    /// Fetch messages newer than `sinceISO` (the forward-only high-water
+    /// mark; falls back to `lookbackDays` server-side when nil) from the
+    /// configured mailbox, optionally filtered to unread / a sender. Dedup
+    /// against already-imported message-ids happens client-side in the
+    /// Sources ingest flow.
+    func fetchEmails(_ s: SavedEmailSource, sinceISO: String?) async throws -> [EmailMessage] {
         struct Req: Encodable {
             let host: String
             let port: Int
@@ -69,12 +71,18 @@ extension LlmIdeAPIClient {
             let user: String
             let mailbox: String
             let lookbackDays: Int
+            let sinceISO: String?
+            let unreadOnly: Bool
+            let fromFilter: String
         }
         struct Resp: Decodable { let messages: [EmailMessage] }
         let resp: Resp = try await post("/kb/email/fetch",
                                         body: Req(host: s.host, port: s.port, secure: s.secure,
                                                   user: s.user, mailbox: s.mailbox,
-                                                  lookbackDays: s.lookbackDays),
+                                                  lookbackDays: s.lookbackDays,
+                                                  sinceISO: sinceISO,
+                                                  unreadOnly: s.unreadOnly,
+                                                  fromFilter: s.fromFilter),
                                         authenticated: true)
         return resp.messages
     }

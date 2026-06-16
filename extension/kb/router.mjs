@@ -285,7 +285,13 @@ export async function handleKB(req, res) {
 
       // url === '/kb/email/fetch'
       try {
-        const messages = await fetchRecentEmails({ host, port, secure, user, password, mailbox, lookbackDays: body.lookbackDays });
+        const messages = await fetchRecentEmails({
+          host, port, secure, user, password, mailbox,
+          lookbackDays: body.lookbackDays,
+          sinceISO: body.sinceISO,
+          unreadOnly: body.unreadOnly,
+          fromFilter: body.fromFilter,
+        });
         sendJSON(res, 200, { messages });
       } catch (e) {
         sendJSON(res, 502, { error: { code: 'EMAIL_FETCH_FAILED', message: e.message } });

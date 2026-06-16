@@ -39,8 +39,37 @@ struct SavedEmailSource: Codable, Equatable {
     var secure: Bool = true
     var user: String = ""          // email address / IMAP username
     var mailbox: String = "INBOX"
-    var lookbackDays: Int = 7
+    var lookbackDays: Int = 7      // clamp: never look back further than this
     var enabled: Bool = true
+    /// Only import unread messages — the usual case (read mail is noise).
+    var unreadOnly: Bool = true
+    /// Optional sender substring filter (IMAP FROM search). Empty = all.
+    var fromFilter: String = ""
+    /// High-water mark: the source captures mail *forward* from here. Set to
+    /// "now" when the source is first connected (so connecting doesn't import
+    /// a huge backlog — it behaves like meeting capture, which records from
+    /// when you turn it on) and advanced after each fully-drained fetch.
+    var lastFetchedAt: Date?
+
+    init() {}
+
+    /// Tolerant decoder: every field falls back to its default when absent,
+    /// so adding fields over time never invalidates a previously-saved
+    /// source (synthesized Codable would otherwise throw on a missing key).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        displayName  = try c.decodeIfPresent(String.self, forKey: .displayName) ?? ""
+        host         = try c.decodeIfPresent(String.self, forKey: .host) ?? "imap.gmail.com"
+        port         = try c.decodeIfPresent(Int.self, forKey: .port) ?? 993
+        secure       = try c.decodeIfPresent(Bool.self, forKey: .secure) ?? true
+        user         = try c.decodeIfPresent(String.self, forKey: .user) ?? ""
+        mailbox      = try c.decodeIfPresent(String.self, forKey: .mailbox) ?? "INBOX"
+        lookbackDays = try c.decodeIfPresent(Int.self, forKey: .lookbackDays) ?? 7
+        enabled      = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        unreadOnly   = try c.decodeIfPresent(Bool.self, forKey: .unreadOnly) ?? true
+        fromFilter   = try c.decodeIfPresent(String.self, forKey: .fromFilter) ?? ""
+        lastFetchedAt = try c.decodeIfPresent(Date.self, forKey: .lastFetchedAt)
+    }
 }
 
 /// User-tunable settings persisted to UserDefaults.
