@@ -601,8 +601,14 @@ struct GitLabSettingsSection: View {
             let (data, resp) = try await GitLabClient.session.data(for: req)
             guard let http = resp as? HTTPURLResponse else { gitLabStatus = "No response."; return }
             if http.statusCode == 200 {
-                let user = try? AppJSON.decoder.decode([String: String].self, from: data)
-                let name = user?["name"] ?? user?["username"] ?? "unknown"
+                // GitLab's /user payload mixes types (id: number, bot: bool, …),
+                // so decoding the whole object as [String: String] always fails
+                // and the name fell through to "unknown". Read it untyped and
+                // pull just the string fields we display.
+                let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+                let name = (obj?["name"] as? String)
+                    ?? (obj?["username"] as? String)
+                    ?? "unknown"
                 config.gitLabToken = token
                 config.gitLabBaseURL = base
                 gitLabStatus = "✓ Connected as \(name)"
