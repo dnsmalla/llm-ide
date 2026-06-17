@@ -45,7 +45,9 @@ struct AppShell: View {
                 // to avoid the measurement being 0 when collapsed.
                 Color.clear.preference(key: WindowHeightKey.self, value: geo.size.height)
             })
-            TerminalPanelView(projectDirectory: projectDirectory)
+            // NOTE: the terminal dock lives INSIDE the editor (detail) column —
+            // see splitContent() — so it spans only the editor area and not the
+            // activity rail / file-tree, VS Code style.
             StatusBar(api: api)
         }
         // ShellState lives at the AppShell root so siblings of the
@@ -292,6 +294,8 @@ struct AppShell: View {
         if shell.section == .library {
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView(api: api)
+                    // Match the other layout: sidebar opens at its minimum.
+                    .navigationSplitViewColumnWidth(min: 180, ideal: 180, max: 260)
             } content: {
                 LibraryView(api: api)
                     // Explicit theme background so the list column matches
@@ -300,16 +304,24 @@ struct AppShell: View {
                     .background(theme.current.surface)
                     .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 420)
             } detail: {
-                LibraryDetailView(api: api)
-                    .background(theme.current.body)
+                VStack(spacing: 0) {
+                    LibraryDetailView(api: api)
+                        .background(theme.current.body)
+                    TerminalPanelView(projectDirectory: projectDirectory)
+                }
             }
         } else {
             NavigationSplitView {
                 SidebarView(api: api)
-                    .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 260)
+                    // Open at the minimum width by default (ideal == min) for a
+                    // tighter, cleaner rail; the user can still widen to 260.
+                    .navigationSplitViewColumnWidth(min: 180, ideal: 180, max: 260)
             } detail: {
-                detailColumn(shell.section)
-                    .background(theme.current.body)
+                VStack(spacing: 0) {
+                    detailColumn(shell.section)
+                        .background(theme.current.body)
+                    TerminalPanelView(projectDirectory: projectDirectory)
+                }
             }
         }
     }
