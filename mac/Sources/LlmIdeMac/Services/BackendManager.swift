@@ -19,7 +19,7 @@ struct BackendLogLine: Identifiable, Hashable {
 @Observable
 final class BackendManager {
     /// The loopback port the Node backend listens on. Single source of truth.
-    static let defaultBackendPort = 3456
+    nonisolated static let defaultBackendPort = 3456
 
     enum Status: Equatable {
         case stopped
@@ -249,6 +249,14 @@ final class BackendManager {
                 self.stderrPipe?.fileHandleForReading.readabilityHandler = nil
                 self.stdoutPipe = nil
                 self.stderrPipe = nil
+                // If node dies on startup (before /health ever answered)
+                // surface the tail of its output — a missing dependency,
+                // a syntax error, a port clash — so the reason shows on
+                // the login screen instead of looking like a silent no-op.
+                if exitCode != 0 {
+                    self.lastError = self.recentErrorSummary()
+                        ?? "Server exited with code \(exitCode). See Settings → Backend for the log."
+                }
                 self.status = exitCode == 0 ? .stopped : .crashed(exitCode: exitCode)
                 self.scheduleAutoRestartIfNeeded(exitCode: exitCode)
             }
@@ -260,25 +268,86 @@ final class BackendManager {
             self.pid = proc.processIdentifier
             self.stdoutPipe = stdOut
             self.stderrPipe = stdErr
-            self.status = .running
-            self.lastSuccessfulStartAt = Date()
             self.lastStartArgs = (nodePath: nodePath, workingDirectory: workURL.path)
-            // Stable up-time gate: if we've been running for at least
-            // 60s, reset the restart counter so a recoverable hiccup
-            // hours into a session gets its full retry budget.
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: 60_000_000_000)
-                guard let self else { return }
-                if case .running = self.status,
-                   let started = self.lastSuccessfulStartAt,
-                   Date().timeIntervalSince(started) >= 60 {
-                    self.restartCount = 0
-                }
-            }
-            append("--- Server started (pid \(proc.processIdentifier)) ---", stream: .info)
+            // Stay .starting — NOT .running. proc.run() only means the OS
+            // exec'd node; the HTTP server hasn't loaded its modules, run
+            // migrations, or bound the port yet. Declaring .running here
+            // races the login screen's auto-retry: it fires on the
+            // .running transition, hits a port that isn't listening, fails
+            // with connection-refused, and never retries because the
+            // status doesn't change again. Instead poll /health and only
+            // flip to .running once the server actually answers — same
+            // contract the adopt path above already honours.
+            append("--- Server launched (pid \(proc.processIdentifier)), waiting for /health… ---", stream: .info)
+            waitForReadyThenRun(proc: proc, nodePath: nodePath, workURL: workURL)
         } catch {
             fail("Failed to launch: \(error.localizedDescription)")
         }
+    }
+
+    /// After spawning, poll `/health` until the server answers, then flip
+    /// to `.running` (which unblocks the login screen's auto-retry). Bails
+    /// out if the process dies first — the terminationHandler owns the
+    /// `.crashed` transition and error surfacing — or if the server never
+    /// becomes ready within the budget.
+    private func waitForReadyThenRun(proc: Process, nodePath: String, workURL: URL) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let deadline = Date().addingTimeInterval(20)
+            while Date() < deadline {
+                // Process died during startup — terminationHandler handles
+                // the .crashed transition and error. Stop polling.
+                if !proc.isRunning { return }
+                if await Self.probeHealth() {
+                    // Make sure we're still the live process and weren't
+                    // stop()'d or replaced while the probe was in flight.
+                    guard self.process === proc, proc.isRunning else { return }
+                    self.markRunning(nodePath: nodePath, workURL: workURL, proc: proc)
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+            // Timed out. A live-but-unresponsive process is wedged —
+            // terminate it and report so the user isn't stuck on a spinner.
+            if proc.isRunning, self.process === proc {
+                proc.terminate()
+                self.fail("Server started but didn't answer /health within 20s. Check Settings → Backend for the log.")
+            }
+        }
+    }
+
+    /// Promote a freshly-spawned, now-healthy server to `.running` and arm
+    /// the stable-uptime restart-budget reset.
+    private func markRunning(nodePath: String, workURL: URL, proc: Process) {
+        status = .running
+        lastError = nil
+        lastSuccessfulStartAt = Date()
+        lastStartArgs = (nodePath: nodePath, workingDirectory: workURL.path)
+        append("--- Server ready (pid \(proc.processIdentifier)) ---", stream: .info)
+        // Stable up-time gate: once we've been healthy for 60s, reset the
+        // restart counter so a recoverable hiccup hours into a session
+        // still gets its full retry budget.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
+            guard let self else { return }
+            if case .running = self.status,
+               let started = self.lastSuccessfulStartAt,
+               Date().timeIntervalSince(started) >= 60 {
+                self.restartCount = 0
+            }
+        }
+    }
+
+    /// Best-effort: the most useful stderr line the spawned node emitted,
+    /// for surfacing a startup-failure reason on the login screen. Prefers
+    /// a line containing "Error" (the message line of a Node stack trace)
+    /// and falls back to the last stderr line.
+    private func recentErrorSummary() -> String? {
+        let errs = log.suffix(40).filter { $0.stream == .stderr && !$0.text.hasPrefix("---") }
+        if let errLine = errs.last(where: { $0.text.contains("Error") }) {
+            return errLine.text.trimmingCharacters(in: .whitespaces)
+        }
+        return errs.last?.text.trimmingCharacters(in: .whitespaces)
     }
 
     // Auto-restart with exponential backoff. Skips the loop when the
@@ -376,7 +445,7 @@ final class BackendManager {
     /// its version via /health.apiVersion; if the live server is
     /// older than this, the Mac app surfaces an "update your server"
     /// banner instead of hitting silent 4xx/5xx.
-    static let minimumServerApiVersion = 18
+    nonisolated static let minimumServerApiVersion = 18
 
     struct HealthProbeResult {
         let ok: Bool

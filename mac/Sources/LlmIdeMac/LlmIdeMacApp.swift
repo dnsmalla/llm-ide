@@ -164,11 +164,25 @@ struct LlmIdeMacApp: App {
                     // customTemplates on first frame still gets the
                     // hydrated list within the same .task tick.
                     templateStore.bootstrap()
+                    // Start the backend FIRST. Session restore below calls
+                    // the backend (api.refresh), so it must already be coming
+                    // up — and, more importantly, a slow or blocked restore
+                    // (e.g. a keychain-access prompt after an ad-hoc re-sign)
+                    // must never gate the backend from starting at all, which
+                    // is what happened when this ran after bootstrap.
+                    if config.backendAutoStart {
+                        autoStartBackend()
+                        // Give a freshly-spawned backend a brief, bounded
+                        // window to answer so session restore has a fair shot
+                        // on a cold launch. Returns immediately once healthy
+                        // (e.g. an adopted server); bounded so a genuinely
+                        // down backend can't stall the first frame.
+                        await Self.awaitBackendReady(timeoutSec: 3)
+                    }
                     // Restore persisted session on launch, if any.
                     await session.bootstrap(api: api)
                     autoCapture.start()
                     if config.autoCodeUpdateEnabled { autoCodeUpdate.start() }
-                    if config.backendAutoStart { autoStartBackend() }
                 }
                 // Start / stop the live caption mirror in lockstep
                 // with authentication.  When signed out, polling
@@ -266,6 +280,17 @@ struct LlmIdeMacApp: App {
         BackendManager.resolveLaunchPaths(config: config)
         guard !config.backendNodePath.isEmpty, !config.backendWorkingDir.isEmpty else { return }
         backend.start(nodePath: config.backendNodePath, workingDirectory: config.backendWorkingDir)
+    }
+
+    /// Poll `/health` briefly so session restore — which talks to the
+    /// backend — has a chance to succeed on a cold launch. Best-effort:
+    /// returns the moment the backend answers, or when the timeout elapses.
+    private static func awaitBackendReady(timeoutSec: Double) async {
+        let deadline = Date().addingTimeInterval(timeoutSec)
+        while Date() < deadline {
+            if await BackendManager.probeHealth() { return }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
     }
 }
 
