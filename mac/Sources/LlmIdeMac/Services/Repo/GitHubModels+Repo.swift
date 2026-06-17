@@ -135,6 +135,17 @@ extension GitHubClient {
         try await post("/repos/\(owner)/\(name)/issues/\(number)/comments", body: ["body": body])
     }
 
+    // MARK: - Pull requests
+
+    func createPullRequestGitHub(owner: String, name: String, body: [String: Any]) async throws -> GitHubPullRequestWire {
+        try await post("/repos/\(owner)/\(name)/pulls", body: body)
+    }
+
+    func listOpenPullRequestsGitHub(owner: String, name: String) async throws -> [GitHubPullRequestWire] {
+        try await get("/repos/\(owner)/\(name)/pulls",
+                      query: [.init(name: "state", value: "open"), .init(name: "per_page", value: "100")])
+    }
+
     // MARK: - Generic POST / PATCH helpers
 
     private func post<T: Decodable>(_ path: String, body: [String: Any]) async throws -> T {
@@ -167,6 +178,26 @@ extension GitHubClient {
         } catch {
             throw GitHubError.decodingError(error)
         }
+    }
+}
+
+// MARK: - Pull request wire type
+
+struct GitHubPullRequestWire: Decodable {
+    let id: Int
+    let number: Int
+    let title: String
+    let state: String          // "open" | "closed"
+    let htmlUrl: String
+    let draft: Bool?
+    let head: Ref
+    let base: Ref
+
+    struct Ref: Decodable { let ref: String }
+
+    enum CodingKeys: String, CodingKey {
+        case id, number, title, state, draft, head, base
+        case htmlUrl = "html_url"
     }
 }
 

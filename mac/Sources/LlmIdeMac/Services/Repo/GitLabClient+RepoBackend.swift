@@ -98,6 +98,40 @@ extension GitLabClient: RepoBackend {
         let raw = try await self.createNote(projectId: intId, iid: number, body: body)
         return raw.asRepoNote
     }
+
+    func createMergeRequest(projectId: String, payload: RepoMergeRequestPayload) async throws -> RepoMergeRequest {
+        guard let intId = Int(projectId) else {
+            throw GitLabError.badURL("project id \(projectId) isn't numeric")
+        }
+        // GitLab's draft mechanism is a "Draft:" title prefix (no API flag).
+        let title = (payload.draft && !payload.title.lowercased().hasPrefix("draft:"))
+            ? "Draft: \(payload.title)" : payload.title
+        let gl = GitLabMergeRequestPayload(
+            title: title,
+            description: payload.description,
+            sourceBranch: payload.sourceBranch,
+            targetBranch: payload.targetBranch)
+        let mr = try await self.createMergeRequest(projectId: intId, payload: gl)
+        return mr.asRepoMergeRequest
+    }
+
+    func listOpenMergeRequests(projectId: String) async throws -> [RepoMergeRequest] {
+        guard let intId = Int(projectId) else {
+            throw GitLabError.badURL("project id \(projectId) isn't numeric")
+        }
+        return try await self.listMergeRequests(projectId: intId, state: "opened")
+            .map { $0.asRepoMergeRequest }
+    }
+}
+
+private extension GitLabMergeRequest {
+    var asRepoMergeRequest: RepoMergeRequest {
+        let lower = title.lowercased()
+        return RepoMergeRequest(
+            id: String(id), number: iid, title: title, state: state,
+            sourceBranch: sourceBranch, targetBranch: targetBranch, webUrl: webUrl,
+            isDraft: lower.hasPrefix("draft:") || lower.hasPrefix("wip:"))
+    }
 }
 
 // MARK: - Write payload bridge

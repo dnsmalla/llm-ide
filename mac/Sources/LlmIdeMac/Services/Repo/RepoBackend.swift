@@ -168,6 +168,43 @@ struct RepoIssuePayload {
     }
 }
 
+// MARK: - Merge / pull request
+
+/// Neutral create payload for a merge request (GitLab) / pull request (GitHub).
+struct RepoMergeRequestPayload: Sendable {
+    var title: String
+    var description: String?
+    var sourceBranch: String
+    var targetBranch: String
+    /// Open as a draft. GitHub sends `draft: true`; GitLab has no create-time
+    /// flag, so its adapter prefixes the title with "Draft:" (its native
+    /// draft mechanism).
+    var draft: Bool
+
+    init(title: String, description: String? = nil, sourceBranch: String,
+         targetBranch: String, draft: Bool = false) {
+        self.title = title
+        self.description = description
+        self.sourceBranch = sourceBranch
+        self.targetBranch = targetBranch
+        self.draft = draft
+    }
+}
+
+struct RepoMergeRequest: Identifiable, Hashable, Sendable {
+    let id: String
+    /// Per-project number — `iid` (GitLab) / `number` (GitHub).
+    let number: Int
+    let title: String
+    /// "opened" / "merged" / "closed" (GitLab vocabulary; the GitHub adapter
+    /// maps "open" → "opened").
+    let state: String
+    let sourceBranch: String
+    let targetBranch: String
+    let webUrl: String
+    let isDraft: Bool
+}
+
 // MARK: - Filter (neutral, replaces GitLab's IssueFilter for protocol use)
 
 struct RepoIssueFilter: Equatable, Sendable {
@@ -251,4 +288,12 @@ protocol RepoBackend: Sendable {
 
     /// Post a comment. Returns the created note.
     func createNote(projectId: String, number: Int, body: String) async throws -> RepoNote
+
+    /// Create a merge request / pull request. Returns the created MR/PR.
+    func createMergeRequest(projectId: String, payload: RepoMergeRequestPayload) async throws -> RepoMergeRequest
+
+    /// Open merge requests / pull requests for a project — used to dedup
+    /// before creating, since both backends reject a duplicate for the same
+    /// source/head branch.
+    func listOpenMergeRequests(projectId: String) async throws -> [RepoMergeRequest]
 }

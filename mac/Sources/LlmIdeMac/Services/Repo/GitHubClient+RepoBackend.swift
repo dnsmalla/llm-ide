@@ -102,6 +102,42 @@ extension GitHubClient: RepoBackend {
         let wire = try await createIssueCommentGitHub(owner: owner, name: name, number: number, body: body)
         return wire.asRepoNote
     }
+
+    func createMergeRequest(projectId: String, payload: RepoMergeRequestPayload) async throws -> RepoMergeRequest {
+        guard let (owner, name) = Self.ownerAndName(from: projectId) else {
+            throw GitHubError.badURL(projectId)
+        }
+        var body: [String: Any] = [
+            "title": payload.title,
+            "head": payload.sourceBranch,     // GitHub: source branch
+            "base": payload.targetBranch,     // GitHub: target branch
+            "draft": payload.draft,
+        ]
+        if let d = payload.description { body["body"] = d }
+        let wire = try await createPullRequestGitHub(owner: owner, name: name, body: body)
+        return wire.asRepoMergeRequest
+    }
+
+    func listOpenMergeRequests(projectId: String) async throws -> [RepoMergeRequest] {
+        guard let (owner, name) = Self.ownerAndName(from: projectId) else { return [] }
+        return try await listOpenPullRequestsGitHub(owner: owner, name: name)
+            .map { $0.asRepoMergeRequest }
+    }
+}
+
+private extension GitHubPullRequestWire {
+    var asRepoMergeRequest: RepoMergeRequest {
+        RepoMergeRequest(
+            id: String(id),
+            number: number,
+            title: title,
+            // GitHub "open" → GitLab "opened" so shared state strings keep working.
+            state: state == "open" ? "opened" : state,
+            sourceBranch: head.ref,
+            targetBranch: base.ref,
+            webUrl: htmlUrl,
+            isDraft: draft ?? false)
+    }
 }
 
 // MARK: - Write payload bridge
