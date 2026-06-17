@@ -11,12 +11,13 @@ struct PlannedInputSource: Identifiable {
 
 /// Registry of input-source add-ons, the config-layer parallel to
 /// `PlatformDetector.allScrapers`. Live sources (Meetings, Email) have their
-/// own cards in `SourcesView`; everything here is announced as upcoming.
+/// own cards in `ConnectionsSettingsSection`; everything here is announced as
+/// upcoming.
 ///
 /// To promote a planned source to live: build its `InputSourceCard` in
-/// `SourcesView` (with its config + fetch wiring) and remove it from this
-/// list — one card + one deletion, mirroring how a new `CaptionScraper`
-/// is one file plus one registry entry.
+/// `ConnectionsSettingsSection` (with its config + fetch wiring) and remove it
+/// from this list — one card + one deletion, mirroring how a new
+/// `CaptionScraper` is one file plus one registry entry.
 enum InputSourceRegistry {
     static let planned: [PlannedInputSource] = [
         .init(id: "slack", icon: "number",

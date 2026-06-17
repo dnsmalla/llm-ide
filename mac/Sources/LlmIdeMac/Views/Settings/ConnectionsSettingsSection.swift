@@ -1,19 +1,28 @@
 import SwiftUI
 
-/// "Inputs" hub — the single home for every source that feeds the Library.
+/// Settings → **Connections**: the inputs hub. Connect the sources that feed
+/// the Library — Meetings (auto-capture) and Email — plus planned sources
+/// shown as "coming soon". This is the only place input capture is
+/// *configured*.
 ///
-/// Each source is a uniform add-on card (`InputSourceCard`): Meetings
-/// (auto-captured), Email (fetched via the server and ingested through the
-/// meeting pipeline), and a registry of planned sources shown as upcoming.
-/// This is the only place input capture is *configured* — the old
-/// Settings → "Capture" card was folded into the Meetings add-on here so
-/// there is exactly one switch per setting. The `.live` section remains a
-/// separate runtime view (the live transcript while recording).
-struct SourcesView: View {
+/// It used to be a standalone activity-bar section ("Sources"), but that
+/// collided with the Library's own "Sources" section (the files those inputs
+/// produce). It now lives here and is reachable directly or via the
+/// "Connect a source…" deep-link in the Library's Sources section
+/// (`.scrollSettingsToCard` with anchor "connections").
+///
+/// Unlike most settings sections this does NOT wrap its body in
+/// `SettingsSectionCard` — that would card-wrap the content, and the input
+/// rows are already `InputSourceCard`s. We use a matching collapsible header
+/// but let those cards be the surfaces, avoiding a card-in-card look.
+struct ConnectionsSettingsSection: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var theme: ThemeStore
     @Environment(AppEnvironment.self) private var env
+
+    /// Persisted per-section like `SettingsSectionCard`, so it survives launches.
+    @AppStorage("settings.section.Connections.expanded") private var isExpanded = false
 
     @State private var showingEmailSheet = false
     @State private var fetching = false
@@ -23,67 +32,78 @@ struct SourcesView: View {
     @State private var lastEmailWasError = false
     /// Meetings "Advanced" (poll interval) disclosure, collapsed by default.
     @State private var showMeetingAdvanced = false
-    /// Handle for a manual "Fetch now" import so we can cancel it if the user
-    /// navigates away mid-import (the `.task` auto-fetch already auto-cancels).
+    /// Handle for a manual "Fetch now" import so we can cancel it if the view
+    /// disappears mid-import (the `.task` auto-fetch already auto-cancels).
     @State private var importTask: Task<Void, Never>?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Sources")
-                        .font(Typography.title)
-                        .foregroundStyle(theme.current.text)
-                    Text("Connect the sources that feed your Library.")
-                        .font(Typography.caption)
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            header
+            if isExpanded {
+                VStack(alignment: .leading, spacing: Spacing.md) {
+                    SettingsHint("Connect the sources that feed your Library.")
+                    meetingsCard
+                    emailCard
+
+                    Text("More inputs")
+                        .font(Typography.section)
                         .foregroundStyle(theme.current.textMuted)
+                        .padding(.top, Spacing.xs)
+
+                    ForEach(InputSourceRegistry.planned) { src in
+                        InputSourceCard(icon: src.icon, title: src.title,
+                                        subtitle: src.subtitle,
+                                        badgeText: "Coming soon", badgeTone: .neutral,
+                                        isAvailable: false)
+                    }
                 }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+                .sheet(isPresented: $showingEmailSheet) {
+                    EmailSourceSheet(api: api)
+                        .environmentObject(theme)
+                        .environmentObject(config)
+                }
+                // Light auto-fetch when the section is opened (no global timer).
+                // Only runs when a source is configured + enabled. `.task`
+                // auto-cancels when the view disappears.
+                .task {
+                    if config.emailSource?.enabled == true { await runImport() }
+                }
+                .onDisappear { importTask?.cancel() }
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: isExpanded)
+        // Deep-link from the Library Sources section lands here expanded.
+        .onReceive(NotificationCenter.default.publisher(for: .scrollSettingsToCard)) { note in
+            if note.object as? String == "connections" { isExpanded = true }
+        }
+    }
 
-                meetingsCard
-                emailCard
-
-                Text("More inputs")
-                    .font(Typography.section)
+    private var header: some View {
+        Button { isExpanded.toggle() } label: {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "tray.and.arrow.down")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(theme.current.accent2)
+                SectionLabel("Connections", size: 12)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(theme.current.textMuted)
-                    .padding(.top, Spacing.sm)
-
-                ForEach(InputSourceRegistry.planned) { src in
-                    InputSourceCard(icon: src.icon, title: src.title,
-                                    subtitle: src.subtitle,
-                                    badgeText: "Coming soon", badgeTone: .neutral,
-                                    isAvailable: false)
-                }
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
             }
-            .padding(Spacing.lg)
-            .frame(maxWidth: 720, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
         }
-        .background(theme.current.body)
-        .navigationTitle("Sources")
-        .sheet(isPresented: $showingEmailSheet) {
-            EmailSourceSheet(api: api)
-                .environmentObject(theme)
-                .environmentObject(config)
-        }
-        // Light auto-fetch on appear (no global timer — periodic polling
-        // can come later). Only runs when a source is configured + enabled.
-        // `.task` auto-cancels when the view disappears.
-        .task {
-            if config.emailSource?.enabled == true {
-                await runImport()
-            }
-        }
-        // Cancel an in-flight manual import if we navigate away.
-        .onDisappear { importTask?.cancel() }
+        .buttonStyle(.plain)
+        .help(isExpanded ? "Collapse Connections" : "Expand Connections")
     }
 
     // MARK: - Meetings add-on
 
     /// The single home for meeting capture config: the auto-capture toggle
-    /// plus the poll interval (migrated here from the deleted Settings →
-    /// Capture card). Drives `config.autoCaptureOnMeeting` / `pollIntervalMs`
-    /// — the same properties the capture runtime reads, so behaviour is
-    /// unchanged; only the config UI moved.
+    /// plus the poll interval. Drives `config.autoCaptureOnMeeting` /
+    /// `pollIntervalMs` — the same properties the capture runtime reads.
     private var meetingsCard: some View {
         InputSourceCard(
             icon: "waveform",

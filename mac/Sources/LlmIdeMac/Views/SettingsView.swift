@@ -22,6 +22,7 @@ struct SettingsView: View {
                         AccountSettingsSection()
                         ServerSettingsSection()
                         BackendSettingsSection()
+                        ConnectionsSettingsSection(api: api).id("connections")
                         AppearanceSettingsSection()
                         SidebarVisibilitySection()
                         UpdatesSettingsSection()

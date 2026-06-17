@@ -496,6 +496,14 @@ struct LibraryView: View {
             if category == .meetings {
                 Divider()
                 Button {
+                    // Jump to Settings → Connections (the inputs hub) and
+                    // expand it via the deep-link the section listens for.
+                    shell.section = .settings
+                    NotificationCenter.default.post(name: .scrollSettingsToCard, object: "connections")
+                } label: {
+                    Label("Connect a source…", systemImage: "tray.and.arrow.down")
+                }
+                Button {
                     NSWorkspace.shared.open(
                         URL(fileURLWithPath: env.meetingsFolder.path))
                 } label: {
@@ -512,7 +520,7 @@ struct LibraryView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .frame(width: 20)
-        .help(category == .meetings ? "Add transcript or reveal folder" : "Add file or folder")
+        .help(category == .meetings ? "Add transcript, connect a source, or reveal folder" : "Add file or folder")
     }
 
     /// Consistent muted empty/placeholder row used across every section.

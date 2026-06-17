@@ -33,7 +33,7 @@ struct SidebarView: View {
     /// remains the single selection source — AppShell routing is
     /// unchanged.
     private static let primarySections: [ShellState.Section] =
-        [.explorer, .search, .sourceControl, .sources]
+        [.explorer, .search, .sourceControl]
 
     /// Sections offered in the ⋯ More overflow, in display order.  This
     /// is every non-primary, non-settings destination; `isVisible`
