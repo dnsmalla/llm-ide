@@ -19,7 +19,7 @@ struct TreeRowLabel: View {
     var body: some View {
         HStack(spacing: 4) {
             if isFolder {
-                if depth > 0 { Spacer().frame(width: CGFloat(depth) * 14) }
+                indentGuides(depth)
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -34,7 +34,8 @@ struct TreeRowLabel: View {
                     .strikethrough(gitStatus == .deleted)
                     .lineLimit(1)
             } else {
-                Spacer().frame(width: CGFloat(depth) * 14 + 14)
+                indentGuides(depth)
+                Spacer().frame(width: 10)   // aligns the file icon under sibling folder icons
                 Image(systemName: FileIconKit.icon(for: fileExtension))
                     .font(.system(size: 11))
                     .foregroundStyle(gitColor ?? FileIconKit.color(for: fileExtension))
@@ -55,6 +56,25 @@ struct TreeRowLabel: View {
         }
         .padding(.vertical, 2)
         .contentShape(Rectangle())
+    }
+
+    /// VSCode-style indent guides: one faint vertical rule per ancestor level,
+    /// each 14pt wide so child rows line up under their parent's chevron.
+    @ViewBuilder
+    private func indentGuides(_ depth: Int) -> some View {
+        if depth > 0 {
+            HStack(spacing: 0) {
+                ForEach(0..<depth, id: \.self) { _ in
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.18))
+                        .frame(width: 1)
+                        .frame(maxHeight: .infinity)
+                        .padding(.leading, 6)
+                        .padding(.trailing, 7)
+                }
+            }
+            .frame(height: 16)
+        }
     }
 
     /// VS Code-style status colors. Readable in both light and dark themes.

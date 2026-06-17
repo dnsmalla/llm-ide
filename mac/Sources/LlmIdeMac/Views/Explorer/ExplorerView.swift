@@ -25,6 +25,18 @@ struct ExplorerView: View {
     @State private var decorations = GitStatusStore()
     @Environment(\.controlActiveState) private var controlActiveState
 
+    // Bottom terminal dock (shared, rendered at AppShell level) — toggled
+    // from this view's toolbar.
+    @Environment(TerminalPanelState.self) private var terminalState
+
+    // Cursor/VSCode-style panel visibility. Tree shows by default; the AI
+    // chat panel opens on demand from the toolbar (the "chat from click").
+    @State private var treeVisible = true
+    @State private var assistantVisible = false
+    /// Persisted chat-panel width (HSplitView has no width binding — read it
+    /// back via GeometryReader, same pattern as ReviewView).
+    @AppStorage("EXPLORER_CHAT_PANEL_WIDTH") private var chatPanelWidth: Double = 300
+
     /// Prefer the active CODE repo (matching Source Control / terminal); fall
     /// back to the active project's local folder. nil when neither is set.
     private var root: URL? {
@@ -33,12 +45,38 @@ struct ExplorerView: View {
 
     var body: some View {
         HSplitView {
-            treePane
-                .frame(minWidth: 220, idealWidth: 280, maxWidth: 360)
+            if treeVisible {
+                treePane
+                    .frame(minWidth: 200, idealWidth: 260, maxWidth: 360)
+                    .transition(.move(edge: .leading))
+            }
 
             editorArea
                 .frame(minWidth: 360, maxWidth: .infinity)
+
+            if assistantVisible {
+                CodeAssistantPanel(api: api,
+                                   initialURL: activeTab,
+                                   showFileAttachButtons: true,
+                                   showModelPicker: true)
+                    .frame(minWidth: 220,
+                           idealWidth: CGFloat(chatPanelWidth),
+                           maxWidth: .infinity)
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear
+                                .onChange(of: geo.size.width) { _, w in
+                                    let clamped = max(220, Double(w))
+                                    if abs(clamped - chatPanelWidth) > 1 {
+                                        chatPanelWidth = clamped
+                                    }
+                                }
+                        }
+                    )
+                    .transition(.move(edge: .trailing))
+            }
         }
+        .toolbar { explorerToolbar }
         // Reset all per-project state when the active project changes, so the
         // tree, cache, and open tabs never show a previous project's files
         // (and the cache can't grow unbounded across switches).
@@ -54,6 +92,40 @@ struct ExplorerView: View {
         // the same — picks up edits made via terminal/other tools).
         .onChange(of: controlActiveState) { _, state in
             if state == .key { Task { await decorations.refresh(root: root) } }
+        }
+    }
+
+    // MARK: - Toolbar (tree · terminal · chat toggles)
+
+    @ToolbarContentBuilder
+    private var explorerToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { treeVisible.toggle() }
+            } label: {
+                Image(systemName: "sidebar.left")
+                    .symbolVariant(treeVisible ? .fill : .none)
+            }
+            .help(treeVisible ? "Hide Files" : "Show Files")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                if let root { terminalState.toggle(projectDirectory: root) }
+            } label: {
+                Image(systemName: "chevron.left.forwardslash.chevron.right")
+                    .symbolVariant(terminalState.isOpen ? .fill : .none)
+            }
+            .help("Toggle Terminal (⌃`)")
+            .disabled(root == nil)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { assistantVisible.toggle() }
+            } label: {
+                Image(systemName: "sidebar.right")
+                    .symbolVariant(assistantVisible ? .fill : .none)
+            }
+            .help(assistantVisible ? "Hide Chat" : "Show Chat")
         }
     }
 

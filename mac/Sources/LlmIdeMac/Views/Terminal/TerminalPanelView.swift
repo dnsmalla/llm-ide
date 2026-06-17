@@ -33,38 +33,56 @@ struct TerminalPanelView: View {
                 if h > 0 { windowHeight = h }
             }
 
-        // ── Session views — always present, zero-height when closed ──────
-        // Keeping NSViews in the hierarchy is what preserves PTYs and
-        // scrollback when the user presses Ctrl+` to hide the panel.
-        if !state.sessions.isEmpty {
+        // ── Bottom dock — present whenever open OR a session is alive ─────
+        // Keeping the session NSViews in the hierarchy is what preserves PTYs
+        // and scrollback across open/close toggles (Ctrl+`). The dock renders
+        // even with no sessions so the placeholder tabs (Problems/Output/…)
+        // can show.
+        if state.isOpen || !state.sessions.isEmpty {
             VStack(spacing: 0) {
-                // Resize handle — only interactive when open
                 if state.isOpen {
                     resizeHandle
-                }
-
-                // Tab bar
-                if state.isOpen {
-                    TerminalTabBar(projectDirectory: projectDirectory)
+                    // VSCode-style dock tab strip (Problems/Output/…/Terminal).
+                    BottomDockTabBar(projectDirectory: projectDirectory)
                     Divider()
-                }
-
-                // ZStack — all NSViews stay in hierarchy; inactive tabs are
-                // invisible (opacity 0) but their PTYs keep running.
-                ZStack {
-                    ForEach(Array(state.sessions.enumerated()), id: \.element.id) { idx, session in
-                        TerminalSessionView(session: session)
-                            .opacity(idx == state.activeIndex ? 1 : 0)
+                    // Terminal's own session pills, only under the Terminal tab.
+                    if state.activeDockTab == .terminal {
+                        TerminalTabBar(projectDirectory: projectDirectory)
+                        Divider()
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black)
+                dockContent
             }
             // When closed: collapse to zero height so layout is undisturbed.
             .frame(height: state.isOpen ? state.panelHeight : 0)
             .clipped()
             .overlay(state.isOpen ? Divider() : nil, alignment: .top)
         }
+    }
+
+    // MARK: - Dock content
+
+    /// The terminal session ZStack stays mounted (PTYs alive) but is hidden
+    /// when a non-terminal dock tab is selected; the placeholder is overlaid
+    /// for those tabs.
+    private var dockContent: some View {
+        ZStack {
+            ZStack {
+                ForEach(Array(state.sessions.enumerated()), id: \.element.id) { idx, session in
+                    TerminalSessionView(session: session)
+                        .opacity(idx == state.activeIndex ? 1 : 0)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black)
+            .opacity(state.activeDockTab == .terminal ? 1 : 0)
+            .allowsHitTesting(state.activeDockTab == .terminal)
+
+            if state.activeDockTab != .terminal {
+                BottomDockPlaceholder(tab: state.activeDockTab)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Resize Handle

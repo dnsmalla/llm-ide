@@ -2,6 +2,47 @@ import Foundation
 import Observation
 import SwiftUI
 
+/// VSCode-style bottom-panel tabs. Only `.terminal` is functional; the others
+/// are placeholders so the dock reads like VSCode's panel at a glance.
+enum BottomDockTab: String, CaseIterable, Identifiable {
+    case problems, output, debugConsole, terminal, ports, gitlens
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .problems:     return "Problems"
+        case .output:       return "Output"
+        case .debugConsole: return "Debug Console"
+        case .terminal:     return "Terminal"
+        case .ports:        return "Ports"
+        case .gitlens:      return "GitLens"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .problems:     return "exclamationmark.triangle"
+        case .output:       return "text.alignleft"
+        case .debugConsole: return "terminal"
+        case .terminal:     return "chevron.left.forwardslash.chevron.right"
+        case .ports:        return "antenna.radiowaves.left.and.right"
+        case .gitlens:      return "arrow.triangle.branch"
+        }
+    }
+
+    /// Muted placeholder copy for the non-functional tabs.
+    var placeholder: String {
+        switch self {
+        case .problems:     return "No problems have been detected in the workspace."
+        case .output:       return "No output to show yet."
+        case .debugConsole: return "The debug console is not active."
+        case .ports:        return "No forwarded ports.\nRun a server to see ports here."
+        case .gitlens:      return "GitLens insights are not configured."
+        case .terminal:     return ""
+        }
+    }
+}
+
 /// Panel-level state: open/closed, height, and the list of tab sessions.
 /// Created as `@State` in `AppShell`, propagated via `.environment()`.
 @Observable
@@ -11,6 +52,10 @@ final class TerminalPanelState {
     // MARK: - State
 
     var isOpen: Bool = false
+
+    /// Which VSCode-style dock tab is showing. `.terminal` is the only live
+    /// one; the rest render placeholder content.
+    var activeDockTab: BottomDockTab = .terminal
 
     /// Panel height in points. Persisted across app launches.
     var panelHeight: CGFloat {
@@ -37,7 +82,8 @@ final class TerminalPanelState {
 
     // MARK: - Actions
 
-    /// Toggle panel open/closed. Creates a first tab if none exist yet.
+    /// Toggle panel open/closed. Opening focuses the Terminal tab (Ctrl+`
+    /// is terminal-centric) and creates a first session if none exist.
     func toggle(projectDirectory: URL) {
         if isOpen {
             isOpen = false
@@ -45,6 +91,7 @@ final class TerminalPanelState {
             if sessions.isEmpty {
                 _addTab(in: projectDirectory)
             }
+            activeDockTab = .terminal
             isOpen = true
         }
     }
