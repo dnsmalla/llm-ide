@@ -89,7 +89,7 @@ struct TerminalPanelView: View {
 
     private var resizeHandle: some View {
         Rectangle()
-            .fill(Color(nsColor: .separatorColor).opacity(0.6))
+            .fill(theme.current.border)
             .frame(height: 4)
             .frame(maxWidth: .infinity)
             .onHover { inside in

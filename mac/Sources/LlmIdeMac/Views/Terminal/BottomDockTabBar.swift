@@ -36,7 +36,7 @@ struct BottomDockTabBar: View {
             .padding(.horizontal, 6)
         }
         .frame(height: 32)
-        .background(Color(nsColor: NSColor(red: 0.12, green: 0.12, blue: 0.13, alpha: 1)))
+        .background(theme.current.surface)
     }
 
     private func tabButton(_ tab: BottomDockTab) -> some View {
@@ -47,7 +47,7 @@ struct BottomDockTabBar: View {
             Text(tab.title.uppercased())
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(0.4)
-                .foregroundStyle(isActive ? Color.white : Color(nsColor: .systemGray))
+                .foregroundStyle(isActive ? theme.current.text : theme.current.textMuted)
                 .padding(.horizontal, 9)
                 .frame(height: 32)
                 .overlay(alignment: .bottom) {
@@ -67,7 +67,7 @@ struct BottomDockTabBar: View {
         Button(action: action) {
             Image(systemName: name)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color(nsColor: .lightGray))
+                .foregroundStyle(theme.current.textMuted)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 4)
                 .contentShape(Rectangle())
@@ -78,23 +78,25 @@ struct BottomDockTabBar: View {
 }
 
 /// Muted placeholder shown for the non-functional dock tabs (Problems,
-/// Output, Debug Console, Ports, GitLens). Matches the dark terminal chrome.
+/// Output, Debug Console, Ports, GitLens). Theme-aware to match the rest
+/// of the app chrome.
 struct BottomDockPlaceholder: View {
+    @EnvironmentObject var theme: ThemeStore
     let tab: BottomDockTab
 
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: tab.systemImage)
                 .font(.system(size: 24, weight: .thin))
-                .foregroundStyle(Color(nsColor: .systemGray))
+                .foregroundStyle(theme.current.textMuted)
             Text(tab.placeholder)
                 .font(.system(size: 12))
-                .foregroundStyle(Color(nsColor: .systemGray))
+                .foregroundStyle(theme.current.textMuted)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: NSColor(red: 0.1, green: 0.1, blue: 0.11, alpha: 1)))
+        .background(theme.current.body)
     }
 }

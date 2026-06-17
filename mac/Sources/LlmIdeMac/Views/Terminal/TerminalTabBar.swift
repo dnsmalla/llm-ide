@@ -34,7 +34,7 @@ struct TerminalTabBar: View {
             .help("New Terminal Tab")
         }
         .frame(height: 30)
-        .background(Color(nsColor: NSColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1)))
+        .background(theme.current.surface)
     }
 
     @ViewBuilder
@@ -46,8 +46,8 @@ struct TerminalTabBar: View {
             Text(session.title)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(isDead
-                    ? Color(nsColor: .systemGray)
-                    : isActive ? .white : Color(nsColor: .lightGray))
+                    ? theme.current.danger
+                    : isActive ? theme.current.text : theme.current.textMuted)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: 120, alignment: .leading)
@@ -57,18 +57,14 @@ struct TerminalTabBar: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(Color(nsColor: .lightGray))
+                    .foregroundStyle(theme.current.textMuted)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Close \(session.title)")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(
-            isActive
-                ? Color(nsColor: NSColor(red: 0.20, green: 0.20, blue: 0.20, alpha: 1))
-                : Color.clear
-        )
+        .background(isActive ? theme.current.surface2 : Color.clear)
         .overlay(
             isActive
                 ? Rectangle()
