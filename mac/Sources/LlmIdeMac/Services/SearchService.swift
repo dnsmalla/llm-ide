@@ -65,7 +65,13 @@ final class SearchService {
             if noiseNames.contains(url.lastPathComponent) { en.skipDescendants(); continue }
             guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
             if total >= maxMatches { break }
-            let display = url.path.hasPrefix(rootPath + "/") ? String(url.path.dropFirst(rootPath.count + 1)) : url.path
+            // Standardize the enumerated path before stripping the root: on
+            // macOS the enumerator yields `/private/var/…` while `rootPath`
+            // (also standardized) is `/var/…`, so a raw-path prefix check fails
+            // and the include/exclude globs would match against the full path.
+            // No-op for ordinary roots; fixes any symlinked/firmlinked root.
+            let filePath = url.standardizedFileURL.path
+            let display = filePath.hasPrefix(rootPath + "/") ? String(filePath.dropFirst(rootPath.count + 1)) : filePath
 
             // Glob filter on the repo-relative path.
             guard GlobMatch.matchesAny(path: display, patterns: include) else { continue }

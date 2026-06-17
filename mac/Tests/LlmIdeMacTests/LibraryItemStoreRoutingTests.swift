@@ -10,11 +10,25 @@ import Foundation
 @Suite("LibraryItemStore routing")
 struct LibraryItemStoreRoutingTests {
 
+    /// A freshly-created temp directory, normalized to the canonical form the
+    /// store records. The store's paths come from `FileManager`'s enumerator,
+    /// which on macOS reports the temp dir under `/private/var/folders/…` —
+    /// but every `URL` transform (`standardizedFileURL`, `resolvingSymlinksInPath`)
+    /// leaves the `/var` firmlink in place. So we map `/var/…` → `/private/var/…`
+    /// explicitly; otherwise every path assertion mismatches by the `/private`
+    /// prefix on this and any APFS macOS host.
+    private func tempDir(_ prefix: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(prefix)-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let p = url.path
+        let canonical = p.hasPrefix("/var/") ? "/private" + p : p
+        return URL(fileURLWithPath: canonical, isDirectory: true)
+    }
+
     /// Make a fresh temp project root with the given relative files written.
     private func makeProject(files: [String: String] = [:]) throws -> URL {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("llmide-store-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let root = try tempDir("llmide-store")
         for (rel, contents) in files {
             let url = root.appendingPathComponent(rel)
             try FileManager.default.createDirectory(
@@ -161,9 +175,7 @@ struct LibraryItemStoreRoutingTests {
         let root = try makeProject()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let extRepo = FileManager.default.temporaryDirectory
-            .appendingPathComponent("llmide-repo-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: extRepo, withIntermediateDirectories: true)
+        let extRepo = try tempDir("llmide-repo")
         defer { try? FileManager.default.removeItem(at: extRepo) }
         try "import Foundation".write(
             to: extRepo.appendingPathComponent("lib.swift"), atomically: true, encoding: .utf8)
@@ -219,9 +231,7 @@ struct LibraryItemStoreRoutingTests {
         let root = try makeProject()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let extRepo = FileManager.default.temporaryDirectory
-            .appendingPathComponent("llmide-repo-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: extRepo, withIntermediateDirectories: true)
+        let extRepo = try tempDir("llmide-repo")
         defer { try? FileManager.default.removeItem(at: extRepo) }
         try "import Foundation".write(
             to: extRepo.appendingPathComponent("lib.swift"), atomically: true, encoding: .utf8)
@@ -249,9 +259,7 @@ struct LibraryItemStoreRoutingTests {
         let root = try makeProject()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let extRepo = FileManager.default.temporaryDirectory
-            .appendingPathComponent("llmide-repo-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: extRepo, withIntermediateDirectories: true)
+        let extRepo = try tempDir("llmide-repo")
         defer { try? FileManager.default.removeItem(at: extRepo) }
         try "import Foundation".write(
             to: extRepo.appendingPathComponent("lib.swift"), atomically: true, encoding: .utf8)
@@ -300,9 +308,7 @@ struct LibraryItemStoreRoutingTests {
         let root = try makeProject()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let extRepo = FileManager.default.temporaryDirectory
-            .appendingPathComponent("llmide-repo-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: extRepo, withIntermediateDirectories: true)
+        let extRepo = try tempDir("llmide-repo")
         defer { try? FileManager.default.removeItem(at: extRepo) }
         let extFile = extRepo.appendingPathComponent("lib.swift")
         try "import Foundation".write(to: extFile, atomically: true, encoding: .utf8)
@@ -326,10 +332,8 @@ struct LibraryItemStoreRoutingTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         // Old and new clone locations share the same repo basename "myrepo".
-        let oldParent = FileManager.default.temporaryDirectory
-            .appendingPathComponent("llmide-old-\(UUID().uuidString)", isDirectory: true)
-        let newParent = FileManager.default.temporaryDirectory
-            .appendingPathComponent("llmide-new-\(UUID().uuidString)", isDirectory: true)
+        let oldParent = try tempDir("llmide-old")
+        let newParent = try tempDir("llmide-new")
         let oldRepo = oldParent.appendingPathComponent("myrepo", isDirectory: true)
         let newRepo = newParent.appendingPathComponent("myrepo", isDirectory: true)
         try FileManager.default.createDirectory(at: oldRepo, withIntermediateDirectories: true)

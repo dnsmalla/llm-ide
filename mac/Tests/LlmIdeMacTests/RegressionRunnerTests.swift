@@ -265,7 +265,9 @@ struct RegressionJudgeTests {
         let judge = FakeJudge(equivalent: false)
         let runner = RegressionRunner(prompter: prompter, judge: judge, store: store)
 
-        await runner.run(at: repo)
+        // This test asserts auto-reopen, so it must enable it (the parameter
+        // defaults to false — see runDefaultsToNoAutoReopen).
+        await runner.run(at: repo, autoReopen: true)
 
         #expect(runner.results.first?.verdict == .regressed)
         #expect(runner.results.first?.autoReopened == true)
