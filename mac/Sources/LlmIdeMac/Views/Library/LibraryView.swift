@@ -12,6 +12,9 @@ struct LibraryView: View {
     @FocusState private var filterFocused: Bool
     /// Tracks which folder groups are expanded per category
     @State private var expandedFolders: Set<String> = []
+    /// Tracks which SOURCES sub-groups (Meetings / Mail) are collapsed.
+    /// Absence means expanded, so both groups are open by default.
+    @State private var collapsedSourceGroups: Set<String> = []
     /// Installed plugins for the current user. Loaded once on appear
     /// and refreshed when the user (re-)opens Library. Failures are
     /// silent — the sidebar just shows an empty Plugins section.
@@ -179,6 +182,68 @@ struct LibraryView: View {
 
     @ViewBuilder
     private func fileTreeSection(_ category: LibraryItem.Category) -> some View {
+        if category == .meetings {
+            // The "MEETINGS" folder is presented as SOURCES, split into
+            // Meetings / Mail sub-groups (and, later, Slack).
+            sourcesSection(category)
+        } else if category == .code {
+            // Code renders as a real nested directory tree (one node per
+            // repo/root) rather than a flat one-level grouping.
+            codeTreeSection(category)
+        } else {
+            plainFileTreeSection(category)
+        }
+    }
+
+    // MARK: - Code section (nested tree)
+
+    /// Renders `.code` items as a recursive directory tree via `OutlineGroup`,
+    /// which handles expand/collapse and nesting for us. Each repo/root shows
+    /// its true subfolder hierarchy; files reuse the standard row + selection
+    /// tag. Swipe-to-delete isn't offered here (OutlineGroup isn't a ForEach) —
+    /// acceptable since code files are in-place repo references.
+    @ViewBuilder
+    private func codeTreeSection(_ category: LibraryItem.Category) -> some View {
+        let items = itemStore.items(for: category)
+        Section {
+            if items.isEmpty {
+                Text("No \(category.rawValue.lowercased()) files yet")
+                    .font(Typography.fileMeta)
+                    .foregroundStyle(.tertiary)
+                    .listRowSeparator(.hidden)
+                    .padding(.vertical, 2)
+            } else {
+                OutlineGroup(CodeEntry.build(from: items), children: \.children) { entry in
+                    codeEntryRow(entry, tint: category.folderTint)
+                }
+            }
+        } header: {
+            sectionHeader(category, count: items.count)
+        }
+    }
+
+    @ViewBuilder
+    private func codeEntryRow(_ entry: CodeEntry, tint: Color) -> some View {
+        if let item = entry.item {
+            LibraryFileRow(item: item)
+                .tag(ShellState.LibrarySelection.file(item.url))
+        } else {
+            HStack(spacing: 5) {
+                Image(systemName: "folder.fill")
+                    .font(Typography.filename)
+                    .foregroundStyle(tint)
+                Text(entry.name)
+                    .font(Typography.filename)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            .help(entry.name)
+        }
+    }
+
+    /// Standard single-list file-tree section (Code / Data / Notes).
+    @ViewBuilder
+    private func plainFileTreeSection(_ category: LibraryItem.Category) -> some View {
         let sectionItems = itemStore.items(for: category)
         Section {
             let looseFiles = sectionItems.filter { $0.folderOrigin == nil }
@@ -250,6 +315,83 @@ struct LibraryView: View {
         }
     }
 
+    // MARK: - Sources section (Meetings / Mail)
+
+    /// The `.meetings` folder rendered as SOURCES: a single header over one
+    /// sub-group per `SourceKind` — captured Meetings and ingested Mail. All
+    /// cases are always shown, so the structure reads as intentionally
+    /// extensible: a new input (e.g. Slack) is one `SourceKind` case, no view
+    /// change. Items partition by an exhaustive switch on `sourceKind` so a
+    /// future case can never silently fall into the wrong group.
+    @ViewBuilder
+    private func sourcesSection(_ category: LibraryItem.Category) -> some View {
+        let all = itemStore.items(for: category)
+        let grouped = Dictionary(grouping: all) { $0.sourceKind ?? .meeting }
+        Section {
+            ForEach(LibraryItem.SourceKind.allCases, id: \.self) { kind in
+                sourceSubGroup(kind: kind, items: grouped[kind] ?? [],
+                               tint: category.folderTint)
+            }
+        } header: {
+            sectionHeader(category, count: all.count)
+        }
+    }
+
+    /// One collapsible SOURCES sub-group. Mirrors the folder-group
+    /// DisclosureGroup styling used elsewhere in the file tree; defaults to
+    /// expanded and shows a muted empty state when it has no files.
+    ///
+    /// Note: items are shown as a flat list here — unlike the plain file-tree
+    /// sections, `folderOrigin` nesting is intentionally not reproduced, since
+    /// auto-synced meeting/mail files sit directly in `meetings/`.
+    @ViewBuilder
+    private func sourceSubGroup(kind: LibraryItem.SourceKind, items: [LibraryItem],
+                                tint: Color) -> some View {
+        let stateKey = "sources:\(kind.rawValue)"
+        let isExpanded = Binding(
+            get: { !collapsedSourceGroups.contains(stateKey) },
+            set: { open in
+                if open { collapsedSourceGroups.remove(stateKey) }
+                else     { collapsedSourceGroups.insert(stateKey) }
+            }
+        )
+        DisclosureGroup(isExpanded: isExpanded) {
+            if items.isEmpty {
+                Text(kind.emptyText)
+                    .font(Typography.fileMeta)
+                    .foregroundStyle(.tertiary)
+                    .listRowSeparator(.hidden)
+                    .padding(.vertical, 2)
+                    .padding(.leading, 6)
+            } else {
+                ForEach(items) { item in
+                    LibraryFileRow(item: item)
+                        .tag(ShellState.LibrarySelection.file(item.url))
+                        .padding(.leading, 6)
+                }
+                .onDelete { offsets in
+                    let toDelete = offsets.map { items[$0] }
+                    toDelete.forEach { itemStore.remove(id: $0.id) }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: kind.icon)
+                    .font(Typography.filename)
+                    .foregroundStyle(tint)
+                Text(kind.title)
+                    .font(Typography.filename)
+                    .foregroundStyle(.primary)
+                if !items.isEmpty {
+                    Text("\(items.count)")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.leading, 16)
+    }
+
     private func sectionHeader(_ category: LibraryItem.Category, count: Int) -> some View {
         HStack(spacing: 0) {
             HStack(spacing: 6) {
@@ -258,7 +400,7 @@ struct LibraryView: View {
                     .foregroundStyle(category.uiColor)
                     .frame(width: 18, height: 18)
                     .background(category.uiColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-                Text(category.rawValue)
+                Text(category.sectionTitle)
                     .font(.system(size: 11, weight: .heavy))
                     .foregroundStyle(category.uiColor)
                     .textCase(.uppercase)

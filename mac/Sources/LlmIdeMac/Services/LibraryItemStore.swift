@@ -95,6 +95,54 @@ final class LibraryItemStore {
         ("meetings", .meetings),
     ]
 
+    /// Memoised source-kind classification, keyed by path → (mtime, kind).
+    /// `rescan()` runs on the main actor and would otherwise re-read every
+    /// meeting `.md` on each refresh; caching on modification date means we
+    /// only touch files that actually changed.
+    private var sourceKindCache: [String: (mtime: Date, kind: LibraryItem.SourceKind)] = [:]
+
+    /// Classify a `meetings/` file as a captured meeting or ingested mail,
+    /// using the mtime cache to avoid re-reading unchanged files.
+    private func classifiedSourceKind(for url: URL) -> LibraryItem.SourceKind {
+        let path = url.path
+        let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+            .contentModificationDate
+        if let cached = sourceKindCache[path], cached.mtime == mtime {
+            return cached.kind
+        }
+        let kind = Self.sourceKind(for: url)
+        if let mtime { sourceKindCache[path] = (mtime, kind) }
+        return kind
+    }
+
+    /// Classify a `meetings/` file as a captured meeting or ingested mail by
+    /// reading the `platform` field from its `.md` frontmatter. Best-effort:
+    /// reads only the file head and defaults to `.meeting` for non-`.md`
+    /// files, missing frontmatter, or an absent `platform` line — robust to
+    /// frontmatter schema drift since it never decodes the whole struct.
+    /// `platform` is the third frontmatter key, so a small head read covers it.
+    /// `nonisolated` (pure function) so it can run off the main actor and be
+    /// unit-tested directly.
+    nonisolated static func sourceKind(for url: URL) -> LibraryItem.SourceKind {
+        guard url.pathExtension.lowercased() == "md",
+              let handle = try? FileHandle(forReadingFrom: url) else { return .meeting }
+        defer { try? handle.close() }
+        let head = (try? handle.read(upToCount: 2048))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        guard head.hasPrefix("---") else { return .meeting }
+        // Walk the frontmatter block (between the opening and closing "---").
+        for raw in head.split(separator: "\n").dropFirst() {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line == "---" { break }                 // end of frontmatter
+            if line.hasPrefix("platform:") {
+                let value = line.dropFirst("platform:".count)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
+                return LibraryItem.SourceKind(platform: value)
+            }
+        }
+        return .meeting
+    }
+
     /// Rebuild `items` from the bound project folder.  Authoritative for
     /// the bound-project case: enumerates each canonical subfolder, applies
     /// the same noise/relevance filters as the old `addFolder`, then appends
@@ -132,6 +180,18 @@ final class LibraryItemStore {
                 // dir name so the sidebar groups it in a DisclosureGroup.
                 let parentName = fileURL.deletingLastPathComponent().lastPathComponent
                 item.folderOrigin = (parentName == subfolder) ? nil : parentName
+                // Code renders as a nested tree: record the directory path
+                // relative to the project's code/ folder (files at its top
+                // level get an empty path).
+                if category == .code {
+                    item.treePath = Self.relativeDirComponents(of: fileURL, under: folderURL)
+                }
+                // Meetings and ingested email share the meetings/ folder;
+                // classify by frontmatter platform so the SOURCES section can
+                // split them into Meetings / Mail sub-groups.
+                if category == .meetings {
+                    item.sourceKind = classifiedSourceKind(for: fileURL)
+                }
                 scanned.append(item)
             }
         }
@@ -171,6 +231,10 @@ final class LibraryItemStore {
                 if !Self.isCodeRelevant(url: fileURL) { continue }
                 var item = LibraryItem(name: name, path: fileURL.path, category: .code)
                 item.folderOrigin = folderName
+                // Nest the whole repo under a single node named after the
+                // folder, then its real subdirectory structure beneath that.
+                item.treePath = [folderName]
+                    + Self.relativeDirComponents(of: fileURL, under: folderURL)
                 result.append(item)
             }
         }
@@ -234,6 +298,19 @@ final class LibraryItemStore {
     /// that differ only by a trailing slash or unresolved component.
     static func standardize(_ path: String) -> String {
         URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    /// Directory components between `root` and `fileURL`, excluding the
+    /// filename — the file's position within `root` for the nested code tree.
+    /// Returns `[]` when the file sits directly in `root`, and `[]` (not a
+    /// crash) when `fileURL` isn't actually under `root`.
+    nonisolated static func relativeDirComponents(of fileURL: URL, under root: URL) -> [String] {
+        let rootComps = root.standardizedFileURL.pathComponents
+        let fileComps = fileURL.standardizedFileURL.pathComponents
+        guard fileComps.count > rootComps.count,
+              Array(fileComps.prefix(rootComps.count)) == rootComps else { return [] }
+        // Drop the filename (last component); keep the dirs in between.
+        return Array(fileComps[rootComps.count..<(fileComps.count - 1)])
     }
 
     private static func dedupePreservingOrder(_ paths: [String]) -> [String] {
