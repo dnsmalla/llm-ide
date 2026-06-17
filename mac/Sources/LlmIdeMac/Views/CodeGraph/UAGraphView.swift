@@ -259,7 +259,8 @@ struct UAGraphView: View {
     @State private var migrationError: String?
     @State private var migrating: Bool = false
 
-    @ViewBuilder
+    // Not @ViewBuilder: this returns an explicit AnyView (the guard needs an
+    // early return), which is incompatible with the result builder.
     private func migrationBanner(target: URL) -> some View {
         let t = theme.current
         guard let current = codeTargetFolder else { return AnyView(EmptyView()) }

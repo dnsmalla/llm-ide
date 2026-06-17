@@ -4,6 +4,30 @@ import os.log
 
 private let configLogger = Logger(subsystem: "com.llmide.macapp", category: "AppConfig")
 
+/// Decode persisted config data, or — on corruption — stash the bad blob
+/// aside (under Application Support/LLM IDE) so the user's settings aren't
+/// silently lost on the next `defaults.set(...)`, log a warning, clear the
+/// key, and return nil. Mirrors the recovery already used for
+/// `gitLabSavedProjects`.
+private func decodeConfigOrStash<T: Decodable>(
+    _ type: T.Type, key: String, data: Data, defaults: UserDefaults) -> T? {
+    do {
+        return try AppJSON.decoder.decode(type, from: data)
+    } catch {
+        let ts = Int(Date().timeIntervalSince1970)
+        let fm = FileManager.default
+        if let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let dir = support.appendingPathComponent("LLM IDE")
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            let backup = dir.appendingPathComponent("\(key).json.corrupt-\(ts)")
+            try? data.write(to: backup, options: .atomic)
+            configLogger.warning("Corrupt \(key) stashed to \(backup.path): \(error.localizedDescription)")
+        }
+        defaults.removeObject(forKey: key)
+        return nil
+    }
+}
+
 struct SavedGitLabProject: Codable, Identifiable, Equatable {
     var id: String
     var url: String
@@ -384,7 +408,7 @@ final class AppConfig: ObservableObject {
         self.memorySubdir = storedMem.isEmpty ? AppConfig.defaultMemorySubdir : storedMem
         self.uaBinaryOverride = defaults.string(forKey: "uaBinaryOverride") ?? ""
         if let data = defaults.data(forKey: "localCodeFolders"),
-           let decoded = try? AppJSON.decoder.decode([String].self, from: data) {
+           let decoded = decodeConfigOrStash([String].self, key: "localCodeFolders", data: data, defaults: defaults) {
             self.localCodeFolders = decoded
         } else {
             self.localCodeFolders = []
@@ -429,13 +453,13 @@ final class AppConfig: ObservableObject {
         // GitHub: token from Keychain, saved repos from UserDefaults.
         self.gitHubToken = self.persistsSecrets ? (KeychainStore.loadGitHubToken() ?? "") : ""
         if let data = defaults.data(forKey: "gitHubSavedRepos"),
-           let decoded = try? AppJSON.decoder.decode([SavedGitHubRepo].self, from: data) {
+           let decoded = decodeConfigOrStash([SavedGitHubRepo].self, key: "gitHubSavedRepos", data: data, defaults: defaults) {
             self.gitHubSavedRepos = decoded
         } else {
             self.gitHubSavedRepos = []
         }
         if let data = defaults.data(forKey: "emailSource"),
-           let decoded = try? AppJSON.decoder.decode(SavedEmailSource.self, from: data) {
+           let decoded = decodeConfigOrStash(SavedEmailSource.self, key: "emailSource", data: data, defaults: defaults) {
             self.emailSource = decoded
         } else {
             self.emailSource = nil

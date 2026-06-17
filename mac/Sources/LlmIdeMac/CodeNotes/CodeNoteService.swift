@@ -35,7 +35,7 @@ public final class CodeNoteService: ObservableObject {
     /// skeleton and no agent is invoked.
     private let cliExecutable: URL?
 
-    private static let log = Logger(subsystem: "com.llmide.macapp", category: "CodeNoteService")
+    nonisolated private static let log = Logger(subsystem: "com.llmide.macapp", category: "CodeNoteService")
 
     public init(launcher: ProcessLauncher = SystemProcessLauncher(),
                 cliExecutable: URL? = nil) {

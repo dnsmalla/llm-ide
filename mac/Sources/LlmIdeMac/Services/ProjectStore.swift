@@ -55,7 +55,7 @@ final class ProjectStore: ObservableObject {
     }
 
     /// Defaults used when no AppConfig is supplied (test paths).
-    static let fallbackDefaults = ProjectSettings(
+    nonisolated static let fallbackDefaults = ProjectSettings(
         language: "en", activeCLI: "claudeCode", linkedRepo: nil,
         notesFolderRelative: nil, enabledPlugins: [],
         uaBinaryOverride: "", regressionLookbackCount: 5,

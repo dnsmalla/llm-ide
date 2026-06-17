@@ -3,7 +3,12 @@ import Dispatch
 
 // Notification.Name extensions moved to Services/NotificationNames.swift
 
-final class FolderIndexer {
+/// Thread-safe by design: `fullScan` is serialized by `scanLock`, the watcher
+/// state (`source`/`watchFD`/`pendingScan`) is mutated only on its serial
+/// event-handler queue after a one-time `startWatching`, and `index` is itself
+/// `Sendable`. `@unchecked Sendable` formalizes the cross-thread use that
+/// `AppEnvironment` already relies on.
+final class FolderIndexer: @unchecked Sendable {
     let root: URL
     let index: MeetingIndex
     private var source: DispatchSourceFileSystemObject?

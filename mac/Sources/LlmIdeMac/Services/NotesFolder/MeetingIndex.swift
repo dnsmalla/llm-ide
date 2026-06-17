@@ -1,7 +1,12 @@
 import Foundation
 import SQLite3
 
-final class MeetingIndex {
+/// Thread-safe: the SQLite connection is opened with `SQLITE_OPEN_FULLMUTEX`
+/// (serialized mode — sqlite serializes concurrent calls internally), the `db`
+/// handle is immutable after `init`, and every method keeps its statement
+/// state local. The folder indexer + auto-code run each use their own
+/// connection. Hence `@unchecked Sendable` is accurate, not a suppression.
+final class MeetingIndex: @unchecked Sendable {
     struct Row: Equatable {
         let id: String
         let path: String
