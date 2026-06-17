@@ -326,7 +326,7 @@ final class SourceControlService {
         await refresh(root: root)
     }
 
-    // MARK: - Merge / Tags / Blame
+    // MARK: - Merge / Tags
 
     /// Merge `branch` into the current branch, then refresh. On failure
     /// (e.g. conflicts) the error is captured into the sticky `opError`; the
@@ -347,14 +347,6 @@ final class SourceControlService {
     /// Create a lightweight tag at HEAD, then refresh.
     func createTag(root: URL, name: String) async {
         await run(["tag", name], root)
-    }
-
-    /// Blame annotations for `path` (relative to `root`), one per line.
-    /// Returns [] on error.
-    func blame(root: URL, path: String) async -> [BlameLine] {
-        guard let out = try? await repo.runGit(
-            ["blame", "--line-porcelain", "--", path], at: root) else { return [] }
-        return GitLog.parseBlame(out)
     }
 
     /// Single chokepoint for local mutating git ops. Sets `isBusy` for the

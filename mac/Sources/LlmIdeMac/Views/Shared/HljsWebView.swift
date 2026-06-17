@@ -21,7 +21,7 @@ enum Hljs {
     }
 
     /// HTML-escape for text inserted into the page. Both views run ALL dynamic
-    /// content (file content, diff text, blame author names) through this.
+    /// content (file content, diff text) through this.
     static func escape(_ s: String) -> String {
         s.replacingOccurrences(of: "&", with: "&amp;")
          .replacingOccurrences(of: "<", with: "&lt;")
@@ -29,7 +29,7 @@ enum Hljs {
     }
 
     /// The 5 shared palette tokens both views use. Per-view extras (hover,
-    /// blame, hunk-header, add/del row tints) stay local to each view.
+    /// hunk-header, add/del row tints) stay local to each view.
     struct Palette {
         let bg, fg, gutterBg, gutterFg, border: String
         init(isDark: Bool) {
