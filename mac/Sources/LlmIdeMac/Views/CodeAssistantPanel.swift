@@ -11,6 +11,25 @@ import AppKit
 /// side — the assistant is purely advisory.  When the user wants the
 /// model to actually CHANGE files, they take its suggestion to the
 /// Plan tab's Generate Code flow (which is review-gated).
+
+/// How the agent's file-edit tool calls are accepted in the chat panel.
+enum EditAcceptanceMode: String, CaseIterable, Identifiable {
+    /// Show the confirmation card + `UpdateFileSheet` for every edit.
+    case review
+    /// Apply `update-file` edits immediately (to already-attached files,
+    /// enforced by `confirmUpdateFile`); GitLab actions still always confirm.
+    case auto
+
+    var id: String { rawValue }
+    var label: String { self == .auto ? "Auto" : "Review" }
+    var icon: String { self == .auto ? "bolt.fill" : "checklist" }
+    var help: String {
+        self == .auto
+            ? "Auto-apply file edits (attached files only) — no popup"
+            : "Review each file edit in a confirmation popup"
+    }
+}
+
 struct CodeAssistantPanel: View {
     let api: LlmIdeAPIClient
     /// When set, this file is attached automatically the first time the panel appears.
@@ -54,6 +73,12 @@ struct CodeAssistantPanel: View {
     @State private var showingReviewCodeSheet: Bool = false
     @State private var showingUpdateFileSheet: Bool = false
     @State private var reportingFault: FaultReportContext?
+    /// How file-edit tool calls are accepted. Persisted across launches.
+    /// `.review` (default) shows the confirmation card + popup; `.auto`
+    /// applies `update-file` edits immediately (to attached files only —
+    /// the GitLab actions always confirm regardless).
+    @AppStorage("codeAssist.editMode") private var editModeRaw = EditAcceptanceMode.review.rawValue
+    private var editMode: EditAcceptanceMode { EditAcceptanceMode(rawValue: editModeRaw) ?? .review }
     @StateObject private var session = CodeAssistantSession()
     /// Captured at the moment the banner appears so Save uses the
     /// prompt+answer that triggered the threshold, not whatever the
@@ -963,6 +988,7 @@ struct CodeAssistantPanel: View {
                 }
             }
             if showModelPicker { modelPickerChips }
+            editModeChip
             Spacer()
             keyHint
             sendButton
@@ -980,6 +1006,7 @@ struct CodeAssistantPanel: View {
                         contextButton(icon: "folder", label: "Add folder", action: pickFolder)
                     }
                     if showModelPicker { modelPickerChips }
+                    editModeChip
                     Spacer(minLength: 0)
                 }
                 if showFileAttachButtons && !attachments.isEmpty {
@@ -1063,6 +1090,28 @@ struct CodeAssistantPanel: View {
         }
     }
 
+    /// Edit-acceptance mode selector (Review / Auto). Same capsule style as
+    /// the model picker; collapses to icon-only when the panel is compact.
+    private var editModeChip: some View {
+        Menu {
+            ForEach(EditAcceptanceMode.allCases) { mode in
+                Button { editModeRaw = mode.rawValue } label: {
+                    Label(mode.label, systemImage: mode.icon)
+                }
+            }
+        } label: {
+            Chip(
+                icon: editMode.icon,
+                label: isCompact ? "" : editMode.label,
+                trailing: "chevron.down",
+                compact: isCompact
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .help(editMode.help)
+        .fixedSize()
+    }
+
     /// Aggressive truncation for the model label in compact panels —
     /// "Sonnet 4.6" → "S4.6", "Opus 4.7" → "O4.7". Keeps the chip on
     /// a single short capsule instead of clipping mid-glyph.
@@ -1101,8 +1150,18 @@ struct CodeAssistantPanel: View {
             HStack(spacing: 4) {
                 Image(systemName: icon)
                     .font(.system(size: 10, weight: .medium))
-                Text(label)
-                    .font(.system(size: 11))
+                // These are the lowest-priority controls, so drop them to
+                // icon-only as soon as the panel isn't comfortably wide —
+                // keeping room for the model picker rather than clipping it.
+                // `lineLimit(1)` + `fixedSize` are essential: without them a
+                // narrow row squeezes the label to 1-character width and
+                // SwiftUI renders it vertically (one glyph per line).
+                if panelWidth >= 320 {
+                    Text(label)
+                        .font(.system(size: 11))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -1378,6 +1437,16 @@ struct CodeAssistantPanel: View {
             )
             history.append(.init(role: .assistant, content: resp.reply))
             self.pendingTool = resp.pendingTool
+            // Fast path: in Auto mode, apply a proposed file edit immediately
+            // instead of surfacing the card + popup. Scoped to `update-file`
+            // (confirmUpdateFile enforces the attached-files-only guard, and
+            // leaves the card up if the file isn't attached); GitLab actions
+            // keep their confirmation. Only the primary turn auto-applies —
+            // the follow-up turn falls back to the card, so an agent that
+            // keeps proposing edits can't loop.
+            if editMode == .auto, let pt = resp.pendingTool, let args = pt.updateFileArgs {
+                _ = await confirmUpdateFile(args, finalContent: args.content)
+            }
         } catch {
             self.error = error.localizedDescription
         }
