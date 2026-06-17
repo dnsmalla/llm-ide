@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderPlanSummary, renderDispatchResult, renderReviewDecided } from '../agents/slack.mjs';
+import { renderPlanSummary, renderDispatchResult, renderReviewDecided, notifySlack } from '../agents/slack.mjs';
 
 test('renderPlanSummary produces title, goal, count, milestones', () => {
   const text = renderPlanSummary({
@@ -51,4 +51,21 @@ test('renderReviewDecided picks emoji per status', () => {
   assert.match(renderReviewDecided({ status: 'executed', title: 'x' }), /:white_check_mark:/);
   assert.match(renderReviewDecided({ status: 'rejected', title: 'x' }), /:no_entry_sign:/);
   assert.match(renderReviewDecided({ status: 'failed',   title: 'x' }), /:warning:/);
+});
+
+test('notifySlack releases the dedupe slot when the send fails', async () => {
+  // An invalid webhook URL makes postWebhook throw before any network I/O.
+  const args = {
+    webhookUrl: 'https://evil.example/hook',
+    kind: 'review',
+    payload: { status: 'executed', title: 'release-on-failure' },
+    dedupeKey: 'user:review:release-on-failure',
+  };
+  // First attempt: send fails (invalid URL), so it must throw — not record
+  // the dedupe key as if the notification went through.
+  await assert.rejects(() => notifySlack(args), /Invalid Slack webhook URL/);
+  // Retry within the dedupe window: the slot was released, so this must
+  // reach postWebhook again (throw the same URL error) rather than be
+  // silently swallowed as a duplicate.
+  await assert.rejects(() => notifySlack(args), /Invalid Slack webhook URL/);
 });

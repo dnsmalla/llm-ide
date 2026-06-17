@@ -149,23 +149,34 @@ export async function notifySlack({ webhookUrl, kind, payload, dedupeKey }) {
   if (isDuplicateSend(dedupeKey)) {
     return { ok: true, deduped: true };
   }
-  let text;
-  if (kind === 'plan')          text = renderPlanSummary(payload);
-  else if (kind === 'dispatch') text = renderDispatchResult(payload);
-  else if (kind === 'review')   text = renderReviewDecided(payload);
-  else if (kind === 'custom') {
-    // Escape mrkdwn special chars and cap length to prevent oversized
-    // or injected payloads reaching the Slack channel.
-    const raw = String(payload?.text || '').slice(0, 2000);
-    // Guard against a custom message that embeds a real secret (e.g. a
-    // user accidentally pastes an API key into the notification field).
-    if (scanForSecrets(raw)) throw new Error('Custom Slack message contains a potential secret — refusing to send.');
-    text = asMrkdwn(raw);
-  }
-  else throw new Error(`Unknown Slack message kind: ${kind}`);
+  // `isDuplicateSend` recorded the key optimistically so a concurrent
+  // double-click is suppressed even before this send resolves.  But if
+  // anything below fails — bad payload, secret detected, network/Slack
+  // error — nothing actually reached the channel, so we must release the
+  // slot.  Otherwise a genuine retry within the window would be silently
+  // swallowed as a duplicate and the notification lost forever.
+  try {
+    let text;
+    if (kind === 'plan')          text = renderPlanSummary(payload);
+    else if (kind === 'dispatch') text = renderDispatchResult(payload);
+    else if (kind === 'review')   text = renderReviewDecided(payload);
+    else if (kind === 'custom') {
+      // Escape mrkdwn special chars and cap length to prevent oversized
+      // or injected payloads reaching the Slack channel.
+      const raw = String(payload?.text || '').slice(0, 2000);
+      // Guard against a custom message that embeds a real secret (e.g. a
+      // user accidentally pastes an API key into the notification field).
+      if (scanForSecrets(raw)) throw new Error('Custom Slack message contains a potential secret — refusing to send.');
+      text = asMrkdwn(raw);
+    }
+    else throw new Error(`Unknown Slack message kind: ${kind}`);
 
-  if (!text || !text.trim()) throw new Error('Empty Slack message');
-  return postWebhook(webhookUrl, { text });
+    if (!text || !text.trim()) throw new Error('Empty Slack message');
+    return await postWebhook(webhookUrl, { text });
+  } catch (err) {
+    if (dedupeKey) recentSends.delete(dedupeKey);
+    throw err;
+  }
 }
 
 export { renderPlanSummary, renderDispatchResult, renderReviewDecided };
