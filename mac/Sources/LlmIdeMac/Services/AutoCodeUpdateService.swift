@@ -30,8 +30,9 @@ final class AutoCodeUpdateService: ObservableObject {
     private let registry: ProcessedActionsRegistry
     private let projectStore: ProjectStore?
     /// Optional API client used by the regression auto-task. When nil
-    /// (e.g. older callers + tests), the regression step is silently
-    /// skipped — the rest of the run is unaffected.
+    /// (e.g. older callers + tests), the regression step is skipped and the
+    /// reason is surfaced via `taskErrors` ("Regression skipped — no API
+    /// client wired."); the rest of the run is unaffected.
     private let api: LlmIdeAPIClient?
     private let log = Logger(subsystem: "com.llmide.macapp", category: "AutoCodeUpdateService")
 
@@ -374,8 +375,22 @@ final class AutoCodeUpdateService: ObservableObject {
         p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         p.arguments = ["-C", localPath, "status", "--porcelain"]
         let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
-        do { try p.run() } catch { return true }
+        let log = Logger(subsystem: "com.llmide.macapp", category: "AutoCodeUpdateService")
+        // Fail CLOSED: if we cannot verify the tree is clean we must NOT let an
+        // auto-commit proceed — it would otherwise sweep the user's WIP into
+        // the fix commit. (Previously this returned `true`/clean when git
+        // couldn't even launch, the unsafe direction.)
+        do { try p.run() } catch {
+            log.error("isWorkingTreeClean: git could not launch at \(localPath, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return false
+        }
         p.waitUntilExit()
+        // A non-zero exit (not a git repo, transient git error) likewise means
+        // we can't trust the output — don't assume clean.
+        guard p.terminationStatus == 0 else {
+            log.error("isWorkingTreeClean: git status exited \(p.terminationStatus) at \(localPath, privacy: .public)")
+            return false
+        }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         let s = String(data: data, encoding: .utf8) ?? ""
         return s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
