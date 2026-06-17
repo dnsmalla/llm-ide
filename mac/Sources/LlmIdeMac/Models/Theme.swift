@@ -93,6 +93,39 @@ extension Theme {
     var success: Color { accent3 }
     var warning: Color { accent4 }
     var info: Color { accent2 }
+
+    // MARK: - Sidebar category hues
+    //
+    // The Library sidebar colour-codes its sections. Blue/green/brand map
+    // straight onto palette slots; purple and teal have no slot, so they are
+    // authored per-theme here (exactly like the accents) to read correctly on
+    // each background — never raw `.purple` / `.teal`, which wash out in
+    // Midnight.
+    var categoryPurple: Color {
+        switch id {
+        case "light":    return Color(red: 0.52, green: 0.36, blue: 0.78)
+        case "midnight": return Color(red: 0.76, green: 0.64, blue: 1.00)
+        default:         return Color(red: 0.70, green: 0.56, blue: 0.95) // dark
+        }
+    }
+    var categoryTeal: Color {
+        switch id {
+        case "light":    return Color(red: 0.10, green: 0.52, blue: 0.55)
+        case "midnight": return Color(red: 0.52, green: 0.86, blue: 0.90)
+        default:         return Color(red: 0.42, green: 0.78, blue: 0.82) // dark
+        }
+    }
+
+    /// Single source of truth for a Library file-tree section's tint, derived
+    /// from the active palette. Sources/Notes read as the blue (info) family,
+    /// Code as green (success), Data as purple.
+    func tint(for category: LibraryItem.Category) -> Color {
+        switch category {
+        case .meetings, .notes: return info
+        case .code:             return success
+        case .data:             return categoryPurple
+        }
+    }
 }
 
 /// Convenience wrapper so views can read the active theme via

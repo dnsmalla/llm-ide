@@ -10,7 +10,7 @@ interface Props {
 type IconName =
   | 'clipboard' | 'compass' | 'mic' | 'note' | 'question'
   | 'chat' | 'gear' | 'monitor' | 'command' | 'tool' | 'check'
-  | 'zap' | 'search';
+  | 'zap' | 'search' | 'lightbulb' | 'alert';
 
 const ICON_PATHS: Record<IconName, React.ReactNode> = {
   clipboard: (
@@ -83,6 +83,20 @@ const ICON_PATHS: Record<IconName, React.ReactNode> = {
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
     </>
   ),
+  lightbulb: (
+    <>
+      <path d="M9 18h6" />
+      <path d="M10 22h4" />
+      <path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V17h6v-.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z" />
+    </>
+  ),
+  alert: (
+    <>
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </>
+  ),
 };
 
 function Icon({ name, size = 14 }: { name: IconName; size?: number }) {
@@ -101,6 +115,32 @@ function Icon({ name, size = 14 }: { name: IconName; size?: number }) {
     >
       {ICON_PATHS[name]}
     </svg>
+  );
+}
+
+/* Tip / Note callout — an icon + label header above the body. Replaces the
+   old CSS `::before` text label so callouts read with the same inline-icon
+   language as the rest of the panel. `kind` drives the tint and default
+   label; pass `title` to override the label (e.g. "Pro tip", "Important"). */
+function Callout({
+  kind = 'tip',
+  title,
+  children,
+}: {
+  kind?: 'tip' | 'note';
+  title?: string;
+  children: React.ReactNode;
+}) {
+  const icon: IconName = kind === 'note' ? 'alert' : 'lightbulb';
+  const label = title ?? (kind === 'note' ? 'Note' : 'Tip');
+  return (
+    <div className={`help-callout help-callout-${kind}`}>
+      <div className="help-callout-head">
+        <span className="help-callout-icon" aria-hidden="true"><Icon name={icon} size={13} /></span>
+        <span className="help-callout-title">{label}</span>
+      </div>
+      <div className="help-callout-body">{children}</div>
+    </div>
   );
 }
 
@@ -343,12 +383,12 @@ function GettingStartedSection() {
           Leave this terminal open &mdash; it needs to stay running while you use
           LLM IDE.
         </p>
-        <div className="help-card help-tip">
-          <strong>Good to know:</strong> Recording works even without the server.
+        <Callout title="Good to know">
+          Recording works even without the server.
           So if you forget to start it, you can still capture the meeting and
           generate notes afterward. The server is only needed for AI features
           (notes, chat, questions).
-        </div>
+        </Callout>
       </div>
 
       <div className="help-card">
@@ -377,11 +417,11 @@ function GettingStartedSection() {
           A side panel slides open on the right side of your screen, right
           next to the meeting.
         </p>
-        <div className="help-card help-tip">
-          <strong>Tip:</strong> The side panel stays open even when you switch
+        <Callout title="Tip">
+          The side panel stays open even when you switch
           between browser tabs. So you can peek at a document and come back to
           the meeting without losing your place.
-        </div>
+        </Callout>
       </div>
 
       <div className="help-card">
@@ -499,11 +539,11 @@ function TranscriptPageSection() {
           or by <strong>speaker name</strong> (e.g., &ldquo;Alice&rdquo;). Clear
           the search field to see the full transcript again.
         </p>
-        <div className="help-card help-tip">
-          <strong>Pro tip:</strong> Searching doesn&apos;t affect the recording.
+        <Callout title="Pro tip">
+          Searching doesn&apos;t affect the recording.
           New lines still arrive while you&apos;re searching &mdash; they just
           won&apos;t auto-scroll into view so your search results stay stable.
-        </div>
+        </Callout>
       </div>
 
       <div className="help-card">
@@ -718,11 +758,11 @@ function NotesPageSection() {
           transcript, so mid-meeting notes give you a snapshot of what&apos;s
           been discussed so far.
         </p>
-        <div className="help-card help-tip">
-          <strong>Handy trick:</strong> Generate notes halfway through a long
+        <Callout title="Handy trick">
+          Generate notes halfway through a long
           meeting to capture the first half&apos;s decisions. Then generate again
           at the end for the complete picture. Both sets of notes stay available.
-        </div>
+        </Callout>
       </div>
 
       <div className="help-card">
@@ -841,12 +881,12 @@ function QuestionsPageSection() {
             listening&rdquo;, &ldquo;analyzing&rdquo;, or why it chose not to
             ask)</li>
         </ul>
-        <div className="help-card help-tip">
-          <strong>When to turn it off:</strong> If you&apos;re in a casual
+        <Callout title="When to turn it off">
+          If you&apos;re in a casual
           brainstorming session where precision doesn&apos;t matter, the co-pilot
           might feel overzealous. Flip the toggle off and it stops immediately.
           Turn it back on anytime.
-        </div>
+        </Callout>
       </div>
 
       <div className="help-card">
@@ -1125,13 +1165,13 @@ function SettingsPageSection() {
             caption arrived (e.g., &ldquo;3s ago&rdquo; or &ldquo;never&rdquo;).
             If it says &ldquo;never&rdquo; while recording, something is wrong.</li>
         </ul>
-        <div className="help-card help-tip">
-          <strong>Quick diagnostic:</strong> If you see &ldquo;Recording: yes
+        <Callout title="Quick diagnostic">
+          If you see &ldquo;Recording: yes
           (captions)&rdquo; but &ldquo;Captions received: 0&rdquo; and
           &ldquo;Last caption: never,&rdquo; it means the extension is trying to
           read CC but the platform isn&apos;t producing any. Turn on closed
           captions in the meeting itself.
-        </div>
+        </Callout>
       </div>
 
       <div className="help-card">
@@ -1195,13 +1235,13 @@ function SettingsPageSection() {
           <li><strong>Plans</strong> &mdash; Project plans generated from meetings</li>
           <li><strong>Outcomes</strong> &mdash; Results and outcomes that were tracked</li>
         </ul>
-        <div className="help-card help-tip">
+        <Callout>
           <strong>Think of it as your team&apos;s institutional memory.</strong>{' '}
           Three months from now, when someone asks &ldquo;Why did we decide to
           use PostgreSQL instead of MongoDB?&rdquo; you can search for
           &ldquo;database decision&rdquo; and find the exact meeting where it
           was discussed.
-        </div>
+        </Callout>
       </div>
 
       <div className="help-card">
@@ -1248,12 +1288,12 @@ function PlatformsSection() {
               platform&apos;s own caption overlay so you see captions only in the
               side panel, keeping the video clean</li>
           </ul>
-          <div className="help-card help-tip">
-            <strong>For best results:</strong> Make sure closed captions are turned
+          <Callout title="For best results">
+            Make sure closed captions are turned
             on in the meeting. Look for the &ldquo;CC&rdquo; button in the bottom
             toolbar. LLM IDE will also try to enable CC automatically when you
             start recording.
-          </div>
+          </Callout>
         </div>
 
         <div className="help-card">
@@ -1277,13 +1317,13 @@ function PlatformsSection() {
             <li><strong>Transcript panel</strong> and inline captions</li>
             <li><strong>Speaker detection</strong> via video tile CSS classes</li>
           </ul>
-          <div className="help-card help-warning">
-            <strong>Important:</strong> This works with Zoom in your <em>web
+          <Callout kind="note" title="Important">
+            This works with Zoom in your <em>web
             browser</em> only. The standalone Zoom desktop app runs outside
             Chrome, so the extension can&apos;t access it. To use the web client,
             click &ldquo;Join from your browser&rdquo; instead of launching the
             app.
-          </div>
+          </Callout>
         </div>
       </div>
 
@@ -1411,11 +1451,11 @@ function TroubleshootingSection() {
             again. This re-injects the content scripts.
           </li>
         </ol>
-        <div className="help-card help-tip">
-          <strong>How to verify:</strong> Go to Settings &gt; Diagnostics. If
+        <Callout title="How to verify">
+          Go to Settings &gt; Diagnostics. If
           &ldquo;Captions received&rdquo; is incrementing, captions are flowing
           correctly. If it&apos;s stuck at 0, one of the steps above will fix it.
-        </div>
+        </Callout>
       </div>
 
       <div className="help-card">

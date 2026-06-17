@@ -1972,13 +1972,14 @@ a:focus-visible {
 }
 
 .help-nav-divider {
-  display: inline-flex;
-  align-items: center;
-  color: var(--color-border-strong);
-  font-size: var(--text-xs);
-  padding: 0 2px;
-  user-select: none;
   flex-shrink: 0;
+  align-self: center;
+  width: 1px;
+  height: 14px;
+  margin: 0 var(--space-1);
+  background: var(--color-border);
+  font-size: 0; /* collapses the literal "|" glyph into a clean hairline rule */
+  user-select: none;
 }
 
 /* ── Scrollable content area ───────────────────────────────────── */
@@ -2043,7 +2044,7 @@ a:focus-visible {
 }
 .help-page-pill {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   background: var(--color-bg-2);
@@ -2055,8 +2056,7 @@ a:focus-visible {
 .help-pill-icon {
   display: inline-flex;
   flex-shrink: 0;
-  position: relative;
-  top: 2px;
+  margin-top: 1px;
   color: var(--color-primary);
 }
 .help-page-pill strong {
@@ -2074,35 +2074,55 @@ a:focus-visible {
 }
 .help-card:last-child { margin-bottom: 0; }
 
-/* ── Tip callout (green-tinted card) ───────────────────────────── */
-.help-tip {
+/* ── Callouts (tip / note) — icon + label header above the body ──── */
+.help-callout {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  border-left-width: 3px;
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.help-callout:last-child { margin-bottom: 0; }
+.help-callout-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: var(--space-1);
+}
+.help-callout-icon {
+  display: inline-flex;
+  align-items: center;
+}
+.help-callout-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.help-callout-body {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+.help-callout-body p { margin-bottom: var(--space-1); }
+.help-callout-body p:last-child { margin-bottom: 0; }
+.help-callout-body strong { color: var(--color-text); }
+
+.help-callout-tip {
   background: var(--color-success-dim);
   border-color: rgba(129, 201, 149, 0.3);
+  border-left-color: var(--color-success);
 }
-.help-tip::before {
-  content: 'TIP';
-  display: block;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--color-success);
-  margin-bottom: var(--space-1);
-}
+.help-callout-tip .help-callout-icon,
+.help-callout-tip .help-callout-title { color: var(--color-success); }
 
-/* ── Warning callout (amber-tinted card) ───────────────────────── */
-.help-warning {
+.help-callout-note {
   background: var(--color-warning-dim);
   border-color: rgba(251, 188, 4, 0.3);
+  border-left-color: var(--color-warning);
 }
-.help-warning::before {
-  content: 'NOTE';
-  display: block;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--color-warning);
-  margin-bottom: var(--space-1);
-}
+.help-callout-note .help-callout-icon,
+.help-callout-note .help-callout-title { color: var(--color-warning); }
 
 /* ── Example scenario block ────────────────────────────────────── */
 .help-scenario {
@@ -2133,12 +2153,27 @@ a:focus-visible {
   margin: var(--space-3) 0;
 }
 .help-flow-step {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: var(--space-3);
   padding: var(--space-2) 0;
 }
+/* Continuous vertical connector running through the number column, behind
+   the badges — replaces the old loose "↓" arrows for a real stepper look. */
+.help-flow-step:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--color-border);
+  z-index: 0;
+}
 .help-flow-icon {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2154,15 +2189,8 @@ a:focus-visible {
   background: var(--color-primary-dim);
   border-color: var(--color-primary-border);
 }
-.help-flow-arrow {
-  display: flex;
-  justify-content: center;
-  padding: 0;
-  color: var(--color-text-subtle);
-  font-size: var(--text-xs);
-  line-height: 1;
-  margin-left: 10px;
-}
+/* The standalone arrow divs are superseded by the connector line above. */
+.help-flow-arrow { display: none; }
 .help-flow-body h4 {
   font-size: var(--text-sm);
   font-weight: 600;
@@ -2292,35 +2320,6 @@ a:focus-visible {
   font-size: var(--text-xs) !important;
   color: var(--color-text-subtle) !important;
   font-style: italic;
-}
-
-/* ── Feature grid ──────────────────────────────────────────────── */
-.help-feature-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--space-2);
-}
-
-.help-feature {
-  display: flex;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  background: var(--color-bg-1);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-}
-
-.help-feature-icon {
-  font-size: 20px;
-  flex-shrink: 0;
-  line-height: 1;
-  margin-top: 2px;
-}
-.help-feature h4 {
-  margin-bottom: 2px;
-}
-.help-feature p {
-  margin-bottom: 0;
 }
 
 /* ── Platform list ─────────────────────────────────────────────── */

@@ -7,6 +7,7 @@ struct LibraryView: View {
     @Environment(LibraryItemStore.self) private var itemStore
     @Environment(AgentCatalogStore.self) private var catalogStore
     @EnvironmentObject private var projectStore: ProjectStore
+    @EnvironmentObject private var theme: ThemeStore
     @State private var vm: LibraryViewModel?
     @State private var loadError: String?
     @FocusState private var filterFocused: Bool
@@ -26,13 +27,12 @@ struct LibraryView: View {
     @State private var showingGitInstallSheet = false
     @State private var showingClaudeImportSheet = false
     @State private var pluginInstallMessage: String?
-    /// Agents section collapses by default.
-    @State private var agentsExpanded = false
-    /// Skills section collapses by default — it's a reference panel,
-    /// not something users browse on every session.
-    @State private var skillsExpanded = false
-    /// Plugins section collapses by default like Agents and Skills.
-    @State private var pluginsExpanded = false
+    /// Persisted set of COLLAPSED section ids (comma-joined). Absence ⇒
+    /// expanded. One uniform mechanism drives every section's chevron:
+    /// file-tree sections (Sources/Code/Data/Notes) default expanded, while
+    /// Agents/Skills/Plugins are seeded collapsed since they're reference
+    /// panels users open occasionally. Survives relaunch.
+    @AppStorage("library.collapsedSections") private var collapsedSectionsRaw = "agents,skills,plugins"
 
     var body: some View {
         Group {
@@ -78,6 +78,30 @@ struct LibraryView: View {
             searchBar(filter: Bindable(vm).filter)
             mainList(vm: vm)
         }
+    }
+
+    // MARK: - Section collapse state
+
+    private var collapsedSet: Set<String> {
+        Set(collapsedSectionsRaw.split(separator: ",").map(String.init))
+    }
+
+    /// Binding for a section's expanded state, persisted in
+    /// `collapsedSectionsRaw`. Drives every section's collapse chevron.
+    private func sectionExpanded(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { !collapsedSet.contains(id) },
+            set: { open in
+                var set = collapsedSet
+                if open { set.remove(id) } else { set.insert(id) }
+                collapsedSectionsRaw = set.sorted().joined(separator: ",")
+            }
+        )
+    }
+
+    /// Stable section id for a file-tree category (e.g. `.meetings` → "meetings").
+    private func sectionId(_ category: LibraryItem.Category) -> String {
+        category.rawValue.lowercased()
     }
 
     // MARK: - Search bar
@@ -206,15 +230,13 @@ struct LibraryView: View {
     private func codeTreeSection(_ category: LibraryItem.Category) -> some View {
         let items = itemStore.items(for: category)
         Section {
-            if items.isEmpty {
-                Text("No \(category.rawValue.lowercased()) files yet")
-                    .font(Typography.fileMeta)
-                    .foregroundStyle(.tertiary)
-                    .listRowSeparator(.hidden)
-                    .padding(.vertical, 2)
-            } else {
-                OutlineGroup(CodeEntry.build(from: items), children: \.children) { entry in
-                    codeEntryRow(entry, tint: category.folderTint)
+            if sectionExpanded(sectionId(category)).wrappedValue {
+                if items.isEmpty {
+                    emptyRow("No \(category.rawValue.lowercased()) files yet")
+                } else {
+                    OutlineGroup(CodeEntry.build(from: items), children: \.children) { entry in
+                        codeEntryRow(entry, tint: theme.current.tint(for: category))
+                    }
                 }
             }
         } header: {
@@ -246,6 +268,7 @@ struct LibraryView: View {
     private func plainFileTreeSection(_ category: LibraryItem.Category) -> some View {
         let sectionItems = itemStore.items(for: category)
         Section {
+          if sectionExpanded(sectionId(category)).wrappedValue {
             let looseFiles = sectionItems.filter { $0.folderOrigin == nil }
             let folderGroups = Dictionary(
                 grouping: sectionItems.filter { $0.folderOrigin != nil },
@@ -254,11 +277,7 @@ struct LibraryView: View {
             let sortedFolders = folderGroups.keys.sorted()
 
             if sectionItems.isEmpty {
-                Text("No \(category.rawValue.lowercased()) files yet")
-                    .font(Typography.fileMeta)
-                    .foregroundStyle(.tertiary)
-                    .listRowSeparator(.hidden)
-                    .padding(.vertical, 2)
+                emptyRow("No \(category.rawValue.lowercased()) files yet")
             } else {
                 // Loose files (imported individually)
                 ForEach(looseFiles) { item in
@@ -295,7 +314,7 @@ struct LibraryView: View {
                         HStack(spacing: 5) {
                             Image(systemName: "folder.fill")
                                 .font(Typography.filename)
-                                .foregroundStyle(category.folderTint)
+                                .foregroundStyle(theme.current.tint(for: category))
                             Text(folderName)
                                 .font(Typography.filename)
                                 .foregroundStyle(.primary)
@@ -309,6 +328,7 @@ struct LibraryView: View {
                     .padding(.leading, 16)
                 }
             }
+          }
 
         } header: {
             sectionHeader(category, count: sectionItems.count)
@@ -328,9 +348,11 @@ struct LibraryView: View {
         let all = itemStore.items(for: category)
         let grouped = Dictionary(grouping: all) { $0.sourceKind ?? .meeting }
         Section {
-            ForEach(LibraryItem.SourceKind.allCases, id: \.self) { kind in
-                sourceSubGroup(kind: kind, items: grouped[kind] ?? [],
-                               tint: category.folderTint)
+            if sectionExpanded(sectionId(category)).wrappedValue {
+                ForEach(LibraryItem.SourceKind.allCases, id: \.self) { kind in
+                    sourceSubGroup(kind: kind, items: grouped[kind] ?? [],
+                                   tint: theme.current.tint(for: category))
+                }
             }
         } header: {
             sectionHeader(category, count: all.count)
@@ -357,12 +379,7 @@ struct LibraryView: View {
         )
         DisclosureGroup(isExpanded: isExpanded) {
             if items.isEmpty {
-                Text(kind.emptyText)
-                    .font(Typography.fileMeta)
-                    .foregroundStyle(.tertiary)
-                    .listRowSeparator(.hidden)
-                    .padding(.vertical, 2)
-                    .padding(.leading, 6)
+                emptyRow(kind.emptyText, icon: kind.icon, leading: 6)
             } else {
                 ForEach(items) { item in
                     LibraryFileRow(item: item)
@@ -392,64 +409,125 @@ struct LibraryView: View {
         .padding(.leading, 16)
     }
 
-    private func sectionHeader(_ category: LibraryItem.Category, count: Int) -> some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Image(systemName: category.icon)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(category.uiColor)
-                    .frame(width: 18, height: 18)
-                    .background(category.uiColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-                Text(category.sectionTitle)
-                    .font(.system(size: 11, weight: .heavy))
-                    .foregroundStyle(category.uiColor)
-                    .textCase(.uppercase)
-                    .tracking(0.5)
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(category.uiColor.opacity(0.6))
-                }
-            }
-            Spacer(minLength: 4)
-            Menu {
-                Button { pickFile(for: category) } label: {
-                    Label("Add File", systemImage: "doc.badge.plus")
-                }
-                .disabled(projectStore.activeProject == nil)
-                .help(projectStore.activeProject == nil ? "Open a project first" : "")
-                Button { pickFolder(for: category) } label: {
-                    Label("Add Folder", systemImage: "folder.badge.plus")
-                }
-                .disabled(projectStore.activeProject == nil)
-                .help(projectStore.activeProject == nil ? "Open a project first" : "")
-                if category == .meetings {
-                    Divider()
-                    Button {
-                        NSWorkspace.shared.open(
-                            URL(fileURLWithPath: env.meetingsFolder.path))
-                    } label: {
-                        Label("Reveal Folder in Finder", systemImage: "folder")
-                    }
+    // MARK: - Unified section header
+
+    /// The one header style used by EVERY Library section: a collapse chevron,
+    /// an 18×18 tinted icon chip, an uppercase label, a count pill, and an
+    /// optional trailing control (an "+" / install menu). `tint` is always
+    /// palette-derived so the whole sidebar adapts across Dark/Light/Midnight.
+    ///
+    /// Tapping anywhere on the label area toggles the section (large hit
+    /// target); the trailing control sits outside the toggle button.
+    private func unifiedSectionHeader<Trailing: View>(
+        id: String, title: String, icon: String, tint: Color, count: Int,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
+        let isExpanded = sectionExpanded(id)
+        return HStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isExpanded.wrappedValue.toggle()
                 }
             } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(category.uiColor.opacity(0.5))
-                    .frame(width: 18, height: 18)
-                    .contentShape(Rectangle())
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
+                        .frame(width: 10)
+                    Image(systemName: icon)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(tint)
+                        .frame(width: 18, height: 18)
+                        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+                    Text(title)
+                        .font(.system(size: 11, weight: .heavy))
+                        .foregroundStyle(tint)
+                        .textCase(.uppercase)
+                        .tracking(0.5)
+                    if count > 0 {
+                        Text("\(count)")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(tint.opacity(0.6))
+                    }
+                    Spacer(minLength: 4)
+                }
+                .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 20)
-            .help(category == .meetings ? "Add transcript or reveal folder" : "Add file or folder")
+            .buttonStyle(.plain)
+            .help(isExpanded.wrappedValue ? "Collapse \(title)" : "Expand \(title)")
+
+            trailing()
         }
         // Breathing room above each section groups it visually (Finder-style)
-        // and stops the colored uppercase label from crowding the folder/file
-        // rows beneath it. Smaller bottom inset keeps the label tied to its
-        // own content rather than floating between sections.
+        // and stops the colored uppercase label from crowding the rows beneath.
         .padding(.top, 12)
         .padding(.bottom, 3)
+    }
+
+    /// File-tree section header (Sources/Code/Data/Notes): unified header with
+    /// the category's palette tint and the "Add File / Add Folder" menu.
+    private func sectionHeader(_ category: LibraryItem.Category, count: Int) -> some View {
+        unifiedSectionHeader(
+            id: sectionId(category),
+            title: category.sectionTitle,
+            icon: category.icon,
+            tint: theme.current.tint(for: category),
+            count: count
+        ) {
+            addMenu(for: category)
+        }
+    }
+
+    /// The "+" add menu shown on file-tree section headers.
+    @ViewBuilder
+    private func addMenu(for category: LibraryItem.Category) -> some View {
+        Menu {
+            Button { pickFile(for: category) } label: {
+                Label("Add File", systemImage: "doc.badge.plus")
+            }
+            .disabled(projectStore.activeProject == nil)
+            .help(projectStore.activeProject == nil ? "Open a project first" : "")
+            Button { pickFolder(for: category) } label: {
+                Label("Add Folder", systemImage: "folder.badge.plus")
+            }
+            .disabled(projectStore.activeProject == nil)
+            .help(projectStore.activeProject == nil ? "Open a project first" : "")
+            if category == .meetings {
+                Divider()
+                Button {
+                    NSWorkspace.shared.open(
+                        URL(fileURLWithPath: env.meetingsFolder.path))
+                } label: {
+                    Label("Reveal Folder in Finder", systemImage: "folder")
+                }
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(theme.current.tint(for: category).opacity(0.6))
+                .frame(width: 18, height: 18)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 20)
+        .help(category == .meetings ? "Add transcript or reveal folder" : "Add file or folder")
+    }
+
+    /// Consistent muted empty/placeholder row used across every section.
+    private func emptyRow(_ text: String, icon: String = "tray", leading: CGFloat = 0) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(Typography.fileMeta)
+                .foregroundStyle(.tertiary)
+            Text(text)
+                .font(Typography.fileMeta)
+                .foregroundStyle(.tertiary)
+        }
+        .listRowSeparator(.hidden)
+        .padding(.vertical, 2)
+        .padding(.leading, leading)
     }
 
     private func pickFile(for category: LibraryItem.Category) {
@@ -530,9 +608,9 @@ struct LibraryView: View {
 
         Section {
             // All content only rendered when expanded — collapsed by default.
-            if agentsExpanded {
+            if sectionExpanded("agents").wrappedValue {
                 // ── Sub-group 1: Built-in core agents (locked) ──────────
-                subGroupLabel("Built-in", icon: "shield.checkmark.fill", color: .blue)
+                subGroupLabel("Built-in", icon: "shield.checkmark.fill", color: theme.current.info)
 
                 AgentLibraryRow(
                     title: "Meeting Assistant",
@@ -549,7 +627,7 @@ struct LibraryView: View {
                 .tag(ShellState.LibrarySelection.builtinAgent("ask-agent"))
 
                 // ── Sub-group 2: User personas (editable) ───────────────
-                subGroupLabel("My Personas", icon: "person.crop.circle", color: .purple)
+                subGroupLabel("My Personas", icon: "person.crop.circle", color: theme.current.categoryPurple)
 
                 if agentPersonas.isEmpty {
                     AgentLibraryRow(
@@ -573,7 +651,7 @@ struct LibraryView: View {
 
                 // ── Sub-group 3: Plugin subagents (locked) ──────────────
                 if !allPluginSubagents.isEmpty {
-                    subGroupLabel("From Plugins", icon: "puzzlepiece.extension", color: .teal)
+                    subGroupLabel("From Plugins", icon: "puzzlepiece.extension", color: theme.current.categoryTeal)
                     ForEach(allPluginSubagents, id: \.pluginName) { group in
                         ForEach(group.subagents, id: \.name) { sub in
                             AgentLibraryRow(
@@ -593,51 +671,28 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var agentsHeader: some View {
-        HStack(spacing: 0) {
-            // Toggle button: icon + label + spacer + chevron (chevron at far right)
-            let agentColor = Color(red: 0.20, green: 0.45, blue: 0.95)
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) { agentsExpanded.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "brain.head.profile")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(agentColor)
-                        .frame(width: 18, height: 18)
-                        .background(agentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-                    Text("Agents")
-                        .font(.system(size: 11, weight: .heavy))
-                        .foregroundStyle(agentColor)
-                        .textCase(.uppercase)
-                        .tracking(0.5)
-                    Spacer(minLength: 4)
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(agentsExpanded ? 90 : 0))
-                        .animation(.easeInOut(duration: 0.18), value: agentsExpanded)
-                }
-            }
-            .buttonStyle(.plain)
-            .help(agentsExpanded ? "Collapse Agents" : "Expand Agents")
-
-            // Add-persona button — always visible, separated from the toggle.
+        let pluginSubagentCount = (catalogStore.catalog?.subagents.plugins ?? [])
+            .reduce(0) { $0 + $1.subagents.count }
+        let total = 2 + agentPersonas.count + pluginSubagentCount
+        unifiedSectionHeader(
+            id: "agents", title: "Agents", icon: "brain.head.profile",
+            tint: theme.current.accent, count: total
+        ) {
+            // Add-persona button — sits outside the collapse toggle.
             Button {
                 Task { await addPersona() }
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(theme.current.accent.opacity(0.6))
                     .frame(width: 18, height: 18)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.leading, 4)
+            .frame(width: 20)
             .disabled(agentPersonas.count >= 10)
             .help(agentPersonas.count >= 10 ? "Persona limit reached (10)" : "Add a persona")
         }
-        .padding(.top, 12)
-        .padding(.bottom, 3)
     }
 
     private func addPersona() async {
@@ -680,16 +735,13 @@ struct LibraryView: View {
 
         Section {
             // Content only rendered when expanded — collapsed by default.
-            if skillsExpanded {
+            if sectionExpanded("skills").wrappedValue {
                 if totalSkills == 0 {
-                    Text("Loading skills…")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .listRowSeparator(.hidden)
+                    emptyRow("Loading skills…", icon: "hourglass")
                 } else {
                     // Global tools sub-group label
                     if !globalSkills.isEmpty {
-                        subGroupLabel("Global Tools", icon: "globe", color: .blue)
+                        subGroupLabel("Global Tools", icon: "globe", color: theme.current.info)
                         ForEach(globalSkills) { skill in
                             SkillLibraryRow(skill: skill, pluginName: nil)
                                 .tag(ShellState.LibrarySelection.skill(skill.name))
@@ -697,7 +749,7 @@ struct LibraryView: View {
                     }
                     // Core KB skills sub-group
                     if !internalSkills.isEmpty {
-                        subGroupLabel("Core Skills", icon: "building.columns", color: .indigo)
+                        subGroupLabel("Core Skills", icon: "building.columns", color: theme.current.categoryPurple)
                         ForEach(internalSkills) { skill in
                             SkillLibraryRow(skill: skill, pluginName: nil)
                                 .tag(ShellState.LibrarySelection.skill(skill.name))
@@ -705,7 +757,7 @@ struct LibraryView: View {
                     }
                     // Plugin skills
                     if !pluginGroups.isEmpty {
-                        subGroupLabel("From Plugins", icon: "puzzlepiece.extension", color: .teal)
+                        subGroupLabel("From Plugins", icon: "puzzlepiece.extension", color: theme.current.categoryTeal)
                         ForEach(pluginGroups, id: \.pluginName) { group in
                             ForEach(group.skills) { skill in
                                 SkillLibraryRow(skill: skill, pluginName: group.pluginName)
@@ -722,50 +774,19 @@ struct LibraryView: View {
     }
 
     private func skillsHeader(count: Int) -> some View {
-        let skillColor = Color(red: 0.22, green: 0.70, blue: 0.45) // green (Code family)
-        return Button {
-            withAnimation(.easeInOut(duration: 0.18)) { skillsExpanded.toggle() }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "wrench.and.screwdriver")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(skillColor)
-                    .frame(width: 18, height: 18)
-                    .background(skillColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-                Text("Skills")
-                    .font(.system(size: 11, weight: .heavy))
-                    .foregroundStyle(skillColor)
-                    .textCase(.uppercase)
-                    .tracking(0.5)
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(skillColor.opacity(0.6))
-                }
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(skillsExpanded ? 90 : 0))
-                    .animation(.easeInOut(duration: 0.18), value: skillsExpanded)
-            }
-        }
-        .buttonStyle(.plain)
-        .help(skillsExpanded ? "Collapse Skills" : "Expand Skills")
-        .padding(.top, 12)
-        .padding(.bottom, 3)
+        unifiedSectionHeader(
+            id: "skills", title: "Skills", icon: "wrench.and.screwdriver",
+            tint: theme.current.success, count: count
+        ) { EmptyView() }
     }
 
     @ViewBuilder
     private var pluginsSection: some View {
         Section {
-            if pluginsExpanded {
+            if sectionExpanded("plugins").wrappedValue {
                 if plugins.isEmpty {
-                    Text("No plugins installed yet — install one from .zip or a Git URL.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 6)
-                        .listRowSeparator(.hidden)
+                    emptyRow("No plugins installed yet — install from .zip or a Git URL.",
+                             icon: "puzzlepiece.extension")
                 } else {
                     ForEach(plugins) { p in
                         PluginLibraryRow(plugin: p)
@@ -788,40 +809,11 @@ struct LibraryView: View {
     /// left, small icon-button on the right — same size and colour token.
     @ViewBuilder
     private var pluginsHeader: some View {
-        HStack(spacing: 0) {
-            let pluginColor = Color.teal
-            // Toggle button: icon + label + chevron (matches Agents/Skills pattern)
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) { pluginsExpanded.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "puzzlepiece.extension")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(pluginColor)
-                        .frame(width: 18, height: 18)
-                        .background(pluginColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-                    Text("Plugins")
-                        .font(.system(size: 11, weight: .heavy))
-                        .foregroundStyle(pluginColor)
-                        .textCase(.uppercase)
-                        .tracking(0.5)
-                    if !plugins.isEmpty {
-                        Text("\(plugins.count)")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(pluginColor.opacity(0.6))
-                    }
-                    Spacer(minLength: 4)
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(pluginsExpanded ? 90 : 0))
-                        .animation(.easeInOut(duration: 0.18), value: pluginsExpanded)
-                }
-            }
-            .buttonStyle(.plain)
-            .help(pluginsExpanded ? "Collapse Plugins" : "Expand Plugins")
-
-            // Right: install menu — same frame/font as the + buttons above
+        unifiedSectionHeader(
+            id: "plugins", title: "Plugins", icon: "puzzlepiece.extension",
+            tint: theme.current.categoryTeal, count: plugins.count
+        ) {
+            // Right: install menu — same frame/font as the + buttons above.
             Menu {
                 Button {
                     Task { await installFromZip() }
@@ -842,7 +834,7 @@ struct LibraryView: View {
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(theme.current.categoryTeal.opacity(0.6))
                     .frame(width: 18, height: 18)
                     .contentShape(Rectangle())
             }
@@ -851,8 +843,6 @@ struct LibraryView: View {
             .frame(width: 20)
             .help("Install or reload plugins")
         }
-        .padding(.top, 12)
-        .padding(.bottom, 3)
         .sheet(isPresented: $showingGitInstallSheet) {
             PluginGitInstallSheet { url, ref in
                 showingGitInstallSheet = false
