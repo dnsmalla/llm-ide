@@ -11,7 +11,7 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
-const { resolveProvider, providerApiKey, completeViaApi, verifyProvider, cliInvocation } =
+const { resolveProvider, providerApiKey, completeViaApi, verifyProvider, cliInvocation, listProviderModels } =
   await import('../agents/providers.mjs');
 
 function mockFetch(handler) {
@@ -99,11 +99,43 @@ test('completeViaApi: throws on a non-transient 401 (no retry)', async () => {
   } finally { restore(); }
 });
 
-test('verifyProvider: key mode reports ok on a 200 probe', async () => {
-  const restore = mockFetch(async () => jsonRes(200, { choices: [{ message: { content: 'pong' } }] }));
+test('listProviderModels openai: parses { data: [{id}] }', async () => {
+  const restore = mockFetch(async (url, opts) => {
+    assert.match(url, /api\.openai\.com\/v1\/models/);
+    assert.equal(opts.method, 'GET');
+    return jsonRes(200, { data: [{ id: 'gpt-4o' }, { id: 'gpt-4o-mini' }] });
+  });
   try {
-    const r = await verifyProvider({ provider: 'openai', mode: 'key', apiKey: 'k', model: 'gpt-4o-mini' });
+    assert.deepEqual(await listProviderModels('openai', { apiKey: 'k' }), ['gpt-4o', 'gpt-4o-mini']);
+  } finally { restore(); }
+});
+
+test('listProviderModels google: strips models/ prefix from names', async () => {
+  const restore = mockFetch(async (url) => {
+    assert.match(url, /generativelanguage\.googleapis\.com\/v1beta\/models/);
+    return jsonRes(200, { models: [{ name: 'models/gemini-2.0-flash' }, { name: 'models/gemini-1.5-pro' }] });
+  });
+  try {
+    assert.deepEqual(await listProviderModels('google', { apiKey: 'k' }), ['gemini-2.0-flash', 'gemini-1.5-pro']);
+  } finally { restore(); }
+});
+
+test('listProviderModels: throws on a 401', async () => {
+  const restore = mockFetch(async () => jsonRes(401, { error: 'bad key' }));
+  try {
+    await assert.rejects(() => listProviderModels('openai', { apiKey: 'k' }), /HTTP 401/);
+  } finally { restore(); }
+});
+
+test('verifyProvider: key mode lists models (GET) and reports ok', async () => {
+  const restore = mockFetch(async (url, opts) => {
+    assert.equal(opts.method, 'GET'); // no token-spending generate call
+    return jsonRes(200, { data: [{ id: 'gpt-4o' }, { id: 'gpt-4o-mini' }] });
+  });
+  try {
+    const r = await verifyProvider({ provider: 'openai', mode: 'key', apiKey: 'k' });
     assert.equal(r.ok, true);
+    assert.match(r.detail, /2 models/);
   } finally { restore(); }
 });
 

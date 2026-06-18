@@ -199,42 +199,65 @@ export function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS } = {})
   });
 }
 
+// ── Model discovery ───────────────────────────────────────────────────
+
+// GET endpoint that lists a provider's models. Used both to verify a key
+// (a 200 means the key authenticates) and to populate the model picker with
+// live ids instead of a hardcoded list that drifts as models are retired.
+const MODELS_ENDPOINT = {
+  anthropic: (key) => ({ url: 'https://api.anthropic.com/v1/models',
+    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' } }),
+  openai: (key) => ({ url: 'https://api.openai.com/v1/models',
+    headers: { Authorization: `Bearer ${key}` } }),
+  google: (key) => ({ url: `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`,
+    headers: {} }),
+};
+
+function parseModelIds(provider, data) {
+  if (provider === 'google') {
+    return (data?.models || [])
+      .map((m) => String(m?.name || '').replace(/^models\//, ''))
+      .filter(Boolean);
+  }
+  // anthropic + openai both return { data: [{ id }, …] }
+  return (data?.data || []).map((m) => m?.id).filter((id) => typeof id === 'string');
+}
+
+/**
+ * List a provider's available model ids over its models endpoint. Throws on
+ * a non-200 (auth/transient) — callers verify or fall back to a static list.
+ */
+export async function listProviderModels(provider, { apiKey, signal } = {}) {
+  const make = MODELS_ENDPOINT[provider];
+  if (!make) throw new Error(`listProviderModels: unsupported provider '${provider}'`);
+  if (!apiKey) throw new Error(`listProviderModels: no API key for ${provider}`);
+  const { url, headers } = make(apiKey);
+  const res = await fetch(url, { method: 'GET', headers, signal: signal || AbortSignal.timeout(15_000) });
+  if (!res.ok) throw await readError(res, apiKey);
+  const data = await res.json();
+  return parseModelIds(provider, data);
+}
+
 // ── Verification ──────────────────────────────────────────────────────
 
 /**
- * Verify a provider credential. For `mode: 'key'` it makes a minimal live
- * call (1-token budget) and reports whether the key works. For
- * `mode: 'cli'` it checks the provider's CLI binary is installed (login
- * state can't be probed non-interactively for every CLI, so we report
- * "installed" and let the first real call surface an auth error).
+ * Verify a provider credential. `mode: 'key'` lists the provider's models —
+ * a 200 confirms the key authenticates, at zero token cost and with no
+ * dependency on a specific (retirable) probe model. `mode: 'cli'` checks the
+ * provider's CLI binary is installed (interactive login state can't be
+ * probed for every CLI; the first real call surfaces an auth error).
  * Always resolves — never throws — returning { ok, detail }.
  */
-export async function verifyProvider({ provider, mode, apiKey, model } = {}) {
+export async function verifyProvider({ provider, mode, apiKey } = {}) {
   if (!PROVIDERS[provider]) return { ok: false, detail: `unknown provider '${provider}'` };
   if (mode === 'cli') return verifyCli(provider);
   if (!apiKey) return { ok: false, detail: 'no API key provided' };
   try {
-    const probeModel = model || defaultProbeModel(provider);
-    if (provider === 'anthropic') {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-        body: JSON.stringify({ model: probeModel, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
-        signal: AbortSignal.timeout(15_000),
-      });
-      return res.ok ? { ok: true, detail: 'key verified' } : { ok: false, detail: (await readError(res, apiKey)).message };
-    }
-    await completeViaApi(provider, { apiKey, model: probeModel, prompt: 'ping', maxTokens: 1 });
-    return { ok: true, detail: 'key verified' };
+    const models = await listProviderModels(provider, { apiKey });
+    return { ok: true, detail: `key verified — ${models.length} models available` };
   } catch (err) {
     return { ok: false, detail: redact(err.message || String(err), apiKey) };
   }
-}
-
-function defaultProbeModel(provider) {
-  if (provider === 'openai') return process.env.LLMIDE_OPENAI_MODEL || 'gpt-4o-mini';
-  if (provider === 'google') return process.env.LLMIDE_GOOGLE_MODEL || 'gemini-1.5-flash';
-  return process.env.LLMIDE_MODEL || 'claude-sonnet-4-6';
 }
 
 function verifyCli(provider) {
