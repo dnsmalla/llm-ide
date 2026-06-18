@@ -11,15 +11,9 @@ struct ReviewConfig {
     let emptyHint: String
     let emptyHintWidth: CGFloat
 
-    static let code = ReviewConfig(
-        treeTitle: "EXPLORER",
-        treeCategories: [.code],
-        treeLabel: "Explorer",
-        emptyIcon: "curlybraces",
-        emptyTitle: "Select a file to view",
-        emptyHint: "Clone a GitLab repo in Settings, or use **Add file / Add folder** in the tree",
-        emptyHintWidth: 300
-    )
+    // (ReviewConfig.code removed with the .review section — Explorer now
+    // owns the project file-browser role. ReviewView serves .docs and
+    // .conflicts only.)
 
     static let docs = ReviewConfig(
         treeTitle: "DOCUMENTS",

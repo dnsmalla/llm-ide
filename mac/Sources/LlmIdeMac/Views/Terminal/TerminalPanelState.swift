@@ -105,7 +105,7 @@ final class TerminalPanelState {
     /// Terminate a session and remove its tab.
     /// Closes the panel automatically when the last tab is removed.
     func closeTab(at index: Int) {
-        guard index < sessions.count else { return }
+        guard index >= 0, index < sessions.count else { return }
         sessions[index].terminate()
         sessions.remove(at: index)
         if sessions.isEmpty {

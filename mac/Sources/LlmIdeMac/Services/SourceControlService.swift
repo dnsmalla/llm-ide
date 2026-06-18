@@ -110,7 +110,12 @@ final class SourceControlService {
     /// are restored. Caller must confirm — this is destructive.
     func discard(root: URL, file: FileChange) async {
         if file.status == .untracked {
-            try? FileManager.default.removeItem(at: root.appendingPathComponent(file.path))
+            do {
+                try FileManager.default.removeItem(at: root.appendingPathComponent(file.path))
+            } catch {
+                // Surface like every other op (was silently swallowed).
+                state.opError = "Couldn't discard \(file.path): \(error.localizedDescription)"
+            }
         } else {
             await run(["restore", "--", file.path], root)
         }

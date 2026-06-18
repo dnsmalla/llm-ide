@@ -128,6 +128,7 @@ private struct FSNodeRow: View {
     let store: LibraryItemStore
     @State private var showDeleteConfirmation = false
     @State private var showRemoveConfirmation = false
+    @State private var deleteError: String?
 
     var body: some View {
         if node.isFile {
@@ -233,14 +234,29 @@ private struct FSNodeRow: View {
             .confirmationDialog("Delete \"\(node.name)\"?", isPresented: $showDeleteConfirmation) {
                 Button("Delete", role: .destructive) {
                     if let item = node.item {
-                        if selectedURL == node.url { selectedURL = nil }
-                        try? FileManager.default.removeItem(at: item.url)
-                        store.remove(id: item.id)
-                        NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
+                        // Only drop it from the library if the on-disk delete
+                        // actually succeeded — otherwise the file silently
+                        // survives while the user believes it's gone.
+                        do {
+                            try FileManager.default.removeItem(at: item.url)
+                            if selectedURL == node.url { selectedURL = nil }
+                            store.remove(id: item.id)
+                            NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
+                        } catch {
+                            deleteError = "Couldn't delete \"\(node.name)\": \(error.localizedDescription)"
+                        }
                     }
                 }
             } message: {
                 Text("This will permanently delete the transcript file from disk.")
+            }
+            .alert("Delete failed", isPresented: Binding(
+                get: { deleteError != nil },
+                set: { if !$0 { deleteError = nil } }
+            )) {
+                Button("OK", role: .cancel) { deleteError = nil }
+            } message: {
+                Text(deleteError ?? "")
             }
             .confirmationDialog("Remove \"\(node.name)\" from the library?", isPresented: $showRemoveConfirmation) {
                 Button("Remove", role: .destructive) {
