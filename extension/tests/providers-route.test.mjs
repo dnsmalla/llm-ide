@@ -90,3 +90,22 @@ test('POST /kb/providers/verify (cli mode) returns a boolean ok without network'
   assert.equal(typeof parsed.ok, 'boolean');
   assert.equal(typeof parsed.detail, 'string');
 });
+
+test('POST /kb/providers/models returns [] with a note when no key is configured', async () => {
+  resetDb();
+  const req = makeReq({ method: 'POST', url: '/kb/providers/models', body: { provider: 'openai' }, userId: 'u-nokey' });
+  const res = makeRes();
+  assert.equal(await handleKB(req, res), true);
+  assert.equal(res.statusCode, 200);
+  const parsed = JSON.parse(res._body);
+  assert.deepEqual(parsed.models, []);
+  assert.match(parsed.detail, /no API key/);
+});
+
+test('POST /kb/providers/models rejects an unknown provider with 400', async () => {
+  resetDb();
+  const req = makeReq({ method: 'POST', url: '/kb/providers/models', body: { provider: 'skynet' }, userId: 'u1' });
+  const res = makeRes();
+  assert.equal(await handleKB(req, res), true);
+  assert.equal(res.statusCode, 400);
+});

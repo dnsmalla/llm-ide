@@ -238,6 +238,24 @@ export async function listProviderModels(provider, { apiKey, signal } = {}) {
   return parseModelIds(provider, data);
 }
 
+// Narrow a raw provider model list to the chat/completion models worth
+// showing in a picker — provider model lists also include embeddings, TTS,
+// image, moderation, etc. that can't serve a prompt.
+export function chatModels(provider, ids) {
+  const list = Array.isArray(ids) ? ids : [];
+  if (provider === 'openai') {
+    const exclude = /(embedding|tts|whisper|audio|image|realtime|moderation|dall-e|transcribe|search)/i;
+    return list.filter((id) => /^(gpt-|o\d|chatgpt)/i.test(id) && !exclude.test(id));
+  }
+  if (provider === 'google') {
+    return list.filter((id) => /^gemini-/i.test(id) && !/embedding|aqa/i.test(id));
+  }
+  if (provider === 'anthropic') {
+    return list.filter((id) => /^claude-/i.test(id));
+  }
+  return list;
+}
+
 // ── Verification ──────────────────────────────────────────────────────
 
 /**

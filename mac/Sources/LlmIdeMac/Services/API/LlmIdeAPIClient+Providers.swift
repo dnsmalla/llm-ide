@@ -23,6 +23,18 @@ extension LlmIdeAPIClient {
                               authenticated: true)
     }
 
+    /// Live chat-model ids for a provider (from its models endpoint, filtered
+    /// server-side). Returns [] when no key is configured or the fetch fails,
+    /// so callers fall back to a built-in static list rather than an empty UI.
+    func listProviderModels(_ provider: String) async throws -> [String] {
+        struct Req: Encodable { let provider: String }
+        struct Resp: Decodable { let models: [String] }
+        let r: Resp = try await post("/kb/providers/models",
+                                     body: Req(provider: provider),
+                                     authenticated: true)
+        return r.models
+    }
+
     /// Vault keys the user currently has set (names only — values never leave
     /// the server). Used to show a "configured" badge per provider.
     func configuredSecretKeys() async throws -> Set<String> {

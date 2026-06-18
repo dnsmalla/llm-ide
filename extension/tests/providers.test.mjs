@@ -11,7 +11,7 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
-const { resolveProvider, providerApiKey, completeViaApi, verifyProvider, cliInvocation, listProviderModels } =
+const { resolveProvider, providerApiKey, completeViaApi, verifyProvider, cliInvocation, listProviderModels, chatModels } =
   await import('../agents/providers.mjs');
 
 function mockFetch(handler) {
@@ -151,6 +151,21 @@ test('verifyProvider: key mode reports failure on a 401, never throws', async ()
 test('verifyProvider: unknown provider fails gracefully', async () => {
   const r = await verifyProvider({ provider: 'skynet', mode: 'key', apiKey: 'k' });
   assert.equal(r.ok, false);
+});
+
+test('chatModels: openai keeps chat models, drops non-completion ones', () => {
+  const ids = ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'text-embedding-3-small',
+               'whisper-1', 'tts-1', 'dall-e-3', 'omni-moderation-latest'];
+  assert.deepEqual(chatModels('openai', ids).sort(), ['gpt-4o', 'gpt-4o-mini', 'o3-mini']);
+});
+
+test('chatModels: google keeps gemini-*, drops embeddings', () => {
+  const ids = ['gemini-2.0-flash', 'gemini-1.5-pro', 'text-embedding-004', 'aqa'];
+  assert.deepEqual(chatModels('google', ids).sort(), ['gemini-1.5-pro', 'gemini-2.0-flash']);
+});
+
+test('chatModels: anthropic keeps claude-* only', () => {
+  assert.deepEqual(chatModels('anthropic', ['claude-sonnet-4-6', 'whatever']), ['claude-sonnet-4-6']);
 });
 
 test('cliInvocation: standard non-interactive form per provider', () => {

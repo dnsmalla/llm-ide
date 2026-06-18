@@ -63,6 +63,10 @@ struct CodeAssistantPanel: View {
     /// (e.g. an image or binary). Prevents the silent drop on the Visual page.
     @State private var attachNotice: String?
     @State private var selectedModel: String = ""
+    /// Live provider models, keyed by provider id ("openai"/"google"/...).
+    /// Populated from the provider's models endpoint; falls back to the
+    /// built-in AICliTool.models list when empty (no key / fetch failed).
+    @State private var liveModels: [String: [AIModel]] = [:]
     @State private var pendingTool: PendingTool?
     /// Snapshot of recent issues for the active project, refreshed on
     /// panel mount and every ~60s. Bundled into agentContext so the
@@ -144,6 +148,7 @@ struct CodeAssistantPanel: View {
         .background(theme.current.body)
         .task { await loadLanguage() }
         .task { await refreshRecentIssuesLoop() }
+        .task { await loadModels(for: AICliTool(rawValue: config.activeCLI) ?? .claudeCode) }
         .onAppear {
             if selectedModel.isEmpty {
                 selectedModel = config.defaultModelId.isEmpty
@@ -1085,7 +1090,7 @@ struct CodeAssistantPanel: View {
             // Model picker. Truncate label aggressively when compact so
             // the chip stays one capsule wide instead of wrapping.
             Menu {
-                ForEach(cli.models) { model in
+                ForEach(modelsFor(cli)) { model in
                     Button(model.displayName) { selectedModel = model.id }
                 }
             } label: {
@@ -1138,9 +1143,24 @@ struct CodeAssistantPanel: View {
     }
 
     private func currentModelDisplayName(for cli: AICliTool) -> String {
-        cli.models.first(where: { $0.id == selectedModel })?.displayName
-            ?? cli.models.first?.displayName
+        let models = modelsFor(cli)
+        return models.first(where: { $0.id == selectedModel })?.displayName
+            ?? models.first?.displayName
             ?? selectedModel
+    }
+
+    /// Models to offer for a provider: the live list when we've fetched one,
+    /// otherwise the built-in static list (keeps the picker populated when no
+    /// key is set or the fetch failed).
+    private func modelsFor(_ cli: AICliTool) -> [AIModel] {
+        if let live = liveModels[cli.provider], !live.isEmpty { return live }
+        return cli.models
+    }
+
+    /// Fetch the provider's live chat models (best-effort; silent on failure).
+    private func loadModels(for cli: AICliTool) async {
+        guard let ids = try? await api.listProviderModels(cli.provider), !ids.isEmpty else { return }
+        liveModels[cli.provider] = ids.map { AIModel(id: $0, displayName: $0) }
     }
 
     /// Switch the active model provider (Claude / OpenAI / Gemini) and reset
@@ -1150,6 +1170,7 @@ struct CodeAssistantPanel: View {
         config.activeCLI = tool.rawValue
         config.defaultModelId = tool.defaultModelId
         selectedModel = tool.defaultModelId
+        Task { await loadModels(for: tool) }
     }
 
     /// Single source of truth for composer text-area height.  Caps

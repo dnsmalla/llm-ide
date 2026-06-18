@@ -22,7 +22,7 @@ import { handleReviewRoutes } from './routes/review.mjs';
 // runGuardrails moved into routes/review.mjs.
 import { summarizeTranscript } from '../agents/summarize.mjs';
 import { runClaude } from '../agents/runtime.mjs';
-import { verifyProvider, providerApiKey, PROVIDER_IDS } from '../agents/providers.mjs';
+import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatModels } from '../agents/providers.mjs';
 import { iterateUserMeetings } from './exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails } from '../agents/email-source.mjs';
@@ -87,6 +87,29 @@ export async function handleKB(req, res) {
       const model = typeof body.model === 'string' ? body.model : undefined;
       const result = await verifyProvider({ provider, mode, apiKey, model });
       sendJSON(res, 200, result);
+      return true;
+    }
+
+    // Live model list for a provider's picker. Reads the user's stored key
+    // and returns the provider's current chat models (filtered). Always 200:
+    // an empty list (no key, or a transient error) lets the client fall back
+    // to its built-in static list rather than failing the UI.
+    if (req.method === 'POST' && url === '/kb/providers/models') {
+      const body = parseJSON(await readBody(req, 16 * 1024)) || {};
+      const provider = String(body.provider || '');
+      if (!PROVIDER_IDS.includes(provider)) {
+        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED',
+          message: `Unknown provider (allowed: ${PROVIDER_IDS.join(', ')})` } });
+        return true;
+      }
+      const key = providerApiKey(userId, provider);
+      if (!key) { sendJSON(res, 200, { models: [], detail: 'no API key configured' }); return true; }
+      try {
+        const ids = await listProviderModels(provider, { apiKey: key });
+        sendJSON(res, 200, { models: chatModels(provider, ids).sort() });
+      } catch (err) {
+        sendJSON(res, 200, { models: [], detail: String(err?.message || err).slice(0, 200) });
+      }
       return true;
     }
 
