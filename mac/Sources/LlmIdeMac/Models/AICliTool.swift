@@ -5,30 +5,57 @@ import Foundation
 /// in AppConfig and drives the model picker in CodeAssistantPanel.
 enum AICliTool: String, CaseIterable, Identifiable {
     case claudeCode = "claude_code"
+    case openai     = "openai"
     case cursor     = "cursor"
     case copilot    = "copilot"
     case gemini     = "gemini"
 
     var id: String { rawValue }
 
-    /// Tools that are actually functional end-to-end. The backend only
-    /// speaks to the Claude CLI / Anthropic API today, so the others are
-    /// hidden from the picker — showing them would silently run Claude
-    /// under another tool's name. Add cases here when real support lands.
-    static var selectable: [AICliTool] { [.claudeCode] }
+    /// Tools selectable in the picker. These are the direct-API providers the
+    /// backend routes by model id (see extension/agents/providers.mjs):
+    /// Anthropic (Claude), OpenAI, Google (Gemini). A non-Claude provider
+    /// needs an API key configured in Settings → Model Providers; without one
+    /// the backend returns a clear "add a key" error rather than silently
+    /// running Claude. Cursor/Copilot stay hidden — they're editor tools, not
+    /// direct API endpoints, so routing their gpt ids to the OpenAI API would
+    /// misrepresent the source.
+    static var selectable: [AICliTool] { [.claudeCode, .openai, .gemini] }
+
+    /// Backend provider id this tool's models route to.
+    var provider: String {
+        switch self {
+        case .claudeCode:            return "anthropic"
+        case .openai, .copilot:      return "openai"
+        case .gemini:                return "google"
+        case .cursor:                return "anthropic" // mixed; not selectable
+        }
+    }
+
+    /// Vault key for this provider's API credential (nil for non-providers).
+    var vaultKey: String? {
+        switch provider {
+        case "anthropic": return "claude.apiKey"
+        case "openai":    return "openai.apiKey"
+        case "google":    return "google.apiKey"
+        default:          return nil
+        }
+    }
 
     var displayName: String {
         switch self {
-        case .claudeCode: return "Claude Code"
+        case .claudeCode: return "Claude"
+        case .openai:     return "OpenAI"
         case .cursor:     return "Cursor"
         case .copilot:    return "GitHub Copilot"
-        case .gemini:     return "Gemini CLI"
+        case .gemini:     return "Gemini"
         }
     }
 
     var icon: String {
         switch self {
         case .claudeCode: return "terminal.fill"
+        case .openai:     return "cpu"
         case .cursor:     return "curlybraces.square.fill"
         case .copilot:    return "chevron.left.forwardslash.chevron.right"
         case .gemini:     return "sparkles"
@@ -37,10 +64,11 @@ enum AICliTool: String, CaseIterable, Identifiable {
 
     var description: String {
         switch self {
-        case .claudeCode: return "Anthropic's official CLI for Claude"
+        case .claudeCode: return "Anthropic Claude (API key, or your logged-in claude CLI)"
+        case .openai:     return "OpenAI GPT / Codex models (API key)"
         case .cursor:     return "AI-first code editor by Anysphere"
         case .copilot:    return "GitHub's AI coding assistant"
-        case .gemini:     return "Google's Gemini AI CLI"
+        case .gemini:     return "Google Gemini models (API key)"
         }
     }
 
@@ -51,6 +79,12 @@ enum AICliTool: String, CaseIterable, Identifiable {
                 AIModel(id: "claude-sonnet-4-6",         displayName: "Sonnet 4.6"),
                 AIModel(id: "claude-opus-4-8",            displayName: "Opus 4.8"),
                 AIModel(id: "claude-haiku-4-5-20251001",  displayName: "Haiku 4.5"),
+            ]
+        case .openai:
+            return [
+                AIModel(id: "gpt-4o",                     displayName: "GPT-4o"),
+                AIModel(id: "gpt-4o-mini",                displayName: "GPT-4o mini"),
+                AIModel(id: "o3-mini",                    displayName: "o3-mini"),
             ]
         case .cursor:
             return [
@@ -81,6 +115,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
     var cliExecutable: String {
         switch self {
         case .claudeCode: return "claude"
+        case .openai:     return "codex"
         case .cursor:     return "cursor"
         case .copilot:    return "gh copilot"
         case .gemini:     return "gemini"

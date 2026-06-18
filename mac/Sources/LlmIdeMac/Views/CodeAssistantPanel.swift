@@ -1060,15 +1060,27 @@ struct CodeAssistantPanel: View {
     private var modelPickerChips: some View {
         let cli = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
         return HStack(spacing: 6) {
-            // Active CLI chip — icon-only when very compact, label
-            // collapses to an icon button so the row never clips.
-            Chip(
-                icon: cli.icon,
-                label: isCompact ? "" : cli.displayName,
-                trailing: "chevron.down",
-                compact: isCompact
-            )
-            .help(cli.displayName)
+            // Provider chip — a menu to switch among the direct-API providers
+            // (Claude / OpenAI / Gemini). Switching resets the model to that
+            // provider's default. A provider without a configured key surfaces
+            // a clear "add a key in Settings" error on send.
+            Menu {
+                ForEach(AICliTool.selectable) { tool in
+                    Button { switchProvider(tool) } label: {
+                        Label(tool.displayName, systemImage: tool.icon)
+                    }
+                }
+            } label: {
+                Chip(
+                    icon: cli.icon,
+                    label: isCompact ? "" : cli.displayName,
+                    trailing: "chevron.down",
+                    compact: isCompact
+                )
+            }
+            .menuStyle(.borderlessButton)
+            .help("Switch model provider")
+            .fixedSize()
 
             // Model picker. Truncate label aggressively when compact so
             // the chip stays one capsule wide instead of wrapping.
@@ -1129,6 +1141,15 @@ struct CodeAssistantPanel: View {
         cli.models.first(where: { $0.id == selectedModel })?.displayName
             ?? cli.models.first?.displayName
             ?? selectedModel
+    }
+
+    /// Switch the active model provider (Claude / OpenAI / Gemini) and reset
+    /// the selected model to that provider's default. The model id flows to
+    /// the backend, which routes it to the right provider API.
+    private func switchProvider(_ tool: AICliTool) {
+        config.activeCLI = tool.rawValue
+        config.defaultModelId = tool.defaultModelId
+        selectedModel = tool.defaultModelId
     }
 
     /// Single source of truth for composer text-area height.  Caps
