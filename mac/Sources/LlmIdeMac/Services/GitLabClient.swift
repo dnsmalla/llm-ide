@@ -2,6 +2,7 @@ import Foundation
 
 /// Thin async/await wrapper around GitLab's REST v4 API.
 /// All calls require a Personal Access Token with the `api` scope.
+@MainActor
 final class GitLabClient {
 
     enum GitLabError: LocalizedError {

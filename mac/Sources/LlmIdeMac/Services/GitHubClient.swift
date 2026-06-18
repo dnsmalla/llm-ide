@@ -6,6 +6,7 @@ import Foundation
 /// the token and resolve a repo URL to a `GitHubRepo`. Issues/PRs/etc.
 /// are intentionally out of scope until a `RepoBackend` abstraction
 /// across GitLab and GitHub lands.
+@MainActor
 final class GitHubClient {
 
     enum GitHubError: LocalizedError {
@@ -132,7 +133,7 @@ final class GitHubClient {
 
     /// Returns (owner, name) for `https://github.com/<owner>/<name>(.git)?`
     /// or shorthand `<owner>/<name>`. Strips a trailing `.git` if present.
-    static func ownerAndName(from raw: String) -> (String, String)? {
+    nonisolated static func ownerAndName(from raw: String) -> (String, String)? {
         var path = raw
 
         // If it's a URL, only accept github.com — fail closed on enterprise
