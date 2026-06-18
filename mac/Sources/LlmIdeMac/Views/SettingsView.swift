@@ -50,6 +50,7 @@ struct SettingsView: View {
                                 GitLabSettingsSection()
                                 GitHubSettingsSection()
                                 CLISettingsSection()
+                                ProvidersSettingsSection(api: api)
                                 PreferencesSettingsSection(api: api)
                             }
                             Group {
