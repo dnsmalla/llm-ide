@@ -146,6 +146,18 @@ extension GitHubClient {
                       query: [.init(name: "state", value: "open"), .init(name: "per_page", value: "100")])
     }
 
+    // MARK: - Branches
+
+    /// Create branch `branch` pointing at the head of `fromRef` (an existing
+    /// branch). GitHub needs the base ref's commit sha first, then a new ref.
+    func createBranchGitHub(owner: String, name: String, branch: String, fromRef: String) async throws {
+        struct RefWire: Decodable { struct Obj: Decodable { let sha: String }; let object: Obj }
+        let base: RefWire = try await get("/repos/\(owner)/\(name)/git/ref/heads/\(fromRef)")
+        struct CreatedRef: Decodable { let ref: String }
+        let _: CreatedRef = try await post("/repos/\(owner)/\(name)/git/refs",
+                                           body: ["ref": "refs/heads/\(branch)", "sha": base.object.sha])
+    }
+
     // MARK: - Generic POST / PATCH helpers
 
     private func post<T: Decodable>(_ path: String, body: [String: Any]) async throws -> T {

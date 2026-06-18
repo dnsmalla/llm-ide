@@ -99,6 +99,13 @@ extension GitLabClient: RepoBackend {
         return raw.asRepoNote
     }
 
+    func createBranch(projectId: String, name: String, ref: String) async throws {
+        guard let intId = Int(projectId) else {
+            throw GitLabError.badURL("project id \(projectId) isn't numeric")
+        }
+        _ = try await self.createBranch(projectId: intId, name: name, ref: ref)
+    }
+
     func createMergeRequest(projectId: String, payload: RepoMergeRequestPayload) async throws -> RepoMergeRequest {
         guard let intId = Int(projectId) else {
             throw GitLabError.badURL("project id \(projectId) isn't numeric")

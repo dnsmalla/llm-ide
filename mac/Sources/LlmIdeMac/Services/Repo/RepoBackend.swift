@@ -243,6 +243,11 @@ struct RepoIssueFilter: Equatable, Sendable {
 
 /// Minimal read-shaped contract. Per-call errors throw; the caller
 /// decides how to surface them.
+// Main-actor-isolated: both conformers (GitLabClient/GitHubClient) are
+// @MainActor — they read main-mutated AppConfig live — and every consumer is
+// a SwiftUI view. Isolating the protocol to match avoids the Swift 6
+// conformance-isolation warning without faking Sendability.
+@MainActor
 protocol RepoBackend: Sendable {
     var kind: RepoBackendKind { get }
 
@@ -288,6 +293,10 @@ protocol RepoBackend: Sendable {
 
     /// Post a comment. Returns the created note.
     func createNote(projectId: String, number: Int, body: String) async throws -> RepoNote
+
+    /// Create branch `name` from existing branch `ref`. Throws on failure.
+    /// Needed by the AI code-change workflow (issue → branch → commit → MR).
+    func createBranch(projectId: String, name: String, ref: String) async throws
 
     /// Create a merge request / pull request. Returns the created MR/PR.
     func createMergeRequest(projectId: String, payload: RepoMergeRequestPayload) async throws -> RepoMergeRequest

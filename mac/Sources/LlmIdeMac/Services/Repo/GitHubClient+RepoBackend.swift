@@ -103,6 +103,13 @@ extension GitHubClient: RepoBackend {
         return wire.asRepoNote
     }
 
+    func createBranch(projectId: String, name: String, ref: String) async throws {
+        guard let (owner, repo) = Self.ownerAndName(from: projectId) else {
+            throw GitHubError.badURL(projectId)
+        }
+        try await createBranchGitHub(owner: owner, name: repo, branch: name, fromRef: ref)
+    }
+
     func createMergeRequest(projectId: String, payload: RepoMergeRequestPayload) async throws -> RepoMergeRequest {
         guard let (owner, name) = Self.ownerAndName(from: projectId) else {
             throw GitHubError.badURL(projectId)
