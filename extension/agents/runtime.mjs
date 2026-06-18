@@ -6,6 +6,7 @@ import { execFile } from 'child_process';
 import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
+import { resolveProvider, providerApiKey, completeViaApi } from './providers.mjs';
 
 const log = logger.child({ component: 'claude-runtime' });
 
@@ -102,6 +103,19 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
   // for every call over-spends on short structured outputs.
   // Default: 8192 (safe for planning, long-form agent replies).
   const resolvedMaxTokens = (Number.isFinite(maxTokens) && maxTokens > 0) ? maxTokens : 8192;
+
+  // Multi-provider routing: a non-Anthropic model (OpenAI/Google) goes to
+  // its HTTP adapter. Anthropic keeps the hardened path below (prompt
+  // caching, context-overflow retry, operator CLI fallback).
+  const provider = resolveProvider(model);
+  if (provider !== 'anthropic') {
+    const key = providerApiKey(userId, provider);
+    if (!key) {
+      throw new Error(`No API key configured for ${provider}. Add one in Settings, or choose a Claude model.`);
+    }
+    return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens });
+  }
+
   // A user-scoped key is one stored against this specific userId in the
   // vault.  When such a key is in play, the caller's intent is "bill
   // and quota against THIS user's Anthropic account" — silently
@@ -351,6 +365,12 @@ export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheT
     onChunk(result);
     return result;
   };
+
+  // Non-Anthropic models have no streaming adapter yet — route them
+  // through the buffered path (runClaude → provider HTTP), delivered as a
+  // single chunk. Without this, the streaming code below would send a
+  // non-Claude id to the Anthropic API (coerced to the default model).
+  if (resolveProvider(model) !== 'anthropic') return fallbackBuffered();
 
   if (!apiKey) return fallbackBuffered();
 
