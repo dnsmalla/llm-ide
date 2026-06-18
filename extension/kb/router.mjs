@@ -99,7 +99,11 @@ export async function handleKB(req, res) {
       const limit = Number.isFinite(rawLimit) && rawLimit > 0
         ? Math.min(rawLimit, 100)
         : 20;
-      const results = kb.search(userId, { q, kind, limit });
+      // Optional project scoping — kb.search filters on meta.projectId.
+      // Validate like any id so a junk value can't reach the filter.
+      const projIdRaw = u.searchParams.get('projectId');
+      const projectId = projIdRaw && SAFE_ID.test(projIdRaw) ? projIdRaw : undefined;
+      const results = kb.search(userId, { q, kind, limit, projectId });
       sendJSON(res, 200, { results });
       return true;
     }

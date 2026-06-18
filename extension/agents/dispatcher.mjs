@@ -92,11 +92,15 @@ async function dispatchGithub(userId, { plan, tasks, repo, token, labels = [] })
     if (shouldSkip(task)) {
       return { taskId: task.id, status: 'skipped', reason: 'already dispatched' };
     }
+    // NOTE: no `assignees`. `task.owner` is a meeting participant's
+    // DISPLAY NAME (planner.mjs picks from `meeting.participants`), not a
+    // GitHub login — GitHub 422s the entire issue create on an unknown
+    // assignee, so sending it would reliably fail dispatch. The owner is
+    // already surfaced in the issue body (buildBody → "**Owner:** …").
     const body = JSON.stringify({
       title: task.title.slice(0, 250),
       body: buildBody(plan, task),
       labels: [...labels, ...(task.risk ? [`risk:${task.risk}`] : [])].slice(0, 10),
-      assignees: task.owner ? [task.owner] : undefined,
     });
     const r = await fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(15_000) });
     if (!r.ok) {

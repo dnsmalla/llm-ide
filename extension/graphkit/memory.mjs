@@ -15,7 +15,7 @@
 // - All I/O is best-effort: missing files / read errors collapse to a
 //   silent skip, never throw.
 
-import { readFileSync, statSync, readdirSync } from 'node:fs';
+import { readFileSync, statSync, readdirSync, openSync, readSync, closeSync } from 'node:fs';
 import { join, isAbsolute, normalize, resolve } from 'node:path';
 import { userRepoAllowlist } from '../kb/db.mjs';
 
@@ -32,12 +32,22 @@ function safeRead(path, maxChars) {
   try {
     const st = statSync(path);
     if (!st.isFile()) return null;
-    // Reject anything obviously huge before reading.
-    if (st.size > maxChars * 4) {
-      const buf = readFileSync(path, { encoding: 'utf8', flag: 'r' });
-      return buf.slice(0, maxChars);
+    // Small file: read it whole and slice. Large file: read only the
+    // first maxChars bytes via a bounded fd read rather than loading a
+    // multi-MB memory file into RAM just to slice the head off it.
+    // (At a UTF-8 byte boundary the tail char may be clipped — fine for
+    // a prompt excerpt; result is always ≤ maxChars chars.)
+    if (st.size <= maxChars * 4) {
+      return readFileSync(path, 'utf8').slice(0, maxChars);
     }
-    return readFileSync(path, 'utf8').slice(0, maxChars);
+    const fd = openSync(path, 'r');
+    try {
+      const buf = Buffer.alloc(maxChars);
+      const n = readSync(fd, buf, 0, maxChars, 0);
+      return buf.toString('utf8', 0, n);
+    } finally {
+      closeSync(fd);
+    }
   } catch {
     return null;
   }
