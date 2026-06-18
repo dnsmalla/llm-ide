@@ -28,11 +28,10 @@ struct LibraryView: View {
     @State private var showingClaudeImportSheet = false
     @State private var pluginInstallMessage: String?
     /// Persisted set of COLLAPSED section ids (comma-joined). Absence ⇒
-    /// expanded. One uniform mechanism drives every section's chevron:
-    /// file-tree sections (Sources/Code/Data/Notes) default expanded, while
-    /// Agents/Skills/Plugins are seeded collapsed since they're reference
-    /// panels users open occasionally. Survives relaunch.
-    @AppStorage("library.collapsedSections") private var collapsedSectionsRaw = "agents,skills,plugins"
+    /// expanded. One uniform mechanism drives every section's chevron.
+    /// Every section is seeded collapsed so the library opens in a clean,
+    /// fully-closed state; the user expands what they need. Survives relaunch.
+    @AppStorage("library.collapsedSections") private var collapsedSectionsRaw = "meetings,code,data,notes,agents,skills,plugins"
 
     var body: some View {
         Group {
@@ -45,7 +44,10 @@ struct LibraryView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(minWidth: 260, idealWidth: 300)
+        // Fill the column width the parent (AppShell) assigns. A hard
+        // minWidth here (was 260) fought AppShell's 180 column and the
+        // oversized content got centered, clipping headers on the left.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task { await load() }
         .task { await loadAgentsAndPlugins() }
         .onReceive(NotificationCenter.default.publisher(for: .agentPersonaChanged)) { _ in

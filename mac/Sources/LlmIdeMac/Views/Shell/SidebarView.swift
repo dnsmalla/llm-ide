@@ -41,7 +41,7 @@ struct SidebarView: View {
     /// `.live` are never hidden (the first is the landing fallback, the
     /// second is condition-driven).
     private static let moreSections: [ShellState.Section] =
-        [.library, .live, .docGen, .review, .plans, .conflicts,
+        [.library, .live, .docGen, .plans, .conflicts,
          .autoCode, .codeGraph, .regression, .issues, .gantt, .visual]
 
     /// True when the current selection lives in the ⋯ More overflow —

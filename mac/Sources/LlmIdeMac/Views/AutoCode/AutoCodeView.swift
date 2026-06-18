@@ -16,7 +16,6 @@ struct AutoCodeView: View {
                 .frame(minWidth: 300)
         }
         .background(theme.current.body)
-        .navigationTitle("Auto Tasks")
     }
 
     // MARK: - Left pane

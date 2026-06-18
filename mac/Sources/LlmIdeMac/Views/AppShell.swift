@@ -18,7 +18,9 @@ struct AppShell: View {
     @State private var pendingOrphan: PartialRecovery.Orphan?
     @State private var recoveryError: String?
     @State private var showLegacyPrompt = false
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    /// Library list visibility — toggled from the inline SectionChromeBar so
+    /// the Library header matches every other section (no title-bar toggle).
+    @State private var libraryTreeVisible = true
     @AppStorage("MEETNOTES_LEGACY_PROMPT_SUPPRESSED") private var legacyPromptSuppressed = false
     @State private var showAskAgentSheet = false
     /// Cached "auto-dispatch when capture starts" flag from the user's
@@ -291,37 +293,59 @@ struct AppShell: View {
     /// with no wasted middle column.
     @ViewBuilder
     private func splitContent() -> some View {
-        if shell.section == .library {
-            NavigationSplitView(columnVisibility: $columnVisibility) {
-                SidebarView(api: api)
-                    // Match the other layout: sidebar opens at its minimum.
-                    .navigationSplitViewColumnWidth(min: 180, ideal: 180, max: 260)
-            } content: {
-                LibraryView(api: api)
-                    // Explicit theme background so the list column matches
-                    // the custom theme instead of falling back to the system
-                    // windowBackgroundColor when Dark/Midnight is active.
-                    .background(theme.current.surface)
-                    .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 420)
-            } detail: {
-                VStack(spacing: 0) {
-                    LibraryDetailView(api: api)
-                        .background(theme.current.body)
-                    TerminalPanelView(projectDirectory: projectDirectory)
+        // Cursor/VS Code style: the section icons live in the unified window
+        // title bar (a `.principal` toolbar item), so the top header IS the
+        // activity bar — no separate row. The active section renders below.
+        sectionLayout()
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TopActivityBar(api: api)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    HeaderAccountMenu()
                 }
             }
-        } else {
-            NavigationSplitView {
-                SidebarView(api: api)
-                    // Open at the minimum width by default (ideal == min) for a
-                    // tighter, cleaner rail; the user can still widen to 260.
-                    .navigationSplitViewColumnWidth(min: 180, ideal: 180, max: 260)
-            } detail: {
-                VStack(spacing: 0) {
-                    detailColumn(shell.section)
+    }
+
+    @ViewBuilder
+    private func sectionLayout() -> some View {
+        if shell.section == .library {
+            // Library list | detail split — same VStack + inline SectionChromeBar
+            // pattern as every other section, so its window header is identical
+            // (no NavigationSplitView title-bar toggle).
+            VStack(spacing: 0) {
+                SectionChromeBar(toggles: [
+                    SectionToggle(icon: "sidebar.left", isOn: libraryTreeVisible,
+                                  helpOn: "Hide Library", helpOff: "Show Library") {
+                        withAnimation(.easeInOut(duration: 0.2)) { libraryTreeVisible.toggle() }
+                    }
+                ])
+                Divider()
+                HSplitView {
+                    if libraryTreeVisible {
+                        LibraryView(api: api)
+                            .background(theme.current.surface)
+                            .frame(minWidth: 180, idealWidth: 180, maxWidth: 420,
+                                   maxHeight: .infinity)
+                            .transition(.move(edge: .leading))
+                    }
+                    LibraryDetailView(api: api)
                         .background(theme.current.body)
-                    TerminalPanelView(projectDirectory: projectDirectory)
+                        // Detail grows to fill leftover width (maxWidth .infinity)
+                        // while the list stays near its 180 min. A modest ideal
+                        // (not 100_000) keeps a fresh window from opening wider
+                        // than the screen when there's no saved frame.
+                        .frame(minWidth: 360, idealWidth: 720, maxWidth: .infinity,
+                               maxHeight: .infinity)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                TerminalPanelView(projectDirectory: projectDirectory)
+            }
+        } else {
+            VStack(spacing: 0) {
+                detailColumn(shell.section)
+                    .background(theme.current.body)
+                TerminalPanelView(projectDirectory: projectDirectory)
             }
         }
     }
@@ -349,7 +373,6 @@ struct AppShell: View {
         case .live:      TranscriptView(api: api)
         case .explorer:  ExplorerView(api: api)
         case .search:    SearchView(api: api)
-        case .review:    ReviewView(api: api, config: .code)
         case .plans:     ReviewView(api: api, config: .docs)
         case .conflicts: ReviewView(api: api, config: .conflicts)
         case .sourceControl: SourceControlView(api: api)

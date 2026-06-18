@@ -42,8 +42,10 @@ struct SearchView: View {
             emptyState("Open a project or activate a repo to search")
         } else {
             HSplitView {
-                resultsPane.frame(minWidth: 280, idealWidth: 360, maxWidth: 560)
-                editorPane.frame(minWidth: 360)
+                resultsPane.frame(minWidth: 180, idealWidth: 180, maxWidth: 560)
+                // Greedy ideal so the editor absorbs leftover width and the
+                // results list stays at its 180 minimum by default.
+                editorPane.frame(minWidth: 360, idealWidth: 100_000, maxWidth: .infinity)
             }
             .onChange(of: options) { _, _ in scheduleSearch() }
         }

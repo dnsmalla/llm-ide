@@ -102,7 +102,7 @@ final class DeepLinkRouter: ObservableObject {
         // to transcript (the most common reason to deep-link from the
         // extension is "show me what I'm capturing right now").
         let host = url.host?.lowercased() ?? "transcript"
-        let allowed: Set<String> = ["transcript", "plan", "review", "history", "settings"]
+        let allowed: Set<String> = ["transcript", "plan", "history", "settings"]
         let tab = allowed.contains(host) ? host : "transcript"
 
         // Optional session subscription.  Constrained to a safe ID

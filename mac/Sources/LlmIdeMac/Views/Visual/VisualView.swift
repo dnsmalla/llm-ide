@@ -26,7 +26,23 @@ struct VisualView: View {
     @AppStorage("MEETNOTES_VISUAL_CHAT_PANEL_WIDTH") private var chatPanelWidth: Double = 260
 
     var body: some View {
-        HSplitView {
+        VStack(spacing: 0) {
+            SectionChromeBar(toggles: [
+                SectionToggle(icon: "sidebar.left", isOn: treeVisible,
+                              helpOn: "Hide library tree", helpOff: "Show library tree") {
+                    withAnimation(.easeInOut(duration: 0.2)) { treeVisible.toggle() }
+                }
+            ]) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { assistantVisible.toggle() }
+                } label: {
+                    Image(systemName: "sidebar.right").symbolVariant(assistantVisible ? .fill : .none)
+                }
+                .buttonStyle(.borderless)
+                .help(assistantVisible ? "Hide chat" : "Show chat")
+            }
+            Divider()
+            HSplitView {
             if treeVisible {
                 FileTreePanel(title: "LIBRARY",
                               categories: [.data, .code],
@@ -60,25 +76,6 @@ struct VisualView: View {
                     .transition(.move(edge: .trailing))
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { treeVisible.toggle() }
-                } label: {
-                    Image(systemName: "sidebar.left")
-                        .symbolVariant(treeVisible ? .fill : .none)
-                }
-                .help(treeVisible ? "Hide library tree" : "Show library tree")
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { assistantVisible.toggle() }
-                } label: {
-                    Image(systemName: "sidebar.right")
-                        .symbolVariant(assistantVisible ? .fill : .none)
-                }
-                .help(assistantVisible ? "Hide chat" : "Show chat")
-            }
         }
     }
 }

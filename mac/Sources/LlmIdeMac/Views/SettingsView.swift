@@ -20,6 +20,7 @@ struct SettingsView: View {
                             .font(Typography.title)
                             .foregroundStyle(theme.current.textMuted)
                         AccountSettingsSection()
+                        RecordingSettingsSection(api: api)
                         ServerSettingsSection()
                         BackendSettingsSection()
                         ConnectionsSettingsSection(api: api).id("connections")

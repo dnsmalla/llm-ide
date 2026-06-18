@@ -68,7 +68,7 @@ struct ReviewView: View {
     /// Default chat-panel width targets roughly a quarter of a typical
     /// Mac window (≈1280pt). Users can still drag wider; the chosen
     /// width persists across launches.
-    @AppStorage("MEETNOTES_CHAT_PANEL_WIDTH") private var chatPanelWidth: Double = 200
+    @AppStorage("MEETNOTES_CHAT_PANEL_WIDTH") private var chatPanelWidth: Double = 180
     @State private var showWorkflowSheet = false
     @State private var showQuickFixSheet = false
 
@@ -123,12 +123,16 @@ struct ReviewView: View {
     }
 
     var body: some View {
-        HSplitView {
+        VStack(spacing: 0) {
+            reviewChromeBar
+            Divider()
+            HSplitView {
             if treeVisible {
                 FileTreePanel(title: config.treeTitle,
                               categories: config.treeCategories,
                               selectedURL: $treeSelectedURL)
-                    .frame(minWidth: 200, idealWidth: 240, maxWidth: 300)
+                    // Open at a tight default (ideal == min); draggable to 300.
+                    .frame(minWidth: 180, idealWidth: 180, maxWidth: 300)
                     .transition(.move(edge: .leading))
             }
 
@@ -153,7 +157,7 @@ struct ReviewView: View {
                                    initialURL: activeTabURL,
                                    showFileAttachButtons: false,
                                    showModelPicker: true)
-                    .frame(minWidth: 120,
+                    .frame(minWidth: 180,
                            idealWidth: CGFloat(chatPanelWidth),
                            maxWidth: .infinity)
                     .background(
@@ -192,67 +196,60 @@ struct ReviewView: View {
             if !openTabs.contains(url) { openTabs.append(url) }
             activeTabURL = url
         }
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { treeVisible.toggle() }
-                } label: {
-                    Image(systemName: "sidebar.left")
-                        .symbolVariant(treeVisible ? .fill : .none)
-                }
-                .help(treeVisible ? "Hide \(config.treeLabel)" : "Show \(config.treeLabel)")
-            }
+        .task(id: linkedCodeRepo?.localURL.path) { syncRepoToLibrary() }
+        }
+    }
 
-            if let project = linkedProject {
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Button {
-                            showQuickFixSheet = true
-                        } label: {
-                            Label("Quick Fix", systemImage: "bolt.fill")
-                        }
-                        .help("Single-screen end-to-end fix for an existing issue")
-                        Button {
-                            showWorkflowSheet = true
-                        } label: {
-                            Label("Guided", systemImage: "list.bullet.rectangle")
-                        }
-                        .help("Step-by-step: create issue → branch → generate → review → MR")
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "arrow.triangle.branch")
-                            Text("New Change…").font(Typography.button)
-                        }
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(theme.current.accent, in: RoundedRectangle(cornerRadius: 7))
-                        .foregroundStyle(.white)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .help("Quick Fix (one screen) or Guided (5 steps) — start a Code update")
-                    .sheet(isPresented: $showWorkflowSheet) {
-                        CodeWorkflowSheet(api: api, project: project)
-                            .environmentObject(appConfig)
-                    }
-                    .sheet(isPresented: $showQuickFixSheet) {
-                        QuickFixSheet(api: api, project: project)
-                            .environmentObject(appConfig)
-                    }
-                }
-            }
+    // MARK: - Inline section chrome (tree toggle · New Change · chat toggle)
 
-            ToolbarItem(placement: .primaryAction) {
+    @ViewBuilder
+    private var reviewChromeBar: some View {
+        SectionChromeBar(toggles: [
+            SectionToggle(icon: "sidebar.left", isOn: treeVisible,
+                          helpOn: "Hide \(config.treeLabel)", helpOff: "Show \(config.treeLabel)") {
+                withAnimation(.easeInOut(duration: 0.2)) { treeVisible.toggle() }
+            }
+        ]) {
+            HStack(spacing: 8) {
+                if let project = linkedProject { newChangeMenu(project) }
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) { assistantVisible.toggle() }
                 } label: {
-                    Image(systemName: "sidebar.right")
-                        .symbolVariant(assistantVisible ? .fill : .none)
+                    Image(systemName: "sidebar.right").symbolVariant(assistantVisible ? .fill : .none)
                 }
+                .buttonStyle(.borderless)
                 .help(assistantVisible ? "Hide Assistant" : "Show Assistant")
             }
         }
-        .task(id: linkedCodeRepo?.localURL.path) { syncRepoToLibrary() }
+    }
+
+    private func newChangeMenu(_ project: SavedGitLabProject) -> some View {
+        Menu {
+            Button { showQuickFixSheet = true } label: {
+                Label("Quick Fix", systemImage: "bolt.fill")
+            }
+            Button { showWorkflowSheet = true } label: {
+                Label("Guided", systemImage: "list.bullet.rectangle")
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.triangle.branch")
+                Text("New Change…").font(Typography.button)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .background(theme.current.accent, in: RoundedRectangle(cornerRadius: 7))
+            .foregroundStyle(.white)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Quick Fix (one screen) or Guided (5 steps) — start a Code update")
+        .sheet(isPresented: $showWorkflowSheet) {
+            CodeWorkflowSheet(api: api, project: project).environmentObject(appConfig)
+        }
+        .sheet(isPresented: $showQuickFixSheet) {
+            QuickFixSheet(api: api, project: project).environmentObject(appConfig)
+        }
     }
 
     // MARK: - Sync repo

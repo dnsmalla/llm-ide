@@ -29,7 +29,7 @@ struct StatusBar: View {
     private var content: some View {
         let t = theme.current
         HStack(spacing: 12) {
-            projectInfo
+            ProjectSwitcher()
             Spacer()
             terminalToggleButton
             AgentStatusBadge(api: api)
@@ -58,38 +58,4 @@ struct StatusBar: View {
         .help("Toggle Terminal  (⌃`)")
     }
 
-    @ViewBuilder
-    private var projectInfo: some View {
-        let t = theme.current
-        if let active = projectStore.activeProject {
-            let abbreviatedPath = (active.localPath as NSString).abbreviatingWithTildeInPath
-            let linkedSuffix = active.bundle.settings.linkedRepo
-                .map { ", linked to \($0.remoteId)" } ?? ""
-            let a11yLabel = "Project \(active.bundle.displayName), path \(abbreviatedPath)\(linkedSuffix)"
-
-            HStack(spacing: 12) {
-                Image(systemName: "folder.fill")
-                    .foregroundStyle(t.accent)
-                Text(active.bundle.displayName).font(Typography.caption.bold())
-                Text(abbreviatedPath)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(t.textMuted)
-                    .lineLimit(1).truncationMode(.middle)
-                if let linked = active.bundle.settings.linkedRepo {
-                    Spacer().frame(width: 8)
-                    Image(systemName: linked.kind == .github ? "circle.dashed" : "g.square")
-                        .foregroundStyle(t.textMuted)
-                    Text(linked.remoteId).font(.system(size: 11))
-                        .foregroundStyle(t.textMuted)
-                        .lineLimit(1)
-                }
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(a11yLabel)
-        } else {
-            Text("No project")
-                .font(Typography.caption)
-                .foregroundStyle(t.textMuted)
-        }
-    }
 }

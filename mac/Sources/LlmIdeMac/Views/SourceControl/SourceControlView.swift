@@ -66,9 +66,11 @@ struct SourceControlView: View {
     @ViewBuilder private var content: some View {
         if let root {
             HSplitView {
-                leftPane(root).frame(minWidth: 280, idealWidth: 340, maxWidth: 520)
+                leftPane(root).frame(minWidth: 180, idealWidth: 180, maxWidth: 520)
                 UnifiedDiffView(hunks: hunks, fileExtension: diffLanguage)
-                    .frame(minWidth: 360)
+                    // Greedy ideal so the diff absorbs leftover width and the
+                    // changes list stays at its 180 minimum by default.
+                    .frame(minWidth: 360, idealWidth: 100_000, maxWidth: .infinity)
             }
         } else {
             emptyState

@@ -358,8 +358,23 @@ struct UAGraphView: View {
         }
     }
 
+    private var graphChromeBar: some View {
+        SectionChromeBar(toggles: [
+            SectionToggle(icon: "sidebar.left", isOn: showLibraryPanel,
+                          helpOn: "Hide Library", helpOff: "Show Library") {
+                withAnimation(.easeInOut(duration: 0.18)) { showLibraryPanel.toggle() }
+            },
+            SectionToggle(icon: "sidebar.squares.left", isOn: showItemsPanel,
+                          helpOn: "Hide panel", helpOff: "Show panel") {
+                withAnimation(.easeInOut(duration: 0.18)) { showItemsPanel.toggle() }
+            },
+        ])
+    }
+
     var body: some View {
         VStack(spacing: 0) {
+            graphChromeBar
+            Divider()
             if let target = clonesMigrationTarget {
                 migrationBanner(target: target)
             }
@@ -386,27 +401,6 @@ struct UAGraphView: View {
         .animation(.easeInOut(duration: 0.18), value: showLibraryPanel)
         .animation(.easeInOut(duration: 0.18), value: showItemsPanel)
         .animation(.easeInOut(duration: 0.2), value: graphExpanded)
-        .toolbar {
-            // Standard system sidebar toggles — matches Review / Library
-            // where the column toggle lives in the window toolbar.
-            ToolbarItemGroup(placement: .navigation) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) { showLibraryPanel.toggle() }
-                } label: {
-                    Image(systemName: "sidebar.left")
-                        .symbolVariant(showLibraryPanel ? .fill : .none)
-                }
-                .help(showLibraryPanel ? "Hide Library" : "Show Library")
-
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) { showItemsPanel.toggle() }
-                } label: {
-                    Image(systemName: "sidebar.squares.left")
-                        .symbolVariant(showItemsPanel ? .fill : .none)
-                }
-                .help(showItemsPanel ? "Hide \(mode.displayName) panel" : "Show \(mode.displayName) panel")
-            }
-        }
         .onAppear {
             rebuildLibraryIndex()
         }
