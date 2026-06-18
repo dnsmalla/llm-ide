@@ -36,7 +36,7 @@ struct ProvidersSettingsSection: View {
     var body: some View {
         SettingsSectionCard(icon: "key.horizontal", title: "Model Providers") {
             VStack(alignment: .leading, spacing: Spacing.md) {
-                SettingsHint("Add an API key per provider to run its models over the fast HTTP API instead of the slow CLI. Keys are stored in the server vault — never on disk here.")
+                SettingsHint("Add an API key to run a provider over the fast HTTP API, or use “Check CLI” to run it through your logged-in CLI (subscription, no key). Keys are stored in the server vault — never on disk here.")
                 ForEach(providers) { providerRow($0) }
             }
         }
@@ -72,6 +72,9 @@ struct ProvidersSettingsSection: View {
                     Button("Clear") { Task { await clear(p) } }
                         .disabled(busy.contains(p.id))
                 }
+                Button("Check CLI") { Task { await checkCli(p) } }
+                    .disabled(busy.contains(p.id))
+                    .help("Verify this provider's logged-in CLI for subscription mode (no key needed)")
             }
 
             Text(p.hint)
@@ -119,6 +122,19 @@ struct ProvidersSettingsSection: View {
             try await api.setSecret(key: p.vaultKey, value: "")
             configured.remove(p.vaultKey)
             status[p.id] = (true, "Cleared.")
+        } catch {
+            status[p.id] = (false, error.localizedDescription)
+        }
+    }
+
+    /// Verify the provider's logged-in CLI (subscription mode — no key). Lets
+    /// users who run codex/gemini/claude via their own login confirm the CLI
+    /// is installed and reachable from the server.
+    private func checkCli(_ p: Provider) async {
+        busy.insert(p.id); defer { busy.remove(p.id) }
+        do {
+            let result = try await api.verifyProvider(p.id, mode: "cli", apiKey: nil)
+            status[p.id] = (result.ok, result.detail ?? (result.ok ? "CLI ready" : "CLI not found"))
         } catch {
             status[p.id] = (false, error.localizedDescription)
         }
