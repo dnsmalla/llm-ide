@@ -31,7 +31,7 @@ const CHUNK_LINES = 80;                  // lines per chunk
 const MAX_CHUNKS_PER_FILE = 20;          // hard cap so megafiles can't blow KB
 const MAX_DEPTH = 100;                   // prevent infinite loops via very deep trees
 
-function isProbablyBinary(buf, sample = 4096) {
+export function isProbablyBinary(buf, sample = 4096) {
   // Cheap heuristic: presence of a NUL byte in the first ~4 KB.
   const len = Math.min(buf.length, sample);
   for (let i = 0; i < len; i += 1) if (buf[i] === 0) return true;
@@ -79,7 +79,7 @@ async function* walkAsync(root) {
   }
 }
 
-function chunkLines(text) {
+export function chunkLines(text) {
   const lines = text.split(/\r?\n/);
   const chunks = [];
   for (let i = 0; i < lines.length && chunks.length < MAX_CHUNKS_PER_FILE; i += CHUNK_LINES) {
