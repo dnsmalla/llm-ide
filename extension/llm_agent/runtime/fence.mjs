@@ -68,6 +68,13 @@ export function validateArgs(schema, args) {
       if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) {
         return { error: `argument '${name}' must be an array of strings` };
       }
+      // Cap element count (default 512) so a forged fence can't pass a
+      // pathologically long array — per-element maxLength alone doesn't
+      // bound the total.
+      const maxItems = def.maxItems != null ? def.maxItems : 512;
+      if (v.length > maxItems) {
+        return { error: `argument '${name}' exceeds maxItems ${maxItems}` };
+      }
       // Apply maxLength to each element, not just the array as a whole.
       if (def.maxLength != null) {
         for (let idx = 0; idx < v.length; idx++) {

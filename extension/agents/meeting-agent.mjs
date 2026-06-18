@@ -409,7 +409,14 @@ async function tickRun(run) {
   );
   if (newCaptions.length > 0) {
     run.windowBuffer.push(...newCaptions);
-    run.lastSeenSeq = fresh.sequence;   // fresh.sequence = highest seq in session
+  }
+  // Advance the high-water mark past EVERYTHING seen this tick — including
+  // ticks that fetched only agent-authored captions (filtered out above).
+  // fresh.sequence is the session's true max seq, so this never skips a
+  // human caption; it just stops getCaptionsSince from refetching and
+  // refiltering the same agent captions every ~1.5s tick.
+  if (typeof fresh.sequence === 'number' && fresh.sequence > run.lastSeenSeq) {
+    run.lastSeenSeq = fresh.sequence;
   }
 
   // Trim the window buffer to only keep captions within TRANSCRIPT_WINDOW_MS.
