@@ -225,6 +225,29 @@ struct LibraryItemStoreRoutingTests {
         #expect(store.externalCodeFolders.isEmpty)
     }
 
+    // MARK: - Async (off-main) scan matches the synchronous scan
+
+    /// rescanAsync() runs the same pure performScan off the main actor; its
+    /// result must be identical to the synchronous rescan() the copy-on-add
+    /// paths use. Guards the offload from drifting from the sync contract.
+    @Test func rescanAsyncMatchesSyncRescan() async throws {
+        let root = try makeProject(files: [
+            "notes/idea.md": "x",
+            "code/main.swift": "import Foundation",
+            "meetings/standup.md": "---\ntitle: Standup\n---\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = LibraryItemStore()
+        store.bindProject(root: root)      // sync rescan() runs here
+        let syncPaths = Set(store.items.map(\.path))
+        #expect(!syncPaths.isEmpty)
+
+        await store.rescanAsync()
+        let asyncPaths = Set(store.items.map(\.path))
+        #expect(asyncPaths == syncPaths)
+    }
+
     // MARK: - Folder removal clears the external reference (no resurrection)
 
     @Test func removeFolderByOriginClearsExternalRefAndRescanDoesNotResurrect() throws {

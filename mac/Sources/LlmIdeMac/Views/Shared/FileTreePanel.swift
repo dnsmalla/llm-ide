@@ -320,7 +320,8 @@ struct FileTreePanel: View {
     /// the bound project's notes/ and meetings/ folders.
     private func syncIfNeeded() {
         if categories.contains(.notes) || categories.contains(.meetings) {
-            store.rescan()
+            // Off-main so a notes/meetings refresh never hitches the tree.
+            Task { await store.rescanAsync() }
         }
     }
 

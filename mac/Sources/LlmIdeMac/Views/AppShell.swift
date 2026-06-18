@@ -183,10 +183,10 @@ struct AppShell: View {
         // always reflects the current notes/ folder — not just the tab
         // that happens to contain LibraryView.
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
-            // rescan() is authoritative for the bound project's meetings/ and
-            // notes/ folders — route the refresh through it so we don't race
-            // the scan by mutating items directly.
-            itemStore.rescan()
+            // Authoritative refresh of the bound project's meetings/ and notes/
+            // folders. Off-main (rescanAsync) so a notification storm during a
+            // sync/import doesn't hitch the UI with the directory walk.
+            Task { await itemStore.rescanAsync() }
         }
         .onAppear {
             bindLibraryStore()

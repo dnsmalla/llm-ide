@@ -87,33 +87,13 @@ final class LibraryItemStore {
     /// category.  `assets/` (images, non-code attachments) folds into
     /// `.data` alongside `data/`; `plans/` is intentionally omitted (it is
     /// handled by the Plans/ReviewView pipeline, not the Library index).
-    private static let scanFolders: [(subfolder: String, category: LibraryItem.Category)] = [
+    nonisolated private static let scanFolders: [(subfolder: String, category: LibraryItem.Category)] = [
         ("notes", .notes),
         ("data", .data),
         ("assets", .data),
         ("code", .code),
         ("meetings", .meetings),
     ]
-
-    /// Memoised source-kind classification, keyed by path → (mtime, kind).
-    /// `rescan()` runs on the main actor and would otherwise re-read every
-    /// meeting `.md` on each refresh; caching on modification date means we
-    /// only touch files that actually changed.
-    private var sourceKindCache: [String: (mtime: Date, kind: LibraryItem.SourceKind)] = [:]
-
-    /// Classify a `meetings/` file as a captured meeting or ingested mail,
-    /// using the mtime cache to avoid re-reading unchanged files.
-    private func classifiedSourceKind(for url: URL) -> LibraryItem.SourceKind {
-        let path = url.path
-        let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
-            .contentModificationDate
-        if let cached = sourceKindCache[path], cached.mtime == mtime {
-            return cached.kind
-        }
-        let kind = Self.sourceKind(for: url)
-        if let mtime { sourceKindCache[path] = (mtime, kind) }
-        return kind
-    }
 
     /// Classify a `meetings/` file as a captured meeting or ingested mail by
     /// reading the `platform` field from its `.md` frontmatter. Best-effort:
@@ -149,13 +129,33 @@ final class LibraryItemStore {
     /// external referenced-folder items.  With no project bound, `items` is
     /// emptied.
     func rescan() {
-        guard let root = projectRoot else {
-            items = []
-            return
-        }
+        items = Self.performScan(root: projectRoot, externalFolders: externalCodeFolders)
+    }
+
+    /// Off-main variant for the hot paths (project bind, `meetingIndexChanged`
+    /// fan-out) where the directory walk + per-meeting frontmatter reads would
+    /// otherwise hitch the UI. Runs the same pure scan on a background task,
+    /// then assigns `items` back on the main actor. The synchronous `rescan()`
+    /// stays for the copy-on-add/remove/move paths whose callers read `items`
+    /// immediately after.
+    func rescanAsync() async {
+        let root = projectRoot
+        let external = externalCodeFolders
+        let scanned = await Task.detached(priority: .utility) {
+            Self.performScan(root: root, externalFolders: external)
+        }.value
+        items = scanned
+    }
+
+    /// Pure, off-main-safe scan: enumerate the project's canonical subfolders
+    /// + external code-folder references, apply the noise/relevance filters,
+    /// classify meeting vs mail, and dedup by path. No instance/main-actor
+    /// state — everything it needs is passed in — so it runs on any thread.
+    nonisolated static func performScan(root: URL?, externalFolders: [String]) -> [LibraryItem] {
+        guard let root else { return [] }
         let fm = FileManager.default
         var scanned: [LibraryItem] = []
-        for (subfolder, category) in Self.scanFolders {
+        for (subfolder, category) in scanFolders {
             let folderURL = root.appendingPathComponent(subfolder, isDirectory: true)
             guard let enumerator = fm.enumerator(
                 at: folderURL,
@@ -164,14 +164,14 @@ final class LibraryItemStore {
             ) else { continue }
             for case let fileURL as URL in enumerator {
                 let name = fileURL.lastPathComponent
-                if Self.noiseDirectoryNames.contains(name),
+                if noiseDirectoryNames.contains(name),
                    (try? fileURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
                     enumerator.skipDescendants()
                     continue
                 }
                 guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
                 else { continue }
-                if category == .code, !Self.isCodeRelevant(url: fileURL) { continue }
+                if category == .code, !isCodeRelevant(url: fileURL) { continue }
                 // Skip partial-draft notes/transcripts and the reference template.
                 if name.hasSuffix(".partial.md") || name == "template.md" { continue }
                 var item = LibraryItem(name: name, path: fileURL.path, category: category)
@@ -184,33 +184,33 @@ final class LibraryItemStore {
                 // relative to the project's code/ folder (files at its top
                 // level get an empty path).
                 if category == .code {
-                    item.treePath = Self.relativeDirComponents(of: fileURL, under: folderURL)
+                    item.treePath = relativeDirComponents(of: fileURL, under: folderURL)
                 }
                 // Meetings and ingested email share the meetings/ folder;
                 // classify by frontmatter platform so the SOURCES section can
                 // split them into Meetings / Mail sub-groups.
                 if category == .meetings {
-                    item.sourceKind = classifiedSourceKind(for: fileURL)
+                    item.sourceKind = sourceKind(for: fileURL)
                 }
                 scanned.append(item)
             }
         }
-        scanned.append(contentsOf: externalFolderItems())
+        scanned.append(contentsOf: externalFolderItems(externalFolders))
         // Dedup by path (preserving order) so an external code folder that
         // overlaps with a scanned canonical subfolder can't produce two items
         // with the same path — which would share an id and break SwiftUI ForEach.
         var seenPaths = Set<String>()
-        items = scanned.filter { seenPaths.insert($0.path).inserted }
+        return scanned.filter { seenPaths.insert($0.path).inserted }
     }
 
     /// Index files from each external code-folder reference (folders are
     /// referenced in place, never copied).  Each file becomes a `.code`
     /// item with `folderOrigin` = the folder's name so the sidebar groups
     /// it.  Applies the same noise-dir + code-relevance filters as the scan.
-    private func externalFolderItems() -> [LibraryItem] {
+    nonisolated private static func externalFolderItems(_ externalFolders: [String]) -> [LibraryItem] {
         let fm = FileManager.default
         var result: [LibraryItem] = []
-        for path in externalCodeFolders {
+        for path in externalFolders {
             let folderURL = URL(fileURLWithPath: path)
             let folderName = folderURL.lastPathComponent
             guard fm.fileExists(atPath: path),
@@ -221,20 +221,20 @@ final class LibraryItemStore {
                   ) else { continue }
             for case let fileURL as URL in enumerator {
                 let name = fileURL.lastPathComponent
-                if Self.noiseDirectoryNames.contains(name),
+                if noiseDirectoryNames.contains(name),
                    (try? fileURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
                     enumerator.skipDescendants()
                     continue
                 }
                 guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
                 else { continue }
-                if !Self.isCodeRelevant(url: fileURL) { continue }
+                if !isCodeRelevant(url: fileURL) { continue }
                 var item = LibraryItem(name: name, path: fileURL.path, category: .code)
                 item.folderOrigin = folderName
                 // Nest the whole repo under a single node named after the
                 // folder, then its real subdirectory structure beneath that.
                 item.treePath = [folderName]
-                    + Self.relativeDirComponents(of: fileURL, under: folderURL)
+                    + relativeDirComponents(of: fileURL, under: folderURL)
                 result.append(item)
             }
         }
@@ -325,14 +325,14 @@ final class LibraryItemStore {
 
     /// Dirs we never want to walk into when indexing a code repo.
     /// Thin alias for the canonical `IgnoreList.directories`.
-    static let noiseDirectoryNames: Set<String> = IgnoreList.directories
+    nonisolated static let noiseDirectoryNames: Set<String> = IgnoreList.directories
 
     /// True when `url` is a file the app can meaningfully preview as
     /// code/text/docs/config. The check is on the extension; files
     /// with NO extension (LICENSE, VERSION, Makefile, Dockerfile,
     /// NOTICE) are kept because they're almost always plain text
     /// and high-signal in a repo root.
-    static func isCodeRelevant(url: URL) -> Bool {
+    nonisolated static func isCodeRelevant(url: URL) -> Bool {
         let ext = url.pathExtension.lowercased()
         if ext.isEmpty { return true }
         return codeRelevantExtensions.contains(ext)
@@ -343,7 +343,7 @@ final class LibraryItemStore {
     /// FileDetailView pipeline can render meaningfully. Images
     /// (.png, .jpg, …) and binaries (.dmg, .pkg, .zip) are
     /// deliberately omitted; they're noise in a code graph.
-    static let codeRelevantExtensions: Set<String> = [
+    nonisolated static let codeRelevantExtensions: Set<String> = [
         // Programming languages
         "swift", "py", "js", "ts", "jsx", "tsx", "mjs", "cjs",
         "rb", "go", "rs", "kt", "kts", "java", "scala", "clj", "cljs",
