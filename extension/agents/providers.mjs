@@ -67,7 +67,12 @@ async function readError(res, key) {
   try { detail = redact(await res.text(), key); } catch { /* ignore */ }
   const err = new Error(`HTTP ${res.status}${detail ? `: ${detail}` : ''}`);
   err.status = res.status;
-  err.transient = RETRY_STATUS.has(res.status);
+  // A 429 from a quota/billing problem won't clear on retry — don't burn the
+  // backoff sequence (and more of the user's quota) hammering it. Rate-limit
+  // 429s (no quota marker) stay transient.
+  const quota = res.status === 429
+    && /insufficient_quota|exceeded your current quota|billing|payment/i.test(detail);
+  err.transient = RETRY_STATUS.has(res.status) && !quota;
   return err;
 }
 
@@ -143,6 +148,55 @@ export async function completeViaApi(provider, { apiKey, model, prompt, maxToken
     }
   }
   throw lastErr;
+}
+
+// ── CLI subscription mode ─────────────────────────────────────────────
+//
+// Drive a provider's locally-logged-in CLI as a subprocess — no API key,
+// uses the user's own subscription login (the same auth `claude`/`codex`/
+// `gemini` use interactively). This is the no-key fallback. Invocations are
+// the standard non-interactive forms; override the binary per provider with
+// LLMIDE_<PROVIDER>_CLI (e.g. LLMIDE_OPENAI_CLI=codex) for installs that
+// differ. (Anthropic's own CLI fallback still lives in runtime.mjs.)
+
+const CLI_ARG_BUILDERS = {
+  anthropic: (p) => ['-p', p],
+  openai:    (p) => ['exec', p],   // codex exec "<prompt>"
+  google:    (p) => ['-p', p],     // gemini -p "<prompt>"
+};
+
+/** The {bin, args} a provider's CLI is invoked with for a prompt. Pure —
+ *  exported so the invocation is testable without spawning anything. */
+export function cliInvocation(provider, prompt) {
+  const cfg = PROVIDERS[provider];
+  if (!cfg) return null;
+  const bin = process.env[`LLMIDE_${provider.toUpperCase()}_CLI`] || cfg.cli;
+  const build = CLI_ARG_BUILDERS[provider] || ((p) => ['-p', p]);
+  return { bin, args: build(prompt) };
+}
+
+const CLI_TIMEOUT_MS = 120_000;
+
+/** Run a prompt through the provider's logged-in CLI, returning stdout. */
+export function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS } = {}) {
+  const inv = cliInvocation(provider, prompt);
+  if (!inv) return Promise.reject(new Error(`runViaCli: unknown provider '${provider}'`));
+  return new Promise((resolve, reject) => {
+    execFile(inv.bin, inv.args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) {
+        if (err.code === 'ENOENT') {
+          reject(new Error(`${inv.bin} CLI not found — install it and log in, or add an API key in Settings → Model Providers.`));
+          return;
+        }
+        reject(new Error(`${inv.bin} error: ${String(stderr || err.message || '').slice(0, 200)}`));
+        return;
+      }
+      const text = String(stdout || '').trim();
+      if (!text) { reject(new Error(`${inv.bin} returned empty output`)); return; }
+      log.info('provider_cli_complete', { provider, bin: inv.bin });
+      resolve(text);
+    });
+  });
 }
 
 // ── Verification ──────────────────────────────────────────────────────

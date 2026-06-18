@@ -6,7 +6,7 @@ import { execFile } from 'child_process';
 import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
-import { resolveProvider, providerApiKey, completeViaApi } from './providers.mjs';
+import { resolveProvider, providerApiKey, completeViaApi, runViaCli } from './providers.mjs';
 
 const log = logger.child({ component: 'claude-runtime' });
 
@@ -110,10 +110,11 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
   const provider = resolveProvider(model);
   if (provider !== 'anthropic') {
     const key = providerApiKey(userId, provider);
-    if (!key) {
-      throw new Error(`No API key configured for ${provider}. Add one in Settings, or choose a Claude model.`);
+    if (key) {
+      return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens });
     }
-    return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens });
+    // No key → subscription mode: drive the provider's logged-in CLI.
+    return runViaCli(provider, prompt);
   }
 
   // A user-scoped key is one stored against this specific userId in the

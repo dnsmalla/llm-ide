@@ -11,7 +11,7 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
-const { resolveProvider, providerApiKey, completeViaApi, verifyProvider } =
+const { resolveProvider, providerApiKey, completeViaApi, verifyProvider, cliInvocation } =
   await import('../agents/providers.mjs');
 
 function mockFetch(handler) {
@@ -119,4 +119,49 @@ test('verifyProvider: key mode reports failure on a 401, never throws', async ()
 test('verifyProvider: unknown provider fails gracefully', async () => {
   const r = await verifyProvider({ provider: 'skynet', mode: 'key', apiKey: 'k' });
   assert.equal(r.ok, false);
+});
+
+test('cliInvocation: standard non-interactive form per provider', () => {
+  assert.deepEqual(cliInvocation('anthropic', 'hi'), { bin: 'claude', args: ['-p', 'hi'] });
+  assert.deepEqual(cliInvocation('openai', 'hi'),    { bin: 'codex',  args: ['exec', 'hi'] });
+  assert.deepEqual(cliInvocation('google', 'hi'),    { bin: 'gemini', args: ['-p', 'hi'] });
+  assert.equal(cliInvocation('skynet', 'hi'), null);
+});
+
+test('cliInvocation: binary overridable via LLMIDE_<PROVIDER>_CLI', () => {
+  process.env.LLMIDE_OPENAI_CLI = 'my-codex';
+  try {
+    assert.deepEqual(cliInvocation('openai', 'x'), { bin: 'my-codex', args: ['exec', 'x'] });
+  } finally {
+    delete process.env.LLMIDE_OPENAI_CLI;
+  }
+});
+
+test('completeViaApi: a quota 429 is NOT retried (would only burn quota)', async () => {
+  let calls = 0;
+  const restore = mockFetch(async () => {
+    calls += 1;
+    return jsonRes(429, { error: { code: 'insufficient_quota', message: 'exceeded your current quota' } });
+  });
+  try {
+    await assert.rejects(
+      () => completeViaApi('openai', { apiKey: 'k', model: 'gpt-4o', prompt: 'x' }),
+      /HTTP 429/,
+    );
+    assert.equal(calls, 1); // no retry
+  } finally { restore(); }
+});
+
+test('completeViaApi: a rate-limit 429 (no quota marker) IS retried', async () => {
+  let calls = 0;
+  const restore = mockFetch(async () => {
+    calls += 1;
+    return calls === 1 ? jsonRes(429, { error: { message: 'rate limit, slow down' } })
+                       : jsonRes(200, { choices: [{ message: { content: 'ok' } }] });
+  });
+  try {
+    const out = await completeViaApi('openai', { apiKey: 'k', model: 'gpt-4o', prompt: 'x' });
+    assert.equal(out, 'ok');
+    assert.equal(calls, 2);
+  } finally { restore(); }
 });

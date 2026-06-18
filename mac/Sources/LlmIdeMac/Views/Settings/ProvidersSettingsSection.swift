@@ -22,10 +22,10 @@ struct ProvidersSettingsSection: View {
                  hint: "claude-* models. Also works with no key via your logged-in `claude` CLI (subscription)."),
         Provider(id: "openai", label: "OpenAI (GPT / Codex)", vaultKey: "openai.apiKey",
                  placeholder: "sk-…",
-                 hint: "gpt-*, o*, codex-* models."),
+                 hint: "gpt-*, o*, codex-* models. With no key, falls back to your logged-in `codex` CLI (subscription)."),
         Provider(id: "google", label: "Google (Gemini)", vaultKey: "google.apiKey",
                  placeholder: "AIza…",
-                 hint: "gemini-* models."),
+                 hint: "gemini-* models. With no key, falls back to your logged-in `gemini` CLI (subscription)."),
     ]
 
     @State private var drafts: [String: String] = [:]
