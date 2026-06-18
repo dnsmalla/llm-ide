@@ -67,6 +67,7 @@ const ENDPOINTS = [
   '/kb/analyze-risks',
   '/kb/summarize',
   '/kb/conflict-questions',
+  '/kb/providers/verify',
   '/kb/code-sync',
   '/kb/plans',
   '/kb/plan/:id',
@@ -128,6 +129,7 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/generate-code')       return 'llm';
   if (url === '/kb/summarize')           return 'llm';            // runClaude, 3-min ceiling
   if (url === '/kb/conflict-questions')  return 'llm';            // runClaude
+  if (url === '/kb/providers/verify')    return 'llmFast';        // tiny live probe / CLI check
   if (url === '/kb/dispatch')            return 'dispatch';
   if (url === '/kb/notify/slack')        return 'dispatch';
   if (url === '/kb/outcomes/refresh')    return 'outcomePoll';

@@ -22,6 +22,7 @@ import { handleReviewRoutes } from './routes/review.mjs';
 // runGuardrails moved into routes/review.mjs.
 import { summarizeTranscript } from '../agents/summarize.mjs';
 import { runClaude } from '../agents/runtime.mjs';
+import { verifyProvider, providerApiKey, PROVIDER_IDS } from '../agents/providers.mjs';
 import { iterateUserMeetings } from './exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails } from '../agents/email-source.mjs';
@@ -63,6 +64,29 @@ export async function handleKB(req, res) {
       }
       const result = kb.ingestMeeting(userId, body);
       sendJSON(res, 200, { ok: true, ...result });
+      return true;
+    }
+
+    // Verify a model provider's credential before/after the user saves it.
+    // mode 'key' (default): live 1-token probe of the supplied key, or the
+    // user's stored <provider>.apiKey when none is supplied. mode 'cli':
+    // check the provider's CLI binary is installed (subscription mode).
+    // Always 200 with { ok, detail } unless the request itself is invalid.
+    if (req.method === 'POST' && url === '/kb/providers/verify') {
+      const body = parseJSON(await readBody(req, 64 * 1024)) || {};
+      const provider = String(body.provider || '');
+      if (!PROVIDER_IDS.includes(provider)) {
+        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED',
+          message: `Unknown provider (allowed: ${PROVIDER_IDS.join(', ')})` } });
+        return true;
+      }
+      const mode = body.mode === 'cli' ? 'cli' : 'key';
+      const apiKey = mode === 'key'
+        ? ((typeof body.apiKey === 'string' && body.apiKey) ? body.apiKey : providerApiKey(userId, provider))
+        : undefined;
+      const model = typeof body.model === 'string' ? body.model : undefined;
+      const result = await verifyProvider({ provider, mode, apiKey, model });
+      sendJSON(res, 200, result);
       return true;
     }
 

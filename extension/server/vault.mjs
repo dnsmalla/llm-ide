@@ -120,6 +120,11 @@ const ALLOWED_KEYS = new Set([
   // ANTHROPIC_API_KEY=<this> so each user's LLM spend is attributed
   // to their own account instead of the operator's Claude CLI login.
   'claude.apiKey',
+  // Per-user keys for the other model providers (see agents/providers.mjs).
+  // A configured key routes that provider's models over the fast HTTP API
+  // instead of the local CLI subprocess.
+  'openai.apiKey',
+  'google.apiKey',
 ]);
 
 function ensureAllowed(key) {
