@@ -38,7 +38,7 @@ regression: test-mac
 .PHONY: hooks
 hooks:
 	git config core.hooksPath .githooks
-	@echo "✓ git hooks enabled (.githooks). pre-push runs 'make regression' for mac/ changes; bypass with --no-verify."
+	@echo "✓ git hooks enabled (.githooks). pre-push runs 'make regression' for mac/ changes and 'make test' for extension/ changes; bypass with --no-verify."
 
 # --- docs --------------------------------------------------------------------
 
