@@ -24,7 +24,7 @@ const safe = async (fn) => {
 
 // --- GitHub ---------------------------------------------------------------
 
-function parseGithubUrl(url) {
+export function parseGithubUrl(url) {
   // Match either /issues/N or /pull/N
   const m = String(url).match(/github\.com\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)/);
   if (!m) return null;
@@ -76,7 +76,7 @@ async function pollGithub(dispatched, { token } = {}) {
 
 // --- Backlog --------------------------------------------------------------
 
-function parseBacklogUrl(url) {
+export function parseBacklogUrl(url) {
   // https://<space>/view/<KEY>
   const m = String(url).match(/^https?:\/\/([^/]+)\/view\/([A-Z0-9_-]+)/);
   if (!m) return null;
