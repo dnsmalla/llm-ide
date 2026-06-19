@@ -10,7 +10,7 @@ struct QuickFixSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appConfig: AppConfig
     @EnvironmentObject private var theme: ThemeStore
-    private let prefill: (iid: Int, plan: String)?
+    private let prefill: (number: Int, plan: String)?
     private let api: LlmIdeAPIClient
     private let project: SavedGitLabProject
 
@@ -18,8 +18,15 @@ struct QuickFixSheet: View {
     @State private var switchToGuided = false
     @State private var showIssuePicker = false
 
-    init(api: LlmIdeAPIClient, project: SavedGitLabProject, prefill: (iid: Int, plan: String)? = nil) {
-        _svc = StateObject(wrappedValue: CodeWorkflowService(project: project, api: api))
+    init(api: LlmIdeAPIClient, project: SavedGitLabProject, prefill: (number: Int, plan: String)? = nil) {
+        _svc = StateObject(wrappedValue: CodeWorkflowService(
+            backend: GitLabClient(),
+            projectId: String(project.resolvedId ?? 0),
+            localURL: project.localURL ?? URL(fileURLWithPath: "/"),
+            defaultBranch: project.defaultBranch ?? "main",
+            displayName: project.displayName,
+            gitPushToken: { (try? GitLabClient.currentToken()) ?? "" },
+            api: api))
         self.api = api
         self.project = project
         self.prefill = prefill
@@ -38,7 +45,7 @@ struct QuickFixSheet: View {
             guard !bootstrapped else { return }
             bootstrapped = true
             if let pf = prefill {
-                await svc.bootstrapFromExistingIssue(iid: pf.iid, plan: pf.plan)
+                await svc.bootstrapFromExistingIssue(number: pf.number, plan: pf.plan)
             } else {
                 showIssuePicker = true
             }
@@ -50,7 +57,7 @@ struct QuickFixSheet: View {
                     showIssuePicker = false
                     Task {
                         await svc.bootstrapFromExistingIssue(
-                            iid: issue.iid,
+                            number: issue.iid,
                             plan: issue.description ?? issue.title
                         )
                     }
@@ -65,7 +72,7 @@ struct QuickFixSheet: View {
             CodeWorkflowSheet(
                 api: api,
                 project: project,
-                prefill: svc.createdIssue.map { (iid: $0.iid, plan: svc.aiPrompt) },
+                prefill: svc.createdIssue.map { (number: $0.number, plan: svc.aiPrompt) },
                 // Carry forward in-progress state so the guided sheet
                 // lands on the step the Quick Fix run reached and
                 // doesn't re-create the branch / re-generate the diff.
@@ -95,7 +102,7 @@ struct QuickFixSheet: View {
             }
             Spacer()
             if let issue = svc.createdIssue {
-                Text("#\(issue.iid)")
+                Text("#\(issue.number)")
                     .font(.caption.monospaced())
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(theme.current.accent.opacity(0.12))

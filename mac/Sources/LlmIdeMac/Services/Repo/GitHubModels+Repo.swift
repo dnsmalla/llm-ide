@@ -150,12 +150,20 @@ extension GitHubClient {
 
     /// Create branch `branch` pointing at the head of `fromRef` (an existing
     /// branch). GitHub needs the base ref's commit sha first, then a new ref.
-    func createBranchGitHub(owner: String, name: String, branch: String, fromRef: String) async throws {
+    /// Returns `true` if created, `false` if the branch already existed (422
+    /// "Reference already exists") — idempotent for workflow re-runs.
+    func createBranchGitHub(owner: String, name: String, branch: String, fromRef: String) async throws -> Bool {
         struct RefWire: Decodable { struct Obj: Decodable { let sha: String }; let object: Obj }
         let base: RefWire = try await get("/repos/\(owner)/\(name)/git/ref/heads/\(fromRef)")
         struct CreatedRef: Decodable { let ref: String }
-        let _: CreatedRef = try await post("/repos/\(owner)/\(name)/git/refs",
-                                           body: ["ref": "refs/heads/\(branch)", "sha": base.object.sha])
+        do {
+            let _: CreatedRef = try await post("/repos/\(owner)/\(name)/git/refs",
+                                               body: ["ref": "refs/heads/\(branch)", "sha": base.object.sha])
+            return true
+        } catch let GitHubError.httpError(status, msg)
+                    where status == 422 && msg.range(of: "already exists", options: .caseInsensitive) != nil {
+            return false
+        }
     }
 
     // MARK: - Generic POST / PATCH helpers

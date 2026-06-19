@@ -15,7 +15,7 @@ extension GitHubClient: RepoBackend {
     // GitLab MRs (draft state, auto-merge, review requests) so it's
     // not a trivial protocol method.
     var canWriteIssues: Bool { true }
-    var canCreateMergeRequests: Bool { false }
+    var canCreateMergeRequests: Bool { true }
 
     // MARK: - Projects
 
@@ -103,11 +103,11 @@ extension GitHubClient: RepoBackend {
         return wire.asRepoNote
     }
 
-    func createBranch(projectId: String, name: String, ref: String) async throws {
+    func createBranch(projectId: String, name: String, ref: String) async throws -> Bool {
         guard let (owner, repo) = Self.ownerAndName(from: projectId) else {
             throw GitHubError.badURL(projectId)
         }
-        try await createBranchGitHub(owner: owner, name: repo, branch: name, fromRef: ref)
+        return try await createBranchGitHub(owner: owner, name: repo, branch: name, fromRef: ref)
     }
 
     func createMergeRequest(projectId: String, payload: RepoMergeRequestPayload) async throws -> RepoMergeRequest {

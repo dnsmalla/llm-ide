@@ -99,11 +99,22 @@ extension GitLabClient: RepoBackend {
         return raw.asRepoNote
     }
 
-    func createBranch(projectId: String, name: String, ref: String) async throws {
+    func createBranch(projectId: String, name: String, ref: String) async throws -> Bool {
         guard let intId = Int(projectId) else {
             throw GitLabError.badURL("project id \(projectId) isn't numeric")
         }
-        _ = try await self.createBranch(projectId: intId, name: name, ref: ref)
+        do {
+            _ = try await self.createBranch(projectId: intId, name: name, ref: ref)
+            return true
+        } catch let err as GitLabError {
+            // GitLab returns 400 "Branch already exists" when re-running the
+            // workflow on the same issue — treat as reuse, not failure.
+            if case .httpError(400, let msg) = err,
+               msg.range(of: "already exists", options: .caseInsensitive) != nil {
+                return false
+            }
+            throw err
+        }
     }
 
     func createMergeRequest(projectId: String, payload: RepoMergeRequestPayload) async throws -> RepoMergeRequest {

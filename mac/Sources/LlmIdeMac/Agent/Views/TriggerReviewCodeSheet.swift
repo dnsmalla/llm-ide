@@ -91,7 +91,7 @@ struct TriggerReviewCodeSheet: View {
                 CodeWorkflowSheet(
                     api: api,
                     project: proj,
-                    prefill: (iid: iid, plan: editedPlan)
+                    prefill: (number: iid, plan: editedPlan)
                 )
                 .environmentObject(config)
             }
@@ -101,7 +101,7 @@ struct TriggerReviewCodeSheet: View {
                 QuickFixSheet(
                     api: api,
                     project: proj,
-                    prefill: (iid: iid, plan: editedPlan)
+                    prefill: (number: iid, plan: editedPlan)
                 )
                 .environmentObject(config)
             }

@@ -8,7 +8,10 @@ struct CodeWorkflowSheet: View {
     @EnvironmentObject private var appConfig: AppConfig
     @EnvironmentObject private var theme: ThemeStore
     @State private var showExistingPicker = false
-    private let prefill: (iid: Int, plan: String)?
+    /// GitLab project — retained for the GitLab-specific "pick existing issue"
+    /// picker. The workflow service itself is backend-neutral.
+    private let project: SavedGitLabProject
+    private let prefill: (number: Int, plan: String)?
 
     /// In-progress state from a Quick Fix run that hit a failure and is
     /// handing off to the guided flow. Optional; nil for fresh starts.
@@ -20,15 +23,23 @@ struct CodeWorkflowSheet: View {
         let mrTitle: String
         let mrDescription: String
         let aiPrompt: String
-        let createdMR: GitLabMergeRequest?
+        let createdMR: RepoMergeRequest?
         let landAtStep: CodeWorkflowService.Step
     }
 
     init(api: LlmIdeAPIClient,
          project: SavedGitLabProject,
-         prefill: (iid: Int, plan: String)? = nil,
+         prefill: (number: Int, plan: String)? = nil,
          resumeFrom: ResumeState? = nil) {
-        _svc = StateObject(wrappedValue: CodeWorkflowService(project: project, api: api))
+        self.project = project
+        _svc = StateObject(wrappedValue: CodeWorkflowService(
+            backend: GitLabClient(),
+            projectId: String(project.resolvedId ?? 0),
+            localURL: project.localURL ?? URL(fileURLWithPath: "/"),
+            defaultBranch: project.defaultBranch ?? "main",
+            displayName: project.displayName,
+            gitPushToken: { (try? GitLabClient.currentToken()) ?? "" },
+            api: api))
         self.prefill = prefill
         self.resumeFrom = resumeFrom
     }
@@ -47,7 +58,7 @@ struct CodeWorkflowSheet: View {
         .frame(minWidth: 640, minHeight: 520)
         .task {
             if let pf = prefill, svc.createdIssue == nil {
-                await svc.bootstrapFromExistingIssue(iid: pf.iid, plan: pf.plan)
+                await svc.bootstrapFromExistingIssue(number: pf.number, plan: pf.plan)
             }
             // After bootstrap, optionally overlay in-progress state from
             // a Quick Fix run that's handing off to us.
@@ -63,12 +74,12 @@ struct CodeWorkflowSheet: View {
         }
         .sheet(isPresented: $showExistingPicker) {
             ExistingIssuePicker(
-                project: svc.project,
+                project: project,
                 onSelect: { issue in
                     showExistingPicker = false
                     Task {
                         await svc.bootstrapFromExistingIssue(
-                            iid: issue.iid,
+                            number: issue.iid,
                             plan: issue.description ?? issue.title
                         )
                     }
@@ -83,7 +94,7 @@ struct CodeWorkflowSheet: View {
     private var header: some View {
         SheetHeader(
             title: "New Change",
-            subtitle: svc.project.displayName,
+            subtitle: svc.projectDisplayName,
             cancelDisabled: svc.busy,
             onCancel: { dismiss() }
         )
@@ -220,7 +231,7 @@ struct CodeWorkflowSheet: View {
                 Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)
                     .font(.caption)
-                Text("Base: **\(svc.project.defaultBranch ?? "main")**  →  \(svc.project.localURL?.lastPathComponent ?? svc.project.displayName)")
+                Text("Base: **\(svc.defaultBranch)**  →  \(svc.localURL.lastPathComponent)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -390,7 +401,7 @@ struct CodeWorkflowSheet: View {
                 if let issue = svc.createdIssue {
                     summaryRow(icon: "number.circle.fill", label: "Issue") {
                         HStack(spacing: 6) {
-                            Text("#\(issue.iid) · \(issue.title)")
+                            Text("#\(issue.number) · \(issue.title)")
                                 .font(.callout)
                                 .lineLimit(1)
                             Button {
@@ -553,10 +564,10 @@ struct CodeWorkflowSheet: View {
         }
     }
 
-    private func issueBadge(_ issue: GitLabIssue) -> some View {
+    private func issueBadge(_ issue: RepoIssue) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "number.circle.fill").foregroundStyle(theme.current.accent).font(.caption)
-            Text("#\(issue.iid): \(issue.title)")
+            Text("#\(issue.number): \(issue.title)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

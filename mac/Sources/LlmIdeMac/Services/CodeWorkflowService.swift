@@ -47,7 +47,7 @@ final class CodeWorkflowService: ObservableObject {
     // Issue step
     @Published var issueTitle = ""
     @Published var issueDescription = ""
-    @Published var createdIssue: GitLabIssue?
+    @Published var createdIssue: RepoIssue?
 
     // Branch step
     @Published var branchName = ""
@@ -65,7 +65,7 @@ final class CodeWorkflowService: ObservableObject {
     @Published var refinementPrompt = ""
 
     // Push step
-    @Published var createdMR: GitLabMergeRequest?
+    @Published var createdMR: RepoMergeRequest?
     @Published var mrTitle = ""
     @Published var mrDescription = ""
 
@@ -85,17 +85,38 @@ final class CodeWorkflowService: ObservableObject {
 
     // MARK: - Dependencies
 
-    let project: SavedGitLabProject
-    private let gitlab: GitLabClient
+    /// Backend-neutral dependencies. `backend` routes issue/branch/MR calls to
+    /// GitLab or GitHub; the local-clone fields (`localURL`, `defaultBranch`)
+    /// are the git state the workflow needs and that `RepoProject` doesn't
+    /// carry, so they're passed explicitly by the construction site.
+    let backend: RepoBackend
+    /// Backend project id — numeric string for GitLab, "owner/name" for GitHub.
+    let projectId: String
+    let localURL: URL
+    let defaultBranch: String
+    let projectDisplayName: String
+    /// Push-auth token provider (GitLab PAT / GitHub PAT), resolved lazily by
+    /// the construction site so a token change is picked up at push time.
+    private let gitPushToken: () -> String
     private let repo: RepoManager
     private let api: LlmIdeAPIClient
     private let log = Logger(subsystem: "com.llmide.macapp", category: "CodeWorkflowService")
 
     // MARK: - Init
 
-    init(project: SavedGitLabProject, api: LlmIdeAPIClient) {
-        self.project = project
-        self.gitlab = GitLabClient()
+    init(backend: RepoBackend,
+         projectId: String,
+         localURL: URL,
+         defaultBranch: String,
+         displayName: String,
+         gitPushToken: @escaping () -> String,
+         api: LlmIdeAPIClient) {
+        self.backend = backend
+        self.projectId = projectId
+        self.localURL = localURL
+        self.defaultBranch = defaultBranch
+        self.projectDisplayName = displayName
+        self.gitPushToken = gitPushToken
         self.repo = RepoManager()
         self.api = api
     }
@@ -104,55 +125,47 @@ final class CodeWorkflowService: ObservableObject {
 
     /// Pre-load state from an existing issue (skipping the Create-Issue step).
     /// Used when the chat agent emits `trigger-review-code` for an already-filed issue.
-    func bootstrapFromExistingIssue(iid: Int, plan: String) async {
-        guard let projectId = project.resolvedId else {
-            stepError = "Project ID not resolved. Try re-linking in Settings → GitLab."
-            return
-        }
+    func bootstrapFromExistingIssue(number: Int, plan: String) async {
         busy = true; stepError = nil
         defer { busy = false }
         do {
-            let issue = try await gitlab.getIssue(projectId: projectId, iid: iid)
+            let issue = try await backend.getIssue(projectId: projectId, number: number)
             createdIssue = issue
             issueTitle = issue.title
-            issueDescription = issue.description ?? ""
-            let slug = RepoManager.branchName(issueIid: issue.iid, title: issue.title)
+            issueDescription = issue.body ?? ""
+            let slug = RepoManager.branchName(issueIid: issue.number, title: issue.title)
             branchName = slug
-            commitMessage = "fix: \(issue.title) (closes #\(issue.iid))"
+            commitMessage = "fix: \(issue.title) (closes #\(issue.number))"
             mrTitle = issue.title
-            mrDescription = "Closes #\(issue.iid)\n\n\(plan)"
+            mrDescription = "Closes #\(issue.number)\n\n\(plan)"
             aiPrompt = plan
-            log.info("bootstrap_from_issue iid=\(issue.iid, privacy: .public)")
+            log.info("bootstrap_from_issue number=\(issue.number, privacy: .public)")
             currentStep = .branch
         } catch {
-            stepError = "Failed to load issue #\(iid): \(error.localizedDescription)"
+            stepError = "Failed to load issue #\(number): \(error.localizedDescription)"
         }
     }
 
     // MARK: - Step 1: Create Issue
 
     func createIssue() async {
-        guard let projectId = project.resolvedId else {
-            stepError = "Project ID not resolved. Try re-linking in Settings → GitLab."
-            return
-        }
         busy = true; stepError = nil
         defer { busy = false }
         do {
-            let payload = GitLabIssuePayload(
+            let payload = RepoIssuePayload(
                 title: issueTitle.trimmingCharacters(in: .whitespacesAndNewlines),
-                description: issueDescription.isEmpty ? nil : issueDescription
+                body: issueDescription.isEmpty ? nil : issueDescription
             )
-            let issue = try await gitlab.createIssue(projectId: projectId, payload: payload)
+            let issue = try await backend.createIssue(projectId: projectId, payload: payload)
             createdIssue = issue
             // Pre-fill derived fields for subsequent steps
-            let slug = RepoManager.branchName(issueIid: issue.iid, title: issue.title)
+            let slug = RepoManager.branchName(issueIid: issue.number, title: issue.title)
             branchName = slug
-            commitMessage = "fix: \(issue.title) (closes #\(issue.iid))"
+            commitMessage = "fix: \(issue.title) (closes #\(issue.number))"
             mrTitle = issue.title
-            mrDescription = "Closes #\(issue.iid)\n\n\(issueDescription)"
+            mrDescription = "Closes #\(issue.number)\n\n\(issueDescription)"
             aiPrompt = "Implement the following in the linked repo:\n\n\(issue.title)\n\n\(issueDescription)"
-            log.info("issue_created iid=\(issue.iid, privacy: .public)")
+            log.info("issue_created number=\(issue.number, privacy: .public)")
             advance()
         } catch {
             stepError = error.localizedDescription
@@ -162,39 +175,26 @@ final class CodeWorkflowService: ObservableObject {
     // MARK: - Step 2: Create Branch
 
     func createBranch() async {
-        guard let projectId = project.resolvedId,
-              let repoURL = project.localURL,
-              let issue = createdIssue else {
-            stepError = "Missing project or issue context."
+        guard let issue = createdIssue else {
+            stepError = "Missing issue context."
             return
         }
-        let base = project.defaultBranch ?? "main"
+        let base = defaultBranch
         busy = true; stepError = nil
         defer { busy = false }
         do {
-            // Remote branch via GitLab API. If the branch already exists
-            // (e.g. re-running the workflow on the same issue), GitLab
-            // returns 400 "Branch already exists" — treat that as a
-            // success and reuse the existing branch.
-            var reused = false
-            do {
-                _ = try await gitlab.createBranch(projectId: projectId, name: branchName, ref: base)
-            } catch let err as GitLabClient.GitLabError {
-                if case .httpError(400, let msg) = err,
-                   msg.range(of: "already exists", options: .caseInsensitive) != nil {
-                    reused = true
-                    log.info("branch_reused_remote name=\(self.branchName, privacy: .public)")
-                } else {
-                    throw err
-                }
-            }
+            // Remote branch via the backend API. createBranch is idempotent:
+            // it returns false when the branch already existed (re-running the
+            // workflow on the same issue) so we reuse it instead of failing.
+            let created = try await backend.createBranch(projectId: projectId, name: branchName, ref: base)
             // Local checkout
-            if reused {
-                try await repo.checkoutExisting(branch: branchName, at: repoURL)
+            if created {
+                try await repo.createAndCheckout(branch: branchName, at: localURL, from: base)
             } else {
-                try await repo.createAndCheckout(branch: branchName, at: repoURL, from: base)
+                log.info("branch_reused_remote name=\(self.branchName, privacy: .public)")
+                try await repo.checkoutExisting(branch: branchName, at: localURL)
             }
-            log.info("branch_ready name=\(self.branchName, privacy: .public) issue=\(issue.iid, privacy: .public) reused=\(reused, privacy: .public)")
+            log.info("branch_ready name=\(self.branchName, privacy: .public) issue=\(issue.number, privacy: .public) reused=\(!created, privacy: .public)")
             advance()
         } catch {
             stepError = error.localizedDescription
@@ -211,10 +211,7 @@ final class CodeWorkflowService: ObservableObject {
     // is intentionally Q&A-only and has no file-edit tools.
 
     func generateChanges(activeCLI: String) async {
-        guard let repoURL = project.localURL else {
-            stepError = "Repo not cloned."
-            return
-        }
+        let repoURL = localURL
         busy = true; stepError = nil; stepInfo = nil
         defer { busy = false }
 
@@ -241,11 +238,11 @@ final class CodeWorkflowService: ObservableObject {
             stepError = "Failed to create log dir: \(error.localizedDescription)"
             return
         }
-        let iid = createdIssue?.iid ?? 0
+        let issueNum = createdIssue?.number ?? 0
         let logURL = logDir.appendingPathComponent(
-            "code-workflow-\(iid)-\(Int(Date().timeIntervalSince1970)).log")
+            "code-workflow-\(issueNum)-\(Int(Date().timeIntervalSince1970)).log")
         let created = FileManager.default.createFile(atPath: logURL.path, contents: nil)
-        log.info("workflow_generate_start iid=\(iid, privacy: .public) cli=\(cliTool.rawValue, privacy: .public) log_path=\(logURL.path, privacy: .public) log_created=\(created, privacy: .public)")
+        log.info("workflow_generate_start issue=\(issueNum, privacy: .public) cli=\(cliTool.rawValue, privacy: .public) log_path=\(logURL.path, privacy: .public) log_created=\(created, privacy: .public)")
 
         // 3. Build process
         let process = Process()
@@ -591,10 +588,7 @@ final class CodeWorkflowService: ObservableObject {
     // MARK: - Step 4: Commit (after user reviews)
 
     func commitChanges() async {
-        guard let repoURL = project.localURL else {
-            stepError = "Repo not cloned."
-            return
-        }
+        let repoURL = localURL
         busy = true; stepError = nil
         defer { busy = false }
         do {
@@ -623,32 +617,30 @@ final class CodeWorkflowService: ObservableObject {
     // multiple times because listMergeRequests detects an existing MR.
 
     func retryMROnly() async {
-        guard let projectId = project.resolvedId,
-              let issue = createdIssue else {
+        guard let issue = createdIssue else {
             stepError = "Missing context for retry."
             return
         }
         busy = true; stepError = nil
         defer { busy = false }
         do {
-            // If an MR already exists for this branch, adopt it instead
-            // of trying to create a duplicate (GitLab returns 409).
-            let openMRs = try await gitlab.listMergeRequests(projectId: projectId)
+            // If an MR/PR already exists for this branch, adopt it instead
+            // of trying to create a duplicate (both backends reject one).
+            let openMRs = try await backend.listOpenMergeRequests(projectId: projectId)
             let existingForBranch = openMRs.first { $0.sourceBranch == branchName }
-            let mr: GitLabMergeRequest
+            let mr: RepoMergeRequest
             if let found = existingForBranch {
                 mr = found
-                log.info("mr_reused iid=\(found.iid, privacy: .public)")
+                log.info("mr_reused number=\(found.number, privacy: .public)")
             } else {
-                let base = project.defaultBranch ?? "main"
-                let mrPayload = GitLabMergeRequestPayload(
+                let mrPayload = RepoMergeRequestPayload(
                     title: mrTitle.trimmingCharacters(in: .whitespacesAndNewlines),
                     description: mrDescription.isEmpty ? nil : mrDescription,
                     sourceBranch: branchName,
-                    targetBranch: base
+                    targetBranch: defaultBranch
                 )
-                mr = try await gitlab.createMergeRequest(projectId: projectId, payload: mrPayload)
-                log.info("mr_created_on_retry iid=\(mr.iid, privacy: .public)")
+                mr = try await backend.createMergeRequest(projectId: projectId, payload: mrPayload)
+                log.info("mr_created_on_retry number=\(mr.number, privacy: .public)")
             }
             createdMR = mr
             let comment = """
@@ -656,7 +648,7 @@ final class CodeWorkflowService: ObservableObject {
 
             Changes applied by LLM IDE AI assistant.
             """
-            _ = try? await gitlab.createNote(projectId: projectId, iid: issue.iid, body: comment)
+            _ = try? await backend.createNote(projectId: projectId, number: issue.number, body: comment)
             advance()
         } catch {
             stepError = error.localizedDescription
@@ -666,26 +658,23 @@ final class CodeWorkflowService: ObservableObject {
     // MARK: - Step 5: Push & Create MR
 
     func pushAndCreateMR() async {
-        guard let repoURL = project.localURL,
-              let projectId = project.resolvedId,
-              let issue = createdIssue else {
+        guard let issue = createdIssue else {
             stepError = "Missing context for push."
             return
         }
-        let token = (try? GitLabClient.currentToken()) ?? ""
-        let base = project.defaultBranch ?? "main"
+        let token = gitPushToken()
         busy = true; stepError = nil
         defer { busy = false }
         do {
-            try await repo.push(at: repoURL, branch: branchName, token: token)
+            try await repo.push(at: localURL, branch: branchName, token: token)
 
-            let mrPayload = GitLabMergeRequestPayload(
+            let mrPayload = RepoMergeRequestPayload(
                 title: mrTitle.trimmingCharacters(in: .whitespacesAndNewlines),
                 description: mrDescription.isEmpty ? nil : mrDescription,
                 sourceBranch: branchName,
-                targetBranch: base
+                targetBranch: defaultBranch
             )
-            let mr = try await gitlab.createMergeRequest(projectId: projectId, payload: mrPayload)
+            let mr = try await backend.createMergeRequest(projectId: projectId, payload: mrPayload)
             createdMR = mr
 
             // Post summary comment on the issue
@@ -694,23 +683,20 @@ final class CodeWorkflowService: ObservableObject {
 
             Changes applied by LLM IDE AI assistant.
             """
-            _ = try await gitlab.createNote(projectId: projectId, iid: issue.iid, body: comment)
+            _ = try await backend.createNote(projectId: projectId, number: issue.number, body: comment)
             // Close the source issue now that work is committed and an
             // MR is in review. The MR's "Closes #N" line also auto-closes
             // on merge, but users want the issue out of the open queue
             // immediately so it isn't surfaced for re-execution. Failure
             // here is non-fatal — the workflow still advances.
             do {
-                let closePayload = GitLabIssuePayload(
-                    title: issue.title,
-                    stateEvent: "close"
-                )
-                _ = try await gitlab.updateIssue(projectId: projectId, iid: issue.iid, payload: closePayload)
-                log.info("issue_closed iid=\(issue.iid, privacy: .public)")
+                let closePayload = RepoIssuePayload(title: issue.title, stateChange: .close)
+                _ = try await backend.updateIssue(projectId: projectId, number: issue.number, payload: closePayload)
+                log.info("issue_closed number=\(issue.number, privacy: .public)")
             } catch {
-                log.warning("issue_close_failed iid=\(issue.iid, privacy: .public) err=\(error.localizedDescription, privacy: .public)")
+                log.warning("issue_close_failed number=\(issue.number, privacy: .public) err=\(error.localizedDescription, privacy: .public)")
             }
-            log.info("mr_created iid=\(mr.iid, privacy: .public)")
+            log.info("mr_created number=\(mr.number, privacy: .public)")
             advance()
         } catch {
             stepError = error.localizedDescription
@@ -734,19 +720,19 @@ final class CodeWorkflowService: ObservableObject {
     func closeIssueIfNeeded() async {
         guard !doneCloseFired else { return }
         doneCloseFired = true
-        guard let projectId = project.resolvedId, let issue = createdIssue else { return }
+        guard let issue = createdIssue else { return }
         do {
-            let current = try await gitlab.getIssue(projectId: projectId, iid: issue.iid)
+            let current = try await backend.getIssue(projectId: projectId, number: issue.number)
             if current.state == "opened" {
-                let payload = GitLabIssuePayload(title: current.title, stateEvent: "close")
-                _ = try await gitlab.updateIssue(projectId: projectId, iid: issue.iid, payload: payload)
-                log.info("issue_closed_on_done iid=\(issue.iid, privacy: .public)")
+                let payload = RepoIssuePayload(title: current.title, stateChange: .close)
+                _ = try await backend.updateIssue(projectId: projectId, number: issue.number, payload: payload)
+                log.info("issue_closed_on_done number=\(issue.number, privacy: .public)")
             } else {
-                log.info("issue_already_closed_on_done iid=\(issue.iid, privacy: .public) state=\(current.state, privacy: .public)")
+                log.info("issue_already_closed_on_done number=\(issue.number, privacy: .public) state=\(current.state, privacy: .public)")
             }
             issueClosedSuccessfully = true
         } catch {
-            log.warning("issue_close_on_done_failed iid=\(issue.iid, privacy: .public) err=\(error.localizedDescription, privacy: .public)")
+            log.warning("issue_close_on_done_failed number=\(issue.number, privacy: .public) err=\(error.localizedDescription, privacy: .public)")
             issueClosedSuccessfully = false
         }
     }

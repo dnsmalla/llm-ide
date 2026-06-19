@@ -294,9 +294,12 @@ protocol RepoBackend: Sendable {
     /// Post a comment. Returns the created note.
     func createNote(projectId: String, number: Int, body: String) async throws -> RepoNote
 
-    /// Create branch `name` from existing branch `ref`. Throws on failure.
+    /// Create branch `name` from existing branch `ref`. Idempotent: returns
+    /// `true` when a new branch was created, `false` when it already existed
+    /// (so callers reuse it instead of failing). Throws on other errors.
     /// Needed by the AI code-change workflow (issue → branch → commit → MR).
-    func createBranch(projectId: String, name: String, ref: String) async throws
+    @discardableResult
+    func createBranch(projectId: String, name: String, ref: String) async throws -> Bool
 
     /// Create a merge request / pull request. Returns the created MR/PR.
     func createMergeRequest(projectId: String, payload: RepoMergeRequestPayload) async throws -> RepoMergeRequest
