@@ -42,15 +42,20 @@ struct VisualView: View {
                 .help(assistantVisible ? "Hide chat" : "Show chat")
             }
             Divider()
-            HSplitView {
+            // Fixed-width tree column outside HSplitView (HSplitView doesn't
+            // reliably cap a leading child's width); HSplitView drives only
+            // the image ↔ chat split.
+            HStack(spacing: 0) {
             if treeVisible {
                 FileTreePanel(title: "LIBRARY",
                               categories: [.data, .code],
                               selectedURL: $treeSelectedURL)
-                    .frame(minWidth: 200, idealWidth: 240, maxWidth: 300)
+                    .frame(width: 240)
                     .transition(.move(edge: .leading))
+                Divider()
             }
 
+            HSplitView {
             ImageShowPanel(selectedURL: $treeSelectedURL)
                 .frame(minWidth: 300, idealWidth: 520, maxWidth: .infinity)
 
@@ -74,6 +79,7 @@ struct VisualView: View {
                         }
                     )
                     .transition(.move(edge: .trailing))
+            }
             }
         }
         }

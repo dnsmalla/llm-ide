@@ -321,22 +321,20 @@ struct AppShell: View {
                     }
                 ])
                 Divider()
-                HSplitView {
+                // Fixed-width list column (HSplitView doesn't reliably cap a
+                // leading child's width); the detail fills the rest.
+                HStack(spacing: 0) {
                     if libraryTreeVisible {
                         LibraryView(api: api)
                             .background(theme.current.surface)
-                            .frame(minWidth: 180, idealWidth: 180, maxWidth: 420,
-                                   maxHeight: .infinity)
+                            .frame(width: 260)
+                            .frame(maxHeight: .infinity)
                             .transition(.move(edge: .leading))
+                        Divider()
                     }
                     LibraryDetailView(api: api)
                         .background(theme.current.body)
-                        // Detail grows to fill leftover width (maxWidth .infinity)
-                        // while the list stays near its 180 min. A modest ideal
-                        // (not 100_000) keeps a fresh window from opening wider
-                        // than the screen when there's no saved frame.
-                        .frame(minWidth: 360, idealWidth: 720, maxWidth: .infinity,
-                               maxHeight: .infinity)
+                        .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 TerminalPanelView(projectDirectory: projectDirectory)

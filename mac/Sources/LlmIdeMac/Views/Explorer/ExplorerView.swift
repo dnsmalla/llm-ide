@@ -47,42 +47,46 @@ struct ExplorerView: View {
         VStack(spacing: 0) {
             explorerControlBar
             Divider()
-            HSplitView {
-            if treeVisible {
-                treePane
-                    // Open at a tight default (ideal == min); draggable to 360.
-                    .frame(minWidth: 180, idealWidth: 180, maxWidth: 360)
-                    .transition(.move(edge: .leading))
-            }
+            // The file tree is a FIXED-width column OUTSIDE the HSplitView.
+            // HSplitView doesn't reliably honor a leading child's
+            // idealWidth/maxWidth (it let the tree balloon past its cap), so
+            // pinning the width here is the only dependable way to keep the
+            // first panel minimal. HSplitView still drives the editor ↔ chat
+            // split, which resizes correctly.
+            HStack(spacing: 0) {
+                if treeVisible {
+                    treePane
+                        .frame(width: 240)
+                        .transition(.move(edge: .leading))
+                    Divider()
+                }
+                HSplitView {
+                    editorArea
+                        .frame(minWidth: 360, maxWidth: .infinity)
 
-            editorArea
-                // Greedy ideal so HSplitView gives the leftover width to the
-                // editor, not the leading tree (which would otherwise overrun
-                // its maxWidth). Keeps the tree at its 180 minimum by default.
-                .frame(minWidth: 360, idealWidth: 100_000, maxWidth: .infinity)
-
-            if assistantVisible {
-                CodeAssistantPanel(api: api,
-                                   initialURL: activeTab,
-                                   showFileAttachButtons: true,
-                                   showModelPicker: true)
-                    .frame(minWidth: 180,
-                           idealWidth: CGFloat(chatPanelWidth),
-                           maxWidth: .infinity)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear
-                                .onChange(of: geo.size.width) { _, w in
-                                    let clamped = max(220, Double(w))
-                                    if abs(clamped - chatPanelWidth) > 1 {
-                                        chatPanelWidth = clamped
-                                    }
+                    if assistantVisible {
+                        CodeAssistantPanel(api: api,
+                                           initialURL: activeTab,
+                                           showFileAttachButtons: true,
+                                           showModelPicker: true)
+                            .frame(minWidth: 180,
+                                   idealWidth: CGFloat(chatPanelWidth),
+                                   maxWidth: .infinity)
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear
+                                        .onChange(of: geo.size.width) { _, w in
+                                            let clamped = max(220, Double(w))
+                                            if abs(clamped - chatPanelWidth) > 1 {
+                                                chatPanelWidth = clamped
+                                            }
+                                        }
                                 }
-                        }
-                    )
-                    .transition(.move(edge: .trailing))
+                            )
+                            .transition(.move(edge: .trailing))
+                    }
+                }
             }
-        }
         // Reset all per-project state when the active project changes, so the
         // tree, cache, and open tabs never show a previous project's files
         // (and the cache can't grow unbounded across switches).

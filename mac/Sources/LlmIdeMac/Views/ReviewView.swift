@@ -120,16 +120,20 @@ struct ReviewView: View {
         VStack(spacing: 0) {
             reviewChromeBar
             Divider()
-            HSplitView {
+            // Fixed-width tree column outside HSplitView — HSplitView doesn't
+            // reliably cap a leading child's width, so pin it here and let
+            // HSplitView drive only the viewer ↔ chat split.
+            HStack(spacing: 0) {
             if treeVisible {
                 FileTreePanel(title: config.treeTitle,
                               categories: config.treeCategories,
                               selectedURL: $treeSelectedURL)
-                    // Open at a tight default (ideal == min); draggable to 300.
-                    .frame(minWidth: 180, idealWidth: 180, maxWidth: 300)
+                    .frame(width: 240)
                     .transition(.move(edge: .leading))
+                Divider()
             }
 
+            HSplitView {
             VStack(spacing: 0) {
                 if !openTabs.isEmpty {
                     EditorTabBar(tabs: $openTabs, activeTab: $activeTabURL)
@@ -173,6 +177,7 @@ struct ReviewView: View {
                         }
                     )
                     .transition(.move(edge: .trailing))
+            }
             }
         }
         // One-time migration to the smaller default. Anything wider
