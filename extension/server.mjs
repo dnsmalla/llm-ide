@@ -3,27 +3,18 @@ import './core/env-compat.mjs';
 import http from 'http';
 import { execFile } from 'child_process';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { handleKB } from './kb/router.mjs';
 import { handleAIRoutes } from './server/ai-routes.mjs';
 import { handleExportRoutes } from './server/export-routes.mjs';
-import { appendCaptions } from './agents/live-sessions.mjs';
-// Single source of truth for the Claude CLI wrapper + language
-// helpers.  agents/runtime.mjs's runClaude honors per-user vault
-// keys (see safeLookupApiKey) — server.mjs used to have its own
-// local copy that ignored them, so multi-tenant billing didn't
-// work on /generate-notes, /chat, /generate-questions, etc.
-import { runClaude, resolveLanguage } from './agents/runtime.mjs';
 
 import { logger, newRequestId } from './core/logger.mjs';
-import { authenticate, isPublicPath, requireAdmin } from './server/auth.mjs';
+import { authenticate, requireAdmin } from './server/auth.mjs';
 import { handleAuth, isAuthRoute } from './server/auth-routes.mjs';
 import { purgeExpiredRefreshTokens, purgeExpiredResetTokens } from './server/users.mjs';
 import { AppError, sendError, errInternal, errNotFound, errValidation, errRateLimit } from './core/errors.mjs';
 import { tryConsume, saveBuckets, loadBuckets } from './server/rate-limit.mjs';
 import { recordHttpRequest, recordRateLimitDeny, setKbGauge, renderPrometheus } from './server/metrics.mjs';
-import { recordAudit } from './server/audit.mjs';
 import { getDb, closeDb, statsAdmin, purgeExpiredJti } from './kb/db.mjs';
 import { stopAllAgents } from './agents/meeting-agent.mjs';
 
@@ -35,7 +26,6 @@ import { startBackgroundOutcomePoller, stopBackgroundOutcomePoller } from './age
 
 const PORT = config.port;
 const HOST = config.host;
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Bump whenever the HTTP surface changes so the extension can detect
 // a stale server process ("you installed the new client but forgot to

@@ -82,7 +82,7 @@ export function sanitizeForPrompt(text) {
 // so a single shared RegExp object beats relying on the JIT to spot
 // the literal-in-hot-function pattern.  Same patterns/flags/behavior
 // as the previous inline literals.
-// eslint-disable-next-line no-control-regex
+ 
 const CONTROL_CHARS_RE = /[\u0000-\u001F\u007F]/g;
 const WHITESPACE_RUN_RE = /\s+/g;
 

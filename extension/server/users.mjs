@@ -79,7 +79,7 @@ export function registerUser(db, { email, password, displayName }) {
   // inside a transaction so two concurrent registrations can't both
   // see "0 existing users" and both become admin.  better-sqlite3
   // serializes writers, so the transaction acts as a critical section.
-  const provisioned = db.transaction(() => {
+  db.transaction(() => {
     const userCount = db.prepare(
       "SELECT COUNT(*) AS n FROM users WHERE id != 'legacy'",
     ).get().n;

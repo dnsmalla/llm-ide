@@ -38,7 +38,7 @@ const ANTHROPIC_VERSION = process.env.LLMIDE_ANTHROPIC_VERSION || '2023-06-01';
 // anything else (empty, stale, or a foreign provider) falls back to the
 // default rather than failing the request. A regex (not a fixed list)
 // keeps new Claude models working without a code change here.
-const CLAUDE_MODEL_RE = /^claude-[a-z0-9.\-]+$/;
+const CLAUDE_MODEL_RE = /^claude-[a-z0-9.-]+$/;
 function resolveModel(model) {
   return (typeof model === 'string' && CLAUDE_MODEL_RE.test(model)) ? model : DEFAULT_MODEL;
 }

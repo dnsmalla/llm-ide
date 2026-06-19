@@ -91,8 +91,8 @@ const TOKEN_REDACTIONS = [
   /\bxox[abp]-[A-Za-z0-9-]{10,}\b/g,
   /\bAIza[0-9A-Za-z\-_]{35}\b/g,
   /\bAKIA[0-9A-Z]{16}\b/g,
-  /Bearer\s+[A-Za-z0-9._\-]{20,}/gi,
-  /apiKey=[A-Za-z0-9_\-]+/gi,
+  /Bearer\s+[A-Za-z0-9._-]{20,}/gi,
+  /apiKey=[A-Za-z0-9_-]+/gi,
 ];
 function redactTokens(msg) {
   let s = typeof msg === 'string' ? msg : String(msg);

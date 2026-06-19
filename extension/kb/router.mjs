@@ -27,7 +27,7 @@ import { iterateUserMeetings } from './exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails } from '../agents/email-source.mjs';
 import { logger } from '../core/logger.mjs';
-import { sendJSON, readBody, parseJSON, sanitizeForPrompt } from '../core/utils.mjs';
+import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 
 // SSE concurrency tracking now lives in routes/live.mjs alongside
 // the stream route itself.
@@ -471,7 +471,7 @@ export async function handleKB(req, res) {
           res.write(JSON.stringify({ done: true, next_cursor: last }) + '\n');
           res.end();
         }
-      } catch (err) {
+      } catch {
         // Headers (200) are already on the wire, so we cannot change the
         // status code. Emit a terminal error record the client can detect
         // (done:false + error) and a resumable cursor, then end the stream.

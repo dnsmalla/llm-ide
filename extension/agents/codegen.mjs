@@ -17,7 +17,7 @@ const MAX_FILE_BYTES = 25 * 1024;
 function sanitizePath(p) {
   if (typeof p !== 'string') return null;
   // No absolute paths, no parent-directory escapes, no NUL.
-  // eslint-disable-next-line no-control-regex
+   
   if (/[\u0000]/.test(p)) return null;
   if (p.startsWith('/') || p.includes('..')) return null;
   if (p.length > 300) return null;

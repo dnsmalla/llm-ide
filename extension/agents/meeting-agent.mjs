@@ -13,7 +13,7 @@
 // No bot-workers, no third-party transport — just an LLM watching
 // the transcript and injecting questions into the user's UI.
 
-import { appendCaptions, finalizeSession, getCaptionsSince, listActiveSessions } from './live-sessions.mjs';
+import { appendCaptions, getCaptionsSince, listActiveSessions } from './live-sessions.mjs';
 import { draftQuestion } from './agent-prompt.mjs';
 import { getPlan, getAgentPersona } from '../kb/db.mjs';
 import { logger as _agentLog } from '../core/logger.mjs';

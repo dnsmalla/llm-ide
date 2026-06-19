@@ -4,7 +4,7 @@
 // through the kb facade.
 
 import { config } from '../core/config.mjs';
-import { errAuth, errForbidden, errNotFound, errValidation } from '../core/errors.mjs';
+import { errAuth, errNotFound, errValidation } from '../core/errors.mjs';
 import { requireAdmin } from './auth.mjs';
 import { tryConsume } from './rate-limit.mjs';
 import {
