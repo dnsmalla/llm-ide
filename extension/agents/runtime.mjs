@@ -7,6 +7,7 @@ import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
 import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS } from './providers.mjs';
+import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 
 const log = logger.child({ component: 'claude-runtime' });
 
@@ -42,20 +43,12 @@ function resolveModel(model) {
   return (typeof model === 'string' && CLAUDE_MODEL_RE.test(model)) ? model : DEFAULT_MODEL;
 }
 
-// Anthropic 529 "overloaded" responses usually clear within 5-30s.
-// Retry transient capacity errors (529, 503) with jittered backoff
-// before bubbling up to the user. Other errors (auth, 4xx, malformed
+// Anthropic 529 "overloaded" responses usually clear within 5-30s. Retry
+// transient capacity errors (529, 503) with the shared jittered backoff
+// (agents/backoff.mjs) before bubbling up. Other errors (auth, 4xx, malformed
 // JSON) throw on first attempt — masking those would hide real bugs.
-const RETRY_DELAYS_MS = [1_000, 3_000];  // attempt 1 → 2 (after 1s),
-                                          // attempt 2 → 3 (after 3s).
-                                          // 3 attempts total.
-
-// ±25% jitter to avoid thundering-herd retries from concurrent calls.
-// Exported — the dispatcher's retry backoff uses the same strategy.
-export function jittered(ms) {
-  const factor = 0.75 + Math.random() * 0.5;
-  return Math.round(ms * factor);
-}
+// `jittered` is re-exported so the dispatcher keeps importing it from here.
+export { jittered };
 
 function isCliOverloaded(stderr) {
   if (typeof stderr !== 'string') return false;
@@ -75,7 +68,6 @@ function redactKey(text, apiKey) {
   return out.replace(/sk-ant-[A-Za-z0-9-]{10,}/g, 'sk-ant-***');
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Hard cap on prompt length passed to either the HTTP API or the
 // CLI.  Server-level /generate-* routes also cap their inputs at
 // ~500 k chars, but agent modules (planner, risk, meeting-agent,

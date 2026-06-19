@@ -12,6 +12,7 @@ import { execFile } from 'node:child_process';
 import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
+import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 
 const log = logger.child({ component: 'providers' });
 
@@ -71,9 +72,6 @@ export function providerApiKey(userId, provider) {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const RETRY_STATUS = new Set([429, 500, 502, 503, 529]);
-const RETRY_DELAYS_MS = [1_000, 3_000];
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-function jitter(ms) { return Math.round(ms * (0.75 + Math.random() * 0.5)); }
 
 function redact(text, key) {
   let s = typeof text === 'string' ? text : String(text ?? '');
@@ -160,7 +158,7 @@ export async function completeViaApi(provider, { apiKey, model, prompt, maxToken
     } catch (err) {
       lastErr = err;
       if (err.transient && attempt < RETRY_DELAYS_MS.length) {
-        const delay = jitter(RETRY_DELAYS_MS[attempt]);
+        const delay = jittered(RETRY_DELAYS_MS[attempt]);
         log.warn('provider_retry', { provider, attempt: attempt + 1, delayMs: delay });
         await sleep(delay);
         continue;

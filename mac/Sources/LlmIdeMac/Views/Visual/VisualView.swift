@@ -64,20 +64,7 @@ struct VisualView: View {
                                    initialURL: treeSelectedURL,
                                    showFileAttachButtons: true,
                                    showModelPicker: true)
-                    .frame(minWidth: 160,
-                           idealWidth: CGFloat(chatPanelWidth),
-                           maxWidth: .infinity)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear
-                                .onChange(of: geo.size.width) { _, w in
-                                    let clamped = max(160, Double(w))
-                                    if abs(clamped - chatPanelWidth) > 1 {
-                                        chatPanelWidth = clamped
-                                    }
-                                }
-                        }
-                    )
+                    .persistedPanelWidth($chatPanelWidth, minWidth: 160, floor: 160)
                     .transition(.move(edge: .trailing))
             }
             }

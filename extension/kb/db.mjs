@@ -427,7 +427,6 @@ export {
   updateTask,
   mergeTaskMeta,
   getTaskById,
-  getPlanSnapshots,
 } from './plans.mjs';
 
 // Per-user metadata (repo allow-list, UI prefs, JWT revocation list)
@@ -467,7 +466,6 @@ export {
 // `kb.recordAgentFeedback(...)` etc. call sites.
 export {
   recordAgentFeedback,
-  getAgentFeedback,
   agentFeedbackByTask,
   agentFeedbackStats,
 } from './feedback.mjs';

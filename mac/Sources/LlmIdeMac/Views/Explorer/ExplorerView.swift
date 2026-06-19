@@ -69,20 +69,7 @@ struct ExplorerView: View {
                                            initialURL: activeTab,
                                            showFileAttachButtons: true,
                                            showModelPicker: true)
-                            .frame(minWidth: 180,
-                                   idealWidth: CGFloat(chatPanelWidth),
-                                   maxWidth: .infinity)
-                            .background(
-                                GeometryReader { geo in
-                                    Color.clear
-                                        .onChange(of: geo.size.width) { _, w in
-                                            let clamped = max(220, Double(w))
-                                            if abs(clamped - chatPanelWidth) > 1 {
-                                                chatPanelWidth = clamped
-                                            }
-                                        }
-                                }
-                            )
+                            .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 220)
                             .transition(.move(edge: .trailing))
                     }
                 }

@@ -39,6 +39,15 @@ import { sendJSON, readBody, parseJSON, sanitizeForPrompt } from '../core/utils.
 // data-access call.
 const SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
+// Shared guard for the /kb/providers/* routes: sends a 400 and returns true
+// when the provider id is unknown, so the caller can `if (…) return true;`.
+function rejectUnknownProvider(res, provider) {
+  if (PROVIDER_IDS.includes(provider)) return false;
+  sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED',
+    message: `Unknown provider (allowed: ${PROVIDER_IDS.join(', ')})` } });
+  return true;
+}
+
 // Returns true if the request was handled (response written), false if
 // the URL is not a /kb/* route — caller falls through to its own routing.
 export async function handleKB(req, res) {
@@ -75,11 +84,7 @@ export async function handleKB(req, res) {
     if (req.method === 'POST' && url === '/kb/providers/verify') {
       const body = parseJSON(await readBody(req, 64 * 1024)) || {};
       const provider = String(body.provider || '');
-      if (!PROVIDER_IDS.includes(provider)) {
-        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED',
-          message: `Unknown provider (allowed: ${PROVIDER_IDS.join(', ')})` } });
-        return true;
-      }
+      if (rejectUnknownProvider(res, provider)) return true;
       const mode = body.mode === 'cli' ? 'cli' : 'key';
       const apiKey = mode === 'key'
         ? ((typeof body.apiKey === 'string' && body.apiKey) ? body.apiKey : providerApiKey(userId, provider))
@@ -101,11 +106,7 @@ export async function handleKB(req, res) {
     if (req.method === 'POST' && url === '/kb/providers/models') {
       const body = parseJSON(await readBody(req, 16 * 1024)) || {};
       const provider = String(body.provider || '');
-      if (!PROVIDER_IDS.includes(provider)) {
-        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED',
-          message: `Unknown provider (allowed: ${PROVIDER_IDS.join(', ')})` } });
-        return true;
-      }
+      if (rejectUnknownProvider(res, provider)) return true;
       const key = providerApiKey(userId, provider);
       if (!key) { sendJSON(res, 200, { models: [], detail: 'no API key configured' }); return true; }
       const baseUrl = provider === 'custom' ? customBaseUrl(userId) : undefined;

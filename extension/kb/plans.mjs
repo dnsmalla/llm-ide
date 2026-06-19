@@ -285,15 +285,3 @@ export function getTaskById(userId, taskId) {
   };
 }
 
-// Return the snapshot history for a plan (last N saved states stored
-// in plan.meta.snapshots). Each snapshot contains { savedAt, taskCount, tasks }.
-export function getPlanSnapshots(userId, planId) {
-  requireUser(userId);
-  const db = getDb();
-  const row = db.prepare(
-    'SELECT meta FROM plans WHERE id = ? AND user_id = ?',
-  ).get(String(planId), userId);
-  if (!row) return [];
-  const m = safeParseMeta(row.meta) || {};
-  return Array.isArray(m.snapshots) ? m.snapshots : [];
-}

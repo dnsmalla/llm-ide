@@ -36,17 +36,6 @@ export function recordAgentFeedback(userId, { sessionId, captionSeq, verdict, pl
   );
 }
 
-export function getAgentFeedback(userId, sessionId, captionSeq) {
-  requireUser(userId);
-  if (!sessionId) return null;
-  const db = getDb();
-  const row = lazyPrepare(db,
-    'SELECT verdict, plan_task_id AS planTaskId, score, recorded_at AS recordedAt ' +
-    'FROM agent_feedback WHERE user_id = ? AND session_id = ? AND caption_seq = ?',
-  ).get(userId, sessionId, Math.floor(captionSeq));
-  return row || null;
-}
-
 /// Per-plan-task breakdown of agent feedback. Returns one row per
 /// plan task that has at least one feedback entry, with verdict
 /// counts + useful-rate + avg-score-when-useful. Drives the "which

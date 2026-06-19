@@ -155,27 +155,7 @@ struct ReviewView: View {
                                    initialURL: activeTabURL,
                                    showFileAttachButtons: false,
                                    showModelPicker: true)
-                    .frame(minWidth: 180,
-                           idealWidth: CGFloat(chatPanelWidth),
-                           maxWidth: .infinity)
-                    .background(
-                        // HSplitView doesn't bind back the actual width
-                        // when the user drags the divider. Observing
-                        // the rendered width through GeometryReader is
-                        // the cleanest workaround — when the size
-                        // settles after a drag, the new value is
-                        // written back to AppStorage and applied on
-                        // next launch.
-                        GeometryReader { geo in
-                            Color.clear
-                                .onChange(of: geo.size.width) { _, w in
-                                    let clamped = max(120, Double(w))
-                                    if abs(clamped - chatPanelWidth) > 1 {
-                                        chatPanelWidth = clamped
-                                    }
-                                }
-                        }
-                    )
+                    .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 120)
                     .transition(.move(edge: .trailing))
             }
             }
