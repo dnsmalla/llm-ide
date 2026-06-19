@@ -45,3 +45,6 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Build (bundler)
+        run: npm run build
