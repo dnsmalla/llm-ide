@@ -49,7 +49,6 @@ struct SettingsView: View {
                                 PathsSettingsSection()
                                 GitLabSettingsSection()
                                 GitHubSettingsSection()
-                                CLISettingsSection()
                                 ProvidersSettingsSection(api: api)
                                 PreferencesSettingsSection(api: api)
                             }

@@ -7,6 +7,7 @@ import SwiftUI
 struct ProvidersSettingsSection: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
+    @EnvironmentObject var config: AppConfig
 
     private struct Provider: Identifiable {
         let id: String          // "anthropic" — the verify-endpoint provider id
@@ -14,6 +15,10 @@ struct ProvidersSettingsSection: View {
         let vaultKey: String     // "claude.apiKey" — the /auth/me/secrets key
         let placeholder: String
         let hint: String
+        /// The composer/CLI tool this provider maps to — drives the "active
+        /// default" radio + default-model picker (folded in from the old CLI
+        /// Tool section so providers live in ONE place).
+        let tool: AICliTool
         /// OpenAI-compatible "custom" provider also needs an endpoint base URL.
         var needsBaseURL: Bool = false
     }
@@ -21,17 +26,20 @@ struct ProvidersSettingsSection: View {
     private let providers: [Provider] = [
         Provider(id: "anthropic", label: "Anthropic (Claude)", vaultKey: "claude.apiKey",
                  placeholder: "sk-ant-…",
-                 hint: "claude-* models. Also works with no key via your logged-in `claude` CLI (subscription)."),
+                 hint: "claude-* models. Also works with no key via your logged-in `claude` CLI (subscription).",
+                 tool: .claudeCode),
         Provider(id: "openai", label: "OpenAI (GPT / Codex)", vaultKey: "openai.apiKey",
                  placeholder: "sk-…",
-                 hint: "gpt-*, o*, codex-* models. With no key, falls back to your logged-in `codex` CLI (subscription)."),
+                 hint: "gpt-*, o*, codex-* models. With no key, falls back to your logged-in `codex` CLI (subscription).",
+                 tool: .openai),
         Provider(id: "google", label: "Google (Gemini)", vaultKey: "google.apiKey",
                  placeholder: "AIza…",
-                 hint: "gemini-* models. With no key, falls back to your logged-in `gemini` CLI (subscription)."),
+                 hint: "gemini-* models. With no key, falls back to your logged-in `gemini` CLI (subscription).",
+                 tool: .gemini),
         Provider(id: "custom", label: "Custom (OpenAI-compatible)", vaultKey: "custom.apiKey",
                  placeholder: "API key (any value for local servers)",
-                 hint: "Any OpenAI-compatible endpoint — OpenRouter, Ollama / LM Studio (local), DeepSeek, Mistral. Pick “Custom” in the composer, then add a model.",
-                 needsBaseURL: true),
+                 hint: "Any OpenAI-compatible endpoint — OpenRouter, Ollama / LM Studio (local), DeepSeek, Mistral. Add a model below or in the composer.",
+                 tool: .custom, needsBaseURL: true),
     ]
 
     @State private var drafts: [String: String] = [:]
@@ -43,18 +51,48 @@ struct ProvidersSettingsSection: View {
     var body: some View {
         SettingsSectionCard(icon: "key.horizontal", title: "Model Providers") {
             VStack(alignment: .leading, spacing: Spacing.md) {
-                SettingsHint("Add an API key to run a provider over the fast HTTP API, or use “Check CLI” to run it through your logged-in CLI (subscription, no key). Keys are stored in the server vault — never on disk here.")
+                SettingsHint("Pick the default provider (◉) and model for new Code & Doc Review chats, and add each provider's credentials. A key runs over the fast HTTP API; with no key, “Check CLI” uses your logged-in CLI (subscription). Keys are stored in the server vault — never on disk here. You can also switch provider/model live in the chat composer.")
                 ForEach(providers) { providerRow($0) }
             }
         }
         .task { await loadConfigured() }
+        .onAppear(perform: normalizeActiveCLI)
+    }
+
+    private func isActive(_ p: Provider) -> Bool { config.activeCLI == p.tool.rawValue }
+
+    private func setActive(_ p: Provider) {
+        config.activeCLI = p.tool.rawValue
+        config.defaultModelId = p.tool.defaultModelId
+    }
+
+    /// Keep `activeCLI` pointing at a selectable provider (a stale persisted
+    /// value falls back to Claude).
+    private func normalizeActiveCLI() {
+        guard !AICliTool.selectable.contains(where: { $0.rawValue == config.activeCLI }) else { return }
+        config.activeCLI = AICliTool.claudeCode.rawValue
+        config.defaultModelId = AICliTool.claudeCode.defaultModelId
     }
 
     @ViewBuilder
     private func providerRow(_ p: Provider) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: Spacing.sm) {
+                // Active-default selector (replaces the old CLI Tool radio list).
+                Button { setActive(p) } label: {
+                    Image(systemName: isActive(p) ? "circle.inset.filled" : "circle")
+                        .foregroundStyle(isActive(p) ? theme.current.accent : theme.current.textMuted)
+                }
+                .buttonStyle(.plain)
+                .help("Use as the default provider for new chats")
                 Text(p.label).font(Typography.bodyStrong)
+                if isActive(p) {
+                    Text("Active")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(theme.current.accent)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(theme.current.accent.opacity(0.12)).clipShape(Capsule())
+                }
                 if configured.contains(p.vaultKey) {
                     Text("• configured")
                         .font(Typography.caption)
@@ -93,6 +131,21 @@ struct ProvidersSettingsSection: View {
                     Button("Check CLI") { Task { await checkCli(p) } }
                         .disabled(busy.contains(p.id))
                         .help("Verify this provider's logged-in CLI for subscription mode (no key needed)")
+                }
+            }
+
+            // Default model for the active provider (folded in from the old
+            // CLI Tool section). Custom has no built-in list — its model is
+            // chosen in the composer ("Add model…").
+            if isActive(p), !p.tool.models.isEmpty {
+                HStack(spacing: Spacing.sm) {
+                    Text("Default model")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                    Picker("", selection: $config.defaultModelId) {
+                        ForEach(p.tool.models) { Text($0.displayName).tag($0.id) }
+                    }
+                    .labelsHidden().pickerStyle(.menu).fixedSize()
                 }
             }
 
