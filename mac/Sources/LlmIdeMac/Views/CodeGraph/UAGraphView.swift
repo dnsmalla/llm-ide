@@ -378,16 +378,20 @@ struct UAGraphView: View {
             if let target = clonesMigrationTarget {
                 migrationBanner(target: target)
             }
-            HSplitView {
+            // Fixed-width left panels (HSplitView overrides a child's width
+            // frame); the canvas fills the rest.
+            HStack(spacing: 0) {
                 if showLibraryPanel {
                     controlsPanel
-                        .frame(minWidth: 220, idealWidth: 260, maxWidth: 340)
+                        .frame(width: 260)
                         .transition(.move(edge: .leading).combined(with: .opacity))
+                    Divider()
                 }
                 if showItemsPanel {
                     itemsPanel
-                        .frame(minWidth: 240, idealWidth: 300, maxWidth: 420)
+                        .frame(width: 300)
                         .transition(.move(edge: .leading).combined(with: .opacity))
+                    Divider()
                 }
                 canvasPanel
                     .frame(minWidth: 360, maxWidth: .infinity)

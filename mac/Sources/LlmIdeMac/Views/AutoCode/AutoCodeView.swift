@@ -9,11 +9,14 @@ struct AutoCodeView: View {
     @State private var taskToReset: AutoTask? = nil
 
     var body: some View {
-        HSplitView {
+        // Fixed-width left column — HSplitView overrides a child's width
+        // frame, so pin it outside the split to keep it minimal.
+        HStack(spacing: 0) {
             leftPane
-                .frame(minWidth: 220, idealWidth: 260, maxWidth: 300)
+                .frame(width: 280)
+            Divider()
             rightPane
-                .frame(minWidth: 300)
+                .frame(minWidth: 300, maxWidth: .infinity)
         }
         .background(theme.current.body)
     }

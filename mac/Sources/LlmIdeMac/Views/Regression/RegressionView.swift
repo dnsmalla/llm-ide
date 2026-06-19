@@ -46,7 +46,9 @@ struct RegressionView: View {
     }
 
     var body: some View {
-        HSplitView {
+        // Fixed-width sources column (HSplitView overrides a child's width
+        // frame); HSplitView drives only the detail ↔ log split.
+        HStack(spacing: 0) {
             RegressionSourcesPane(
                 repoRoot: activeRepoRoot,
                 faults: allFaults,
@@ -55,8 +57,10 @@ struct RegressionView: View {
                 selected: $selected,
                 results: runner.results
             )
-            .frame(minWidth: 260, idealWidth: 320, maxWidth: 480)
+            .frame(width: 300)
+            Divider()
 
+            HSplitView {
             RegressionDetailPane(
                 selected: selected,
                 checkedCount: checked.count,
@@ -65,13 +69,14 @@ struct RegressionView: View {
                 results: runner.results,
                 onRun: { Task { await runSelected() } }
             )
-            .frame(minWidth: 360, idealWidth: 560)
+            .frame(minWidth: 360, maxWidth: .infinity)
 
             RegressionLogPane(
                 lines: runner.log,
                 onClear: { runner.clearLog() }
             )
             .frame(minWidth: 240, idealWidth: 300, maxWidth: 420)
+            }
         }
         .background(theme.current.body)
         .onAppear { runner.config = config }

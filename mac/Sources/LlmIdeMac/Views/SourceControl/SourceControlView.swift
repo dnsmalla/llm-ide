@@ -65,12 +65,13 @@ struct SourceControlView: View {
 
     @ViewBuilder private var content: some View {
         if let root {
-            HSplitView {
-                leftPane(root).frame(minWidth: 180, idealWidth: 180, maxWidth: 520)
+            // Fixed-width changes column — HSplitView overrides a child's
+            // width frame, so pin it outside the split to keep it minimal.
+            HStack(spacing: 0) {
+                leftPane(root).frame(width: 300)
+                Divider()
                 UnifiedDiffView(hunks: hunks, fileExtension: diffLanguage)
-                    // Greedy ideal so the diff absorbs leftover width and the
-                    // changes list stays at its 180 minimum by default.
-                    .frame(minWidth: 360, idealWidth: 100_000, maxWidth: .infinity)
+                    .frame(minWidth: 360, maxWidth: .infinity)
             }
         } else {
             emptyState

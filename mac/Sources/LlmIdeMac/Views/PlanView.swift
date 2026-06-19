@@ -43,9 +43,12 @@ struct PlanView: View {
     }
 
     var body: some View {
-        HSplitView {
+        // Fixed-width list column — HSplitView overrides a child's width
+        // frame, so pin it outside the split to keep it minimal.
+        HStack(spacing: 0) {
             list
-                .frame(minWidth: 220, idealWidth: 260, maxWidth: 360)
+                .frame(width: 280)
+            Divider()
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

@@ -23,15 +23,19 @@ struct DocGenView: View {
                 .help(assistantVisible ? "Hide Assistant" : "Show Assistant")
             }
             Divider()
-            HSplitView {
+            // Fixed-width sources column (HSplitView overrides a child's width
+            // frame); HSplitView drives only the editor ↔ chat split.
+            HStack(spacing: 0) {
             if sourceVisible {
                 DocGenSourcePanel(vm: vm, api: api)
-                    .frame(minWidth: 200, idealWidth: 240, maxWidth: 300)
+                    .frame(width: 240)
                     .transition(.move(edge: .leading))
+                Divider()
             }
 
+            HSplitView {
             DocGenEditorPanel(vm: vm, api: api)
-                .frame(minWidth: 320, idealWidth: 460, maxWidth: 560)
+                .frame(minWidth: 320, idealWidth: 460, maxWidth: .infinity)
 
             if assistantVisible {
                 CodeAssistantPanel(
@@ -41,6 +45,7 @@ struct DocGenView: View {
                     showModelPicker: true)
                     .frame(minWidth: 280, idealWidth: 360, maxWidth: .infinity)
                     .transition(.move(edge: .trailing))
+            }
             }
         }
         }
