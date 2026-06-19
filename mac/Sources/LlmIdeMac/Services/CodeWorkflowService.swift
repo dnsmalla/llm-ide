@@ -121,6 +121,16 @@ final class CodeWorkflowService: ObservableObject {
         self.api = api
     }
 
+    /// Map the issue/MR backend onto the git push-auth backend so the HTTPS
+    /// push uses the right credential header (GitLab PRIVATE-TOKEN vs GitHub
+    /// Basic x-access-token).
+    private var pushBackend: RepoManager.Backend {
+        switch backend.kind {
+        case .gitlab: return .gitlab
+        case .github: return .github
+        }
+    }
+
     // MARK: - Bootstrap from existing issue
 
     /// Pre-load state from an existing issue (skipping the Create-Issue step).
@@ -666,7 +676,7 @@ final class CodeWorkflowService: ObservableObject {
         busy = true; stepError = nil
         defer { busy = false }
         do {
-            try await repo.push(at: localURL, branch: branchName, token: token)
+            try await repo.push(at: localURL, branch: branchName, token: token, backend: pushBackend)
 
             let mrPayload = RepoMergeRequestPayload(
                 title: mrTitle.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -776,6 +786,16 @@ extension GitLabClient {
     static func currentToken() throws -> String {
         let t = AppConfig.shared.gitLabToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { throw GitLabError.notConfigured }
+        return t
+    }
+}
+
+extension GitHubClient {
+    /// GitHub counterpart of the push-auth token accessor. The PAT doubles
+    /// as the HTTPS push credential (https://x-access-token:<pat>@github.com).
+    static func currentToken() throws -> String {
+        let t = AppConfig.shared.gitHubToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { throw GitHubError.notConfigured }
         return t
     }
 }

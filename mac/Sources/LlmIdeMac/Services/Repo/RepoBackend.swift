@@ -33,6 +33,24 @@ enum RepoBackendKind: String, Sendable, Hashable, CaseIterable, Codable {
         case .github: return "chevron.left.forwardslash.chevron.right"
         }
     }
+
+    /// "Merge Request" (GitLab) / "Pull Request" (GitHub) — the provider's
+    /// own name for a change-review request, so the Code workflow copy reads
+    /// natively whichever backend is active.
+    var changeRequestNoun: String {
+        switch self {
+        case .gitlab: return "Merge Request"
+        case .github: return "Pull Request"
+        }
+    }
+
+    /// Short form: "MR" / "PR".
+    var changeRequestAbbrev: String {
+        switch self {
+        case .gitlab: return "MR"
+        case .github: return "PR"
+        }
+    }
 }
 
 // MARK: - Neutral models

@@ -1,16 +1,17 @@
 import SwiftUI
 
-/// Multi-step sheet for the GitLab code-change workflow.
-/// Steps: Create Issue → Create Branch → Generate Changes → Review & Commit → Push & MR → Done
+/// Multi-step sheet for the code-change workflow (GitLab or GitHub).
+/// Steps: Create Issue → Create Branch → Generate Changes → Review & Commit → Push & MR/PR → Done
 struct CodeWorkflowSheet: View {
     @StateObject private var svc: CodeWorkflowService
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appConfig: AppConfig
     @EnvironmentObject private var theme: ThemeStore
     @State private var showExistingPicker = false
-    /// GitLab project — retained for the GitLab-specific "pick existing issue"
-    /// picker. The workflow service itself is backend-neutral.
-    private let project: SavedGitLabProject
+    /// Backend-neutral descriptor — selects GitLab vs GitHub and carries the
+    /// state the "pick existing issue" picker needs.
+    private let target: CodeWorkflowTarget
+    private var kind: RepoBackendKind { target.kind }
     private let prefill: (number: Int, plan: String)?
 
     /// In-progress state from a Quick Fix run that hit a failure and is
@@ -28,17 +29,17 @@ struct CodeWorkflowSheet: View {
     }
 
     init(api: LlmIdeAPIClient,
-         project: SavedGitLabProject,
+         target: CodeWorkflowTarget,
          prefill: (number: Int, plan: String)? = nil,
          resumeFrom: ResumeState? = nil) {
-        self.project = project
+        self.target = target
         _svc = StateObject(wrappedValue: CodeWorkflowService(
-            backend: GitLabClient(),
-            projectId: String(project.resolvedId ?? 0),
-            localURL: project.localURL ?? URL(fileURLWithPath: "/"),
-            defaultBranch: project.defaultBranch ?? "main",
-            displayName: project.displayName,
-            gitPushToken: { (try? GitLabClient.currentToken()) ?? "" },
+            backend: target.backend,
+            projectId: target.projectId,
+            localURL: target.localURL,
+            defaultBranch: target.defaultBranch,
+            displayName: target.displayName,
+            gitPushToken: target.pushToken,
             api: api))
         self.prefill = prefill
         self.resumeFrom = resumeFrom
@@ -74,13 +75,16 @@ struct CodeWorkflowSheet: View {
         }
         .sheet(isPresented: $showExistingPicker) {
             ExistingIssuePicker(
-                project: project,
+                backend: target.backend,
+                projectId: target.projectId,
+                displayName: target.displayName,
+                isResolved: target.isResolved,
                 onSelect: { issue in
                     showExistingPicker = false
                     Task {
                         await svc.bootstrapFromExistingIssue(
-                            number: issue.iid,
-                            plan: issue.description ?? issue.title
+                            number: issue.number,
+                            plan: issue.body ?? issue.title
                         )
                     }
                 },
@@ -173,7 +177,7 @@ struct CodeWorkflowSheet: View {
 
     private var issueStep: some View {
         VStack(alignment: .leading, spacing: 14) {
-            stepHeading(icon: "tag", title: "Create a GitLab Issue", subtitle: "Describe what needs to change")
+            stepHeading(icon: "tag", title: "Create a \(kind.displayName) Issue", subtitle: "Describe what needs to change")
             VStack(alignment: .leading, spacing: 6) {
                 SectionLabel("Title")
                 TextField("Brief description of the change", text: $svc.issueTitle)
@@ -219,7 +223,7 @@ struct CodeWorkflowSheet: View {
                 issueBadge(issue)
             }
             stepHeading(icon: "arrow.triangle.branch", title: "Create Branch",
-                        subtitle: "A feature branch will be created locally and on GitLab")
+                        subtitle: "A feature branch will be created locally and on \(kind.displayName)")
             VStack(alignment: .leading, spacing: 6) {
                 SectionLabel("Branch name")
                 TextField("e.g. issue-42-fix-login-flow", text: $svc.branchName)
@@ -364,16 +368,16 @@ struct CodeWorkflowSheet: View {
     private var pushStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             if let issue = svc.createdIssue { issueBadge(issue) }
-            stepHeading(icon: "icloud.and.arrow.up", title: "Push & Create Merge Request",
-                        subtitle: "Push the branch and open an MR on GitLab")
+            stepHeading(icon: "icloud.and.arrow.up", title: "Push & Create \(kind.changeRequestNoun)",
+                        subtitle: "Push the branch and open a \(kind.changeRequestAbbrev) on \(kind.displayName)")
             VStack(alignment: .leading, spacing: 6) {
-                SectionLabel("MR title")
-                TextField("Merge request title", text: $svc.mrTitle)
+                SectionLabel("\(kind.changeRequestAbbrev) title")
+                TextField("\(kind.changeRequestNoun) title", text: $svc.mrTitle)
                     .textFieldStyle(.roundedBorder)
                     .disabled(svc.busy)
             }
             VStack(alignment: .leading, spacing: 6) {
-                SectionLabel("MR description")
+                SectionLabel("\(kind.changeRequestAbbrev) description")
                 TextEditor(text: $svc.mrDescription)
                     .font(.body)
                     .frame(minHeight: 80)
@@ -421,20 +425,20 @@ struct CodeWorkflowSheet: View {
                             .textSelection(.enabled)
                     }
                 }
-                summaryRow(icon: "icloud.and.arrow.up.fill", label: "MR") {
+                summaryRow(icon: "icloud.and.arrow.up.fill", label: kind.changeRequestAbbrev) {
                     if let mr = svc.createdMR {
                         HStack(spacing: 6) {
                             Text(mr.title).font(.callout).lineLimit(1)
                             Button {
                                 if let url = URL(string: mr.webUrl) { NSWorkspace.shared.open(url) }
                             } label: {
-                                Label("View MR", systemImage: "arrow.up.right.square")
+                                Label("View \(kind.changeRequestAbbrev)", systemImage: "arrow.up.right.square")
                                     .labelStyle(.iconOnly)
                             }
                             .buttonStyle(.borderless)
                         }
                     } else {
-                        Text("No MR opened")
+                        Text("No \(kind.changeRequestAbbrev) opened")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
@@ -535,11 +539,11 @@ struct CodeWorkflowSheet: View {
                 // Safe to call repeatedly — listMergeRequests detects
                 // an existing MR and adopts it instead of duplicating.
                 if svc.stepError != nil {
-                    Button("Retry MR only") { Task { await svc.retryMROnly() } }
+                    Button("Retry \(kind.changeRequestAbbrev) only") { Task { await svc.retryMROnly() } }
                         .buttonStyle(.bordered)
                         .disabled(svc.busy)
                 }
-                Button(svc.busy ? "Pushing…" : "Push & Create MR") { Task { await svc.pushAndCreateMR() } }
+                Button(svc.busy ? "Pushing…" : "Push & Create \(kind.changeRequestAbbrev)") { Task { await svc.pushAndCreateMR() } }
                     .buttonStyle(.borderedProminent)
                     .disabled(svc.busy || svc.mrTitle.trimmingCharacters(in: .whitespaces).isEmpty)
             }

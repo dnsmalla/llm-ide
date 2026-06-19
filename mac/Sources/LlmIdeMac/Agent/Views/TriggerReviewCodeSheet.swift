@@ -39,19 +39,20 @@ struct TriggerReviewCodeSheet: View {
                         .frame(minHeight: 180, maxHeight: 320)
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
                 }
-                if let proj = activeProject {
+                if let target = activeTarget {
                     field(label: "Project") {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(proj.displayName.isEmpty ? "project" : proj.displayName)
+                            Text(target.displayName.isEmpty ? "project" : target.displayName)
                                 .font(.system(size: 12, weight: .medium))
-                            Text(proj.url).font(.system(size: 11)).foregroundStyle(.secondary)
+                            Label(target.kind.displayName, systemImage: target.kind.sfSymbol)
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
                         }
                     }
                 }
             }
 
-            if activeProject == nil {
-                Text("No active GitLab project. Add one in Settings → GitLab.")
+            if activeTarget == nil {
+                Text("No active, cloned repo. Add and clone one in Settings → GitLab or GitHub.")
                     .font(.system(size: 12))
                     .foregroundStyle(.red)
             }
@@ -78,7 +79,8 @@ struct TriggerReviewCodeSheet: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .disabled(activeProject == nil || editedPlan.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!CodeWorkflowTarget.hasActive(config: config)
+                          || editedPlan.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(20)
@@ -87,20 +89,20 @@ struct TriggerReviewCodeSheet: View {
             if editedPlan.isEmpty { editedPlan = plan }
         }
         .sheet(isPresented: $presentingWorkflow, onDismiss: { dismiss() }) {
-            if let proj = activeProject {
+            if let target = activeTarget {
                 CodeWorkflowSheet(
                     api: api,
-                    project: proj,
+                    target: target,
                     prefill: (number: iid, plan: editedPlan)
                 )
                 .environmentObject(config)
             }
         }
         .sheet(isPresented: $presentingQuickFix, onDismiss: { dismiss() }) {
-            if let proj = activeProject {
+            if let target = activeTarget {
                 QuickFixSheet(
                     api: api,
-                    project: proj,
+                    target: target,
                     prefill: (number: iid, plan: editedPlan)
                 )
                 .environmentObject(config)
@@ -108,8 +110,9 @@ struct TriggerReviewCodeSheet: View {
         }
     }
 
-    private var activeProject: SavedGitLabProject? {
-        config.gitLabSavedProjects.first(where: { $0.isActive })
+    /// Active+cloned repo (GitLab or GitHub) the code workflow can run against.
+    private var activeTarget: CodeWorkflowTarget? {
+        CodeWorkflowTarget.resolveActive(config: config)
     }
 
     @ViewBuilder

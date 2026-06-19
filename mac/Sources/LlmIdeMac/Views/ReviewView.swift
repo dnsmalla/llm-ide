@@ -71,9 +71,11 @@ struct ReviewView: View {
     /// GitLab-only: the active+cloned GitLab project. Drives the
     /// "New Change…" toolbar menu (workflows / MRs / issue linking).
     /// Stays GitLab-only because the write workflow is GitLab-typed.
-    private var linkedProject: SavedGitLabProject? {
+    /// Backend-neutral target for the New Change menu — active+cloned GitLab
+    /// or GitHub repo (GitLab first), or nil when none is linked.
+    private var linkedWorkflowTarget: CodeWorkflowTarget? {
         guard config.treeCategories.contains(.code) else { return nil }
-        return appConfig.gitLabSavedProjects.first(where: { $0.isActive && $0.isCloned })
+        return CodeWorkflowTarget.resolveActive(config: appConfig)
     }
 
     /// Backend-agnostic: the active+cloned repo from either GitLab OR
@@ -190,7 +192,7 @@ struct ReviewView: View {
             }
         ]) {
             HStack(spacing: 8) {
-                if let project = linkedProject { newChangeMenu(project) }
+                if let target = linkedWorkflowTarget { newChangeMenu(target) }
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) { assistantVisible.toggle() }
                 } label: {
@@ -202,7 +204,7 @@ struct ReviewView: View {
         }
     }
 
-    private func newChangeMenu(_ project: SavedGitLabProject) -> some View {
+    private func newChangeMenu(_ target: CodeWorkflowTarget) -> some View {
         Menu {
             Button { showQuickFixSheet = true } label: {
                 Label("Quick Fix", systemImage: "bolt.fill")
@@ -224,10 +226,10 @@ struct ReviewView: View {
         .fixedSize()
         .help("Quick Fix (one screen) or Guided (5 steps) — start a Code update")
         .sheet(isPresented: $showWorkflowSheet) {
-            CodeWorkflowSheet(api: api, project: project).environmentObject(appConfig)
+            CodeWorkflowSheet(api: api, target: target).environmentObject(appConfig)
         }
         .sheet(isPresented: $showQuickFixSheet) {
-            QuickFixSheet(api: api, project: project).environmentObject(appConfig)
+            QuickFixSheet(api: api, target: target).environmentObject(appConfig)
         }
     }
 

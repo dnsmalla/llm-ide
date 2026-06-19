@@ -1,16 +1,22 @@
 import SwiftUI
 
-/// Picker shown from `CodeWorkflowSheet` so users can run the multi-step
-/// Review Code workflow against an already-open GitLab issue instead of
-/// having to create a fresh one in the issue step.
+/// Picker shown from `CodeWorkflowSheet` / `QuickFixSheet` so users can run
+/// the Review Code workflow against an already-open issue instead of creating
+/// a fresh one. Backend-neutral: drives whichever `RepoBackend` (GitLab or
+/// GitHub) the active project resolves to.
 struct ExistingIssuePicker: View {
-    let project: SavedGitLabProject
-    let onSelect: (GitLabIssue) -> Void
+    let backend: RepoBackend
+    let projectId: String
+    let displayName: String
+    /// False when the backend project isn't resolved yet — surfaces a clear
+    /// message instead of a confusing API error.
+    let isResolved: Bool
+    let onSelect: (RepoIssue) -> Void
     let onCancel: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var theme: ThemeStore
-    @State private var issues: [GitLabIssue] = []
+    @State private var issues: [RepoIssue] = []
     @State private var loading = false
     @State private var errorMessage: String? = nil
 
@@ -31,9 +37,13 @@ struct ExistingIssuePicker: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Pick an existing issue")
                     .font(.headline)
-                Text(project.displayName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 5) {
+                    Image(systemName: backend.kind.sfSymbol)
+                        .font(.caption2)
+                    Text(displayName)
+                        .font(.caption)
+                }
+                .foregroundStyle(.secondary)
             }
             Spacer()
         }
@@ -92,10 +102,10 @@ struct ExistingIssuePicker: View {
         }
     }
 
-    private func row(_ issue: GitLabIssue) -> some View {
+    private func row(_ issue: RepoIssue) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Text("#\(issue.iid)")
+                Text("#\(issue.number)")
                     .font(.system(.callout, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Text(issue.title)
@@ -134,17 +144,16 @@ struct ExistingIssuePicker: View {
     }
 
     private func load() async {
-        guard let pid = project.resolvedId else {
-            errorMessage = "Project has not been resolved on GitLab yet."
+        guard isResolved else {
+            errorMessage = "This \(backend.kind.displayName) project hasn't been resolved yet — open it once in Settings."
             return
         }
         loading = true
         errorMessage = nil
         defer { loading = false }
         do {
-            let filter = IssueFilter(state: .opened)
-            let result = try await GitLabClient().listIssues(projectId: pid, filter: filter, page: 1)
-            self.issues = result
+            let filter = RepoIssueFilter(state: .opened)
+            self.issues = try await backend.listIssues(projectId: projectId, filter: filter, page: 1)
         } catch {
             self.errorMessage = "Failed to load issues: \(error.localizedDescription)"
         }

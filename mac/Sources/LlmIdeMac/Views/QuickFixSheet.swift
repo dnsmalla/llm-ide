@@ -12,23 +12,24 @@ struct QuickFixSheet: View {
     @EnvironmentObject private var theme: ThemeStore
     private let prefill: (number: Int, plan: String)?
     private let api: LlmIdeAPIClient
-    private let project: SavedGitLabProject
+    private let target: CodeWorkflowTarget
+    private var kind: RepoBackendKind { target.kind }
 
     @State private var bootstrapped = false
     @State private var switchToGuided = false
     @State private var showIssuePicker = false
 
-    init(api: LlmIdeAPIClient, project: SavedGitLabProject, prefill: (number: Int, plan: String)? = nil) {
+    init(api: LlmIdeAPIClient, target: CodeWorkflowTarget, prefill: (number: Int, plan: String)? = nil) {
         _svc = StateObject(wrappedValue: CodeWorkflowService(
-            backend: GitLabClient(),
-            projectId: String(project.resolvedId ?? 0),
-            localURL: project.localURL ?? URL(fileURLWithPath: "/"),
-            defaultBranch: project.defaultBranch ?? "main",
-            displayName: project.displayName,
-            gitPushToken: { (try? GitLabClient.currentToken()) ?? "" },
+            backend: target.backend,
+            projectId: target.projectId,
+            localURL: target.localURL,
+            defaultBranch: target.defaultBranch,
+            displayName: target.displayName,
+            gitPushToken: target.pushToken,
             api: api))
         self.api = api
-        self.project = project
+        self.target = target
         self.prefill = prefill
     }
 
@@ -52,13 +53,16 @@ struct QuickFixSheet: View {
         }
         .sheet(isPresented: $showIssuePicker) {
             ExistingIssuePicker(
-                project: project,
+                backend: target.backend,
+                projectId: target.projectId,
+                displayName: target.displayName,
+                isResolved: target.isResolved,
                 onSelect: { issue in
                     showIssuePicker = false
                     Task {
                         await svc.bootstrapFromExistingIssue(
-                            number: issue.iid,
-                            plan: issue.description ?? issue.title
+                            number: issue.number,
+                            plan: issue.body ?? issue.title
                         )
                     }
                 },
@@ -71,7 +75,7 @@ struct QuickFixSheet: View {
         .sheet(isPresented: $switchToGuided, onDismiss: { dismiss() }) {
             CodeWorkflowSheet(
                 api: api,
-                project: project,
+                target: target,
                 prefill: svc.createdIssue.map { (number: $0.number, plan: svc.aiPrompt) },
                 // Carry forward in-progress state so the guided sheet
                 // lands on the step the Quick Fix run reached and
@@ -98,7 +102,7 @@ struct QuickFixSheet: View {
                 .foregroundStyle(theme.current.warning)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Quick Fix").font(.headline)
-                Text(project.displayName).font(.caption).foregroundStyle(.secondary)
+                Text(target.displayName).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             if let issue = svc.createdIssue {
@@ -190,7 +194,7 @@ struct QuickFixSheet: View {
                     Button {
                         NSWorkspace.shared.open(url)
                     } label: {
-                        Label("View MR", systemImage: "arrow.up.right.square")
+                        Label("View \(kind.changeRequestAbbrev)", systemImage: "arrow.up.right.square")
                     }
                     .buttonStyle(.borderedProminent)
                 }
