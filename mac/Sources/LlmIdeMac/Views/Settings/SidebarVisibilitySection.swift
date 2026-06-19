@@ -9,9 +9,9 @@ struct SidebarVisibilitySection: View {
     @EnvironmentObject var config: AppConfig
 
     var body: some View {
-        SettingsSectionCard(icon: "sidebar.left", title: "Sidebar") {
+        SettingsSectionCard(icon: "sidebar.left", title: "Menu Bar") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                Text("Pick which menus appear in the sidebar. Hidden menus stay reachable through deep links and keyboard shortcuts.")
+                Text("Pick which menus appear in the top bar. Hidden menus stay reachable through deep links and keyboard shortcuts.")
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
                     .fixedSize(horizontal: false, vertical: true)

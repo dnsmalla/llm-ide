@@ -10,6 +10,7 @@ struct TopActivityBar: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var capture: CaptionOrchestrator
     @EnvironmentObject var liveMirror: LiveSessionMirror
+    @EnvironmentObject var config: AppConfig
 
     /// Coding/dev sections first, then the rest. `.settings` is reached from
     /// the account menu; `.live` appears only while a session is active.
@@ -21,7 +22,13 @@ struct TopActivityBar: View {
 
     private var liveActive: Bool { capture.isRunning || liveMirror.activeSession != nil }
     private var sections: [ShellState.Section] {
-        Self.order.filter { $0 != .live || liveActive }
+        Self.order.filter { section in
+            // .live is condition-driven; every user-hideable section honors the
+            // Settings → Sidebar visibility toggles. library/settings aren't
+            // hideable so they're never in hiddenSidebarSections.
+            if section == .live { return liveActive }
+            return !config.hiddenSidebarSections.contains(section.rawValue)
+        }
     }
 
     var body: some View {
