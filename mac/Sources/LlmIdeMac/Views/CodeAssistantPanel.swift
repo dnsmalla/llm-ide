@@ -1517,6 +1517,7 @@ struct CodeAssistantPanel: View {
                 message: msg,
                 language: prefLanguage,
                 model: selectedModel.isEmpty ? nil : selectedModel,
+                provider: (AICliTool(rawValue: config.activeCLI) ?? .claudeCode).provider,
                 history: recent.dropLast(),     // exclude the just-pushed user turn — server appends it
                 attachments: attachments,
                 agentContext: agentContext,
@@ -1700,6 +1701,7 @@ struct CodeAssistantPanel: View {
                 message: "(continue)",
                 language: prefLanguage,
                 model: selectedModel.isEmpty ? nil : selectedModel,
+                provider: (AICliTool(rawValue: config.activeCLI) ?? .claudeCode).provider,
                 history: recent,
                 attachments: [],
                 agentContext: agentContext

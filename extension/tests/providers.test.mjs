@@ -11,7 +11,7 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
-const { resolveProvider, providerApiKey, completeViaApi, verifyProvider, cliInvocation, listProviderModels, chatModels } =
+const { resolveProvider, providerApiKey, completeViaApi, verifyProvider, cliInvocation, listProviderModels, chatModels, customBaseUrl } =
   await import('../agents/providers.mjs');
 
 function mockFetch(handler) {
@@ -152,6 +152,56 @@ test('verifyProvider: unknown provider fails gracefully', async () => {
   const r = await verifyProvider({ provider: 'skynet', mode: 'key', apiKey: 'k' });
   assert.equal(r.ok, false);
 });
+
+test('custom: resolveProvider never infers it from a model id', () => {
+  // Custom is explicit-only (not prefix-routable), so arbitrary ids fall back
+  // to the anthropic default rather than accidentally hitting the custom path.
+  assert.equal(resolveProvider('mistral-large'), 'anthropic');
+  assert.equal(resolveProvider('llama-3.1-70b'), 'anthropic');
+});
+
+test('custom: completeViaApi posts to the configured base URL', async () => {
+  const restore = mockFetch(async (url, opts) => {
+    assert.equal(url, 'https://openrouter.example/api/v1/chat/completions');
+    const body = JSON.parse(opts.body);
+    assert.equal(body.model, 'deepseek/deepseek-chat');
+    return jsonRes(200, { choices: [{ message: { content: 'custom-reply' } }] });
+  });
+  try {
+    const out = await completeViaApi('custom', {
+      apiKey: 'k', model: 'deepseek/deepseek-chat', prompt: 'x',
+      baseUrl: 'https://openrouter.example/api/v1/',   // trailing slash tolerated
+    });
+    assert.equal(out, 'custom-reply');
+  } finally { restore(); }
+});
+
+test('custom: listProviderModels reads <baseUrl>/models', async () => {
+  const restore = mockFetch(async (url, opts) => {
+    assert.equal(url, 'https://local.example/v1/models');
+    assert.equal(opts.method, 'GET');
+    return jsonRes(200, { data: [{ id: 'llama3' }, { id: 'qwen2.5' }] });
+  });
+  try {
+    const ids = await listProviderModels('custom', { apiKey: 'k', baseUrl: 'https://local.example/v1' });
+    assert.deepEqual(ids, ['llama3', 'qwen2.5']);
+  } finally { restore(); }
+});
+
+test('custom: verifyProvider reports failure when no base URL is set', async () => {
+  const r = await verifyProvider({ provider: 'custom', mode: 'key', apiKey: 'k' });
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /base URL/i);
+});
+
+test('customBaseUrl: env fallback, trailing slash stripped', () => {
+  process.env.LLMIDE_OPENAI_COMPAT_BASE_URL = 'https://x.example/v1/';
+  try {
+    assert.equal(customBaseUrl(null), 'https://x.example/v1');
+  } finally {
+    delete process.env.LLMIDE_OPENAI_COMPAT_BASE_URL;
+  }
+})
 
 test('chatModels: openai keeps chat models, drops non-completion ones', () => {
   const ids = ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'text-embedding-3-small',

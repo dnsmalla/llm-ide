@@ -21,9 +21,28 @@ export const PROVIDERS = {
   anthropic: { vaultKey: 'claude.apiKey', env: 'ANTHROPIC_API_KEY', cli: 'claude' },
   openai:    { vaultKey: 'openai.apiKey', env: 'OPENAI_API_KEY',    cli: 'codex'  },
   google:    { vaultKey: 'google.apiKey', env: 'GOOGLE_API_KEY',    cli: 'gemini' },
+  // Generic OpenAI-compatible endpoint — covers OpenRouter, Ollama/LM Studio
+  // (local), DeepSeek, Mistral, Together, etc. The base URL is user-supplied
+  // (vault `custom.baseUrl`); it is NOT id-prefix routable, so callers must
+  // select it explicitly (the picker passes provider="custom").
+  custom:    { vaultKey: 'custom.apiKey', env: 'OPENAI_COMPAT_API_KEY', cli: null },
 };
 
 export const PROVIDER_IDS = Object.keys(PROVIDERS);
+
+const DEFAULT_OPENAI_BASE = 'https://api.openai.com/v1';
+
+// Base URL for the custom OpenAI-compatible provider: user's vault value
+// first, then an operator env fallback. Trailing slashes stripped. null when
+// unset (the caller then reports "configure a base URL").
+export function customBaseUrl(userId) {
+  let url = null;
+  if (userId) {
+    try { url = getSecret(getDb(), userId, 'custom.baseUrl') || null; } catch { url = null; }
+  }
+  url = url || process.env.LLMIDE_OPENAI_COMPAT_BASE_URL || null;
+  return url ? url.replace(/\/+$/, '') : null;
+}
 
 // Map a model id to its provider. A regex per family (not a fixed list)
 // keeps new models working without a code change here. Unknown / blank →
@@ -78,8 +97,9 @@ async function readError(res, key) {
 
 // OpenAI Chat Completions. Newer reasoning models reject `temperature` and
 // use `max_completion_tokens`, so we send only the portable fields.
-async function callOpenAI({ apiKey, model, prompt, maxTokens, signal }) {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+async function callOpenAI({ apiKey, model, prompt, maxTokens, signal, baseUrl }) {
+  const base = (baseUrl || DEFAULT_OPENAI_BASE).replace(/\/+$/, '');
+  const res = await fetch(`${base}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -92,7 +112,7 @@ async function callOpenAI({ apiKey, model, prompt, maxTokens, signal }) {
   if (!res.ok) throw await readError(res, apiKey);
   const data = await res.json();
   const text = data?.choices?.[0]?.message?.content;
-  if (typeof text !== 'string' || !text) throw new Error('openai: empty response');
+  if (typeof text !== 'string' || !text) throw new Error('empty response from OpenAI-compatible endpoint');
   return text;
 }
 
@@ -118,7 +138,8 @@ async function callGoogle({ apiKey, model, prompt, maxTokens, signal }) {
   return text;
 }
 
-const API_ADAPTERS = { openai: callOpenAI, google: callGoogle };
+// `custom` is OpenAI-compatible — same adapter, just a different base URL.
+const API_ADAPTERS = { openai: callOpenAI, google: callGoogle, custom: callOpenAI };
 
 /**
  * Run a prompt against a non-Anthropic provider over HTTP, with jittered
@@ -126,14 +147,14 @@ const API_ADAPTERS = { openai: callOpenAI, google: callGoogle };
  * prompt-caching / overflow handling is provider-specific). Throws on a
  * non-transient error or after exhausting retries.
  */
-export async function completeViaApi(provider, { apiKey, model, prompt, maxTokens = 8192, signal } = {}) {
+export async function completeViaApi(provider, { apiKey, model, prompt, maxTokens = 8192, signal, baseUrl } = {}) {
   const adapter = API_ADAPTERS[provider];
   if (!adapter) throw new Error(`completeViaApi: unsupported provider '${provider}'`);
   if (!apiKey) throw new Error(`completeViaApi: no API key for ${provider}`);
   let lastErr;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     try {
-      const text = await adapter({ apiKey, model, prompt, maxTokens, signal });
+      const text = await adapter({ apiKey, model, prompt, maxTokens, signal, baseUrl });
       log.info('provider_complete', { provider, model });
       return text;
     } catch (err) {
@@ -227,11 +248,18 @@ function parseModelIds(provider, data) {
  * List a provider's available model ids over its models endpoint. Throws on
  * a non-200 (auth/transient) — callers verify or fall back to a static list.
  */
-export async function listProviderModels(provider, { apiKey, signal } = {}) {
-  const make = MODELS_ENDPOINT[provider];
-  if (!make) throw new Error(`listProviderModels: unsupported provider '${provider}'`);
+export async function listProviderModels(provider, { apiKey, baseUrl, signal } = {}) {
   if (!apiKey) throw new Error(`listProviderModels: no API key for ${provider}`);
-  const { url, headers } = make(apiKey);
+  let url, headers;
+  if (provider === 'custom') {
+    if (!baseUrl) throw new Error('custom: no base URL configured');
+    url = `${baseUrl.replace(/\/+$/, '')}/models`;
+    headers = { Authorization: `Bearer ${apiKey}` };
+  } else {
+    const make = MODELS_ENDPOINT[provider];
+    if (!make) throw new Error(`listProviderModels: unsupported provider '${provider}'`);
+    ({ url, headers } = make(apiKey));
+  }
   const res = await fetch(url, { method: 'GET', headers, signal: signal || AbortSignal.timeout(15_000) });
   if (!res.ok) throw await readError(res, apiKey);
   const data = await res.json();
@@ -266,12 +294,13 @@ export function chatModels(provider, ids) {
  * probed for every CLI; the first real call surfaces an auth error).
  * Always resolves — never throws — returning { ok, detail }.
  */
-export async function verifyProvider({ provider, mode, apiKey } = {}) {
+export async function verifyProvider({ provider, mode, apiKey, baseUrl } = {}) {
   if (!PROVIDERS[provider]) return { ok: false, detail: `unknown provider '${provider}'` };
   if (mode === 'cli') return verifyCli(provider);
   if (!apiKey) return { ok: false, detail: 'no API key provided' };
+  if (provider === 'custom' && !baseUrl) return { ok: false, detail: 'no base URL configured' };
   try {
-    const models = await listProviderModels(provider, { apiKey });
+    const models = await listProviderModels(provider, { apiKey, baseUrl });
     return { ok: true, detail: `key verified — ${models.length} models available` };
   } catch (err) {
     return { ok: false, detail: redact(err.message || String(err), apiKey) };
@@ -280,6 +309,7 @@ export async function verifyProvider({ provider, mode, apiKey } = {}) {
 
 function verifyCli(provider) {
   const bin = PROVIDERS[provider].cli;
+  if (!bin) return Promise.resolve({ ok: false, detail: `${provider} has no CLI mode — use an API key` });
   return new Promise((resolve) => {
     execFile(bin, ['--version'], { timeout: 5000 }, (err) => {
       if (err) {

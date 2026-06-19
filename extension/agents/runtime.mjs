@@ -6,7 +6,7 @@ import { execFile } from 'child_process';
 import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
-import { resolveProvider, providerApiKey, completeViaApi, runViaCli } from './providers.mjs';
+import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS } from './providers.mjs';
 
 const log = logger.child({ component: 'claude-runtime' });
 
@@ -91,7 +91,7 @@ const MAX_PROMPT_CHARS = 500_000;
 // so multi-user deployments charge each user's own Anthropic account
 // rather than the operator's CLI login.  When userId is omitted (or
 // the user has no stored key) we fall back to the operator's CLI auth.
-export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscript } = {}) {
+export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscript, provider: explicitProvider } = {}) {
   if (typeof prompt !== 'string') {
     throw new Error('runClaude: prompt must be a string');
   }
@@ -104,16 +104,28 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
   // Default: 8192 (safe for planning, long-form agent replies).
   const resolvedMaxTokens = (Number.isFinite(maxTokens) && maxTokens > 0) ? maxTokens : 8192;
 
-  // Multi-provider routing: a non-Anthropic model (OpenAI/Google) goes to
-  // its HTTP adapter. Anthropic keeps the hardened path below (prompt
-  // caching, context-overflow retry, operator CLI fallback).
-  const provider = resolveProvider(model);
+  // Multi-provider routing. An explicit provider (from the client picker)
+  // wins — required for `custom`, whose model ids aren't prefix-routable;
+  // otherwise infer from the model id. Anthropic keeps the hardened path
+  // below (prompt caching, context-overflow retry, operator CLI fallback).
+  const provider = (typeof explicitProvider === 'string' && PROVIDER_IDS.includes(explicitProvider))
+    ? explicitProvider
+    : resolveProvider(model);
   if (provider !== 'anthropic') {
     const key = providerApiKey(userId, provider);
     if (key) {
+      if (provider === 'custom') {
+        const baseUrl = customBaseUrl(userId);
+        if (!baseUrl) throw new Error('No base URL configured for the custom provider. Add one in Settings → Model Providers.');
+        return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl });
+      }
       return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens });
     }
-    // No key → subscription mode: drive the provider's logged-in CLI.
+    // custom has no CLI subscription mode; other providers fall back to their
+    // logged-in CLI.
+    if (provider === 'custom') {
+      throw new Error('No API key configured for the custom provider. Add one in Settings → Model Providers.');
+    }
     return runViaCli(provider, prompt);
   }
 
@@ -347,9 +359,9 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
  *   - Non-transient API error → CLI fallback (operator key only)
  *   - `signal` aborted → reader cancelled, partial text returned
  */
-export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheTranscript, onChunk, signal } = {}) {
+export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheTranscript, onChunk, signal, provider: explicitProvider } = {}) {
   if (typeof onChunk !== 'function') {
-    return runClaude(prompt, { userId, model, maxTokens, cacheTranscript });
+    return runClaude(prompt, { userId, model, maxTokens, cacheTranscript, provider: explicitProvider });
   }
   if (typeof prompt !== 'string') throw new Error('runClaudeStream: prompt must be a string');
   if (prompt.length > MAX_PROMPT_CHARS) throw new Error(`runClaudeStream: prompt too long`);
@@ -362,16 +374,20 @@ export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheT
   // Helper: buffered fallback via runClaude. Delivers the entire result
   // as a single chunk so the caller still gets onChunk() called.
   const fallbackBuffered = async () => {
-    const result = await runClaude(prompt, { userId, model, maxTokens, cacheTranscript });
+    const result = await runClaude(prompt, { userId, model, maxTokens, cacheTranscript, provider: explicitProvider });
     onChunk(result);
     return result;
   };
 
   // Non-Anthropic models have no streaming adapter yet — route them
   // through the buffered path (runClaude → provider HTTP), delivered as a
-  // single chunk. Without this, the streaming code below would send a
-  // non-Claude id to the Anthropic API (coerced to the default model).
-  if (resolveProvider(model) !== 'anthropic') return fallbackBuffered();
+  // single chunk. An explicit non-anthropic provider (e.g. "custom", which
+  // isn't prefix-routable) also takes this path. Without this, the streaming
+  // code below would send a foreign id to the Anthropic API.
+  const streamProvider = (typeof explicitProvider === 'string' && PROVIDER_IDS.includes(explicitProvider))
+    ? explicitProvider
+    : resolveProvider(model);
+  if (streamProvider !== 'anthropic') return fallbackBuffered();
 
   if (!apiKey) return fallbackBuffered();
 

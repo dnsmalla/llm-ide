@@ -9,6 +9,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
     case cursor     = "cursor"
     case copilot    = "copilot"
     case gemini     = "gemini"
+    case custom     = "custom"
 
     var id: String { rawValue }
 
@@ -20,7 +21,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
     /// running Claude. Cursor/Copilot stay hidden — they're editor tools, not
     /// direct API endpoints, so routing their gpt ids to the OpenAI API would
     /// misrepresent the source.
-    static var selectable: [AICliTool] { [.claudeCode, .openai, .gemini] }
+    static var selectable: [AICliTool] { [.claudeCode, .openai, .gemini, .custom] }
 
     /// Backend provider id this tool's models route to.
     var provider: String {
@@ -28,6 +29,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .claudeCode:            return "anthropic"
         case .openai, .copilot:      return "openai"
         case .gemini:                return "google"
+        case .custom:                return "custom"
         case .cursor:                return "anthropic" // mixed; not selectable
         }
     }
@@ -38,6 +40,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case "anthropic": return "claude.apiKey"
         case "openai":    return "openai.apiKey"
         case "google":    return "google.apiKey"
+        case "custom":    return "custom.apiKey"
         default:          return nil
         }
     }
@@ -49,6 +52,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .cursor:     return "Cursor"
         case .copilot:    return "GitHub Copilot"
         case .gemini:     return "Gemini"
+        case .custom:     return "Custom"
         }
     }
 
@@ -59,6 +63,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .cursor:     return "curlybraces.square.fill"
         case .copilot:    return "chevron.left.forwardslash.chevron.right"
         case .gemini:     return "sparkles"
+        case .custom:     return "network"
         }
     }
 
@@ -69,6 +74,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .cursor:     return "AI-first code editor by Anysphere"
         case .copilot:    return "GitHub's AI coding assistant"
         case .gemini:     return "Google Gemini models (API key)"
+        case .custom:     return "Any OpenAI-compatible endpoint (OpenRouter, Ollama, …)"
         }
     }
 
@@ -106,10 +112,16 @@ enum AICliTool: String, CaseIterable, Identifiable {
                 AIModel(id: "gemini-1.5-pro",             displayName: "Gemini 1.5 Pro"),
                 AIModel(id: "gemini-1.5-flash",           displayName: "Gemini 1.5 Flash"),
             ]
+        case .custom:
+            // No built-in ids — the endpoint's models come from live discovery
+            // (/kb/providers/models) or "Add model…".
+            return []
         }
     }
 
-    var defaultModelId: String { models[0].id }
+    /// First built-in model, or "" when there are none (custom). Callers that
+    /// need a concrete id fall back to live/user-added models.
+    var defaultModelId: String { models.first?.id ?? "" }
 
     /// The executable name used to invoke this tool from the command line.
     var cliExecutable: String {
@@ -119,6 +131,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .cursor:     return "cursor"
         case .copilot:    return "gh copilot"
         case .gemini:     return "gemini"
+        case .custom:     return ""   // no CLI subscription mode
         }
     }
 }

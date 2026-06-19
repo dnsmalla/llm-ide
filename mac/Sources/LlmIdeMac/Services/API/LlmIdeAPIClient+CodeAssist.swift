@@ -38,6 +38,9 @@ extension LlmIdeAPIClient {
         let message: String
         let language: String?
         let model: String?
+        /// Explicit backend provider ("anthropic"/"openai"/"google"/"custom").
+        /// Required for "custom", whose model ids aren't prefix-routable.
+        let provider: String?
         let history: [CodeAssistTurn]
         let attachments: [CodeAttachment]
         let agentContext: AgentContext?     // NEW — optional for back-compat
@@ -61,6 +64,7 @@ extension LlmIdeAPIClient {
         message: String,
         language: String?,
         model: String? = nil,
+        provider: String? = nil,
         history: [CodeAssistTurn],
         attachments: [CodeAttachment],
         agentContext: AgentContext? = nil,
@@ -71,6 +75,7 @@ extension LlmIdeAPIClient {
                 message: message,
                 language: language,
                 model: model,
+                provider: provider,
                 history: history,
                 attachments: attachments,
                 agentContext: agentContext,

@@ -22,7 +22,7 @@ import { handleReviewRoutes } from './routes/review.mjs';
 // runGuardrails moved into routes/review.mjs.
 import { summarizeTranscript } from '../agents/summarize.mjs';
 import { runClaude } from '../agents/runtime.mjs';
-import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatModels } from '../agents/providers.mjs';
+import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatModels, customBaseUrl } from '../agents/providers.mjs';
 import { iterateUserMeetings } from './exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails } from '../agents/email-source.mjs';
@@ -84,8 +84,12 @@ export async function handleKB(req, res) {
       const apiKey = mode === 'key'
         ? ((typeof body.apiKey === 'string' && body.apiKey) ? body.apiKey : providerApiKey(userId, provider))
         : undefined;
-      const model = typeof body.model === 'string' ? body.model : undefined;
-      const result = await verifyProvider({ provider, mode, apiKey, model });
+      // Custom (OpenAI-compatible) provider also needs a base URL — accept it
+      // in the body (verify-before-save) or read the stored one.
+      const baseUrl = provider === 'custom'
+        ? ((typeof body.baseUrl === 'string' && body.baseUrl) ? body.baseUrl : customBaseUrl(userId))
+        : undefined;
+      const result = await verifyProvider({ provider, mode, apiKey, baseUrl });
       sendJSON(res, 200, result);
       return true;
     }
@@ -104,8 +108,12 @@ export async function handleKB(req, res) {
       }
       const key = providerApiKey(userId, provider);
       if (!key) { sendJSON(res, 200, { models: [], detail: 'no API key configured' }); return true; }
+      const baseUrl = provider === 'custom' ? customBaseUrl(userId) : undefined;
+      if (provider === 'custom' && !baseUrl) {
+        sendJSON(res, 200, { models: [], detail: 'no base URL configured' }); return true;
+      }
       try {
-        const ids = await listProviderModels(provider, { apiKey: key });
+        const ids = await listProviderModels(provider, { apiKey: key, baseUrl });
         sendJSON(res, 200, { models: chatModels(provider, ids).sort() });
       } catch (err) {
         sendJSON(res, 200, { models: [], detail: String(err?.message || err).slice(0, 200) });

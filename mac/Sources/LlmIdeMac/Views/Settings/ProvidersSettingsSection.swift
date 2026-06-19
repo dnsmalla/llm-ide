@@ -14,6 +14,8 @@ struct ProvidersSettingsSection: View {
         let vaultKey: String     // "claude.apiKey" — the /auth/me/secrets key
         let placeholder: String
         let hint: String
+        /// OpenAI-compatible "custom" provider also needs an endpoint base URL.
+        var needsBaseURL: Bool = false
     }
 
     private let providers: [Provider] = [
@@ -26,9 +28,14 @@ struct ProvidersSettingsSection: View {
         Provider(id: "google", label: "Google (Gemini)", vaultKey: "google.apiKey",
                  placeholder: "AIza…",
                  hint: "gemini-* models. With no key, falls back to your logged-in `gemini` CLI (subscription)."),
+        Provider(id: "custom", label: "Custom (OpenAI-compatible)", vaultKey: "custom.apiKey",
+                 placeholder: "API key (any value for local servers)",
+                 hint: "Any OpenAI-compatible endpoint — OpenRouter, Ollama / LM Studio (local), DeepSeek, Mistral. Pick “Custom” in the composer, then add a model.",
+                 needsBaseURL: true),
     ]
 
     @State private var drafts: [String: String] = [:]
+    @State private var baseURLDraft: String = ""
     @State private var status: [String: (ok: Bool, msg: String)] = [:]
     @State private var configured: Set<String> = []
     @State private var busy: Set<String> = []
@@ -60,6 +67,16 @@ struct ProvidersSettingsSection: View {
                 }
             }
 
+            if p.needsBaseURL {
+                TextField("Base URL — e.g. https://openrouter.ai/api/v1  or  http://localhost:11434/v1",
+                          text: $baseURLDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 480)
+                if configured.contains("custom.baseUrl") {
+                    Text("• base URL set").font(Typography.caption).foregroundStyle(theme.current.accent3)
+                }
+            }
+
             HStack(spacing: Spacing.sm) {
                 SecureField(p.placeholder, text: bindingFor(p.id))
                     .textFieldStyle(.roundedBorder)
@@ -72,9 +89,11 @@ struct ProvidersSettingsSection: View {
                     Button("Clear") { Task { await clear(p) } }
                         .disabled(busy.contains(p.id))
                 }
-                Button("Check CLI") { Task { await checkCli(p) } }
-                    .disabled(busy.contains(p.id))
-                    .help("Verify this provider's logged-in CLI for subscription mode (no key needed)")
+                if !p.needsBaseURL {
+                    Button("Check CLI") { Task { await checkCli(p) } }
+                        .disabled(busy.contains(p.id))
+                        .help("Verify this provider's logged-in CLI for subscription mode (no key needed)")
+                }
             }
 
             Text(p.hint)
@@ -104,6 +123,17 @@ struct ProvidersSettingsSection: View {
         guard !key.isEmpty else { return }
         busy.insert(p.id); defer { busy.remove(p.id) }
         do {
+            // Custom (OpenAI-compatible) also needs its base URL stored before
+            // verification (the server reads it back when probing /models).
+            if p.needsBaseURL {
+                let base = baseURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !base.isEmpty else {
+                    status[p.id] = (false, "Enter a base URL (e.g. https://openrouter.ai/api/v1).")
+                    return
+                }
+                try await api.setSecret(key: "custom.baseUrl", value: base)
+                configured.insert("custom.baseUrl")
+            }
             try await api.setSecret(key: p.vaultKey, value: key)
             let result = try await api.verifyProvider(p.id, mode: "key", apiKey: nil)
             status[p.id] = (result.ok, result.ok ? "Verified ✓" : (result.detail ?? "Verification failed"))

@@ -125,6 +125,11 @@ const ALLOWED_KEYS = new Set([
   // instead of the local CLI subprocess.
   'openai.apiKey',
   'google.apiKey',
+  // Generic OpenAI-compatible "custom" provider (OpenRouter, Ollama, etc.):
+  // an API key + the endpoint base URL (the base URL isn't secret, but it
+  // rides the same per-user secrets channel for simplicity).
+  'custom.apiKey',
+  'custom.baseUrl',
 ]);
 
 function ensureAllowed(key) {
