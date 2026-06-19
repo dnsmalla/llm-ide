@@ -61,7 +61,9 @@ export function useRemoteSessions() {
               try {
                 const payload = JSON.parse(chunk.slice(6));
                 if (active) setSessions(payload.sessions || []);
-              } catch { /* ignore parse errors */ }
+              } catch {
+                /* ignore parse errors */
+              }
             }
           }
         }
@@ -70,7 +72,9 @@ export function useRemoteSessions() {
       } finally {
         if (active) {
           const delay = Math.min(3000 * Math.pow(2, reconnectAttempts - 1), 30_000);
-          setTimeout(() => { if (active) connect(); }, delay);
+          setTimeout(() => {
+            if (active) connect();
+          }, delay);
         }
       }
     }
@@ -79,7 +83,11 @@ export function useRemoteSessions() {
 
     return () => {
       active = false;
-      try { reader?.cancel().catch(() => {}); } catch { /* reader already closed */ }
+      try {
+        reader?.cancel().catch(() => {});
+      } catch {
+        /* reader already closed */
+      }
     };
   }, []);
 

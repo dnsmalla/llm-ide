@@ -1,4 +1,4 @@
-import { getServerUrl, REQUEST_TIMEOUT_MS , authFetch} from './config';
+import { getServerUrl, REQUEST_TIMEOUT_MS, authFetch } from './config';
 
 /**
  * Generate meeting notes — streaming variant.
@@ -26,7 +26,7 @@ export async function generateMeetingNotesStream(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'text/event-stream',
+        Accept: 'text/event-stream',
       },
       body: JSON.stringify({ transcript, meetingTitle, participants, language }),
       signal: controller.signal,
@@ -57,7 +57,7 @@ export async function generateMeetingNotesStream(
 
         for (const event of events) {
           if (!event.trim()) continue;
-          const dataLine = event.split('\n').find(l => l.startsWith('data: '));
+          const dataLine = event.split('\n').find((l) => l.startsWith('data: '));
           if (!dataLine) continue;
           const jsonStr = dataLine.slice(6);
 
@@ -80,9 +80,7 @@ export async function generateMeetingNotesStream(
               fullText = parsed.text;
             }
           } else if (parsed.type === 'error') {
-            throw new Error(
-              typeof parsed.error === 'string' ? parsed.error : 'Server streaming error',
-            );
+            throw new Error(typeof parsed.error === 'string' ? parsed.error : 'Server streaming error');
           }
         }
       }
@@ -100,7 +98,6 @@ export async function generateMeetingNotesStream(
     }
     onChunk(data.notes);
     return data.notes;
-
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
       if (externalSignal?.aborted) throw err;

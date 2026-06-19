@@ -17,70 +17,68 @@ export function useNotes() {
   // when the stream is idle between tokens.
   const flushedLenRef = useRef(0);
 
-  const generate = useCallback(async (
-    transcript: string,
-    meetingTitle?: string,
-    participants?: string[],
-    language?: string,
-  ) => {
-    if (!transcript.trim()) {
-      setError('No transcript available. Record a meeting first.');
-      return;
-    }
-    if (isGenerating) return;
-
-    setIsGenerating(true);
-    setError(null);
-    setNotes('');
-    accRef.current = '';
-    flushedLenRef.current = 0;
-
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    // rAF loop that flushes accumulated chunks to React state.
-    // Only calls setNotes when new data has arrived since the last
-    // flush, so idle frames don't trigger re-renders.
-    let flushing = true;
-    const flush = () => {
-      if (!flushing) return;
-      if (accRef.current.length > flushedLenRef.current) {
-        flushedLenRef.current = accRef.current.length;
-        setNotes(accRef.current);
+  const generate = useCallback(
+    async (transcript: string, meetingTitle?: string, participants?: string[], language?: string) => {
+      if (!transcript.trim()) {
+        setError('No transcript available. Record a meeting first.');
+        return;
       }
+      if (isGenerating) return;
+
+      setIsGenerating(true);
+      setError(null);
+      setNotes('');
+      accRef.current = '';
+      flushedLenRef.current = 0;
+
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      // rAF loop that flushes accumulated chunks to React state.
+      // Only calls setNotes when new data has arrived since the last
+      // flush, so idle frames don't trigger re-renders.
+      let flushing = true;
+      const flush = () => {
+        if (!flushing) return;
+        if (accRef.current.length > flushedLenRef.current) {
+          flushedLenRef.current = accRef.current.length;
+          setNotes(accRef.current);
+        }
+        rafRef.current = requestAnimationFrame(flush);
+      };
       rafRef.current = requestAnimationFrame(flush);
-    };
-    rafRef.current = requestAnimationFrame(flush);
 
-    try {
-      const result = await generateMeetingNotesStream(
-        transcript,
-        (chunk: string) => {
-          accRef.current += chunk;
-        },
-        meetingTitle,
-        participants,
-        controller.signal,
-        language,
-      );
-      if (controller.signal.aborted) return;
-      // Final state — ensure we have the complete text, not a
-      // rAF-lagged partial snapshot.
-      setNotes(result);
-    } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') return;
-      setError(err instanceof Error ? err.message : 'Failed to generate notes');
-    } finally {
-      flushing = false;
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
+      try {
+        const result = await generateMeetingNotesStream(
+          transcript,
+          (chunk: string) => {
+            accRef.current += chunk;
+          },
+          meetingTitle,
+          participants,
+          controller.signal,
+          language,
+        );
+        if (controller.signal.aborted) return;
+        // Final state — ensure we have the complete text, not a
+        // rAF-lagged partial snapshot.
+        setNotes(result);
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        setError(err instanceof Error ? err.message : 'Failed to generate notes');
+      } finally {
+        flushing = false;
+        if (rafRef.current !== null) {
+          cancelAnimationFrame(rafRef.current);
+          rafRef.current = null;
+        }
+        if (abortRef.current === controller) abortRef.current = null;
+        setIsGenerating(false);
       }
-      if (abortRef.current === controller) abortRef.current = null;
-      setIsGenerating(false);
-    }
-  }, [isGenerating]);
+    },
+    [isGenerating],
+  );
 
   const clearNotes = useCallback(() => {
     abortRef.current?.abort();

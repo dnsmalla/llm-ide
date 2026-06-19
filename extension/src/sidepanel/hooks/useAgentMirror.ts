@@ -24,8 +24,8 @@ export interface AgentCaption {
   seq: number;
   speaker: string;
   text: string;
-  ts: number;                     // ms epoch
-  source: string;                 // 'agent-system' | 'agent-question' | 'captions' | etc.
+  ts: number; // ms epoch
+  source: string; // 'agent-system' | 'agent-question' | 'captions' | etc.
   meta?: AgentCaptionMeta;
 }
 
@@ -33,7 +33,9 @@ const POLL_MS = 1500;
 const MAX_CAPTIONS = 2000;
 
 export function useAgentMirror({
-  sessionId, isAttached, includeHuman = false,
+  sessionId,
+  isAttached,
+  includeHuman = false,
 }: {
   sessionId: string;
   /** Only poll while the agent is actually attached to this session OR
@@ -65,12 +67,10 @@ export function useAgentMirror({
         if (r.ok) {
           consecutiveFailures = 0;
           const j = await r.json();
-          const rows: AgentCaption[] = (j.captions || []).filter(
-            (c: { source?: string }) => {
-              if (includeHuman) return true;
-              return c.source === 'agent-system' || c.source === 'agent-question';
-            },
-          );
+          const rows: AgentCaption[] = (j.captions || []).filter((c: { source?: string }) => {
+            if (includeHuman) return true;
+            return c.source === 'agent-system' || c.source === 'agent-question';
+          });
           if (!cancelledRef.current && rows.length > 0) {
             setCaptions((prev) => {
               const merged = prev.concat(rows);

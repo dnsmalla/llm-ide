@@ -13,9 +13,9 @@ import {
 // loopback HTTP boundary to our own server when the user clicks Index.
 const STORAGE_KEYS = {
   repoPath: 'connector.git.path',
-  ghRepo:   'connector.gh.repo',
-  ghToken:  'connector.gh.token',
-  ghState:  'connector.gh.state',
+  ghRepo: 'connector.gh.repo',
+  ghToken: 'connector.gh.token',
+  ghState: 'connector.gh.state',
   qaSource: 'connector.qa.source',
 } as const;
 
@@ -24,15 +24,21 @@ type Status = { kind: 'idle' | 'busy' | 'ok' | 'err'; message?: string };
 function useStored(key: string, initial = '') {
   const [v, setV] = useState(initial);
   useEffect(() => {
-    chrome.storage?.local?.get(key).then((r) => {
-      const raw = r?.[key];
-      if (typeof raw === 'string') setV(raw);
-    }).catch(() => {});
+    chrome.storage?.local
+      ?.get(key)
+      .then((r) => {
+        const raw = r?.[key];
+        if (typeof raw === 'string') setV(raw);
+      })
+      .catch(() => {});
   }, [key]);
-  const update = useCallback((next: string) => {
-    setV(next);
-    chrome.storage?.local?.set({ [key]: next }).catch(() => {});
-  }, [key]);
+  const update = useCallback(
+    (next: string) => {
+      setV(next);
+      chrome.storage?.local?.set({ [key]: next }).catch(() => {});
+    },
+    [key],
+  );
   return [v, update] as const;
 }
 
@@ -57,11 +63,15 @@ export default function ConnectorsSettings() {
   const [showToken, setShowToken] = useState(false);
 
   const [gitStatus, setGitStatus] = useState<Status>({ kind: 'idle' });
-  const [ghStatus, setGhStatus]   = useState<Status>({ kind: 'idle' });
-  const [qaStatus, setQaStatus]   = useState<Status>({ kind: 'idle' });
+  const [ghStatus, setGhStatus] = useState<Status>({ kind: 'idle' });
+  const [qaStatus, setQaStatus] = useState<Status>({ kind: 'idle' });
 
-  const refreshStats = useCallback(() => { getKBStats().then(setStats); }, []);
-  useEffect(() => { refreshStats(); }, [refreshStats]);
+  const refreshStats = useCallback(() => {
+    getKBStats().then(setStats);
+  }, []);
+  useEffect(() => {
+    refreshStats();
+  }, [refreshStats]);
 
   const runGit = useCallback(async () => {
     if (!repoPath.trim()) return;
@@ -91,25 +101,27 @@ export default function ConnectorsSettings() {
     }
   }, [ghRepo, ghToken, ghState, refreshStats]);
 
-  const runQA = useCallback(async (file: File) => {
-    setQaStatus({ kind: 'busy', message: 'Parsing…' });
-    try {
-      const xml = await file.text();
-      const r = await connectQA({ xml, source: qaSource.trim() || file.name });
-      setQaStatus({ kind: 'ok', message: summarize(r) });
-      refreshStats();
-    } catch (err) {
-      setQaStatus({ kind: 'err', message: err instanceof Error ? err.message : String(err) });
-    }
-  }, [qaSource, refreshStats]);
+  const runQA = useCallback(
+    async (file: File) => {
+      setQaStatus({ kind: 'busy', message: 'Parsing…' });
+      try {
+        const xml = await file.text();
+        const r = await connectQA({ xml, source: qaSource.trim() || file.name });
+        setQaStatus({ kind: 'ok', message: summarize(r) });
+        refreshStats();
+      } catch (err) {
+        setQaStatus({ kind: 'err', message: err instanceof Error ? err.message : String(err) });
+      }
+    },
+    [qaSource, refreshStats],
+  );
 
   return (
     <section className="connectors-settings">
       <h3 className="settings-section-title">Knowledge Base connectors</h3>
       {stats?.sources && (
         <p className="actions-hint">
-          Indexed: {stats.sources.code} code · {stats.sources.ticket} ticket ·{' '}
-          {stats.sources.qa} qa
+          Indexed: {stats.sources.code} code · {stats.sources.ticket} ticket · {stats.sources.qa} qa
         </p>
       )}
 
@@ -125,11 +137,7 @@ export default function ConnectorsSettings() {
             onChange={(e) => setRepoPath(e.target.value)}
             spellCheck={false}
           />
-          <button
-            className="btn btn-sm"
-            onClick={runGit}
-            disabled={!repoPath.trim() || gitStatus.kind === 'busy'}
-          >
+          <button className="btn btn-sm" onClick={runGit} disabled={!repoPath.trim() || gitStatus.kind === 'busy'}>
             {gitStatus.kind === 'busy' ? 'Indexing…' : 'Index'}
           </button>
         </div>
@@ -181,11 +189,7 @@ export default function ConnectorsSettings() {
           <span className="connector-hint">
             Token stays in <code>chrome.storage.local</code> and is only sent to your own 127.0.0.1 server.
           </span>
-          <button
-            className="btn btn-sm"
-            onClick={runGithub}
-            disabled={!ghRepo.trim() || ghStatus.kind === 'busy'}
-          >
+          <button className="btn btn-sm" onClick={runGithub} disabled={!ghRepo.trim() || ghStatus.kind === 'busy'}>
             {ghStatus.kind === 'busy' ? 'Fetching…' : 'Fetch'}
           </button>
         </div>
@@ -228,8 +232,14 @@ export default function ConnectorsSettings() {
 function StatusLine({ status }: { status: Status }) {
   if (status.kind === 'idle') return null;
   const className =
-    status.kind === 'err' ? 'connector-status err'
-    : status.kind === 'ok' ? 'connector-status ok'
-    : 'connector-status busy';
-  return <div className={className} role="status">{status.message}</div>;
+    status.kind === 'err'
+      ? 'connector-status err'
+      : status.kind === 'ok'
+        ? 'connector-status ok'
+        : 'connector-status busy';
+  return (
+    <div className={className} role="status">
+      {status.message}
+    </div>
+  );
 }

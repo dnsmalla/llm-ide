@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { getServerUrl, REQUEST_TIMEOUT_MS , authFetch} from '../../lib/config';
+import { getServerUrl, REQUEST_TIMEOUT_MS, authFetch } from '../../lib/config';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -30,12 +30,16 @@ export function useChat() {
 
   // Rehydrate from storage on mount, then persist on every change.
   useEffect(() => {
-    chrome.storage?.local?.get(STORAGE_KEY).then((result) => {
-      const saved = result?.[STORAGE_KEY];
-      if (Array.isArray(saved)) setMessages(saved);
-    }).catch(() => {}).finally(() => {
-      hydratedRef.current = true;
-    });
+    chrome.storage?.local
+      ?.get(STORAGE_KEY)
+      .then((result) => {
+        const saved = result?.[STORAGE_KEY];
+        if (Array.isArray(saved)) setMessages(saved);
+      })
+      .catch(() => {})
+      .finally(() => {
+        hydratedRef.current = true;
+      });
   }, []);
 
   useEffect(() => {
@@ -47,74 +51,73 @@ export function useChat() {
       const msg = err?.message || String(err);
       if (/QUOTA_BYTES|quota/i.test(msg)) {
         setQuotaWarning(
-          'Chat history is approaching Chrome\'s 5 MB storage limit. ' +
-          'Export what you want to keep, then click Clear chat.',
+          "Chat history is approaching Chrome's 5 MB storage limit. " +
+            'Export what you want to keep, then click Clear chat.',
         );
       }
     });
   }, [messages]);
 
-  const sendMessage = useCallback(async (
-    userMessage: string,
-    transcript: string,
-    language?: string,
-  ) => {
-    const trimmed = userMessage.trim();
-    if (!trimmed || isLoading) return;
-    setError(null);
+  const sendMessage = useCallback(
+    async (userMessage: string, transcript: string, language?: string) => {
+      const trimmed = userMessage.trim();
+      if (!trimmed || isLoading) return;
+      setError(null);
 
-    const userMsg: ChatMessage = {
-      role: 'user',
-      content: trimmed,
-      timestamp: Date.now(),
-    };
-
-    let historySnapshot: ChatMessage[] = [];
-    setMessages((prev) => {
-      const updated = [...prev, userMsg];
-      historySnapshot = updated.slice(-MAX_HISTORY);
-      return updated;
-    });
-
-    setIsLoading(true);
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-    try {
-      const serverUrl = await getServerUrl();
-      const response = await authFetch(`${serverUrl}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: trimmed, transcript, history: historySnapshot, language }),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({ error: 'Server error' }));
-        throw new Error(err.error || `Server error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      if (typeof data?.reply !== 'string' || !data.reply.trim()) {
-        throw new Error('Empty response from server');
-      }
-      const assistantMsg: ChatMessage = {
-        role: 'assistant',
-        content: data.reply,
+      const userMsg: ChatMessage = {
+        role: 'user',
+        content: trimmed,
         timestamp: Date.now(),
       };
-      setMessages((prev) => [...prev, assistantMsg]);
-    } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') return;
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      clearTimeout(timeout);
-      setIsLoading(false);
-      if (abortRef.current === controller) abortRef.current = null;
-    }
-  }, [isLoading]);
+
+      let historySnapshot: ChatMessage[] = [];
+      setMessages((prev) => {
+        const updated = [...prev, userMsg];
+        historySnapshot = updated.slice(-MAX_HISTORY);
+        return updated;
+      });
+
+      setIsLoading(true);
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+      try {
+        const serverUrl = await getServerUrl();
+        const response = await authFetch(`${serverUrl}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: trimmed, transcript, history: historySnapshot, language }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({ error: 'Server error' }));
+          throw new Error(err.error || `Server error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (typeof data?.reply !== 'string' || !data.reply.trim()) {
+          throw new Error('Empty response from server');
+        }
+        const assistantMsg: ChatMessage = {
+          role: 'assistant',
+          content: data.reply,
+          timestamp: Date.now(),
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        setError(err instanceof Error ? err.message : 'Unknown error');
+      } finally {
+        clearTimeout(timeout);
+        setIsLoading(false);
+        if (abortRef.current === controller) abortRef.current = null;
+      }
+    },
+    [isLoading],
+  );
 
   const clearChat = useCallback(() => {
     abortRef.current?.abort();

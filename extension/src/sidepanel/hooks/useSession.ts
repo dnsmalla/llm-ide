@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  apiLogin, apiLogout, apiRegister, apiWellKnown,
-  clearSession, getSession, loadStoredSession, onSessionChange, setSession,
+  apiLogin,
+  apiLogout,
+  apiRegister,
+  apiWellKnown,
+  clearSession,
+  getSession,
+  loadStoredSession,
+  onSessionChange,
+  setSession,
   ServerError,
 } from '../../lib/config';
 
@@ -43,11 +50,14 @@ export function useSession() {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    setBusy(true); setError(null);
+    setBusy(true);
+    setError(null);
     try {
       const res = await apiLogin(email, password);
       setSession({
@@ -57,11 +67,14 @@ export function useSession() {
       });
       return true;
     } catch (err) {
-      const msg = err instanceof DOMException && err.name === 'AbortError'
-        ? 'Server not responding — check that it is running.'
-        : err instanceof ServerError ? err.message
-        : err instanceof Error ? err.message
-        : 'Login failed';
+      const msg =
+        err instanceof DOMException && err.name === 'AbortError'
+          ? 'Server not responding — check that it is running.'
+          : err instanceof ServerError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : 'Login failed';
       setError(msg);
       return false;
     } finally {
@@ -69,23 +82,30 @@ export function useSession() {
     }
   }, []);
 
-  const register = useCallback(async (email: string, password: string, displayName?: string) => {
-    setBusy(true); setError(null);
-    try {
-      await apiRegister(email, password, displayName);
-      return await login(email, password);
-    } catch (err) {
-      const msg = err instanceof DOMException && err.name === 'AbortError'
-        ? 'Server not responding — check that it is running.'
-        : err instanceof ServerError ? err.message
-        : err instanceof Error ? err.message
-        : 'Registration failed';
-      setError(msg);
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }, [login]);
+  const register = useCallback(
+    async (email: string, password: string, displayName?: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await apiRegister(email, password, displayName);
+        return await login(email, password);
+      } catch (err) {
+        const msg =
+          err instanceof DOMException && err.name === 'AbortError'
+            ? 'Server not responding — check that it is running.'
+            : err instanceof ServerError
+              ? err.message
+              : err instanceof Error
+                ? err.message
+                : 'Registration failed';
+        setError(msg);
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [login],
+  );
 
   const logout = useCallback(async () => {
     await apiLogout(false);

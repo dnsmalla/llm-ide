@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { getServerUrl, REQUEST_TIMEOUT_MS , authFetch} from '../../lib/config';
+import { getServerUrl, REQUEST_TIMEOUT_MS, authFetch } from '../../lib/config';
 import { conflictQuestions } from '../../lib/kb';
 import { MsgType } from '../../lib/messages';
 
@@ -11,70 +11,63 @@ export function useQuestions() {
   const [error, setError] = useState<string | null>(null);
   const busyRef = useRef(false);
 
-  const generate = useCallback(async (
-    transcript: string,
-    participants: string[],
-    types: QuestionType[],
-    language?: string,
-  ) => {
-    if (!transcript.trim()) {
-      setError('No transcript available. Record a meeting first.');
-      return;
-    }
-    if (types.length === 0) {
-      setError('Pick at least one question type.');
-      return;
-    }
-    if (busyRef.current) return;
+  const generate = useCallback(
+    async (transcript: string, participants: string[], types: QuestionType[], language?: string) => {
+      if (!transcript.trim()) {
+        setError('No transcript available. Record a meeting first.');
+        return;
+      }
+      if (types.length === 0) {
+        setError('Pick at least one question type.');
+        return;
+      }
+      if (busyRef.current) return;
 
-    busyRef.current = true;
-    setIsGenerating(true);
-    setError(null);
+      busyRef.current = true;
+      setIsGenerating(true);
+      setError(null);
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-    try {
-      const serverUrl = await getServerUrl();
-      const response = await authFetch(`${serverUrl}/generate-questions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript, participants, types, language }),
-        signal: controller.signal,
-      });
+      try {
+        const serverUrl = await getServerUrl();
+        const response = await authFetch(`${serverUrl}/generate-questions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transcript, participants, types, language }),
+          signal: controller.signal,
+        });
 
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        if (response.status === 404) {
-          throw new Error(
-            'This feature requires a newer server version. Please restart the server and try again.',
-          );
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          if (response.status === 404) {
+            throw new Error('This feature requires a newer server version. Please restart the server and try again.');
+          }
+          throw new Error(err.error || 'Failed to generate questions. Please try again.');
         }
-        throw new Error(err.error || 'Failed to generate questions. Please try again.');
-      }
 
-      const data = await response.json();
-      if (typeof data?.questions !== 'string' || !data.questions.trim()) {
-        throw new Error('Empty response from server');
+        const data = await response.json();
+        if (typeof data?.questions !== 'string' || !data.questions.trim()) {
+          throw new Error('Empty response from server');
+        }
+        setQuestions(data.questions);
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          setError('Request timed out. Try again.');
+        } else {
+          setError(err instanceof Error ? err.message : 'Failed to generate questions');
+        }
+      } finally {
+        clearTimeout(timeout);
+        busyRef.current = false;
+        setIsGenerating(false);
       }
-      setQuestions(data.questions);
-    } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
-        setError('Request timed out. Try again.');
-      } else {
-        setError(err instanceof Error ? err.message : 'Failed to generate questions');
-      }
-    } finally {
-      clearTimeout(timeout);
-      busyRef.current = false;
-      setIsGenerating(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
-  const generateFromHistory = useCallback(async (
-    transcript: string,
-    language?: string,
-  ) => {
+  const generateFromHistory = useCallback(async (transcript: string, language?: string) => {
     if (busyRef.current) return;
     busyRef.current = true;
     setIsGenerating(true);
@@ -116,9 +109,15 @@ export function useQuestions() {
         text,
       });
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(
-          'Chat injection timed out. The Meet tab may not have the extension loaded — try refreshing the page.'
-        )), 10_000)
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                'Chat injection timed out. The Meet tab may not have the extension loaded — try refreshing the page.',
+              ),
+            ),
+          10_000,
+        ),
       );
       const response = await Promise.race([responsePromise, timeoutPromise]);
 

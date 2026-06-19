@@ -101,14 +101,17 @@ export async function getPlan(id: string): Promise<Plan | null> {
   return await r.json();
 }
 
-export async function updateTask(taskId: string, patch: Partial<{
-  status: TaskStatus;
-  risk: RiskLevel | null;
-  riskReason: string;
-  owner: string;
-  due: string;
-  files: PlanTask['files'];
-}>): Promise<PlanTask | null> {
+export async function updateTask(
+  taskId: string,
+  patch: Partial<{
+    status: TaskStatus;
+    risk: RiskLevel | null;
+    riskReason: string;
+    owner: string;
+    due: string;
+    files: PlanTask['files'];
+  }>,
+): Promise<PlanTask | null> {
   return postJSON('/kb/plan-task/update', { taskId, patch }, 30_000);
 }
 
@@ -127,10 +130,10 @@ export async function savePlan(opts: {
 }
 
 interface IngestArgs {
-  serverUrl: string;          // already resolved by the caller
+  serverUrl: string; // already resolved by the caller
   meetingId: string;
   meetingTitle: string;
-  date: string;               // ISO
+  date: string; // ISO
   durationSec: number;
   language?: string;
   participants: string[];
@@ -145,15 +148,24 @@ interface IngestArgs {
 export async function ingestToKB(args: IngestArgs): Promise<void> {
   const flatEntities = [
     ...args.entities.actions.map((a) => ({
-      id: a.id, kind: 'action', text: a.text, quote: a.quote,
+      id: a.id,
+      kind: 'action',
+      text: a.text,
+      quote: a.quote,
       meta: { owner: a.owner, due: a.due, status: a.status },
     })),
     ...args.entities.decisions.map((d) => ({
-      id: d.id, kind: 'decision', text: d.text, quote: d.quote,
+      id: d.id,
+      kind: 'decision',
+      text: d.text,
+      quote: d.quote,
       meta: { participants: d.participants },
     })),
     ...args.entities.blockers.map((b) => ({
-      id: b.id, kind: 'blocker', text: b.text, quote: b.quote,
+      id: b.id,
+      kind: 'blocker',
+      text: b.text,
+      quote: b.quote,
       meta: { severity: b.severity },
     })),
   ];
@@ -234,4 +246,3 @@ export async function getKBStats(): Promise<KBStats | null> {
     return null;
   }
 }
-

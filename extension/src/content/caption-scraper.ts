@@ -35,10 +35,9 @@ interface CaptionBlock {
   text: string;
 }
 
-
-const SESSION_GAP_MS = 5_000;       // After this silence, next caption starts a new line
+const SESSION_GAP_MS = 5_000; // After this silence, next caption starts a new line
 const SCRAPE_INTERVAL_MS = 800;
-const MAX_BLOCK_AGE_MS = 15_000;    // Drop speaker state older than this
+const MAX_BLOCK_AGE_MS = 15_000; // Drop speaker state older than this
 
 let isCapturing = false;
 let observer: MutationObserver | null = null;
@@ -82,7 +81,7 @@ function isActiveMeetingPage(): boolean {
   if (platform !== 'meet') return true; // Only guard Meet pages
   const path = window.location.pathname;
   if (MEET_ROOM_RE.test(path)) return true;
-  if (MEET_VALID_PATHS.some(p => path.startsWith(p))) return true;
+  if (MEET_VALID_PATHS.some((p) => path.startsWith(p))) return true;
   return false;
 }
 
@@ -111,7 +110,7 @@ function readMeetCaptionsByClass(): CaptionBlock[] {
   const captionEls = document.querySelectorAll('.nMcdL.bj4p3b');
   for (const el of Array.from(captionEls).reverse()) {
     const speakerEl = el.querySelector(':scope > .adE6rb') as HTMLElement | null;
-    const textEl    = el.querySelector(':scope > .ygicle')  as HTMLElement | null;
+    const textEl = el.querySelector(':scope > .ygicle') as HTMLElement | null;
     if (!speakerEl || !textEl) continue;
 
     let speaker = speakerEl.innerText?.trim() ?? '';
@@ -163,12 +162,12 @@ function readMeetCaptionsByHeuristic(): CaptionBlock[] {
     if (!isValidCaption(speaker, captionText)) continue;
     if (seenSpeakers.has(speaker)) continue;
 
-    const hasSmallerCaptionChild = Array.from(el.children).some(child => {
+    const hasSmallerCaptionChild = Array.from(el.children).some((child) => {
       const childText = (child as HTMLElement).innerText?.trim();
       if (!childText) return false;
       const childLines = childText
         .split('\n')
-        .map(l => l.trim().replace(GROUP_ICON_RE, '').trim())
+        .map((l) => l.trim().replace(GROUP_ICON_RE, '').trim())
         .filter(Boolean);
       return childLines.length >= 2 && childLines[0] === speaker;
     });
@@ -192,10 +191,12 @@ function readMeetCaptionsByAria(): CaptionBlock[] {
   //    "caption" / "subtitle" / "字幕" / "subtítulo" all use the same
   //    aria-label idiom in Meet.  Case-insensitive substring match
   //    catches "Captions", "Live Captions", "Closed Captions", etc.
-  const ariaCandidates = Array.from(document.querySelectorAll<HTMLElement>(
-    '[aria-label*="aption" i], [aria-label*="ubtitle" i], [aria-label*="字幕"], ' +
-    '[role="region"][aria-label], [aria-live="polite"]'
-  ));
+  const ariaCandidates = Array.from(
+    document.querySelectorAll<HTMLElement>(
+      '[aria-label*="aption" i], [aria-label*="ubtitle" i], [aria-label*="字幕"], ' +
+        '[role="region"][aria-label], [aria-live="polite"]',
+    ),
+  );
   const liveLabels = ['caption', 'subtitle', 'cc', '字幕', 'transcript'];
   let panels = ariaCandidates.filter((el) => {
     const label = (el.getAttribute('aria-label') || '').toLowerCase();
@@ -244,7 +245,8 @@ function readMeetCaptionsByAria(): CaptionBlock[] {
       const childMatchesSelf = Array.from(row.children).some((child) => {
         const t = (child as HTMLElement).innerText?.trim();
         if (!t) return false;
-        const childLines = t.split('\n')
+        const childLines = t
+          .split('\n')
           .map((l) => l.replace(GROUP_ICON_RE, '').trim())
           .filter(Boolean);
         return childLines.length >= 2 && childLines[0] === lines[0];
@@ -315,7 +317,7 @@ function readZoomCaptions(): CaptionBlock[] {
 
   // Zoom transcript panel
   const panel = document.querySelector(
-    '[aria-label*="Transcript"], [aria-label*="Caption"], [class*="transcript"], [class*="caption-panel"]'
+    '[aria-label*="Transcript"], [aria-label*="Caption"], [class*="transcript"], [class*="caption-panel"]',
   );
 
   if (panel) {
@@ -324,7 +326,10 @@ function readZoomCaptions(): CaptionBlock[] {
     for (const item of itemArray) {
       const t = (item as HTMLElement).innerText?.trim();
       if (!t) continue;
-      const lines = t.split('\n').map(l => l.trim()).filter(Boolean);
+      const lines = t
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
       if (lines.length < 2) continue;
       const speaker = sanitizeSpeaker(lines[0]);
       const text = lines.slice(1).join(' ');
@@ -342,7 +347,10 @@ function readZoomCaptions(): CaptionBlock[] {
   for (const el of inline) {
     const t = (el as HTMLElement).innerText?.trim();
     if (!t) continue;
-    const lines = t.split('\n').map(l => l.trim()).filter(Boolean);
+    const lines = t
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
     if (lines.length < 2) continue;
     const speaker = sanitizeSpeaker(lines[0]);
     const text = lines.slice(1).join(' ');
@@ -358,9 +366,11 @@ function readZoomCaptions(): CaptionBlock[] {
 // ─── Validation ───────────────────────────────────────────────────────
 
 // Known non-caption UI text patterns
-const UI_PATTERNS = /^(present|mute|unmute|camera|more|chat|people|raise|record|share|hang|info|meeting|host|leave|call|keyboard|audio|video|back_hand|mood|apps|lock|closed_caption|format_size|circle|font|settings|open|turn|send|language|japanese|english|live captions|ume-|pm\s|am\s|frame_person|visual_effects|reframe|backgrounds|effects|filters|appearance|touch|framing|portrait|blur|lighting|close\s|your\s+meeting|dial-in|pin:|copy\s|joining\s+info|attachments|add\s|share\s+this|meeting\s+link|meeting\s+code|loading\s+invitees|contributors|just\s+you|\d+\s+joined|save\s+transcript|ask\s+tactiq|chevron_right|chevron_left|expand_more|expand_less|content_copy|return\s+to\s+home|submit\s+feedback|in\s+the\s+meeting|your\s+meet\s+call|secure\s+video|video\s+conferencing|new\s+meeting|enter\s+a\s+code|connect.*collaborate|from\s+your\s+google)/i;
+const UI_PATTERNS =
+  /^(present|mute|unmute|camera|more|chat|people|raise|record|share|hang|info|meeting|host|leave|call|keyboard|audio|video|back_hand|mood|apps|lock|closed_caption|format_size|circle|font|settings|open|turn|send|language|japanese|english|live captions|ume-|pm\s|am\s|frame_person|visual_effects|reframe|backgrounds|effects|filters|appearance|touch|framing|portrait|blur|lighting|close\s|your\s+meeting|dial-in|pin:|copy\s|joining\s+info|attachments|add\s|share\s+this|meeting\s+link|meeting\s+code|loading\s+invitees|contributors|just\s+you|\d+\s+joined|save\s+transcript|ask\s+tactiq|chevron_right|chevron_left|expand_more|expand_less|content_copy|return\s+to\s+home|submit\s+feedback|in\s+the\s+meeting|your\s+meet\s+call|secure\s+video|video\s+conferencing|new\s+meeting|enter\s+a\s+code|connect.*collaborate|from\s+your\s+google)/i;
 
-const ICON_PATTERN = /\b(frame_person|visual_effects|closed_caption|format_size|keyboard_arrow|more_vert|call_end|back_hand|mic|videocam|computer|reaction|settings|lock_person|chat|apps|info|mood|raise|stop_circle|filter|chevron_right|chevron_left|expand_more|expand_less|content_copy|arrow_back|arrow_forward|open_in_new|check_circle|cancel|navigate_next|navigate_before)\b/i;
+const ICON_PATTERN =
+  /\b(frame_person|visual_effects|closed_caption|format_size|keyboard_arrow|more_vert|call_end|back_hand|mic|videocam|computer|reaction|settings|lock_person|chat|apps|info|mood|raise|stop_circle|filter|chevron_right|chevron_left|expand_more|expand_less|content_copy|arrow_back|arrow_forward|open_in_new|check_circle|cancel|navigate_next|navigate_before)\b/i;
 
 // When Meet has 3+ active speakers it prefixes the caption block with the
 // Material Symbol `groups`. Depending on how innerText folds the DOM this
@@ -385,14 +395,16 @@ const COMBINED_SPEAKER_JA = /\s*(他|ほか)\s*\d+\s*(名|人|さん)?\b.*$/;
 // could break prompt structure on the server side once it's concatenated
 // into "[Alice\n...]: text".
 function sanitizeSpeaker(raw: string): string {
-  return raw
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u001F\u007F]/g, ' ')
-    .replace(COMBINED_SPEAKER_RE, '')
-    .replace(COMBINED_SPEAKER_JA, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 50);
+  return (
+    raw
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u001F\u007F]/g, ' ')
+      .replace(COMBINED_SPEAKER_RE, '')
+      .replace(COMBINED_SPEAKER_JA, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 50)
+  );
 }
 
 function isValidCaption(speaker: string, text: string): boolean {
@@ -426,7 +438,7 @@ function isValidCaption(speaker: string, text: string): boolean {
   // Reject text that is ONLY icon names or short UI labels
   // (e.g. "chevron_right chevron_right chevron_right")
   const textWords = text.split(/\s+/);
-  if (textWords.every(w => /^[a-z]+_[a-z]+$/i.test(w))) return false;
+  if (textWords.every((w) => /^[a-z]+_[a-z]+$/i.test(w))) return false;
 
   // Reject standalone numbers (e.g. "1" from "Contributors 1")
   if (/^\d{1,3}$/.test(text.trim())) return false;
@@ -518,9 +530,11 @@ function sendUpdate(speaker: string, text: string, sessionId: string): void {
   chrome.runtime.sendMessage(msg).catch((e: Error) => handleSendError(e));
 
   // Notify the floating overlay (same tab — custom events are shared across content scripts)
-  window.dispatchEvent(new CustomEvent('llmide:caption', {
-    detail: { speaker, text, sessionId },
-  }));
+  window.dispatchEvent(
+    new CustomEvent('llmide:caption', {
+      detail: { speaker, text, sessionId },
+    }),
+  );
 }
 
 function scrape(): void {
@@ -536,7 +550,7 @@ function scrape(): void {
     const prev = speakerState.get(speaker);
 
     // New session if: first time seeing this speaker, or silent > SESSION_GAP_MS.
-    const needsNewSession = !prev || (now - prev.lastSeen > SESSION_GAP_MS);
+    const needsNewSession = !prev || now - prev.lastSeen > SESSION_GAP_MS;
 
     if (needsNewSession) {
       sessionCounter++;
@@ -597,8 +611,7 @@ function enableTeamsCC(): boolean {
   for (const btn of document.querySelectorAll('button[aria-label], button[data-tid]')) {
     const label = (btn.getAttribute('aria-label') || '').toLowerCase();
     const tid = (btn.getAttribute('data-tid') || '').toLowerCase();
-    if (label.includes('caption') || label.includes('subtitle') ||
-        tid.includes('caption') || tid.includes('cc')) {
+    if (label.includes('caption') || label.includes('subtitle') || tid.includes('caption') || tid.includes('cc')) {
       if (btn.getAttribute('aria-pressed') === 'true') return true;
       (btn as HTMLButtonElement).click();
       return true;
@@ -611,8 +624,7 @@ function enableZoomCC(): boolean {
   for (const btn of document.querySelectorAll('button')) {
     const label = (btn.getAttribute('aria-label') || '').toLowerCase();
     const text = (btn.textContent || '').toLowerCase();
-    if (label.includes('caption') || label.includes('transcript') ||
-        text.includes('cc') || text.includes('caption')) {
+    if (label.includes('caption') || label.includes('transcript') || text.includes('cc') || text.includes('caption')) {
       if (btn.getAttribute('aria-pressed') === 'true') return true;
       (btn as HTMLButtonElement).click();
       return true;
@@ -679,7 +691,7 @@ async function injectMeetChat(text: string): Promise<boolean> {
   if (!isPanelOpen) {
     chatBtn.click();
     // Wait for the panel animation — retry up to 3 times if needed
-    await new Promise(r => setTimeout(r, 600));
+    await new Promise((r) => setTimeout(r, 600));
   }
 
   // 2. Find the input. Meet uses textarea OR contenteditable depending on build.
@@ -697,7 +709,7 @@ async function injectMeetChat(text: string): Promise<boolean> {
       if (input) break;
     }
     if (input) break;
-    await new Promise(r => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 400));
   }
   if (!input) {
     debug('injectMeetChat: no chat input found after retries');
@@ -730,7 +742,9 @@ async function injectMeetChat(text: string): Promise<boolean> {
   }
 
   // Fallback: hit Enter
-  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+  input.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }),
+  );
   return true;
 }
 
@@ -758,8 +772,14 @@ function startScraping(): void {
 }
 
 function stopScraping(): void {
-  if (scrapeInterval) { clearInterval(scrapeInterval); scrapeInterval = null; }
-  if (observer) { observer.disconnect(); observer = null; }
+  if (scrapeInterval) {
+    clearInterval(scrapeInterval);
+    scrapeInterval = null;
+  }
+  if (observer) {
+    observer.disconnect();
+    observer = null;
+  }
   speakerState.clear();
   sessionCounter = 0;
   if (platform === 'meet') showMeetCCOverlay();
@@ -805,14 +825,20 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
 
     const ok = enableCC();
     debug(`CC enable result: ${ok}`);
-    setTimeout(() => { if (isCapturing) enableCC(); }, 2_000);
-    setTimeout(() => { if (isCapturing) enableCC(); }, 5_000);
+    setTimeout(() => {
+      if (isCapturing) enableCC();
+    }, 2_000);
+    setTimeout(() => {
+      if (isCapturing) enableCC();
+    }, 5_000);
 
     // Hide the CC overlay once it has appeared in the DOM (give it 1s to render).
     // CC must stay enabled in Meet for the scraper to work — we just make it
     // invisible so the transcript panel is the user's only view of captions.
     if (platform === 'meet') {
-      setTimeout(() => { if (isCapturing) hideMeetCCOverlay(); }, 1_000);
+      setTimeout(() => {
+        if (isCapturing) hideMeetCCOverlay();
+      }, 1_000);
     }
 
     startScraping();
@@ -846,18 +872,21 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
 
   if (type === MsgType.POST_CHAT) {
     if (platform !== 'meet') {
-      sendResponse({ ok: false, error: `Chat injection is only supported on Google Meet (current platform: ${platform ?? 'unknown'}).` });
+      sendResponse({
+        ok: false,
+        error: `Chat injection is only supported on Google Meet (current platform: ${platform ?? 'unknown'}).`,
+      });
       return false;
     }
     injectMeetChat((message as unknown as { text: string }).text)
-      .then(ok => {
+      .then((ok) => {
         if (!ok) {
           sendResponse({ ok: false, error: 'Could not find the Meet chat panel. Open the chat first and try again.' });
         } else {
           sendResponse({ ok: true });
         }
       })
-      .catch(err => sendResponse({ ok: false, error: err?.message || 'Chat injection failed unexpectedly.' }));
+      .catch((err) => sendResponse({ ok: false, error: err?.message || 'Chat injection failed unexpectedly.' }));
     return true; // Keep channel open for async response
   }
 

@@ -46,12 +46,13 @@ async function ensureContentScriptInjected(tabId: number, url: string): Promise<
       // Synchronously inlined — must not import anything; runs in the
       // page world. Returns true if any of the three content scripts
       // has set its sentinel.
-      func: () => Boolean(
-        // window augmentation lives in each content script; `as any` covers it
-        (window as any).__llmideCaptionScraperInjected
-          || (window as any).__llmideSpeakerDetectorInjected
-          || (window as any).__llmideFloatingOverlayInjected
-      ),
+      func: () =>
+        Boolean(
+          // window augmentation lives in each content script; `as any` covers it
+          (window as any).__llmideCaptionScraperInjected ||
+          (window as any).__llmideSpeakerDetectorInjected ||
+          (window as any).__llmideFloatingOverlayInjected,
+        ),
     });
     if (pageResult?.result === true) return true;
   } catch {
@@ -151,8 +152,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             for (let attempt = 0; attempt < 5; attempt++) {
               try {
                 const pong = await chrome.tabs.sendMessage(tab.id, { type: MsgType.PING });
-                if (pong?.pong) { ready = true; break; }
-              } catch { /* not ready yet */ }
+                if (pong?.pong) {
+                  ready = true;
+                  break;
+                }
+              } catch {
+                /* not ready yet */
+              }
               await new Promise((r) => setTimeout(r, 150));
             }
             if (!ready) {

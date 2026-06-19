@@ -11,15 +11,15 @@ const MAX_TRANSCRIPTS = 50;
 const STORAGE_KEY = 'transcripts';
 
 interface SavedTranscript {
-  id: string;                               // UUID-ish — `${startedAt}-${random}`
+  id: string; // UUID-ish — `${startedAt}-${random}`
   meetingTitle: string;
-  date: string;                             // ISO timestamp when stopRecording fired
-  duration: number;                         // seconds of elapsed recording
-  language?: string;                        // primary language at save time
-  transcript: string;                       // pre-rendered `[Name] text` string
-  segments: TranscriptSegment[];            // raw segments, lets us restore UI exactly
-  speakerNames: Record<string, string>;     // speaker-id → display name map
-  notes?: string;                           // room for future "save notes with transcript" flow
+  date: string; // ISO timestamp when stopRecording fired
+  duration: number; // seconds of elapsed recording
+  language?: string; // primary language at save time
+  transcript: string; // pre-rendered `[Name] text` string
+  segments: TranscriptSegment[]; // raw segments, lets us restore UI exactly
+  speakerNames: Record<string, string>; // speaker-id → display name map
+  notes?: string; // room for future "save notes with transcript" flow
 }
 
 function generateId(): string {
@@ -37,13 +37,9 @@ export class StorageQuotaError extends Error {
   }
 }
 
-export async function saveTranscript(
-  input: Omit<SavedTranscript, 'id'> & { id?: string },
-): Promise<SavedTranscript> {
+export async function saveTranscript(input: Omit<SavedTranscript, 'id'> & { id?: string }): Promise<SavedTranscript> {
   const result = await chrome.storage.local.get(STORAGE_KEY);
-  const transcripts: SavedTranscript[] = Array.isArray(result[STORAGE_KEY])
-    ? result[STORAGE_KEY]
-    : [];
+  const transcripts: SavedTranscript[] = Array.isArray(result[STORAGE_KEY]) ? result[STORAGE_KEY] : [];
   const saved: SavedTranscript = { ...input, id: input.id || generateId() };
   transcripts.unshift(saved);
   if (transcripts.length > MAX_TRANSCRIPTS) {
@@ -62,12 +58,8 @@ export async function saveTranscript(
       await chrome.storage.local.set({ [STORAGE_KEY]: trimmed });
       return saved;
     } catch (err2) {
-      throw new StorageQuotaError(
-        `Could not persist transcript (chrome.storage.local quota): ${msg}`,
-        saved,
-      );
+      throw new StorageQuotaError(`Could not persist transcript (chrome.storage.local quota): ${msg}`, saved);
     }
   }
   return saved;
 }
-

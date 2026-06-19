@@ -22,9 +22,7 @@ export interface LiveSyncResult {
   resetSyncError: () => void;
 }
 
-export function useLiveSync({
-  isRecording, sessionId, meetingTitle, segments,
-}: LiveSyncState): LiveSyncResult {
+export function useLiveSync({ isRecording, sessionId, meetingTitle, segments }: LiveSyncState): LiveSyncResult {
   const lastPushedIndex = useRef(0);
   const lastPushedTextForLast = useRef('');
   const lastSessionId = useRef('');
@@ -157,7 +155,9 @@ export function useLiveSync({
             headers: { 'Content-Type': 'application/json' },
             body: '{}',
           });
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
         setSyncStatus('idle');
       });
     // deps intentionally narrow — re-run only on recording transitions

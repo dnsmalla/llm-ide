@@ -35,7 +35,9 @@ export interface AgentDispatchResponse {
 // isSupportedUrl handles null/undefined and malformed URLs.
 
 export function useAgent({
-  isRecording, language, sessionId,
+  isRecording,
+  language,
+  sessionId,
 }: {
   isRecording: boolean;
   language?: string;
@@ -110,63 +112,66 @@ export function useAgent({
     };
   }, [runs.length]);
 
-  const dispatch = useCallback(async (
-    planId: string | null = null,
-    /** Override the auto-detected meeting URL.  When undefined we
-     *  use whatever chrome.tabs.query found.  When explicitly null,
-     *  send no URL (forces co-pilot mode).  When a string, that
-     *  exact value is sent — the editor uses this. */
-    meetingUrlOverride?: string | null,
-  ): Promise<AgentDispatchResponse | null> => {
-    if (!isRecording) {
-      setError('Start recording first — the agent attaches to your live capture.');
-      return null;
-    }
-    const meetingUrlToSend = meetingUrlOverride === undefined
-      ? (activeMeetingUrl || undefined)
-      : (meetingUrlOverride || undefined);
-    setBusy(true);
-    setError(null);
-    try {
-      const serverUrl = await getServerUrl();
-      // No sessionId in the body — the server picks the user's most
-      // recently-active live session, which is the one the extension
-      // is currently writing to.
-      const r = await authFetch(`${serverUrl}/kb/agent/dispatch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: sessionId || undefined,
-          planId,
-          language: language || 'en',
-          meetingUrl: meetingUrlToSend,
-        }),
-      });
-      if (!r.ok) {
-        const text = await r.text().catch(() => '');
-        throw new Error(`dispatch ${r.status}: ${text.slice(0, 200)}`);
+  const dispatch = useCallback(
+    async (
+      planId: string | null = null,
+      /** Override the auto-detected meeting URL.  When undefined we
+       *  use whatever chrome.tabs.query found.  When explicitly null,
+       *  send no URL (forces co-pilot mode).  When a string, that
+       *  exact value is sent — the editor uses this. */
+      meetingUrlOverride?: string | null,
+    ): Promise<AgentDispatchResponse | null> => {
+      if (!isRecording) {
+        setError('Start recording first — the agent attaches to your live capture.');
+        return null;
       }
-      const json: AgentDispatchResponse = await r.json();
-      setRuns((prev) => [
-        ...prev,
-        {
-          sessionId: json.sessionId, planId,
-          startedAt: Date.now(),
-          lastTickAt: null,
-          lastDecision: null,
-        },
-      ]);
-      if (meetingUrlToSend && !json.attached) {
-        setError('Co-pilot failed to attach to this meeting.');
+      const meetingUrlToSend =
+        meetingUrlOverride === undefined ? activeMeetingUrl || undefined : meetingUrlOverride || undefined;
+      setBusy(true);
+      setError(null);
+      try {
+        const serverUrl = await getServerUrl();
+        // No sessionId in the body — the server picks the user's most
+        // recently-active live session, which is the one the extension
+        // is currently writing to.
+        const r = await authFetch(`${serverUrl}/kb/agent/dispatch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: sessionId || undefined,
+            planId,
+            language: language || 'en',
+            meetingUrl: meetingUrlToSend,
+          }),
+        });
+        if (!r.ok) {
+          const text = await r.text().catch(() => '');
+          throw new Error(`dispatch ${r.status}: ${text.slice(0, 200)}`);
+        }
+        const json: AgentDispatchResponse = await r.json();
+        setRuns((prev) => [
+          ...prev,
+          {
+            sessionId: json.sessionId,
+            planId,
+            startedAt: Date.now(),
+            lastTickAt: null,
+            lastDecision: null,
+          },
+        ]);
+        if (meetingUrlToSend && !json.attached) {
+          setError('Co-pilot failed to attach to this meeting.');
+        }
+        return json;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'dispatch failed');
+        return null;
+      } finally {
+        setBusy(false);
       }
-      return json;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'dispatch failed');
-      return null;
-    } finally {
-      setBusy(false);
-    }
-  }, [isRecording, language, sessionId, activeMeetingUrl]);
+    },
+    [isRecording, language, sessionId, activeMeetingUrl],
+  );
 
   const stop = useCallback(async (sessionId: string) => {
     setBusy(true);
@@ -189,7 +194,7 @@ export function useAgent({
   return {
     canDispatch: isRecording && !busy,
     isRecording,
-    activeMeetingUrl,                  // null when no Meet/Teams/Zoom tab focused
+    activeMeetingUrl, // null when no Meet/Teams/Zoom tab focused
     runs,
     busy,
     error,

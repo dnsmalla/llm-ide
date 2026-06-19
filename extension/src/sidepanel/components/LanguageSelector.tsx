@@ -11,8 +11,12 @@ interface Props {
 }
 
 export default function LanguageSelector({
-  primaryLang, secondaryLang, bilingual,
-  onChangePrimary, onChangeSecondary, onToggleBilingual,
+  primaryLang,
+  secondaryLang,
+  bilingual,
+  onChangePrimary,
+  onChangeSecondary,
+  onToggleBilingual,
 }: Props) {
   return (
     <div className="language-selector">
@@ -24,12 +28,16 @@ export default function LanguageSelector({
           aria-label="Primary transcription language"
         >
           {LANGUAGES.map((lang) => (
-            <option key={lang.code} value={lang.code}>{lang.label}</option>
+            <option key={lang.code} value={lang.code}>
+              {lang.label}
+            </option>
           ))}
         </select>
         {bilingual && (
           <>
-            <span className="lang-plus" aria-hidden="true">+</span>
+            <span className="lang-plus" aria-hidden="true">
+              +
+            </span>
             <select
               value={secondaryLang}
               onChange={(e) => onChangeSecondary(e.target.value)}
@@ -37,7 +45,9 @@ export default function LanguageSelector({
               aria-label="Secondary transcription language"
             >
               {LANGUAGES.map((lang) => (
-                <option key={lang.code} value={lang.code}>{lang.label}</option>
+                <option key={lang.code} value={lang.code}>
+                  {lang.label}
+                </option>
               ))}
             </select>
           </>

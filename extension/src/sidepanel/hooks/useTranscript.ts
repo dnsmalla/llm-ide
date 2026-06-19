@@ -59,9 +59,9 @@ function extractMeetingTitle(raw: string): string {
 }
 
 export interface Diagnostics {
-  platform: string | null;     // last platform reported by a content script
-  captionsReceived: number;    // total CAPTION_FINAL messages this session
-  lastCaptionAt: number;       // epoch ms of the most recent caption
+  platform: string | null; // last platform reported by a content script
+  captionsReceived: number; // total CAPTION_FINAL messages this session
+  lastCaptionAt: number; // epoch ms of the most recent caption
 }
 
 export function useTranscript() {
@@ -107,18 +107,32 @@ export function useTranscript() {
   const meetingTitleRef = useRef('');
   const elapsedRef = useRef(0);
   const primaryLangRef = useRef('ja');
-  useEffect(() => { segmentsRef.current = segments; }, [segments]);
-  useEffect(() => { speakerNamesRef.current = speakerNames; }, [speakerNames]);
-  useEffect(() => { meetingTitleRef.current = meetingTitle; }, [meetingTitle]);
-  useEffect(() => { elapsedRef.current = elapsed; }, [elapsed]);
-  useEffect(() => { primaryLangRef.current = primaryLang; }, [primaryLang]);
+  useEffect(() => {
+    segmentsRef.current = segments;
+  }, [segments]);
+  useEffect(() => {
+    speakerNamesRef.current = speakerNames;
+  }, [speakerNames]);
+  useEffect(() => {
+    meetingTitleRef.current = meetingTitle;
+  }, [meetingTitle]);
+  useEffect(() => {
+    elapsedRef.current = elapsed;
+  }, [elapsed]);
+  useEffect(() => {
+    primaryLangRef.current = primaryLang;
+  }, [primaryLang]);
 
   // Keep refs in sync with state.  These refs are read from the
   // chrome.runtime.onMessage listener (registered once, stale-closure
   // otherwise).  We also update them EAGERLY from the setters below so a
   // CAPTION_FINAL arriving in the same tick as start/stop isn't dropped.
-  useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
-  useEffect(() => { captureModeRef.current = captureMode; }, [captureMode]);
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
+  useEffect(() => {
+    captureModeRef.current = captureMode;
+  }, [captureMode]);
 
   const setRecordingSync = useCallback((recording: boolean, mode?: CaptureMode) => {
     isRecordingRef.current = recording;
@@ -129,12 +143,15 @@ export function useTranscript() {
 
   // Load preferences
   useEffect(() => {
-    chrome.storage?.local?.get(['primaryLang', 'secondaryLang', 'bilingual', 'speakerNames']).then((result) => {
-      if (result.primaryLang) setPrimaryLang(result.primaryLang);
-      if (result.secondaryLang) setSecondaryLang(result.secondaryLang);
-      if (result.bilingual !== undefined) setBilingual(result.bilingual);
-      if (result.speakerNames) setSpeakerNames(result.speakerNames);
-    }).catch(() => {});
+    chrome.storage?.local
+      ?.get(['primaryLang', 'secondaryLang', 'bilingual', 'speakerNames'])
+      .then((result) => {
+        if (result.primaryLang) setPrimaryLang(result.primaryLang);
+        if (result.secondaryLang) setSecondaryLang(result.secondaryLang);
+        if (result.bilingual !== undefined) setBilingual(result.bilingual);
+        if (result.speakerNames) setSpeakerNames(result.speakerNames);
+      })
+      .catch(() => {});
   }, []);
 
   // If this app instance opened AFTER recording had already begun (user
@@ -142,10 +159,13 @@ export function useTranscript() {
   // tab's caption scraper for its current state.  The scraper replies with
   // a CAPTION_STATUS broadcast which our listener below picks up.
   useEffect(() => {
-    chrome.tabs?.query?.({ active: true, currentWindow: true }).then(([tab]) => {
-      if (!tab?.id) return;
-      chrome.tabs.sendMessage(tab.id, { type: MsgType.GET_CAPTION_STATUS }).catch(() => {});
-    }).catch(() => {});
+    chrome.tabs
+      ?.query?.({ active: true, currentWindow: true })
+      .then(([tab]) => {
+        if (!tab?.id) return;
+        chrome.tabs.sendMessage(tab.id, { type: MsgType.GET_CAPTION_STATUS }).catch(() => {});
+      })
+      .catch(() => {});
   }, []);
 
   // Listen for messages from content scripts
@@ -195,9 +215,7 @@ export function useTranscript() {
       // Caption data from caption-scraper (Meet/Teams/Zoom CC).
       // The scraper groups each speaker's continuous utterance into a sessionId.
       // We keep ONE transcript line per session, updating it as the caption grows.
-      if (message.type === MsgType.CAPTION_FINAL &&
-          isRecordingRef.current &&
-          captureModeRef.current === 'captions') {
+      if (message.type === MsgType.CAPTION_FINAL && isRecordingRef.current && captureModeRef.current === 'captions') {
         const { speaker, text, timestamp, sessionId } = message;
         const safeName = speaker.trim().slice(0, 50) || 'Unknown';
 
@@ -221,14 +239,17 @@ export function useTranscript() {
           // This ensures bots/agents (e.g. "Agent") with no video tile show
           // up in the contributors list even though getMeetParticipants()
           // only scrapes [data-self-name] from video grid tiles.
-          setParticipants((pp) => pp.includes(safeName) ? pp : [...pp, safeName]);
-          const next = [...prev, {
-            text,
-            timestamp,
-            isFinal: true,
-            speaker: safeName,
-            sessionId,
-          }];
+          setParticipants((pp) => (pp.includes(safeName) ? pp : [...pp, safeName]));
+          const next = [
+            ...prev,
+            {
+              text,
+              timestamp,
+              isFinal: true,
+              speaker: safeName,
+              sessionId,
+            },
+          ];
           if (next.length > MAX_SEGMENTS) {
             setSegmentLimitReached(true);
             return next.slice(-MAX_SEGMENTS);
@@ -281,9 +302,7 @@ export function useTranscript() {
   const setupMic = useCallback(async (deviceId?: string, volume?: number) => {
     try {
       const constraints: MediaStreamConstraints = {
-        audio: deviceId && deviceId !== 'default'
-          ? { deviceId: { exact: deviceId } }
-          : true,
+        audio: deviceId && deviceId !== 'default' ? { deviceId: { exact: deviceId } } : true,
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       mediaStreamRef.current = stream;
@@ -334,18 +353,21 @@ export function useTranscript() {
     return `Speaker ${currentSpeakerNumRef.current}`;
   }, []);
 
-  const addSegment = useCallback((text: string, lang: string) => {
-    const speaker = getSpeaker();
-    setSegments((prev) => {
-      const next = [...prev, { text, timestamp: Date.now(), isFinal: true, speaker, lang }];
-      if (next.length > MAX_SEGMENTS) {
-        setSegmentLimitReached(true);
-        return next.slice(-MAX_SEGMENTS);
-      }
-      return next;
-    });
-    setInterimText('');
-  }, [getSpeaker]);
+  const addSegment = useCallback(
+    (text: string, lang: string) => {
+      const speaker = getSpeaker();
+      setSegments((prev) => {
+        const next = [...prev, { text, timestamp: Date.now(), isFinal: true, speaker, lang }];
+        if (next.length > MAX_SEGMENTS) {
+          setSegmentLimitReached(true);
+          return next.slice(-MAX_SEGMENTS);
+        }
+        return next;
+      });
+      setInterimText('');
+    },
+    [getSpeaker],
+  );
 
   // ─── Speech Recognition (mic mode) ─────────────────────────────────
 
@@ -366,195 +388,208 @@ export function useTranscript() {
     pendingResultsRef.current.clear();
   }, []);
 
-  const createRecognition = useCallback((
-    lang: string,
-    ref: React.MutableRefObject<SpeechRecognition | null>,
-    onFinalResult: (text: string, confidence: number, lang: string) => void,
-    onInterimResult: (text: string) => void,
-  ) => {
-    const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!Ctor) {
-      setError('Speech recognition not supported. Use Chrome.');
-      return;
-    }
+  const createRecognition = useCallback(
+    (
+      lang: string,
+      ref: React.MutableRefObject<SpeechRecognition | null>,
+      onFinalResult: (text: string, confidence: number, lang: string) => void,
+      onInterimResult: (text: string) => void,
+    ) => {
+      const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!Ctor) {
+        setError('Speech recognition not supported. Use Chrome.');
+        return;
+      }
 
-    const rec = new Ctor();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = lang;
+      const rec = new Ctor();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = lang;
 
-    rec.onresult = (event: SpeechRecognitionEvent) => {
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        const text = result[0].transcript;
-        const confidence = result[0].confidence;
-        if (result.isFinal) {
-          onFinalResult(text, confidence, lang);
-        } else {
-          onInterimResult(text);
+      rec.onresult = (event: SpeechRecognitionEvent) => {
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i];
+          const text = result[0].transcript;
+          const confidence = result[0].confidence;
+          if (result.isFinal) {
+            onFinalResult(text, confidence, lang);
+          } else {
+            onInterimResult(text);
+          }
         }
-      }
-    };
+      };
 
-    const restart = () => {
-      if (ref.current) {
-        ref.current.onresult = null;
-        ref.current.onerror = null;
-        ref.current.onend = null;
-        ref.current.abort();
-        ref.current = null;
-      }
-      if (isRecordingRef.current && captureModeRef.current === 'mic') {
-        createRecognition(lang, ref, onFinalResult, onInterimResult);
-      }
-    };
+      const restart = () => {
+        if (ref.current) {
+          ref.current.onresult = null;
+          ref.current.onerror = null;
+          ref.current.onend = null;
+          ref.current.abort();
+          ref.current = null;
+        }
+        if (isRecordingRef.current && captureModeRef.current === 'mic') {
+          createRecognition(lang, ref, onFinalResult, onInterimResult);
+        }
+      };
 
-    const scheduleRestart = (delayMs: number) => {
-      const t = setTimeout(() => {
-        restartTimersRef.current.delete(t);
-        restart();
-      }, delayMs);
-      restartTimersRef.current.add(t);
-    };
+      const scheduleRestart = (delayMs: number) => {
+        const t = setTimeout(() => {
+          restartTimersRef.current.delete(t);
+          restart();
+        }, delayMs);
+        restartTimersRef.current.add(t);
+      };
 
-    rec.onerror = (event: SpeechRecognitionErrorEvent) => {
-      if (event.error === 'no-speech' || event.error === 'aborted') {
-        if (isRecordingRef.current) scheduleRestart(500);
-        return;
-      }
-      if (event.error === 'not-allowed') {
-        setError('Microphone access denied.');
-        setIsRecording(false);
-        return;
-      }
-      if (ref === primaryRecRef) {
-        setError(`Speech recognition error: ${event.error}`);
-      }
-    };
+      rec.onerror = (event: SpeechRecognitionErrorEvent) => {
+        if (event.error === 'no-speech' || event.error === 'aborted') {
+          if (isRecordingRef.current) scheduleRestart(500);
+          return;
+        }
+        if (event.error === 'not-allowed') {
+          setError('Microphone access denied.');
+          setIsRecording(false);
+          return;
+        }
+        if (ref === primaryRecRef) {
+          setError(`Speech recognition error: ${event.error}`);
+        }
+      };
 
-    rec.onend = () => {
-      if (isRecordingRef.current && captureModeRef.current === 'mic') {
-        scheduleRestart(300);
-      }
-    };
+      rec.onend = () => {
+        if (isRecordingRef.current && captureModeRef.current === 'mic') {
+          scheduleRestart(300);
+        }
+      };
 
-    ref.current = rec;
-    rec.start();
-  }, []);
+      ref.current = rec;
+      rec.start();
+    },
+    [],
+  );
 
   // Bilingual: compare results from two instances
-  const startBilingualRecognition = useCallback((lang1: string, lang2: string) => {
-    const COMPARE_WINDOW_MS = 1500;
+  const startBilingualRecognition = useCallback(
+    (lang1: string, lang2: string) => {
+      const COMPARE_WINDOW_MS = 1500;
 
-    const handleFinal = (text: string, confidence: number, lang: string) => {
-      const roundId = resultCounterRef.current;
-      const existing = pendingResultsRef.current.get(roundId) || [];
-      existing.push({ text, confidence, lang });
-      pendingResultsRef.current.set(roundId, existing);
+      const handleFinal = (text: string, confidence: number, lang: string) => {
+        const roundId = resultCounterRef.current;
+        const existing = pendingResultsRef.current.get(roundId) || [];
+        existing.push({ text, confidence, lang });
+        pendingResultsRef.current.set(roundId, existing);
 
-      if (existing.length >= 2) {
-        pickBest(roundId);
-        resultCounterRef.current++;
-        return;
-      }
-
-      setTimeout(() => {
-        if (pendingResultsRef.current.has(roundId)) {
+        if (existing.length >= 2) {
           pickBest(roundId);
           resultCounterRef.current++;
+          return;
         }
-      }, COMPARE_WINDOW_MS);
-    };
 
-    const pickBest = (roundId: number) => {
-      const results = pendingResultsRef.current.get(roundId);
-      pendingResultsRef.current.delete(roundId);
-      if (!results?.length) return;
+        setTimeout(() => {
+          if (pendingResultsRef.current.has(roundId)) {
+            pickBest(roundId);
+            resultCounterRef.current++;
+          }
+        }, COMPARE_WINDOW_MS);
+      };
 
-      let best = results[0];
-      if (results.length >= 2) {
-        const primary = results.find((r) => r.lang === lang1);
-        const secondary = results.find((r) => r.lang === lang2);
-        if (primary && secondary) {
-          best = secondary.confidence - primary.confidence > 0.15 ? secondary : primary;
+      const pickBest = (roundId: number) => {
+        const results = pendingResultsRef.current.get(roundId);
+        pendingResultsRef.current.delete(roundId);
+        if (!results?.length) return;
+
+        let best = results[0];
+        if (results.length >= 2) {
+          const primary = results.find((r) => r.lang === lang1);
+          const secondary = results.find((r) => r.lang === lang2);
+          if (primary && secondary) {
+            best = secondary.confidence - primary.confidence > 0.15 ? secondary : primary;
+          }
         }
-      }
-      addSegment(best.text, best.lang);
-    };
+        addSegment(best.text, best.lang);
+      };
 
-    const handleInterim = (text: string) => setInterimText(text);
+      const handleInterim = (text: string) => setInterimText(text);
 
-    createRecognition(lang1, primaryRecRef, handleFinal, handleInterim);
-    createRecognition(lang2, secondaryRecRef, handleFinal, handleInterim);
-  }, [createRecognition, addSegment]);
+      createRecognition(lang1, primaryRecRef, handleFinal, handleInterim);
+      createRecognition(lang2, secondaryRecRef, handleFinal, handleInterim);
+    },
+    [createRecognition, addSegment],
+  );
 
-  const startSingleRecognition = useCallback((lang: string) => {
-    createRecognition(
-      lang, primaryRecRef,
-      (text, _conf, langCode) => addSegment(text, langCode),
-      (text) => setInterimText(text),
-    );
-  }, [createRecognition, addSegment]);
+  const startSingleRecognition = useCallback(
+    (lang: string) => {
+      createRecognition(
+        lang,
+        primaryRecRef,
+        (text, _conf, langCode) => addSegment(text, langCode),
+        (text) => setInterimText(text),
+      );
+    },
+    [createRecognition, addSegment],
+  );
 
   // ─── Public API ─────────────────────────────────────────────────────
 
-  const startRecording = useCallback(async (options?: TranscriptOptions) => {
-    setError(null);
-    setSegments([]);
-    setInterimText('');
-    setElapsed(0);
-    setSegmentLimitReached(false);
-    setSaveError(null);
-    currentSpeakerNumRef.current = 1;
-    lastSpeechEndRef.current = 0;
-    activeSpeakerRef.current = null;
-    resultCounterRef.current = 0;
-    pendingResultsRef.current.clear();
+  const startRecording = useCallback(
+    async (options?: TranscriptOptions) => {
+      setError(null);
+      setSegments([]);
+      setInterimText('');
+      setElapsed(0);
+      setSegmentLimitReached(false);
+      setSaveError(null);
+      currentSpeakerNumRef.current = 1;
+      lastSpeechEndRef.current = 0;
+      activeSpeakerRef.current = null;
+      resultCounterRef.current = 0;
+      pendingResultsRef.current.clear();
 
-    // Check if we're on a supported platform with CC captions
-    let useCaptions = false;
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      const url = tab?.url || '';
-      // Capture the tab title as the meeting title — falls back to empty if
-      // the tab is the extension's own popup window.
-      if (tab?.title) setMeetingTitle(extractMeetingTitle(tab.title));
+      // Check if we're on a supported platform with CC captions
+      let useCaptions = false;
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const url = tab?.url || '';
+        // Capture the tab title as the meeting title — falls back to empty if
+        // the tab is the extension's own popup window.
+        if (tab?.title) setMeetingTitle(extractMeetingTitle(tab.title));
 
-      if (isSupportedUrl(url)) {
-        // Tell caption scraper to start — retry in case content script hasn't loaded yet
-        const sendStart = () => chrome.runtime.sendMessage({ type: MsgType.START_CAPTION_SCRAPING }).catch(() => {});
-        sendStart();
-        setTimeout(sendStart, 1000);
-        setTimeout(sendStart, 3000);
-        useCaptions = true;
+        if (isSupportedUrl(url)) {
+          // Tell caption scraper to start — retry in case content script hasn't loaded yet
+          const sendStart = () => chrome.runtime.sendMessage({ type: MsgType.START_CAPTION_SCRAPING }).catch(() => {});
+          sendStart();
+          setTimeout(sendStart, 1000);
+          setTimeout(sendStart, 3000);
+          useCaptions = true;
+        }
+      } catch (err) {
+        debug('Failed to detect meeting platform:', err);
       }
-    } catch (err) {
-      debug('Failed to detect meeting platform:', err);
-    }
 
-    // Reset session-scoped diagnostics on every new recording.
-    setDiagnostics((d) => ({ ...d, captionsReceived: 0, lastCaptionAt: 0 }));
+      // Reset session-scoped diagnostics on every new recording.
+      setDiagnostics((d) => ({ ...d, captionsReceived: 0, lastCaptionAt: 0 }));
 
-    if (useCaptions) {
-      // CC mode: captions come from content script with real speaker names
-      setRecordingSync(true, 'captions');
-      return;
-    }
+      if (useCaptions) {
+        // CC mode: captions come from content script with real speaker names
+        setRecordingSync(true, 'captions');
+        return;
+      }
 
-    // Mic mode: set up mic and start speech recognition
-    captureModeRef.current = 'mic';
-    setCaptureMode('mic');
-    const success = await setupMic(options?.deviceId, options?.volume);
-    if (!success) return;
+      // Mic mode: set up mic and start speech recognition
+      captureModeRef.current = 'mic';
+      setCaptureMode('mic');
+      const success = await setupMic(options?.deviceId, options?.volume);
+      if (!success) return;
 
-    setRecordingSync(true, 'mic');
+      setRecordingSync(true, 'mic');
 
-    if (bilingual && primaryLang !== secondaryLang) {
-      startBilingualRecognition(primaryLang, secondaryLang);
-    } else {
-      startSingleRecognition(primaryLang);
-    }
-  }, [setupMic, bilingual, primaryLang, secondaryLang, startBilingualRecognition, startSingleRecognition]);
+      if (bilingual && primaryLang !== secondaryLang) {
+        startBilingualRecognition(primaryLang, secondaryLang);
+      } else {
+        startSingleRecognition(primaryLang);
+      }
+    },
+    [setupMic, bilingual, primaryLang, secondaryLang, startBilingualRecognition, startSingleRecognition],
+  );
 
   const stopRecording = useCallback(() => {
     stopAllRecognition();
@@ -569,9 +604,7 @@ export function useTranscript() {
     const segs = segmentsRef.current;
     if (segs.length === 0) return;
     const names = speakerNamesRef.current;
-    const rendered = segs
-      .map((s) => `[${names[s.speaker] || s.speaker}] ${s.text}`)
-      .join('\n');
+    const rendered = segs.map((s) => `[${names[s.speaker] || s.speaker}] ${s.text}`).join('\n');
     persistTranscript({
       meetingTitle: meetingTitleRef.current || 'Untitled meeting',
       date: new Date().toISOString(),
@@ -581,9 +614,10 @@ export function useTranscript() {
       segments: segs,
       speakerNames: names,
     }).catch((err) => {
-      const msg = err instanceof StorageQuotaError
-        ? 'Transcript too large to save — download it manually before closing.'
-        : 'Failed to save transcript to local storage.';
+      const msg =
+        err instanceof StorageQuotaError
+          ? 'Transcript too large to save — download it manually before closing.'
+          : 'Failed to save transcript to local storage.';
       setSaveError(msg);
     });
   }, [stopAllRecognition, cleanupMic, setRecordingSync]);
@@ -595,20 +629,23 @@ export function useTranscript() {
 
   // Restore a past session into the live UI.  Refuses while recording to
   // avoid clobbering an in-progress transcript.
-  const loadTranscript = useCallback((
-    loadSegments: TranscriptSegment[],
-    loadSpeakerNames: Record<string, string>,
-    loadMeetingTitle: string,
-    loadDuration: number,
-  ) => {
-    if (isRecordingRef.current) return false;
-    setSegments(loadSegments);
-    setSpeakerNames((prev) => ({ ...prev, ...loadSpeakerNames }));
-    setMeetingTitle(loadMeetingTitle);
-    setElapsed(loadDuration);
-    setInterimText('');
-    return true;
-  }, []);
+  const loadTranscript = useCallback(
+    (
+      loadSegments: TranscriptSegment[],
+      loadSpeakerNames: Record<string, string>,
+      loadMeetingTitle: string,
+      loadDuration: number,
+    ) => {
+      if (isRecordingRef.current) return false;
+      setSegments(loadSegments);
+      setSpeakerNames((prev) => ({ ...prev, ...loadSpeakerNames }));
+      setMeetingTitle(loadMeetingTitle);
+      setElapsed(loadDuration);
+      setInterimText('');
+      return true;
+    },
+    [],
+  );
 
   const fullTranscript = segments
     .map((s) => {

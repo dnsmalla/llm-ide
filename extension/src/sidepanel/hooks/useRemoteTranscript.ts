@@ -7,12 +7,7 @@ const POLL_MS = 1500;
 const MAX_SEGMENTS = 5000;
 const MAX_AGENT_CAPTIONS = 2000;
 
-export function useRemoteTranscript({
-  sessionId, isMirroring,
-}: {
-  sessionId: string;
-  isMirroring: boolean;
-}) {
+export function useRemoteTranscript({ sessionId, isMirroring }: { sessionId: string; isMirroring: boolean }) {
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [agentCaptions, setAgentCaptions] = useState<AgentCaption[]>([]);
   const sinceRef = useRef(0);
@@ -74,18 +69,22 @@ export function useRemoteTranscript({
                 }
 
                 if (!cancelledRef.current) {
-                  if (newSegments.length > 0) setSegments((prev: TranscriptSegment[]) => {
-                    const merged = prev.concat(newSegments);
-                    return merged.length > MAX_SEGMENTS ? merged.slice(-MAX_SEGMENTS) : merged;
-                  });
-                  if (newAgent.length > 0) setAgentCaptions((prev: AgentCaption[]) => {
-                    const merged = prev.concat(newAgent);
-                    return merged.length > MAX_AGENT_CAPTIONS ? merged.slice(-MAX_AGENT_CAPTIONS) : merged;
-                  });
+                  if (newSegments.length > 0)
+                    setSegments((prev: TranscriptSegment[]) => {
+                      const merged = prev.concat(newSegments);
+                      return merged.length > MAX_SEGMENTS ? merged.slice(-MAX_SEGMENTS) : merged;
+                    });
+                  if (newAgent.length > 0)
+                    setAgentCaptions((prev: AgentCaption[]) => {
+                      const merged = prev.concat(newAgent);
+                      return merged.length > MAX_AGENT_CAPTIONS ? merged.slice(-MAX_AGENT_CAPTIONS) : merged;
+                    });
                 }
 
                 if (typeof j.sequence === 'number') sinceRef.current = j.sequence;
-              } catch { /* ignore JSON parse error on chunk */ }
+              } catch {
+                /* ignore JSON parse error on chunk */
+              }
             }
           }
         }
@@ -104,7 +103,11 @@ export function useRemoteTranscript({
       cancelledRef.current = true;
       if (timer) clearTimeout(timer);
       if (reader) {
-        try { reader.cancel().catch(() => {}); } catch { /* reader already closed */ }
+        try {
+          reader.cancel().catch(() => {});
+        } catch {
+          /* reader already closed */
+        }
       }
     };
   }, [sessionId, isMirroring]);

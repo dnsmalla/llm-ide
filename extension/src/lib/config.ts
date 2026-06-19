@@ -81,13 +81,19 @@ const listeners = new Set<SessionListener>();
 
 export function onSessionChange(fn: SessionListener): () => void {
   listeners.add(fn);
-  return () => { listeners.delete(fn); };
+  return () => {
+    listeners.delete(fn);
+  };
 }
 
 function emitSessionChange() {
   const snapshot = { ...session };
   for (const fn of listeners) {
-    try { fn(snapshot); } catch { /* ignore */ }
+    try {
+      fn(snapshot);
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -104,17 +110,18 @@ export async function loadStoredSession(): Promise<void> {
       // Try to mint an access token straight away so the UI can skip
       // the login screen.  Failure is silent — the user just gets the
       // login screen instead.
-      try { await refreshAccessToken(); }
-      catch { clearSession(); }
+      try {
+        await refreshAccessToken();
+      } catch {
+        clearSession();
+      }
     }
-  } catch { /* chrome.storage unavailable in tests */ }
+  } catch {
+    /* chrome.storage unavailable in tests */
+  }
 }
 
-export function setSession(next: {
-  accessToken: string;
-  refreshToken: string;
-  user: SessionState['user'];
-}): void {
+export function setSession(next: { accessToken: string; refreshToken: string; user: SessionState['user'] }): void {
   session.accessToken = next.accessToken;
   session.refreshToken = next.refreshToken;
   session.user = next.user;
@@ -190,7 +197,9 @@ async function refreshAccessToken(): Promise<string | null> {
       // Queueing a microtask defers the clear until after every
       // currently-pending then-handler has run, eliminating that
       // window.
-      queueMicrotask(() => { _refreshPromise = null; });
+      queueMicrotask(() => {
+        _refreshPromise = null;
+      });
     }
   })();
   return _refreshPromise;
@@ -264,7 +273,12 @@ function withTimeout(init: AuthFetchInit): { init: RequestInit; cleanup: () => v
   // Strip our extension fields before handing to fetch().
   delete (merged as AuthFetchInit).noRetry;
   delete (merged as AuthFetchInit).timeoutMs;
-  return { init: merged, cleanup: () => { if (timer) clearTimeout(timer); } };
+  return {
+    init: merged,
+    cleanup: () => {
+      if (timer) clearTimeout(timer);
+    },
+  };
 }
 
 // Circuit breaker — when the server is clearly down (consecutive 5xx
@@ -302,7 +316,11 @@ export async function authFetch(input: string, init: AuthFetchInit = {}): Promis
   }
 
   if (_refreshPromise && !init.noRetry) {
-    try { await _refreshPromise; } catch { /* refresh failure is handled below */ }
+    try {
+      await _refreshPromise;
+    } catch {
+      /* refresh failure is handled below */
+    }
   }
   const first = withTimeout(init);
   let r: Response;
@@ -362,7 +380,11 @@ export async function apiLogin(email: string, password: string): Promise<LoginRe
   }
 }
 
-export async function apiRegister(email: string, password: string, displayName?: string): Promise<{ user: LoginResponse['user'] }> {
+export async function apiRegister(
+  email: string,
+  password: string,
+  displayName?: string,
+): Promise<{ user: LoginResponse['user'] }> {
   const url = await getServerUrl();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), AUTH_FETCH_TIMEOUT_MS);
@@ -402,7 +424,11 @@ export async function apiWellKnown(): Promise<{ registrationOpen: boolean; vault
 // legacy { error: "string" } shape.  Throws ServerError on !ok.
 export async function parseJsonResponse<T = unknown>(r: Response): Promise<T> {
   let data: unknown;
-  try { data = await r.json(); } catch { data = null; }
+  try {
+    data = await r.json();
+  } catch {
+    data = null;
+  }
   if (!r.ok) {
     const env = (data as { error?: unknown })?.error;
     if (env && typeof env === 'object' && 'code' in env) {

@@ -40,8 +40,12 @@ function highlight(text: string, query: string): React.ReactNode {
 }
 
 export default function TranscriptView({
-  segments, interimText, speakerNames, onRenameSpeaker,
-  agentCaptions = [], onAgentFeedback,
+  segments,
+  interimText,
+  speakerNames,
+  onRenameSpeaker,
+  agentCaptions = [],
+  onAgentFeedback,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [editingSpeaker, setEditingSpeaker] = useState<string | null>(null);
@@ -139,11 +143,7 @@ export default function TranscriptView({
           >
             Save
           </button>
-          <button
-            className="btn btn-sm"
-            onClick={() => setEditingSpeaker(null)}
-            aria-label="Cancel renaming"
-          >
+          <button className="btn btn-sm" onClick={() => setEditingSpeaker(null)} aria-label="Cancel renaming">
             Cancel
           </button>
         </div>

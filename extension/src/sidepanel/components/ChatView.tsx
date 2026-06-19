@@ -54,18 +54,14 @@ export default function ChatView({ messages, isLoading, error, quotaWarning, has
   return (
     <div className="chat-view">
       {quotaWarning && (
-        <div className="error-message quota-warning" role="alert">{quotaWarning}</div>
+        <div className="error-message quota-warning" role="alert">
+          {quotaWarning}
+        </div>
       )}
       {/* role="log" + aria-live so screen readers announce new messages.
           aria-atomic="false" means only new nodes are announced, not the
           whole log re-read every time. */}
-      <div
-        className="chat-messages"
-        role="log"
-        aria-live="polite"
-        aria-atomic="false"
-        aria-label="Chat conversation"
-      >
+      <div className="chat-messages" role="log" aria-live="polite" aria-atomic="false" aria-label="Chat conversation">
         {messages.length === 0 && !isLoading && (
           <div className="chat-empty">
             <p>Ask anything about the transcript</p>
@@ -107,7 +103,9 @@ export default function ChatView({ messages, isLoading, error, quotaWarning, has
         ))}
         {isLoading && (
           <div className="chat-msg chat-msg-assistant" aria-busy="true">
-            <div className="chat-msg-label" aria-hidden="true">AI</div>
+            <div className="chat-msg-label" aria-hidden="true">
+              AI
+            </div>
             <div className="chat-msg-content">
               <div className="chat-typing" role="status" aria-label="Assistant is thinking">
                 <span aria-hidden="true">Thinking…</span>
@@ -152,12 +150,7 @@ export default function ChatView({ messages, isLoading, error, quotaWarning, has
         </p>
       )}
       {messages.length > 0 && (
-        <button
-          type="button"
-          className="btn btn-sm chat-clear"
-          onClick={onClear}
-          aria-label="Clear chat history"
-        >
+        <button type="button" className="btn btn-sm chat-clear" onClick={onClear} aria-label="Clear chat history">
           Clear Chat
         </button>
       )}

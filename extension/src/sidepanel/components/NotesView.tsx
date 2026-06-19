@@ -32,11 +32,7 @@ export default function NotesView({ notes, isGenerating, error, onGenerate, hasT
       {error && (
         <div className="error-message" role="alert">
           <p>{error}</p>
-          <button
-            className="btn btn-sm btn-retry"
-            onClick={onGenerate}
-            aria-label="Retry generating notes"
-          >
+          <button className="btn btn-sm btn-retry" onClick={onGenerate} aria-label="Retry generating notes">
             Retry
           </button>
         </div>
@@ -44,11 +40,7 @@ export default function NotesView({ notes, isGenerating, error, onGenerate, hasT
       {notes && (
         <div className="notes-content">
           <ReactMarkdown rehypePlugins={[rehypeSanitize]}>{notes}</ReactMarkdown>
-          <button
-            className="btn btn-sm btn-regenerate"
-            onClick={onGenerate}
-            aria-label="Regenerate notes"
-          >
+          <button className="btn btn-sm btn-regenerate" onClick={onGenerate} aria-label="Regenerate notes">
             Regenerate
           </button>
         </div>

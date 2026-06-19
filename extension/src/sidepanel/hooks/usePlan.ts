@@ -24,39 +24,45 @@ export function usePlan() {
   const [busyAction, setBusyAction] = useState<null | 'risk' | 'code'>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const generate = useCallback(async (
-    meetingId: string,
-    opts: { goal?: string; language?: string; skipRisk?: boolean; skipCodeSync?: boolean } = {},
-  ) => {
-    if (!meetingId) {
-      setError('Meeting must be ingested into KB before planning. Run "Extract Actions" first.');
-      return;
-    }
-    setIsGenerating(true);
-    setError(null);
-    try {
-      const result = await apiGeneratePlan({ meetingId, ...opts });
-      setPlan(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Plan generation failed');
-    } finally {
-      setIsGenerating(false);
-    }
-  }, []);
+  const generate = useCallback(
+    async (
+      meetingId: string,
+      opts: { goal?: string; language?: string; skipRisk?: boolean; skipCodeSync?: boolean } = {},
+    ) => {
+      if (!meetingId) {
+        setError('Meeting must be ingested into KB before planning. Run "Extract Actions" first.');
+        return;
+      }
+      setIsGenerating(true);
+      setError(null);
+      try {
+        const result = await apiGeneratePlan({ meetingId, ...opts });
+        setPlan(result);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Plan generation failed');
+      } finally {
+        setIsGenerating(false);
+      }
+    },
+    [],
+  );
 
-  const reanalyzeRisks = useCallback(async (language?: string) => {
-    if (!plan) return;
-    setBusyAction('risk');
-    setError(null);
-    try {
-      const updated = await analyzeRisks({ planId: plan.id, language });
-      setPlan(updated);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Risk analysis failed');
-    } finally {
-      setBusyAction(null);
-    }
-  }, [plan]);
+  const reanalyzeRisks = useCallback(
+    async (language?: string) => {
+      if (!plan) return;
+      setBusyAction('risk');
+      setError(null);
+      try {
+        const updated = await analyzeRisks({ planId: plan.id, language });
+        setPlan(updated);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Risk analysis failed');
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [plan],
+  );
 
   const refreshCodeSync = useCallback(async () => {
     if (!plan) return;
@@ -78,16 +84,20 @@ export function usePlan() {
       if (!prev) return prev;
       const task = prev.tasks.find((t) => t.id === taskId);
       if (task) prevStatus = task.status;
-      return { ...prev, tasks: prev.tasks.map((t) => t.id === taskId ? { ...t, status } : t) };
+      return { ...prev, tasks: prev.tasks.map((t) => (t.id === taskId ? { ...t, status } : t)) };
     });
     try {
       await apiUpdateTask(taskId, { status });
     } catch {
       if (prevStatus !== undefined) {
-        setPlan((prev) => prev ? {
-          ...prev,
-          tasks: prev.tasks.map((t) => t.id === taskId ? { ...t, status: prevStatus! } : t),
-        } : prev);
+        setPlan((prev) =>
+          prev
+            ? {
+                ...prev,
+                tasks: prev.tasks.map((t) => (t.id === taskId ? { ...t, status: prevStatus! } : t)),
+              }
+            : prev,
+        );
       }
     }
   }, []);
@@ -98,16 +108,20 @@ export function usePlan() {
       if (!prev) return prev;
       const task = prev.tasks.find((t) => t.id === taskId);
       if (task) prevRisk = task.risk;
-      return { ...prev, tasks: prev.tasks.map((t) => t.id === taskId ? { ...t, risk } : t) };
+      return { ...prev, tasks: prev.tasks.map((t) => (t.id === taskId ? { ...t, risk } : t)) };
     });
     try {
       await apiUpdateTask(taskId, { risk });
     } catch {
       if (prevRisk !== undefined) {
-        setPlan((prev) => prev ? {
-          ...prev,
-          tasks: prev.tasks.map((t) => t.id === taskId ? { ...t, risk: prevRisk! } : t),
-        } : prev);
+        setPlan((prev) =>
+          prev
+            ? {
+                ...prev,
+                tasks: prev.tasks.map((t) => (t.id === taskId ? { ...t, risk: prevRisk! } : t)),
+              }
+            : prev,
+        );
       }
     }
   }, []);
@@ -157,28 +171,31 @@ export function usePlan() {
   // Inline rename — used by the agent toggle bar's ✎ editor.  Posts
   // the full plan back via /kb/plan/save which is an upsert.  Updates
   // local state optimistically so the UI feels snappy.
-  const rename = useCallback(async (newTitle: string) => {
-    if (!plan) return null;
-    const trimmed = newTitle.trim().slice(0, 500);
-    if (!trimmed || trimmed === plan.title) return plan;
-    const optimistic = { ...plan, title: trimmed };
-    setPlan(optimistic);
-    try {
-      const saved = await apiSavePlan({
-        id: plan.id,
-        title: trimmed,
-        goal: plan.goal ?? undefined,
-        language: plan.language ?? undefined,
-        tasks: plan.tasks,
-      });
-      setPlan(saved);
-      return saved;
-    } catch (err) {
-      setPlan(plan);                                    // rollback
-      setError(err instanceof Error ? err.message : 'Rename failed');
-      return null;
-    }
-  }, [plan]);
+  const rename = useCallback(
+    async (newTitle: string) => {
+      if (!plan) return null;
+      const trimmed = newTitle.trim().slice(0, 500);
+      if (!trimmed || trimmed === plan.title) return plan;
+      const optimistic = { ...plan, title: trimmed };
+      setPlan(optimistic);
+      try {
+        const saved = await apiSavePlan({
+          id: plan.id,
+          title: trimmed,
+          goal: plan.goal ?? undefined,
+          language: plan.language ?? undefined,
+          tasks: plan.tasks,
+        });
+        setPlan(saved);
+        return saved;
+      } catch (err) {
+        setPlan(plan); // rollback
+        setError(err instanceof Error ? err.message : 'Rename failed');
+        return null;
+      }
+    },
+    [plan],
+  );
 
   return {
     plan,

@@ -105,8 +105,7 @@ function getTeamsActiveSpeaker(): string | null {
   const videoTiles = document.querySelectorAll('[data-cid="calling-participant-stream"], [class*="video-tile"]');
   for (const tile of videoTiles) {
     const isActive =
-      tile.classList.toString().includes('active-speaker') ||
-      tile.querySelector('[class*="active-speaker"]');
+      tile.classList.toString().includes('active-speaker') || tile.querySelector('[class*="active-speaker"]');
 
     if (isActive) {
       return (
@@ -135,9 +134,7 @@ function getTeamsParticipants(): string[] {
 
 function getZoomActiveSpeaker(): string | null {
   // Video tiles with active speaker highlight
-  const tiles = document.querySelectorAll(
-    '[class*="video-avatar"], [class*="gallery-video-container"]'
-  );
+  const tiles = document.querySelectorAll('[class*="video-avatar"], [class*="gallery-video-container"]');
   for (const tile of tiles) {
     const classList = tile.classList.toString();
     if (classList.includes('active-speaker') || classList.includes('speaking')) {
@@ -155,11 +152,10 @@ function getZoomActiveSpeaker(): string | null {
 
 function getZoomParticipants(): string[] {
   const names = new Set<string>();
-  document.querySelectorAll('[class*="participants-item"] [class*="name"], [class*="display-name"]')
-    .forEach((el) => {
-      const name = el.textContent?.trim();
-      if (name && name.length < 50) names.add(name);
-    });
+  document.querySelectorAll('[class*="participants-item"] [class*="name"], [class*="display-name"]').forEach((el) => {
+    const name = el.textContent?.trim();
+    if (name && name.length < 50) names.add(name);
+  });
   return Array.from(names);
 }
 
@@ -178,8 +174,14 @@ const participantDetectors: Record<Platform, () => string[]> = {
 };
 
 function cleanup() {
-  if (speakerInterval) { clearInterval(speakerInterval); speakerInterval = null; }
-  if (participantInterval) { clearInterval(participantInterval); participantInterval = null; }
+  if (speakerInterval) {
+    clearInterval(speakerInterval);
+    speakerInterval = null;
+  }
+  if (participantInterval) {
+    clearInterval(participantInterval);
+    participantInterval = null;
+  }
   // Reset the de-dup cache — if the script ever restarts (BFCache restore,
   // SPA nav back into meet.google.com) we want the first speaker detection
   // after restart to broadcast, not be silently suppressed as "unchanged".

@@ -134,10 +134,14 @@ export default function ExportMenu({
       )}
 
       {exportError && (
-        <div className="error-message" role="alert">{exportError}</div>
+        <div className="error-message" role="alert">
+          {exportError}
+        </div>
       )}
       {copyFeedback && (
-        <div className="success-message" role="status">{copyFeedback}</div>
+        <div className="success-message" role="status">
+          {copyFeedback}
+        </div>
       )}
 
       <div className="export-actions">
@@ -151,12 +155,7 @@ export default function ExportMenu({
           </button>
         )}
         {noteFormats.map((fmt) => (
-          <button
-            key={fmt.id}
-            className="btn btn-sm"
-            onClick={() => downloadFormat(fmt.id)}
-            aria-label={fmt.ariaLabel}
-          >
+          <button key={fmt.id} className="btn btn-sm" onClick={() => downloadFormat(fmt.id)} aria-label={fmt.ariaLabel}>
             {fmt.label}
           </button>
         ))}
@@ -170,12 +169,7 @@ export default function ExportMenu({
           </button>
         )}
         {transcriptFormats.map((fmt) => (
-          <button
-            key={fmt.id}
-            className="btn btn-sm"
-            onClick={() => downloadFormat(fmt.id)}
-            aria-label={fmt.ariaLabel}
-          >
+          <button key={fmt.id} className="btn btn-sm" onClick={() => downloadFormat(fmt.id)} aria-label={fmt.ariaLabel}>
             {fmt.label}
           </button>
         ))}

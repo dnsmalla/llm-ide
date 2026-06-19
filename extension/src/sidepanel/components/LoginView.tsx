@@ -23,8 +23,14 @@ export default function LoginView({ onLogin, onRegister, busy, error, registrati
     if (busy) return;
     setFieldError(null);
     const trimmedEmail = email.trim();
-    if (!trimmedEmail) { setFieldError('Please enter your email address.'); return; }
-    if (!password) { setFieldError('Please enter your password.'); return; }
+    if (!trimmedEmail) {
+      setFieldError('Please enter your email address.');
+      return;
+    }
+    if (!password) {
+      setFieldError('Please enter your password.');
+      return;
+    }
     if (mode === 'register' && password.length < 10) {
       setFieldError('Password must be at least 10 characters.');
       return;
@@ -82,7 +88,9 @@ export default function LoginView({ onLogin, onRegister, busy, error, registrati
         </label>
 
         {(error || fieldError) && (
-          <div className="error-message" role="alert">{fieldError || error}</div>
+          <div className="error-message" role="alert">
+            {fieldError || error}
+          </div>
         )}
 
         <button type="submit" className="btn btn-generate" disabled={busy || !email || !password}>
@@ -105,7 +113,11 @@ export default function LoginView({ onLogin, onRegister, busy, error, registrati
 
       <footer className="login-footer">
         <p>
-          Server: <code>{(typeof window !== 'undefined' && (window as { __llmideUrl?: string }).__llmideUrl) || 'http://localhost:3456'}</code>
+          Server:{' '}
+          <code>
+            {(typeof window !== 'undefined' && (window as { __llmideUrl?: string }).__llmideUrl) ||
+              'http://localhost:3456'}
+          </code>
         </p>
         <button
           type="button"

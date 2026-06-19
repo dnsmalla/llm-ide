@@ -36,10 +36,15 @@ export default function AgentPersonaSettings(): JSX.Element {
             setPromptSuffix(j.persona.promptSuffix ?? '');
           }
         }
-      } catch { /* ignore */ }
-      finally { if (!cancelled) setLoaded(true); }
+      } catch {
+        /* ignore */
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function save() {
@@ -92,12 +97,13 @@ export default function AgentPersonaSettings(): JSX.Element {
       <h3 className="settings-heading">Agent persona</h3>
       <AgentStatsBadge />
       <p className="settings-hint">
-        Customize how the meeting agent introduces itself and what it
-        watches for.  Both fields are optional — leave blank for the
-        built-in defaults.
+        Customize how the meeting agent introduces itself and what it watches for. Both fields are optional — leave
+        blank for the built-in defaults.
       </p>
       <div className="settings-row">
-        <label className="settings-label" htmlFor="agent-persona-name">Name</label>
+        <label className="settings-label" htmlFor="agent-persona-name">
+          Name
+        </label>
         <input
           id="agent-persona-name"
           className="settings-input"
@@ -110,7 +116,9 @@ export default function AgentPersonaSettings(): JSX.Element {
         />
       </div>
       <div className="settings-row settings-row-stack">
-        <label className="settings-label" htmlFor="agent-persona-suffix">Voice / focus</label>
+        <label className="settings-label" htmlFor="agent-persona-suffix">
+          Voice / focus
+        </label>
         <textarea
           id="agent-persona-suffix"
           className="settings-textarea"

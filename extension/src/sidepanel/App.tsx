@@ -107,21 +107,22 @@ export default function App() {
   const [showHint, setShowHint] = useState(false);
   // Session-scoped meeting id — set on Start, reused for KB ingest so
   // re-extracting on the same recording updates the same KB row.
-  const [sessionId, setSessionId] = useState<string>(
-    () => {
-      const bytes = crypto.getRandomValues(new Uint8Array(8));
-      const rand = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-      return `m-${Date.now().toString(36)}-${rand}`;
-    },
-  );
+  const [sessionId, setSessionId] = useState<string>(() => {
+    const bytes = crypto.getRandomValues(new Uint8Array(8));
+    const rand = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    return `m-${Date.now().toString(36)}-${rand}`;
+  });
   const [isMirroring, setIsMirroring] = useState(false);
   const [discoveryDismissed, setDiscoveryDismissed] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
 
   useEffect(() => {
-    chrome.storage?.local?.get(HINT_DISMISSED_KEY).then((r) => {
-      if (!r?.[HINT_DISMISSED_KEY]) setShowHint(true);
-    }).catch(() => {});
+    chrome.storage?.local
+      ?.get(HINT_DISMISSED_KEY)
+      .then((r) => {
+        if (!r?.[HINT_DISMISSED_KEY]) setShowHint(true);
+      })
+      .catch(() => {});
   }, []);
 
   const dismissHint = useCallback(() => {
@@ -156,11 +157,18 @@ export default function App() {
   // toggle lives inside the Questions tab; flipping it OFF detaches
   // any running run AND prevents auto-attach on future recordings.
   const [agentEnabled, setAgentEnabled] = useState<boolean>(() => {
-    try { return localStorage.getItem('agent.enabled') !== '0'; }
-    catch { return true; }
+    try {
+      return localStorage.getItem('agent.enabled') !== '0';
+    } catch {
+      return true;
+    }
   });
   useEffect(() => {
-    try { localStorage.setItem('agent.enabled', agentEnabled ? '1' : '0'); } catch { /* */ }
+    try {
+      localStorage.setItem('agent.enabled', agentEnabled ? '1' : '0');
+    } catch {
+      /* */
+    }
   }, [agentEnabled]);
   // Auto-stub a plan the first time the user records without one.
   // The stub has a generic name (renameable inline below) and an
@@ -172,7 +180,7 @@ export default function App() {
   useEffect(() => {
     if (!agentEnabled) return;
     if (!transcript.isRecording) return;
-    if (plan.plan) return;                      // already have a plan
+    if (plan.plan) return; // already have a plan
     plan.createStub({ language: transcript.primaryLang });
     // deps intentionally narrow (see comments) — only react to these transitions
   }, [agentEnabled, transcript.isRecording]);
@@ -187,7 +195,7 @@ export default function App() {
     if (agent.runs.length > 0) return;
     if (agent.busy) return;
     const planId = plan.plan?.id ?? null;
-    if (!planId) return;                        // wait for createStub to complete
+    if (!planId) return; // wait for createStub to complete
     agent.dispatch(planId);
     // We intentionally omit `agent` from deps to avoid re-firing on
     // every busy/error tick — we only react to (recording, planId,
@@ -290,7 +298,9 @@ export default function App() {
       ...transcript.segments.map((s) => {
         const name = transcript.speakerNames[s.speaker] || s.speaker;
         const time = new Date(s.timestamp).toLocaleTimeString([], {
-          hour: '2-digit', minute: '2-digit', second: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
         });
         return `[${time}] ${name}: ${s.text}`;
       }),
@@ -376,19 +386,25 @@ export default function App() {
             onClick={() => setShowHelp(true)}
             title="Help & getting started"
             aria-label="Open help guide"
-          >?</button>
+          >
+            ?
+          </button>
           <button
             className="btn-popout"
             onClick={sess.logout}
             title={`Sign out ${sess.user?.email || ''}`.trim()}
             aria-label="Sign out"
-          >⎋</button>
+          >
+            ⎋
+          </button>
           <button
             className="btn-popout"
             onClick={popOut}
             title="Open transcript in the LLM IDE desktop app"
             aria-label="Open transcript in the LLM IDE desktop app"
-          >↗</button>
+          >
+            ↗
+          </button>
         </div>
         <p className="meeting-subtitle">{subtitle}</p>
         {!isMirroring && !transcript.isRecording && !discoveryDismissed && (
@@ -432,22 +448,18 @@ export default function App() {
 
       {transcript.segmentLimitReached && (
         <div className="quota-warning" role="alert">
-          Transcript limit reached (5,000 segments). Oldest lines are being dropped.
-          Save your transcript to preserve it.
+          Transcript limit reached (5,000 segments). Oldest lines are being dropped. Save your transcript to preserve
+          it.
         </div>
       )}
 
       {liveSync.syncStatus === 'error' && transcript.isRecording && (
         <div className="quota-warning sync-warning" role="status">
           <span>
-            Live sync paused — server unreachable ({liveSync.consecutiveFailures} failed attempts).
-            Recording continues locally.
+            Live sync paused — server unreachable ({liveSync.consecutiveFailures} failed attempts). Recording continues
+            locally.
           </span>
-          <button
-            className="btn btn-sm"
-            onClick={liveSync.resetSyncError}
-            aria-label="Retry live sync"
-          >
+          <button className="btn btn-sm" onClick={liveSync.resetSyncError} aria-label="Retry live sync">
             Retry
           </button>
         </div>
@@ -459,11 +471,7 @@ export default function App() {
             Server needs to be restarted to enable new features. Please stop and re-run <code>node server.mjs</code>.
           </span>
           <div className="server-offline-actions">
-            <button
-              className="btn btn-sm"
-              onClick={checkServer}
-              aria-label="Re-check server after restarting it"
-            >
+            <button className="btn btn-sm" onClick={checkServer} aria-label="Re-check server after restarting it">
               Re-check
             </button>
           </div>
@@ -472,7 +480,9 @@ export default function App() {
 
       {!serverOnline && (
         <div className="error-message server-offline" role="alert">
-          <span>Can't reach the local server. Make sure <code>node server.mjs</code> is running.</span>
+          <span>
+            Can't reach the local server. Make sure <code>node server.mjs</code> is running.
+          </span>
           <div className="server-offline-actions">
             <button
               className="btn btn-sm"
@@ -489,11 +499,7 @@ export default function App() {
             >
               {copyCmdFeedback ? 'Copied!' : 'Copy cmd'}
             </button>
-            <button
-              className="btn btn-sm"
-              onClick={checkServer}
-              aria-label="Retry connecting to server"
-            >
+            <button className="btn btn-sm" onClick={checkServer} aria-label="Retry connecting to server">
               Retry
             </button>
           </div>
@@ -503,14 +509,10 @@ export default function App() {
       {showHint && !transcript.isRecording && (
         <div className="first-run-hint" role="note">
           <p>
-            Open a Google Meet, Teams, or Zoom tab and click <strong>Start</strong>.
-            Platform captions (CC) will be used if available; otherwise your mic.
+            Open a Google Meet, Teams, or Zoom tab and click <strong>Start</strong>. Platform captions (CC) will be used
+            if available; otherwise your mic.
           </p>
-          <button
-            className="btn btn-sm"
-            onClick={dismissHint}
-            aria-label="Dismiss this tip"
-          >
+          <button className="btn btn-sm" onClick={dismissHint} aria-label="Dismiss this tip">
             Got it
           </button>
         </div>
@@ -519,9 +521,11 @@ export default function App() {
       <nav className="tabs" role="tablist" aria-label="Notes sections">
         {TABS.map(({ id, label }, idx) => {
           const badge =
-            id === 'notes' && notes.notes && activeTab !== 'notes' ? '✓' :
-            id === 'questions' && questions.questions.length > 0 && activeTab !== 'questions'
-              ? String(questions.questions.length) : null;
+            id === 'notes' && notes.notes && activeTab !== 'notes'
+              ? '✓'
+              : id === 'questions' && questions.questions.length > 0 && activeTab !== 'questions'
+                ? String(questions.questions.length)
+                : null;
           return (
             <button
               key={id}
@@ -536,7 +540,9 @@ export default function App() {
             >
               {label}
               {badge && (
-                <span className="tab-badge" aria-label={`${badge} new`}>{badge}</span>
+                <span className="tab-badge" aria-label={`${badge} new`}>
+                  {badge}
+                </span>
               )}
             </button>
           );
@@ -556,11 +562,7 @@ export default function App() {
             />
             {transcript.segments.length > 0 && (
               <div className="transcript-save-row">
-                <button
-                  className="btn btn-sm"
-                  onClick={saveTranscript}
-                  aria-label="Save transcript as text file"
-                >
+                <button className="btn btn-sm" onClick={saveTranscript} aria-label="Save transcript as text file">
                   {saveFeedback ? 'Saved!' : 'Save Transcript'}
                 </button>
               </div>
@@ -575,7 +577,14 @@ export default function App() {
               isGenerating={notes.isGenerating}
               error={notes.error}
               hasTranscript={transcript.fullTranscript.length > 0}
-              onGenerate={() => notes.generate(transcript.fullTranscript, transcript.meetingTitle, transcript.participants, transcript.primaryLang)}
+              onGenerate={() =>
+                notes.generate(
+                  transcript.fullTranscript,
+                  transcript.meetingTitle,
+                  transcript.participants,
+                  transcript.primaryLang,
+                )
+              }
             />
             <ExportMenu
               transcript={transcript.fullTranscript}
@@ -602,7 +611,9 @@ export default function App() {
               isGenerating={questions.isGenerating}
               error={questions.error}
               onGenerate={(ps, ts) => questions.generate(transcript.fullTranscript, ps, ts, transcript.primaryLang)}
-              onGenerateFromHistory={() => questions.generateFromHistory(transcript.fullTranscript, transcript.primaryLang)}
+              onGenerateFromHistory={() =>
+                questions.generateFromHistory(transcript.fullTranscript, transcript.primaryLang)
+              }
               onPostToChat={questions.postToChat}
               hasTranscript={transcript.fullTranscript.length > 0}
               agentEnabled={agentEnabled}

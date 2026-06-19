@@ -34,11 +34,16 @@ export default function AgentStatsBadge(): JSX.Element | null {
           const j: Stats = await r.json();
           if (!cancelled) setStats(j);
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       if (!cancelled) timer = setTimeout(tick, POLL_MS);
     }
     tick();
-    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   // No data yet (still loading or no feedback ever recorded) → render
@@ -46,15 +51,15 @@ export default function AgentStatsBadge(): JSX.Element | null {
   // users who haven't dogfooded yet.
   if (!stats || stats.total === 0) return null;
 
-  const rate = stats.usefulRate != null
-    ? `${Math.round(stats.usefulRate * 100)}% useful`
-    : '—';
+  const rate = stats.usefulRate != null ? `${Math.round(stats.usefulRate * 100)}% useful` : '—';
   const tooltip = [
     `${stats.byVerdict.useful} useful, ${stats.byVerdict.noise} noise, ${stats.byVerdict.later} later`,
     stats.avgScore.useful != null ? `avg score (useful): ${stats.avgScore.useful.toFixed(2)}` : null,
-    stats.avgScore.noise  != null ? `avg score (noise): ${stats.avgScore.noise.toFixed(2)}`  : null,
+    stats.avgScore.noise != null ? `avg score (noise): ${stats.avgScore.noise.toFixed(2)}` : null,
     `last ${stats.sinceDays} days`,
-  ].filter(Boolean).join(' · ');
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
     <p className="settings-hint" title={tooltip}>

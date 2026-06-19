@@ -38,9 +38,9 @@ interface Props {
 }
 
 const TYPE_OPTIONS: { id: QuestionType; label: string; hint: string }[] = [
-  { id: 'conflict', label: 'Conflicts',           hint: 'Contradictions between speakers' },
-  { id: 'confirm',  label: 'Needs confirmation',  hint: 'Decisions, numbers, commitments' },
-  { id: 'explain',  label: 'Needs more detail',   hint: 'Vague or skipped reasoning' },
+  { id: 'conflict', label: 'Conflicts', hint: 'Contradictions between speakers' },
+  { id: 'confirm', label: 'Needs confirmation', hint: 'Decisions, numbers, commitments' },
+  { id: 'explain', label: 'Needs more detail', hint: 'Vague or skipped reasoning' },
 ];
 
 // Persistence shape for the saved "customize" state.  Stored in
@@ -61,20 +61,24 @@ function loadPrefs(): SavedPrefs {
     if (raw) {
       const j = JSON.parse(raw);
       const types = Array.isArray(j?.types)
-        ? j.types.filter((t: unknown): t is QuestionType =>
-            t === 'conflict' || t === 'confirm' || t === 'explain')
+        ? j.types.filter((t: unknown): t is QuestionType => t === 'conflict' || t === 'confirm' || t === 'explain')
         : DEFAULT_TYPES;
       const participants = Array.isArray(j?.participants)
         ? j.participants.filter((p: unknown): p is string => typeof p === 'string')
         : null;
       return { participants, types: types.length ? types : DEFAULT_TYPES };
     }
-  } catch { /* corrupted blob — fall through to defaults */ }
+  } catch {
+    /* corrupted blob — fall through to defaults */
+  }
   return { participants: null, types: DEFAULT_TYPES };
 }
 function savePrefs(prefs: SavedPrefs) {
-  try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); }
-  catch { /* quota — non-fatal, defaults still apply */ }
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    /* quota — non-fatal, defaults still apply */
+  }
 }
 
 export default function QuestionsView({
@@ -153,7 +157,9 @@ export default function QuestionsView({
     setJustSaved(false);
     setEditing(true);
   }
-  function cancelEditor() { setEditing(false); }
+  function cancelEditor() {
+    setEditing(false);
+  }
   function saveEditor() {
     // Empty draft → treat as "reset to defaults" rather than blocking
     // generation entirely.  Also clamp to a sane minimum so a slip
@@ -183,26 +189,22 @@ export default function QuestionsView({
   }
 
   const toggleDraftParticipant = (name: string) =>
-    setDraftParticipants((p) => p.includes(name) ? p.filter((n) => n !== name) : [...p, name]);
+    setDraftParticipants((p) => (p.includes(name) ? p.filter((n) => n !== name) : [...p, name]));
   const toggleDraftType = (id: QuestionType) =>
-    setDraftTypes((p) => p.includes(id) ? p.filter((t) => t !== id) : [...p, id]);
+    setDraftTypes((p) => (p.includes(id) ? p.filter((t) => t !== id) : [...p, id]));
 
-  const canGenerate =
-    hasTranscript &&
-    effectiveTypes.length > 0 &&
-    effectiveParticipants.length > 0 &&
-    !isGenerating;
+  const canGenerate = hasTranscript && effectiveTypes.length > 0 && effectiveParticipants.length > 0 && !isGenerating;
 
   // Short, scan-friendly summary of what Generate will use right now.
   // E.g. "Will ask about: Alice, Bob · Conflicts, Needs confirmation"
-  const typeLabel = (id: QuestionType) =>
-    TYPE_OPTIONS.find((t) => t.id === id)?.label ?? id;
+  const typeLabel = (id: QuestionType) => TYPE_OPTIONS.find((t) => t.id === id)?.label ?? id;
   const summaryLine = (() => {
-    const ppl = effectiveParticipants.length === 0
-      ? '(no speakers detected yet)'
-      : effectiveParticipants.length <= 3
-        ? effectiveParticipants.join(', ')
-        : `${effectiveParticipants.slice(0, 2).join(', ')} +${effectiveParticipants.length - 2} more`;
+    const ppl =
+      effectiveParticipants.length === 0
+        ? '(no speakers detected yet)'
+        : effectiveParticipants.length <= 3
+          ? effectiveParticipants.join(', ')
+          : `${effectiveParticipants.slice(0, 2).join(', ')} +${effectiveParticipants.length - 2} more`;
     const ts = effectiveTypes.map(typeLabel).join(', ') || '(none)';
     return `${ppl} · ${ts}`;
   })();
@@ -212,9 +214,9 @@ export default function QuestionsView({
     if (!questions) return [];
     return questions
       .split('\n')
-      .map(line => line.trim())
-      .filter(line => /^(\d+\. |[-*] )/.test(line))
-      .map(line => line.replace(/^(\d+\. |[-*] )/, ''));
+      .map((line) => line.trim())
+      .filter((line) => /^(\d+\. |[-*] )/.test(line))
+      .map((line) => line.replace(/^(\d+\. |[-*] )/, ''));
   }, [questions]);
 
   // Compact "AI Assistant" toggle bar — replaces the old header
@@ -224,7 +226,10 @@ export default function QuestionsView({
   //   - disabled               → grey dot + "AI assistant: off"
   const agentBar = (
     <div className={`agent-toggle-bar ${agentEnabled ? 'on' : 'off'}`}>
-      <label className="agent-toggle-switch" title={agentEnabled ? 'Turn off the AI assistant' : 'Turn on the AI assistant'}>
+      <label
+        className="agent-toggle-switch"
+        title={agentEnabled ? 'Turn off the AI assistant' : 'Turn on the AI assistant'}
+      >
         <input
           type="checkbox"
           checked={agentEnabled}
@@ -254,10 +259,16 @@ export default function QuestionsView({
           {!agentEnabled
             ? 'Will not attach on recording.'
             : agentAttached
-              ? (agentLastDecision ? `watching · ${agentLastDecision}` : 'watching · just attached')
+              ? agentLastDecision
+                ? `watching · ${agentLastDecision}`
+                : 'watching · just attached'
               : !hasPlan
-                ? (isRecording ? 'creating starter plan…' : 'attaches automatically when you start recording')
-                : (isRecording ? 'attaching…' : 'attaches automatically when you start recording')}
+                ? isRecording
+                  ? 'creating starter plan…'
+                  : 'attaches automatically when you start recording'
+                : isRecording
+                  ? 'attaching…'
+                  : 'attaches automatically when you start recording'}
         </div>
         {/* Inline plan rename — appears whenever there's a plan, even
             before the agent attaches.  Click ✎ to edit; Enter or
@@ -284,13 +295,21 @@ export default function QuestionsView({
                 <span className="agent-plan-label" title={planTitle}>
                   Plan: {planTitle.length > 40 ? `${planTitle.slice(0, 40)}…` : planTitle}
                 </span>
-                <button
-                  className="agent-plan-edit"
-                  onClick={startRename}
-                  title="Rename plan"
-                  aria-label="Rename plan"
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                <button className="agent-plan-edit" onClick={startRename} title="Rename plan" aria-label="Rename plan">
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
                 </button>
               </>
             )}
@@ -309,7 +328,20 @@ export default function QuestionsView({
         {agentError && (
           <div className="agent-toggle-error" role="alert" onClick={onClearAgentError} title="Click to dismiss">
             {agentError.length > 100 ? `${agentError.slice(0, 100)}…` : agentError}
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true" style={{marginLeft: '6px', flexShrink: 0}}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              aria-hidden="true"
+              style={{ marginLeft: '6px', flexShrink: 0 }}
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
           </div>
         )}
       </div>
@@ -359,7 +391,9 @@ export default function QuestionsView({
         <div className="questions-summary" title={summaryLine}>
           {summaryLine}
           {savedPrefs.participants !== null && (
-            <span className="questions-pinned-badge" title="Saved customization in use">pinned</span>
+            <span className="questions-pinned-badge" title="Saved customization in use">
+              pinned
+            </span>
           )}
           {justSaved && <span className="questions-saved-flash">✓ saved</span>}
         </div>
@@ -384,11 +418,7 @@ export default function QuestionsView({
                   const checked = draftParticipants.includes(name);
                   return (
                     <label key={name} className={`questions-chip ${checked ? 'checked' : ''}`}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleDraftParticipant(name)}
-                      />
+                      <input type="checkbox" checked={checked} onChange={() => toggleDraftParticipant(name)} />
                       <span>{name}</span>
                     </label>
                   );
@@ -404,11 +434,7 @@ export default function QuestionsView({
                 const checked = draftTypes.includes(id);
                 return (
                   <label key={id} className={`questions-type ${checked ? 'checked' : ''}`}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleDraftType(id)}
-                    />
+                    <input type="checkbox" checked={checked} onChange={() => toggleDraftType(id)} />
                     <span className="questions-type-label">{label}</span>
                     <span className="questions-type-hint">{hint}</span>
                   </label>
@@ -426,11 +452,7 @@ export default function QuestionsView({
             >
               Save & use
             </button>
-            <button
-              className="btn btn-secondary"
-              onClick={cancelEditor}
-              title="Discard edits"
-            >
+            <button className="btn btn-secondary" onClick={cancelEditor} title="Discard edits">
               Cancel
             </button>
             {savedPrefs.participants !== null && (

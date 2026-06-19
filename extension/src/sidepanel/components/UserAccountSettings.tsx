@@ -24,7 +24,11 @@ interface Me {
 
 function fmtDate(ts: number | null | undefined): string {
   if (!ts) return '—';
-  try { return new Date(ts).toLocaleString(); } catch { return '—'; }
+  try {
+    return new Date(ts).toLocaleString();
+  } catch {
+    return '—';
+  }
 }
 
 export default function UserAccountSettings(): JSX.Element {
@@ -53,14 +57,25 @@ export default function UserAccountSettings(): JSX.Element {
         if (!cancelled) setError(err instanceof Error ? err.message : 'failed to load');
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function changePassword() {
     setPwStatus(null);
-    if (!currentPw || !newPw) { setPwStatus('Both fields required.'); return; }
-    if (newPw !== confirmPw) { setPwStatus('New passwords do not match.'); return; }
-    if (newPw.length < 8) { setPwStatus('New password must be at least 8 characters.'); return; }
+    if (!currentPw || !newPw) {
+      setPwStatus('Both fields required.');
+      return;
+    }
+    if (newPw !== confirmPw) {
+      setPwStatus('New passwords do not match.');
+      return;
+    }
+    if (newPw.length < 8) {
+      setPwStatus('New password must be at least 8 characters.');
+      return;
+    }
     setPwBusy(true);
     try {
       const url = await getServerUrl();
@@ -74,7 +89,9 @@ export default function UserAccountSettings(): JSX.Element {
         throw new Error(body?.error?.message || `HTTP ${r.status}`);
       }
       setPwStatus('Password changed.');
-      setCurrentPw(''); setNewPw(''); setConfirmPw('');
+      setCurrentPw('');
+      setNewPw('');
+      setConfirmPw('');
       setShowPwForm(false);
     } catch (err) {
       setPwStatus(err instanceof Error ? err.message : 'Change failed.');
@@ -87,13 +104,11 @@ export default function UserAccountSettings(): JSX.Element {
     <>
       <h3 className="settings-heading">User account</h3>
       <p className="settings-hint">
-        The LLM IDE account you signed in to your local server with.
-        Stored on <code>127.0.0.1:3456</code>; never leaves your machine.
+        The LLM IDE account you signed in to your local server with. Stored on <code>127.0.0.1:3456</code>; never leaves
+        your machine.
       </p>
 
-      {error && (
-        <p className="settings-hint settings-hint--error">{error}</p>
-      )}
+      {error && <p className="settings-hint settings-hint--error">{error}</p>}
 
       {me && (
         <dl className="diagnostics-grid">
@@ -114,13 +129,18 @@ export default function UserAccountSettings(): JSX.Element {
         <div className="settings-row settings-row-actions">
           <button
             className="btn btn-sm"
-            onClick={() => { setShowPwForm(true); setPwStatus(null); }}
+            onClick={() => {
+              setShowPwForm(true);
+              setPwStatus(null);
+            }}
           >
             Change password
           </button>
           <button
             className="btn btn-sm btn-quiet"
-            onClick={() => { void logout(); }}
+            onClick={() => {
+              void logout();
+            }}
           >
             Sign out
           </button>
@@ -129,7 +149,9 @@ export default function UserAccountSettings(): JSX.Element {
       ) : (
         <>
           <div className="settings-row settings-row-stack">
-            <label className="settings-label" htmlFor="user-current-pw">Current password</label>
+            <label className="settings-label" htmlFor="user-current-pw">
+              Current password
+            </label>
             <input
               id="user-current-pw"
               className="settings-input"
@@ -141,7 +163,9 @@ export default function UserAccountSettings(): JSX.Element {
             />
           </div>
           <div className="settings-row settings-row-stack">
-            <label className="settings-label" htmlFor="user-new-pw">New password</label>
+            <label className="settings-label" htmlFor="user-new-pw">
+              New password
+            </label>
             <input
               id="user-new-pw"
               className="settings-input"
@@ -153,7 +177,9 @@ export default function UserAccountSettings(): JSX.Element {
             />
           </div>
           <div className="settings-row settings-row-stack">
-            <label className="settings-label" htmlFor="user-confirm-pw">Confirm new password</label>
+            <label className="settings-label" htmlFor="user-confirm-pw">
+              Confirm new password
+            </label>
             <input
               id="user-confirm-pw"
               className="settings-input"
@@ -172,7 +198,9 @@ export default function UserAccountSettings(): JSX.Element {
               className="btn btn-sm btn-quiet"
               onClick={() => {
                 setShowPwForm(false);
-                setCurrentPw(''); setNewPw(''); setConfirmPw('');
+                setCurrentPw('');
+                setNewPw('');
+                setConfirmPw('');
                 setPwStatus(null);
               }}
               disabled={pwBusy}

@@ -48,11 +48,7 @@ export default function Settings({
       <div className="settings-section">
         <h3 className="settings-heading">Microphone</h3>
         <div className="settings-row">
-          <select
-            className="settings-select"
-            value={selectedDeviceId}
-            onChange={(e) => onSelectDevice(e.target.value)}
-          >
+          <select className="settings-select" value={selectedDeviceId} onChange={(e) => onSelectDevice(e.target.value)}>
             <option value="default">System Default</option>
             {devices.map((d) => (
               <option key={d.deviceId} value={d.deviceId}>
@@ -67,9 +63,7 @@ export default function Settings({
       </div>
 
       <div className="settings-section">
-        <h3 className="settings-heading">
-          Volume Boost: {volume}%
-        </h3>
+        <h3 className="settings-heading">Volume Boost: {volume}%</h3>
         <input
           type="range"
           min="50"
@@ -85,9 +79,7 @@ export default function Settings({
           <span>200%</span>
           <span>300%</span>
         </div>
-        <p className="settings-hint">
-          Boost mic sensitivity for quiet speakers. 100% = normal.
-        </p>
+        <p className="settings-hint">Boost mic sensitivity for quiet speakers. 100% = normal.</p>
       </div>
 
       <div className="settings-section">
@@ -103,19 +95,22 @@ export default function Settings({
           <dd>{formatAgo(diagnostics.lastCaptionAt)}</dd>
         </dl>
         <p className="settings-hint">
-          If captions aren't arriving: make sure CC is turned on in the meeting
-          tab, that the tab is focused when you click Start, and that the
-          extension is installed in the same browser profile as the meeting.
+          If captions aren't arriving: make sure CC is turned on in the meeting tab, that the tab is focused when you
+          click Start, and that the extension is installed in the same browser profile as the meeting.
         </p>
       </div>
 
       <div className="settings-section">
         <h3 className="settings-heading">How it works</h3>
         <p className="settings-hint">
-          1. Click Start Recording<br />
-          2. Allow microphone access when prompted<br />
-          3. Your mic captures all meeting audio<br />
-          4. Click Generate Notes when done<br />
+          1. Click Start Recording
+          <br />
+          2. Allow microphone access when prompted
+          <br />
+          3. Your mic captures all meeting audio
+          <br />
+          4. Click Generate Notes when done
+          <br />
           5. Requires <code>node server.mjs</code> running locally
         </p>
       </div>
@@ -137,9 +132,8 @@ export default function Settings({
         <p className="settings-hint">
           LLM IDE v{chrome.runtime?.getManifest?.().version || 'development'}
           <br />
-          Captions and audio stay on your machine. Transcripts are sent only to
-          your local server on <code>127.0.0.1:3456</code>, which uses your own
-          Claude CLI authentication.
+          Captions and audio stay on your machine. Transcripts are sent only to your local server on{' '}
+          <code>127.0.0.1:3456</code>, which uses your own Claude CLI authentication.
         </p>
       </div>
     </div>
@@ -154,7 +148,9 @@ function KBSearchPanel() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => { getKBStats().then(setStats); }, []);
+  useEffect(() => {
+    getKBStats().then(setStats);
+  }, []);
 
   const run = useCallback(async () => {
     setLoading(true);
@@ -179,8 +175,8 @@ function KBSearchPanel() {
       <h3 className="settings-heading">Knowledge Base Search</h3>
       {stats && (
         <p className="actions-hint">
-          {stats.meetings} meeting{stats.meetings === 1 ? '' : 's'} ·{' '}
-          {stats.entities} item{stats.entities === 1 ? '' : 's'} indexed
+          {stats.meetings} meeting{stats.meetings === 1 ? '' : 's'} · {stats.entities} item
+          {stats.entities === 1 ? '' : 's'} indexed
         </p>
       )}
       <div className="kb-search-row">
@@ -189,7 +185,9 @@ function KBSearchPanel() {
           type="search"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') run(); }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') run();
+          }}
           placeholder="Search past meetings, actions, decisions…"
           aria-label="Search the knowledge base"
         />
@@ -222,22 +220,30 @@ function KBSearchPanel() {
         </button>
       </div>
       <p className="sr-only" aria-live="polite" aria-atomic="true">
-        {loading ? 'Searching…'
-          : err ? `Search error: ${err}`
-          : q && results.length === 0 ? 'No matches found.'
-          : results.length > 0 ? `${results.length} result${results.length === 1 ? '' : 's'} found.`
-          : ''}
+        {loading
+          ? 'Searching…'
+          : err
+            ? `Search error: ${err}`
+            : q && results.length === 0
+              ? 'No matches found.'
+              : results.length > 0
+                ? `${results.length} result${results.length === 1 ? '' : 's'} found.`
+                : ''}
       </p>
-      {err && <p className="error-message" role="alert">{err}</p>}
+      {err && (
+        <p className="error-message" role="alert">
+          {err}
+        </p>
+      )}
       {results.length > 0 && (
         <ul className="kb-results" aria-label={`${results.length} search result${results.length === 1 ? '' : 's'}`}>
           {results.map((r, i) => (
             <li key={`${r.kind}-${r.entityId || r.meetingId}-${i}`} className={`kb-hit kind-${r.kind}`}>
               <div className="kb-hit-head">
-                <span className={`meta-chip kind-${r.kind}`} aria-label={`Type: ${r.kind}`}>{r.kind}</span>
-                {r.meetingTitle && r.kind !== 'meeting' && (
-                  <span className="kb-hit-meeting">{r.meetingTitle}</span>
-                )}
+                <span className={`meta-chip kind-${r.kind}`} aria-label={`Type: ${r.kind}`}>
+                  {r.kind}
+                </span>
+                {r.meetingTitle && r.kind !== 'meeting' && <span className="kb-hit-meeting">{r.meetingTitle}</span>}
                 {r.date && <span className="kb-hit-date">{r.date.split('T')[0]}</span>}
               </div>
               <div className="kb-hit-title">{r.title}</div>
@@ -248,7 +254,8 @@ function KBSearchPanel() {
       )}
       {!loading && results.length === 0 && q && !err && (
         <p className="actions-hint">
-          No matches for <strong>{q}</strong>{kind !== 'all' ? ` in ${kind}` : ''}.
+          No matches for <strong>{q}</strong>
+          {kind !== 'all' ? ` in ${kind}` : ''}.
         </p>
       )}
     </section>

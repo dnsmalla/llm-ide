@@ -90,4 +90,3 @@ export function stripPlatformSuffix(raw: string): string {
   const re = new RegExp(`\\s+[-–|·]\\s*(${suffixes}).*$`, 'i');
   return raw.replace(re, '').replace(/\s+/g, ' ').trim();
 }
-

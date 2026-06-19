@@ -34,10 +34,13 @@ export function useAudioDevices() {
   }, []);
 
   useEffect(() => {
-    chrome.storage?.local?.get(['micDeviceId', 'micVolume']).then((result) => {
-      if (result.micDeviceId) setSelectedDeviceId(result.micDeviceId);
-      if (result.micVolume !== undefined) setVolume(result.micVolume);
-    }).catch(() => {});
+    chrome.storage?.local
+      ?.get(['micDeviceId', 'micVolume'])
+      .then((result) => {
+        if (result.micDeviceId) setSelectedDeviceId(result.micDeviceId);
+        if (result.micVolume !== undefined) setVolume(result.micVolume);
+      })
+      .catch(() => {});
     loadDevices();
 
     const handler = () => loadDevices();

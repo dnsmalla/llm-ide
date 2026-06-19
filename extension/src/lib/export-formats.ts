@@ -72,9 +72,7 @@ function buildSubtitleContent(
   segments.forEach((seg, i) => {
     const cueStart = Math.max(0, seg.timestamp - startEpoch);
     const next = segments[i + 1];
-    const cueEnd = next
-      ? Math.max(cueStart + 500, next.timestamp - startEpoch)
-      : cueStart + 3000;
+    const cueEnd = next ? Math.max(cueStart + 500, next.timestamp - startEpoch) : cueStart + 3000;
     if (format === 'srt') lines.push(String(i + 1));
     lines.push(`${subtitleTimestamp(cueStart, sep)} --> ${subtitleTimestamp(cueEnd, sep)}`);
     const name = speakerNames[seg.speaker] || seg.speaker;
