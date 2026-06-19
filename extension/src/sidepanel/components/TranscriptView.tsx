@@ -1,13 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { TranscriptSegment } from '../hooks/useTranscript';
+import type { AgentCaption } from '../hooks/useAgentMirror';
+
+type AgentFeedbackVerdict = 'useful' | 'noise' | 'later';
 
 interface Props {
   segments: TranscriptSegment[];
   interimText: string;
   speakerNames: Record<string, string>;
   onRenameSpeaker: (speakerId: string, name: string) => void;
-  agentCaptions?: unknown[];
-  onAgentFeedback?: (seq: number, verdict: 'useful' | 'noise' | 'later') => Promise<void>;
+  agentCaptions?: AgentCaption[];
+  onAgentFeedback?: (seq: number, verdict: AgentFeedbackVerdict) => Promise<void>;
 }
 
 function formatTimestamp(ts: number): string {
@@ -39,19 +42,40 @@ function highlight(text: string, query: string): React.ReactNode {
   return parts;
 }
 
+interface SpeakerGroup {
+  speaker: string;
+  texts: { text: string; timestamp: number; lang?: string }[];
+}
+
+// A single ordered stream mixing the user's speaker groups with the agent's
+// contributions, so an agent question shows up inline at the moment it landed
+// rather than in a separate rail.
+type TimelineItem =
+  | { kind: 'speaker'; ts: number; group: SpeakerGroup }
+  | { kind: 'agent'; ts: number; caption: AgentCaption };
+
+const FEEDBACK_OPTIONS: { verdict: AgentFeedbackVerdict; label: string }[] = [
+  { verdict: 'useful', label: '👍 Useful' },
+  { verdict: 'noise', label: '🔇 Noise' },
+  { verdict: 'later', label: '⏳ Later' },
+];
+
 export default function TranscriptView({
   segments,
   interimText,
   speakerNames,
   onRenameSpeaker,
-  // agentCaptions / onAgentFeedback are part of the Props contract and passed
-  // by App.tsx, but not yet rendered here — omit from the destructure so they
-  // don't read as used-then-ignored.
+  agentCaptions,
+  onAgentFeedback,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [editingSpeaker, setEditingSpeaker] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [query, setQuery] = useState('');
+  // seq → the verdict the user picked, so the chosen button stays highlighted.
+  const [feedback, setFeedback] = useState<Record<number, AgentFeedbackVerdict>>({});
+
+  const captions = useMemo(() => agentCaptions ?? [], [agentCaptions]);
 
   const filteredSegments = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -62,11 +86,17 @@ export default function TranscriptView({
     });
   }, [segments, query, speakerNames]);
 
+  const filteredCaptions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return captions;
+    return captions.filter((c) => c.text.toLowerCase().includes(q));
+  }, [captions, query]);
+
   useEffect(() => {
     // Don't auto-scroll while the user is searching — keep their results visible.
     if (query.trim()) return;
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [segments, interimText, query]);
+  }, [segments, interimText, captions, query]);
 
   const handleSpeakerClick = (speakerId: string) => {
     setEditingSpeaker(speakerId);
@@ -80,7 +110,24 @@ export default function TranscriptView({
     setEditingSpeaker(null);
   };
 
-  if (segments.length === 0 && !interimText) {
+  const handleFeedback = async (seq: number, verdict: AgentFeedbackVerdict) => {
+    if (!onAgentFeedback) return;
+    const previous = feedback[seq];
+    setFeedback((prev) => ({ ...prev, [seq]: verdict })); // optimistic
+    try {
+      await onAgentFeedback(seq, verdict);
+    } catch {
+      // Revert to whatever was selected before so the UI doesn't lie.
+      setFeedback((prev) => {
+        const next = { ...prev };
+        if (previous === undefined) delete next[seq];
+        else next[seq] = previous;
+        return next;
+      });
+    }
+  };
+
+  if (segments.length === 0 && !interimText && captions.length === 0) {
     return (
       <div className="transcript-empty">
         <p>Transcript will appear here when recording starts.</p>
@@ -92,7 +139,7 @@ export default function TranscriptView({
   const showInterim = !query.trim() || interimText.toLowerCase().includes(query.trim().toLowerCase());
 
   // Group consecutive segments by the same speaker
-  const grouped: { speaker: string; texts: { text: string; timestamp: number; lang?: string }[] }[] = [];
+  const grouped: SpeakerGroup[] = [];
   for (const seg of filteredSegments) {
     const last = grouped[grouped.length - 1];
     if (last && last.speaker === seg.speaker) {
@@ -101,6 +148,12 @@ export default function TranscriptView({
       grouped.push({ speaker: seg.speaker, texts: [{ text: seg.text, timestamp: seg.timestamp, lang: seg.lang }] });
     }
   }
+
+  // Merge speaker groups and agent captions into one chronological stream.
+  const timeline: TimelineItem[] = [
+    ...grouped.map((group): TimelineItem => ({ kind: 'speaker', ts: group.texts[0].timestamp, group })),
+    ...filteredCaptions.map((caption): TimelineItem => ({ kind: 'agent', ts: caption.ts, caption })),
+  ].sort((a, b) => a.ts - b.ts);
 
   const trimmedQuery = query.trim();
 
@@ -149,7 +202,40 @@ export default function TranscriptView({
           </button>
         </div>
       )}
-      {grouped.map((group, i) => {
+      {timeline.map((item, i) => {
+        if (item.kind === 'agent') {
+          const { caption } = item;
+          const chosen = feedback[caption.seq];
+          const isQuestion = caption.source === 'agent-question';
+          return (
+            <div key={`agent-${caption.seq}`} className="transcript-group agent-caption">
+              <div className="transcript-speaker-row">
+                <span className="agent-caption-label">{isQuestion ? 'Agent · Question' : 'Agent'}</span>
+                <span className="transcript-time">{formatTimestamp(caption.ts)}</span>
+              </div>
+              <div className="transcript-texts">
+                <span className="transcript-text">{highlight(caption.text, trimmedQuery)}</span>
+              </div>
+              {onAgentFeedback && (
+                <div className="agent-caption-feedback" role="group" aria-label="Rate this agent suggestion">
+                  {FEEDBACK_OPTIONS.map(({ verdict, label }) => (
+                    <button
+                      key={verdict}
+                      type="button"
+                      className={`agent-feedback-btn${chosen === verdict ? ' active' : ''}`}
+                      onClick={() => handleFeedback(caption.seq, verdict)}
+                      aria-pressed={chosen === verdict}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        const { group } = item;
         const displayName = speakerNames[group.speaker] || group.speaker;
         const firstTs = group.texts[0].timestamp;
         return (

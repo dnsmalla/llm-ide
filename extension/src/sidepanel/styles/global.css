@@ -1101,6 +1101,51 @@ a:focus-visible {
   opacity: 0.5;
 }
 
+/* Agent contributions interleaved in the transcript timeline. */
+.transcript-group.agent-caption {
+  background: var(--color-primary-dim);
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  margin: var(--space-1) 0;
+}
+.agent-caption-label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.agent-caption-feedback {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+.agent-feedback-btn {
+  font-size: var(--text-xs);
+  font-family: inherit;
+  color: var(--color-text-muted);
+  background: var(--color-bg-1);
+  border: 1px solid rgba(60, 64, 67, 0.4);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+.agent-feedback-btn:hover {
+  color: var(--color-text);
+  background: var(--color-primary-dim);
+}
+.agent-feedback-btn.active {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+  background: var(--color-primary-dim);
+  font-weight: 600;
+}
+
 .speaker-rename-bar {
   display: flex;
   gap: var(--space-1);
