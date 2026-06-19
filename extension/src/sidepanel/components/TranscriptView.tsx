@@ -44,8 +44,9 @@ export default function TranscriptView({
   interimText,
   speakerNames,
   onRenameSpeaker,
-  agentCaptions = [],
-  onAgentFeedback,
+  // agentCaptions / onAgentFeedback are part of the Props contract and passed
+  // by App.tsx, but not yet rendered here — omit from the destructure so they
+  // don't read as used-then-ignored.
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [editingSpeaker, setEditingSpeaker] = useState<string | null>(null);

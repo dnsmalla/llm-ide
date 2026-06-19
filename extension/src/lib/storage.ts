@@ -57,7 +57,7 @@ export async function saveTranscript(input: Omit<SavedTranscript, 'id'> & { id?:
     try {
       await chrome.storage.local.set({ [STORAGE_KEY]: trimmed });
       return saved;
-    } catch (err2) {
+    } catch {
       throw new StorageQuotaError(`Could not persist transcript (chrome.storage.local quota): ${msg}`, saved);
     }
   }

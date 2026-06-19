@@ -46,13 +46,16 @@ async function ensureContentScriptInjected(tabId: number, url: string): Promise<
       // Synchronously inlined — must not import anything; runs in the
       // page world. Returns true if any of the three content scripts
       // has set its sentinel.
-      func: () =>
-        Boolean(
-          // window augmentation lives in each content script; `as any` covers it
-          (window as any).__llmideCaptionScraperInjected ||
-          (window as any).__llmideSpeakerDetectorInjected ||
-          (window as any).__llmideFloatingOverlayInjected,
-        ),
+      func: () => {
+        // window augmentation lives in each content script; index via a
+        // typed record instead of `any` (this body is inlined into the page).
+        const w = window as unknown as Record<string, unknown>;
+        return Boolean(
+          w.__llmideCaptionScraperInjected ||
+          w.__llmideSpeakerDetectorInjected ||
+          w.__llmideFloatingOverlayInjected,
+        );
+      },
     });
     if (pageResult?.result === true) return true;
   } catch {
