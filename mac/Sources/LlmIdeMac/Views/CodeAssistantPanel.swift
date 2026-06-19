@@ -67,6 +67,12 @@ struct CodeAssistantPanel: View {
     /// Populated from the provider's models endpoint; falls back to the
     /// built-in AICliTool.models list when empty (no key / fetch failed).
     @State private var liveModels: [String: [AIModel]] = [:]
+    /// User-added model ids, keyed by provider id, JSON in AppStorage. Lets
+    /// the user run a model the built-in/live lists don't include (e.g. a
+    /// brand-new release) — it's sent as-is and routed by id prefix.
+    @AppStorage("MEETNOTES_CUSTOM_MODELS") private var customModelsRaw = "{}"
+    @State private var showAddModel = false
+    @State private var newModelId = ""
     @State private var pendingTool: PendingTool?
     /// Snapshot of recent issues for the active project, refreshed on
     /// panel mount and every ~60s. Bundled into agentContext so the
@@ -1093,6 +1099,8 @@ struct CodeAssistantPanel: View {
                 ForEach(modelsFor(cli)) { model in
                     Button(model.displayName) { selectedModel = model.id }
                 }
+                Divider()
+                Button("Add model…") { newModelId = ""; showAddModel = true }
             } label: {
                 Chip(
                     icon: nil,
@@ -1104,6 +1112,18 @@ struct CodeAssistantPanel: View {
             .menuStyle(.borderlessButton)
             .help(currentModelDisplayName(for: cli))
             .fixedSize()
+        }
+        .alert("Add a model", isPresented: $showAddModel) {
+            TextField("model id, e.g. gpt-5 / claude-opus-4-9 / gemini-2.5-pro", text: $newModelId)
+            Button("Add") {
+                let id = newModelId.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !id.isEmpty else { return }
+                let active = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
+                addCustomModel(id, provider: active.provider)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Adds a model id under the current provider. It's sent to the backend as-is and routed by id prefix — handy for a release not yet in the list.")
         }
     }
 
@@ -1151,10 +1171,34 @@ struct CodeAssistantPanel: View {
 
     /// Models to offer for a provider: the live list when we've fetched one,
     /// otherwise the built-in static list (keeps the picker populated when no
-    /// key is set or the fetch failed).
+    /// key is set or the fetch failed), plus any user-added custom ids.
     private func modelsFor(_ cli: AICliTool) -> [AIModel] {
-        if let live = liveModels[cli.provider], !live.isEmpty { return live }
-        return cli.models
+        let base = (liveModels[cli.provider]?.isEmpty == false) ? liveModels[cli.provider]! : cli.models
+        let baseIds = Set(base.map(\.id))
+        let custom = customModels(for: cli.provider)
+            .filter { !baseIds.contains($0) }
+            .map { AIModel(id: $0, displayName: $0) }
+        return base + custom
+    }
+
+    /// User-added model ids for a provider (decoded from AppStorage JSON).
+    private func customModels(for provider: String) -> [String] {
+        let dict = (try? JSONDecoder().decode([String: [String]].self,
+                                              from: Data(customModelsRaw.utf8))) ?? [:]
+        return dict[provider] ?? []
+    }
+
+    /// Append a custom model id for a provider and select it.
+    private func addCustomModel(_ id: String, provider: String) {
+        var dict = (try? JSONDecoder().decode([String: [String]].self,
+                                              from: Data(customModelsRaw.utf8))) ?? [:]
+        var list = dict[provider] ?? []
+        if !list.contains(id) { list.append(id) }
+        dict[provider] = list
+        if let data = try? JSONEncoder().encode(dict), let s = String(data: data, encoding: .utf8) {
+            customModelsRaw = s
+        }
+        selectedModel = id
     }
 
     /// Fetch the provider's live chat models (best-effort; silent on failure).
