@@ -1,0 +1,37 @@
+version: 2
+
+# Automated dependency-update PRs. Each PR runs the existing CI gates
+# (extension-ci / mac-ci), so an update that breaks the build or tests can't
+# be merged. Weekly cadence keeps noise low; dev/minor npm updates are grouped
+# into a single PR.
+updates:
+  # Extension (Node) dependencies.
+  - package-ecosystem: npm
+    directory: /extension
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Mac app (Swift Package Manager).
+  - package-ecosystem: swift
+    directory: /mac
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      swift-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # The GitHub Actions used by the workflows themselves.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
