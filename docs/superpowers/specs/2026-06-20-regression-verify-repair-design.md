@@ -213,8 +213,28 @@ Three-pane layout unchanged; additive only.
   - **Diff review** state for `.repaired` / `.repairFailed`: shows the working-tree `git diff` with
     **Approve (mark fixed)** and **Discard (revert + reopen)**.
 - **Log pane:** unchanged; gains lines for verify exit codes, repair attempts, re-verify outcomes.
-- **Settings:** keep `autoCodeRunRegression`; add "Attempt repair on regression" (default off) and the
-  verify timeout.
+
+### Settings & paths audit
+
+**Paths section — nothing to add.**
+- Where faults live is already covered by the **Per-repo memory subdir** row
+  (`config.memorySubdir`, default `.understand-anything/memory`); faults sit at
+  `<repo>/<memorySubdir>/faults/`. The verify+repair pipeline, CSV, and packs all key off it.
+- Fault-pack export/import uses an `NSOpenPanel` / `NSSavePanel` file picker — the user chooses the
+  `.json` location each time, so no stored path setting is needed.
+
+**Config fields to add** (follow the existing `@Published … didSet { defaults.set(...) }` +
+init-from-defaults pattern in `AppConfig`, same shape as `regressionAutoReopen`):
+
+| Field | Type | Default | UI |
+|---|---|---|---|
+| `regressionAttemptRepair` | `Bool` | `false` | New toggle in `AutoCodeSettingsSection`, next to the Regression auto-task toggle. |
+| `regressionVerifyTimeout` | `TimeInterval` | `120` | Settings field + Regression view toolbar field. |
+
+**Existing fields reused:** `autoCodeRunRegression` (auto-task toggle, already wired in
+`AutoCodeSettingsSection`) and `regressionAutoReopen` (used by the runner). Note `regressionAutoReopen`
+currently has **no Settings toggle** — it is only set from the Regression view toolbar; add a Settings
+toggle for it while adding the two new fields above.
 
 ---
 
