@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AppKit
 import Combine
 import os.log
 
@@ -466,8 +467,9 @@ final class AutoCodeUpdateService: ObservableObject {
         --- END UNTRUSTED ISSUE [\(nonce)] ---
         """
 
-        // Set up log file
+        // Set up log file (rotate the prior run's log aside, don't clobber).
         let logURL = logDir.appendingPathComponent("auto-code-\(issue.number).log")
+        Self.rotateLog(at: logURL)
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
 
         let process = Process()
@@ -575,6 +577,7 @@ final class AutoCodeUpdateService: ObservableObject {
         }
 
         let logURL = logDir.appendingPathComponent("auto-task-\(logSuffix).log")
+        Self.rotateLog(at: logURL)
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
 
         let process = Process()
@@ -776,6 +779,26 @@ final class AutoCodeUpdateService: ObservableObject {
             if batch.isEmpty { break }
         }
         return out
+    }
+
+    /// Preserve the previous run's log instead of clobbering it: rename an
+    /// existing log to `<name>.prev.<ext>` (overwriting any older `.prev`)
+    /// before the caller truncates/creates a fresh one. Keeps exactly one
+    /// prior run per task — bounded growth, but the last run is never lost.
+    nonisolated static func rotateLog(at url: URL) {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path) else { return }
+        let prev = url.deletingPathExtension()
+            .appendingPathExtension("prev." + url.pathExtension)
+        try? fm.removeItem(at: prev)
+        try? fm.moveItem(at: url, to: prev)
+    }
+
+    /// Reveal the auto-task logs folder in Finder. Review tasks write their
+    /// findings to log files; this is the one-click way to read them.
+    func revealLogsInFinder() {
+        guard let dir = logsDirectory() else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([dir])
     }
 
     private func logsDirectory() -> URL? {

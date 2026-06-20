@@ -109,16 +109,25 @@ struct AutoCodeSettingsSection: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(autoCodeUpdate.isRunning)
+
+                    // Review tasks write their findings to log files; give a
+                    // one-click way to read them (success or failure).
+                    Button("Reveal Logs") {
+                        autoCodeUpdate.revealLogsInFinder()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Open the Auto Tasks log folder (review findings + run output) in Finder")
                 }
 
-                // Warning hint when no active+cloned GitLab project is configured
+                // Warning hint when no usable repo target is configured.
                 if !hasLinkedRepo {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("No linked repository detected. An active GitLab project with a local clone path is required.")
+                        Text("No linked repository detected. Auto Tasks need an active GitLab or GitHub project with a local clone path and a matching access token.")
                             .font(Typography.caption)
                             .foregroundStyle(theme.current.textMuted)
                             .fixedSize(horizontal: false, vertical: true)
-                        Button("Open GitLab Settings") {
+                        Button("Open Settings") {
                             shell.section = .settings
                         }
                         .font(Typography.caption)
@@ -138,8 +147,12 @@ struct AutoCodeSettingsSection: View {
         return "Last run \(ago) · \(autoCodeUpdate.statusMessage)"
     }
 
+    /// Mirrors exactly what `run()` requires to find a target — covers
+    /// GitLab, GitHub, the active project's linkedRepo, and token presence,
+    /// rather than only checking GitLab (which falsely warned GitHub-only
+    /// setups).
     private var hasLinkedRepo: Bool {
-        config.gitLabSavedProjects.contains { $0.isActive && !($0.localPath ?? "").isEmpty }
+        autoCodeUpdate.resolveBackendAndProject() != nil
     }
 
     @ViewBuilder
