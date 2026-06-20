@@ -1,5 +1,5 @@
 // User-reported fault feedback. Persisted as a markdown file with YAML
-// frontmatter under <repo>/.understand-anything/memory/faults/<slug>.md.
+// frontmatter under <repo>/system/faults/<slug>.md.
 //
 // Format chosen to be:
 //   • Human-readable (open in any text editor).

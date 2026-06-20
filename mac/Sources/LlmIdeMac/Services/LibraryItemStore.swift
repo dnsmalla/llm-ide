@@ -83,19 +83,13 @@ final class LibraryItemStore {
 
     // MARK: - Scan-as-index
 
-    /// Canonical subfolders scanned into the index, paired with their
-    /// category.  `assets/` (images, non-code attachments) folds into
-    /// `.data` alongside `data/`; `plans/` is intentionally omitted (it is
-    /// handled by the Plans/ReviewView pipeline, not the Library index).
-    nonisolated private static let scanFolders: [(subfolder: String, category: LibraryItem.Category)] = [
-        ("notes", .notes),
-        ("data", .data),
-        ("assets", .data),
-        ("code", .code),
-        ("meetings", .meetings),
-    ]
+    /// Canonical subfolders scanned into the index, mirroring the Library
+    /// sections.  Captured transcripts live in `source/`; images fold into
+    /// `data/`.
+    nonisolated private static let scanFolders: [(subfolder: String, category: LibraryItem.Category)] =
+        ProjectLayout.userFolders.map { (subfolder: $0.name, category: $0.category) }
 
-    /// Classify a `meetings/` file as a captured meeting or ingested mail by
+    /// Classify a `source/` file as a captured meeting or ingested mail by
     /// reading the `platform` field from its `.md` frontmatter. Best-effort:
     /// reads only the file head and defaults to `.meeting` for non-`.md`
     /// files, missing frontmatter, or an absent `platform` line — robust to
@@ -186,7 +180,7 @@ final class LibraryItemStore {
                 if category == .code {
                     item.treePath = relativeDirComponents(of: fileURL, under: folderURL)
                 }
-                // Meetings and ingested email share the meetings/ folder;
+                // Meetings and ingested email share the source/ folder;
                 // classify by frontmatter platform so the SOURCES section can
                 // split them into Meetings / Mail sub-groups.
                 if category == .meetings {
@@ -438,7 +432,7 @@ final class LibraryItemStore {
     /// via `add(url:category:)`; files already inside the project are
     /// ignored (the subsequent scan picks them up).  The legacy file is then
     /// renamed to `library_items.migrated.json` so this runs exactly once.
-    /// Meeting items are skipped — the `meetings/` scan is authoritative.
+    /// Meeting items are skipped — the `source/` scan is authoritative.
     private func migrateLegacyIndexIfNeeded(root: URL) {
         guard let url = storeURL else { return }
         let fm = FileManager.default

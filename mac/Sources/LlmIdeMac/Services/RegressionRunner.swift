@@ -1,5 +1,5 @@
 // Phase D driver. Iterates all `status: fixed` FaultReports under
-// <repo>/.understand-anything/memory/faults/, re-asks the agent each
+// <repo>/system/faults/, re-asks the agent each
 // question, and compares the new answer to the one saved on the
 // fault. Verdicts publish via @Published so the view can stream them
 // as work progresses.

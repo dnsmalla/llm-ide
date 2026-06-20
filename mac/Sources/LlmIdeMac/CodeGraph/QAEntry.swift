@@ -1,5 +1,5 @@
 // User-saved Q&A pair. Persisted as markdown with YAML frontmatter
-// under <repo>/.understand-anything/memory/q&a/<slug>.md, alongside fault
+// under <repo>/system/faults/q&a/<slug>.md, alongside fault
 // reports. Phase C's repeated-command detection writes these.
 //
 // We share slugify + the ISO formatter with FaultReport — both files

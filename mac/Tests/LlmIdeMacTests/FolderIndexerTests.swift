@@ -10,7 +10,7 @@ final class FolderIndexerTests {
     init() throws {
         tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("fi-\(UUID().uuidString)")
-        indexURL = tempRoot.appendingPathComponent(".llmide/index.sqlite")
+        indexURL = tempRoot.appendingPathComponent("system/index.sqlite")
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
     }
 

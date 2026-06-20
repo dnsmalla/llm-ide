@@ -21,7 +21,6 @@ struct ProjectTests {
                 ),
                 notesFolderRelative: "Meetings",
                 enabledPlugins: ["sample-summarizer"],
-                uaBinaryOverride: "",
                 regressionLookbackCount: 5,
                 agentPersona: nil,
                 docTemplatesActive: []
@@ -45,7 +44,6 @@ struct ProjectTests {
                 "activeCLI": "claudeCode",
                 "notesFolderRelative": null,
                 "enabledPlugins": [],
-                "uaBinaryOverride": "",
                 "regressionLookbackCount": 5,
                 "agentPersona": null,
                 "docTemplatesActive": [],
@@ -62,7 +60,7 @@ struct ProjectTests {
         let json = """
         {"schemaVersion": 999, "id": "x", "displayName": "y", "createdAt": "2026-05-26T00:00:00Z",
          "settings": {"language": "en", "activeCLI": "claudeCode", "enabledPlugins": [],
-                      "uaBinaryOverride": "", "regressionLookbackCount": 5,
+                      "regressionLookbackCount": 5,
                       "docTemplatesActive": []}}
         """.data(using: .utf8)!
         #expect(throws: Project.LoadError.unsupportedSchema(version: 999)) {
@@ -83,7 +81,6 @@ struct ProjectTests {
                 "language": "en",
                 "activeCLI": "claudeCode",
                 "enabledPlugins": [],
-                "uaBinaryOverride": "",
                 "regressionLookbackCount": 5,
                 "docTemplatesActive": []
             }
@@ -107,7 +104,6 @@ struct ProjectTests {
                 "activeCLI": "claudeCode",
                 "linkedRepo": {"kind": "bitbucket", "url": "x", "remoteId": "y"},
                 "enabledPlugins": [],
-                "uaBinaryOverride": "",
                 "regressionLookbackCount": 5,
                 "docTemplatesActive": []
             }
@@ -129,7 +125,7 @@ struct ProjectTests {
         let json = """
         {"schemaVersion": 0, "id": "x", "displayName": "y", "createdAt": "2026-05-26T00:00:00Z",
          "settings": {"language": "en", "activeCLI": "claudeCode", "enabledPlugins": [],
-                      "uaBinaryOverride": "", "regressionLookbackCount": 5,
+                      "regressionLookbackCount": 5,
                       "docTemplatesActive": []}}
         """.data(using: .utf8)!
         #expect(throws: Project.LoadError.unsupportedSchema(version: 0)) {

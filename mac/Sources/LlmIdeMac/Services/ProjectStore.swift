@@ -7,7 +7,7 @@ import os.log
 
 /// App-wide recents + active project record. Kept in
 /// `<stateDirectory>/projects.json`. The active Project is fully
-/// hydrated from its own `<folder>/.llmide/project.json` on demand.
+/// hydrated from its own `<folder>/system/project.json` on demand.
 @MainActor
 final class ProjectStore: ObservableObject {
 
@@ -58,7 +58,7 @@ final class ProjectStore: ObservableObject {
     nonisolated static let fallbackDefaults = ProjectSettings(
         language: "en", activeCLI: "claudeCode", linkedRepo: nil,
         notesFolderRelative: nil, enabledPlugins: [],
-        uaBinaryOverride: "", regressionLookbackCount: 5,
+        regressionLookbackCount: 5,
         agentPersona: nil, docTemplatesActive: [])
 
     // MARK: - Public API
@@ -68,16 +68,12 @@ final class ProjectStore: ObservableObject {
         // (HFS+/APFS) don't create duplicate recents for the same folder.
         let url = url.standardizedFileURL
 
-        // Upgrade a pre-rename `.meetnotes` marker to `.llmide` so projects
-        // created by the MeetNotes build still open after the rebrand.
-        Self.migrateLegacyMarker(at: url)
-
         // Guard against opening arbitrary non-project folders.
         // Throws ProjectStoreError.invalidFolderStructure when the folder
         // is non-empty and missing the required LLM IDE sub-folder tree.
         try ProjectScaffolder.validate(at: url)
 
-        let projectJSON = url.appendingPathComponent(".llmide/project.json")
+        let projectJSON = url.appendingPathComponent("system/project.json")
         let project: Project
         if FileManager.default.fileExists(atPath: projectJSON.path) {
             let data = try Data(contentsOf: projectJSON)
@@ -104,8 +100,8 @@ final class ProjectStore: ObservableObject {
         // existingShellContent) reads the correct path.  For project
         // switches, AppShell observes .notesFolderChanged and rebuilds
         // AppEnvironment after this call.
-        let meetingsFolder = url.appendingPathComponent("meetings", isDirectory: true)
-        try? NotesFolderConfig().setFolderFromPath(meetingsFolder)
+        let sourceFolder = url.appendingPathComponent("source", isDirectory: true)
+        try? NotesFolderConfig().setFolderFromPath(sourceFolder)
 
         activeProject = ActiveProject(bundle: project, localPath: url.path)
         bumpRecent(id: project.id, path: url.path, displayName: project.displayName)
@@ -116,7 +112,7 @@ final class ProjectStore: ObservableObject {
         NotificationCenter.default.post(name: .notesFolderChanged, object: nil)
     }
 
-    /// Adopt `folderURL` as a LLM IDE project: write `.llmide/project.json`
+    /// Adopt `folderURL` as a LLM IDE project: write `system/project.json`
     /// and the canonical folder tree if they don't already exist. Idempotent —
     /// safe on an existing project (returns its bundle unchanged).
     ///
@@ -128,8 +124,7 @@ final class ProjectStore: ObservableObject {
     @discardableResult
     func ensureProjectScaffold(at folderURL: URL) throws -> Project {
         let url = folderURL.standardizedFileURL
-        Self.migrateLegacyMarker(at: url)
-        let projectJSON = url.appendingPathComponent(".llmide/project.json")
+        let projectJSON = url.appendingPathComponent("system/project.json")
         let project: Project
         if FileManager.default.fileExists(atPath: projectJSON.path) {
             project = try Project.fromJSON(Data(contentsOf: projectJSON))
@@ -195,7 +190,7 @@ final class ProjectStore: ObservableObject {
                     project:   ap.bundle,
                     folderURL: folderURL,
                     client:    client)
-                log.info("project export ok — \(result.meetingsWritten) meetings, \(result.plansWritten) plans, \(result.durationMs)ms")
+                log.info("project export ok — \(result.meetingsWritten) meetings, \(result.durationMs)ms")
             } catch {
                 log.error("project export failed (close will proceed): \(error.localizedDescription, privacy: .public)")
             }
@@ -228,7 +223,7 @@ final class ProjectStore: ObservableObject {
             project:   ap.bundle,
             folderURL: folderURL,
             client:    client)
-        log.info("manual export ok — \(result.meetingsWritten) meetings, \(result.plansWritten) plans")
+        log.info("manual export ok — \(result.meetingsWritten) meetings")
         return result
     }
 
@@ -271,14 +266,8 @@ final class ProjectStore: ObservableObject {
             // entry stays in the sidebar forever and a click on it throws.
             let pruned = state.recents.filter { entry in
                 let base = URL(fileURLWithPath: entry.path)
-                // Accept the new marker OR a legacy `.meetnotes` one — otherwise
-                // an upgrading user's not-yet-migrated projects would be pruned
-                // from recents on first launch (silent data loss). The legacy
-                // marker is migrated to `.llmide` when the project is opened.
                 return FileManager.default.fileExists(
-                        atPath: base.appendingPathComponent(".llmide/project.json").path)
-                    || FileManager.default.fileExists(
-                        atPath: base.appendingPathComponent(".meetnotes/project.json").path)
+                        atPath: base.appendingPathComponent("system/project.json").path)
             }
             recents = pruned
             if let activeId = state.activeId,
@@ -299,11 +288,8 @@ final class ProjectStore: ObservableObject {
     }
 
     private func rehydrateActive(from entry: RecentEntry) -> Bool {
-        // Migrate a legacy `.meetnotes` marker so a pre-rename active project
-        // restores correctly on launch.
-        Self.migrateLegacyMarker(at: URL(fileURLWithPath: entry.path))
         let projectJSON = URL(fileURLWithPath: entry.path)
-            .appendingPathComponent(".llmide/project.json")
+            .appendingPathComponent("system/project.json")
         let data: Data
         do {
             data = try Data(contentsOf: projectJSON)
@@ -329,11 +315,11 @@ final class ProjectStore: ObservableObject {
         }
         activeProject = ActiveProject(bundle: project, localPath: entry.path)
         // Sync NotesFolderConfig so AppEnvironment (constructed by AppShell
-        // on first render) points at this project's meetings/ folder.
+        // on first render) points at this project's source/ folder.
         // No notification needed here — AppShell hasn't subscribed yet.
-        let meetingsFolder = URL(fileURLWithPath: entry.path)
-            .appendingPathComponent("meetings", isDirectory: true)
-        try? NotesFolderConfig().setFolderFromPath(meetingsFolder)
+        let sourceFolder = URL(fileURLWithPath: entry.path)
+            .appendingPathComponent("source", isDirectory: true)
+        try? NotesFolderConfig().setFolderFromPath(sourceFolder)
         return true
     }
 
@@ -363,20 +349,6 @@ final class ProjectStore: ObservableObject {
         // semantics as our previous tmp+replaceItemAt dance, but
         // works whether the destination exists or not.
         try data.write(to: stateFile, options: .atomic)
-    }
-
-    /// Rename a pre-rename `.meetnotes` marker directory to `.llmide` so a
-    /// project created by the old MeetNotes build keeps opening. No-op once
-    /// migrated, or when there's nothing to migrate. Best-effort — a failure
-    /// here is non-fatal (validate still accepts a legacy marker as a fallback).
-    static func migrateLegacyMarker(at folder: URL) {
-        let fm = FileManager.default
-        let legacy = folder.appendingPathComponent(".meetnotes")
-        let current = folder.appendingPathComponent(".llmide")
-        var isDir: ObjCBool = false
-        guard fm.fileExists(atPath: legacy.path, isDirectory: &isDir), isDir.boolValue,
-              !fm.fileExists(atPath: current.path) else { return }
-        try? fm.moveItem(at: legacy, to: current)
     }
 
     private func writeProjectJSON(_ project: Project, to url: URL) throws {

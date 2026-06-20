@@ -197,7 +197,7 @@ struct WelcomeView: View {
     /// New project: the user picks a PARENT location and types a project name;
     /// we create `<parent>/<name>/` and scaffold the workspace INSIDE that new
     /// folder. This avoids the old behaviour where picking e.g. the Desktop
-    /// dumped meetings/plans/notes/… directly onto the Desktop. The named
+    /// dumped source/code/data/notes/system directly onto the Desktop. The named
     /// folder is created fresh, so scaffolding into it is always clean. Code
     /// only lands in code/ once a GitHub/GitLab repo is set up.
     private func newProject() {

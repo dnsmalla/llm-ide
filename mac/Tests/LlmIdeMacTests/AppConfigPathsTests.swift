@@ -77,7 +77,7 @@ struct AppConfigPathsTests {
 }
 
 /// Pins AppConfig.defaultProjectSettings — the snapshot ProjectStore
-/// uses to materialise `<folder>/.llmide/project.json` on first
+/// uses to materialise `<folder>/system/project.json` on first
 /// open. Each AppConfig field that flows into the bundle gets one
 /// assertion so future renames break the test instead of silently
 /// dropping a default.
@@ -97,7 +97,6 @@ struct AppConfigDefaultProjectSettingsTests {
         // AppConfig has no global language field — snapshot uses "".
         #expect(snap.language == "")
         #expect(snap.activeCLI == cfg.activeCLI)
-        #expect(snap.uaBinaryOverride == cfg.uaBinaryOverride)
         #expect(snap.regressionLookbackCount == cfg.autoCodeUpdateLookbackCount)
         #expect(snap.linkedRepo == nil)
         #expect(snap.notesFolderRelative == nil)

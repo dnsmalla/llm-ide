@@ -2,7 +2,7 @@
 // assistant turn in CodeAssistantPanel. Pre-fills the prompt and
 // response from the chat history; user adds notes + severity + tags
 // and submits, which writes a markdown file under
-// <repo>/.understand-anything/memory/faults/.
+// <repo>/system/faults/.
 //
 // The sheet is purely a UI concern. The data model (FaultReport) and
 // the persistence path (MemoryStore.writeFault) live in CodeGraph/.
@@ -17,7 +17,7 @@ struct ReportFaultSheet: View {
     /// strip irrelevant chrome before saving.
     @State var response: String
     /// Active repo root. The sheet writes into
-    /// `<repoRoot>/.understand-anything/memory/faults/`. Required — caller must
+    /// `<repoRoot>/system/faults/`. Required — caller must
     /// have confirmed a repo is selected before presenting the sheet.
     let repoRoot: URL
     /// `AICliTool.rawValue` of the agent that produced the response.

@@ -18,7 +18,7 @@ struct MemoryStoreTests {
         let store = MemoryStore()
         try store.seedIfMissing(in: repo)
 
-        let memoryDir = repo.appendingPathComponent(".understand-anything/memory")
+        let memoryDir = repo.appendingPathComponent("system/faults")
         let repoMd = memoryDir.appendingPathComponent("repo.md")
         #expect(FileManager.default.fileExists(atPath: memoryDir.path))
         #expect(FileManager.default.fileExists(atPath: repoMd.path))
@@ -33,7 +33,7 @@ struct MemoryStoreTests {
         let store = MemoryStore()
 
         try store.seedIfMissing(in: repo)
-        let repoMd = repo.appendingPathComponent(".understand-anything/memory/repo.md")
+        let repoMd = repo.appendingPathComponent("system/faults/repo.md")
         try "user-edited content".write(to: repoMd, atomically: true, encoding: .utf8)
 
         // Second seed must not clobber existing content.
@@ -45,7 +45,7 @@ struct MemoryStoreTests {
     @Test func repoMdAbsentBeforeSeed() throws {
         let repo = try tmpRepoDir()
         defer { try? FileManager.default.removeItem(at: repo) }
-        let repoMd = repo.appendingPathComponent(".understand-anything/memory/repo.md")
+        let repoMd = repo.appendingPathComponent("system/faults/repo.md")
         #expect(!FileManager.default.fileExists(atPath: repoMd.path))
     }
 
@@ -54,7 +54,7 @@ struct MemoryStoreTests {
         defer { try? FileManager.default.removeItem(at: repo) }
         let store = MemoryStore()
         try store.seedIfMissing(in: repo)
-        let repoMd = repo.appendingPathComponent(".understand-anything/memory/repo.md")
+        let repoMd = repo.appendingPathComponent("system/faults/repo.md")
         #expect(FileManager.default.fileExists(atPath: repoMd.path))
         let contents = try String(contentsOf: repoMd, encoding: .utf8)
         #expect(contents.contains("# Project facts"))
@@ -71,8 +71,8 @@ struct MemoryStoreTests {
     @Test func listFaultsAndQAReturnMarkdownFilesSorted() throws {
         let repo = try tmpRepoDir()
         defer { try? FileManager.default.removeItem(at: repo) }
-        let faults = repo.appendingPathComponent(".understand-anything/memory/faults", isDirectory: true)
-        let qa   = repo.appendingPathComponent(".understand-anything/memory/q&a", isDirectory: true)
+        let faults = repo.appendingPathComponent("system/faults/faults", isDirectory: true)
+        let qa   = repo.appendingPathComponent("system/faults/q&a", isDirectory: true)
         try FileManager.default.createDirectory(at: faults, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: qa,   withIntermediateDirectories: true)
         try "b".write(to: faults.appendingPathComponent("2026-05-23-flow.md"), atomically: true, encoding: .utf8)
@@ -91,7 +91,7 @@ struct MemoryStoreTests {
         let repo = try tmpRepoDir()
         defer { try? FileManager.default.removeItem(at: repo) }
         // Seed a legacy `bugs/` dir with a fault file but no `faults/` dir.
-        let legacy = repo.appendingPathComponent(".understand-anything/memory/bugs", isDirectory: true)
+        let legacy = repo.appendingPathComponent("system/faults/bugs", isDirectory: true)
         try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
         try "x".write(to: legacy.appendingPathComponent("2026-05-22-auth.md"),
                       atomically: true, encoding: .utf8)
@@ -99,7 +99,7 @@ struct MemoryStoreTests {
         let store = MemoryStore()
         try store.seedIfMissing(in: repo)
 
-        let faults = repo.appendingPathComponent(".understand-anything/memory/faults")
+        let faults = repo.appendingPathComponent("system/faults/faults")
         #expect(FileManager.default.fileExists(atPath: faults.path))
         #expect(!FileManager.default.fileExists(atPath: legacy.path))
         let listed = store.listFaults(at: repo).map { $0.lastPathComponent }

@@ -264,7 +264,7 @@ final class AppConfig: ObservableObject {
     /// default (`dataRoot / clonesSubdir`). Empty string = "not yet
     /// configured"; clones then fall back to `defaultClonesFallback`.
     /// Each project owns its own canonical folder tree
-    /// (meetings/plans/notes/assets/code/data) under its own folder —
+    /// (source/code/data/notes) under its own folder —
     /// not under this root.
     @Published var dataRoot: String {
         didSet { defaults.set(dataRoot, forKey: "dataRoot") }
@@ -279,11 +279,6 @@ final class AppConfig: ObservableObject {
     @Published var memorySubdir: String {
         didSet { defaults.set(memorySubdir, forKey: "memorySubdir") }
     }
-    /// Optional absolute path to the `understand-anything` CLI binary. Empty
-    /// means auto-discover from PATH + the usual install locations.
-    @Published var uaBinaryOverride: String {
-        didSet { defaults.set(uaBinaryOverride, forKey: "uaBinaryOverride") }
-    }
     /// Absolute paths to local source-code folders added directly by the user
     /// (outside of the GitHub/GitLab clone flow). Each path is indexed into
     /// the Library as a .code item so the Code Graph can scan it.
@@ -296,7 +291,7 @@ final class AppConfig: ObservableObject {
     }
 
     // Defaults — single source of truth.
-    static let defaultMemorySubdir = ".understand-anything/memory"
+    static let defaultMemorySubdir = "system/faults"
     static let defaultClonesSubdir = "Clones"
 
     // ── Auto Code Update ──────────────────────────────────────────────
@@ -347,7 +342,7 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(autoCodeRunReviewConflicts, forKey: "autoCodeRunReviewConflicts") }
     }
     /// Whether the Auto Code Update run also fires a regression sweep
-    /// against `<repo>/.understand-anything/memory/faults/` (re-asks every
+    /// against `<repo>/system/faults/` (re-asks every
     /// `status: fixed` fault, auto-reopens regressions). Off by default
     /// — the sweep can be slow on a big fault archive and uses LLM
     /// turns, so users opt in.
@@ -439,7 +434,6 @@ final class AppConfig: ObservableObject {
         self.clonesSubdir = storedClones.isEmpty ? AppConfig.defaultClonesSubdir : storedClones
         let storedMem = defaults.string(forKey: "memorySubdir") ?? ""
         self.memorySubdir = storedMem.isEmpty ? AppConfig.defaultMemorySubdir : storedMem
-        self.uaBinaryOverride = defaults.string(forKey: "uaBinaryOverride") ?? ""
         if let data = defaults.data(forKey: "localCodeFolders"),
            let decoded = decodeConfigOrStash([String].self, key: "localCodeFolders", data: data, defaults: defaults) {
             self.localCodeFolders = decoded
@@ -603,7 +597,7 @@ extension AppConfig {
 extension AppConfig {
     /// Snapshot of current AppConfig values projected into a
     /// ProjectSettings shape. Used by ProjectStore.openFolder when
-    /// it materialises `<folder>/.llmide/project.json` for the
+    /// it materialises `<folder>/system/project.json` for the
     /// first time. After Phase 1, AppConfig retains these fields
     /// for back-compat but project-scoped call sites consult the
     /// active Project's bundle instead.
@@ -620,7 +614,6 @@ extension AppConfig {
             linkedRepo: nil,                // user picks via Settings on first run
             notesFolderRelative: nil,
             enabledPlugins: [],
-            uaBinaryOverride: uaBinaryOverride,
             regressionLookbackCount: autoCodeUpdateLookbackCount,
             agentPersona: nil,
             docTemplatesActive: [])

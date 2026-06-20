@@ -56,14 +56,6 @@ enum PathValidator {
             return .invalid(reason: "Path contains an invalid character.")
         }
         let canonical = segments.joined(separator: "/")
-        // Warn (but allow) when the convention changes — the Understand-Anything
-        // skill expects the default path. Users overriding this need to know.
-        if canonical != AppConfig.defaultMemorySubdir {
-            return .warning(
-                message: "Non-default path — the Understand-Anything skill expects `\(AppConfig.defaultMemorySubdir)`. Re-install the skill if you change this.",
-                canonical: canonical
-            )
-        }
         return .ok(canonical: canonical)
     }
 

@@ -9,7 +9,7 @@ import os
 /// only files whose content hash changed since the last run are re-parsed,
 /// so regeneration cost scales with the diff, not the whole repo.
 ///
-///   <repo>/.code-notes/
+///   <repo>/system/graph/
 ///     index.md        ← whole-repo summary ranked by impact
 ///     graph.json      ← machine-readable adjacency list
 ///     notes/          ← one deterministic .md per code file

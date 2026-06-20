@@ -126,14 +126,14 @@ extension LlmIdeAPIClient {
     /// Write `content` to a `.md` file and return its URL.
     ///
     /// - When `projectRoot` is supplied the file is written into
-    ///   `<projectRoot>/plans/`, creating the directory if needed.
+    ///   `<projectRoot>/data/`, creating the directory if needed.
     /// - When `projectRoot` is nil the file lands in the user's
     ///   Downloads folder (existing behaviour for the no-project case).
     func exportMarkdown(content: String, filename: String, projectRoot: URL? = nil) throws -> URL {
         let fm = FileManager.default
         let baseDir: URL
         if let root = projectRoot {
-            let plansDir = root.appendingPathComponent("plans", isDirectory: true)
+            let plansDir = root.appendingPathComponent("data", isDirectory: true)
             try fm.createDirectory(at: plansDir, withIntermediateDirectories: true)
             baseDir = plansDir
         } else {

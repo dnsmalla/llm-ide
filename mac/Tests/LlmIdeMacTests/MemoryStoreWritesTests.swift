@@ -25,7 +25,7 @@ struct MemoryStoreWritesTests {
         let store = MemoryStore()
         let url = try store.writeFault(at: repo, sampleFault())
 
-        let faultsDir = repo.appendingPathComponent(".understand-anything/memory/faults")
+        let faultsDir = repo.appendingPathComponent("system/faults/faults")
         #expect(FileManager.default.fileExists(atPath: faultsDir.path))
         #expect(FileManager.default.fileExists(atPath: url.path))
         #expect(url.lastPathComponent.hasSuffix(".md"))

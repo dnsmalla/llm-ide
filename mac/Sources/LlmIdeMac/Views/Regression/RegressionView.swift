@@ -226,8 +226,7 @@ private struct RegressionSourcesPane: View {
                 Spacer()
                 if let repo = repoRoot {
                     Button {
-                        let dir = repo.appendingPathComponent(".understand-anything/memory/faults",
-                                                              isDirectory: true)
+                        let dir = ProjectLayout(root: repo).faultsDir
                         NSWorkspace.shared.activateFileViewerSelecting([dir])
                     } label: {
                         Label("Faults folder", systemImage: "folder")
@@ -239,7 +238,7 @@ private struct RegressionSourcesPane: View {
                 }
             }
             if let repo = repoRoot {
-                Text(repo.appendingPathComponent(".understand-anything/memory/faults").path)
+                Text(ProjectLayout(root: repo).faultsDir.path)
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(t.textMuted)
                     .lineLimit(1)

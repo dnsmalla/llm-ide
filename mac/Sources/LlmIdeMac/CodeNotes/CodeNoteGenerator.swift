@@ -5,7 +5,7 @@ import os
 /// Generates deterministic, human-readable code notes from a ScanResult.
 /// No AI — notes are produced directly from structural facts (imports, types,
 /// function signatures, roles, reverse-deps). Output lives under
-/// `<repo>/.code-notes/`:
+/// `<repo>/system/graph/`:
 ///
 ///   index.md      ← whole-repo summary ranked by impact (LLM reads first)
 ///   graph.json    ← machine-readable adjacency list for tooling
@@ -23,13 +23,13 @@ public enum CodeNoteGenerator {
     @discardableResult
     public static func generate(scan: ScanResult, repoRoot: URL,
                                 changedPaths: Set<String>? = nil) -> Int {
-        let notesRoot = repoRoot.appendingPathComponent(".code-notes/notes", isDirectory: true)
+        let notesRoot = repoRoot.appendingPathComponent("system/graph/notes", isDirectory: true)
         try? FileManager.default.createDirectory(at: notesRoot, withIntermediateDirectories: true)
 
-        // Self-ignoring marker: makes git ignore everything under `.code-notes`
+        // Self-ignoring marker: makes git ignore everything under `system/graph`
         // in ANY repo, regardless of the repo's root .gitignore. Idempotent /
         // write-always (cheap), so generated notes never flood Source Control.
-        let codeNotesRoot = repoRoot.appendingPathComponent(".code-notes", isDirectory: true)
+        let codeNotesRoot = repoRoot.appendingPathComponent("system/graph", isDirectory: true)
         try? "*\n".write(to: codeNotesRoot.appendingPathComponent(".gitignore"),
                          atomically: true, encoding: .utf8)
 
@@ -139,7 +139,7 @@ public enum CodeNoteGenerator {
     // MARK: - index.md
 
     static func writeIndex(scan: ScanResult, usedBy: [String: [String]], repoRoot: URL) {
-        let codeDir = repoRoot.appendingPathComponent(".code-notes")
+        let codeDir = repoRoot.appendingPathComponent("system/graph")
         try? FileManager.default.createDirectory(at: codeDir, withIntermediateDirectories: true)
 
         let codeFiles = scan.files.filter { $0.language != "other" }
@@ -201,7 +201,7 @@ public enum CodeNoteGenerator {
     // MARK: - graph.json
 
     static func writeGraphJSON(scan: ScanResult, usedBy: [String: [String]], repoRoot: URL) {
-        let codeDir = repoRoot.appendingPathComponent(".code-notes")
+        let codeDir = repoRoot.appendingPathComponent("system/graph")
 
         struct SymEntry: Encodable {
             let name: String; let line: Int; let declaration: String?

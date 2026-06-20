@@ -9,20 +9,16 @@ import os.log
 ///
 /// ```
 /// <projectFolder>/
-/// ├── .llmide/
+/// ├── system/
 /// │   └── sync.json                  ← written LAST; its presence = complete export
-/// ├── meetings/
-/// │   ├── _index.json
-/// │   └── YYYY/MM/
-/// │       └── YYYY-MM-DD-slug-<id8>.md
-/// └── plans/
+/// └── source/
 ///     ├── _index.json
-///     ├── YYYY-MM-DD-slug-<id8>.md
-///     └── YYYY-MM-DD-slug-<id8>.json
+///     └── YYYY/MM/
+///         └── YYYY-MM-DD-slug-<id8>.md
 /// ```
 ///
 /// **ID suffix** — every filename ends with the last 8 chars of the item's ID
-/// so two meetings/plans with identical titles on the same date never collide.
+/// so two meetings/source items with identical titles on the same date never collide.
 ///
 /// **YAML safety** — all frontmatter values are double-quoted via `yamlScalar()`.
 ///
@@ -88,10 +84,9 @@ final class ProjectExporter {
         }
 
         var meetingIndexEntries: [[String: String]] = []
-        var planIndexEntries:    [[String: String]] = []
 
         // ── Meetings ─────────────────────────────────────────────────────────
-        let meetingsRoot = folderURL.appendingPathComponent("meetings")
+        let meetingsRoot = folderURL.appendingPathComponent("source")
         try fm.createDirectory(at: meetingsRoot, withIntermediateDirectories: true)
 
         for meeting in bundle.meetings {
@@ -113,7 +108,7 @@ final class ProjectExporter {
                 "id":    meeting.id,
                 "title": meeting.title,
                 "date":  meeting.date ?? "",
-                "path":  "meetings/\(year)/\(month)/\(filename)",
+                "path":  "source/\(year)/\(month)/\(filename)",
             ])
         }
 
@@ -126,69 +121,34 @@ final class ProjectExporter {
             ] as [String: Any], options: [.prettyPrinted, .sortedKeys])
             .write(to: meetingsRoot.appendingPathComponent("_index.json"), options: .atomic)
 
-        // ── Plans ─────────────────────────────────────────────────────────────
-        let plansRoot = folderURL.appendingPathComponent("plans")
-        try fm.createDirectory(at: plansRoot, withIntermediateDirectories: true)
-
-        let jsonEncoder = JSONEncoder()
-        jsonEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-
-        for plan in bundle.plans {
-            let prefix   = datePrefix(from: plan.createdAt)
-            let slug     = slugify(plan.title, id: plan.id)
-            let baseName = "\(prefix)-\(slug)"
-
-            try planMarkdown(plan: plan)
-                .write(to: plansRoot.appendingPathComponent("\(baseName).md"),
-                       atomically: true, encoding: .utf8)
-            try jsonEncoder.encode(plan)
-                .write(to: plansRoot.appendingPathComponent("\(baseName).json"),
-                       options: .atomic)
-
-            planIndexEntries.append([
-                "id":        plan.id,
-                "title":     plan.title,
-                "createdAt": plan.createdAt ?? "",
-                "mdPath":    "plans/\(baseName).md",
-                "jsonPath":  "plans/\(baseName).json",
-            ])
-        }
-
-        // plans/_index.json
-        try JSONSerialization
-            .data(withJSONObject: [
-                "generatedAt": nowISO(),
-                "count":       bundle.plans.count,
-                "plans":       planIndexEntries,
-            ] as [String: Any], options: [.prettyPrinted, .sortedKeys])
-            .write(to: plansRoot.appendingPathComponent("_index.json"), options: .atomic)
-
         // ── README badge ──────────────────────────────────────────────────────
         updateReadme(
             at: folderURL.appendingPathComponent("README.md"),
             meetings: bundle.meetings.count,
-            plans:    bundle.plans.count)
+            plans:    0)
 
-        // ── .llmide/sync.json — written LAST ───────────────────────────────
+        // ── system/sync.json — written LAST ────────────────────────────────
         // Its presence on disk signals that the entire export above completed
         // successfully.  A reader that sees no sync.json should treat the
         // folder as a partial / in-progress export.
+        let systemDir = folderURL.appendingPathComponent("system")
+        try fm.createDirectory(at: systemDir, withIntermediateDirectories: true)
         try JSONSerialization
             .data(withJSONObject: [
                 "exportedAt":        nowISO(),
                 "meetingsExported":  bundle.meetings.count,
-                "plansExported":     bundle.plans.count,
+                "plansExported":     0,
                 "backendExportedAt": bundle.exportedAt,
             ] as [String: Any], options: .prettyPrinted)
-            .write(to: folderURL.appendingPathComponent(".llmide/sync.json"),
+            .write(to: systemDir.appendingPathComponent("sync.json"),
                    options: .atomic)
 
         let ms = Int(Date().timeIntervalSince(t0) * 1000)
-        log.info("export done: \(bundle.meetings.count) meetings, \(bundle.plans.count) plans in \(ms)ms")
+        log.info("export done: \(bundle.meetings.count) meetings in \(ms)ms")
 
         return ExportResult(
             meetingsWritten: bundle.meetings.count,
-            plansWritten:    bundle.plans.count,
+            plansWritten:    0,
             exportedAt:      Date(),
             durationMs:      ms
         )

@@ -49,8 +49,7 @@ struct ProjectSwitcher: View {
                         do {
                             if let result = try await projectStore.exportCurrentProject() {
                                 let msg =
-                                    "Exported \(result.meetingsWritten) meeting(s) and " +
-                                    "\(result.plansWritten) plan(s)."
+                                    "Exported \(result.meetingsWritten) meeting(s)."
                                 alert = AlertItem(kind: .exportSuccess(msg, folderPath: active.localPath))
                             }
                             // nil result means isExporting was already true — silently ignored

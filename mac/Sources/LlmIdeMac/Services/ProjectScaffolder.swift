@@ -10,20 +10,17 @@ import os.log
 ///
 /// ```
 /// <projectFolder>/
-/// ├── .llmide/
-/// │   ├── project.json      ← project metadata (written by ProjectStore)
-/// │   ├── sync.json         ← last export info  (written by ProjectExporter)
-/// │   ├── index.sqlite      ← meeting full-text index (written by AppEnvironment)
-/// │   └── cache/            ← runtime cache, git-ignored
-/// ├── .gitignore            ← project-root; LLM IDE managed block ignores
-/// │                            .code-notes/, .understand-anything/, cache, etc.
-/// ├── meetings/             ← live captures + YYYY/MM/date-slug-<id>.md on export
-/// ├── plans/                ← date-slug-<id>.md + .json on export
-/// ├── notes/                ← free-form notes, user-managed
-/// ├── assets/               ← screenshots / diagrams, user-managed
-/// ├── code/                 ← source files routed from Code items
-/// ├── data/                 ← data files routed from Data items
-/// └── README.md             ← refreshed on every open
+/// ├── source/   ← meeting & email transcripts (your Sources)
+/// ├── code/     ← code files
+/// ├── data/     ← documents, data files, images
+/// ├── notes/    ← notes generated from meetings/email
+/// └── system/   ← LLM IDE managed: settings, faults, graph, index (most git-ignored)
+///     ├── project.json   ← project metadata (written by ProjectStore)
+///     ├── sync.json      ← last export info  (git-ignored)
+///     ├── index.sqlite   ← full-text index   (git-ignored)
+///     ├── faults/        ← fault log entries
+///     ├── graph/         ← knowledge graph   (git-ignored)
+///     └── cache/         ← runtime cache     (git-ignored)
 /// ```
 enum ProjectScaffolder {
 
@@ -34,14 +31,8 @@ enum ProjectScaffolder {
 
     // Directories that must exist under every project root.
     static let requiredDirectories = [
-        ".llmide",
-        ".llmide/cache",   // runtime cache; gitignored
-        "meetings",
-        "plans",
-        "notes",
-        "assets",
-        "code",            // source files routed from Code-type items
-        "data",            // data files routed from Data-type items
+        "source", "code", "data", "notes",
+        "system", "system/faults", "system/graph", "system/cache",
     ]
 
     // MARK: - Public entry point
@@ -50,46 +41,23 @@ enum ProjectScaffolder {
     ///
     /// A folder is accepted when it satisfies **any** of the following:
     ///
-    /// 1. Already a LLM IDE project — has `.llmide/project.json`.
-    /// 2. Has the required top-level sub-folders (`meetings/`, `notes/`,
-    ///    `plans/`) — handles manually created or migrated project trees
-    ///    that pre-date the `.llmide/` marker.
-    /// 3. Is completely empty — treated as a new project to be scaffolded.
+    /// 1. Already a new-layout LLM IDE project — has `system/project.json`.
+    /// 2. Is completely empty — treated as a new project to be scaffolded.
     ///
-    /// Anything else (e.g. a Downloads folder, a code repo, a random
-    /// directory) throws `ProjectStoreError.invalidFolderStructure` so the
-    /// caller can surface an error before any state is mutated.
+    /// Anything else (e.g. a Downloads folder, a code repo, an old-layout
+    /// project with `meetings/`/`plans/`) throws
+    /// `ProjectStoreError.invalidFolderStructure` so the caller can surface
+    /// an error before any state is mutated.
     ///
     /// - Throws: `ProjectStoreError.invalidFolderStructure` when none of
     ///   the above conditions are met.
     static func validate(at folderURL: URL) throws {
         let fm = FileManager.default
-
-        // 1. Existing LLM IDE project (or a not-yet-migrated MeetNotes one).
-        let projectJSON = folderURL.appendingPathComponent(".llmide/project.json")
-        if fm.fileExists(atPath: projectJSON.path) { return }
-        let legacyJSON = folderURL.appendingPathComponent(".meetnotes/project.json")
-        if fm.fileExists(atPath: legacyJSON.path) { return }
-
-        // 2. Has all required top-level dirs (migrated / manually created).
-        // NOTE: "code" and "data" are intentionally absent here — adding them
-        // would reject legacy projects that pre-date those folders.  The
-        // idempotent scaffold call on every project open fills them in safely.
-        let topLevelRequired = ["meetings", "notes", "plans"]
-        let allPresent = topLevelRequired.allSatisfy { dir in
-            var isDir: ObjCBool = false
-            let exists = fm.fileExists(
-                atPath: folderURL.appendingPathComponent(dir).path,
-                isDirectory: &isDir)
-            return exists && isDir.boolValue
-        }
-        if allPresent { return }
-
-        // 3. Empty folder — new project.
+        // 1. New-layout project marker.
+        if fm.fileExists(atPath: folderURL.appendingPathComponent("system/project.json").path) { return }
+        // 2. Empty folder — new project to scaffold.
         let contents = (try? fm.contentsOfDirectory(atPath: folderURL.path)) ?? []
         if contents.isEmpty { return }
-
-        // None of the above — reject.
         throw ProjectStoreError.invalidFolderStructure(folderURL.lastPathComponent)
     }
 
@@ -113,7 +81,7 @@ enum ProjectScaffolder {
         ensureRootGitignore(at: folderURL)
 
         // 3. .gitkeep markers so empty directories survive `git add .`
-        for dir in ["notes", "assets"] {
+        for dir in ["notes", "data"] {
             writeIfAbsent(
                 at: folderURL.appendingPathComponent("\(dir)/.gitkeep"),
                 content: "")
@@ -166,13 +134,12 @@ enum ProjectScaffolder {
 
     private static let managedGitignoreBlock = """
     # >>> LLM IDE managed (auto-generated / ephemeral) — edit your own rules above
-    .code-notes/
-    .understand-anything/
-    .llmide/cache/
-    .llmide/sync.json
-    .llmide/index.sqlite
-    .llmide/index.sqlite-shm
-    .llmide/index.sqlite-wal
+    system/cache/
+    system/index.sqlite
+    system/index.sqlite-shm
+    system/index.sqlite-wal
+    system/graph/
+    system/sync.json
     *.partial.md
     # <<< LLM IDE managed
     """
@@ -231,30 +198,18 @@ enum ProjectScaffolder {
 
         ```
         \(name)/
-        ├── .llmide/   ← project metadata & sync state (managed by LLM IDE)
-        │   └── cache/    ← runtime cache (git-ignored)
-        ├── meetings/     ← exported meeting transcripts & summaries (YYYY/MM/)
-        ├── plans/        ← exported project plans (Markdown + JSON)
-        ├── notes/        ← free-form notes (yours to use)
-        ├── assets/       ← screenshots, diagrams, attachments (yours to use)
-        ├── code/         ← source files routed from Code items
-        └── data/         ← data files routed from Data items
+        ├── source/   ← meeting & email transcripts (your Sources)
+        ├── code/     ← code files
+        ├── data/     ← documents, data files, images
+        ├── notes/    ← notes generated from meetings/email
+        └── system/   ← LLM IDE managed: settings, faults, graph, index (most git-ignored)
         ```
 
         ## Meetings
 
-        Meeting files land under `meetings/YYYY/MM/YYYY-MM-DD-<slug>-<id>.md` when
+        Meeting files land under `source/YYYY/MM/YYYY-MM-DD-<slug>-<id>.md` when
         you close or export the project.  Each file has YAML frontmatter, an action
         items / decisions / blockers summary, and the full transcript (fenced).
-
-        ## Plans
-
-        | Format | Description |
-        |--------|-------------|
-        | `.md`  | Human-readable milestone-grouped task list |
-        | `.json`| Full Codable dump with all fields |
-
-        `_index.json` in each directory is updated automatically on export.
 
         ---
         *Auto-generated by LLM IDE. Add your own notes ABOVE the `<!-- llmide:auto -->` marker.*

@@ -45,7 +45,7 @@ struct LibraryItemStoreRoutingTests {
             "notes/idea.md": "x",
             "data/rows.csv": "a,b",
             "code/main.swift": "import Foundation",
-            "meetings/standup.md": "notes",
+            "source/standup.md": "notes",
         ])
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -61,7 +61,7 @@ struct LibraryItemStoreRoutingTests {
     @Test func scanAssignsFolderOriginForNestedFiles() throws {
         let root = try makeProject(files: [
             "notes/top.md": "x",          // direct child → folderOrigin nil
-            "meetings/2026-05/m.md": "y", // nested → folderOrigin "2026-05"
+            "source/2026-05/m.md": "y",   // nested → folderOrigin "2026-05"
         ])
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -234,7 +234,7 @@ struct LibraryItemStoreRoutingTests {
         let root = try makeProject(files: [
             "notes/idea.md": "x",
             "code/main.swift": "import Foundation",
-            "meetings/standup.md": "---\ntitle: Standup\n---\n",
+            "source/standup.md": "---\ntitle: Standup\n---\n",
         ])
         defer { try? FileManager.default.removeItem(at: root) }
 
