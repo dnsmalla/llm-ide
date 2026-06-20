@@ -19,6 +19,9 @@ final class AutoCodeUpdateService: ObservableObject {
     @Published private(set) var allEntries: [ProcessedActionsRegistry.RegistryEntry] = []
     @Published private(set) var lastError: String? = nil
     @Published private(set) var taskErrors: [String: String] = [:]
+    /// Tail of each review task's last-run log, keyed by `AutoTask.rawValue`.
+    /// Lets the UI show review findings inline instead of only in a file.
+    @Published private(set) var taskOutputs: [String: String] = [:]
 
     // MARK: - Dependencies
 
@@ -117,6 +120,7 @@ final class AutoCodeUpdateService: ObservableObject {
         failedCount = 0
         lastError = nil
         taskErrors = [:]
+        taskOutputs = [:]
         defer {
             isRunning = false
             lastRunDate = Date()
@@ -292,6 +296,7 @@ final class AutoCodeUpdateService: ObservableObject {
                                       localPath: capturedLocalPath,
                                       logSuffix: "review-code",
                                       logDir: logDir)
+                taskOutputs[AutoTask.reviewCode.rawValue] = logTail(suffix: "review-code", logDir: logDir)
                 if ok {
                     taskErrors.removeValue(forKey: AutoTask.reviewCode.rawValue)
                 } else {
@@ -303,6 +308,7 @@ final class AutoCodeUpdateService: ObservableObject {
                                       localPath: capturedLocalPath,
                                       logSuffix: "review-doc",
                                       logDir: logDir)
+                taskOutputs[AutoTask.reviewDoc.rawValue] = logTail(suffix: "review-doc", logDir: logDir)
                 if ok {
                     taskErrors.removeValue(forKey: AutoTask.reviewDoc.rawValue)
                 } else {
@@ -314,6 +320,7 @@ final class AutoCodeUpdateService: ObservableObject {
                                       localPath: capturedLocalPath,
                                       logSuffix: "review-conflicts",
                                       logDir: logDir)
+                taskOutputs[AutoTask.reviewConflicts.rawValue] = logTail(suffix: "review-conflicts", logDir: logDir)
                 if ok {
                     taskErrors.removeValue(forKey: AutoTask.reviewConflicts.rawValue)
                 } else {
@@ -792,6 +799,16 @@ final class AutoCodeUpdateService: ObservableObject {
             .appendingPathExtension("prev." + url.pathExtension)
         try? fm.removeItem(at: prev)
         try? fm.moveItem(at: url, to: prev)
+    }
+
+    /// Tail of an auto-task log, for showing review findings inline in the
+    /// UI without opening Finder. Capped to the last `maxChars` characters.
+    func logTail(suffix: String, logDir: URL, maxChars: Int = 6_000) -> String {
+        let url = logDir.appendingPathComponent("auto-task-\(suffix).log")
+        guard let data = try? Data(contentsOf: url),
+              let s = String(data: data, encoding: .utf8) else { return "" }
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.count > maxChars ? "…\n" + String(trimmed.suffix(maxChars)) : trimmed
     }
 
     /// Reveal the auto-task logs folder in Finder. Review tasks write their
