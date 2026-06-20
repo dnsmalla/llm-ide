@@ -13,7 +13,7 @@
 
 import Foundation
 
-public struct MemoryStore {
+public struct MemoryStore: Sendable {
     /// Subdir under the repo where memory files live. Defaults to
     /// the conventional `.understand-anything/memory`; tests + callers can
     /// override it. Settings UI rejects absolute paths and `..`
@@ -111,6 +111,31 @@ public struct MemoryStore {
     func loadFault(at url: URL) throws -> FaultReport {
         let md = try String(contentsOf: url, encoding: .utf8)
         return try FaultReport.fromMarkdown(md)
+    }
+
+    /// A Sendable snapshot of every fault's status, for callers that need
+    /// to scan + decode off the main actor and then publish the result.
+    /// `urls` is the sorted listing; `statuses` maps each decodable fault
+    /// to its status (undecodable files are omitted from the map but kept
+    /// in `urls`).
+    struct FaultStatusSnapshot: Sendable, Equatable {
+        let urls: [URL]
+        let statuses: [URL: FaultStatus]
+        /// Convenience for the menu-bar pill.
+        var openCount: Int { statuses.values.filter { $0 == .open }.count }
+    }
+
+    /// Pure disk work — list + decode all faults. Safe to call from a
+    /// background executor (MemoryStore is Sendable). The @MainActor
+    /// callers (RegressionView, MenuBarMenu) await this off-main so the
+    /// frontmatter decode never blocks the UI thread.
+    func faultStatusSnapshot(at repo: URL) -> FaultStatusSnapshot {
+        let urls = listFaults(at: repo)
+        var statuses: [URL: FaultStatus] = [:]
+        for u in urls {
+            if let fault = try? loadFault(at: u) { statuses[u] = fault.status }
+        }
+        return FaultStatusSnapshot(urls: urls, statuses: statuses)
     }
 
     /// In-place status flip. Reads the file, rewrites only the status

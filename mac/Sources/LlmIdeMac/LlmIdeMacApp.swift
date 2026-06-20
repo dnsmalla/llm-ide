@@ -392,10 +392,14 @@ struct MenuBarMenu: View {
             return
         }
         let store = config.memoryStore
-        let bugs = store.listFaults(at: repo)
-        openFaultCount = bugs.compactMap { try? store.loadFault(at: $0) }
-            .filter { $0.status == .open }
-            .count
+        // Counting faults decodes every frontmatter — keep it off the main
+        // actor so the periodic (30s) refresh never stutters the menu.
+        Task {
+            let count = await Task.detached(priority: .utility) {
+                store.faultStatusSnapshot(at: repo).openCount
+            }.value
+            openFaultCount = count
+        }
     }
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {
