@@ -406,7 +406,11 @@ struct GitHubSettingsSection: View {
         let httpsURL = "https://github.com/\(owner)/\(name).git"
 
         do {
-            if let existingPath = r.localPath {
+            // Re-sync (pull) only when the saved clone still exists on disk.
+            // A stale localPath (clone deleted, or layout changed) falls
+            // through to a fresh clone into the active project's code/.
+            if let existingPath = r.localPath,
+               FileManager.default.fileExists(atPath: existingPath) {
                 let localURL = URL(fileURLWithPath: existingPath)
                 try await repoManager.pull(at: localURL, token: token, backend: .github)
             } else {

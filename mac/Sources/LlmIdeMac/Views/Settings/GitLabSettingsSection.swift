@@ -442,7 +442,11 @@ struct GitLabSettingsSection: View {
         guard !repoURL.isEmpty, !token.isEmpty else { return }
 
         do {
-            if let existingPath = p.localPath {
+            // Re-sync (pull) only when the saved clone still exists on disk.
+            // A stale localPath (clone deleted, or layout changed) falls
+            // through to a fresh clone into the active project's code/.
+            if let existingPath = p.localPath,
+               FileManager.default.fileExists(atPath: existingPath) {
                 // Re-sync: git pull
                 let localURL = URL(fileURLWithPath: existingPath)
                 try await repoManager.pull(at: localURL, token: token)
