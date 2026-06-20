@@ -217,12 +217,21 @@ final class AutoCodeUpdateService: ObservableObject {
             lastError = "Meeting index read failed: \(error.localizedDescription)"
             return
         }
-        let recentRows = Array(rows
-            .sorted { $0.startedAt > $1.startedAt }
-            .prefix(config.autoCodeUpdateLookbackCount))
+        // Lookback: by age (last N days) or by count (last N meetings).
+        // startedAt is epoch MILLISECONDS.
+        let sortedRows = rows.sorted { $0.startedAt > $1.startedAt }
+        let recentRows: [MeetingIndex.Row]
+        if config.autoCodeLookbackByDays {
+            let cutoffMs = Self.lookbackCutoffMs(now: Date(), days: config.autoCodeLookbackDays)
+            recentRows = sortedRows.filter { $0.startedAt >= cutoffMs }
+        } else {
+            recentRows = Array(sortedRows.prefix(config.autoCodeUpdateLookbackCount))
+        }
 
         if recentRows.isEmpty {
-            statusMessage = "No meetings found"
+            statusMessage = config.autoCodeLookbackByDays
+                ? "No meetings in the last \(max(1, config.autoCodeLookbackDays)) days"
+                : "No meetings found"
             return
         }
 
@@ -230,8 +239,9 @@ final class AutoCodeUpdateService: ObservableObject {
         let newActions = actions.filter { !registry.isKnown(id: $0.id) }
 
         if newActions.isEmpty && registry.pendingEntries().isEmpty {
-            let n = config.autoCodeUpdateLookbackCount
-            statusMessage = "No actions found in last \(n) meetings"
+            statusMessage = config.autoCodeLookbackByDays
+                ? "No actions found in last \(max(1, config.autoCodeLookbackDays)) days"
+                : "No actions found in last \(config.autoCodeUpdateLookbackCount) meetings"
             return
         }
 
@@ -441,6 +451,13 @@ final class AutoCodeUpdateService: ObservableObject {
 
     /// True if the repo working tree has no uncommitted changes. Best-effort:
     /// if git can't be run we return true (don't block) — same as before the check.
+    /// Epoch-MILLISECONDS cutoff for the by-age lookback: meetings with
+    /// `startedAt >= cutoff` are in-window. `startedAt` is stored in ms, so
+    /// this converts the seconds-based Date accordingly. Days floored at 1.
+    nonisolated static func lookbackCutoffMs(now: Date, days: Int) -> Int64 {
+        Int64((now.timeIntervalSince1970 - Double(max(1, days)) * 86_400) * 1000)
+    }
+
     nonisolated static func isWorkingTreeClean(at localPath: String) -> Bool {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/git")

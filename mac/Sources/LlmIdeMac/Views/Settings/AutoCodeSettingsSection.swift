@@ -7,6 +7,7 @@ struct AutoCodeSettingsSection: View {
     @Environment(ShellState.self) private var shell
 
     private let lookbackOptions = [1, 3, 5, 10, 20]
+    private let dayOptions = [1, 3, 7, 14, 30]
     /// Cadence options in minutes. Floor matches AutoCodeUpdateService.minIntervalMinutes.
     private let intervalOptions = [5, 15, 30, 60, 180, 360, 720, 1440]
 
@@ -43,22 +44,34 @@ struct AutoCodeSettingsSection: View {
                 }
                 .toggleStyle(.switch)
 
-                // Row 2: Lookback picker
+                // Row 2: Lookback — by count (N meetings) or by age (N days).
                 HStack(spacing: Spacing.md) {
                     Text("Scan last")
                         .font(Typography.body)
                         .foregroundStyle(theme.current.textMuted)
-                    Picker("", selection: $config.autoCodeUpdateLookbackCount) {
-                        ForEach(lookbackOptions, id: \.self) { n in
-                            Text("\(n)").tag(n)
+                    if config.autoCodeLookbackByDays {
+                        Picker("", selection: $config.autoCodeLookbackDays) {
+                            ForEach(dayOptions, id: \.self) { n in Text("\(n)").tag(n) }
                         }
+                        .labelsHidden().pickerStyle(.menu).frame(width: 70)
+                        Text("days")
+                            .font(Typography.body)
+                            .foregroundStyle(theme.current.textMuted)
+                    } else {
+                        Picker("", selection: $config.autoCodeUpdateLookbackCount) {
+                            ForEach(lookbackOptions, id: \.self) { n in Text("\(n)").tag(n) }
+                        }
+                        .labelsHidden().pickerStyle(.menu).frame(width: 70)
+                        Text("meetings")
+                            .font(Typography.body)
+                            .foregroundStyle(theme.current.textMuted)
                     }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .frame(width: 70)
-                    Text("meetings")
-                        .font(Typography.body)
-                        .foregroundStyle(theme.current.textMuted)
+                    Spacer()
+                    Picker("", selection: $config.autoCodeLookbackByDays) {
+                        Text("by count").tag(false)
+                        Text("by age").tag(true)
+                    }
+                    .labelsHidden().pickerStyle(.segmented).frame(width: 150)
                 }
 
                 // Cadence: how often the auto-task timer fires while enabled.

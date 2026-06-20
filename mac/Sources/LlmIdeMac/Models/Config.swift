@@ -318,6 +318,17 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(autoCodeIntervalMinutes, forKey: "autoCodeIntervalMinutes") }
     }
 
+    /// Lookback mode for the meeting scan. false = by count (the historical
+    /// behaviour, uses `autoCodeUpdateLookbackCount`); true = by age in days
+    /// (uses `autoCodeLookbackDays`).
+    @Published var autoCodeLookbackByDays: Bool {
+        didSet { defaults.set(autoCodeLookbackByDays, forKey: "autoCodeLookbackByDays") }
+    }
+    /// Age window (days) for the by-age lookback mode.
+    @Published var autoCodeLookbackDays: Int {
+        didSet { defaults.set(autoCodeLookbackDays, forKey: "autoCodeLookbackDays") }
+    }
+
     /// Which review task types to include in the auto-run pipeline.
     @Published var autoCodeRunReviewCode: Bool {
         didSet { defaults.set(autoCodeRunReviewCode, forKey: "autoCodeRunReviewCode") }
@@ -482,6 +493,8 @@ final class AppConfig: ObservableObject {
         self.autoCodeUpdateEnabled = defaults.object(forKey: "autoCodeUpdateEnabled") as? Bool ?? false
         self.autoCodeUpdateLookbackCount = defaults.object(forKey: "autoCodeUpdateLookbackCount") as? Int ?? 5
         self.autoCodeIntervalMinutes = defaults.object(forKey: "autoCodeIntervalMinutes") as? Int ?? 60
+        self.autoCodeLookbackByDays = defaults.object(forKey: "autoCodeLookbackByDays") as? Bool ?? false
+        self.autoCodeLookbackDays = defaults.object(forKey: "autoCodeLookbackDays") as? Int ?? 7
         self.autoCodeRunReviewCode = defaults.object(forKey: "autoCodeRunReviewCode") as? Bool ?? true
         self.autoCodeRunReviewDoc = defaults.object(forKey: "autoCodeRunReviewDoc") as? Bool ?? true
         self.autoCodeRunReviewConflicts = defaults.object(forKey: "autoCodeRunReviewConflicts") as? Bool ?? false
