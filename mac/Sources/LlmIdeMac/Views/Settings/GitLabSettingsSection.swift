@@ -4,6 +4,7 @@ import GraphKit
 struct GitLabSettingsSection: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
+    @EnvironmentObject var projectStore: ProjectStore
     @Environment(LibraryItemStore.self) private var library
 
     @State private var gitLabTokenDraft: String = ""
@@ -452,9 +453,10 @@ struct GitLabSettingsSection: View {
                 // the user's intent and made the "Move to Clones
                 // folder" banner trip later. Production wants the
                 // path setting to be authoritative; no fallback.
-                // Configured <root>/Clones if a Paths root is set, else a
-                // sensible default — cloning isn't blocked by a missing root.
-                let baseDir = config.effectiveClonesURL
+                // When a project is open, clone INTO its code/ folder so the
+                // code is part of the project (and shows in its Explorer);
+                // otherwise fall back to the global Clones/ dir.
+                let baseDir = projectStore.activeProjectCodeDir ?? config.effectiveClonesURL
                 // trimmingCharacters strips trailing "/" so .last
                 // returns the repo name for URLs ending in `/`.
                 let rawSlug = repoURL
