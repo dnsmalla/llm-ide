@@ -279,11 +279,6 @@ final class AppConfig: ObservableObject {
     @Published var memorySubdir: String {
         didSet { defaults.set(memorySubdir, forKey: "memorySubdir") }
     }
-    /// Optional absolute path to the `understand-anything` CLI binary. Empty
-    /// means auto-discover from PATH + the usual install locations.
-    @Published var uaBinaryOverride: String {
-        didSet { defaults.set(uaBinaryOverride, forKey: "uaBinaryOverride") }
-    }
     /// Absolute paths to local source-code folders added directly by the user
     /// (outside of the GitHub/GitLab clone flow). Each path is indexed into
     /// the Library as a .code item so the Code Graph can scan it.
@@ -439,7 +434,6 @@ final class AppConfig: ObservableObject {
         self.clonesSubdir = storedClones.isEmpty ? AppConfig.defaultClonesSubdir : storedClones
         let storedMem = defaults.string(forKey: "memorySubdir") ?? ""
         self.memorySubdir = storedMem.isEmpty ? AppConfig.defaultMemorySubdir : storedMem
-        self.uaBinaryOverride = defaults.string(forKey: "uaBinaryOverride") ?? ""
         if let data = defaults.data(forKey: "localCodeFolders"),
            let decoded = decodeConfigOrStash([String].self, key: "localCodeFolders", data: data, defaults: defaults) {
             self.localCodeFolders = decoded
@@ -620,7 +614,6 @@ extension AppConfig {
             linkedRepo: nil,                // user picks via Settings on first run
             notesFolderRelative: nil,
             enabledPlugins: [],
-            uaBinaryOverride: uaBinaryOverride,
             regressionLookbackCount: autoCodeUpdateLookbackCount,
             agentPersona: nil,
             docTemplatesActive: [])

@@ -63,7 +63,6 @@ struct ProjectSettings: Codable, Equatable {
     var linkedRepo: LinkedRepo?
     var notesFolderRelative: String?
     var enabledPlugins: [String]
-    var uaBinaryOverride: String
     var regressionLookbackCount: Int
     var agentPersona: String?
     var docTemplatesActive: [String]
@@ -72,27 +71,22 @@ struct ProjectSettings: Codable, Equatable {
     // init(from:) which suppresses the synthesized one).
     init(language: String, activeCLI: String, linkedRepo: LinkedRepo? = nil,
          notesFolderRelative: String? = nil, enabledPlugins: [String],
-         uaBinaryOverride: String, regressionLookbackCount: Int,
+         regressionLookbackCount: Int,
          agentPersona: String? = nil, docTemplatesActive: [String]) {
         self.language = language
         self.activeCLI = activeCLI
         self.linkedRepo = linkedRepo
         self.notesFolderRelative = notesFolderRelative
         self.enabledPlugins = enabledPlugins
-        self.uaBinaryOverride = uaBinaryOverride
         self.regressionLookbackCount = regressionLookbackCount
         self.agentPersona = agentPersona
         self.docTemplatesActive = docTemplatesActive
     }
 
-    // Backward-compatible decoding: existing project.json files on disk
-    // still have `graphifyBinaryOverride`. Accept either key name.
     enum CodingKeys: String, CodingKey {
         case language, activeCLI, linkedRepo, notesFolderRelative
-        case enabledPlugins, uaBinaryOverride, regressionLookbackCount
+        case enabledPlugins, regressionLookbackCount
         case agentPersona, docTemplatesActive
-        // Legacy alias — kept so old project.json files still load.
-        case graphifyBinaryOverride
     }
 
     init(from decoder: Decoder) throws {
@@ -102,10 +96,6 @@ struct ProjectSettings: Codable, Equatable {
         linkedRepo = try c.decodeIfPresent(LinkedRepo.self, forKey: .linkedRepo)
         notesFolderRelative = try c.decodeIfPresent(String.self, forKey: .notesFolderRelative)
         enabledPlugins = try c.decode([String].self, forKey: .enabledPlugins)
-        // Try new key first, fall back to old key, default to empty.
-        uaBinaryOverride = (try? c.decode(String.self, forKey: .uaBinaryOverride))
-            ?? (try? c.decode(String.self, forKey: .graphifyBinaryOverride))
-            ?? ""
         regressionLookbackCount = try c.decode(Int.self, forKey: .regressionLookbackCount)
         agentPersona = try c.decodeIfPresent(String.self, forKey: .agentPersona)
         docTemplatesActive = try c.decode([String].self, forKey: .docTemplatesActive)
@@ -118,7 +108,6 @@ struct ProjectSettings: Codable, Equatable {
         try c.encodeIfPresent(linkedRepo, forKey: .linkedRepo)
         try c.encodeIfPresent(notesFolderRelative, forKey: .notesFolderRelative)
         try c.encode(enabledPlugins, forKey: .enabledPlugins)
-        try c.encode(uaBinaryOverride, forKey: .uaBinaryOverride)
         try c.encode(regressionLookbackCount, forKey: .regressionLookbackCount)
         try c.encodeIfPresent(agentPersona, forKey: .agentPersona)
         try c.encode(docTemplatesActive, forKey: .docTemplatesActive)

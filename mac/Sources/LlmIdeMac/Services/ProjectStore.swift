@@ -58,7 +58,7 @@ final class ProjectStore: ObservableObject {
     nonisolated static let fallbackDefaults = ProjectSettings(
         language: "en", activeCLI: "claudeCode", linkedRepo: nil,
         notesFolderRelative: nil, enabledPlugins: [],
-        uaBinaryOverride: "", regressionLookbackCount: 5,
+        regressionLookbackCount: 5,
         agentPersona: nil, docTemplatesActive: [])
 
     // MARK: - Public API

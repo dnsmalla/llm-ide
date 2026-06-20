@@ -76,10 +76,6 @@ struct PathsSettingsSection: View {
 
                 Divider().background(theme.current.border)
 
-                uaBinaryRow
-
-                Divider().background(theme.current.border)
-
                 localCodeFoldersSection
             }
         }
@@ -366,21 +362,6 @@ struct PathsSettingsSection: View {
             onSave: { config.memorySubdir = $0 },
             chooserKind: .none,
             hideLabel: true
-        )
-    }
-
-    // MARK: - UA binary
-
-    @ViewBuilder
-    private var uaBinaryRow: some View {
-        PathRow(
-            label: "UA binary",
-            help: "Absolute path to the `understand-anything` CLI. Leave empty to auto-discover from PATH or use `npx understand-anything`.",
-            placeholder: "npx understand-anything (leave empty to auto-discover)",
-            initialValue: config.uaBinaryOverride,
-            validate: { PathValidator.executableFile($0, allowEmpty: true) },
-            onSave: { config.uaBinaryOverride = $0 },
-            chooserKind: .file
         )
     }
 
