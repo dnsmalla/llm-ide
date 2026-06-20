@@ -13,6 +13,8 @@
 // selection falls back to "all fixed faults" (Phase D behaviour).
 
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 struct RegressionView: View {
     let api: LlmIdeAPIClient
@@ -42,8 +44,15 @@ struct RegressionView: View {
         // the meaning changed — without it every reworded answer
         // auto-reopens its fault.
         let judge = CodeAssistJudge(api: api)
-        _runner = StateObject(wrappedValue: RegressionRunner(prompter: prompter, judge: judge))
+        let repairer = AgentFaultRepairer(api: api)
+        _runner = StateObject(wrappedValue: RegressionRunner(
+            prompter: prompter, judge: judge,
+            verifier: ShellFaultVerifier(), repairer: repairer))
     }
+
+    /// Shared verify-command allowlist — consulted by the detail pane's
+    /// "Approve & enable" button and (via the runner) at verify time.
+    private let approvals = VerifyApprovalStore()
 
     var body: some View {
         // Fixed-width sources column (HSplitView overrides a child's width
@@ -68,6 +77,8 @@ struct RegressionView: View {
                 running: runner.running,
                 hasRepo: activeRepoRoot != nil,
                 results: runner.results,
+                approvals: approvals,
+                repoRoot: activeRepoRoot,
                 onRun: { Task { await runSelected() } }
             )
             .frame(minWidth: 360, maxWidth: .infinity)
@@ -115,7 +126,10 @@ struct RegressionView: View {
     private func runSelected() async {
         guard let repo = activeRepoRoot else { return }
         let only = checked.isEmpty ? nil : checked
-        await runner.run(at: repo, only: only, autoReopen: config.regressionAutoReopen)
+        runner.applyTimeout(config.regressionVerifyTimeout)
+        await runner.run(at: repo, only: only,
+                         autoReopen: config.regressionAutoReopen,
+                         attemptRepair: config.regressionAttemptRepair)
     }
 
     private func markFixed(_ url: URL) async {
@@ -361,6 +375,8 @@ private struct RegressionDetailPane: View {
     let running: Bool
     let hasRepo: Bool
     let results: [RegressionRunner.Result]
+    let approvals: VerifyApprovalStore
+    let repoRoot: URL?
     let onRun: () -> Void
 
     @EnvironmentObject var theme: ThemeStore
@@ -399,6 +415,16 @@ private struct RegressionDetailPane: View {
             .controlSize(.small)
             .disabled(running)
             .help("When on, a regressed verdict flips the fault back to “open” on disk. Off (default) reports drift without modifying any files — the verdict is a heuristic text comparison.")
+
+            Button("Export pack…") { exportPack() }
+                .buttonStyle(.bordered).controlSize(.small).disabled(running || !hasRepo)
+            Button("Import pack…") { importPack() }
+                .buttonStyle(.bordered).controlSize(.small).disabled(running || !hasRepo)
+            HStack(spacing: 4) {
+                Text("timeout").font(Typography.caption).foregroundStyle(t.textMuted)
+                TextField("120", value: $config.regressionVerifyTimeout, format: .number)
+                    .frame(width: 50).textFieldStyle(.roundedBorder)
+            }
 
             Spacer()
             if case .fault(let url) = selected,
@@ -450,6 +476,39 @@ private struct RegressionDetailPane: View {
                             .font(Typography.body)
                             .foregroundStyle(t.text)
                             .textSelection(.enabled)
+                    }
+
+                    sectionHeader("Verify command")
+                    if let cmd = fault.verify, !cmd.isEmpty {
+                        Text(cmd).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+                        if let repo = repoRoot,
+                           !approvals.isApproved(repo: repo, faultFile: url.lastPathComponent, command: cmd) {
+                            Button("Approve & enable") {
+                                approvals.approve(repo: repo, faultFile: url.lastPathComponent, command: cmd)
+                            }
+                            .buttonStyle(.borderedProminent).controlSize(.small)
+                        }
+                    } else {
+                        Text("no check — uses answer comparison")
+                            .font(Typography.caption).foregroundStyle(t.textMuted)
+                    }
+
+                    if let r = results.first(where: { $0.faultURL.standardizedFileURL.path == url.standardizedFileURL.path }),
+                       isRepairVerdict(r.verdict),
+                       let repo = repoRoot,
+                       let diff = try? config.memoryStore.gitDiff(at: repo), !diff.unified.isEmpty {
+                        sectionHeader("Repair diff")
+                        ScrollView { Text(diff.unified).font(.system(size: 10, design: .monospaced)).textSelection(.enabled) }
+                            .frame(maxHeight: 240)
+                        HStack {
+                            Button("Approve (mark fixed)") {
+                                try? config.memoryStore.markFixed(at: url, verify: fault.verify)
+                            }.buttonStyle(.borderedProminent).controlSize(.small)
+                            Button("Discard (revert + reopen)") {
+                                try? config.memoryStore.gitCheckout(at: repo, paths: r.repairedPaths)
+                                try? config.memoryStore.updateFaultStatus(at: url, to: .open)
+                            }.buttonStyle(.bordered).controlSize(.small)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -571,6 +630,29 @@ private struct RegressionDetailPane: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(color)
         }
+    }
+
+    private func isRepairVerdict(_ v: RegressionRunner.Verdict) -> Bool {
+        if case .repaired = v { return true }
+        if case .repairFailed = v { return true }
+        return false
+    }
+
+    private func exportPack() {
+        guard let repo = repoRoot else { return }
+        let store = config.memoryStore
+        let faults = store.listFaults(at: repo).compactMap { try? store.loadFault(at: $0) }
+        guard let data = try? FaultPackService(store: store)
+            .export(faults: faults, sourceProject: repo.lastPathComponent, exportedAt: Date()) else { return }
+        let panel = NSSavePanel(); panel.nameFieldStringValue = "faults-pack.json"
+        if panel.runModal() == .OK, let url = panel.url { try? data.write(to: url) }
+    }
+
+    private func importPack() {
+        guard let repo = repoRoot else { return }
+        let panel = NSOpenPanel(); panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) else { return }
+        _ = try? FaultPackService(store: config.memoryStore).importPack(data: data, into: repo)
     }
 
 }
