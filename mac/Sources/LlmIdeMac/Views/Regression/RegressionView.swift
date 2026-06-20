@@ -55,7 +55,8 @@ struct RegressionView: View {
                 faultStatuses: faultStatuses,
                 checked: $checked,
                 selected: $selected,
-                results: runner.results
+                results: runner.results,
+                onMarkFixed: { url in Task { await markFixed(url) } }
             )
             .frame(width: 300)
             Divider()
@@ -116,6 +117,20 @@ struct RegressionView: View {
         let only = checked.isEmpty ? nil : checked
         await runner.run(at: repo, only: only, autoReopen: config.regressionAutoReopen)
     }
+
+    private func markFixed(_ url: URL) async {
+        guard let repo = activeRepoRoot else { return }
+        let store = config.memoryStore
+        // Flip to fixed immediately so the UI reflects it…
+        try? store.updateFaultStatus(at: url, to: .fixed)
+        await refresh()
+        // …then author a verify command in the background and patch it in.
+        if let fault = try? store.loadFault(at: url),
+           let cmd = await VerifyCommandAuthor.author(fault: fault, repoRoot: repo, api: api) {
+            try? store.markFixed(at: url, verify: cmd)
+            await refresh()
+        }
+    }
 }
 
 // MARK: - Sources pane
@@ -127,6 +142,7 @@ private struct RegressionSourcesPane: View {
     @Binding var checked: Set<URL>
     @Binding var selected: RegressionView.SourceSelection?
     let results: [RegressionRunner.Result]
+    let onMarkFixed: (URL) -> Void
 
     @EnvironmentObject var theme: ThemeStore
     @Environment(LibraryItemStore.self) private var libraryStore
@@ -304,6 +320,9 @@ private struct RegressionSourcesPane: View {
         .listRowSeparator(.hidden)
         .background(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
         .contextMenu {
+            if status != .fixed {
+                Button("Mark as fixed") { onMarkFixed(url) }
+            }
             Button("Reveal in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             }
