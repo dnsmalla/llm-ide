@@ -213,6 +213,23 @@ final class BackendManager {
         }
     }
 
+    /// Re-probe `/health` and reconcile a STALE `.running` status. An adopted
+    /// external server (or any backend) that dies has no terminationHandler to
+    /// flip us out of `.running`, so a live connection failure can contradict
+    /// the cached status — which is how the login screen ends up showing
+    /// "Could not reach the server" and "Server is running" at the same time.
+    /// Callers invoke this when they observe the server as unreachable. Only
+    /// downgrades from `.running`; never touches a `.starting`/spawning backend.
+    func reconcileHealthAfterFailure() async {
+        guard case .running = status else { return }
+        if await Self.probeHealth() == false {
+            append("--- /health re-probe failed; backend marked stopped (was stale .running) ---", stream: .info)
+            adoptedExternal = false
+            pid = nil
+            status = .stopped
+        }
+    }
+
     private func spawn(nodePath: String, workURL: URL) {
         status = .starting
         lastError = nil

@@ -360,6 +360,11 @@ struct LoginView: View {
                     error = APIError.network(underlying).localizedDescription
                     serverUnreachable = isRefused
                 }
+                // A live connection-refused contradicts a cached `.running`
+                // status (e.g. an adopted backend that has since died). Re-probe
+                // so the banner reflects reality — otherwise it shows both
+                // "Could not reach the server" and "Server is running".
+                if isRefused { await backend.reconcileHealthAfterFailure() }
             } catch {
                 await MainActor.run {
                     self.error = error.localizedDescription
