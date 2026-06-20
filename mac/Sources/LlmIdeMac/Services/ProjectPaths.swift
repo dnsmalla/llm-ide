@@ -3,21 +3,21 @@ import Foundation
 /// Pure path-routing rules for the single-source project layout.
 /// No I/O — these decide *where* a file belongs; the store does the move.
 enum ProjectPaths {
-    /// Image extensions always live under assets/, regardless of the
+    /// Image extensions always live under data/, regardless of the
     /// section the user added from.
     static let imageExtensions: Set<String> = [
         "png", "jpg", "jpeg", "gif", "heic", "heif", "webp", "bmp", "tiff", "svg"
     ]
 
-    /// The canonical subfolder a file belongs in.
+    /// The canonical subfolder a file belongs in. Images fold into data/.
     static func subfolder(for category: LibraryItem.Category, fileName: String) -> String {
         let ext = (fileName as NSString).pathExtension.lowercased()
-        if imageExtensions.contains(ext) { return "assets" }
+        if imageExtensions.contains(ext) { return "data" }
         switch category {
         case .code:     return "code"
         case .data:     return "data"
         case .notes:    return "notes"
-        case .meetings: return "meetings"
+        case .meetings: return "source"
         }
     }
 
