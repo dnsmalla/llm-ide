@@ -312,6 +312,12 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(autoCodeUpdateLookbackCount, forKey: "autoCodeUpdateLookbackCount") }
     }
 
+    /// How often the auto-task timer fires, in minutes. Drives the
+    /// repeating scheduler in AutoCodeUpdateService (was a hardcoded 60).
+    @Published var autoCodeIntervalMinutes: Int {
+        didSet { defaults.set(autoCodeIntervalMinutes, forKey: "autoCodeIntervalMinutes") }
+    }
+
     /// Which review task types to include in the auto-run pipeline.
     @Published var autoCodeRunReviewCode: Bool {
         didSet { defaults.set(autoCodeRunReviewCode, forKey: "autoCodeRunReviewCode") }
@@ -475,6 +481,7 @@ final class AppConfig: ObservableObject {
         }
         self.autoCodeUpdateEnabled = defaults.object(forKey: "autoCodeUpdateEnabled") as? Bool ?? false
         self.autoCodeUpdateLookbackCount = defaults.object(forKey: "autoCodeUpdateLookbackCount") as? Int ?? 5
+        self.autoCodeIntervalMinutes = defaults.object(forKey: "autoCodeIntervalMinutes") as? Int ?? 60
         self.autoCodeRunReviewCode = defaults.object(forKey: "autoCodeRunReviewCode") as? Bool ?? true
         self.autoCodeRunReviewDoc = defaults.object(forKey: "autoCodeRunReviewDoc") as? Bool ?? true
         self.autoCodeRunReviewConflicts = defaults.object(forKey: "autoCodeRunReviewConflicts") as? Bool ?? false

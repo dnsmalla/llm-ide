@@ -41,8 +41,11 @@ final class AutoCodeUpdateService: ObservableObject {
     private let log = Logger(subsystem: "com.llmide.macapp", category: "AutoCodeUpdateService")
 
     private var timer: Timer?
-    private static let timerInterval: TimeInterval = 3600
+    /// Floor for the configurable cadence so a 0/garbage value can't spin
+    /// the timer hot.
+    private static let minIntervalMinutes = 5
     private var cancellable: AnyCancellable?
+    private var intervalCancellable: AnyCancellable?
     /// The in-flight run, so it can be cancelled (Stop button / timer
     /// shutdown). nil when no run is active.
     private var runTask: Task<Void, Never>?
@@ -67,6 +70,15 @@ final class AutoCodeUpdateService: ObservableObject {
                 self.isEnabled = value
                 if !value { self.stop() }
             }
+        // Reschedule the timer when the user changes the cadence — but only
+        // while a timer is live (i.e. auto-tasks are enabled). dropFirst so
+        // the initial value doesn't reschedule before start() runs.
+        intervalCancellable = config.$autoCodeIntervalMinutes
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self, self.timer != nil else { return }
+                self.scheduleTimer()
+            }
     }
 
     /// Backwards-compat init for callers still passing a GitLabClient.
@@ -90,7 +102,16 @@ final class AutoCodeUpdateService: ObservableObject {
         if let saveErr = registry.initSaveError {
             setError("Action history failed to save on startup: \(saveErr.localizedDescription)")
         }
-        timer = Timer.scheduledTimer(withTimeInterval: Self.timerInterval, repeats: true) { [weak self] _ in
+        scheduleTimer()
+    }
+
+    /// (Re)create the repeating timer at the user's configured cadence.
+    /// Invalidates any existing timer first, so it's safe to call on an
+    /// interval change.
+    private func scheduleTimer() {
+        timer?.invalidate()
+        let minutes = max(Self.minIntervalMinutes, config.autoCodeIntervalMinutes)
+        timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(minutes * 60), repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in self.runNow() }
         }

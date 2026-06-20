@@ -7,6 +7,19 @@ struct AutoCodeSettingsSection: View {
     @Environment(ShellState.self) private var shell
 
     private let lookbackOptions = [1, 3, 5, 10, 20]
+    /// Cadence options in minutes. Floor matches AutoCodeUpdateService.minIntervalMinutes.
+    private let intervalOptions = [5, 15, 30, 60, 180, 360, 720, 1440]
+
+    private func intervalLabel(_ minutes: Int) -> String {
+        switch minutes {
+        case ..<60:  return "\(minutes) min"
+        case 60:     return "1 hour"
+        case 1440:   return "24 hours"
+        default:
+            let h = minutes / 60
+            return "\(h) hours"
+        }
+    }
 
     var body: some View {
         SettingsSectionCard(icon: "arrow.triangle.2.circlepath.circle", title: "Auto Tasks") {
@@ -45,6 +58,24 @@ struct AutoCodeSettingsSection: View {
                     .frame(width: 70)
                     Text("meetings")
                         .font(Typography.body)
+                        .foregroundStyle(theme.current.textMuted)
+                }
+
+                // Cadence: how often the auto-task timer fires while enabled.
+                HStack(spacing: Spacing.md) {
+                    Text("Run every")
+                        .font(Typography.body)
+                        .foregroundStyle(theme.current.textMuted)
+                    Picker("", selection: $config.autoCodeIntervalMinutes) {
+                        ForEach(intervalOptions, id: \.self) { m in
+                            Text(intervalLabel(m)).tag(m)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 110)
+                    Text("(only while the app is open)")
+                        .font(Typography.caption)
                         .foregroundStyle(theme.current.textMuted)
                 }
 
