@@ -351,7 +351,8 @@ final class AutoCodeUpdateService: ObservableObject {
         }
         let repoRoot = URL(fileURLWithPath: localPath, isDirectory: true)
         let prompter = CodeAssistPrompter(api: api, agent: config.activeCLI)
-        let runner = RegressionRunner(prompter: prompter, config: config)
+        let judge = CodeAssistJudge(api: api)
+        let runner = RegressionRunner(prompter: prompter, judge: judge, config: config)
         await runner.run(at: repoRoot, autoReopen: config.regressionAutoReopen)
         // RegressionRunner's published `results` lives on its own
         // lifetime — we read once after the await for the summary.
@@ -360,7 +361,8 @@ final class AutoCodeUpdateService: ObservableObject {
         if total == 0 {
             taskErrors.removeValue(forKey: AutoTask.regression.rawValue)
         } else if regressed > 0 {
-            taskErrors[AutoTask.regression.rawValue] = "Regression: \(regressed)/\(total) regressed (auto-reopened)."
+            let reopened = config.regressionAutoReopen ? " (auto-reopened)" : ""
+            taskErrors[AutoTask.regression.rawValue] = "Regression: \(regressed)/\(total) regressed\(reopened)."
         } else {
             taskErrors.removeValue(forKey: AutoTask.regression.rawValue)
         }

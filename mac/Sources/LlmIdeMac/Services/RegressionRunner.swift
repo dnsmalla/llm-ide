@@ -107,8 +107,13 @@ final class RegressionRunner: ObservableObject {
     ///     Default `false` — the verdict comparison is heuristic
     ///     (text-difference), so a run must NOT silently mutate files
     ///     unless the user explicitly opts in.
-    func run(at repoRoot: URL, only: Set<URL>? = nil, autoReopen: Bool = false) async {
+    func run(at repoRoot: URL, only: Set<URL>? = nil, autoReopen requestedAutoReopen: Bool = false) async {
         running = true
+        // Auto-reopen mutates files on disk. The exact-match verdict is a
+        // heuristic; without a semantic judge to confirm textual drift is a
+        // real regression, reopening would corrupt fault files on every
+        // reworded LLM answer. Refuse the unsafe combination.
+        let autoReopen = requestedAutoReopen && judge != nil
         let startedAt = Date()
         defer {
             running = false

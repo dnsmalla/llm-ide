@@ -33,6 +33,15 @@ struct RegressionGateTests {
         return try store.writeFault(at: repo, fault)
     }
 
+    /// Fake judge that always returns `false` (semantically different),
+    /// so textually-drifted answers are confirmed as genuine regressions
+    /// and auto-reopen is allowed to proceed.
+    final class AlwaysRegressJudge: RegressionJudge {
+        func sameMeaning(prompt: String, original: String, current: String) async throws -> Bool {
+            return false   // never the same meaning → genuine regression → reopen
+        }
+    }
+
     @Test func exportedCSVReflectsRegressionAndUnchangedStatus() async throws {
         let repo = try tmpRepo()
         defer { try? FileManager.default.removeItem(at: repo) }
@@ -50,7 +59,9 @@ struct RegressionGateTests {
         prompter.replies["regress-q"] = "drifted-answer"   // differs → regressed
         prompter.replies["steady-q"]  = "steady-answer"    // same → unchanged
 
-        let runner = RegressionRunner(prompter: prompter, store: store)
+        // A judge is required to allow auto-reopen. AlwaysRegressJudge confirms
+        // every textual drift as a genuine regression so the fault is reopened.
+        let runner = RegressionRunner(prompter: prompter, judge: AlwaysRegressJudge(), store: store)
         await runner.run(at: repo, autoReopen: true)
 
         // The run exported a fresh CSV.
@@ -68,5 +79,23 @@ struct RegressionGateTests {
         // And the on-disk fault file matches.
         let reloaded = try store.loadFault(at: regressedURL)
         #expect(reloaded.status == .open)
+    }
+
+    @Test func noJudgeWithAutoReopenDoesNotMutateDiskOnTextualDrift() async throws {
+        let repo = try tmpRepo()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let store = MemoryStore()
+        let url = try writeFault(store, at: repo, prompt: "q",
+                                 response: "the answer is 42", status: .fixed,
+                                 reportedAt: Date(timeIntervalSince1970: 1_716_465_600))
+        let prompter = FakePrompter()
+        prompter.replies["q"] = "the answer is forty-two"   // textual drift, same meaning
+
+        // No judge supplied + autoReopen requested → MUST refuse to reopen.
+        let runner = RegressionRunner(prompter: prompter, judge: nil, store: store)
+        await runner.run(at: repo, autoReopen: true)
+
+        let reloaded = try store.loadFault(at: url)
+        #expect(reloaded.status == .fixed)   // not flipped to .open
     }
 }
