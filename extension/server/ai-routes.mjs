@@ -1,6 +1,7 @@
 import { runClaude, runClaudeStream, resolveLanguage } from '../agents/runtime.mjs';
 import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON } from '../core/utils.mjs';
 import { handleCodeAssist } from '../llm_agent/runtime/route.mjs';
+import { resolveTierModel } from '../llm_agent/runtime/model-tier.mjs';
 import * as kb from '../kb/db.mjs';
 import { scanForSecrets } from '../guardrails/scan.mjs';
 import { sanitizePersonaSuffix } from '../agents/prompt-utils.mjs';
@@ -309,8 +310,7 @@ export async function handleAIRoutes(req, res) {
 
     prompt += `# User\n${message}\n\nAssistant:`;
 
-    const tierModel = body.model
-      || (body.tier === 'subagent' ? process.env.LLMIDE_SUBAGENT_MODEL : undefined);
+    const tierModel = resolveTierModel(body);
 
     try {
       if (body.agentContext) {
