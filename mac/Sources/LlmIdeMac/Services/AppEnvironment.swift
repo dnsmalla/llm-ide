@@ -13,25 +13,25 @@ final class AppEnvironment {
     private let projectRoot: URL?
 
     /// - Parameter indexRootURL: Directory that contains (or will contain)
-    ///   the `.llmide/index.sqlite` file.  Pass the **project root** when
-    ///   a project is open so the index lands in `project/.llmide/` (the
-    ///   canonical, scaffolded location) instead of `meetings/.llmide/`.
+    ///   the `system/index.sqlite` file.  Pass the **project root** when
+    ///   a project is open so the index lands in `project/system/` (the
+    ///   canonical, scaffolded location) instead of inside `meetings/system/`.
     ///   Pass `nil` when no project is active — the notes folder itself is
     ///   used as the root (legacy behaviour for standalone/no-project mode).
     init(indexRootURL: URL? = nil) throws {
         let config = NotesFolderConfig()
         let folder = config.currentFolder
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        // Place the SQLite index at <indexRoot>/.llmide/index.sqlite.
+        // Place the SQLite index at <indexRoot>/system/index.sqlite.
         // When a project is open indexRootURL is the project root, so the
-        // index lives in the scaffolded .llmide/ dir alongside project.json
-        // and sync.json — not buried inside meetings/.llmide/.
+        // index lives in the scaffolded system/ dir alongside project.json
+        // and sync.json — not buried inside meetings/system/.
         let idxRoot = indexRootURL ?? folder
         try FileManager.default.createDirectory(
-            at: idxRoot.appendingPathComponent(".llmide"),
+            at: idxRoot.appendingPathComponent("system"),
             withIntermediateDirectories: true)
         let idx = try MeetingIndex(
-            url: idxRoot.appendingPathComponent(".llmide/index.sqlite"))
+            url: idxRoot.appendingPathComponent("system/index.sqlite"))
         let indexer = FolderIndexer(root: folder, index: idx)
         self.notesConfig = config
         self.index = idx
