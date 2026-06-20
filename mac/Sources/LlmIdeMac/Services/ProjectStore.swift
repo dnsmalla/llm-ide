@@ -25,6 +25,13 @@ final class ProjectStore: ObservableObject {
 
     @Published private(set) var activeProject: ActiveProject?
     @Published private(set) var recents: [RecentEntry] = []
+
+    /// The active project's `code/` directory, when a project is open. Repo
+    /// clones land here so the code is part of the project (and shows in its
+    /// Explorer), rather than in a detached global Clones/ folder.
+    var activeProjectCodeDir: URL? {
+        activeProject.map { ProjectLayout(root: URL(fileURLWithPath: $0.localPath)).codeDir }
+    }
     /// True while an async export is running — drives the close-progress UI.
     @Published private(set) var isExporting = false
     /// Set when a corrupt projects.json was archived on launch; the Welcome

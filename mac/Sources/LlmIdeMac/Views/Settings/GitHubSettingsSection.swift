@@ -410,10 +410,11 @@ struct GitHubSettingsSection: View {
                 let localURL = URL(fileURLWithPath: existingPath)
                 try await repoManager.pull(at: localURL, token: token, backend: .github)
             } else {
-                // Clones go to <root>/Clones when a Paths root is set, else a
-                // sensible default — so cloning works even while a project is
-                // active and the global root can't be edited.
-                let baseDir = config.effectiveClonesURL
+                // When a project is open, clone INTO its code/ folder so the
+                // code is part of the project (and shows in its Explorer).
+                // With no active project, fall back to the global Clones/ dir.
+                let intoProject = projectStore.activeProjectCodeDir != nil
+                let baseDir = projectStore.activeProjectCodeDir ?? config.effectiveClonesURL
                 try? FileManager.default.createDirectory(
                     at: baseDir, withIntermediateDirectories: true)
                 let destURL = baseDir.appendingPathComponent(name)
@@ -422,19 +423,20 @@ struct GitHubSettingsSection: View {
                     config.gitHubSavedRepos[idx].localPath = destURL.path
                     config.gitHubSavedRepos[idx].defaultBranch = branch
                 }
-                // A bare git clone has no `system/`, `source/`, `notes/`
-                // or `code/` — so "Open Folder" would reject it as "not a
-                // LLM IDE project". Adopt the freshly-cloned repo as a
-                // project: write project.json + scaffold the tree (the repo's
-                // own README is preserved). Non-fatal — the clone itself
-                // already succeeded.
-                do {
-                    try projectStore.ensureProjectScaffold(at: destURL)
-                } catch {
-                    cloneErrors[r.id] = "Cloned, but couldn't initialize LLM IDE project: \(error.localizedDescription)"
+                // Only when cloning STANDALONE (no active project) do we adopt
+                // the bare clone as its own LLM IDE project so "Open Folder"
+                // accepts it. A clone inside the active project's code/ is
+                // already part of that project — don't scaffold a nested one.
+                if !intoProject {
+                    do {
+                        try projectStore.ensureProjectScaffold(at: destURL)
+                    } catch {
+                        cloneErrors[r.id] = "Cloned, but couldn't initialize LLM IDE project: \(error.localizedDescription)"
+                    }
                 }
-                // Prune stale entries (older clone at a different
-                // path) before re-indexing — same hygiene as GitLab.
+                // Prune stale entries (older clone at a different path) before
+                // re-indexing. addFolder detects an inside-project path and
+                // just rescans, so project/code clones index correctly.
                 library.removeFolder(folderOrigin: destURL.lastPathComponent)
                 library.addFolder(url: destURL, category: .code)
             }
