@@ -7,7 +7,7 @@ import Foundation
 /// adopted as a project (see GitHubSettingsSection / GitLabSettingsSection), so
 /// when the user is working in a repo it IS the active project and the root is
 /// its folder. A fresh project with no repo set up roots at its own folder
-/// (meetings/notes/plans/assets/code/data) — it must NOT inherit whichever repo
+/// (source/code/data/notes) — it must NOT inherit whichever repo
 /// happened to be marked active globally in Settings, which is the bug this
 /// ordering fixes. The globally-active cloned repo is only a fallback for the
 /// no-active-project case (e.g. first launch / repo-only usage).

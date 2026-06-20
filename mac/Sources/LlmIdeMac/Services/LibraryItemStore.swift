@@ -86,12 +86,8 @@ final class LibraryItemStore {
     /// Canonical subfolders scanned into the index, mirroring the Library
     /// sections.  Captured transcripts live in `source/`; images fold into
     /// `data/`.
-    nonisolated private static let scanFolders: [(subfolder: String, category: LibraryItem.Category)] = [
-        ("source", .meetings),
-        ("code",   .code),
-        ("data",   .data),
-        ("notes",  .notes),
-    ]
+    nonisolated private static let scanFolders: [(subfolder: String, category: LibraryItem.Category)] =
+        ProjectLayout.userFolders.map { (subfolder: $0.name, category: $0.category) }
 
     /// Classify a `source/` file as a captured meeting or ingested mail by
     /// reading the `platform` field from its `.md` frontmatter. Best-effort:

@@ -1,6 +1,6 @@
 import Foundation
 
-/// On-disk per-project bundle. Stored at <projectFolder>/.llmide/project.json.
+/// On-disk per-project bundle. Stored at <projectFolder>/system/project.json.
 struct Project: Codable, Equatable, Identifiable {
     let schemaVersion: Int
     let id: String

@@ -422,7 +422,7 @@ struct AppShell: View {
     private func initEnv() {
         do {
             // When a project is open, put the SQLite index in the project's
-            // canonical .llmide/ directory (alongside project.json and
+            // canonical system/ directory (alongside project.json and
             // sync.json), not inside meetings/.llmide/ where it would be
             // unscaffolded and harder to gitignore.
             let indexRoot = projectStore.activeProject

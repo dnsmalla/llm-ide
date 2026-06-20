@@ -229,12 +229,12 @@ final class AutoCodeUpdateService: ObservableObject {
         let notesFolderURL = NotesFolderConfig().currentFolder
 
         // 1. Extract actions from recent notes.
-        // The SQLite index lives in the project root's .llmide/ (not in
-        // meetings/.llmide/) when a project is open — mirror AppEnvironment's
-        // indexRootURL logic so both always agree on the file location.
+        // The SQLite index lives at <projectRoot>/system/index.sqlite (via
+        // ProjectLayout.indexDB) when a project is open, matching what
+        // AppEnvironment constructs — both always agree on the file location.
         let indexRoot = projectStore?.activeProject
             .map { URL(fileURLWithPath: $0.localPath) } ?? notesFolderURL
-        let indexURL = indexRoot.appendingPathComponent(".llmide/index.sqlite")
+        let indexURL = ProjectLayout(root: indexRoot).indexDB
         let index: MeetingIndex
         do {
             index = try MeetingIndex(url: indexURL)

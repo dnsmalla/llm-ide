@@ -112,7 +112,7 @@ final class ProjectStore: ObservableObject {
         NotificationCenter.default.post(name: .notesFolderChanged, object: nil)
     }
 
-    /// Adopt `folderURL` as a LLM IDE project: write `.llmide/project.json`
+    /// Adopt `folderURL` as a LLM IDE project: write `system/project.json`
     /// and the canonical folder tree if they don't already exist. Idempotent —
     /// safe on an existing project (returns its bundle unchanged).
     ///
@@ -190,7 +190,7 @@ final class ProjectStore: ObservableObject {
                     project:   ap.bundle,
                     folderURL: folderURL,
                     client:    client)
-                log.info("project export ok — \(result.meetingsWritten) meetings, \(result.plansWritten) plans, \(result.durationMs)ms")
+                log.info("project export ok — \(result.meetingsWritten) meetings, \(result.durationMs)ms")
             } catch {
                 log.error("project export failed (close will proceed): \(error.localizedDescription, privacy: .public)")
             }
@@ -223,7 +223,7 @@ final class ProjectStore: ObservableObject {
             project:   ap.bundle,
             folderURL: folderURL,
             client:    client)
-        log.info("manual export ok — \(result.meetingsWritten) meetings, \(result.plansWritten) plans")
+        log.info("manual export ok — \(result.meetingsWritten) meetings")
         return result
     }
 

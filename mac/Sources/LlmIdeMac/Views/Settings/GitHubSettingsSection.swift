@@ -422,8 +422,8 @@ struct GitHubSettingsSection: View {
                     config.gitHubSavedRepos[idx].localPath = destURL.path
                     config.gitHubSavedRepos[idx].defaultBranch = branch
                 }
-                // A bare git clone has no `.llmide/`, `meetings/`, `notes/`
-                // or `plans/` — so "Open Folder" would reject it as "not a
+                // A bare git clone has no `system/`, `source/`, `notes/`
+                // or `code/` — so "Open Folder" would reject it as "not a
                 // LLM IDE project". Adopt the freshly-cloned repo as a
                 // project: write project.json + scaffold the tree (the repo's
                 // own README is preserved). Non-fatal — the clone itself

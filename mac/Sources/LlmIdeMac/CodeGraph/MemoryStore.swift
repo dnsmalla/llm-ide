@@ -15,7 +15,7 @@ import Foundation
 
 public struct MemoryStore: Sendable {
     /// Subdir under the repo where memory files live. Defaults to
-    /// the conventional `.understand-anything/memory`; tests + callers can
+    /// the conventional `system/faults`; tests + callers can
     /// override it. Settings UI rejects absolute paths and `..`
     /// segments via PathValidator.memorySubdir, so by the time a
     /// value lands here it's always a clean relative path.
@@ -93,7 +93,7 @@ public struct MemoryStore: Sendable {
 
     // MARK: - Fault writes (Phase B)
 
-    /// Write a new fault report under `<repo>/.understand-anything/memory/faults/`.
+    /// Write a new fault report under `<repo>/system/faults/`.
     /// File name comes from `fault.suggestedFileName()` (ISO timestamp +
     /// slug) so listings naturally sort chronologically. Creates the
     /// faults/ dir if needed; throws on FS errors or YAML serialisation
@@ -251,7 +251,7 @@ public struct MemoryStore: Sendable {
 
     // MARK: - Q&A writes (Phase C)
 
-    /// Write a saved Q&A under `<repo>/.understand-anything/memory/q&a/`.
+    /// Write a saved Q&A under `<repo>/system/faults/q&a/`.
     /// Same naming convention as faults — ISO timestamp + slug, so
     /// directory listings are chronological.
     @discardableResult
@@ -274,7 +274,7 @@ public struct MemoryStore: Sendable {
     it on every prompt via the Understand-Anything skill.
 
     > ⚠️ Don't paste secrets here. This file is checked in alongside the
-    > rest of the .understand-anything/ dir.
+    > rest of the system/faults/ dir.
 
     ## Stack
 

@@ -264,7 +264,7 @@ final class AppConfig: ObservableObject {
     /// default (`dataRoot / clonesSubdir`). Empty string = "not yet
     /// configured"; clones then fall back to `defaultClonesFallback`.
     /// Each project owns its own canonical folder tree
-    /// (meetings/plans/notes/assets/code/data) under its own folder —
+    /// (source/code/data/notes) under its own folder —
     /// not under this root.
     @Published var dataRoot: String {
         didSet { defaults.set(dataRoot, forKey: "dataRoot") }
@@ -342,7 +342,7 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(autoCodeRunReviewConflicts, forKey: "autoCodeRunReviewConflicts") }
     }
     /// Whether the Auto Code Update run also fires a regression sweep
-    /// against `<repo>/.understand-anything/memory/faults/` (re-asks every
+    /// against `<repo>/system/faults/` (re-asks every
     /// `status: fixed` fault, auto-reopens regressions). Off by default
     /// — the sweep can be slow on a big fault archive and uses LLM
     /// turns, so users opt in.
@@ -597,7 +597,7 @@ extension AppConfig {
 extension AppConfig {
     /// Snapshot of current AppConfig values projected into a
     /// ProjectSettings shape. Used by ProjectStore.openFolder when
-    /// it materialises `<folder>/.llmide/project.json` for the
+    /// it materialises `<folder>/system/project.json` for the
     /// first time. After Phase 1, AppConfig retains these fields
     /// for back-compat but project-scoped call sites consult the
     /// active Project's bundle instead.

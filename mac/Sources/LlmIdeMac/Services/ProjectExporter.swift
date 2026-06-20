@@ -18,7 +18,7 @@ import os.log
 /// ```
 ///
 /// **ID suffix** — every filename ends with the last 8 chars of the item's ID
-/// so two meetings/plans with identical titles on the same date never collide.
+/// so two meetings/source items with identical titles on the same date never collide.
 ///
 /// **YAML safety** — all frontmatter values are double-quoted via `yamlScalar()`.
 ///
