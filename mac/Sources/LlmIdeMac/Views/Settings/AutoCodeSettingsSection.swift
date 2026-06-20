@@ -65,6 +65,17 @@ struct AutoCodeSettingsSection: View {
                         taskToggle("Review Conflicts", icon: "exclamationmark.triangle",  binding: $config.autoCodeRunReviewConflicts)
                         taskToggle("Regression",       icon: "arrow.uturn.backward.circle", binding: $config.autoCodeRunRegression)
                     }
+                    taskToggle("Attempt repair on regression", icon: "wrench.and.screwdriver",
+                               binding: $config.regressionAttemptRepair)
+                    taskToggle("Auto-reopen regressed faults", icon: "arrow.uturn.backward",
+                               binding: $config.regressionAutoReopen)
+                    HStack {
+                        Image(systemName: "timer").font(.system(size: 12))
+                        Text("Verify timeout (s)").font(Typography.caption)
+                        Spacer()
+                        TextField("120", value: $config.regressionVerifyTimeout, format: .number)
+                            .frame(width: 60).textFieldStyle(.roundedBorder)
+                    }
                 }
 
                 Divider().background(theme.current.border)

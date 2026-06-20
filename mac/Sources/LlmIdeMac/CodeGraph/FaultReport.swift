@@ -45,6 +45,11 @@ enum FaultStatus: String, Codable, CaseIterable, Identifiable {
 
 
 struct FaultReport: Equatable {
+    enum VerifyKind: String, Codable, CaseIterable, Identifiable {
+        case command
+        var id: String { rawValue }
+    }
+
     var prompt: String
     var response: String
     var notes: String
@@ -58,6 +63,14 @@ struct FaultReport: Equatable {
     var agent: String
     var status: FaultStatus
     var tags: [String]
+    /// Agent-authored shell command, runnable from the repo root, that
+    /// FAILS (non-zero exit) when this fault is present and PASSES when
+    /// it is fixed. nil on legacy faults and faults with no runnable
+    /// check — those fall back to answer comparison.
+    var verify: String? = nil
+    /// Kind of `verify`. `.command` is the only kind today; reserved so
+    /// the schema can grow without a migration. nil ⇔ `verify` is nil.
+    var verifyKind: VerifyKind? = nil
 
     enum DecodeError: Error, Equatable {
         case missingFrontmatter
@@ -114,6 +127,8 @@ struct FaultReport: Equatable {
             "tags": tags
         ]
         if let gitHead { fm["git_head"] = gitHead }
+        if let verify { fm["verify"] = verify }
+        if let verifyKind { fm["verify_kind"] = verifyKind.rawValue }
         let yaml = try Yams.dump(object: fm)
         return "---\n\(yaml)---\n\(notes)"
     }
@@ -145,10 +160,13 @@ struct FaultReport: Equatable {
         let status = FaultStatus(rawValue: statusRaw) ?? .open
         let gitHead = dict["git_head"] as? String
         let tags = (dict["tags"] as? [String]) ?? []
+        let verify = dict["verify"] as? String
+        let verifyKind = (dict["verify_kind"] as? String).flatMap(VerifyKind.init(rawValue:))
         return FaultReport(
             prompt: prompt, response: response, notes: notes,
             severity: severity, reportedAt: reportedAt, gitHead: gitHead,
-            appVersion: appVersion, agent: agent, status: status, tags: tags
+            appVersion: appVersion, agent: agent, status: status, tags: tags,
+            verify: verify, verifyKind: verifyKind
         )
     }
 

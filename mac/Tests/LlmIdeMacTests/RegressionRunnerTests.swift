@@ -82,7 +82,13 @@ struct RegressionRunnerTests {
         let prompter = FakePrompter()
         prompter.replies["q"] = "drifted-answer"
 
-        let runner = RegressionRunner(prompter: prompter, store: store)
+        // Auto-reopen now requires a judge to confirm the drift is a real
+        // regression (Task 4 safety gate). A judge that says "not equivalent"
+        // confirms the regression, so the opt-in reopen still fires.
+        final class ConfirmsRegression: RegressionJudge {
+            func sameMeaning(prompt: String, original: String, current: String) async throws -> Bool { false }
+        }
+        let runner = RegressionRunner(prompter: prompter, judge: ConfirmsRegression(), store: store)
         await runner.run(at: repo, autoReopen: true)
 
         #expect(runner.results.first?.verdict == .regressed)

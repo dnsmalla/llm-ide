@@ -309,6 +309,9 @@ export async function handleAIRoutes(req, res) {
 
     prompt += `# User\n${message}\n\nAssistant:`;
 
+    const tierModel = body.model
+      || (body.tier === 'subagent' ? process.env.LLMIDE_SUBAGENT_MODEL : undefined);
+
     try {
       if (body.agentContext) {
         // Server fetches recent meetings from KB before delegating so
@@ -351,7 +354,7 @@ export async function handleAIRoutes(req, res) {
           agentContext: enrichedAgentContext,
           attachmentsText,
           languageDirective,
-          runClaude: (p) => runClaude(p, { userId: req.user?.id, model: body.model, provider: body.provider }),
+          runClaude: (p) => runClaude(p, { userId: req.user?.id, model: tierModel, provider: body.provider }),
           kb,
           userId: req.user?.id,
         });
@@ -368,7 +371,7 @@ export async function handleAIRoutes(req, res) {
       }
 
       // Legacy path — no agentContext, no tools.
-      const result = await runClaude(prompt, { userId: req.user?.id, maxTokens: 2048, model: body.model, provider: body.provider });
+      const result = await runClaude(prompt, { userId: req.user?.id, maxTokens: 2048, model: tierModel, provider: body.provider });
       sendJSON(res, 200, {
         reply: result.trim(),
         usage: {

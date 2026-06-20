@@ -123,6 +123,16 @@ public struct MemoryStore {
         try updated.write(to: url, atomically: true, encoding: .utf8)
     }
 
+    /// Flip status to `.fixed` and attach a verify command in one write.
+    /// When `command` is nil only the status changes.
+    func markFixed(at url: URL, verify command: String?) throws {
+        var fault = try loadFault(at: url)
+        fault.status = .fixed
+        if let command { fault.verify = command; fault.verifyKind = .command }
+        let md = try fault.toMarkdown()
+        try md.write(to: url, atomically: true, encoding: .utf8)
+    }
+
     // MARK: - Faults registry (CSV export)
 
     /// Export every fault (all statuses) under the faults dir to a flat
@@ -136,7 +146,7 @@ public struct MemoryStore {
     /// double quotes, with internal quotes doubled).
     @discardableResult
     func exportFaultsCSV(at repo: URL) throws -> URL {
-        let header = "reported,severity,status,fault,answer,git_head,app_version,agent,file"
+        let header = "reported,severity,status,fault,answer,verify,git_head,app_version,agent,file"
         let urls = listFaults(at: repo)   // already sorted ascending by file name
         var lines = [header]
         for url in urls {
@@ -148,6 +158,7 @@ public struct MemoryStore {
                 fault.status.rawValue,
                 Self.shorten(fault.prompt),
                 Self.shorten(fault.response),
+                Self.shorten(fault.verify ?? ""),
                 fault.gitHead ?? "",
                 fault.appVersion,
                 fault.agent,
@@ -176,6 +187,41 @@ public struct MemoryStore {
     /// column count stable even for cells that contain commas.
     private static func csvEscape(_ s: String) -> String {
         "\"" + s.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+    }
+
+    // MARK: - Working-tree diff (for repair review)
+
+    struct GitDiff: Equatable {
+        let unified: String
+        let changedPaths: [String]
+    }
+
+    /// Unified diff of the working tree vs HEAD, plus the changed paths.
+    /// Best-effort: throws only if git can't be launched.
+    func gitDiff(at repo: URL) throws -> GitDiff {
+        let unified = try Self.runGit(["-C", repo.path, "diff"], at: repo)
+        let names = try Self.runGit(["-C", repo.path, "diff", "--name-only"], at: repo)
+        let paths = names.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+        return GitDiff(unified: unified, changedPaths: paths)
+    }
+
+    /// Revert the given working-tree paths to HEAD. Used by "Discard" in
+    /// the repair-review UI.
+    func gitCheckout(at repo: URL, paths: [String]) throws {
+        guard !paths.isEmpty else { return }
+        _ = try Self.runGit(["-C", repo.path, "checkout", "--"] + paths, at: repo)
+    }
+
+    private static func runGit(_ args: [String], at repo: URL) throws -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        p.arguments = args
+        p.currentDirectoryURL = repo
+        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
+        try p.run()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
     // MARK: - Q&A writes (Phase C)

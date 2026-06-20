@@ -251,6 +251,12 @@ final class AppConfig: ObservableObject {
     @Published var regressionAutoReopen: Bool {
         didSet { defaults.set(regressionAutoReopen, forKey: "regressionAutoReopen") }
     }
+    @Published var regressionAttemptRepair: Bool {
+        didSet { defaults.set(regressionAttemptRepair, forKey: "regressionAttemptRepair") }
+    }
+    @Published var regressionVerifyTimeout: TimeInterval {
+        didSet { defaults.set(regressionVerifyTimeout, forKey: "regressionVerifyTimeout") }
+    }
 
     // ── Paths (Phase G + H) ───────────────────────────────────────────
     /// Default location for new projects — the directory new project
@@ -401,6 +407,9 @@ final class AppConfig: ObservableObject {
         }
         self.lastRegressionRegressedCount = defaults.integer(forKey: "lastRegressionRegressedCount")
         self.regressionAutoReopen = defaults.object(forKey: "regressionAutoReopen") as? Bool ?? false
+        self.regressionAttemptRepair = defaults.object(forKey: "regressionAttemptRepair") as? Bool ?? false
+        let savedTimeout = defaults.double(forKey: "regressionVerifyTimeout")
+        self.regressionVerifyTimeout = savedTimeout > 0 ? savedTimeout : 120
         self.dataRoot = defaults.string(forKey: "dataRoot") ?? ""
         let storedClones = defaults.string(forKey: "clonesSubdir") ?? ""
         self.clonesSubdir = storedClones.isEmpty ? AppConfig.defaultClonesSubdir : storedClones

@@ -41,6 +41,10 @@ extension LlmIdeAPIClient {
         /// Explicit backend provider ("anthropic"/"openai"/"google"/"custom").
         /// Required for "custom", whose model ids aren't prefix-routable.
         let provider: String?
+        /// Optional model tier hint. "subagent" → server routes to
+        /// LLMIDE_SUBAGENT_MODEL (cheap, for short judge/verify-author
+        /// calls). nil → normal global model.
+        let tier: String?
         let history: [CodeAssistTurn]
         let attachments: [CodeAttachment]
         let agentContext: AgentContext?     // NEW — optional for back-compat
@@ -65,6 +69,7 @@ extension LlmIdeAPIClient {
         language: String?,
         model: String? = nil,
         provider: String? = nil,
+        tier: String? = nil,
         history: [CodeAssistTurn],
         attachments: [CodeAttachment],
         agentContext: AgentContext? = nil,
@@ -76,6 +81,7 @@ extension LlmIdeAPIClient {
                 language: language,
                 model: model,
                 provider: provider,
+                tier: tier,
                 history: history,
                 attachments: attachments,
                 agentContext: agentContext,
