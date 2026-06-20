@@ -123,6 +123,16 @@ public struct MemoryStore {
         try updated.write(to: url, atomically: true, encoding: .utf8)
     }
 
+    /// Flip status to `.fixed` and attach a verify command in one write.
+    /// When `command` is nil only the status changes.
+    func markFixed(at url: URL, verify command: String?) throws {
+        var fault = try loadFault(at: url)
+        fault.status = .fixed
+        if let command { fault.verify = command; fault.verifyKind = .command }
+        let md = try fault.toMarkdown()
+        try md.write(to: url, atomically: true, encoding: .utf8)
+    }
+
     // MARK: - Faults registry (CSV export)
 
     /// Export every fault (all statuses) under the faults dir to a flat
