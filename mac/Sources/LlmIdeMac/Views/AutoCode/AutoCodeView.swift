@@ -251,6 +251,30 @@ struct AutoCodeView: View {
                     .padding(.vertical, 4)
             }
 
+            // Inline review findings from the last run — so the user reads
+            // them here instead of hunting for the log file. (Reveal Logs in
+            // Settings still opens the full log + the rotated .prev copy.)
+            if let findings = autoCode.taskOutputs[task.rawValue], !findings.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Findings (last run)")
+                        .font(Typography.section)
+                        .foregroundStyle(theme.current.textMuted)
+                    ScrollView {
+                        Text(findings)
+                            .font(Typography.mono)
+                            .foregroundStyle(theme.current.text)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                    }
+                    .frame(maxHeight: 220)
+                    .background(theme.current.surface)
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(theme.current.border, lineWidth: 1))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+            }
+
             Spacer(minLength: 0)
 
             // Last run status
