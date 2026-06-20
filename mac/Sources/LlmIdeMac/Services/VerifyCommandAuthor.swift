@@ -20,16 +20,25 @@ enum VerifyCommandAuthor {
         """
     }
 
-    /// nil ⇔ no runnable command. Strips code fences and whitespace.
+    /// nil ⇔ no runnable command. Strips a leading ```lang fence line and
+    /// a trailing ``` fence line, then returns the first non-empty line.
     static func parseReply(_ raw: String) -> String? {
-        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if s.hasPrefix("```") {
-            s = s.replacingOccurrences(of: "```", with: "")
-                 .trimmingCharacters(in: .whitespacesAndNewlines)
+        var lines = raw.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        // Drop a leading fence line (``` or ```sh etc.)
+        if let first = lines.first, first.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+            lines.removeFirst()
         }
-        if s.isEmpty || s.uppercased() == "NONE" { return nil }
-        return s.split(separator: "\n").first.map(String.init)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Drop a trailing fence line.
+        while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty {
+            lines.removeLast()
+        }
+        if let last = lines.last, last.trimmingCharacters(in: .whitespaces) == "```" {
+            lines.removeLast()
+        }
+        let firstContent = lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty })
+        guard let cmd = firstContent, cmd.uppercased() != "NONE" else { return nil }
+        return cmd
     }
 
     /// Production call — uses the sub-model tier.

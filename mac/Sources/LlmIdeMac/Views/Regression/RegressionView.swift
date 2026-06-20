@@ -79,7 +79,8 @@ struct RegressionView: View {
                 results: runner.results,
                 approvals: approvals,
                 repoRoot: activeRepoRoot,
-                onRun: { Task { await runSelected() } }
+                onRun: { Task { await runSelected() } },
+                onResolved: { Task { await refresh() } }
             )
             .frame(minWidth: 360, maxWidth: .infinity)
 
@@ -378,6 +379,7 @@ private struct RegressionDetailPane: View {
     let approvals: VerifyApprovalStore
     let repoRoot: URL?
     let onRun: () -> Void
+    let onResolved: () -> Void
 
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
@@ -503,10 +505,12 @@ private struct RegressionDetailPane: View {
                         HStack {
                             Button("Approve (mark fixed)") {
                                 try? config.memoryStore.markFixed(at: url, verify: fault.verify)
+                                onResolved()
                             }.buttonStyle(.borderedProminent).controlSize(.small)
                             Button("Discard (revert + reopen)") {
                                 try? config.memoryStore.gitCheckout(at: repo, paths: r.repairedPaths)
                                 try? config.memoryStore.updateFaultStatus(at: url, to: .open)
+                                onResolved()
                             }.buttonStyle(.bordered).controlSize(.small)
                         }
                     }

@@ -13,4 +13,8 @@ struct VerifyCommandAuthorTests {
     @Test func emptyReplyYieldsNil() {
         #expect(VerifyCommandAuthor.parseReply("") == nil)
     }
+    @Test func languageTaggedFenceYieldsCommandNotLang() {
+        #expect(VerifyCommandAuthor.parseReply("```sh\nmake test\n```") == "make test")
+        #expect(VerifyCommandAuthor.parseReply("```bash\npytest -k auth\n```") == "pytest -k auth")
+    }
 }
