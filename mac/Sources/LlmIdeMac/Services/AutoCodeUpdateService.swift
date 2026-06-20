@@ -43,6 +43,13 @@ final class AutoCodeUpdateService: ObservableObject {
     private var timer: Timer?
     private static let timerInterval: TimeInterval = 3600
     private var cancellable: AnyCancellable?
+    /// The in-flight run, so it can be cancelled (Stop button / timer
+    /// shutdown). nil when no run is active.
+    private var runTask: Task<Void, Never>?
+    /// The currently-executing CLI subprocess, so `cancel()` can kill it
+    /// instead of waiting out its 10-minute timeout. Set/cleared on the
+    /// main actor around each subprocess.
+    private var activeProcess: Process?
 
     // MARK: - Init
 
@@ -85,13 +92,34 @@ final class AutoCodeUpdateService: ObservableObject {
         }
         timer = Timer.scheduledTimer(withTimeInterval: Self.timerInterval, repeats: true) { [weak self] _ in
             guard let self else { return }
-            Task { @MainActor in await self.run() }
+            Task { @MainActor in self.runNow() }
         }
+    }
+
+    /// Start a run through a stored, cancellable Task. Used by the timer and
+    /// the Run Now button so an in-flight run can be stopped via `cancel()`.
+    /// No-op if a run is already in flight.
+    func runNow() {
+        guard runTask == nil else { return }
+        runTask = Task { [weak self] in
+            await self?.run()
+            self?.runTask = nil
+        }
+    }
+
+    /// Stop the in-flight run: cancel the run Task (so it bails at the next
+    /// task boundary) and terminate the currently-executing subprocess (so
+    /// we don't wait out its 10-minute timeout).
+    func cancel() {
+        runTask?.cancel()
+        activeProcess?.terminate()
     }
 
     func stop() {
         timer?.invalidate()
         timer = nil
+        // Disabling auto-tasks also stops any run that's currently executing.
+        cancel()
     }
 
     func setError(_ message: String) {
@@ -204,6 +232,7 @@ final class AutoCodeUpdateService: ObservableObject {
 
         // 3. Create issues for genuinely new actions
         for action in newActions {
+            if Task.isCancelled { break }
             let normalized = NoteActionExtractor.normalize(action.text)
             if normalizedExistingTitles.contains(normalized) {
                 // Already exists upstream — register as done, skip
@@ -227,6 +256,7 @@ final class AutoCodeUpdateService: ObservableObject {
         // 4. Implement pending entries via CLI subprocess
         let pending = registry.pendingEntries()
         for entry in pending {
+            if Task.isCancelled { break }
             guard let number = entry.issueIid else { continue }
 
             // Look up in existing issues first; fall back to a direct fetch
@@ -290,8 +320,8 @@ final class AutoCodeUpdateService: ObservableObject {
         ].compactMap { $0 }
 
         // 6. Run per-task-type CLI prompts for enabled task types
-        if let capturedLocalPath = resolvedLocalPath, let logDir = logsDirectory() {
-            if config.autoCodeRunReviewCode {
+        if !Task.isCancelled, let capturedLocalPath = resolvedLocalPath, let logDir = logsDirectory() {
+            if Task.isCancelled == false, config.autoCodeRunReviewCode {
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewCode,
                                       localPath: capturedLocalPath,
                                       logSuffix: "review-code",
@@ -303,7 +333,7 @@ final class AutoCodeUpdateService: ObservableObject {
                     taskErrors[AutoTask.reviewCode.rawValue] = "Review Code task failed. Check ~/Library/Logs/LLM IDE/auto-task-review-code.log"
                 }
             }
-            if config.autoCodeRunReviewDoc {
+            if Task.isCancelled == false, config.autoCodeRunReviewDoc {
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewDoc,
                                       localPath: capturedLocalPath,
                                       logSuffix: "review-doc",
@@ -315,7 +345,7 @@ final class AutoCodeUpdateService: ObservableObject {
                     taskErrors[AutoTask.reviewDoc.rawValue] = "Review Doc task failed. Check ~/Library/Logs/LLM IDE/auto-task-review-doc.log"
                 }
             }
-            if config.autoCodeRunReviewConflicts {
+            if Task.isCancelled == false, config.autoCodeRunReviewConflicts {
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewConflicts,
                                       localPath: capturedLocalPath,
                                       logSuffix: "review-conflicts",
@@ -334,11 +364,16 @@ final class AutoCodeUpdateService: ObservableObject {
         // regressed ones back to `status: open`. Structural task; uses
         // the same prompter the standalone Regression view does (server
         // /code-assist). Off by default; opt-in via Settings.
-        if config.autoCodeRunRegression {
+        if Task.isCancelled == false, config.autoCodeRunRegression {
             await runRegressionSweep(localPath: resolvedLocalPath)
         }
 
-        statusMessage = parts.isEmpty ? "Done — nothing to do" : parts.joined(separator: " · ")
+        // A user-initiated stop wins over the normal summary.
+        if Task.isCancelled {
+            statusMessage = parts.isEmpty ? "Cancelled" : "Cancelled · " + parts.joined(separator: " · ")
+        } else {
+            statusMessage = parts.isEmpty ? "Done — nothing to do" : parts.joined(separator: " · ")
+        }
         allEntries = registry.allEntries()
     }
 
@@ -522,6 +557,9 @@ final class AutoCodeUpdateService: ObservableObject {
 
         // Await with 10-minute timeout using terminationHandler (no data race)
         let timeout: TimeInterval = 600
+        // Expose the live process so cancel() can terminate it instead of
+        // waiting out the timeout. Set on the main actor before launch.
+        activeProcess = process
         let result = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             let resumed = OSAllocatedUnfairLock(initialState: false)
 
@@ -564,6 +602,7 @@ final class AutoCodeUpdateService: ObservableObject {
             }
         }
 
+        activeProcess = nil
         return result
     }
 
@@ -626,6 +665,9 @@ final class AutoCodeUpdateService: ObservableObject {
         process.standardInput = FileHandle.nullDevice
 
         let timeout: TimeInterval = 600
+        // Expose the live process so cancel() can terminate it instead of
+        // waiting out the timeout. Set on the main actor before launch.
+        activeProcess = process
         let result = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             let resumed = OSAllocatedUnfairLock(initialState: false)
 
@@ -665,6 +707,7 @@ final class AutoCodeUpdateService: ObservableObject {
             }
         }
 
+        activeProcess = nil
         return result
     }
 

@@ -106,17 +106,29 @@ struct AutoCodeView: View {
 
             Divider()
 
-            // Run Now
-            Button {
-                Task { await autoCode.run() }
-            } label: {
-                Label(autoCode.isRunning ? "Running…" : "Run Now",
-                      systemImage: autoCode.isRunning ? "ellipsis.circle" : "play.fill")
-                    .frame(maxWidth: .infinity)
+            // Run Now / Stop
+            HStack(spacing: 8) {
+                Button {
+                    autoCode.runNow()
+                } label: {
+                    Label(autoCode.isRunning ? "Running…" : "Run Now",
+                          systemImage: autoCode.isRunning ? "ellipsis.circle" : "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(autoCode.isRunning)
+                .controlSize(.regular)
+
+                if autoCode.isRunning {
+                    Button {
+                        autoCode.cancel()
+                    } label: {
+                        Label("Stop", systemImage: "stop.fill")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(autoCode.isRunning)
-            .controlSize(.regular)
             .padding(12)
         }
         .background(theme.current.surface)
