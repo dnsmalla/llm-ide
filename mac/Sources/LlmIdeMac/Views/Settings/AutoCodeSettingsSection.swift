@@ -95,7 +95,7 @@ struct AutoCodeSettingsSection: View {
                 // Row 4: Run Now button
                 HStack {
                     Button {
-                        Task { await autoCodeUpdate.run() }
+                        autoCodeUpdate.runNow()
                     } label: {
                         if autoCodeUpdate.isRunning {
                             HStack(spacing: 6) {
@@ -109,6 +109,14 @@ struct AutoCodeSettingsSection: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(autoCodeUpdate.isRunning)
+
+                    // Stop an in-flight run — cancels remaining tasks and kills
+                    // the currently-running CLI subprocess.
+                    if autoCodeUpdate.isRunning {
+                        Button("Stop") { autoCodeUpdate.cancel() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
 
                     // Review tasks write their findings to log files; give a
                     // one-click way to read them (success or failure).
