@@ -178,9 +178,18 @@ final class AutoCodeUpdateService: ObservableObject {
         defer {
             isRunning = false
             lastRunDate = Date()
+            // Restore the stash OFF the main actor — checkout + pop can be slow
+            // on a large repo and must not freeze the UI. Fire-and-forget; on a
+            // failed restore the stash is retained and we surface a recovery
+            // note. (defer can't await, hence the detached Task.)
             if didStash, let p = stashPath {
-                if !Self.restoreStash(at: p, originalBranch: stashBranch) {
-                    lastError = "Auto Tasks stashed your uncommitted changes but couldn't restore them cleanly — they're safe in `git stash`. Run `git stash pop` to recover."
+                let branch = stashBranch
+                Task.detached(priority: .userInitiated) {
+                    if !Self.restoreStash(at: p, originalBranch: branch) {
+                        await MainActor.run { [weak self] in
+                            self?.lastError = "Auto Tasks stashed your uncommitted changes but couldn't restore them cleanly — they're safe in `git stash` (the repo may be left on a fix/* branch). Run `git stash pop` to recover."
+                        }
+                    }
                 }
             }
         }
@@ -201,11 +210,17 @@ final class AutoCodeUpdateService: ObservableObject {
 
         // Opt-in: stash uncommitted changes up front so the dirty-tree guard
         // doesn't skip every task. Restored in the defer above. Default off.
-        if config.autoCodeAutoStash, !Self.isWorkingTreeClean(at: capturedLocalPath) {
-            let branch = Self.currentBranch(at: capturedLocalPath)
-            if Self.stashPush(at: capturedLocalPath) {
+        // The git work runs off the main actor (subprocess calls block).
+        if config.autoCodeAutoStash {
+            let path = capturedLocalPath
+            let stashResult: (didStash: Bool, branch: String?) = await Task.detached {
+                guard !Self.isWorkingTreeClean(at: path) else { return (false, nil) }
+                let branch = Self.currentBranch(at: path)
+                return (Self.stashPush(at: path), branch)
+            }.value
+            if stashResult.didStash {
                 didStash = true
-                stashBranch = branch
+                stashBranch = stashResult.branch
                 stashPath = capturedLocalPath
             }
         }
@@ -373,7 +388,7 @@ final class AutoCodeUpdateService: ObservableObject {
 
         // 6. Run per-task-type CLI prompts for enabled task types
         if !Task.isCancelled, let capturedLocalPath = resolvedLocalPath, let logDir = logsDirectory() {
-            if Task.isCancelled == false, config.autoCodeRunReviewCode {
+            if !Task.isCancelled, config.autoCodeRunReviewCode {
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewCode,
                                       localPath: capturedLocalPath,
                                       logSuffix: "review-code",
@@ -385,7 +400,7 @@ final class AutoCodeUpdateService: ObservableObject {
                     taskErrors[AutoTask.reviewCode.rawValue] = "Review Code task failed. Check ~/Library/Logs/LLM IDE/auto-task-review-code.log"
                 }
             }
-            if Task.isCancelled == false, config.autoCodeRunReviewDoc {
+            if !Task.isCancelled, config.autoCodeRunReviewDoc {
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewDoc,
                                       localPath: capturedLocalPath,
                                       logSuffix: "review-doc",
@@ -397,7 +412,7 @@ final class AutoCodeUpdateService: ObservableObject {
                     taskErrors[AutoTask.reviewDoc.rawValue] = "Review Doc task failed. Check ~/Library/Logs/LLM IDE/auto-task-review-doc.log"
                 }
             }
-            if Task.isCancelled == false, config.autoCodeRunReviewConflicts {
+            if !Task.isCancelled, config.autoCodeRunReviewConflicts {
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewConflicts,
                                       localPath: capturedLocalPath,
                                       logSuffix: "review-conflicts",
@@ -416,7 +431,7 @@ final class AutoCodeUpdateService: ObservableObject {
         // regressed ones back to `status: open`. Structural task; uses
         // the same prompter the standalone Regression view does (server
         // /code-assist). Off by default; opt-in via Settings.
-        if Task.isCancelled == false, config.autoCodeRunRegression {
+        if !Task.isCancelled, config.autoCodeRunRegression {
             await runRegressionSweep(localPath: resolvedLocalPath)
         }
 
