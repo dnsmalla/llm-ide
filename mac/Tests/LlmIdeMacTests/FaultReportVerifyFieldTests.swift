@@ -47,4 +47,19 @@ struct FaultReportVerifyFieldTests {
         #expect(!md.contains("verify:"))
         #expect(!md.contains("verify_kind:"))
     }
+
+    @Test func csvIncludesVerifyColumn() throws {
+        let repo = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("csv-verify-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let store = MemoryStore()
+        _ = try store.writeFault(at: repo, sample(verify: "make test", verifyKind: .command))
+
+        let csvURL = try store.exportFaultsCSV(at: repo)
+        let csv = try String(contentsOf: csvURL, encoding: .utf8)
+        let header = csv.split(separator: "\n").first.map(String.init) ?? ""
+        #expect(header.contains("verify"))
+        #expect(csv.contains("\"make test\""))
+    }
 }

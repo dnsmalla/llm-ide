@@ -136,7 +136,7 @@ public struct MemoryStore {
     /// double quotes, with internal quotes doubled).
     @discardableResult
     func exportFaultsCSV(at repo: URL) throws -> URL {
-        let header = "reported,severity,status,fault,answer,git_head,app_version,agent,file"
+        let header = "reported,severity,status,fault,answer,verify,git_head,app_version,agent,file"
         let urls = listFaults(at: repo)   // already sorted ascending by file name
         var lines = [header]
         for url in urls {
@@ -148,6 +148,7 @@ public struct MemoryStore {
                 fault.status.rawValue,
                 Self.shorten(fault.prompt),
                 Self.shorten(fault.response),
+                Self.shorten(fault.verify ?? ""),
                 fault.gitHead ?? "",
                 fault.appVersion,
                 fault.agent,
