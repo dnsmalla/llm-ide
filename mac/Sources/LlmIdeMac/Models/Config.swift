@@ -329,6 +329,13 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(autoCodeLookbackDays, forKey: "autoCodeLookbackDays") }
     }
 
+    /// When true, auto-tasks stash uncommitted changes before running and
+    /// restore them after, instead of skipping on a dirty tree. Off by
+    /// default — stashing the user's WIP is surprising, so it's opt-in.
+    @Published var autoCodeAutoStash: Bool {
+        didSet { defaults.set(autoCodeAutoStash, forKey: "autoCodeAutoStash") }
+    }
+
     /// Which review task types to include in the auto-run pipeline.
     @Published var autoCodeRunReviewCode: Bool {
         didSet { defaults.set(autoCodeRunReviewCode, forKey: "autoCodeRunReviewCode") }
@@ -495,6 +502,7 @@ final class AppConfig: ObservableObject {
         self.autoCodeIntervalMinutes = defaults.object(forKey: "autoCodeIntervalMinutes") as? Int ?? 60
         self.autoCodeLookbackByDays = defaults.object(forKey: "autoCodeLookbackByDays") as? Bool ?? false
         self.autoCodeLookbackDays = defaults.object(forKey: "autoCodeLookbackDays") as? Int ?? 7
+        self.autoCodeAutoStash = defaults.object(forKey: "autoCodeAutoStash") as? Bool ?? false
         self.autoCodeRunReviewCode = defaults.object(forKey: "autoCodeRunReviewCode") as? Bool ?? true
         self.autoCodeRunReviewDoc = defaults.object(forKey: "autoCodeRunReviewDoc") as? Bool ?? true
         self.autoCodeRunReviewConflicts = defaults.object(forKey: "autoCodeRunReviewConflicts") as? Bool ?? false
