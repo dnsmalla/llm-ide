@@ -27,22 +27,38 @@ struct ProjectScaffolderTests {
         try ProjectScaffolder.validate(at: dir)   // must not throw
     }
 
-    @Test func folderWithRequiredSubdirsIsAccepted() throws {
+    @Test func folderWithOldSubdirsIsRejected() throws {
+        // The old meetings/notes/plans layout is no longer a valid project.
         let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
         for sub in ["meetings", "notes", "plans"] {
             try FileManager.default.createDirectory(
                 at: dir.appendingPathComponent(sub), withIntermediateDirectories: true)
         }
+        #expect(throws: ProjectStoreError.self) {
+            try ProjectScaffolder.validate(at: dir)
+        }
+    }
+
+    @Test func folderWithNewMarkerIsAccepted() throws {
+        let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let systemDir = dir.appendingPathComponent("system")
+        try FileManager.default.createDirectory(at: systemDir, withIntermediateDirectories: true)
+        try "{}".write(to: systemDir.appendingPathComponent("project.json"),
+                       atomically: true, encoding: .utf8)
         try ProjectScaffolder.validate(at: dir)   // must not throw
     }
 
-    @Test func existingMeetnotesProjectIsAccepted() throws {
+    @Test func oldDotLlmideMarkerIsRejected() throws {
+        // A folder with only `.llmide/project.json` (old marker) is NOT accepted
+        // by the new validator — it is non-empty but lacks `system/project.json`.
         let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
         let mn = dir.appendingPathComponent(".llmide")
         try FileManager.default.createDirectory(at: mn, withIntermediateDirectories: true)
         try "{}".write(to: mn.appendingPathComponent("project.json"),
                        atomically: true, encoding: .utf8)
-        try ProjectScaffolder.validate(at: dir)   // must not throw
+        #expect(throws: ProjectStoreError.self) {
+            try ProjectScaffolder.validate(at: dir)
+        }
     }
 
     @Test func nonEmptyNonProjectFolderIsRejected() throws {
@@ -55,31 +71,18 @@ struct ProjectScaffolderTests {
         }
     }
 
-    // MARK: legacy MeetNotes migration
+    // MARK: legacy MeetNotes layout — now rejected
 
-    @Test func legacyMeetnotesProjectStillValidates() throws {
+    @Test func legacyMeetnotesProjectIsRejected() throws {
+        // The old .meetnotes marker is no longer a recognised project layout.
         let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
         let mn = dir.appendingPathComponent(".meetnotes")
         try FileManager.default.createDirectory(at: mn, withIntermediateDirectories: true)
         try "{}".write(to: mn.appendingPathComponent("project.json"),
                        atomically: true, encoding: .utf8)
-        // A pre-rename project (only a .meetnotes marker) must still be accepted.
-        try ProjectScaffolder.validate(at: dir)
-    }
-
-    @MainActor @Test func migrateRenamesLegacyMarker() throws {
-        let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
-        let fm = FileManager.default
-        let legacy = dir.appendingPathComponent(".meetnotes")
-        try fm.createDirectory(at: legacy, withIntermediateDirectories: true)
-        try "{}".write(to: legacy.appendingPathComponent("project.json"),
-                       atomically: true, encoding: .utf8)
-
-        ProjectStore.migrateLegacyMarker(at: dir)
-
-        #expect(!fm.fileExists(atPath: legacy.path))
-        #expect(fm.fileExists(
-            atPath: dir.appendingPathComponent(".llmide/project.json").path))
+        #expect(throws: ProjectStoreError.self) {
+            try ProjectScaffolder.validate(at: dir)
+        }
     }
 
     // MARK: scaffold
@@ -88,7 +91,8 @@ struct ProjectScaffolderTests {
         let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
         try ProjectScaffolder.scaffold(at: dir, project: sampleProject())
         let fm = FileManager.default
-        for sub in [".llmide", "meetings", "notes", "plans", "assets"] {
+        for sub in ["source", "code", "data", "notes", "system",
+                    "system/faults", "system/graph", "system/cache"] {
             var isDir: ObjCBool = false
             let exists = fm.fileExists(
                 atPath: dir.appendingPathComponent(sub).path, isDirectory: &isDir)
@@ -96,15 +100,13 @@ struct ProjectScaffolderTests {
         }
     }
 
-    @Test func scaffoldCreatesCodeAndDataFolders() throws {
+    @Test func scaffoldDoesNotCreateOldDirectories() throws {
         let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
         try ProjectScaffolder.scaffold(at: dir, project: sampleProject())
         let fm = FileManager.default
-        for sub in ["meetings", "plans", "notes", "assets", "code", "data"] {
-            var isDir: ObjCBool = false
-            let exists = fm.fileExists(
-                atPath: dir.appendingPathComponent(sub).path, isDirectory: &isDir)
-            #expect(exists && isDir.boolValue, "missing dir: \(sub)")
+        for sub in ["meetings", "plans", "assets", ".llmide", ".understand-anything", ".code-notes"] {
+            #expect(!fm.fileExists(atPath: dir.appendingPathComponent(sub).path),
+                    "unexpected dir present: \(sub)")
         }
     }
 
@@ -146,7 +148,7 @@ struct ProjectScaffolderTests {
         try ProjectScaffolder.scaffold(at: tmp, project: sampleProject())
         let once = try String(contentsOf: root, encoding: .utf8)
         #expect(once.contains("build/"))                 // user rule preserved
-        #expect(once.contains(".code-notes/"))           // managed block added
+        #expect(once.contains("system/"))               // managed block added
         #expect(once.contains("# >>> LLM IDE managed"))
 
         // Idempotent: a second scaffold must not duplicate the block.

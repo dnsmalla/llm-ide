@@ -28,7 +28,7 @@ final class LegacyExporterTests {
                   entities: [.init(kind: "action", owner: "bob", text: "do it", due: nil)]),
         ]
         let store = MeetingFileStore(root: tempRoot)
-        let idx = try MeetingIndex(url: tempRoot.appendingPathComponent(".llmide/index.sqlite"))
+        let idx = try MeetingIndex(url: tempRoot.appendingPathComponent("system/index.sqlite"))
         let exporter = LegacyExporter(store: store, index: idx)
 
         let report = try await exporter.export(records: asAsync(records))

@@ -12,7 +12,7 @@ struct CodeAssistantAgentContextTests {
         let settings = ProjectSettings(
             language: "en", activeCLI: "claudeCode",
             linkedRepo: linkedRepo, notesFolderRelative: nil,
-            enabledPlugins: [], uaBinaryOverride: "",
+            enabledPlugins: [],
             regressionLookbackCount: 5, agentPersona: nil,
             docTemplatesActive: [])
         let project = Project(id: "test-id", displayName: displayName,

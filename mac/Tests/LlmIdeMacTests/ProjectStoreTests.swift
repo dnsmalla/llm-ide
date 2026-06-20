@@ -27,7 +27,7 @@ struct ProjectStoreTests {
         let defaults = ProjectSettings(
             language: "en", activeCLI: "claudeCode",
             linkedRepo: nil, notesFolderRelative: nil,
-            enabledPlugins: [], uaBinaryOverride: "",
+            enabledPlugins: [],
             regressionLookbackCount: 5, agentPersona: nil,
             docTemplatesActive: [])
 
@@ -37,7 +37,7 @@ struct ProjectStoreTests {
         #expect(store.activeProject != nil)
         #expect(store.activeProject?.localPath == proj.path)
         #expect(FileManager.default.fileExists(
-            atPath: proj.appendingPathComponent(".llmide/project.json").path))
+            atPath: proj.appendingPathComponent("system/project.json").path))
 
         // Persistence: a fresh store reads it back.
         let reborn = ProjectStore(stateDirectory: root, defaults: defaults)
@@ -143,9 +143,10 @@ struct ProjectStoreTests {
         #expect(reborn.activeProject == nil)
     }
 
-    @Test func legacyMeetnotesRecentSurvivesLoad() throws {
-        // An upgrading user's project still has only a `.meetnotes` marker.
-        // It must NOT be pruned from recents on launch.
+    @Test func legacyMeetnotesRecentIsPrunedOnLoad() throws {
+        // Old-layout projects (only a `.meetnotes` marker, no `system/project.json`)
+        // must be pruned from recents on launch — the new store only keeps entries
+        // that have a valid `system/project.json`.
         let root = tmpRoot()
         let legacyProj = tmpRoot()
         let mn = legacyProj.appendingPathComponent(".meetnotes")
@@ -162,8 +163,8 @@ struct ProjectStoreTests {
                         atomically: true, encoding: .utf8)
 
         let store = ProjectStore(stateDirectory: root, defaults: .testDefaults)
-        #expect(store.recents.count == 1)
-        #expect(store.recents.first?.path == legacyProj.path)
+        // Legacy project has no `system/project.json`, so it is pruned.
+        #expect(store.recents.isEmpty)
     }
 
     @Test func corruptStateIsSurfacedNotSilent() throws {
@@ -185,6 +186,6 @@ extension ProjectSettings {
     static let testDefaults = ProjectSettings(
         language: "en", activeCLI: "claudeCode", linkedRepo: nil,
         notesFolderRelative: nil, enabledPlugins: [],
-        uaBinaryOverride: "", regressionLookbackCount: 5,
+        regressionLookbackCount: 5,
         agentPersona: nil, docTemplatesActive: [])
 }

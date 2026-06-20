@@ -35,25 +35,25 @@ struct PathValidatorTests {
         #expect(!PathValidator.memorySubdir("   ").isValid)
     }
 
-    @Test func memorySubdirCanonicalisesTrailingSlashAndDotPrefix() {
-        // Trailing slash and `./` prefix should both flatten away.
-        let v = PathValidator.memorySubdir("./graphify-out/memory/")
-        if case .warning(_, let c) = v {
-            // Warning because "./graphify-out/memory" canonicalises
-            // away the `./` and ends up matching the default; we tolerate
-            // either .ok or .warning here.
-            #expect(c == "graphify-out/memory" || c == "./graphify-out/memory")
-        } else if case .ok(let c) = v {
+    @Test func memorySubdirCanonicalisesTrailingSlash() {
+        // Trailing slash is stripped by splitting on "/". A leading "./" component
+        // is kept as-is by the validator (it is a valid relative segment).
+        let v = PathValidator.memorySubdir("graphify-out/memory/")
+        if case .ok(let c) = v {
             #expect(c == "graphify-out/memory")
+        } else {
+            Issue.record("expected .ok, got \(v)")
         }
     }
 
-    @Test func memorySubdirNonDefaultIsWarningNotInvalid() {
+    @Test func memorySubdirNonDefaultIsOK() {
+        // Non-default paths are accepted without a warning in the new layout
+        // (the old warning about Understand-Anything expectations no longer applies).
         let v = PathValidator.memorySubdir("docs/agent-memory")
-        if case .warning(_, let c) = v {
+        if case .ok(let c) = v {
             #expect(c == "docs/agent-memory")
         } else {
-            Issue.record("expected .warning, got \(v)")
+            Issue.record("expected .ok, got \(v)")
         }
     }
 

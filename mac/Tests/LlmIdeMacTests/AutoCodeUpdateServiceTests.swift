@@ -52,7 +52,7 @@ struct AutoCodeUpdateServiceTests {
                 kind: .github, url: "https://github.com/o/n",
                 remoteId: "o/n", defaultBranch: "main"),
             notesFolderRelative: nil, enabledPlugins: [],
-            uaBinaryOverride: "", regressionLookbackCount: 5,
+            regressionLookbackCount: 5,
             agentPersona: nil, docTemplatesActive: [])
         let bundle = Project(id: "T", displayName: "T", createdAt: Date(), settings: settings)
         let active = ProjectStore.ActiveProject(bundle: bundle, localPath: proj.path)
@@ -87,7 +87,7 @@ struct AutoCodeUpdateServiceTests {
                 kind: .github, url: "https://github.com/o/n",
                 remoteId: "o/n", defaultBranch: nil),
             notesFolderRelative: nil, enabledPlugins: [],
-            uaBinaryOverride: "", regressionLookbackCount: 5,
+            regressionLookbackCount: 5,
             agentPersona: nil, docTemplatesActive: [])
         let bundle = Project(id: "T", displayName: "T", createdAt: Date(), settings: settings)
         let active = ProjectStore.ActiveProject(bundle: bundle, localPath: proj.path)
