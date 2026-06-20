@@ -170,9 +170,19 @@ final class AutoCodeUpdateService: ObservableObject {
         lastError = nil
         taskErrors = [:]
         taskOutputs = [:]
+        // Auto-stash bookkeeping (opt-in). Declared before the defer so the
+        // defer can always restore, even on an early return.
+        var didStash = false
+        var stashBranch: String? = nil
+        var stashPath: String? = nil
         defer {
             isRunning = false
             lastRunDate = Date()
+            if didStash, let p = stashPath {
+                if !Self.restoreStash(at: p, originalBranch: stashBranch) {
+                    lastError = "Auto Tasks stashed your uncommitted changes but couldn't restore them cleanly — they're safe in `git stash`. Run `git stash pop` to recover."
+                }
+            }
         }
 
         var resolvedLocalPath: String? = nil
@@ -188,6 +198,17 @@ final class AutoCodeUpdateService: ObservableObject {
         let projectId = resolved.projectId
         let capturedLocalPath = resolved.localPath
         resolvedLocalPath = capturedLocalPath
+
+        // Opt-in: stash uncommitted changes up front so the dirty-tree guard
+        // doesn't skip every task. Restored in the defer above. Default off.
+        if config.autoCodeAutoStash, !Self.isWorkingTreeClean(at: capturedLocalPath) {
+            let branch = Self.currentBranch(at: capturedLocalPath)
+            if Self.stashPush(at: capturedLocalPath) {
+                didStash = true
+                stashBranch = branch
+                stashPath = capturedLocalPath
+            }
+        }
 
         // Resolve the notes folder (meetings/ when a project is active)
         let notesFolderURL = NotesFolderConfig().currentFolder
@@ -456,6 +477,49 @@ final class AutoCodeUpdateService: ObservableObject {
     /// this converts the seconds-based Date accordingly. Days floored at 1.
     nonisolated static func lookbackCutoffMs(now: Date, days: Int) -> Int64 {
         Int64((now.timeIntervalSince1970 - Double(max(1, days)) * 86_400) * 1000)
+    }
+
+    /// Run git, returning (exitCode, combinedOutput). Best-effort: a launch
+    /// failure surfaces as exit code -1.
+    nonisolated private static func git(_ args: [String], at localPath: String) -> (code: Int32, out: String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        p.arguments = ["-C", localPath] + args
+        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
+        do { try p.run() } catch { return (-1, "") }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return (p.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+    }
+
+    /// Current branch name, or nil when detached / unknown.
+    nonisolated static func currentBranch(at localPath: String) -> String? {
+        let r = git(["rev-parse", "--abbrev-ref", "HEAD"], at: localPath)
+        let b = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (r.code == 0 && !b.isEmpty && b != "HEAD") ? b : nil
+    }
+
+    /// Stash uncommitted changes (incl. untracked) so auto-tasks can run on a
+    /// clean tree. Returns true only when a stash entry was actually created.
+    nonisolated static func stashPush(at localPath: String) -> Bool {
+        let r = git(["stash", "push", "--include-untracked", "-m", "llm-ide-auto-task"], at: localPath)
+        // `git stash push` exits 0 even with nothing to stash ("No local
+        // changes to save") — don't claim a stash in that case.
+        return r.code == 0 && !r.out.localizedCaseInsensitiveContains("No local changes")
+    }
+
+    /// Restore a stash created by `stashPush`: return to the original branch
+    /// (so WIP lands where it belongs, not on a fix/* branch the CLI created)
+    /// then pop. Returns true if the WIP was restored. On a conflicting pop or
+    /// a failed checkout the stash is RETAINED (never dropped) so the user's
+    /// changes are never lost — the caller surfaces a recovery message.
+    nonisolated static func restoreStash(at localPath: String, originalBranch: String?) -> Bool {
+        if let b = originalBranch {
+            let co = git(["checkout", b], at: localPath)
+            if co.code != 0 { return false }   // don't pop onto the wrong branch
+        }
+        let pop = git(["stash", "pop"], at: localPath)
+        return pop.code == 0   // conflict / error → false, stash kept
     }
 
     nonisolated static func isWorkingTreeClean(at localPath: String) -> Bool {

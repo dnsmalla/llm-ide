@@ -92,6 +92,15 @@ struct AutoCodeSettingsSection: View {
                         .foregroundStyle(theme.current.textMuted)
                 }
 
+                // Dirty-tree behavior: skip (default) vs auto-stash + restore.
+                Toggle(isOn: $config.autoCodeAutoStash) {
+                    Label("Auto-stash uncommitted changes", systemImage: "tray.and.arrow.down")
+                        .font(Typography.caption)
+                        .foregroundStyle(config.autoCodeAutoStash ? theme.current.text : theme.current.textMuted)
+                }
+                .toggleStyle(.checkbox)
+                .help("When on, auto-tasks stash your uncommitted changes before running and restore them after, instead of skipping. If a restore conflicts, your changes stay safe in `git stash`. Off by default.")
+
                 // Task type selection
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text("Run automatically")
