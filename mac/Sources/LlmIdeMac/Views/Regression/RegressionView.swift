@@ -110,17 +110,16 @@ struct RegressionView: View {
             return
         }
         let store = config.memoryStore
-        let urls = store.listFaults(at: repo)
-        var statuses: [URL: FaultStatus] = [:]
-        for u in urls {
-            if let fault = try? store.loadFault(at: u) {
-                statuses[u] = fault.status
-            }
-        }
-        allFaults = urls
-        faultStatuses = statuses
+        // Scan + decode every fault frontmatter off the main actor — for a
+        // repo with many faults this is non-trivial disk work and must not
+        // block the UI thread. Publish the snapshot back on the main actor.
+        let snapshot = await Task.detached(priority: .utility) {
+            store.faultStatusSnapshot(at: repo)
+        }.value
+        allFaults = snapshot.urls
+        faultStatuses = snapshot.statuses
         // Drop dangling checked URLs (files renamed / deleted).
-        let live = Set(urls.map { $0.standardizedFileURL.path })
+        let live = Set(snapshot.urls.map { $0.standardizedFileURL.path })
         checked = checked.filter { live.contains($0.standardizedFileURL.path) }
     }
 
