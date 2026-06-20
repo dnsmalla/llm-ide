@@ -194,20 +194,25 @@ struct WelcomeView: View {
 
     // MARK: - Actions
 
-    /// New project: adopt whatever folder the user picks. Unlike "Open", this
-    /// scaffolds the project structure into any folder (empty or not) — the
-    /// user explicitly asked to create a project here, and scaffolding never
-    /// overwrites existing files (a repo's own README is preserved).
+    /// New project: the user picks a PARENT location and types a project name;
+    /// we create `<parent>/<name>/` and scaffold the workspace INSIDE that new
+    /// folder. This avoids the old behaviour where picking e.g. the Desktop
+    /// dumped meetings/plans/notes/… directly onto the Desktop. The named
+    /// folder is created fresh, so scaffolding into it is always clean. Code
+    /// only lands in code/ once a GitHub/GitLab repo is set up.
     private func newProject() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
+        let panel = NSSavePanel()
         panel.canCreateDirectories = true
+        panel.title = "New Project"
         panel.prompt = "Create Project"
-        panel.message = "Choose (or create) a folder — LLM IDE sets up the workspace inside it."
+        panel.nameFieldLabel = "Project name:"
+        panel.nameFieldStringValue = "New Project"
+        panel.message = "Choose where to create the project. A new folder with this name is created and set up inside it."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
+            // NSSavePanel returns <parent>/<typed-name>. Create that folder
+            // (no-op if it already exists) and scaffold inside it.
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
             try projectStore.ensureProjectScaffold(at: url)
             try projectStore.openFolder(at: url)
             error = nil
