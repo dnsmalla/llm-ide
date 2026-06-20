@@ -36,8 +36,11 @@ final class RegressionRunner: ObservableObject {
         case pending
         case unchanged
         case regressed
+        case repaired                 // verify failed → repaired → re-verify passed
+        case repairFailed(String)     // repaired but re-verify still failing
+        case needsApproval            // has a verify command not yet approved on this machine
         /// CLI / network error — surfaces in the UI as "couldn't run".
-        case failed(String)
+        case failed(String)           // couldn't run the check
     }
 
     struct Result: Identifiable, Equatable {
@@ -52,6 +55,8 @@ final class RegressionRunner: ObservableObject {
         /// came back `.regressed`. The badge in RegressionView uses
         /// this so the user can tell the auto-fix-up happened.
         var autoReopened: Bool = false
+        /// Working-tree paths the repair touched, for the diff-review UI.
+        var repairedPaths: [String] = []
     }
 
     @Published private(set) var results: [Result] = []
@@ -77,6 +82,10 @@ final class RegressionRunner: ObservableObject {
     private let prompter: RegressionPrompter
     private let judge: RegressionJudge?
     private let store: MemoryStore
+    private let verifier: FaultVerifier?
+    private let repairer: FaultRepairer?
+    private let approvals: VerifyApprovalStore
+    private var verifyTimeout: TimeInterval
     /// Optional handle to the app's config so completed runs can
     /// publish their summary to the menu-bar pill. Set once after
     /// init by the owning view (since @EnvironmentObject is not
@@ -86,12 +95,22 @@ final class RegressionRunner: ObservableObject {
     init(prompter: RegressionPrompter,
          judge: RegressionJudge? = nil,
          store: MemoryStore = MemoryStore(),
+         verifier: FaultVerifier? = nil,
+         repairer: FaultRepairer? = nil,
+         approvals: VerifyApprovalStore = VerifyApprovalStore(),
+         verifyTimeout: TimeInterval = 120,
          config: AppConfig? = nil) {
         self.prompter = prompter
         self.judge = judge
         self.store = store
+        self.verifier = verifier
+        self.repairer = repairer
+        self.approvals = approvals
+        self.verifyTimeout = verifyTimeout
         self.config = config
     }
+
+    func applyTimeout(_ t: TimeInterval) { verifyTimeout = max(1, t) }
 
     /// Execute the run. Safe to call repeatedly — resets state each
     /// call. Bails out cleanly when there are no fixed faults (or none
@@ -107,7 +126,10 @@ final class RegressionRunner: ObservableObject {
     ///     Default `false` — the verdict comparison is heuristic
     ///     (text-difference), so a run must NOT silently mutate files
     ///     unless the user explicitly opts in.
-    func run(at repoRoot: URL, only: Set<URL>? = nil, autoReopen requestedAutoReopen: Bool = false) async {
+    func run(at repoRoot: URL, only: Set<URL>? = nil,
+             autoReopen requestedAutoReopen: Bool = false,
+             attemptRepair: Bool = false) async {
+        guard !running else { return }
         running = true
         // Auto-reopen mutates files on disk. The exact-match verdict is a
         // heuristic; without a semantic judge to confirm textual drift is a
@@ -142,47 +164,16 @@ final class RegressionRunner: ObservableObject {
         let selectedNote = only == nil ? "all fixed faults" : "\(fixed.count) selected"
         appendLog(.info, "Run started · \(fixed.count) to check (\(selectedNote))")
         for (idx, pair) in fixed.enumerated() {
-            let preview = String(pair.1.prompt.prefix(60))
-            appendLog(.info, "[\(idx + 1)/\(fixed.count)] asking: \(preview)")
-            do {
-                let reply = try await prompter.ask(prompt: pair.1.prompt)
-                var v = Self.verdict(originalAnswer: pair.1.response, currentAnswer: reply)
-                // Stage 2: textual mismatch alone isn't a regression when
-                // a semantic judge is available — LLM answers re-word
-                // themselves run to run. Only a judge NO regresses; a
-                // judge failure is surfaced as .failed (conservative: we
-                // can't tell, so we neither reopen nor mark green).
-                if v == .regressed, let judge {
-                    do {
-                        if try await judge.sameMeaning(
-                            prompt: pair.1.prompt,
-                            original: pair.1.response,
-                            current: reply
-                        ) {
-                            v = .unchanged
-                            appendLog(.info, "  → reworded, semantically unchanged (judge)")
-                        }
-                    } catch {
-                        v = .failed("answers differ textually; semantic judge unavailable: \(error.localizedDescription)")
-                        appendLog(.error, "  → judge unavailable — verdict undecided (not reopened)")
-                    }
-                }
-                results[idx].currentAnswer = reply
-                results[idx].verdict = v
-                switch v {
-                case .unchanged: appendLog(.info, "  → unchanged")
-                case .regressed:
-                    if autoReopen, (try? store.updateFaultStatus(at: pair.0, to: .open)) != nil {
-                        results[idx].autoReopened = true
-                        appendLog(.warn, "  → REGRESSED · auto-reopened")
-                    } else {
-                        appendLog(.warn, "  → REGRESSED")
-                    }
-                case .pending, .failed: break
-                }
-            } catch {
-                results[idx].verdict = .failed(error.localizedDescription)
-                appendLog(.error, "  → failed: \(error.localizedDescription)")
+            if Task.isCancelled { appendLog(.warn, "Run cancelled"); break }
+            let (url, fault) = pair
+            let preview = String(fault.prompt.prefix(60))
+            appendLog(.info, "[\(idx + 1)/\(fixed.count)] \(preview)")
+            if let cmd = fault.verify, !cmd.isEmpty, let verifier {
+                await runCommandFault(idx: idx, url: url, command: cmd,
+                                      verifier: verifier, repoRoot: repoRoot,
+                                      attemptRepair: attemptRepair)
+            } else {
+                await runAnswerCompareFault(idx: idx, fault: fault, url: url, autoReopen: autoReopen)
             }
         }
         let summary = "Run complete · regressed: \(results.filter { $0.verdict == .regressed }.count) · unchanged: \(results.filter { $0.verdict == .unchanged }.count) · failed: \(results.filter { if case .failed = $0.verdict { return true }; return false }.count) · elapsed: \(String(format: "%.1fs", Date().timeIntervalSince(startedAt)))"
@@ -193,6 +184,82 @@ final class RegressionRunner: ObservableObject {
         // flipped to `open` above and that shows here. Best-effort — a
         // failed export must not fail the run.
         lastCSVURL = try? store.exportFaultsCSV(at: repoRoot)
+    }
+
+    /// Command-backed path: approve-gate → verify → (repair → re-verify).
+    private func runCommandFault(idx: Int, url: URL, command: String,
+                                 verifier: FaultVerifier, repoRoot: URL,
+                                 attemptRepair: Bool) async {
+        guard approvals.isApproved(repo: repoRoot, faultFile: url.lastPathComponent, command: command) else {
+            results[idx].verdict = .needsApproval
+            appendLog(.warn, "  → needs approval: \(command)")
+            return
+        }
+        do {
+            let first = try await verifier.verify(command: command, repoRoot: repoRoot, timeout: verifyTimeout)
+            if first.exitCode == 0 {
+                results[idx].verdict = .unchanged
+                appendLog(.info, "  → verify passed")
+                return
+            }
+            appendLog(.warn, "  → verify FAILED (exit \(first.exitCode))")
+            guard attemptRepair, let repairer else {
+                results[idx].verdict = .regressed
+                return
+            }
+            appendLog(.info, "  → repairing…")
+            let fault = try store.loadFault(at: url)
+            try await repairer.repair(fault: fault, failureOutput: first.output, repoRoot: repoRoot)
+            let second = try await verifier.verify(command: command, repoRoot: repoRoot, timeout: verifyTimeout)
+            if second.exitCode == 0 {
+                results[idx].verdict = .repaired
+                results[idx].repairedPaths = (try? store.gitDiff(at: repoRoot).changedPaths) ?? []
+                appendLog(.info, "  → repaired · re-verify passed (review diff)")
+            } else {
+                results[idx].verdict = .repairFailed(String(second.output.suffix(200)))
+                appendLog(.error, "  → repair attempted · re-verify still failing")
+            }
+        } catch let e as VerifyError {
+            results[idx].verdict = .failed("\(e)")
+            appendLog(.error, "  → \(e)")
+        } catch {
+            results[idx].verdict = .failed(error.localizedDescription)
+            appendLog(.error, "  → failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Command-less fallback — re-ask + semantic-judge path.
+    private func runAnswerCompareFault(idx: Int, fault: FaultReport, url: URL, autoReopen: Bool) async {
+        do {
+            let reply = try await prompter.ask(prompt: fault.prompt)
+            var v = Self.verdict(originalAnswer: fault.response, currentAnswer: reply)
+            if v == .regressed, let judge {
+                do {
+                    if try await judge.sameMeaning(prompt: fault.prompt, original: fault.response, current: reply) {
+                        v = .unchanged
+                        appendLog(.info, "  → reworded, semantically unchanged (judge)")
+                    }
+                } catch {
+                    v = .failed("answers differ textually; semantic judge unavailable: \(error.localizedDescription)")
+                    appendLog(.error, "  → judge unavailable — verdict undecided")
+                }
+            }
+            results[idx].currentAnswer = reply
+            results[idx].verdict = v
+            if v == .regressed {
+                if autoReopen, (try? store.updateFaultStatus(at: url, to: .open)) != nil {
+                    results[idx].autoReopened = true
+                    appendLog(.warn, "  → REGRESSED · auto-reopened")
+                } else {
+                    appendLog(.warn, "  → REGRESSED")
+                }
+            } else if v == .unchanged {
+                appendLog(.info, "  → unchanged")
+            }
+        } catch {
+            results[idx].verdict = .failed(error.localizedDescription)
+            appendLog(.error, "  → failed: \(error.localizedDescription)")
+        }
     }
 
     private func appendLog(_ level: LogLine.Level, _ text: String) {

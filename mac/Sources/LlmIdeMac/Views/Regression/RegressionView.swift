@@ -316,10 +316,13 @@ private struct RegressionSourcesPane: View {
         let t = theme.current
         let (label, color): (String, Color) = {
             switch v {
-            case .pending:   return ("pending", t.textMuted)
-            case .unchanged: return ("ok", t.accent3)
-            case .regressed: return ("REGR", t.danger)
-            case .failed:    return ("fail", t.accent4)
+            case .pending:       return ("pending", t.textMuted)
+            case .unchanged:     return ("ok", t.accent3)
+            case .regressed:     return ("REGR", t.danger)
+            case .repaired:      return ("fixed", t.accent2)
+            case .repairFailed:  return ("fix?", t.danger)
+            case .needsApproval: return ("approve", t.accent4)
+            case .failed:        return ("fail", t.accent4)
             }
         }()
         Text(label)
@@ -531,6 +534,9 @@ private struct RegressionDetailPane: View {
             case .pending:   return ("pending", t.textMuted)
             case .unchanged: return ("unchanged", t.accent3)
             case .regressed: return ("REGRESSED", t.danger)
+            case .repaired:  return ("repaired — re-verify passed", t.accent2)
+            case .repairFailed(let why): return ("repair failed — \(why.prefix(40))", t.danger)
+            case .needsApproval: return ("needs approval", t.accent4)
             case .failed(let why): return ("failed — \(why.prefix(40))", t.accent4)
             }
         }()
