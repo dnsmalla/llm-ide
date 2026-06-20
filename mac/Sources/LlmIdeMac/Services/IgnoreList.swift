@@ -5,7 +5,7 @@ import Foundation
 /// SearchService, and CodeAssistantPanel.
 enum IgnoreList {
     static let directories: Set<String> = [
-        ".git", "node_modules", ".understand-anything", ".code-notes", ".build",
+        ".git", "node_modules", "system", ".build",
         "DerivedData", ".swiftpm", "Pods", "build", "dist", ".next", ".venv", "venv",
         ".cache", "__pycache__", ".pytest_cache", "target", "vendor", ".gradle",
         ".idea", ".vscode", ".llmide-auto"

@@ -76,7 +76,7 @@ final class DocGenViewModel: ObservableObject {
     }
 
     /// Export the generated markdown.  When `projectRoot` is supplied the file
-    /// is written into `<projectRoot>/plans/` (creating the directory if
+    /// is written into `<projectRoot>/data/` (creating the directory if
     /// needed); otherwise it falls back to the user's Downloads folder.
     func exportMarkdown(content: String, api: LlmIdeAPIClient, projectRoot: URL? = nil) {
         let filename = selectedTemplate.map { "\($0.name)-doc" } ?? "generated-doc"

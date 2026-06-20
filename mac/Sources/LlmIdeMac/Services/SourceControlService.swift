@@ -377,13 +377,13 @@ final class SourceControlService {
         FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path)
     }
 
-    /// For each known generated-artifact dir (`.code-notes`, `.understand-anything`),
+    /// For each known generated-artifact dir (`system/graph`, `system/cache`),
     /// if the dir exists but has no `.gitignore`, drop in a self-ignoring `*`
     /// marker so git stops listing its contents regardless of the repo's root
     /// .gitignore. Best-effort: never fails the refresh.
     private func ensureGeneratedIgnores(_ root: URL) {
         let fm = FileManager.default
-        for dir in [".code-notes", ".understand-anything"] {
+        for dir in ["system/graph", "system/cache"] {
             let dirURL = root.appendingPathComponent(dir, isDirectory: true)
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: dirURL.path, isDirectory: &isDir), isDir.boolValue else { continue }
