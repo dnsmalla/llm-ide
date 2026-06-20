@@ -315,9 +315,9 @@ final class CodeAssistPrompter: RegressionPrompter {
 
 /// Production semantic judge — one constrained codeAssist call per
 /// textually-drifted fault, answered YES/NO. Cheap by construction:
-/// inputs are truncated and the reply is a single word, so this is a
-/// natural fit for the deployment's sub-model tier
-/// (LLMIDE_SUBAGENT_MODEL) rather than the full chat model.
+/// inputs are truncated and the reply is a single word, so this uses
+/// the deployment's sub-model tier (LLMIDE_SUBAGENT_MODEL) via
+/// tier: "subagent" instead of the full chat model.
 final class CodeAssistJudge: RegressionJudge {
     enum JudgeError: LocalizedError {
         case ambiguousReply(String)
@@ -374,6 +374,7 @@ final class CodeAssistJudge: RegressionJudge {
             message: Self.buildPrompt(prompt: prompt, original: original, current: current),
             language: "en",
             model: nil,
+            tier: "subagent",
             history: [],
             attachments: [],
             agentContext: nil
