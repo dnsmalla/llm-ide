@@ -179,6 +179,41 @@ public struct MemoryStore {
         "\"" + s.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }
 
+    // MARK: - Working-tree diff (for repair review)
+
+    struct GitDiff: Equatable {
+        let unified: String
+        let changedPaths: [String]
+    }
+
+    /// Unified diff of the working tree vs HEAD, plus the changed paths.
+    /// Best-effort: throws only if git can't be launched.
+    func gitDiff(at repo: URL) throws -> GitDiff {
+        let unified = try Self.runGit(["-C", repo.path, "diff"], at: repo)
+        let names = try Self.runGit(["-C", repo.path, "diff", "--name-only"], at: repo)
+        let paths = names.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+        return GitDiff(unified: unified, changedPaths: paths)
+    }
+
+    /// Revert the given working-tree paths to HEAD. Used by "Discard" in
+    /// the repair-review UI.
+    func gitCheckout(at repo: URL, paths: [String]) throws {
+        guard !paths.isEmpty else { return }
+        _ = try Self.runGit(["-C", repo.path, "checkout", "--"] + paths, at: repo)
+    }
+
+    private static func runGit(_ args: [String], at repo: URL) throws -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        p.arguments = args
+        p.currentDirectoryURL = repo
+        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
+        try p.run()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
     // MARK: - Q&A writes (Phase C)
 
     /// Write a saved Q&A under `<repo>/.understand-anything/memory/q&a/`.
