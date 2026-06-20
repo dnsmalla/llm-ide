@@ -1,7 +1,7 @@
 // Settings → Paths.
 //
 // When a project is open, the top panel shows that project's canonical
-// folder tree (meetings/plans/notes/assets/code/data) — read-only, with
+// folder tree (source/code/data/notes/system) — read-only, with
 // Reveal-in-Finder per row and a "Rebuild missing folders" action. The
 // project owns these; they are not configurable here.
 //
@@ -12,7 +12,7 @@
 //
 //   ┌─ Paths ──────────────────────────────────────────────────┐
 //   │ 🔒 Folder paths are controlled by the active project.     │
-//   │   meetings/ plans/ notes/ assets/ code/ data/  [Reveal]   │
+//   │   source/ code/ data/ notes/ system/  [Reveal]           │
 //   │   [ Rebuild missing folders ]                             │
 //   │ ──────────────────────────────────────                   │
 //   │ Default location for new projects   ✓                    │
@@ -90,12 +90,7 @@ struct PathsSettingsSection: View {
     private func projectPathsPanel(_ ap: ProjectStore.ActiveProject) -> some View {
         let t = theme.current
         let projectURL = URL(fileURLWithPath: ap.localPath)
-        let meetingsURL = projectURL.appendingPathComponent("meetings")
-        let plansURL    = projectURL.appendingPathComponent("plans")
-        let notesURL    = projectURL.appendingPathComponent("notes")
-        let assetsURL   = projectURL.appendingPathComponent("assets")
-        let codeURL     = projectURL.appendingPathComponent("code")
-        let dataURL     = projectURL.appendingPathComponent("data")
+        let L = ProjectLayout(root: projectURL)
 
         VStack(alignment: .leading, spacing: Spacing.sm) {
             // Header
@@ -121,41 +116,16 @@ struct PathsSettingsSection: View {
                              accent: t.accent)
 
             // Managed subfolders
-            projectFolderRow(label: "meetings/",
-                             icon: "calendar",
-                             url: meetingsURL,
-                             note: "Live captures + exported transcripts",
-                             accent: t.accent)
-
-            projectFolderRow(label: "plans/",
-                             icon: "list.bullet.rectangle",
-                             url: plansURL,
-                             note: "Exported project plans (.md + .json)",
-                             accent: t.textMuted)
-
-            projectFolderRow(label: "notes/",
-                             icon: "note.text",
-                             url: notesURL,
-                             note: "Free-form notes (yours to manage)",
-                             accent: t.textMuted)
-
-            projectFolderRow(label: "assets/",
-                             icon: "photo",
-                             url: assetsURL,
-                             note: "Screenshots, diagrams, attachments",
-                             accent: t.textMuted)
-
-            projectFolderRow(label: "code/",
-                             icon: "chevron.left.forwardslash.chevron.right",
-                             url: codeURL,
-                             note: "Source files routed from Code items",
-                             accent: t.textMuted)
-
-            projectFolderRow(label: "data/",
-                             icon: "tablecells",
-                             url: dataURL,
-                             note: "Data files routed from Data items",
-                             accent: t.textMuted)
+            projectFolderRow(label: "source/", icon: "waveform",
+                             url: L.sourceDir, note: "Meeting & email transcripts", accent: t.accent)
+            projectFolderRow(label: "code/", icon: "chevron.left.forwardslash.chevron.right",
+                             url: L.codeDir, note: "Code files", accent: t.textMuted)
+            projectFolderRow(label: "data/", icon: "tablecells",
+                             url: L.dataDir, note: "Documents, data, images", accent: t.textMuted)
+            projectFolderRow(label: "notes/", icon: "note.text",
+                             url: L.notesDir, note: "Generated notes", accent: t.textMuted)
+            projectFolderRow(label: "system/", icon: "gearshape",
+                             url: L.systemDir, note: "Settings, faults, graph, index (managed)", accent: t.textMuted)
 
             // Actions strip for the meetings/ folder (index rebuild etc.)
             notesActionsStrip
@@ -349,7 +319,7 @@ struct PathsSettingsSection: View {
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
             }
-            Text("Lives inside each repo as faults/, q&a/, repo.md, graph-notes.md. Default `.understand-anything/memory` matches the convention the Understand-Anything skill expects.")
+            Text("Faults + Q&A live under `system/faults`.")
                 .font(Typography.caption)
                 .foregroundStyle(theme.current.textMuted)
         }
