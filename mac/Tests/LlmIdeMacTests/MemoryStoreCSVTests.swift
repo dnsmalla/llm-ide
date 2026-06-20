@@ -42,7 +42,7 @@ struct MemoryStoreCSVTests {
         let url = try store.exportFaultsCSV(at: repo)
         let contents = try String(contentsOf: url, encoding: .utf8)
         let header = contents.split(separator: "\n", omittingEmptySubsequences: false).first.map(String.init)
-        #expect(header == "reported,severity,status,fault,answer,git_head,app_version,agent,file")
+        #expect(header == "reported,severity,status,fault,answer,verify,git_head,app_version,agent,file")
     }
 
     @Test func returnsCSVURLUnderMemorySubdir() throws {
