@@ -47,7 +47,14 @@ struct ShellFaultVerifier: FaultVerifier {
         let deadline = Date().addingTimeInterval(timeout)
         while process.isRunning {
             if Date() >= deadline {
-                process.terminate()                 // SIGTERM
+                process.terminate()                       // SIGTERM
+                // Grace period, then hard-kill if it ignored SIGTERM.
+                let killBy = Date().addingTimeInterval(0.5)
+                while process.isRunning && Date() < killBy {
+                    try? await Task.sleep(nanoseconds: 25_000_000)
+                }
+                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+                process.waitUntilExit()                   // reap; closes pipe → reader unblocks
                 throw VerifyError.timedOut(timeout)
             }
             try await Task.sleep(nanoseconds: 50_000_000) // 50ms poll

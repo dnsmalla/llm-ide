@@ -100,4 +100,49 @@ struct RegressionPipelineTests {
         await runner.run(at: repo, attemptRepair: false)
         #expect(runner.results.first?.verdict == .unchanged)
     }
+
+    @Test func repairedPathsExcludePreexistingDirtyFiles() async throws {
+        let repo = try tmpRepo(); defer { try? FileManager.default.removeItem(at: repo) }
+        // init a real git repo with two committed files
+        func git(_ a: [String]) throws { let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/git"); p.arguments = ["-C", repo.path] + a; p.standardOutput = Pipe(); p.standardError = Pipe(); try p.run(); p.waitUntilExit() }
+        try git(["init", "-q"]); try git(["config", "user.email", "t@t.t"]); try git(["config", "user.name", "t"])
+        try "x\n".write(to: repo.appendingPathComponent("user.txt"), atomically: true, encoding: .utf8)
+        try "y\n".write(to: repo.appendingPathComponent("code.txt"), atomically: true, encoding: .utf8)
+        try git(["add", "."]); try git(["commit", "-q", "-m", "init"])
+        // user dirties user.txt BEFORE the run
+        try "x-edited\n".write(to: repo.appendingPathComponent("user.txt"), atomically: true, encoding: .utf8)
+
+        let store = MemoryStore()
+        let url = try writeFault(store, at: repo, prompt: "q", response: "a", verify: "c")
+        let verifier = FakeVerifier()
+        verifier.outcomes = [VerifyOutcome(exitCode: 1, output: "boom"), VerifyOutcome(exitCode: 0, output: "")]
+        let appr = approvals(); appr.approve(repo: repo, faultFile: url.lastPathComponent, command: "c")
+        // repairer simulates a code fix by writing code.txt
+        final class WritingRepairer: FaultRepairer {
+            let repo: URL; init(_ r: URL) { repo = r }
+            func repair(fault: FaultReport, failureOutput: String, repoRoot: URL) async throws {
+                try "y-fixed\n".write(to: repo.appendingPathComponent("code.txt"), atomically: true, encoding: .utf8)
+            }
+        }
+        let runner = RegressionRunner(prompter: FakePrompter(), store: store,
+                                      verifier: verifier, repairer: WritingRepairer(repo), approvals: appr)
+        await runner.run(at: repo, attemptRepair: true)
+        let paths = runner.results.first?.repairedPaths ?? []
+        #expect(paths.contains("code.txt"))
+        #expect(!paths.contains("user.txt"))   // pre-existing user edit must NOT be in the revert set
+    }
+
+    @Test func commandRegressionAutoReopensWithoutJudge() async throws {
+        let repo = try tmpRepo(); defer { try? FileManager.default.removeItem(at: repo) }
+        let store = MemoryStore()
+        let url = try writeFault(store, at: repo, prompt: "q", response: "a", verify: "c")
+        let verifier = FakeVerifier(); verifier.outcomes = [VerifyOutcome(exitCode: 1, output: "x")]
+        let appr = approvals(); appr.approve(repo: repo, faultFile: url.lastPathComponent, command: "c")
+        let runner = RegressionRunner(prompter: FakePrompter(), store: store,
+                                      verifier: verifier, approvals: appr)   // NO judge
+        await runner.run(at: repo, autoReopen: true, attemptRepair: false)
+        #expect(runner.results.first?.verdict == .regressed)
+        #expect(runner.results.first?.autoReopened == true)
+        #expect((try store.loadFault(at: url)).status == .open)
+    }
 }

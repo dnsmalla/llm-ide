@@ -171,7 +171,8 @@ final class RegressionRunner: ObservableObject {
             if let cmd = fault.verify, !cmd.isEmpty, let verifier {
                 await runCommandFault(idx: idx, url: url, command: cmd,
                                       verifier: verifier, repoRoot: repoRoot,
-                                      attemptRepair: attemptRepair)
+                                      attemptRepair: attemptRepair,
+                                      autoReopen: requestedAutoReopen)
             } else {
                 await runAnswerCompareFault(idx: idx, fault: fault, url: url, autoReopen: autoReopen)
             }
@@ -189,7 +190,8 @@ final class RegressionRunner: ObservableObject {
     /// Command-backed path: approve-gate → verify → (repair → re-verify).
     private func runCommandFault(idx: Int, url: URL, command: String,
                                  verifier: FaultVerifier, repoRoot: URL,
-                                 attemptRepair: Bool) async {
+                                 attemptRepair: Bool,
+                                 autoReopen reopenOnRegression: Bool) async {
         guard approvals.isApproved(repo: repoRoot, faultFile: url.lastPathComponent, command: command) else {
             results[idx].verdict = .needsApproval
             appendLog(.warn, "  → needs approval: \(command)")
@@ -205,15 +207,25 @@ final class RegressionRunner: ObservableObject {
             appendLog(.warn, "  → verify FAILED (exit \(first.exitCode))")
             guard attemptRepair, let repairer else {
                 results[idx].verdict = .regressed
+                // A failed verify command is a deterministic regression (no
+                // heuristic judge needed), so honor auto-reopen directly.
+                if reopenOnRegression, (try? store.updateFaultStatus(at: url, to: .open)) != nil {
+                    results[idx].autoReopened = true
+                    appendLog(.warn, "  → REGRESSED · auto-reopened")
+                }
                 return
             }
+            // Snapshot already-dirty paths so Discard only reverts files the
+            // repair itself introduced — never the user's pre-existing edits.
+            let dirtyBefore = Set((try? store.gitDiff(at: repoRoot).changedPaths) ?? [])
             appendLog(.info, "  → repairing…")
             let fault = try store.loadFault(at: url)
             try await repairer.repair(fault: fault, failureOutput: first.output, repoRoot: repoRoot)
             let second = try await verifier.verify(command: command, repoRoot: repoRoot, timeout: verifyTimeout)
             if second.exitCode == 0 {
                 results[idx].verdict = .repaired
-                results[idx].repairedPaths = (try? store.gitDiff(at: repoRoot).changedPaths) ?? []
+                let changedAfter = (try? store.gitDiff(at: repoRoot).changedPaths) ?? []
+                results[idx].repairedPaths = changedAfter.filter { !dirtyBefore.contains($0) }
                 appendLog(.info, "  → repaired · re-verify passed (review diff)")
             } else {
                 results[idx].verdict = .repairFailed(String(second.output.suffix(200)))
