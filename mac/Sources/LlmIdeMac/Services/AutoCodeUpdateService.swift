@@ -427,7 +427,7 @@ final class AutoCodeUpdateService: ObservableObject {
         }
 
         // 7. Regression sweep — re-asks every `status: fixed` FaultReport
-        // saved under <repo>/.understand-anything/memory/faults/ and flips any
+        // saved under <repo>/system/faults/ and flips any
         // regressed ones back to `status: open`. Structural task; uses
         // the same prompter the standalone Regression view does (server
         // /code-assist). Off by default; opt-in via Settings.

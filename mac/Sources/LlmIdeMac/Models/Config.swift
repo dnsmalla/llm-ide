@@ -296,7 +296,7 @@ final class AppConfig: ObservableObject {
     }
 
     // Defaults — single source of truth.
-    static let defaultMemorySubdir = ".understand-anything/memory"
+    static let defaultMemorySubdir = "system/faults"
     static let defaultClonesSubdir = "Clones"
 
     // ── Auto Code Update ──────────────────────────────────────────────

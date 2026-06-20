@@ -339,7 +339,7 @@ struct AutoCodeView: View {
                 Text("What this does")
                     .font(Typography.section)
                     .foregroundStyle(t.textMuted)
-                Text("Re-asks every `status: fixed` fault report saved under `<repo>/.understand-anything/memory/faults/` and flips any that come back with a different answer back to `status: open` so they show up in the next code review.")
+                Text("Re-asks every `status: fixed` fault report saved under `<repo>/system/faults/` and flips any that come back with a different answer back to `status: open` so they show up in the next code review.")
                     .font(Typography.body)
                     .foregroundStyle(t.text)
                     .fixedSize(horizontal: false, vertical: true)

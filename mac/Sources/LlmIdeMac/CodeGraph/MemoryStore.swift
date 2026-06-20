@@ -1,4 +1,4 @@
-// Read/write the Understand-Anything memory dir under <repo>/.understand-anything/memory/.
+// Read/write the faults/Q&A memory dir under <repo>/system/faults/.
 //
 // Phase A surface — seed + read only:
 //   • seedIfMissing(in:) creates the dir layout and a templated
@@ -21,11 +21,11 @@ public struct MemoryStore: Sendable {
     /// value lands here it's always a clean relative path.
     public let memorySubdir: String
 
-    public init(memorySubdir: String = ".understand-anything/memory") {
+    public init(memorySubdir: String = "system/faults") {
         // Be defensive — if a caller forgets to validate, fall back
         // to the convention rather than blowing up at the FS layer.
         let trimmed = memorySubdir.trimmingCharacters(in: .whitespaces)
-        self.memorySubdir = trimmed.isEmpty ? ".understand-anything/memory" : trimmed
+        self.memorySubdir = trimmed.isEmpty ? ProjectLayout.faultsSubdir : trimmed
     }
 
     // MARK: - Paths
