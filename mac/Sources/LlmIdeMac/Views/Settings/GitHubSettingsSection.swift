@@ -23,10 +23,6 @@ struct GitHubSettingsSection: View {
         SettingsSectionCard(icon: "chevron.left.forwardslash.chevron.right", title: "GitHub") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
 
-                if config.resolvedClonesURL == nil {
-                    pathsRequiredNotice
-                }
-
                 // Access Token
                 HStack(spacing: Spacing.md) {
                     Text("Access Token")
@@ -352,37 +348,6 @@ struct GitHubSettingsSection: View {
         } catch {
             cloneErrors[r.id] = "Move failed: \(error.localizedDescription)"
         }
-    }
-
-    /// Mirrors GitLabSettingsSection.pathsRequiredNotice — surfaces
-    /// the Paths-root requirement at the top of GitHub settings so
-    /// the user sees why Clone is disabled before clicking.
-    @ViewBuilder
-    private var pathsRequiredNotice: some View {
-        let t = theme.current
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: "exclamationmark.circle.fill")
-                .foregroundStyle(t.accent4)
-                .font(.system(size: 12))
-            VStack(alignment: .leading, spacing: 1) {
-                Text("No Paths root set — clones use a default location")
-                    .font(Typography.captionStrong)
-                    .foregroundStyle(t.text)
-                Text("Clones land at ~/Documents/LLM IDE/Clones/<repo>. Set Settings → Paths → Root directory to choose your own.")
-                    .font(Typography.caption)
-                    .foregroundStyle(t.textMuted)
-            }
-            Spacer(minLength: 8)
-            Button("Open Paths") {
-                NotificationCenter.default.post(name: .openSettings, object: nil)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-        }
-        .padding(.horizontal, Spacing.sm)
-        .padding(.vertical, 6)
-        .background(t.accent4.opacity(0.10))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     // MARK: - Clone / Re-sync
