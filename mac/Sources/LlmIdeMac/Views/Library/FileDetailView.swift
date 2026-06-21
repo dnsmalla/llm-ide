@@ -172,6 +172,7 @@ struct CodeDetailView: View {
     let url: URL
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var config: AppConfig
+    @EnvironmentObject private var projectStore: ProjectStore
 
     @State private var changedLines: [Int: GitGutter.Mark] = [:]
 
@@ -193,7 +194,8 @@ struct CodeDetailView: View {
     /// map) when the file isn't inside a git repo — never blocks the editor.
     @MainActor
     private func refreshGutter() async {
-        guard let repo = Self.containingRepo(of: url, preferred: config.activeRepoLocalURL) else {
+        let preferred = WorkspaceRoot.gitWorkingTree(config: config, projectStore: projectStore)
+        guard let repo = Self.containingRepo(of: url, preferred: preferred) else {
             changedLines = [:]
             return
         }

@@ -38,4 +38,50 @@ enum WorkspaceRoot {
         resolve(config: config, projectStore: projectStore)
             ?? FileManager.default.homeDirectoryForCurrentUser
     }
+
+    // MARK: - Two-root context
+
+    /// A workspace has TWO distinct roots that must not be conflated:
+    ///   • `projectRoot` owns generated/system data — `system/faults`, the
+    ///     SQLite index, memory. It is the folder `ProjectLayout` is applied to.
+    ///   • `gitRoot` is the active git working tree, used for SCM, agent cwd,
+    ///     and verify commands. It is `nil` when no working tree exists.
+    ///
+    /// In the "clone-into-code" model these differ (project root vs
+    /// `code/<repo>`); in the "project is a repo" model they're the same URL.
+    /// Resolving them together — and routing each consumer to the right one —
+    /// is what stops faults from landing in `code/<repo>/system/faults` while
+    /// the UI reads `<projectRoot>/system/faults`.
+    struct Context {
+        let projectRoot: URL
+        let gitRoot: URL?
+    }
+
+    @MainActor
+    static func context(config: AppConfig, projectStore: ProjectStore) -> Context? {
+        guard let projectRoot = resolve(config: config, projectStore: projectStore) else { return nil }
+        return Context(projectRoot: projectRoot,
+                       gitRoot: pickGitRoot(projectRoot: projectRoot,
+                                            activeClone: config.activeRepoLocalURL,
+                                            isGitRepo: isGitRepo))
+    }
+
+    /// The active git working tree, or nil. Convenience over `context(...)`.
+    @MainActor
+    static func gitWorkingTree(config: AppConfig, projectStore: ProjectStore) -> URL? {
+        context(config: config, projectStore: projectStore)?.gitRoot
+    }
+
+    /// Pure decision core for the git working tree, separated for unit tests.
+    /// Prefers the project root when it is itself a git repo (project-IS-a-repo
+    /// model); otherwise the globally-active clone when it's a real repo.
+    static func pickGitRoot(projectRoot: URL, activeClone: URL?, isGitRepo: (URL) -> Bool) -> URL? {
+        if isGitRepo(projectRoot) { return projectRoot }
+        if let clone = activeClone, isGitRepo(clone) { return clone }
+        return nil
+    }
+
+    static func isGitRepo(_ url: URL) -> Bool {
+        FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path)
+    }
 }

@@ -8,6 +8,7 @@ struct SourceControlView: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
+    @EnvironmentObject var projectStore: ProjectStore
     @Environment(\.controlActiveState) private var controlActiveState
     @State private var scm = SourceControlService()
     @State private var selected: FileChange?
@@ -48,7 +49,12 @@ struct SourceControlView: View {
         }
     }
 
-    private var root: URL? { config.activeRepoLocalURL }
+    /// SCM operates on the active git WORKING TREE. Resolved project-first
+    /// (the project root when it's itself a repo, else the active clone) so
+    /// SCM follows the open project rather than whichever repo is globally
+    /// active. `isGitRepo`-gated, so it's nil — and the empty state shows —
+    /// when no working tree exists.
+    private var root: URL? { WorkspaceRoot.gitWorkingTree(config: config, projectStore: projectStore) }
 
     /// highlight.js language hint for the right diff pane: "diff" in History
     /// mode (multi-file commit diff), else the selected file's extension.

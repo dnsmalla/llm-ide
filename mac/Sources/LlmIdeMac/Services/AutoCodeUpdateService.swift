@@ -194,8 +194,6 @@ final class AutoCodeUpdateService: ObservableObject {
             }
         }
 
-        var resolvedLocalPath: String? = nil
-
         // Resolve the active backend + project. Supports both GitLab and
         // GitHub via the RepoBackend protocol — precedence matches
         // `AppConfig.activeRepoLocalURL` (GitLab first, then GitHub).
@@ -205,14 +203,15 @@ final class AutoCodeUpdateService: ObservableObject {
         }
         let client = resolved.client
         let projectId = resolved.projectId
-        let capturedLocalPath = resolved.localPath
-        resolvedLocalPath = capturedLocalPath
+        // Git ops + agent cwd run in the working tree; faults/index live at
+        // the project root. These differ in the clone-into-code model.
+        let capturedGitRoot = resolved.gitRoot
 
         // Opt-in: stash uncommitted changes up front so the dirty-tree guard
         // doesn't skip every task. Restored in the defer above. Default off.
         // The git work runs off the main actor (subprocess calls block).
         if config.autoCodeAutoStash {
-            let path = capturedLocalPath
+            let path = capturedGitRoot
             let stashResult: (didStash: Bool, branch: String?) = await Task.detached {
                 guard !Self.isWorkingTreeClean(at: path) else { return (false, nil) }
                 let branch = Self.currentBranch(at: path)
@@ -221,7 +220,7 @@ final class AutoCodeUpdateService: ObservableObject {
             if stashResult.didStash {
                 didStash = true
                 stashBranch = stashResult.branch
-                stashPath = capturedLocalPath
+                stashPath = capturedGitRoot
             }
         }
 
@@ -351,7 +350,7 @@ final class AutoCodeUpdateService: ObservableObject {
             }
             let succeeded = await runCLI(
                 issue: issue,
-                localPath: capturedLocalPath,
+                localPath: capturedGitRoot,
                 logDir: logDir
             )
 
@@ -387,10 +386,10 @@ final class AutoCodeUpdateService: ObservableObject {
         ].compactMap { $0 }
 
         // 6. Run per-task-type CLI prompts for enabled task types
-        if !Task.isCancelled, let capturedLocalPath = resolvedLocalPath, let logDir = logsDirectory() {
+        if !Task.isCancelled, let logDir = logsDirectory() {
             if !Task.isCancelled, config.autoCodeRunReviewCode {
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewCode,
-                                      localPath: capturedLocalPath,
+                                      localPath: capturedGitRoot,
                                       logSuffix: "review-code",
                                       logDir: logDir)
                 taskOutputs[AutoTask.reviewCode.rawValue] = logTail(suffix: "review-code", logDir: logDir)
@@ -402,7 +401,7 @@ final class AutoCodeUpdateService: ObservableObject {
             }
             if !Task.isCancelled, config.autoCodeRunReviewDoc {
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewDoc,
-                                      localPath: capturedLocalPath,
+                                      localPath: capturedGitRoot,
                                       logSuffix: "review-doc",
                                       logDir: logDir)
                 taskOutputs[AutoTask.reviewDoc.rawValue] = logTail(suffix: "review-doc", logDir: logDir)
@@ -414,7 +413,7 @@ final class AutoCodeUpdateService: ObservableObject {
             }
             if !Task.isCancelled, config.autoCodeRunReviewConflicts {
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewConflicts,
-                                      localPath: capturedLocalPath,
+                                      localPath: capturedGitRoot,
                                       logSuffix: "review-conflicts",
                                       logDir: logDir)
                 taskOutputs[AutoTask.reviewConflicts.rawValue] = logTail(suffix: "review-conflicts", logDir: logDir)
@@ -427,12 +426,13 @@ final class AutoCodeUpdateService: ObservableObject {
         }
 
         // 7. Regression sweep — re-asks every `status: fixed` FaultReport
-        // saved under <repo>/system/faults/ and flips any
-        // regressed ones back to `status: open`. Structural task; uses
-        // the same prompter the standalone Regression view does (server
-        // /code-assist). Off by default; opt-in via Settings.
+        // saved under <projectRoot>/system/faults/ and flips any
+        // regressed ones back to `status: open`. Faults are PROJECT-level
+        // data, so this targets projectRoot (NOT the git working tree) —
+        // the same place RegressionView and the menu count read. Off by
+        // default; opt-in via Settings.
         if !Task.isCancelled, config.autoCodeRunRegression {
-            await runRegressionSweep(localPath: resolvedLocalPath)
+            await runRegressionSweep(projectRoot: resolved.projectRoot)
         }
 
         // A user-initiated stop wins over the normal summary.
@@ -450,16 +450,16 @@ final class AutoCodeUpdateService: ObservableObject {
     /// regression row to ⚠. The runner itself publishes per-fault
     /// progress to its own @Published state; this entry point waits
     /// for the run to finish then records a summary line.
-    private func runRegressionSweep(localPath: String?) async {
+    private func runRegressionSweep(projectRoot: String) async {
         guard let api else {
             taskErrors[AutoTask.regression.rawValue] = "Regression skipped — no API client wired."
             return
         }
-        guard let localPath, !localPath.isEmpty else {
-            taskErrors[AutoTask.regression.rawValue] = "Regression skipped — no local repo path resolved."
+        guard !projectRoot.isEmpty else {
+            taskErrors[AutoTask.regression.rawValue] = "Regression skipped — no project root resolved."
             return
         }
-        let repoRoot = URL(fileURLWithPath: localPath, isDirectory: true)
+        let repoRoot = URL(fileURLWithPath: projectRoot, isDirectory: true)
         let prompter = CodeAssistPrompter(api: api, agent: config.activeCLI)
         let judge = CodeAssistJudge(api: api)
         let repairer = AgentFaultRepairer(api: api)
@@ -833,10 +833,16 @@ final class AutoCodeUpdateService: ObservableObject {
     // MARK: - Backend resolution
 
     /// Resolved backend + project tuple returned by `resolveBackendAndProject`.
+    /// Carries BOTH workspace roots (see `WorkspaceRoot.Context`):
+    ///   • `gitRoot` — the git working tree: git ops (stash/commit) + agent cwd.
+    ///   • `projectRoot` — owns `system/` data: faults / index / memory.
+    /// In the clone-into-code model these differ (`code/<repo>` vs the project
+    /// folder); in the project-is-a-repo (linkedRepo) model they're the same.
     struct ResolvedRepo {
         let client: RepoBackend
         let projectId: String
-        let localPath: String
+        let gitRoot: String
+        let projectRoot: String
     }
 
     /// Pick the active repo target. Precedence matches
@@ -857,13 +863,17 @@ final class AutoCodeUpdateService: ObservableObject {
                 if let p = config.gitLabSavedProjects.first(where: { $0.isActive }),
                    let id = p.resolvedId,
                    let local = p.localPath, !local.isEmpty {
-                    return .init(client: backend, projectId: String(id), localPath: local)
+                    return .init(client: backend, projectId: String(id),
+                                 gitRoot: local,
+                                 projectRoot: projectStore?.activeProject?.localPath ?? local)
                 }
             case .github:
                 if let r = config.gitHubSavedRepos.first(where: { $0.isActive }),
                    let (owner, name) = GitHubClient.ownerAndName(from: r.url),
                    let local = r.localPath, !local.isEmpty {
-                    return .init(client: backend, projectId: "\(owner)/\(name)", localPath: local)
+                    return .init(client: backend, projectId: "\(owner)/\(name)",
+                                 gitRoot: local,
+                                 projectRoot: projectStore?.activeProject?.localPath ?? local)
                 }
             }
             return nil
@@ -885,15 +895,17 @@ final class AutoCodeUpdateService: ObservableObject {
                     log.warning("Active project linkedRepo is GitLab but gitLabToken is empty — skipping run")
                     return nil
                 }
+                // Linked model: the project root IS the working tree.
                 return .init(client: backendOverride ?? GitLabClient(config: config),
-                             projectId: linked.remoteId, localPath: local)
+                             projectId: linked.remoteId, gitRoot: local, projectRoot: local)
             case .github:
                 guard !config.gitHubToken.isEmpty else {
                     log.warning("Active project linkedRepo is GitHub but gitHubToken is empty — skipping run")
                     return nil
                 }
+                // Linked model: the project root IS the working tree.
                 return .init(client: backendOverride ?? GitHubClient(config: config),
-                             projectId: linked.remoteId, localPath: local)
+                             projectId: linked.remoteId, gitRoot: local, projectRoot: local)
             }
         }
         // Legacy fallback: ONLY reached when there's no active project OR
@@ -909,7 +921,8 @@ final class AutoCodeUpdateService: ObservableObject {
         {
             return .init(client: GitLabClient(config: config),
                          projectId: String(id),
-                         localPath: local)
+                         gitRoot: local,
+                         projectRoot: projectStore?.activeProject?.localPath ?? local)
         }
         if !config.gitHubToken.isEmpty,
            let r = config.gitHubSavedRepos.first(where: { $0.isActive }),
@@ -918,7 +931,8 @@ final class AutoCodeUpdateService: ObservableObject {
         {
             return .init(client: GitHubClient(config: config),
                          projectId: "\(owner)/\(name)",
-                         localPath: local)
+                         gitRoot: local,
+                         projectRoot: projectStore?.activeProject?.localPath ?? local)
         }
         return nil
     }
