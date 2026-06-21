@@ -98,6 +98,8 @@ export function useTranscript() {
   const resultCounterRef = useRef(0);
   const captureModeRef = useRef<CaptureMode>('mic');
   const restartTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  // Tracks the 0s/1s/3s START retry timers so they can be cancelled in stopRecording.
+  const startRetryTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Snapshot refs so stopRecording() can persist the transcript without
   // adding state values to its dep array (which would recreate the
@@ -226,14 +228,21 @@ export function useTranscript() {
         }));
 
         setSegments((prev) => {
-          if (prev.length > 0) {
-            const lastIdx = prev.length - 1;
-            if (prev[lastIdx].sessionId === sessionId) {
-              if (prev[lastIdx].text === text) return prev;
-              const updated = [...prev];
-              updated[lastIdx] = { ...updated[lastIdx], text, timestamp };
-              return updated;
+          // Scan back for an existing segment with the same sessionId so
+          // out-of-order or interleaved speakers are merged correctly.
+          // (findLastIndex is ES2023; scan manually for ES2020 compat.)
+          let existingIdx = -1;
+          for (let i = prev.length - 1; i >= 0; i--) {
+            if (prev[i].sessionId === sessionId) {
+              existingIdx = i;
+              break;
             }
+          }
+          if (existingIdx !== -1) {
+            if (prev[existingIdx].text === text) return prev;
+            const updated = [...prev];
+            updated[existingIdx] = { ...updated[existingIdx], text, timestamp };
+            return updated;
           }
           // Add the caption speaker to participants if not already present.
           // This ensures bots/agents (e.g. "Agent") with no video tile show
@@ -554,11 +563,15 @@ export function useTranscript() {
         if (tab?.title) setMeetingTitle(extractMeetingTitle(tab.title));
 
         if (isSupportedUrl(url)) {
-          // Tell caption scraper to start — retry in case content script hasn't loaded yet
+          // Tell caption scraper to start — retry in case content script hasn't loaded yet.
+          // Clear any previously-scheduled retries before scheduling fresh ones so a
+          // rapid Stop→Start sequence doesn't deliver a stale START after a STOP.
+          for (const t of startRetryTimersRef.current) clearTimeout(t);
+          startRetryTimersRef.current = [];
           const sendStart = () => chrome.runtime.sendMessage({ type: MsgType.START_CAPTION_SCRAPING }).catch(() => {});
           sendStart();
-          setTimeout(sendStart, 1000);
-          setTimeout(sendStart, 3000);
+          startRetryTimersRef.current.push(setTimeout(sendStart, 1000));
+          startRetryTimersRef.current.push(setTimeout(sendStart, 3000));
           useCaptions = true;
         }
       } catch (err) {
@@ -592,6 +605,10 @@ export function useTranscript() {
   );
 
   const stopRecording = useCallback(() => {
+    // Cancel any pending START retry timers so a delayed START can't arrive
+    // after the user has already pressed Stop.
+    for (const t of startRetryTimersRef.current) clearTimeout(t);
+    startRetryTimersRef.current = [];
     stopAllRecognition();
     cleanupMic();
     chrome.runtime.sendMessage({ type: MsgType.STOP_CAPTION_SCRAPING }).catch(() => {});

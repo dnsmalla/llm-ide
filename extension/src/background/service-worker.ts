@@ -25,7 +25,10 @@ async function openMacAppDeepLink(): Promise<void> {
 // ── Content script injection ──────────────────────────────────────────
 
 async function ensureContentScriptInjected(tabId: number, url: string): Promise<boolean> {
-  if (!isSupportedUrl(url)) return true;
+  // Return false for unsupported URLs — the caller uses the return value to
+  // decide whether to forward START to this tab.  Returning true previously
+  // caused the SW to report {ok:true} for tabs that would never respond.
+  if (!isSupportedUrl(url)) return false;
 
   try {
     const response = await chrome.tabs.sendMessage(tabId, { type: MsgType.PING });

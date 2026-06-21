@@ -1,7 +1,7 @@
 // Detects the active speaker on Google Meet, Microsoft Teams, and Zoom (web)
 // Sends speaker name to the side panel via chrome.runtime messages
 
-import { MsgType, type Message } from '../lib/messages';
+import { MsgType, isMessage, type Message } from '../lib/messages';
 import { debug } from '../lib/config';
 import { detectPlatformFromUrl, type PlatformId } from '../lib/platforms';
 
@@ -19,6 +19,9 @@ window.__llmideSpeakerDetectorInjected = true;
 
 type Platform = PlatformId;
 
+// Only poll/broadcast while recording is active — mirrors how caption-scraper
+// gates on isCapturing.  Starts on START_CAPTION_SCRAPING, stops on STOP_CAPTION_SCRAPING.
+let isActive = false;
 let lastSpeaker = '';
 let speakerInterval: ReturnType<typeof setInterval> | null = null;
 let participantInterval: ReturnType<typeof setInterval> | null = null;
@@ -222,9 +225,24 @@ function startDetection() {
 // Cleanup on page unload
 window.addEventListener('beforeunload', cleanup);
 
-// Start
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', startDetection);
-} else {
-  startDetection();
-}
+// Gate detection on recording state — only start polling after
+// START_CAPTION_SCRAPING and stop on STOP_CAPTION_SCRAPING.
+// This mirrors how caption-scraper.ts gates on isCapturing.
+chrome.runtime.onMessage.addListener((message: unknown) => {
+  if (!isMessage(message)) return false;
+  if (message.type === MsgType.START_CAPTION_SCRAPING) {
+    if (!isActive) {
+      isActive = true;
+      debug('[speaker-detector] activated');
+      startDetection();
+    }
+    return false;
+  }
+  if (message.type === MsgType.STOP_CAPTION_SCRAPING) {
+    isActive = false;
+    debug('[speaker-detector] deactivated');
+    cleanup();
+    return false;
+  }
+  return false;
+});

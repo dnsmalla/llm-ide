@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranscript } from './hooks/useTranscript';
 import { useLiveSync } from './hooks/useLiveSync';
 import { useNotes } from './hooks/useNotes';
@@ -185,6 +185,15 @@ export default function App() {
     // deps intentionally narrow (see comments) — only react to these transitions
   }, [agentEnabled, transcript.isRecording]);
 
+  // Guard: track the last plan id for which we already dispatched so two
+  // effect firings for the same plan (e.g. stub creation + isRecording
+  // transition in the same render cycle) can't double-dispatch.
+  // Reset when recording stops so each new session gets a fresh dispatch.
+  const lastDispatchedPlanIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!transcript.isRecording) lastDispatchedPlanIdRef.current = null;
+  }, [transcript.isRecording]);
+
   // Auto-attach: when recording starts AND there's an active plan,
   // dispatch a single run.  With the stub above, this fires on
   // virtually every recording — the user gets a working agent out
@@ -196,6 +205,9 @@ export default function App() {
     if (agent.busy) return;
     const planId = plan.plan?.id ?? null;
     if (!planId) return; // wait for createStub to complete
+    // Skip if we already dispatched for this exact plan id.
+    if (lastDispatchedPlanIdRef.current === planId) return;
+    lastDispatchedPlanIdRef.current = planId;
     agent.dispatch(planId);
     // We intentionally omit `agent` from deps to avoid re-firing on
     // every busy/error tick — we only react to (recording, planId,

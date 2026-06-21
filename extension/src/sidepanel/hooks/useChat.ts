@@ -12,13 +12,11 @@ export interface ChatMessage {
 // and stops the context from growing unboundedly on long sessions.
 const MAX_HISTORY = 10;
 const STORAGE_KEY = 'chatMessages';
-
-// NOTE: we intentionally do NOT cap persisted chat history.  The user owns
-// their conversation and may want to scroll back through weeks of threads.
-// chrome.storage.local has a ~5 MB per-extension quota which comfortably
-// holds tens of thousands of chat messages; if a write ever fails with
-// QUOTA_BYTES, we surface it as a warning rather than silently dropping
-// old messages.
+// Maximum number of messages kept in chrome.storage.local.  The 5 MB quota
+// is shared with the transcript store; capping chat history here prevents
+// one long session from crowding out transcripts.  The in-context MAX_HISTORY
+// (prompt size) is separate and unchanged.
+const MAX_STORED_MESSAGES = 200;
 
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -44,10 +42,11 @@ export function useChat() {
 
   useEffect(() => {
     if (!hydratedRef.current) return;
-    // Persist the full conversation.  If chrome.storage reports a quota
-    // error (QUOTA_BYTES ~5 MB), surface a non-fatal warning instead of
-    // silently dropping messages — the user asked for no retention cap.
-    chrome.storage?.local?.set({ [STORAGE_KEY]: messages }).catch((err: Error) => {
+    // Prune to the most recent MAX_STORED_MESSAGES before writing so the
+    // chat store doesn't crowd out transcripts in the shared 5 MB quota.
+    // The in-context MAX_HISTORY (prompt size) is a separate, smaller cap.
+    const toStore = messages.length > MAX_STORED_MESSAGES ? messages.slice(-MAX_STORED_MESSAGES) : messages;
+    chrome.storage?.local?.set({ [STORAGE_KEY]: toStore }).catch((err: Error) => {
       const msg = err?.message || String(err);
       if (/QUOTA_BYTES|quota/i.test(msg)) {
         setQuotaWarning(

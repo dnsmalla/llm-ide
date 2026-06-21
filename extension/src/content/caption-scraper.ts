@@ -8,7 +8,7 @@
 // 3. When a speaker's text CHANGES, send an update (with same sessionId to update same line).
 // 4. When a speaker disappears from CC and a new caption shows up later, new sessionId = new line.
 
-import { MsgType, type Message } from '../lib/messages';
+import { MsgType, isMessage, type Message } from '../lib/messages';
 import { debug } from '../lib/config';
 import { detectPlatformFromUrl, type PlatformId } from '../lib/platforms';
 
@@ -765,7 +765,9 @@ function scheduleScrape(): void {
 }
 
 function startScraping(): void {
-  if (observer) return;
+  // Idempotent start: if either resource is already set, tear down first to
+  // avoid double-creating the interval or leaving a stale observer behind.
+  if (observer || scrapeInterval) stopScraping();
   scrapeInterval = setInterval(scrape, SCRAPE_INTERVAL_MS);
   observer = new MutationObserver(scheduleScrape);
   observer.observe(document.body, { childList: true, subtree: true, characterData: true });
@@ -790,10 +792,8 @@ function stopScraping(): void {
 platform = detectPlatform();
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
-  if (typeof message !== 'object' || message === null || !('type' in message)) {
-    return false;
-  }
-  const type = (message as { type: unknown }).type;
+  if (!isMessage(message)) return false;
+  const type = message.type;
 
   if (type === MsgType.PING) {
     sendResponse({ pong: true });
@@ -878,7 +878,14 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
       });
       return false;
     }
-    injectMeetChat((message as unknown as { text: string }).text)
+    // isMessage() already validated that message.text is a non-empty string
+    // (POST_CHAT variant requires s('text')), so this cast is safe.
+    const chatText = (message as { type: MsgType.POST_CHAT; text: string }).text;
+    if (typeof chatText !== 'string' || !chatText.trim()) {
+      sendResponse({ ok: false, error: 'POST_CHAT: text must be a non-empty string.' });
+      return false;
+    }
+    injectMeetChat(chatText)
       .then((ok) => {
         if (!ok) {
           sendResponse({ ok: false, error: 'Could not find the Meet chat panel. Open the chat first and try again.' });
