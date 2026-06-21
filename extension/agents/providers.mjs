@@ -33,16 +33,68 @@ export const PROVIDER_IDS = Object.keys(PROVIDERS);
 
 const DEFAULT_OPENAI_BASE = 'https://api.openai.com/v1';
 
+// ── SSRF guard ────────────────────────────────────────────────────────
+//
+// Custom base URLs are user-supplied and must not be forwarded to
+// internal/private addresses. We require HTTPS and block:
+//   • loopback:    127.0.0.0/8, ::1, localhost
+//   • link-local:  169.254.0.0/16, fe80::/10
+//   • RFC-1918:    10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+
+// Matches private/loopback IPv4 addresses that must never be reachable via a custom base URL.
+const PRIVATE_IPv4_RE = /^(127(\.\d{1,3}){3}|10(\.\d{1,3}){3}|169\.254(\.\d{1,3}){2}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}|192\.168(\.\d{1,3}){2})$/;
+
+// Normalise an IPv6 address for comparison (strip brackets, lowercase).
+function normaliseIPv6(host) {
+  return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1).toLowerCase() : host.toLowerCase();
+}
+
+function isPrivateIPv6(host) {
+  const h = normaliseIPv6(host);
+  if (h === '::1') return true;                       // loopback
+  if (/^fe[89ab][0-9a-f]:/i.test(h)) return true;    // fe80::/10 link-local
+  return false;
+}
+
+/**
+ * Throw a clear Error if `url` is not safe to use as a provider base URL.
+ * Rules: must be https:, hostname must not be localhost, a loopback address,
+ * an RFC-1918 address, or a link-local address.
+ */
+export function assertSafeBaseUrl(url) {
+  let parsed;
+  try { parsed = new URL(url); } catch {
+    throw new Error(`SSRF guard: invalid base URL: ${url}`);
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error(`SSRF guard: base URL must use https: (got ${parsed.protocol})`);
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname === 'localhost') {
+    throw new Error('SSRF guard: base URL hostname must not be localhost');
+  }
+  if (PRIVATE_IPv4_RE.test(hostname)) {
+    throw new Error(`SSRF guard: base URL resolves to a private/loopback IPv4 address (${hostname})`);
+  }
+  if (isPrivateIPv6(hostname)) {
+    throw new Error(`SSRF guard: base URL resolves to a private/loopback IPv6 address (${hostname})`);
+  }
+}
+
 // Base URL for the custom OpenAI-compatible provider: user's vault value
 // first, then an operator env fallback. Trailing slashes stripped. null when
 // unset (the caller then reports "configure a base URL").
+// Always validated against the SSRF guard before returning.
 export function customBaseUrl(userId) {
   let url = null;
   if (userId) {
     try { url = getSecret(getDb(), userId, 'custom.baseUrl') || null; } catch { url = null; }
   }
   url = url || process.env.LLMIDE_OPENAI_COMPAT_BASE_URL || null;
-  return url ? url.replace(/\/+$/, '') : null;
+  if (!url) return null;
+  const stripped = url.replace(/\/+$/, '');
+  assertSafeBaseUrl(stripped);
+  return stripped;
 }
 
 // Map a model id to its provider. A regex per family (not a fixed list)
@@ -196,12 +248,50 @@ export function cliInvocation(provider, prompt) {
 
 const CLI_TIMEOUT_MS = 120_000;
 
+/**
+ * Build a minimal environment for provider CLI subprocesses.
+ * Mirrors the allowlist in runtime.mjs (~line 288) so that secrets like
+ * LLMIDE_JWT_SECRET and LLMIDE_VAULT_KEY are never inherited by codex/gemini
+ * or any other provider binary.  Pass `extraKeys` (an object of additional
+ * env vars, e.g. the provider's own API key) to include those too.
+ */
+export function minimalCliEnv(extraKeys = {}) {
+  const env = {
+    PATH:            process.env.PATH            || '',
+    HOME:            process.env.HOME            || '',
+    TMPDIR:          process.env.TMPDIR          || '',
+    TMP:             process.env.TMP             || '',
+    TEMP:            process.env.TEMP            || '',
+    USER:            process.env.USER            || '',
+    LOGNAME:         process.env.LOGNAME         || '',
+    SHELL:           process.env.SHELL           || '',
+    TERM:            process.env.TERM            || '',
+    LANG:            process.env.LANG            || '',
+    LC_ALL:          process.env.LC_ALL          || '',
+    NODE_ENV:        process.env.NODE_ENV        || '',
+    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME || '',
+    XDG_DATA_HOME:   process.env.XDG_DATA_HOME   || '',
+    APPDATA:         process.env.APPDATA         || '',
+    USERPROFILE:     process.env.USERPROFILE     || '',
+    ...extraKeys,
+  };
+  // Strip empty-string entries to keep the subprocess env clean.
+  for (const k of Object.keys(env)) if (!env[k]) delete env[k];
+  return env;
+}
+
 /** Run a prompt through the provider's logged-in CLI, returning stdout. */
 export function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS } = {}) {
   const inv = cliInvocation(provider, prompt);
   if (!inv) return Promise.reject(new Error(`runViaCli: unknown provider '${provider}'`));
+  // Use a minimal env allowlist — never inherit LLMIDE_JWT_SECRET,
+  // LLMIDE_VAULT_KEY, or other server secrets into provider CLI subprocesses.
+  // Include the provider's own API key env var only when it is available.
+  const cfg = PROVIDERS[provider];
+  const extraKeys = cfg?.env && process.env[cfg.env] ? { [cfg.env]: process.env[cfg.env] } : {};
+  const env = minimalCliEnv(extraKeys);
   return new Promise((resolve, reject) => {
-    execFile(inv.bin, inv.args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(inv.bin, inv.args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env }, (err, stdout, stderr) => {
       if (err) {
         if (err.code === 'ENOENT') {
           reject(new Error(`${inv.bin} CLI not found — install it and log in, or add an API key in Settings → Model Providers.`));
@@ -308,8 +398,10 @@ export async function verifyProvider({ provider, mode, apiKey, baseUrl } = {}) {
 function verifyCli(provider) {
   const bin = PROVIDERS[provider].cli;
   if (!bin) return Promise.resolve({ ok: false, detail: `${provider} has no CLI mode — use an API key` });
+  // Minimal env: the version probe only needs PATH to locate the binary.
+  const env = minimalCliEnv();
   return new Promise((resolve) => {
-    execFile(bin, ['--version'], { timeout: 5000 }, (err) => {
+    execFile(bin, ['--version'], { timeout: 5000, env }, (err) => {
       if (err) {
         resolve({
           ok: false,
