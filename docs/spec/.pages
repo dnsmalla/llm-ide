@@ -4,3 +4,4 @@ nav:
   - knowledge-base.md
   - api-server.md
   - agent-runtime.md
+  - chrome-extension.md
