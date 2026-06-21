@@ -13,6 +13,21 @@ A four-lens (correctness · security · architecture · production-readiness) re
 
 Every item has a `file:line` and a one-line fix. Line numbers are point-in-time (2026-06-21).
 
+## Remediation status (updated 2026-06-21)
+
+The critical findings and the secret-leak highs were fixed the same day (commits `9d06a09`, `80420fc`, `6ec3cc5`):
+
+| Finding | Status |
+|---|---|
+| AGT-1 SSRF via `custom.baseUrl` | ✅ fixed — `assertSafeBaseUrl` guard + tests |
+| KB-1 account-deletion orphans `agent_ask_messages` | ✅ fixed — added to `deleteUserCascade` + test |
+| AGT-4 provider CLI inherits full env | ✅ fixed — `minimalCliEnv` allowlist + tests |
+| AGT-5 guardrail zero-width evasion | ✅ fixed — two-collapse (ws + zero-width) + tests |
+| MAC-3 `BackendManager` leaks full env to Node | ✅ fixed — env allowlist (`swift build` clean) |
+| AGT-2 Backlog key in URL | ✅ verified no-op — already never-logged + redacted |
+
+Everything else below remains **open** (triage / schedule as tech-debt).
+
 ## Executive summary
 
 | Severity | Count | Headline |
