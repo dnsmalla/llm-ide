@@ -15,4 +15,14 @@ struct TerminalRemoteTests {
         #expect(s.title == "zsh 3")
         #expect(s.remoteAlias == nil)
     }
+
+    @Test @MainActor func connectRemoteOpensRemoteTabAndPanel() {
+        let state = TerminalPanelState()
+        state.connectRemote(host: RemoteHost(alias: "prod", hostName: nil, user: nil, port: nil))
+        #expect(state.sessions.count == 1)
+        #expect(state.sessions.first?.remoteAlias == "prod")
+        #expect(state.isOpen == true)
+        #expect(state.activeDockTab == .terminal)
+        #expect(state.activeIndex == 0)
+    }
 }
