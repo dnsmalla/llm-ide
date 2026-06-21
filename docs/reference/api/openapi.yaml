@@ -65,11 +65,17 @@ components:
     Health:
       type: object
       properties:
-        status:     { type: string, enum: [ok, degraded] }
-        apiVersion: { type: integer }
-        env:        { type: string }
-        uptimeSec:  { type: integer }
-        schema:     { type: object, properties: { current: { type: integer }, applied: { type: integer } } }
+        status:        { type: string }
+        apiVersion:    { type: integer }
+        schemaVersion: { type: integer }
+        uptimeSec:     { type: integer }
+        endpoints:     { type: array, items: { type: string } }
+        checks:
+          type: object
+          properties:
+            db:          { type: boolean }
+            claude:      { type: boolean }
+            claudeError: { type: string }
 
     Plan:
       type: object
@@ -129,12 +135,15 @@ paths:
   /metrics:
     get:
       summary: Prometheus scrape target
-      security: []
+      security:
+        - bearerAuth: []
       responses:
         '200':
           description: Prometheus text-format metrics
           content:
             text/plain: { schema: { type: string } }
+        '401': { description: Not authenticated, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Admin role required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /auth/well-known:
     get:
@@ -196,6 +205,7 @@ paths:
       responses:
         '200': { description: Session issued, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
         '401': { description: Invalid credentials }
+        '403': { description: Account disabled, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { description: Rate limited per IP }
 
   /auth/refresh:
@@ -211,8 +221,20 @@ paths:
               required: [refreshToken]
               properties: { refreshToken: { type: string } }
       responses:
-        '200': { description: Session rotated, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
+        '200':
+          description: Session rotated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accessToken, refreshToken, accessTokenTTLSec]
+                properties:
+                  accessToken:       { type: string }
+                  refreshToken:      { type: string }
+                  accessTokenTTLSec: { type: integer }
         '401': { description: Invalid or revoked refresh token }
+        '403': { description: Account disabled, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Rate limited }
 
   /auth/logout:
     post:
@@ -237,6 +259,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/User' }
+        '404': { description: User not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /auth/me/password:
     post:
@@ -253,7 +276,9 @@ paths:
                 newPassword:     { type: string, minLength: 10 }
       responses:
         '200': { description: ok }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Current password incorrect }
+        '404': { description: User not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /auth/me/secrets:
     get:
@@ -278,7 +303,7 @@ paths:
               type: object
               required: [key]
               properties:
-                key:   { type: string, enum: [github.token, backlog.apiKey, linear.apiKey, slack.webhookUrl] }
+                key:   { type: string, enum: [github.token, backlog.apiKey, linear.apiKey, slack.webhookUrl, email.imapPassword, claude.apiKey, openai.apiKey, google.apiKey, custom.apiKey, custom.baseUrl] }
                 value: { type: string, nullable: true, description: 'null/empty deletes' }
       responses:
         '200': { description: ok }
@@ -289,13 +314,20 @@ paths:
       parameters:
         - in: query
           name: limit
-          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
         - in: query
           name: action
           schema: { type: string }
       responses:
         '200':
           description: Audit entries newest-first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { type: object } }
+        '500': { description: Audit DB failure, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/ingest:
     post:
@@ -320,17 +352,68 @@ paths:
   /kb/generate-plan:
     post:
       summary: Synthesize a plan from a meeting (chains analyze-risks + code-sync by default)
-      responses: { '200': { description: ok }, '422': { description: 'GUARDRAIL_FAILED' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [meetingId]
+              properties:
+                meetingId:    { type: string }
+                goal:         { type: string }
+                language:     { type: string }
+                skipRisk:     { type: boolean }
+                skipCodeSync: { type: boolean }
+      responses:
+        '200':
+          description: Generated plan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Plan' }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Plan generation failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/dispatch:
     post:
       summary: Preview / send tasks to GitHub, Backlog, or Linear
-      responses: { '200': { description: ok } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [planId]
+              properties:
+                planId:   { type: string }
+                target:   { type: string, enum: [preview, github, backlog, linear], default: preview }
+                taskIds:  { type: array, items: { type: string } }
+                config:   { type: object, additionalProperties: true }
+                reviewId: { type: string, description: 'Required when target != preview' }
+      responses:
+        '200': { description: ok }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Conflict, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/generate-code:
     post:
       summary: LLM-generate files + tests for a single task (preview only)
-      responses: { '200': { description: ok } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [taskId]
+              properties:
+                taskId:             { type: string }
+                language:           { type: string }
+                includeFileContext: { type: boolean, default: true }
+      responses:
+        '200': { description: ok }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Code generation failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/review/submit:
     post:
@@ -347,7 +430,34 @@ paths:
   /kb/outcomes/refresh:
     post:
       summary: Poll dispatched tasks across providers and record outcomes
-      responses: { '200': { description: poll summary } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                creds:
+                  type: object
+                  properties:
+                    github:  { type: object, properties: { token: { type: string } } }
+                    backlog: { type: object, properties: { apiKey: { type: string } } }
+                    linear:  { type: object, properties: { apiKey: { type: string } } }
+                taskIds: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: Poll summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pollCount:        { type: integer }
+                  pollErroredCount: { type: integer }
+                  changedCount:     { type: integer }
+                  durationMs:       { type: integer }
+                  byState:          { type: object, additionalProperties: { type: integer } }
+                  polled:           { type: array, items: { type: object } }
+        '500': { description: Refresh failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/notify/slack:
     post:
@@ -364,7 +474,10 @@ paths:
                 planId:     { type: string }
                 webhookUrl: { type: string, description: 'Optional — vault key slack.webhookUrl is preferred' }
                 payload:    { description: 'Inline payload when kind=custom or kind=dispatch' }
-      responses: { '200': { description: ok } }
+      responses:
+        '200': { description: ok }
+        '400': { description: 'Missing kind, no webhook configured, or notify failed', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Plan not found (when kind=plan), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   # ── Top-level AI routes ─────────────────────────────────────────────────
 
@@ -554,7 +667,7 @@ paths:
                       attachmentChars: { type: integer }
                       paths:           { type: array, items: { type: string } }
         '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '502': { description: Upstream LLM error }
+        '502': { description: 'Upstream LLM error (error code INTERNAL_ERROR)' }
         '429': { description: Rate limited }
 
   /generate-questions:
@@ -639,6 +752,7 @@ paths:
                         severity: { type: string, enum: [low, med, high] }
                         quote:    { type: string }
         '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: AI parse failed (AI_PARSE_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { description: Rate limited }
 
   # ── KB core ─────────────────────────────────────────────────────────────
@@ -1252,7 +1366,13 @@ paths:
           description: Retry summary
           content:
             application/json:
-              schema: { type: object, additionalProperties: true }
+              schema:
+                type: object
+                properties:
+                  retried:  { type: integer }
+                  ok:       { type: integer }
+                  failed:   { type: integer }
+                  deferred: { type: integer }
         '500': { description: Retry failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/outcomes/task/{id}:
@@ -1282,7 +1402,11 @@ paths:
           description: Outcome statistics
           content:
             application/json:
-              schema: { type: object, additionalProperties: true }
+              schema:
+                type: object
+                properties:
+                  total:   { type: integer }
+                  byState: { type: object, additionalProperties: { type: integer } }
 
   # ── KB live capture ──────────────────────────────────────────────────────
 
