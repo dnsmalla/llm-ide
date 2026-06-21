@@ -3,3 +3,4 @@ nav:
   - index.md
   - knowledge-base.md
   - api-server.md
+  - agent-runtime.md
