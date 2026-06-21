@@ -19,7 +19,7 @@ import re
 import sys
 from pathlib import Path
 
-SOURCE_REL = Path("extension/server/errors.mjs")
+SOURCE_REL = Path("extension/core/errors.mjs")
 OUTPUT_REL = Path("docs/reference/error-codes.md")
 
 # Matches the start of an error factory export.

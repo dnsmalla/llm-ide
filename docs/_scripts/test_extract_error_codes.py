@@ -80,3 +80,11 @@ def test_ignores_sendError_function(tmp_path: Path) -> None:
     assert "AUTH_REQUIRED" in codes
     # INTERNAL_ERROR in ternary is not a factory — should not appear
     assert "INTERNAL_ERROR" not in codes
+
+
+def test_every_code_has_a_description():
+    from extract_error_codes import extract
+    from pathlib import Path
+    rows = extract(Path("extension/core/errors.mjs"))
+    missing = [r["code"] for r in rows if not r["description"].strip()]
+    assert not missing, f"error codes missing descriptions: {missing}"

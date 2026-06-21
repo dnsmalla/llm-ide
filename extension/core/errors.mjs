@@ -27,12 +27,15 @@ export class AppError extends Error {
 
 // Common factories — name parity with the codes the client matches on.
 
+// Missing or invalid bearer token; client must (re)authenticate.
 export const errAuth = (msg = 'Authentication required') =>
   new AppError('AUTH_REQUIRED', msg, { status: 401 });
 
+// Authenticated but the requested resource does not belong to this user.
 export const errForbidden = (msg = 'Forbidden') =>
   new AppError('FORBIDDEN', msg, { status: 403 });
 
+// No such resource exists; pass a noun or a full "not found" phrase.
 export const errNotFound = (what = 'Resource') => {
   // Caller may pass either a noun ("Plan") or a phrase ("No route for X");
   // only append " not found" when the noun form would otherwise read awkwardly.
@@ -40,18 +43,22 @@ export const errNotFound = (what = 'Resource') => {
   return new AppError('NOT_FOUND', msg, { status: 404 });
 };
 
+// Request body failed schema or range checks; details carries field-level errors.
 export const errValidation = (msg, details) =>
   new AppError('VALIDATION_FAILED', msg, { status: 400, details });
 
+// The action conflicts with the current server state (e.g. duplicate resource).
 export const errConflict = (msg) =>
   new AppError('CONFLICT', msg, { status: 409 });
 
+// Token-bucket rate limit exhausted; retryAfterSec in details, Retry-After in header.
 export const errRateLimit = (retryAfterSec) =>
   new AppError('RATE_LIMITED', 'Too many requests', {
     status: 429,
     details: { retryAfterSec },
   });
 
+// Unhandled server error; check server logs with LLMIDE_LOG_LEVEL=debug.
 export const errInternal = (msg = 'Internal error', details) =>
   new AppError('INTERNAL_ERROR', msg, { status: 500, details });
 
