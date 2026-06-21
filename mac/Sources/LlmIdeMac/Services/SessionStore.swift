@@ -77,9 +77,8 @@ final class SessionStore: ObservableObject {
     /// same network call instead of sending N parallel /auth/refresh
     /// requests.
     func attemptRefresh(via api: LlmIdeAPIClient) async -> Bool {
-        if let existing = await MainActor.run(body: { self.refreshTask }) {
-            return await existing.value
-        }
+        // The coalescing guard lives inside the MainActor.run below; the
+        // redundant pre-check here was removed (MAC-4).
         let claim: (Task<Bool, Never>, UInt64?) = await MainActor.run {
             if let existing = self.refreshTask { return (existing, nil) }
             self.refreshSlot &+= 1

@@ -1629,7 +1629,10 @@ struct CodeAssistantPanel: View {
         guard let match = matchingAttachment(for: args.path) else {
             return .failure("That file isn't attached to this chat — refusing to write.")
         }
-        let absolute = PathUtils.canonicalise(args.path)
+        // Write to the authoritative attached path, not the LLM-emitted path.
+        // A basename-fallback match can make args.path diverge from match.path,
+        // which would overwrite the wrong file.
+        let absolute = PathUtils.canonicalise(match.path)
         let url = URL(fileURLWithPath: absolute)
         do {
             try finalContent.write(to: url, atomically: true, encoding: .utf8)
@@ -1656,6 +1659,13 @@ struct CodeAssistantPanel: View {
             role: .user,
             content: "(applied update to \(basename): \(deltaStr))"
         ))
+        // In auto-edit mode confirmUpdateFile is called from inside send(),
+        // which has already set busy = true. sendFollowup() guards on !busy
+        // and would silently skip. Clear busy here so the follow-up fires;
+        // send()'s defer { busy = false } will run afterwards (a benign
+        // no-op). In manual-mode the sheet calls us directly with busy already
+        // false, so this is also safe.
+        busy = false
         await sendFollowup()
         return .success
     }

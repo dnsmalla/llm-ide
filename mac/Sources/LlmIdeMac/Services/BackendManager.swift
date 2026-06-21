@@ -186,8 +186,10 @@ final class BackendManager {
         // adopted *any* listener — a hung node would hold the port and
         // every request would block for the full URLSession timeout,
         // surfacing as a 4-minute login spinner after relaunch.
-        Task { [weak self] in
-            guard let self else { return }
+        // BackendManager is singleton-lifetime (held by @State in the app),
+        // so a strong capture is correct and avoids re-guarding self across
+        // each await boundary.
+        Task { [self] in
             let portInUse = await Self.isPortInUse(port: Self.defaultBackendPort)
             if !portInUse {
                 await MainActor.run { self.spawn(nodePath: trimmedNode, workURL: workURL) }
@@ -460,10 +462,27 @@ final class BackendManager {
             .compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
         guard !pids.isEmpty else { return }
 
-        // 2. SIGTERM each PID individually. We trust lsof's port filter:
-        // anyone listening on our configured backend port is, by
-        // definition, the listener we want to replace.
+        // 2. For each PID, verify it is our Node/server.mjs process before
+        // sending SIGTERM. This prevents friendly-fire on unrelated dev
+        // servers that happen to be listening on the same port.
         for pid in pids {
+            let cmd = Process()
+            cmd.launchPath = "/bin/ps"
+            cmd.arguments = ["-p", "\(pid)", "-o", "command="]
+            let cmdPipe = Pipe()
+            cmd.standardOutput = cmdPipe
+            cmd.standardError = Pipe()
+            guard (try? cmd.run()) != nil else { continue }
+            cmd.waitUntilExit()
+            let cmdData = (try? cmdPipe.fileHandleForReading.readToEnd()) ?? Data()
+            let cmdStr = String(data: cmdData, encoding: .utf8) ?? ""
+            // Confirm the process references our Node backend.
+            guard cmdStr.contains("server.mjs") || cmdStr.contains("node") && cmdStr.contains("server") else {
+                // Log to stderr — not ideal in a nonisolated static, but avoids
+                // pulling in a logger dependency here.
+                fputs("[BackendManager] Skipping PID \(pid) on port \(port): '\(cmdStr.trimmingCharacters(in: .whitespacesAndNewlines))' does not look like our server\n", stderr)
+                continue
+            }
             kill(pid, SIGTERM)
         }
     }

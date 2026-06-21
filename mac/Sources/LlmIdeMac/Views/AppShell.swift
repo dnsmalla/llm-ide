@@ -92,8 +92,9 @@ struct AppShell: View {
             // (e.g., during SwiftUI re-renders) without a matching onDisappear.
             guard keyMonitor == nil else { return }
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [terminalPanelState, projectDirectory] event in
-                // keyCode 50 = backtick on US keyboard layout
-                if event.keyCode == 50 && event.modifierFlags.contains(.control) {
+                // Compare by character rather than keyCode so the shortcut works
+                // on all keyboard layouts (keyCode 50 is layout-specific to US).
+                if event.charactersIgnoringModifiers == "`" && event.modifierFlags.contains(.control) {
                     Task { @MainActor in
                         terminalPanelState.toggle(projectDirectory: projectDirectory)
                     }
