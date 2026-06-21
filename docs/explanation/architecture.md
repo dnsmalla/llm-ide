@@ -87,7 +87,7 @@ SQLite, WAL mode, FTS5, foreign keys on. There is no single schema-version numbe
 - **Pure Node `http`, no framework.** Reduces dependency surface and keeps cold start fast. Trade-off: routing and middleware are hand-rolled in `server.mjs`.
 - **Claude CLI shell-out instead of API.** Users keep one auth (their Claude login). The server cannot accept an API key. Trade-off: prompt size capped at 500 k chars; concurrency capped by what the CLI can absorb.
 - **One SQLite database per install, not per surface.** The macOS app and Chrome extension see the same data because they share the server.
-- **Side panel and floating popup mount the same React bundle** and synchronise via `chrome.storage.local` + `chrome.runtime.onMessage`. No separate component tree.
+- **Side panel and floating popup mount the same React bundle** and synchronise via `chrome.storage.local` + `chrome.runtime.onMessage`. No separate component tree. (The floating popup was subsequently removed; the pop-out button now deep-links into the native macOS app via `/launch-app` — see ADR-0010.)
 
 ## Surface-by-surface
 
@@ -115,8 +115,8 @@ description says to start.
 - **`extension/guardrails/`** — secret / PII / destructive-op pattern
   scanners. Run at submit AND at approval; findings push to
   `review_items`.
-- **`extension/src/`** — React 18 + TS + Vite. The side panel and
-  the floating popup mount the same bundle (ADR-0010). Start at
+- **`extension/src/`** — React 18 + TS + Vite. The side panel mounts
+  the bundle (the floating popup was removed — ADR-0010). Start at
   `src/main.tsx`.
 - **`mac/Sources/LlmIdeMac/`** — SwiftUI app. Sub-divides into
   `Models/`, `Services/`, `Views/`, `ViewModels/`. Services follow

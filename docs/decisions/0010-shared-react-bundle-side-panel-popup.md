@@ -6,6 +6,8 @@ date: 2026-05-18
 
 # 0010. Shared React bundle for side panel and floating popup
 
+> **Update (2026-06):** the floating popup was subsequently removed. The pop-out button now deep-links into the native macOS app via `/launch-app` rather than spawning a Chrome popup window. The shared-bundle decision applied while the popup existed; the shared-state invariants (storage sync, message protocol) remain in force for the side panel.
+
 ## Context
 
 Users sometimes want the panel as a floating, always-on-top window during a meeting (e.g., to keep notes visible while screen-sharing the meeting tab). Forking the UI into two component trees would mean every feature gets implemented twice.

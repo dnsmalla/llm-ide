@@ -26,21 +26,21 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 - **`MAX_BLOCK_AGE_MS = 15_000`** — drop stale speaker state after 15 s of no updates.
 - **STOP handler broadcasts `CAPTION_STATUS { active: false, platform }`** — so a freshly mounted popup doesn't think recording is still running.
 - **`GET_CAPTION_STATUS` reply** — on demand, reply with the current status so late-mounting contexts (popup opened after recording started) sync up.
-- **Prompt-injection-safe text** — `sanitizeLine()` strips control chars + the delimiters `<<<BEGIN>>>` / `<<<END>>>` that server prompts use as fences.
+- **Prompt-injection-safe text** — `sanitizeSpeaker()` strips control chars (U+0000–U+001F, U+007F) and combined-speaker suffixes from speaker names. The `<<<BEGIN>>>` / `<<<END>>>` prompt-fence delimiters are stripped server-side in `sanitizeForPrompt()` (`extension/core/utils.mjs`), not in the scraper.
 
 ### ❌ MUST filter out (historical bug reports)
 
 | Category | Examples | Filter |
 |----------|----------|--------|
-| Material icon names | `frame_person`, `visual_effects`, `closed_caption` | `MATERIAL_ICON_PATTERN` + underscored_lowercase check |
-| Clock/timestamps | `8:41`, `AM`, `09:15 PM` | `CLOCK_PATTERN`, `CLOCK_ONLY_AMPM` |
-| Meeting ID | `ume-xkgs-oqf` | `[a-z]{3}-[a-z]{4}-[a-z]{3}` regex |
+| Material icon names | `frame_person`, `visual_effects`, `closed_caption` | `ICON_PATTERN` + underscored_lowercase check in `isValidCaption()` |
+| Clock/timestamps | `8:41`, `AM`, `09:15 PM` | inline `/^\d{1,2}:\d{2}/` regex in `isValidCaption()` (no named const) |
+| Meeting ID | `ume-xkgs-oqf` | inline `/^[a-z]{3}-[a-z]{4}-[a-z]{3}/i` regex in `isValidCaption()` |
 | Keyboard shortcuts | `⌘ + d`, `ctrl + h` | `[⌘⌥⇧⌃ctrl]\s*\+\s*[a-z]` regex |
-| Meeting info popup | `Dial-in`, `PIN:`, `Your meeting's ready`, `close Close` | `MEET_UI_PATTERNS` + `isMeetUIText()` |
-| Phone numbers | `+81 3-4545-0450` | `\+\d{1,3}[\s-]?\d` regex |
+| Meeting info popup | `Dial-in`, `PIN:`, `Your meeting's ready`, `close Close` | `UI_PATTERNS` |
+| Phone numbers | `+81 3-4545-0450` | inline `/\+\d{1,3}[\s-]?\d/` regex in `isValidCaption()` |
 | Long digit sequences | `669 889 208 1049` | `\d{6,}` without surrounding text |
-| Toolbar buttons | `Turn off microphone`, `Open caption settings`, `Live captions`, `Font size` | `MEET_UI_PATTERNS` |
-| Effects panel | `Reframe`, `Backgrounds and effects`, `Portrait`, `Blur` | `MEET_UI_PATTERNS` |
+| Toolbar buttons | `Turn off microphone`, `Open caption settings`, `Live captions`, `Font size` | `UI_PATTERNS` |
+| Effects panel | `Reframe`, `Backgrounds and effects`, `Portrait`, `Blur` | `UI_PATTERNS` |
 
 ### ❌ DO NOT do these (caused regressions)
 
@@ -149,7 +149,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 - **Health check every `TIMING.SERVER_HEALTH_CHECK_INTERVAL_MS`** — user sees server state go offline/online without manual refresh.
 - **`HINT_DISMISSED_KEY` first-run hint** — dismissible, remembered in `chrome.storage.local`. Only shown when `!isRecording` and not previously dismissed.
 - **`handleStart()` clears notes/chat/questions before starting** — a fresh recording should not show stale AI output from the previous meeting.
-- **Pop-out creates a `type: 'popup'` window** of 420×680. User can resize/maximize; CSS adapts. Do not pass fixed `left`/`top`.
+- **Pop-out sends `OPEN_POPUP`**, which the service worker handles by calling `openMacAppDeepLink()`: it opens a tab to `${serverUrl}/launch-app?to=transcript`, which 302s into the `llmide://` scheme so the native Mac app comes to the front. There is no Chrome `type: 'popup'` window.
 - **`language` threaded to every AI consumer** — `notes.generate(..., primaryLang)`, `ExportMenu language={primaryLang}`, `questions.generate(..., primaryLang)`, `chat.sendMessage(..., primaryLang)`.
 - **Copy-cmd button** on the offline banner copies `node server.mjs` to clipboard.
 
@@ -227,14 +227,14 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ### ✅ MUST preserve
 
-- **`isSafeServerUrl()` accepts ONLY** `http(s)://localhost`, `http(s)://127.0.0.1`, `http(s)://[::1]` (with optional port). Used by `setServerUrl()` (throws on unsafe) and `getServerUrl()` (silently falls back).
+- **`isSafeServerUrl()` accepts ONLY** `http(s)://localhost:3456`, `http(s)://127.0.0.1:3456`, `http(s)://[::1]:3456`. Port must be explicitly present and must be `3456` — URLs without a port (e.g. `http://localhost`) are rejected. The server URL is written to `chrome.storage.local` directly; there is no `setServerUrl()` function. Validation happens on read in `getServerUrl()`, which silently falls back to `http://localhost:3456` for any unsafe or missing value.
 - **`getServerUrl()` strips trailing slashes** — request URLs concatenate `${url}/endpoint`, a trailing slash produces `//endpoint` and a 404.
 - **`generateMeetingNotes()` signature**: `(transcript, meetingTitle?, participants?, externalSignal?, language?)` — AbortSignal is threaded through so the UI can cancel.
 - **`HEALTH_CHECK_TIMEOUT_MS` is short (few seconds)** and `REQUEST_TIMEOUT_MS` is long — don't unify them.
 
 ### ❌ DO NOT do these
 
-- **Do NOT accept arbitrary URLs in `setServerUrl`.** An attacker-controlled remote URL could receive all transcripts.
+- **Do NOT accept arbitrary URLs as `serverUrl` in `chrome.storage.local`.** `getServerUrl()` validates on read via `isSafeServerUrl()` and falls back to the default; any unsafe stored value is silently ignored. An attacker-controlled remote URL would be rejected at read time, but never write one deliberately.
 - **Do NOT add `http://0.0.0.0`** to the safe list — it's not local on all platforms.
 
 ---
@@ -269,18 +269,19 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ---
 
-## Floating popup (`chrome.windows.create`)
+## Pop-out → native app
+
+The floating `chrome.windows.create` popup was removed. The pop-out button now sends `MsgType.OPEN_POPUP`; the service worker handles it by opening a tab to `${serverUrl}/launch-app?to=transcript`, which 302s the browser into the `llmide://` custom scheme so the native macOS app comes to the front. Chrome MV3 blocks direct `llmide://` navigation from an extension origin; the server redirect bypasses that restriction.
 
 ### ✅ MUST preserve
 
-- **`type: 'popup'`, `width: 420`, `height: 680`** as defaults. Chrome-natively resizable and maximizable.
-- **Popup mounts the same React bundle** as the side panel (`extension/src/sidepanel/index.html`). It must share state via `chrome.storage.local` + `chrome.runtime.onMessage` — do NOT fork a separate component tree.
-- **Mount-time `GET_CAPTION_STATUS`** query so the popup catches up if it opens after recording started.
+- **`OPEN_POPUP` handler in service-worker.ts** calls `openMacAppDeepLink()` — do not remove or bypass it.
+- **`chrome.sidePanel.open()`** is still called alongside the deep-link so the side panel opens in the same window if it was closed.
 
 ### ❌ DO NOT do these
 
-- **Do NOT open the popup with `chrome.tabs.create`.** Pop-up windows are intentional — they stay on top.
-- **Do NOT pass `focused: false`** or the pop-out loses keyboard focus and users type into the meeting tab instead.
+- **Do NOT reintroduce `chrome.windows.create` with `type: 'popup'`.** The floating popup was removed because it created a confusing "second screen" alongside the side panel and the Mac app.
+- **Do NOT navigate directly to `llmide://` from extension code** — Chrome MV3 silently blocks custom-scheme navigation from `chrome-extension://` origins.
 
 ---
 
@@ -330,14 +331,14 @@ Run through this against a real meeting before merging:
 ### Responsive
 
 - [ ] Side panel at 280 px: tabs horizontally scroll, controls wrap, no clipping
-- [ ] Floating popup at default (420×680): everything fits, no horizontal scroll
-- [ ] Popup maximized: content fills vertically, export buttons wrap cleanly
-- [ ] Popup resized to 300×400: chat input stays pinned to bottom
+- [ ] Side panel at 420 px: everything fits, no horizontal scroll
+- [ ] Side panel maximized: content fills vertically, export buttons wrap cleanly
+- [ ] Side panel resized to 300 px: chat input stays pinned to bottom
 
 ### Security
 
 - [ ] `GET http://evil.example/` with the extension running does NOT reach the server (CORS)
-- [ ] `setServerUrl('http://evil.example')` throws and UI shows the rejection
+- [ ] Setting `chrome.storage.local` `serverUrl` to `'http://evil.example'` is rejected by `isSafeServerUrl()` on read; `getServerUrl()` falls back to the default
 - [ ] Server terminal shows access log lines for each browser request
 - [ ] Meeting with `<<<END>>>` spoken aloud does not break AI output (sanitizer strips it)
 
