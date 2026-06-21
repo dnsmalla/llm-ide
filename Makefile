@@ -46,7 +46,7 @@ VENV_DOCS := .venv-docs
 PY        := $(VENV_DOCS)/bin/python
 MKDOCS    := $(VENV_DOCS)/bin/mkdocs
 
-.PHONY: docs-deps docs-serve docs-build docs-lint docs-refresh-reference
+.PHONY: docs-deps docs-serve docs-build docs-lint docs-refresh-reference docs-check
 
 docs-deps:
 	python3 -m venv $(VENV_DOCS)
@@ -76,3 +76,9 @@ docs-refresh-reference:
 	$(PY) docs/_scripts/extract_guardrails.py
 	$(PY) docs/_scripts/extract_messages.py
 	$(PY) docs/_scripts/extract_rate_limit.py
+	$(PY) docs/_scripts/extract_agent_skills.py
+
+docs-check:
+	python3 -m pytest docs/_scripts/ -q
+	python3 docs/_scripts/check_api_coverage.py
+	python3 docs/_scripts/check_rate_limit_mapping.py

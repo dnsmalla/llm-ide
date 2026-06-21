@@ -15,7 +15,7 @@ status: stable
 
 ## Network
 
-The server binds exclusively to `127.0.0.1` — never `0.0.0.0` and never a network-accessible interface. A CORS allowlist permits only `chrome-extension://<id>`, `localhost`, and `127.0.0.1` as origins. The `Access-Control-Allow-Origin` header echoes the request's `Origin` value; it is never set to `*`. Any origin not on the allowlist receives no CORS header and the request is rejected. Request bodies are capped at 2 MB as a denial-of-service guard, and prompts sent to the Claude CLI are capped at 500 k characters.
+The server binds exclusively to `127.0.0.1` — never `0.0.0.0` and never a network-accessible interface. A CORS allowlist permits only `chrome-extension://<id>`, `localhost`, and `127.0.0.1` as origins. The `Access-Control-Allow-Origin` header echoes the request's `Origin` value; it is never set to `*`. Any origin not on the allowlist receives no CORS header and the request is rejected. Request bodies are capped at 8 MB by default (`LLMIDE_BODY_LIMIT_MB`) as a denial-of-service guard, and prompts sent to the Claude CLI are capped at 500 k characters.
 
 ## Identity
 
@@ -33,7 +33,7 @@ version (1 byte) || iv (12 bytes) || AES-256-GCM(plaintext) || tag (16 bytes)
 
 Each user's data key is derived as `HKDF-SHA256(masterKey, salt=userId, info='llmide-vault-v1', length=32)`. The master key never leaves the server process. A DB-only leak yields ciphertext that cannot be decrypted without the master key; one user's ciphertext cannot be used to attack another's because the derived keys differ.
 
-Allowed secret keys are `github.token`, `backlog.apiKey`, `linear.apiKey`, and `slack.webhookUrl`. Attempts to store keys outside this allowlist are rejected at the route layer.
+Allowed secret keys are `github.token`, `backlog.apiKey`, `linear.apiKey`, `slack.webhookUrl`, `email.imapPassword`, `claude.apiKey`, `openai.apiKey`, `google.apiKey`, `custom.apiKey`, and `custom.baseUrl` (10 keys total). Attempts to store keys outside this allowlist are rejected at the route layer.
 
 ## Tenancy
 

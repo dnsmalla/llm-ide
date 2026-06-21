@@ -45,3 +45,6 @@ jobs:
 
       - name: Build site (strict)
         run: mkdocs build --strict
+
+      - name: Drift guards (API coverage + rate-limit mapping)
+        run: make docs-check
