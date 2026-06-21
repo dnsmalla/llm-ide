@@ -37,7 +37,7 @@ components:
             code:    { type: string, enum: [
               AUTH_REQUIRED, FORBIDDEN, NOT_FOUND, VALIDATION_FAILED,
               CONFLICT, GUARDRAIL_FAILED, RATE_LIMITED, UPSTREAM_ERROR,
-              INTERNAL_ERROR,
+              INTERNAL_ERROR, INVALID_ID,
             ]}
             message: { type: string }
             details: { type: object, additionalProperties: true, description: 'Code-specific structured detail (e.g. guardrail report)' }
@@ -332,7 +332,36 @@ paths:
   /kb/ingest:
     post:
       summary: Upsert a meeting and replace its entities
-      responses: { '200': { description: ok } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id:           { type: string }
+                title:        { type: string }
+                date:         { type: string, format: date-time }
+                duration:     { type: number }
+                language:     { type: string }
+                participants: { type: array, items: { type: string } }
+                transcript:   { type: string }
+                entities:     { type: array, items: { type: object } }
+                meta:         { type: object }
+                projectId:    { type: string }
+      responses:
+        '200':
+          description: Ingest result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:          { type: boolean }
+                  meetingId:   { type: string }
+                  entityCount: { type: integer }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/search:
     get:
@@ -343,11 +372,22 @@ paths:
           schema: { type: string }
         - in: query
           name: kind
-          schema: { type: string, enum: [meeting, action, decision, blocker, code, ticket, qa, plan, task, outcome] }
+          schema: { type: string, enum: [meeting, action, decision, blocker, code, ticket, qa, doc, plan, task, outcome] }
         - in: query
           name: limit
           schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
-      responses: { '200': { description: ok } }
+        - in: query
+          name: projectId
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,128}$' }
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results: { type: array, items: { type: object } }
 
   /kb/generate-plan:
     post:
@@ -418,14 +458,47 @@ paths:
   /kb/review/submit:
     post:
       summary: Submit an artifact (dispatch / codegen-apply) for human review
-      responses: { '200': { description: ok with guardrail report } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, payload]
+              properties:
+                kind:    { type: string, enum: [dispatch, codegen-apply] }
+                payload: { type: object }
+                planId:  { type: string, nullable: true }
+                taskId:  { type: string, nullable: true }
+                title:   { type: string }
+      responses:
+        '200':
+          description: Review item created (pending)
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/review/approve:
     post:
       summary: Execute an approved review item (re-runs guardrails)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id:   { type: string }
+                note: { type: string }
       responses:
         '200': { description: executed }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Review item not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Conflict (e.g. already approved/rejected), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { description: 'GUARDRAIL_FAILED at approval time — auto-rejects' }
+        '500': { description: Approval execution failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/outcomes/refresh:
     post:
@@ -857,7 +930,7 @@ paths:
           description: Indexing summary
           content:
             application/json:
-              schema: { type: object, properties: { ok: { type: boolean }, indexed: { type: integer }, skipped: { type: integer } } }
+              schema: { type: object, properties: { ok: { type: boolean }, repo: { type: string }, filesScanned: { type: integer }, filesIndexed: { type: integer }, chunks: { type: integer } } }
         '400': { description: Missing path, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '403': { description: Path not on user allow-list, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
@@ -874,13 +947,13 @@ paths:
               properties:
                 repo:  { type: string, description: 'owner/name' }
                 token: { type: string, description: 'GitHub PAT (optional — vault github.token used otherwise)' }
-                state: { type: string, enum: [open, closed, all], default: open }
+                state: { type: string, enum: [open, closed, all], default: all }
       responses:
         '200':
           description: Indexing summary
           content:
             application/json:
-              schema: { type: object, properties: { ok: { type: boolean }, indexed: { type: integer } } }
+              schema: { type: object, properties: { ok: { type: boolean }, repo: { type: string }, count: { type: integer }, chunks: { type: integer } } }
         '400': { description: Validation or indexing error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/connect-tickets-json:
@@ -904,7 +977,7 @@ paths:
           description: Indexing summary
           content:
             application/json:
-              schema: { type: object, properties: { ok: { type: boolean }, indexed: { type: integer } } }
+              schema: { type: object, properties: { ok: { type: boolean }, count: { type: integer }, chunks: { type: integer } } }
         '400': { description: Validation or indexing error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/connect-qa:
@@ -925,7 +998,7 @@ paths:
           description: Indexing summary
           content:
             application/json:
-              schema: { type: object, properties: { ok: { type: boolean }, indexed: { type: integer } } }
+              schema: { type: object, properties: { ok: { type: boolean }, source: { type: string }, total: { type: integer }, failed: { type: integer }, chunks: { type: integer } } }
         '400': { description: Validation or parse error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   # ── KB email ─────────────────────────────────────────────────────────────
@@ -951,7 +1024,7 @@ paths:
           description: Connection success with mailbox info
           content:
             application/json:
-              schema: { type: object, properties: { ok: { type: boolean }, mailbox: { type: string }, total: { type: integer } } }
+              schema: { type: object, properties: { ok: { type: boolean }, mailbox: { type: string }, total: { type: integer }, recent: { type: integer } } }
         '400': { description: Missing credentials or no password stored, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '502': { description: IMAP connection failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
@@ -983,7 +1056,11 @@ paths:
                 type: object
                 properties:
                   messages: { type: array, items: { type: object, description: 'Email message with subject, from, date, body' } }
-                  skipped:  { type: integer }
+                  skipped:
+                    type: object
+                    properties:
+                      oversize: { type: integer }
+                      overCap:  { type: integer }
         '400': { description: Missing host/user or no IMAP password stored, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '502': { description: IMAP error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
@@ -1028,6 +1105,7 @@ paths:
             application/json:
               schema: { type: object, additionalProperties: true }
         '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Unexpected summarize error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '502': { description: Summarize LLM call failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '504': { description: Summarize timed out (>3 min), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { description: Rate limited }
@@ -1134,6 +1212,7 @@ paths:
               schema: { $ref: '#/components/schemas/Plan' }
         '400': { description: Neither planId nor plan provided, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Plan not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Code sync failed (CODE_SYNC_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   # ── KB analyze-risks ─────────────────────────────────────────────────────
 
@@ -1158,6 +1237,7 @@ paths:
               schema: { $ref: '#/components/schemas/Plan' }
         '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Plan not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Risk analysis failed (RISK_ANALYSIS_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { description: Rate limited }
 
   # ── KB plan CRUD ─────────────────────────────────────────────────────────
@@ -1679,6 +1759,7 @@ paths:
                 properties:
                   personas: { type: array, items: { type: object } }
                   active:   { type: string, nullable: true }
+                  count:    { type: integer }
     post:
       summary: Create a new agent persona
       requestBody:
@@ -1812,5 +1893,7 @@ paths:
                     items:
                       type: object
                       properties:
-                        role:    { type: string, enum: [user, assistant] }
-                        content: { type: string }
+                        role:       { type: string, enum: [user, assistant] }
+                        content:    { type: string }
+                        seq:        { type: integer }
+                        created_at: { type: string }
