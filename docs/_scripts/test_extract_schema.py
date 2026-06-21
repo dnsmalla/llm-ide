@@ -59,3 +59,20 @@ def test_files_processed_in_lexical_order(tmp_path: Path) -> None:
     tables = extract_tables(sorted(tmp_path.glob("*.sql")))
     cols = [c["name"] for c in tables[0]["columns"]]
     assert cols == ["early", "late"]
+
+
+def test_schema_doc_documents_indexes_fts_and_triggers():
+    """The generated doc must cover indexes, the FTS5 virtual table, and triggers.
+
+    The migrations (extension/kb/migrations/*.sql) define all three constructs.
+    This test runs against the checked-in docs/reference/database-schema.md, which
+    is produced by extract_schema.py — so if this test fails, regenerate with:
+        python3 docs/_scripts/extract_schema.py
+    """
+    doc = Path("docs/reference/database-schema.md").read_text()
+    # The FTS5 full-text search virtual table ('search') must be documented.
+    assert "fts5" in doc.lower(), "FTS5 virtual table not documented"
+    # Indexes from the migrations must appear (dozens defined across all migrations).
+    assert "INDEX" in doc.upper(), "indexes not documented"
+    # Triggers from the migrations must appear (trg_* triggers defined in 0001, 0005, 0011).
+    assert "TRIGGER" in doc.upper(), "triggers not documented"
