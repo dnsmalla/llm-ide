@@ -343,7 +343,12 @@ struct AppShell: View {
             VStack(spacing: 0) {
                 detailColumn(shell.section)
                     .background(theme.current.body)
-                TerminalPanelView(projectDirectory: projectDirectory)
+                // Explorer embeds the terminal INSIDE its editor column (right
+                // of the file tree), so skip the shared full-width dock there.
+                // Every other section gets the dock here, spanning the section.
+                if shell.section != .explorer {
+                    TerminalPanelView(projectDirectory: projectDirectory)
+                }
             }
         }
     }
@@ -473,7 +478,7 @@ struct AppShell: View {
 
     private func checkRecovery() async {
         guard let env = appEnv else { return }
-        let rec = PartialRecovery(root: env.notesConfig.currentFolder)
+        let rec = PartialRecovery(notesFolder: env.notesConfig.currentFolder)
         do {
             if let o = try rec.scanOrphans().first {
                 pendingOrphan = o
@@ -493,7 +498,7 @@ struct AppShell: View {
 
     private func dismissOrphan(_ o: PartialRecovery.Orphan) {
         if let env = appEnv {
-            try? PartialRecovery(root: env.notesConfig.currentFolder).cleanup(id: o.id)
+            try? PartialRecovery(notesFolder: env.notesConfig.currentFolder).cleanup(id: o.id)
         }
         pendingOrphan = nil
     }
@@ -508,7 +513,7 @@ struct AppShell: View {
             do {
                 try await withThrowingTaskGroup(of: Void.self) { group in
                     group.addTask {
-                        let recovery = PartialRecovery(root: root)
+                        let recovery = PartialRecovery(notesFolder: root)
                         guard FileManager.default.fileExists(atPath: url.path) else {
                             try? recovery.cleanup(id: o.id)
                             return
@@ -724,7 +729,7 @@ struct AppShell: View {
                     endedAt: Date(),
                     participants: payload.participants)
 
-                try? PartialRecovery(root: root).cleanup(id: payload.sessionId)
+                try? PartialRecovery(notesFolder: root).cleanup(id: payload.sessionId)
 
                 // 4. Force the Library index to pick up the new file immediately
                 //    rather than waiting for the kqueue watcher's next tick.

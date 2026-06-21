@@ -124,7 +124,7 @@ final class CaptionOrchestrator: ObservableObject {
                 id: id, startedAt: now,
                 platform: "mic", language: "en")
             self.fileHandle = h
-            try? PartialRecovery(root: root)
+            try? PartialRecovery(notesFolder: root)
                 .record(id: id, path: h.url, startedAt: now)
         } catch {
             log.error("partial file create failed: \(error.localizedDescription, privacy: .public)")
@@ -203,7 +203,7 @@ final class CaptionOrchestrator: ObservableObject {
                     title: request.title,
                     endedAt: Date(),
                     participants: participants)
-                try? PartialRecovery(root: root).cleanup(id: handle.id)
+                try? PartialRecovery(notesFolder: root).cleanup(id: handle.id)
                 // Fire-and-forget summarize.  Failure leaves the file as-is
                 // and the user can hit ⌘R Re-summarize from the detail view.
                 let transcriptText = transcript

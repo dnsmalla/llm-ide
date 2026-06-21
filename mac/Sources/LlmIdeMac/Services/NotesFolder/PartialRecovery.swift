@@ -8,8 +8,22 @@ final class PartialRecovery {
         let startedAt: Date
     }
     let recoveryDir: URL
-    init(root: URL) {
-        self.recoveryDir = root.appendingPathComponent(".llmide/recovery", isDirectory: true)
+
+    /// `notesFolder` is the active notes/source folder (`notesConfig.currentFolder`).
+    /// When a project is open it is `<project>/source`, so recovery records belong
+    /// under the project's `system/` tree — not as a stray `.llmide` beside the
+    /// user's content. With no active project (a legacy notes folder that isn't a
+    /// project's `source/`) we keep the original local `.llmide/recovery` location.
+    init(notesFolder: URL) {
+        if notesFolder.lastPathComponent == "source" {
+            let projectRoot = notesFolder.deletingLastPathComponent()
+            let layout = ProjectLayout(root: projectRoot)
+            if FileManager.default.fileExists(atPath: layout.projectJSON.path) {
+                self.recoveryDir = layout.cacheDir.appendingPathComponent("recovery", isDirectory: true)
+                return
+            }
+        }
+        self.recoveryDir = notesFolder.appendingPathComponent(".llmide/recovery", isDirectory: true)
     }
 
     func record(id: String, path: URL, pid: Int32 = ProcessInfo.processInfo.processIdentifier,
