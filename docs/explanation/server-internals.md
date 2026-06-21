@@ -5,6 +5,9 @@ status: stable
 
 # Server internals
 
+!!! info "Rebuild-grade detail"
+    This page explains *how and why*. For exact contracts (auth lifecycle, error codes, full DDL, vault layout) see [`../spec/api-server.md`](../spec/api-server.md) and [`../spec/knowledge-base.md`](../spec/knowledge-base.md).
+
 A self-hostable, multi-user system that turns meeting recordings into
 structured project work and tracks outcomes back into a knowledge base.
 
@@ -144,9 +147,10 @@ Every owned row carries a `user_id` foreign key.  The tenancy contract:
 
 - `kb/migrations/NNNN_<name>.sql`.  Sorted by version, applied inside
   a transaction with their checksum recorded.
-- Editing an already-applied migration logs a checksum-mismatch
-  warning rather than refusing to start; this is intentional for
-  small teams where local edits during development are common.
+- Editing an already-applied migration throws and refuses to start in
+  `NODE_ENV=production`; in dev/test it logs a checksum-mismatch warning
+  and continues. Production fail-fast is intentional — schema drift
+  between deployed instances must be resolved with a new migration.
 - No "down" migrations.  Disaster recovery == backup restore.
 
 ## Database
@@ -187,7 +191,7 @@ Every owned row carries a `user_id` foreign key.  The tenancy contract:
 | Path traversal in code apply | Guardrails + allowlist + safeJoin (3 layers) |
 | Prompt injection in transcript | `<<<BEGIN>>>…<<<END>>>` delimiters + sanitizers |
 | Server-side request forgery | Slack webhook URL parsed, host pinned to `hooks.slack.com` |
-| Replay of expired token | `exp` validated against wall clock with 10s skew |
+| Replay of expired token | `exp` validated against wall clock with 2s skew |
 | `alg=none` JWT impersonation | Header check rejects anything but `HS256` |
 
 ## What's deferred

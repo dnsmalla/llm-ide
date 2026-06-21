@@ -183,7 +183,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 - **CORS is a strict allowlist** — `chrome-extension://<id>` + `localhost` / `127.0.0.1`. The `Access-Control-Allow-Origin` header echoes the request's `Origin` (never `*`), and is only set when the origin is in the allowlist.
 - **Server binds to `127.0.0.1` by default** — a non-loopback `LLMIDE_HOST` is REFUSED at startup unless `LLMIDE_ALLOW_REMOTE=1` is also set (the operator opting into a TLS-terminating proxy). The server itself terminates no TLS.
 - **`runClaude()` prefers the user's stored `claude.apiKey`** (per-user, from the encrypted vault) so multi-user deployments bill each user's own Anthropic account; it falls back to the operator's Claude CLI login (`execFile('claude', ['-p', prompt])`) when no user key is present. A user-scoped key NEVER silently falls back to the operator CLI on failure — that would misattribute spend.
-- **2 MB request body limit** — DoS guard.
+- **8 MB request body limit** — DoS guard.
 - **500 k-char prompt cap** — keeps requests within Claude CLI's comfort zone.
 - **`SERVER_API_VERSION` + full `ENDPOINTS` array exposed on `GET /` and `GET /health`** — the client uses this for stale-server detection. Bump `SERVER_API_VERSION` whenever wire format or endpoint list changes.
 - **Per-request access log** — `res.on('finish', () => console.log(...))` so user sees method, path, status, duration in the terminal.

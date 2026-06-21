@@ -60,7 +60,7 @@ Strongly recommended for any deployment that's not your laptop:
 | Var | Effect | Default |
 |---|---|---|
 | `LLMIDE_PORT` | Listen port. Mac client + extension are hard-coded to 3456; changing requires coordinated client updates. | `3456` |
-| `LLMIDE_BODY_LIMIT_MB` | Cap on JSON request bodies. `/auth/me/plugins/install` has its own 5 MB cap independent of this. | `2` |
+| `LLMIDE_BODY_LIMIT_MB` | Cap on JSON request bodies. `/auth/me/plugins/install` has its own 5 MB cap independent of this. | `8` |
 | `LLMIDE_JWT_ISSUER` | `iss` claim in minted JWTs. Cosmetic unless verifying tokens externally. | `llmide` |
 
 ## Complete table
@@ -83,7 +83,7 @@ python3 docs/_scripts/extract_env_vars.py
 |---|---|---|
 | `LLMIDE_ACCESS_TTL_SEC` | int | `900` (15 min) |
 | `LLMIDE_BCRYPT_COST` | int | `12` |
-| `LLMIDE_BODY_LIMIT_MB` | int | `2` |
+| `LLMIDE_BODY_LIMIT_MB` | int | `8` |
 | `LLMIDE_CORS_ORIGINS` | str | _(empty)_ |
 | `LLMIDE_DB_PATH` | str | `<repo>/kb/data.db` |
 | `LLMIDE_DISABLE_REGISTRATION` | bool | `false` |

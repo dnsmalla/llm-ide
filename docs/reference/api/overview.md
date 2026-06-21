@@ -21,9 +21,9 @@ Human-readable summary of the LLM IDE server API. For the machine-readable spec 
 | `FORBIDDEN` | Authenticated but the resource isn't yours |
 | `NOT_FOUND` | No such resource |
 | `VALIDATION_FAILED` | Request body failed schema or range checks |
-| `GUARDRAIL_FAILED` | Guardrail engine blocked the action |
+| `GUARDRAIL_FAILED` | Reserved — not currently emitted by the server |
 | `RATE_LIMITED` | Token bucket exhausted — see `Retry-After` header |
-| `UPSTREAM_ERROR` | Claude CLI, GitHub, or another upstream failed |
+| `UPSTREAM_ERROR` | Claude CLI, GitHub, or another upstream failed (emitted via raw `sendJSON` — not an AppError) |
 | `INTERNAL_ERROR` | Unhandled — check server logs with `LLMIDE_LOG_LEVEL=debug` |
 
 ## Public routes
