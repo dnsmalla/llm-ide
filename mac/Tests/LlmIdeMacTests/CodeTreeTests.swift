@@ -70,4 +70,49 @@ struct CodeTreeTests {
         // Two repo dirs sort before the loose top-level file.
         #expect(tree.map(\.name) == ["RepoA", "RepoB", "loose.swift"])
     }
+
+    // MARK: - FSNode parity (FileTreePanel renders from the SAME nester)
+
+    private func outline(_ entries: [CodeEntry], _ depth: Int = 0) -> [String] {
+        entries.flatMap { e -> [String] in
+            [String(repeating: "  ", count: depth) + e.name] + outline(e.children ?? [], depth + 1)
+        }
+    }
+    private func outline(_ nodes: [FSNode], _ depth: Int = 0) -> [String] {
+        nodes.flatMap { n -> [String] in
+            [String(repeating: "  ", count: depth) + n.name] + outline(n.children, depth + 1)
+        }
+    }
+
+    @Test("FileTreePanel FSNode tree matches the Library CodeEntry tree")
+    func fsNodeParity() {
+        let items = [
+            codeItem("/x/RepoA/Sources/App/Foo.swift", treePath: ["RepoA", "Sources", "App"]),
+            codeItem("/x/RepoA/README.md", treePath: ["RepoA"]),
+            codeItem("/y/RepoB/b.swift", treePath: ["RepoB"]),
+            codeItem("/p/code/loose.swift", treePath: []),
+        ]
+        // Identical hierarchy from both builders — the consolidation guarantee.
+        #expect(outline(CodeEntry.build(from: items)) == outline(buildCodeTrees(items: items)))
+    }
+
+    @Test("multiple repos stay separate top-level nodes (no commonAncestor collapse)")
+    func fsNodeMultiRepoNotCollapsed() {
+        let items = [
+            codeItem("/x/RepoA/a.swift", treePath: ["RepoA"]),
+            codeItem("/y/RepoB/b.swift", treePath: ["RepoB"]),
+        ]
+        // The old commonAncestor builder would have nested both under one node;
+        // treePath nesting keeps them as distinct repos.
+        #expect(buildCodeTrees(items: items).map(\.name) == ["RepoA", "RepoB"])
+    }
+
+    @Test("FSNode directory URLs reconstruct the real on-disk path")
+    func fsNodeDirURLs() {
+        let items = [codeItem("/x/RepoA/Sources/Foo.swift", treePath: ["RepoA", "Sources"])]
+        let repo = try! #require(buildCodeTrees(items: items).first)
+        #expect(repo.url.path == "/x/RepoA")                                   // Reveal-in-Finder target
+        #expect(repo.children.first?.url.path == "/x/RepoA/Sources")
+        #expect(repo.children.first?.children.first?.url.path == "/x/RepoA/Sources/Foo.swift")
+    }
 }

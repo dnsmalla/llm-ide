@@ -100,29 +100,21 @@ func buildCategoryTrees(items: [LibraryItem]) -> [FSNode] {
     return result
 }
 
-/// Nested FSNode forest for CODE items, built from each item's real path
-/// (one tree rooted at the common ancestor of all code files) rather than
-/// grouped by immediate parent-folder name. This is what makes a repo render
-/// as a single nested folder (e.g. `InfiniteBrain → Sources → …`) instead of
-/// a flat list that duplicates same-named folders (CodeGraph ×3). Matches the
-/// Library tab's CodeEntry hierarchy, just emitting FSNode so the existing
-/// rows/context-menus keep working.
+/// Nested FSNode forest for CODE items. Built via the shared `CodeTreeNester`
+/// (keyed on `LibraryItem.treePath`) so it renders the EXACT same hierarchy as
+/// the Library tab's `CodeEntry` tree — one source of truth, no second
+/// algorithm to drift against. (Previously used `commonAncestor` of absolute
+/// paths, which collapsed multiple repos under a single `code` node and could
+/// disagree with the Library tab.)
 func buildCodeTrees(items: [LibraryItem]) -> [FSNode] {
-    let nested = items.filter { $0.folderOrigin != nil }
-    let loose  = items.filter { $0.folderOrigin == nil }
-    var result: [FSNode] = []
-    for item in loose.sorted(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) {
-        result.append(FSNode(id: item.path, name: item.name, url: item.url, item: item, children: []))
-    }
-    guard !nested.isEmpty else { return result }
-    // Common ancestor of the parent directories → the scan root (e.g. code/
-    // or code/InfiniteBrain). buildTree then nests by full path, so folders
-    // at different depths with the same name stay distinct.
-    let ancestor = commonAncestor(
-        nested.map { URL(fileURLWithPath: $0.path).deletingLastPathComponent().path }
-    )
-    result.append(buildTree(items: nested, root: URL(fileURLWithPath: ancestor)))
-    return result
+    CodeTreeNester.forest(
+        from: items,
+        makeDir: { name, _, dirURL, children in
+            FSNode(id: dirURL.path, name: name, url: dirURL, item: nil, children: children)
+        },
+        makeFile: { item in
+            FSNode(id: item.path, name: item.name, url: item.url, item: item, children: [])
+        })
 }
 
 /// Longest common path shared by all items (used to find the repo root).
