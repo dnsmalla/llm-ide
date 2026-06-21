@@ -126,7 +126,23 @@ final class RegressionRunner: ObservableObject {
     ///     Default `false` — the verdict comparison is heuristic
     ///     (text-difference), so a run must NOT silently mutate files
     ///     unless the user explicitly opts in.
+    /// Back-compat entry: faults + git working tree are the same dir (tests and
+    /// the legacy single-repo case where the project root IS the git repo).
     func run(at repoRoot: URL, only: Set<URL>? = nil,
+             autoReopen requestedAutoReopen: Bool = false,
+             attemptRepair: Bool = false) async {
+        await run(faultsRoot: repoRoot, gitRoot: repoRoot, only: only,
+                  autoReopen: requestedAutoReopen, attemptRepair: attemptRepair)
+    }
+
+    /// Two-root entry. Faults (`status: fixed` .md files + faults.csv) live
+    /// under `faultsRoot` — the PROJECT root. Verify commands, `git
+    /// diff`/`checkout`, and agent repair run in `gitRoot` — the git WORKING
+    /// TREE (the cloned repo). These differ in the clone-into-code layout
+    /// (`<project>/code/<repo>`). `gitRoot == nil` means no working tree is
+    /// resolvable, so command-backed faults are skipped rather than run in the
+    /// wrong cwd (answer-compare faults still run — they need no repo).
+    func run(faultsRoot: URL, gitRoot: URL?, only: Set<URL>? = nil,
              autoReopen requestedAutoReopen: Bool = false,
              attemptRepair: Bool = false) async {
         guard !running else { return }
@@ -143,7 +159,7 @@ final class RegressionRunner: ObservableObject {
             config?.lastRegressionRegressedCount = regressed
             config?.lastRegressionRunAt = Date()
         }
-        let urls = store.listFaults(at: repoRoot)
+        let urls = store.listFaults(at: faultsRoot)
         // /tmp/ vs /private/tmp/ and other symlink prefixes mean URL
         // identity isn't reliable. Match by canonical filesystem path.
         let onlyPaths: Set<String>? = only.map { Set($0.map { $0.standardizedFileURL.path }) }
@@ -170,7 +186,7 @@ final class RegressionRunner: ObservableObject {
             appendLog(.info, "[\(idx + 1)/\(fixed.count)] \(preview)")
             if let cmd = fault.verify, !cmd.isEmpty, let verifier {
                 await runCommandFault(idx: idx, url: url, command: cmd,
-                                      verifier: verifier, repoRoot: repoRoot,
+                                      verifier: verifier, gitRoot: gitRoot,
                                       attemptRepair: attemptRepair,
                                       autoReopen: requestedAutoReopen)
             } else {
@@ -184,14 +200,21 @@ final class RegressionRunner: ObservableObject {
         // post-run state. When auto-reopen is on, regressed faults were
         // flipped to `open` above and that shows here. Best-effort — a
         // failed export must not fail the run.
-        lastCSVURL = try? store.exportFaultsCSV(at: repoRoot)
+        lastCSVURL = try? store.exportFaultsCSV(at: faultsRoot)
     }
 
     /// Command-backed path: approve-gate → verify → (repair → re-verify).
     private func runCommandFault(idx: Int, url: URL, command: String,
-                                 verifier: FaultVerifier, repoRoot: URL,
+                                 verifier: FaultVerifier, gitRoot: URL?,
                                  attemptRepair: Bool,
                                  autoReopen reopenOnRegression: Bool) async {
+        // Verify commands + git ops need a working tree. None resolved (a
+        // project with no cloned repo) → skip rather than run in the wrong cwd.
+        guard let repoRoot = gitRoot else {
+            results[idx].verdict = .failed("No git working tree — can't run verify command")
+            appendLog(.warn, "  → skipped: no git working tree for verify command")
+            return
+        }
         guard approvals.isApproved(repo: repoRoot, faultFile: url.lastPathComponent, command: command) else {
             results[idx].verdict = .needsApproval
             appendLog(.warn, "  → needs approval: \(command)")

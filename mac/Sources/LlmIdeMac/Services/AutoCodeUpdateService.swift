@@ -426,13 +426,14 @@ final class AutoCodeUpdateService: ObservableObject {
         }
 
         // 7. Regression sweep — re-asks every `status: fixed` FaultReport
-        // saved under <projectRoot>/system/faults/ and flips any
-        // regressed ones back to `status: open`. Faults are PROJECT-level
-        // data, so this targets projectRoot (NOT the git working tree) —
-        // the same place RegressionView and the menu count read. Off by
-        // default; opt-in via Settings.
+        // saved under <projectRoot>/system/faults/ and flips any regressed
+        // ones back to `status: open`. Faults are PROJECT-level data (read at
+        // projectRoot — same place RegressionView + the menu count read), but
+        // verify commands + git ops run in the git working tree (gitRoot, the
+        // clone). Off by default; opt-in via Settings.
         if !Task.isCancelled, config.autoCodeRunRegression {
-            await runRegressionSweep(projectRoot: resolved.projectRoot)
+            await runRegressionSweep(projectRoot: resolved.projectRoot,
+                                     gitRoot: resolved.gitRoot)
         }
 
         // A user-initiated stop wins over the normal summary.
@@ -450,7 +451,7 @@ final class AutoCodeUpdateService: ObservableObject {
     /// regression row to ⚠. The runner itself publishes per-fault
     /// progress to its own @Published state; this entry point waits
     /// for the run to finish then records a summary line.
-    private func runRegressionSweep(projectRoot: String) async {
+    private func runRegressionSweep(projectRoot: String, gitRoot: String) async {
         guard let api else {
             taskErrors[AutoTask.regression.rawValue] = "Regression skipped — no API client wired."
             return
@@ -459,14 +460,18 @@ final class AutoCodeUpdateService: ObservableObject {
             taskErrors[AutoTask.regression.rawValue] = "Regression skipped — no project root resolved."
             return
         }
-        let repoRoot = URL(fileURLWithPath: projectRoot, isDirectory: true)
+        let faultsRoot = URL(fileURLWithPath: projectRoot, isDirectory: true)
+        // gitRoot is the cloned working tree where verify commands + git ops
+        // run; empty only in degenerate config, in which case command faults
+        // are skipped by the runner.
+        let gitRootURL = gitRoot.isEmpty ? nil : URL(fileURLWithPath: gitRoot, isDirectory: true)
         let prompter = CodeAssistPrompter(api: api, agent: config.activeCLI)
         let judge = CodeAssistJudge(api: api)
         let repairer = AgentFaultRepairer(api: api)
         let runner = RegressionRunner(prompter: prompter, judge: judge,
                                       verifier: ShellFaultVerifier(), repairer: repairer,
                                       verifyTimeout: config.regressionVerifyTimeout, config: config)
-        await runner.run(at: repoRoot,
+        await runner.run(faultsRoot: faultsRoot, gitRoot: gitRootURL,
                          autoReopen: config.regressionAutoReopen,
                          attemptRepair: config.regressionAttemptRepair)
         // RegressionRunner's published `results` lives on its own

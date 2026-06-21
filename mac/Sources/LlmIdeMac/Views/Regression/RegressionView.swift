@@ -110,6 +110,13 @@ struct RegressionView: View {
         WorkspaceRoot.resolve(config: config, projectStore: projectStore)
     }
 
+    /// The git WORKING TREE for verify commands + git diff/checkout/repair —
+    /// distinct from `activeRepoRoot` (the project root, where faults live).
+    /// nil when no cloned repo exists; command-backed faults are then skipped.
+    private var activeGitRoot: URL? {
+        WorkspaceRoot.gitWorkingTree(config: config, projectStore: projectStore)
+    }
+
     private func refresh() async {
         guard let repo = activeRepoRoot else {
             allFaults = []
@@ -134,7 +141,7 @@ struct RegressionView: View {
         guard let repo = activeRepoRoot else { return }
         let only = checked.isEmpty ? nil : checked
         runner.applyTimeout(config.regressionVerifyTimeout)
-        await runner.run(at: repo, only: only,
+        await runner.run(faultsRoot: repo, gitRoot: activeGitRoot, only: only,
                          autoReopen: config.regressionAutoReopen,
                          attemptRepair: config.regressionAttemptRepair)
     }

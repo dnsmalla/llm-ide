@@ -120,4 +120,67 @@ struct RegressionPipelineIntegrationTests {
         await runner.run(at: repo, attemptRepair: true)
         #expect(runner.results.first?.verdict == .needsApproval)
     }
+
+    // MARK: - Two-root split (faults at projectRoot, verify at gitRoot)
+
+    /// Records the repoRoot each verify call receives, so a test can assert
+    /// the command runs in the git working tree — not the project root.
+    final class RecordingVerifier: FaultVerifier, @unchecked Sendable {
+        var seenRepoRoots: [URL] = []
+        func verify(command: String, repoRoot: URL, timeout: TimeInterval) async throws -> VerifyOutcome {
+            seenRepoRoots.append(repoRoot)
+            return VerifyOutcome(exitCode: 0, output: "")   // "fixed" → .unchanged, no repair path
+        }
+    }
+
+    /// Faults live under the PROJECT root, but the verify command must run in
+    /// the git WORKING TREE (a different dir in the clone-into-code layout).
+    /// Regression test for the bug where the two-root split was applied to
+    /// fault storage but the verify cwd was left at the project root.
+    @Test func verifyRunsInGitRootNotFaultsRoot() async throws {
+        let faultsRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("regr-faults-\(UUID().uuidString)", isDirectory: true)
+        let gitRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("regr-git-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: faultsRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: gitRoot, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: faultsRoot)
+            try? FileManager.default.removeItem(at: gitRoot)
+        }
+        let store = MemoryStore()
+        let url = try writeFixedFault(store, at: faultsRoot, verify: cmd)
+        // Approval is keyed by the working tree (where the command runs).
+        let appr = approvals(approving: cmd, repo: gitRoot, file: url.lastPathComponent)
+        let verifier = RecordingVerifier()
+        let runner = RegressionRunner(prompter: NoPrompter(), store: store,
+                                      verifier: verifier, approvals: appr)
+        await runner.run(faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: false)
+
+        #expect(verifier.seenRepoRoots == [gitRoot])             // ran in the working tree…
+        #expect(!verifier.seenRepoRoots.contains(faultsRoot))    // …never the project root
+        #expect(runner.results.first?.verdict == .unchanged)
+    }
+
+    /// No git working tree resolvable → command-backed faults are skipped
+    /// (marked failed) rather than run in the wrong cwd. The verifier must
+    /// never be invoked.
+    @Test func commandFaultSkippedWhenNoGitRoot() async throws {
+        let faultsRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("regr-faults-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: faultsRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: faultsRoot) }
+        let store = MemoryStore()
+        let url = try writeFixedFault(store, at: faultsRoot, verify: cmd)
+        let appr = approvals(approving: cmd, repo: faultsRoot, file: url.lastPathComponent)
+        let verifier = RecordingVerifier()
+        let runner = RegressionRunner(prompter: NoPrompter(), store: store,
+                                      verifier: verifier, approvals: appr)
+        await runner.run(faultsRoot: faultsRoot, gitRoot: nil, attemptRepair: false)
+
+        #expect(verifier.seenRepoRoots.isEmpty)   // verify command never ran
+        if case .failed = runner.results.first?.verdict {} else {
+            Issue.record("expected .failed (skipped) when gitRoot is nil")
+        }
+    }
 }
