@@ -26,6 +26,7 @@ struct ProjectLayout {
     var projectJSON: URL { systemDir.appendingPathComponent("project.json") }
     var faultsDir:   URL { systemDir.appendingPathComponent("faults", isDirectory: true) }
     var graphDir:    URL { systemDir.appendingPathComponent("graph", isDirectory: true) }
+    var graphNotesDir: URL { graphDir.appendingPathComponent("notes", isDirectory: true) }
     var indexDB:     URL { systemDir.appendingPathComponent("index.sqlite") }
     var syncJSON:    URL { systemDir.appendingPathComponent("sync.json") }
     var cacheDir:    URL { systemDir.appendingPathComponent("cache", isDirectory: true) }

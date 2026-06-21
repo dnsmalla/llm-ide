@@ -23,13 +23,14 @@ public enum CodeNoteGenerator {
     @discardableResult
     public static func generate(scan: ScanResult, repoRoot: URL,
                                 changedPaths: Set<String>? = nil) -> Int {
-        let notesRoot = repoRoot.appendingPathComponent("system/graph/notes", isDirectory: true)
+        let layout = ProjectLayout(root: repoRoot)
+        let notesRoot = layout.graphNotesDir
         try? FileManager.default.createDirectory(at: notesRoot, withIntermediateDirectories: true)
 
         // Self-ignoring marker: makes git ignore everything under `system/graph`
         // in ANY repo, regardless of the repo's root .gitignore. Idempotent /
         // write-always (cheap), so generated notes never flood Source Control.
-        let codeNotesRoot = repoRoot.appendingPathComponent("system/graph", isDirectory: true)
+        let codeNotesRoot = layout.graphDir
         try? "*\n".write(to: codeNotesRoot.appendingPathComponent(".gitignore"),
                          atomically: true, encoding: .utf8)
 
@@ -139,7 +140,7 @@ public enum CodeNoteGenerator {
     // MARK: - index.md
 
     static func writeIndex(scan: ScanResult, usedBy: [String: [String]], repoRoot: URL) {
-        let codeDir = repoRoot.appendingPathComponent("system/graph")
+        let codeDir = ProjectLayout(root: repoRoot).graphDir
         try? FileManager.default.createDirectory(at: codeDir, withIntermediateDirectories: true)
 
         let codeFiles = scan.files.filter { $0.language != "other" }
@@ -201,7 +202,7 @@ public enum CodeNoteGenerator {
     // MARK: - graph.json
 
     static func writeGraphJSON(scan: ScanResult, usedBy: [String: [String]], repoRoot: URL) {
-        let codeDir = repoRoot.appendingPathComponent("system/graph")
+        let codeDir = ProjectLayout(root: repoRoot).graphDir
 
         struct SymEntry: Encodable {
             let name: String; let line: Int; let declaration: String?

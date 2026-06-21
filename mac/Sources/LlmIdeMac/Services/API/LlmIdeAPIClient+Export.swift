@@ -133,7 +133,7 @@ extension LlmIdeAPIClient {
         let fm = FileManager.default
         let baseDir: URL
         if let root = projectRoot {
-            let plansDir = root.appendingPathComponent("data", isDirectory: true)
+            let plansDir = ProjectLayout(root: root).dataDir
             try fm.createDirectory(at: plansDir, withIntermediateDirectories: true)
             baseDir = plansDir
         } else {

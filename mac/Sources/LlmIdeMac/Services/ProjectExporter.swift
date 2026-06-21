@@ -40,7 +40,6 @@ final class ProjectExporter {
 
     struct ExportResult {
         let meetingsWritten: Int
-        let plansWritten: Int
         let exportedAt: Date
         let durationMs: Int
     }
@@ -86,7 +85,7 @@ final class ProjectExporter {
         var meetingIndexEntries: [[String: String]] = []
 
         // ── Meetings ─────────────────────────────────────────────────────────
-        let meetingsRoot = folderURL.appendingPathComponent("source")
+        let meetingsRoot = ProjectLayout(root: folderURL).sourceDir
         try fm.createDirectory(at: meetingsRoot, withIntermediateDirectories: true)
 
         for meeting in bundle.meetings {
@@ -124,31 +123,27 @@ final class ProjectExporter {
         // ── README badge ──────────────────────────────────────────────────────
         updateReadme(
             at: folderURL.appendingPathComponent("README.md"),
-            meetings: bundle.meetings.count,
-            plans:    0)
+            meetings: bundle.meetings.count)
 
         // ── system/sync.json — written LAST ────────────────────────────────
         // Its presence on disk signals that the entire export above completed
         // successfully.  A reader that sees no sync.json should treat the
         // folder as a partial / in-progress export.
-        let systemDir = folderURL.appendingPathComponent("system")
-        try fm.createDirectory(at: systemDir, withIntermediateDirectories: true)
+        let layout = ProjectLayout(root: folderURL)
+        try fm.createDirectory(at: layout.systemDir, withIntermediateDirectories: true)
         try JSONSerialization
             .data(withJSONObject: [
                 "exportedAt":        nowISO(),
                 "meetingsExported":  bundle.meetings.count,
-                "plansExported":     0,
                 "backendExportedAt": bundle.exportedAt,
             ] as [String: Any], options: .prettyPrinted)
-            .write(to: systemDir.appendingPathComponent("sync.json"),
-                   options: .atomic)
+            .write(to: layout.syncJSON, options: .atomic)
 
         let ms = Int(Date().timeIntervalSince(t0) * 1000)
         log.info("export done: \(bundle.meetings.count) meetings in \(ms)ms")
 
         return ExportResult(
             meetingsWritten: bundle.meetings.count,
-            plansWritten:    0,
             exportedAt:      Date(),
             durationMs:      ms
         )
@@ -253,74 +248,11 @@ final class ProjectExporter {
         return md
     }
 
-    // MARK: - Markdown: plan
-
-    private func planMarkdown(plan: ProjectExportBundle.Plan) -> String {
-        var seenMilestones = Set<String>()
-        var milestoneOrder: [String] = []
-        for t in plan.tasks {
-            let ms = t.milestone ?? "General"
-            if seenMilestones.insert(ms).inserted { milestoneOrder.append(ms) }
-        }
-        let byMilestone = Dictionary(grouping: plan.tasks) { $0.milestone ?? "General" }
-
-        var md = """
-        ---
-        id: \(yamlScalar(plan.id))
-        title: \(yamlScalar(plan.title))
-        language: \(plan.language)
-        createdAt: \(plan.createdAt ?? "unknown")
-        updatedAt: \(plan.updatedAt ?? "unknown")
-        ---
-
-        # \(plan.title)
-
-        """
-
-        // plan.goal can contain Markdown characters — escape before blockquote
-        if !plan.goal.isEmpty {
-            md += "> \(escapeMd(plan.goal))\n\n"
-        }
-
-        let total   = plan.tasks.count
-        let done    = plan.tasks.filter { $0.status == "done" || $0.status == "cancelled" }.count
-        let active  = plan.tasks.filter { $0.status == "in_progress" }.count
-        let blocked = plan.tasks.filter { $0.status == "blocked" }.count
-
-        md += """
-        | Total | Done | Active | Blocked |
-        |-------|------|--------|---------|
-        | \(total) | \(done) | \(active) | \(blocked) |
-
-        """
-
-        for ms in milestoneOrder {
-            guard let tasks = byMilestone[ms], !tasks.isEmpty else { continue }
-            md += "## \(escapeMd(ms))\n\n"
-            for t in tasks {
-                let check = (t.status == "done" || t.status == "cancelled") ? "x" : " "
-                var line  = "- [\(check)] **\(escapeMd(t.title))**"
-                if let owner = t.owner, !owner.isEmpty { line += " — @\(escapeMd(owner))" }
-                if let est   = t.estimateDays           { line += " `\(est)d`" }
-                if let risk  = t.risk, risk != "low"    { line += " ⚠️ \(risk) risk" }
-                if t.status == "blocked"                { line += " 🔴 blocked" }
-                md += line + "\n"
-                if let desc = t.description, !desc.isEmpty {
-                    desc.components(separatedBy: "\n")
-                        .forEach { md += "  \($0)\n" }
-                }
-            }
-            md += "\n"
-        }
-
-        return md
-    }
-
     // MARK: - README badge
 
-    private func updateReadme(at url: URL, meetings: Int, plans: Int) {
+    private func updateReadme(at url: URL, meetings: Int) {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return }
-        let badge = "**Last exported:** \(nowISO()) — \(meetings) meeting(s), \(plans) plan(s)"
+        let badge = "**Last exported:** \(nowISO()) — \(meetings) meeting(s)"
 
         let updated: String
         if content.contains("**Last exported:**") {

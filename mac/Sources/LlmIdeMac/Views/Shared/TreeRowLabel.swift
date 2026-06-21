@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Presentation-only row used by all file-tree views (Library FSNodeRow,
-/// Regression RepoFileTreeRow, Explorer). Takes scalars so it works with any
+/// Explorer). Takes scalars so it works with any
 /// node model (eager FSNode or lazy FileSystemTree.Node). Each tree keeps its
 /// own recursion + selection/tap model; this only renders the label.
 struct TreeRowLabel: View {

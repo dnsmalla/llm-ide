@@ -27,11 +27,11 @@ final class AppEnvironment {
         // index lives in the scaffolded system/ dir alongside project.json
         // and sync.json — not buried inside meetings/system/.
         let idxRoot = indexRootURL ?? folder
+        let idxLayout = ProjectLayout(root: idxRoot)
         try FileManager.default.createDirectory(
-            at: idxRoot.appendingPathComponent("system"),
+            at: idxLayout.systemDir,
             withIntermediateDirectories: true)
-        let idx = try MeetingIndex(
-            url: idxRoot.appendingPathComponent("system/index.sqlite"))
+        let idx = try MeetingIndex(url: idxLayout.indexDB)
         let indexer = FolderIndexer(root: folder, index: idx)
         self.notesConfig = config
         self.index = idx
@@ -86,10 +86,9 @@ final class AppEnvironment {
     ///   otherwise), so this branch is purely defensive.
     var notesOutputFolder: URL {
         if let root = projectRoot {
-            return root.appendingPathComponent("notes", isDirectory: true)
+            return ProjectLayout(root: root).notesDir
         }
-        return notesConfig.defaultFolder()
-            .appendingPathComponent("notes", isDirectory: true)
+        return ProjectLayout(root: notesConfig.defaultFolder()).notesDir
     }
 
     /// The `meetings/` folder — contains raw `.md` transcripts organised

@@ -80,7 +80,7 @@ final class ProjectStore: ObservableObject {
         // is non-empty and missing the required LLM IDE sub-folder tree.
         try ProjectScaffolder.validate(at: url)
 
-        let projectJSON = url.appendingPathComponent("system/project.json")
+        let projectJSON = ProjectLayout(root: url).projectJSON
         let project: Project
         if FileManager.default.fileExists(atPath: projectJSON.path) {
             let data = try Data(contentsOf: projectJSON)
@@ -107,7 +107,7 @@ final class ProjectStore: ObservableObject {
         // existingShellContent) reads the correct path.  For project
         // switches, AppShell observes .notesFolderChanged and rebuilds
         // AppEnvironment after this call.
-        let sourceFolder = url.appendingPathComponent("source", isDirectory: true)
+        let sourceFolder = ProjectLayout(root: url).sourceDir
         try? NotesFolderConfig().setFolderFromPath(sourceFolder)
 
         activeProject = ActiveProject(bundle: project, localPath: url.path)
@@ -131,7 +131,7 @@ final class ProjectStore: ObservableObject {
     @discardableResult
     func ensureProjectScaffold(at folderURL: URL) throws -> Project {
         let url = folderURL.standardizedFileURL
-        let projectJSON = url.appendingPathComponent("system/project.json")
+        let projectJSON = ProjectLayout(root: url).projectJSON
         let project: Project
         if FileManager.default.fileExists(atPath: projectJSON.path) {
             project = try Project.fromJSON(Data(contentsOf: projectJSON))
@@ -274,7 +274,7 @@ final class ProjectStore: ObservableObject {
             let pruned = state.recents.filter { entry in
                 let base = URL(fileURLWithPath: entry.path)
                 return FileManager.default.fileExists(
-                        atPath: base.appendingPathComponent("system/project.json").path)
+                        atPath: ProjectLayout(root: base).projectJSON.path)
             }
             recents = pruned
             if let activeId = state.activeId,
@@ -295,8 +295,7 @@ final class ProjectStore: ObservableObject {
     }
 
     private func rehydrateActive(from entry: RecentEntry) -> Bool {
-        let projectJSON = URL(fileURLWithPath: entry.path)
-            .appendingPathComponent("system/project.json")
+        let projectJSON = ProjectLayout(root: URL(fileURLWithPath: entry.path)).projectJSON
         let data: Data
         do {
             data = try Data(contentsOf: projectJSON)
@@ -324,8 +323,7 @@ final class ProjectStore: ObservableObject {
         // Sync NotesFolderConfig so AppEnvironment (constructed by AppShell
         // on first render) points at this project's source/ folder.
         // No notification needed here — AppShell hasn't subscribed yet.
-        let sourceFolder = URL(fileURLWithPath: entry.path)
-            .appendingPathComponent("source", isDirectory: true)
+        let sourceFolder = ProjectLayout(root: URL(fileURLWithPath: entry.path)).sourceDir
         try? NotesFolderConfig().setFolderFromPath(sourceFolder)
         return true
     }

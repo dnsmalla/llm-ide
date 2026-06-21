@@ -57,8 +57,9 @@ final class MeetingDetailViewModel {
         // Use the .md filename stem as the docx suffix — stable across re-runs.
         let dateSlug = AppDateFormatter.dateHourMinuteLocal(fm.startedAt)
         let stem     = fileURL.deletingPathExtension().lastPathComponent.prefix(8)
-        let notesDir = root.deletingLastPathComponent()
-            .appendingPathComponent("notes", isDirectory: true)
+        // root is the project's source/ folder; its parent is the project
+        // root, so notes land in the canonical <projectRoot>/notes/.
+        let notesDir = ProjectLayout(root: root.deletingLastPathComponent()).notesDir
         let docxURL  = notesDir.appendingPathComponent("\(dateSlug)-\(stem)-meeting-notes.docx")
 
         await MeetingSummarizationService.run(
