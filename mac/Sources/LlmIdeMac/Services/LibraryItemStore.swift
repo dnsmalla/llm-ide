@@ -247,6 +247,17 @@ final class LibraryItemStore {
             rescan()
             return
         }
+        _ = copyIntoProject(url: url, category: category)
+        rescan()
+    }
+
+    /// Copy an external file into its canonical subfolder, WITHOUT rescanning.
+    /// Returns true when a copy happened. Shared by `add` (which rescans after)
+    /// and the batched legacy migration (which rescans once at the end), so a
+    /// multi-file migration doesn't trigger a full scan per file.
+    @discardableResult
+    private func copyIntoProject(url: URL, category: LibraryItem.Category) -> Bool {
+        guard let root = projectRoot, !ProjectPaths.isInside(url, root: root) else { return false }
         let dest = ProjectPaths.destinationURL(
             root: root, category: category, fileName: url.lastPathComponent)
         let fm = FileManager.default
@@ -258,12 +269,12 @@ final class LibraryItemStore {
                 try fm.removeItem(at: dest)
             }
             try fm.copyItem(at: url, to: dest)
+            return true
         } catch {
             os_log(.error, "LibraryItemStore: failed to copy %{public}@ into project: %{public}@",
                    url.path, "\(error)")
-            return
+            return false
         }
-        rescan()
     }
 
     /// Reference a code folder in place (folders are never copied).  Only
@@ -444,16 +455,35 @@ final class LibraryItemStore {
         if fm.fileExists(atPath: migrated.path) { return }
         guard fm.fileExists(atPath: url.path),
               let legacy = decodeLegacyItems(at: url) else { return }
+        // Batch the migration: collect external code-folder refs and copy files
+        // WITHOUT rescanning per item. `bindProject` runs a single `rescan()`
+        // right after this returns, and the external refs fire their persist
+        // callback once below — instead of N full scans + N config writes for
+        // an N-item one-time migration on the main actor.
+        var newExternalDirs: [String] = []
         for item in legacy where item.category != .meetings {
             let itemURL = URL(fileURLWithPath: item.path)
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: item.path, isDirectory: &isDir) else { continue }
             if isDir.boolValue {
-                addFolder(url: itemURL, category: .code)
+                // External code-folder reference. In-project dirs are already
+                // covered by the canonical-subfolder scan, so skip those.
+                let path = Self.standardize(item.path)
+                if !isInsideProject(path) { newExternalDirs.append(path) }
             } else if !ProjectPaths.isInside(itemURL, root: root) {
-                add(url: itemURL, category: item.category)
+                copyIntoProject(url: itemURL, category: item.category)
             }
             // Files already inside the project need no action — rescan() finds them.
+        }
+        // Apply the collected external refs once, persisting via the callback
+        // a single time (matching `addFolder`'s contract, batched).
+        if !newExternalDirs.isEmpty {
+            let merged = Self.dedupePreservingOrder(externalCodeFolders + newExternalDirs)
+                .filter { !isInsideProject($0) }
+            if merged != externalCodeFolders {
+                externalCodeFolders = merged
+                onExternalCodeFoldersChanged?(externalCodeFolders)
+            }
         }
         // Rename aside so the migration never runs again (sentinel above).
         do {
