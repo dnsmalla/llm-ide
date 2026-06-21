@@ -37,10 +37,13 @@ struct ExplorerView: View {
     /// back via GeometryReader, same pattern as ReviewView).
     @AppStorage("EXPLORER_CHAT_PANEL_WIDTH") private var chatPanelWidth: Double = 180
 
-    /// Prefer the active CODE repo (matching Source Control / terminal); fall
-    /// back to the active project's local folder. nil when neither is set.
+    /// The Explorer is the code-browsing pane, so it roots at the active
+    /// project's `code/` folder (where repos clone to) — not the whole project
+    /// (source/data/notes are managed in the Library). Falls back to the
+    /// resolved workspace root when no project is open (repo-only/legacy use).
     private var root: URL? {
-        WorkspaceRoot.resolve(config: config, projectStore: projectStore)
+        if let code = projectStore.activeProjectCodeDir { return code }
+        return WorkspaceRoot.resolve(config: config, projectStore: projectStore)
     }
 
     var body: some View {
