@@ -259,6 +259,7 @@ struct LlmIdeMacApp: App {
                 .environmentObject(session)
                 .environmentObject(capture)
                 .environmentObject(config)
+                .environmentObject(projectStore)
         } label: {
             Image(systemName: capture.isRunning ? "record.circle.fill" : "record.circle")
                 .symbolRenderingMode(.palette)
@@ -301,6 +302,7 @@ struct MenuBarMenu: View {
     @EnvironmentObject var capture: CaptionOrchestrator
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var config: AppConfig
+    @EnvironmentObject var projectStore: ProjectStore
     let api: LlmIdeAPIClient
 
     /// Open-fault count cached on appear + every 30s. Counting faults is
@@ -387,7 +389,11 @@ struct MenuBarMenu: View {
     }
 
     private func refreshOpenFaultCount() {
-        guard let repo = config.activeRepoLocalURL else {
+        // Count faults at the active PROJECT root (`<root>/system/faults`) —
+        // the same place CodeAssistantPanel writes them and RegressionView
+        // reads them. `config.activeRepoLocalURL` pointed at the clone
+        // (`code/<repo>`), so the menu under-counted (usually showed 0).
+        guard let repo = WorkspaceRoot.resolve(config: config, projectStore: projectStore) else {
             openFaultCount = 0
             return
         }

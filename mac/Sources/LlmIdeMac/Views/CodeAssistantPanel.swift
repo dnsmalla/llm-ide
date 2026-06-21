@@ -769,11 +769,17 @@ struct CodeAssistantPanel: View {
         return nil
     }
 
-    /// Active+cloned repo root for fault-report / Q&A writes. The
-    /// "Report this" button is hidden when nil. Backed by the shared
-    /// `AppConfig.activeRepoLocalURL` so RegressionView sees the
-    /// same repo we do.
-    private var activeRepoRoot: URL? { config.activeRepoLocalURL }
+    /// Project root for fault-report / Q&A writes. The "Report this"
+    /// button is hidden when nil. Resolved via WorkspaceRoot (active
+    /// project first, cloned repo as fallback) so faults land at
+    /// `<root>/system/faults` — the SAME place RegressionView reads
+    /// them. Using `config.activeRepoLocalURL` here was a bug: it
+    /// points at the clone (`code/<repo>`), so faults written by this
+    /// panel landed under `code/<repo>/system/faults` and were
+    /// invisible to RegressionView (which reads the project root).
+    private var activeRepoRoot: URL? {
+        WorkspaceRoot.resolve(config: config, projectStore: projectStore)
+    }
 
     /// Single identifier for "which repo is active right now". When
     /// it changes we wipe the session counters so a switch doesn't

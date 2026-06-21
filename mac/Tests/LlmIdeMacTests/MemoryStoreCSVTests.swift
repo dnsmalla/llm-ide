@@ -53,7 +53,7 @@ struct MemoryStoreCSVTests {
 
         let url = try store.exportFaultsCSV(at: repo)
         #expect(url.lastPathComponent == "faults.csv")
-        let expected = repo.appendingPathComponent("system/faults/faults.csv")
+        let expected = repo.appendingPathComponent("system/faults.csv")
         #expect(url.standardizedFileURL.path == expected.standardizedFileURL.path)
         #expect(FileManager.default.fileExists(atPath: url.path))
     }
@@ -110,7 +110,7 @@ struct MemoryStoreCSVTests {
         let store = MemoryStore()
         _ = try store.writeFault(at: repo, fault(prompt: "real"))
         // Drop a non-markdown file in the faults dir — must be ignored.
-        let faultsDir = repo.appendingPathComponent("system/faults/faults")
+        let faultsDir = repo.appendingPathComponent("system/faults")
         try "not a fault".write(to: faultsDir.appendingPathComponent("notes.txt"),
                                 atomically: true, encoding: .utf8)
 

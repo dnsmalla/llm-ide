@@ -1,4 +1,4 @@
-// Read/write the faults/Q&A memory dir under <repo>/system/faults/.
+// Read/write the faults/Q&A memory dir under <repo>/system/ (faults/ + q&a/).
 //
 // Phase A surface — seed + read only:
 //   • seedIfMissing(in:) creates the dir layout and a templated
@@ -14,18 +14,22 @@
 import Foundation
 
 public struct MemoryStore: Sendable {
-    /// Subdir under the repo where memory files live. Defaults to
-    /// the conventional `system/faults`; tests + callers can
-    /// override it. Settings UI rejects absolute paths and `..`
-    /// segments via PathValidator.memorySubdir, so by the time a
-    /// value lands here it's always a clean relative path.
+    /// Container subdir under the repo where memory files live; the
+    /// `faults/` and `q&a/` subdirs are created *inside* it. Defaults to
+    /// the conventional `system` (→ `system/faults`, `system/q&a`), which
+    /// matches `ProjectLayout.faultsDir` and the scaffolder. Tests +
+    /// callers can override it. PathValidator.memorySubdir rejects
+    /// absolute paths and `..` segments, so by the time a value lands
+    /// here it's always a clean relative path.
     public let memorySubdir: String
 
-    public init(memorySubdir: String = "system/faults") {
+    // Default literal mirrors ProjectLayout.memorySubdir ("system"); it
+    // can't reference that internal symbol from a public default argument.
+    public init(memorySubdir: String = "system") {
         // Be defensive — if a caller forgets to validate, fall back
         // to the convention rather than blowing up at the FS layer.
         let trimmed = memorySubdir.trimmingCharacters(in: .whitespaces)
-        self.memorySubdir = trimmed.isEmpty ? ProjectLayout.faultsSubdir : trimmed
+        self.memorySubdir = trimmed.isEmpty ? ProjectLayout.memorySubdir : trimmed
     }
 
     // MARK: - Paths

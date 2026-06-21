@@ -291,7 +291,10 @@ final class AppConfig: ObservableObject {
     }
 
     // Defaults — single source of truth.
-    static let defaultMemorySubdir = "system/faults"
+    // The MemoryStore CONTAINER (it appends faults/ + q&a/ inside this).
+    // Must be `system`, not `system/faults`, or faults double-nest to
+    // `system/faults/faults`. Mirrors ProjectLayout.memorySubdir.
+    static let defaultMemorySubdir = ProjectLayout.memorySubdir
     static let defaultClonesSubdir = "Clones"
 
     // ── Auto Code Update ──────────────────────────────────────────────
@@ -432,7 +435,12 @@ final class AppConfig: ObservableObject {
         self.dataRoot = defaults.string(forKey: "dataRoot") ?? ""
         let storedClones = defaults.string(forKey: "clonesSubdir") ?? ""
         self.clonesSubdir = storedClones.isEmpty ? AppConfig.defaultClonesSubdir : storedClones
-        let storedMem = defaults.string(forKey: "memorySubdir") ?? ""
+        // Heal the pre-fix persisted value: "system/faults" used to be the
+        // (buggy) container default and would double-nest faults into
+        // system/faults/faults. Treat it as unset so it falls back to the
+        // corrected default. memorySubdir has no Settings UI anymore.
+        var storedMem = defaults.string(forKey: "memorySubdir") ?? ""
+        if storedMem == "system/faults" { storedMem = "" }
         self.memorySubdir = storedMem.isEmpty ? AppConfig.defaultMemorySubdir : storedMem
         if let data = defaults.data(forKey: "localCodeFolders"),
            let decoded = decodeConfigOrStash([String].self, key: "localCodeFolders", data: data, defaults: defaults) {

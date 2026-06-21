@@ -30,8 +30,11 @@ struct ProjectLayout {
     var syncJSON:    URL { systemDir.appendingPathComponent("sync.json") }
     var cacheDir:    URL { systemDir.appendingPathComponent("cache", isDirectory: true) }
 
-    /// Memory subdir (relative) used by MemoryStore for faults + q&a.
-    static let faultsSubdir = "system/faults"
+    /// Container subdir (relative) used by MemoryStore — it appends
+    /// `faults/` and `q&a/` inside it, so this is `system` (yielding
+    /// `system/faults`, which equals `faultsDir` above) and NOT
+    /// `system/faults` (that would double-nest to `system/faults/faults`).
+    static let memorySubdir = "system"
 
     /// User-content folders mirroring the Library sections, paired with the
     /// LibraryItem.Category the scanner/import-router uses.
