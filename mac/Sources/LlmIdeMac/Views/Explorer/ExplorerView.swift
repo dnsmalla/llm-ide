@@ -46,6 +46,12 @@ struct ExplorerView: View {
         return WorkspaceRoot.resolve(config: config, projectStore: projectStore)
     }
 
+    /// cwd for the embedded terminal dock — mirrors AppShell.projectDirectory
+    /// (active repo / project folder, home as last resort).
+    private var projectDirectory: URL {
+        WorkspaceRoot.resolveOrHome(config: config, projectStore: projectStore)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             explorerControlBar
@@ -63,18 +69,24 @@ struct ExplorerView: View {
                         .transition(.move(edge: .leading))
                     Divider()
                 }
-                HSplitView {
-                    editorArea
-                        .frame(minWidth: 360, maxWidth: .infinity)
+                // Editor + chat split, with the shared terminal dock BELOW
+                // just this column — so the terminal sits to the RIGHT of the
+                // file tree (VS Code / Cursor layout), never spanning under it.
+                VStack(spacing: 0) {
+                    HSplitView {
+                        editorArea
+                            .frame(minWidth: 360, maxWidth: .infinity)
 
-                    if assistantVisible {
-                        CodeAssistantPanel(api: api,
-                                           initialURL: activeTab,
-                                           showFileAttachButtons: true,
-                                           showModelPicker: true)
-                            .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 220)
-                            .transition(.move(edge: .trailing))
+                        if assistantVisible {
+                            CodeAssistantPanel(api: api,
+                                               initialURL: activeTab,
+                                               showFileAttachButtons: true,
+                                               showModelPicker: true)
+                                .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 220)
+                                .transition(.move(edge: .trailing))
+                        }
                     }
+                    TerminalPanelView(projectDirectory: projectDirectory)
                 }
             }
         // Reset all per-project state when the active project changes, so the

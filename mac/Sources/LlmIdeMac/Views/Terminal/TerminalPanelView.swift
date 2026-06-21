@@ -74,7 +74,7 @@ struct TerminalPanelView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.black)
+            .background(theme.current.body)   // follow the theme (was hardcoded black)
             .opacity(state.activeDockTab == .terminal ? 1 : 0)
             .allowsHitTesting(state.activeDockTab == .terminal)
 

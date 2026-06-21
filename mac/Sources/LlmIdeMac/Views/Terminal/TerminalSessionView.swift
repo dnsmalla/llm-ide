@@ -7,6 +7,7 @@ import SwiftTerm
 /// this preserves the PTY process and full scrollback across tab switches.
 struct TerminalSessionView: NSViewRepresentable {
     let session: TerminalSession
+    @EnvironmentObject private var theme: ThemeStore
 
     func makeNSView(context: Context) -> NSView {
         // makeNSView is always called on the main thread, so we can safely
@@ -18,6 +19,7 @@ struct TerminalSessionView: NSViewRepresentable {
             }
 
             if let tv = session.termView {
+                applyTheme(to: tv)
                 return tv
             }
 
@@ -27,10 +29,25 @@ struct TerminalSessionView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        // SwiftTerm manages its own render loop — nothing to do.
+        // Re-apply theme colors so a light/dark palette switch updates the
+        // live terminal (SwiftTerm otherwise keeps its default dark palette).
+        if let tv = nsView as? LocalProcessTerminalView {
+            applyTheme(to: tv)
+        }
     }
 
     // MARK: - Private
+
+    /// Drive the terminal's background / foreground / caret from the active
+    /// app theme so the terminal isn't always dark (VS Code follows the theme).
+    /// The ANSI 16-colour palette is left at SwiftTerm's defaults — only the
+    /// base surface + default text follow the theme.
+    private func applyTheme(to tv: LocalProcessTerminalView) {
+        let t = theme.current
+        tv.nativeBackgroundColor = NSColor(t.body)
+        tv.nativeForegroundColor = NSColor(t.text)
+        tv.caretColor = NSColor(t.accent)
+    }
 
     private func errorView(_ message: String) -> NSView {
         let container = NSView()

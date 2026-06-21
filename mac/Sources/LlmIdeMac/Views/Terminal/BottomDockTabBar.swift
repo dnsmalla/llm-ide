@@ -44,11 +44,13 @@ struct BottomDockTabBar: View {
         return Button {
             state.activeDockTab = tab
         } label: {
-            Text(tab.title.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(0.4)
+            // Title-case, normal-weight labels (VS Code / Cursor style) — not
+            // the old uppercased + letter-spaced chips. Active tab is darker
+            // with a thin accent underline.
+            Text(tab.title)
+                .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(isActive ? theme.current.text : theme.current.textMuted)
-                .padding(.horizontal, 9)
+                .padding(.horizontal, 10)
                 .frame(height: 32)
                 .overlay(alignment: .bottom) {
                     if isActive {
