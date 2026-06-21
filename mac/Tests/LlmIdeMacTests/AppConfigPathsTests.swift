@@ -2,9 +2,8 @@ import Testing
 import Foundation
 @testable import LlmIdeMac
 
-/// Pin AppConfig's path-resolution behaviour. The clone fix in
-/// GitLab/GitHub depends on `resolvedClonesURL` returning the
-/// expected URL — these tests guarantee it.
+/// Pin AppConfig's clone-location behaviour. Clones always land in
+/// the default fallback folder now that the Paths root was removed.
 @MainActor
 struct AppConfigPathsTests {
 
@@ -17,62 +16,9 @@ struct AppConfigPathsTests {
         return AppConfig(userDefaults: defaults)
     }
 
-    @Test func dataRootURLIsNilWhenUnset() {
+    @Test func effectiveClonesURLIsDefaultFallback() {
         let c = makeConfig()
-        #expect(c.dataRootURL == nil)
-        #expect(c.resolvedClonesURL == nil)
-    }
-
-    @Test func dataRootURLExpandsTilde() {
-        let c = makeConfig()
-        c.dataRoot = "~/LLM IDE"
-        let home = NSHomeDirectory()
-        #expect(c.dataRootURL?.path == "\(home)/LLM IDE")
-    }
-
-    @Test func resolvedClonesURLJoinsRootAndSubdir() {
-        let c = makeConfig()
-        c.dataRoot = "/tmp/workspace"
-        c.clonesSubdir = "Clones"
-        #expect(c.resolvedClonesURL?.path == "/tmp/workspace/Clones")
-    }
-
-    @Test func resolvedClonesURLHandlesNestedSubdir() {
-        let c = makeConfig()
-        c.dataRoot = "/tmp/workspace"
-        c.clonesSubdir = "Repos/Code"
-        // appendingPathComponent treats the whole string as one
-        // segment, which is fine for our use — Finder shows
-        // /tmp/workspace/Repos/Code regardless.
-        #expect(c.resolvedClonesURL?.path == "/tmp/workspace/Repos/Code")
-    }
-
-    @Test func effectiveClonesURLFallsBackWhenNoRoot() {
-        let c = makeConfig()
-        // No Paths root → resolved* stay nil, but clones still have a home so
-        // cloning works (even while a project locks the global root).
-        #expect(c.resolvedClonesURL == nil)
         #expect(c.effectiveClonesURL == AppConfig.defaultClonesFallback)
-    }
-
-    @Test func effectiveClonesURLUsesConfiguredRoot() {
-        let c = makeConfig()
-        c.dataRoot = "/tmp/workspace"
-        c.clonesSubdir = "Clones"
-        #expect(c.effectiveClonesURL.path == "/tmp/workspace/Clones")
-    }
-
-    @Test func emptyDataRootSuppressesResolvedClones() {
-        let c = makeConfig()
-        c.dataRoot = ""
-        #expect(c.resolvedClonesURL == nil)
-    }
-
-    @Test func whitespaceDataRootSuppressesResolvedClones() {
-        let c = makeConfig()
-        c.dataRoot = "   "
-        #expect(c.dataRootURL == nil)
-        #expect(c.resolvedClonesURL == nil)
     }
 }
 

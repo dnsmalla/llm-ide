@@ -258,24 +258,10 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(regressionVerifyTimeout, forKey: "regressionVerifyTimeout") }
     }
 
-    // ── Paths (Phase G + H) ───────────────────────────────────────────
-    /// Default location for new projects — the directory new project
-    /// folders are created under, and where repo clones land by
-    /// default (`dataRoot / clonesSubdir`). Empty string = "not yet
-    /// configured"; clones then fall back to `defaultClonesFallback`.
-    /// Each project owns its own canonical folder tree
-    /// (source/code/data/notes) under its own folder —
-    /// not under this root.
-    @Published var dataRoot: String {
-        didSet { defaults.set(dataRoot, forKey: "dataRoot") }
-    }
-    @Published var clonesSubdir: String {
-        didSet { defaults.set(clonesSubdir, forKey: "clonesSubdir") }
-    }
+    // ── Paths ─────────────────────────────────────────────────────────
     /// Per-repo subdir inside the active repo where memory artifacts
-    /// live (faults/, q&a/, repo.md, graph-notes.md). Unlike the
-    /// global subfolders above, this is relative to whichever repo
-    /// is selected — it doesn't live under dataRoot.
+    /// live (faults/, q&a/, repo.md, graph-notes.md). This is relative
+    /// to whichever repo is currently selected.
     @Published var memorySubdir: String {
         didSet { defaults.set(memorySubdir, forKey: "memorySubdir") }
     }
@@ -295,7 +281,6 @@ final class AppConfig: ObservableObject {
     // Must be `system`, not `system/faults`, or faults double-nest to
     // `system/faults/faults`. Mirrors ProjectLayout.memorySubdir.
     static let defaultMemorySubdir = ProjectLayout.memorySubdir
-    static let defaultClonesSubdir = "Clones"
 
     // ── Auto Code Update ──────────────────────────────────────────────
     /// When true, the app automatically scans recent meeting notes for
@@ -432,9 +417,6 @@ final class AppConfig: ObservableObject {
         self.regressionAttemptRepair = defaults.object(forKey: "regressionAttemptRepair") as? Bool ?? false
         let savedTimeout = defaults.double(forKey: "regressionVerifyTimeout")
         self.regressionVerifyTimeout = savedTimeout > 0 ? savedTimeout : 120
-        self.dataRoot = defaults.string(forKey: "dataRoot") ?? ""
-        let storedClones = defaults.string(forKey: "clonesSubdir") ?? ""
-        self.clonesSubdir = storedClones.isEmpty ? AppConfig.defaultClonesSubdir : storedClones
         // Heal the pre-fix persisted value: "system/faults" used to be the
         // (buggy) container default and would double-nest faults into
         // system/faults/faults. Treat it as unset so it falls back to the
@@ -576,30 +558,16 @@ extension AppConfig {
 
     // MARK: - Resolved workspace paths
 
-    /// Absolute URL of `dataRoot`, with `~` expanded. Returns nil
-    /// when the root hasn't been set yet — callers fall back to
-    /// their legacy per-feature setting (notes folder bookmark,
-    /// GitLab clone path, etc.) in that case.
-    var dataRootURL: URL? {
-        let trimmed = dataRoot.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return nil }
-        let expanded = (trimmed as NSString).expandingTildeInPath
-        return URL(fileURLWithPath: expanded)
-    }
-
-    var resolvedClonesURL: URL? { dataRootURL?.appendingPathComponent(clonesSubdir, isDirectory: true) }
-
-    /// Default clones location when no Paths root is configured. Clones just
-    /// need somewhere on disk — so they get a sensible default.
+    /// Default clones location. Clones just need somewhere on disk —
+    /// so they get a sensible default.
     static let defaultClonesFallback: URL = FileManager.default
         .homeDirectoryForCurrentUser
         .appendingPathComponent("Documents/LLM IDE/Clones", isDirectory: true)
 
-    /// Where a repo clone should land: the configured `<root>/Clones` if a
-    /// Paths root is set, otherwise the default fallback. Always non-nil so
-    /// cloning works out of the box — and even while a project is active, when
-    /// the global Paths root can't be edited.
-    var effectiveClonesURL: URL { resolvedClonesURL ?? AppConfig.defaultClonesFallback }
+    /// Where a no-project repo clone should land. Used by the
+    /// GitHub/GitLab clone code as the fallback when no project is
+    /// active. Always non-nil so cloning works out of the box.
+    var effectiveClonesURL: URL { AppConfig.defaultClonesFallback }
 }
 
 extension AppConfig {

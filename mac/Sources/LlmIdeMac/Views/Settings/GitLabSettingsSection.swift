@@ -310,86 +310,12 @@ struct GitLabSettingsSection: View {
                 .help(config.gitLabToken.isEmpty ? "Add and verify a GitLab access token first." : "")
             }
 
-            // Migration affordance — when the saved clone lives
-            // outside the Paths-configured Clones folder, surface a
-            // "Move here" button so the user can relocate it without
-            // shelling out. Re-sync alone does `git pull` at the old
-            // path and never touches Paths, which is the bug the
-            // user hit.
-            if let suggestion = movableTo(p) {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.right.arrow.left")
-                        .font(.system(size: 10))
-                        .foregroundStyle(t.accent2)
-                    Text("Currently outside Clones — move to \(suggestion.path)?")
-                        .font(Typography.caption)
-                        .foregroundStyle(t.textMuted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 4)
-                    Button("Move here") {
-                        moveClone(proj: proj, to: suggestion)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-                    .disabled(isCloning)
-                }
-            }
-
             if let err = cloneError {
                 Text(err)
                     .font(Typography.caption)
                     .foregroundStyle(t.danger)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        }
-    }
-
-    /// Return the resolved target URL for this project iff its
-    /// current `localPath` is *not* already inside the Paths-
-    /// configured Clones folder. nil = nothing to suggest (no root
-    /// set, no localPath, or already in the right place).
-    private func movableTo(_ p: SavedGitLabProject) -> URL? {
-        guard let localPath = p.localPath,
-              let baseDir = config.resolvedClonesURL else { return nil }
-        let current = URL(fileURLWithPath: localPath).standardizedFileURL
-        let suggested = baseDir
-            .appendingPathComponent(current.lastPathComponent)
-            .standardizedFileURL
-        return current.path == suggested.path ? nil : suggested
-    }
-
-    /// `mv` the existing clone into the resolved Clones folder and
-    /// update localPath. Best-effort; on failure surfaces the error
-    /// via the row's `cloneErrors` slot.
-    private func moveClone(proj: Binding<SavedGitLabProject>, to target: URL) {
-        let p = proj.wrappedValue
-        guard let oldPath = p.localPath else { return }
-        let oldURL = URL(fileURLWithPath: oldPath)
-        let fm = FileManager.default
-        do {
-            try fm.createDirectory(at: target.deletingLastPathComponent(),
-                                   withIntermediateDirectories: true)
-            if fm.fileExists(atPath: target.path) {
-                cloneErrors[p.id] = "Target already exists: \(target.path)"
-                return
-            }
-            try fm.moveItem(at: oldURL, to: target)
-            proj.wrappedValue.localPath = target.path
-            // Re-index the moved clone so Library CODE reflects the
-            // new path. Without this, the tree keeps showing the
-            // old `Developer/LLM IDE/<repo>` path forever even
-            // though the actual folder is gone.
-            library.removeFolder(folderOrigin: target.lastPathComponent)
-            library.addFolder(url: target, category: .code)
-            // Drop the UA graph cache that was keyed at the
-            // old path — its node fileURLs point at files that no
-            // longer exist. Forces a fresh Analyze on the new
-            // location instead of hydrating a stale graph.
-            UAStore().invalidate(for: oldURL)
-            cloneErrors[p.id] = nil
-        } catch {
-            cloneErrors[p.id] = "Move failed: \(error.localizedDescription)"
         }
     }
 

@@ -243,128 +243,6 @@ struct UAGraphView: View {
         return nil
     }
 
-    /// When the active code target sits outside the user's
-    /// configured Paths → Clones folder, this returns the suggested
-    /// destination. nil = either no repo selected, no Paths root
-    /// configured, or the repo is already in the right place.
-    /// Drives the migration banner above the body so users don't
-    /// have to dig into GitLab/GitHub Settings to find the
-    /// "Move here" button.
-    private var clonesMigrationTarget: URL? {
-        guard mode == .code,
-              let current = codeTargetFolder,
-              let clonesRoot = config.resolvedClonesURL else { return nil }
-        let currentPath = current.standardizedFileURL.path
-        let clonesPath = clonesRoot.standardizedFileURL.path
-        // Already inside Clones → nothing to suggest.
-        if currentPath.hasPrefix(clonesPath + "/") || currentPath == clonesPath {
-            return nil
-        }
-        return clonesRoot.appendingPathComponent(current.lastPathComponent)
-    }
-
-    @State private var migrationError: String?
-    @State private var migrating: Bool = false
-
-    // Not @ViewBuilder: this returns an explicit AnyView (the guard needs an
-    // early return), which is incompatible with the result builder.
-    private func migrationBanner(target: URL) -> some View {
-        let t = theme.current
-        guard let current = codeTargetFolder else { return AnyView(EmptyView()) }
-        return AnyView(
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: Spacing.sm) {
-                    Image(systemName: "arrow.right.arrow.left.circle.fill")
-                        .foregroundStyle(t.accent2)
-                        .font(.system(size: 13))
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("This repo is outside your Clones folder")
-                            .font(Typography.captionStrong)
-                            .foregroundStyle(t.text)
-                        Text("\(current.path) → \(target.path)")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(t.textMuted)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    Spacer(minLength: 8)
-                    Button {
-                        Task { await migrateCloneToPaths(current: current, target: target) }
-                    } label: {
-                        if migrating {
-                            HStack(spacing: 4) {
-                                ProgressView().controlSize(.mini)
-                                Text("Moving…")
-                            }
-                        } else {
-                            Label("Move to Clones folder", systemImage: "folder.fill.badge.gearshape")
-                                .font(Typography.captionStrong)
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(migrating)
-                }
-                if let err = migrationError {
-                    Text(err)
-                        .font(Typography.caption)
-                        .foregroundStyle(t.danger)
-                        .lineLimit(2)
-                }
-            }
-            .padding(.horizontal, Spacing.lg)
-            .padding(.vertical, Spacing.sm)
-            .background(t.accent2.opacity(0.08))
-            .overlay(Rectangle().frame(height: 1).foregroundStyle(t.border), alignment: .bottom)
-        )
-    }
-
-    /// Physically `mv` the repo into the Paths-configured Clones
-    /// folder, update the matching GitLab/GitHub saved-project's
-    /// localPath, prune+reindex the Library, and invalidate the
-    /// stale UA cache. Mirrors what
-    /// GitLab/GitHubSettingsSection.moveClone does — folded in here
-    /// so the user can do the migration from the surface where
-    /// they're actually seeing the mismatch.
-    private func migrateCloneToPaths(current: URL, target: URL) async {
-        migrationError = nil
-        migrating = true
-        defer { migrating = false }
-        let fm = FileManager.default
-        do {
-            try fm.createDirectory(at: target.deletingLastPathComponent(),
-                                   withIntermediateDirectories: true)
-            if fm.fileExists(atPath: target.path) {
-                migrationError = "Target already exists: \(target.path)"
-                return
-            }
-            try fm.moveItem(at: current, to: target)
-        } catch {
-            migrationError = "Move failed: \(error.localizedDescription)"
-            return
-        }
-        // Update saved-project records pointing at the old path.
-        for idx in config.gitLabSavedProjects.indices
-        where config.gitLabSavedProjects[idx].localPath == current.path {
-            config.gitLabSavedProjects[idx].localPath = target.path
-        }
-        for idx in config.gitHubSavedRepos.indices
-        where config.gitHubSavedRepos[idx].localPath == current.path {
-            config.gitHubSavedRepos[idx].localPath = target.path
-        }
-        // Re-index the Library and clear the on-screen graph so the user
-        // sees the empty state + run CTA. Next Generate builds a fresh
-        // graph at the new path with correct fileURLs.
-        library.removeFolder(folderOrigin: target.lastPathComponent)
-        library.addFolder(url: target, category: .code)
-        await MainActor.run {
-            self.selectedNode = nil
-            self.fullData = CGData.empty
-            self.codeArtifacts = []
-            self.status = .idle
-        }
-    }
-
     private var graphChromeBar: some View {
         SectionChromeBar(toggles: [
             SectionToggle(icon: "sidebar.left", isOn: showLibraryPanel,
@@ -382,9 +260,6 @@ struct UAGraphView: View {
         VStack(spacing: 0) {
             graphChromeBar
             Divider()
-            if let target = clonesMigrationTarget {
-                migrationBanner(target: target)
-            }
             // Fixed-width left panels (HSplitView overrides a child's width
             // frame); the canvas fills the rest.
             HStack(spacing: 0) {

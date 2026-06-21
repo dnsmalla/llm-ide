@@ -281,72 +281,12 @@ struct GitHubSettingsSection: View {
                 .help(config.gitHubToken.isEmpty ? "Add and verify a GitHub access token first." : "")
             }
 
-            // Migration affordance — when the saved clone lives
-            // outside the Paths-configured Clones folder, surface a
-            // "Move here" button. Re-sync alone runs `git pull` at
-            // the old path; it never moves anything.
-            if let suggestion = movableTo(r) {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.right.arrow.left")
-                        .font(.system(size: 10))
-                        .foregroundStyle(t.accent2)
-                    Text("Currently outside Clones — move to \(suggestion.path)?")
-                        .font(Typography.caption)
-                        .foregroundStyle(t.textMuted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 4)
-                    Button("Move here") {
-                        moveClone(repo: repo, to: suggestion)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-                    .disabled(isCloning)
-                }
-            }
-
             if let err = cloneError {
                 Text(err)
                     .font(Typography.caption)
                     .foregroundStyle(t.danger)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        }
-    }
-
-    private func movableTo(_ r: SavedGitHubRepo) -> URL? {
-        guard let localPath = r.localPath,
-              let baseDir = config.resolvedClonesURL else { return nil }
-        let current = URL(fileURLWithPath: localPath).standardizedFileURL
-        let suggested = baseDir
-            .appendingPathComponent(current.lastPathComponent)
-            .standardizedFileURL
-        return current.path == suggested.path ? nil : suggested
-    }
-
-    private func moveClone(repo: Binding<SavedGitHubRepo>, to target: URL) {
-        let r = repo.wrappedValue
-        guard let oldPath = r.localPath else { return }
-        let oldURL = URL(fileURLWithPath: oldPath)
-        let fm = FileManager.default
-        do {
-            try fm.createDirectory(at: target.deletingLastPathComponent(),
-                                   withIntermediateDirectories: true)
-            if fm.fileExists(atPath: target.path) {
-                cloneErrors[r.id] = "Target already exists: \(target.path)"
-                return
-            }
-            try fm.moveItem(at: oldURL, to: target)
-            repo.wrappedValue.localPath = target.path
-            // Re-index — same hygiene as GitLab move.
-            library.removeFolder(folderOrigin: target.lastPathComponent)
-            library.addFolder(url: target, category: .code)
-            // Drop the UA cache keyed at the old path so the
-            // user doesn't see stale node fileURLs after the move.
-            UAStore().invalidate(for: oldURL)
-            cloneErrors[r.id] = nil
-        } catch {
-            cloneErrors[r.id] = "Move failed: \(error.localizedDescription)"
         }
     }
 
