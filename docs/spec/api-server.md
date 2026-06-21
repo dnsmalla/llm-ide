@@ -221,7 +221,7 @@ When a bucket is exhausted, `tryConsume()` returns `{ ok: false, retryAfterSec: 
 |---|---|---|---|
 | `llm` | 3 | 1/30 s | `/code-assist`, `/kb/generate-plan`, `/kb/analyze-risks`, `/kb/generate-code`, `/kb/summarize`, `/kb/conflict-questions` |
 | `llmFast` | 6 | 1/5 s | `/generate-notes`, `/chat`, `/kb/agent/ask`, `/generate-questions`, `/extract-entities`, `/generate-docx`, `/kb/providers/verify`, `/kb/providers/models` |
-| `dispatch` | 4 | 1/10 s | `/kb/dispatch`, `/kb/notify/slack`, `/kb/outcomes/refresh`, `/kb/email/test`, `/kb/email/fetch` |
+| `dispatch` | 4 | 1/10 s | `/kb/dispatch`, `/kb/notify/slack`, `/kb/email/test`, `/kb/email/fetch` |
 | `outcomePoll` | 6 | 1/30 s | `/kb/outcomes/refresh` |
 | `kbWrite` | 30 | 5/s | `/kb/ingest`, `/kb/connect-*`, `/kb/review/*`, `/kb/plan-task/*`, `/kb/email/seen` |
 | `liveAppend` | 30 | 5/s | `/kb/live/:id/append` (applied inside `kb/routes/live.mjs:62`) |
@@ -229,7 +229,7 @@ When a bucket is exhausted, `tryConsume()` returns `{ ok: false, retryAfterSec: 
 | `authPublic` | 10 | 1/s | `/auth/login`, `/auth/refresh`, password-reset confirm/request |
 | `authRegister` | 3 | 1/60 s | `/auth/register` |
 
-Source: `rate-limit.mjs:59–129`.
+Profile **definitions** (capacity + refill) are in `rate-limit.mjs:59–129`. The **URL→profile mapping** above is authoritative in `rateLimitProfile()` (`server.mjs:101–139`) — `rateLimitProfile()` returns the *first* match, so each URL has exactly one profile. The three `auth*`/`liveAppend` profiles are **not** dispatched by `rateLimitProfile()`; they are applied inside their own handlers (`server/auth-routes.mjs` for `authPublic`/`authRegister`, `kb/routes/live.mjs` for `liveAppend`). This mapping is drift-guarded by `docs/_scripts/check_rate_limit_mapping.py`.
 
 ### Bucket persistence
 
@@ -280,7 +280,7 @@ Default: `127.0.0.1:3456` (`config.mjs:113–114`). Binding a non-loopback addre
 
 ## Regeneration checklist
 
-- [ ] Every governed symbol/endpoint/table/prompt is present with its exact shape (no "etc.", no "see code").
-- [ ] Every magic number, timeout, cap, regex, and crypto parameter is stated.
-- [ ] Spot-check: one representative piece rebuilt from this page alone matches source.
-- [ ] Structured facts link to their extractor-generated reference page (no hand-copied drift).
+- [x] Every governed symbol/endpoint/table/prompt is present with its exact shape — **caveat (§3):** endpoint *presence* is checker-verified; per-endpoint OpenAPI *schema fidelity* for bulk-documented routes is spot-verified only.
+- [x] Every magic number, timeout, cap, regex, and crypto parameter is stated.
+- [x] Spot-check: auth lifecycle, the rate-limit URL→profile mapping, vault crypto, and the body/prompt caps were rebuilt from this page and match source.
+- [x] Structured facts link to their extractor-generated reference page (no hand-copied drift).

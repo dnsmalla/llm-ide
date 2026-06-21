@@ -330,7 +330,7 @@ Ciphertext is stored as `BLOB` in `user_secrets(user_id, secret_key, ciphertext)
 ---
 
 ## Regeneration checklist
-- [ ] Every governed symbol/endpoint/table/prompt is present with its exact shape (no "etc.", no "see code").
-- [ ] Every magic number, timeout, cap, regex, and crypto parameter is stated.
-- [ ] Spot-check: one representative piece rebuilt from this page alone matches source.
-- [ ] Structured facts link to their extractor-generated reference page (no hand-copied drift).
+- [x] Every governed symbol/endpoint/table/prompt is present with its exact shape (no "etc.", no "see code").
+- [x] Every magic number, timeout, cap, regex, and crypto parameter is stated.
+- [x] Spot-check: the `meetings`/`search` schema, `buildMatchExpr`, the migration protocol, and the vault byte-layout were rebuilt from this page and match source.
+- [x] Structured facts link to their extractor-generated reference page (no hand-copied drift).
