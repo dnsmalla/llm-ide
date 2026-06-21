@@ -9,6 +9,8 @@ status: stable
 **Owner:** Dinesh
 **Surfaces affected:** `extension/` (server + Chrome ext), `mac/`
 
+See also: [`spec/agent-runtime.md`](../spec/agent-runtime.md) — rebuild-grade contracts for `runClaude`, the loop algorithm, and the fence protocol used by every agent.
+
 ---
 
 ## 1. Goal in one sentence

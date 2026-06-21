@@ -7,6 +7,8 @@ status: stable
 
 > Why the Code Assistant has the shape it does. For the day-to-day "how do I add a new tool" recipe, see [how-to/add-an-agent-skill.md](../how-to/add-an-agent-skill.md).
 
+See also: [`spec/agent-runtime.md`](../spec/agent-runtime.md) — rebuild-grade contracts for the loop algorithm, fence protocol, skill schema, sub-model cascade, and `runClaude`.
+
 ## Architecture
 
 The Code Assistant is two agents sharing one engine:
