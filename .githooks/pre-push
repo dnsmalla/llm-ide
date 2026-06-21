@@ -11,6 +11,25 @@
 # Bypass for one push:    git push --no-verify
 set -uo pipefail
 
+# True when a SwiftPM build/test is already using this repo's mac/.build.
+# Starting a second one would block on the .build lock indefinitely — the
+# deadlock that has wedged pushes (and the stale hung-test-bundle case). We
+# detect it precisely (scoped to THIS repo's .build, so an unrelated Swift
+# project building elsewhere doesn't trip the guard) and fail fast instead.
+mac_build_busy() {
+    local build_dir="$1"
+    # A process holding mac/.build's SwiftPM lock (the actual contention point).
+    if command -v lsof >/dev/null 2>&1 && lsof "$build_dir/.lock" >/dev/null 2>&1; then
+        return 0
+    fi
+    # …or any process whose args reference this repo's .build — e.g. a hung
+    # swiftpm-testing-helper, which carries its --test-bundle-path under .build.
+    if pgrep -f "$build_dir" >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
 zero=0000000000000000000000000000000000000000
 mac_changed=0
 ext_changed=0
@@ -38,6 +57,14 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 done
 
 if [ "$mac_changed" -eq 1 ]; then
+    mac_build_dir="$(git rev-parse --show-toplevel)/mac/.build"
+    if mac_build_busy "$mac_build_dir"; then
+        echo "pre-push: a SwiftPM build/test is already using mac/.build — not starting" >&2
+        echo "          a second (it would block on the .build lock and wedge the push)." >&2
+        echo "          Wait for it to finish (or kill a stuck build/test), then re-push." >&2
+        echo "          Bypass with: git push --no-verify" >&2
+        exit 1
+    fi
     echo "pre-push: mac/ changed — running regression gate (make regression)…"
     if ! make regression; then
         echo "pre-push: regression gate FAILED — push aborted." >&2

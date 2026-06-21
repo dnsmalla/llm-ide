@@ -29,8 +29,8 @@ test-mac:
 # Pre-upgrade / pre-production regression gate. Runs the Swift suite that
 # guards the fault + regression machinery. Pair with the in-app Regression
 # view (re-checks every `status: fixed` fault against the current agent and
-# refreshes `<repo>/.understand-anything/memory/faults.csv`) before shipping
-# an upgrade — the CSV's `status` column is the release checklist.
+# refreshes `<project>/system/faults.csv`) before shipping an upgrade — the
+# CSV's `status` column is the release checklist.
 regression: test-mac
 
 # Enable the repo's git hooks (.githooks/). The pre-push hook runs the
