@@ -365,3 +365,1328 @@ paths:
                 webhookUrl: { type: string, description: 'Optional — vault key slack.webhookUrl is preferred' }
                 payload:    { description: 'Inline payload when kind=custom or kind=dispatch' }
       responses: { '200': { description: ok } }
+
+  # ── Top-level AI routes ─────────────────────────────────────────────────
+
+  /generate-notes:
+    post:
+      summary: Generate markdown meeting notes from a transcript
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transcript]
+              properties:
+                transcript:   { type: string, description: 'Raw meeting transcript text' }
+                meetingTitle: { type: string }
+                meetingId:    { type: string, description: 'Optional — used to scope KB ingest ref' }
+                language:     { type: string, description: 'BCP-47 locale or display name (e.g. "ja", "Japanese")' }
+          text/event-stream:
+            schema:
+              type: string
+              description: 'Accepted when Accept: text/event-stream — streams chunk/done/error SSE events'
+      responses:
+        '200':
+          description: Notes generated (JSON or SSE depending on Accept header)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notes: { type: string, description: 'Markdown meeting notes' }
+            text/event-stream:
+              schema:
+                type: string
+                description: 'SSE stream: data: {"type":"chunk","text":"..."} … data: {"type":"done","text":"<full>"}'
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Rate limited }
+
+  /generate-docx:
+    post:
+      summary: Generate a DOCX meeting-notes file from a transcript
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transcript]
+              properties:
+                transcript:   { type: string }
+                meetingTitle: { type: string }
+                meetingId:    { type: string }
+                language:     { type: string }
+      responses:
+        '200':
+          description: DOCX binary
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema: { type: string, format: binary }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: AI parse or DOCX build failure }
+        '429': { description: Rate limited }
+
+  /generate-doc:
+    post:
+      summary: Generate a structured Markdown document from a template and source content
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [templateName, sections, sources]
+              properties:
+                templateName: { type: string, description: 'Document title / template identifier' }
+                sections:
+                  type: array
+                  items: { type: string }
+                  description: 'Ordered list of section headings (max 30)'
+                sources:
+                  type: array
+                  items:
+                    type: object
+                    required: [name, content]
+                    properties:
+                      name:    { type: string }
+                      content: { type: string }
+                  description: 'Source material (max 20 items, 50 000 chars each)'
+      responses:
+        '200':
+          description: Generated markdown document
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content: { type: string, description: 'Full markdown document' }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /chat:
+    post:
+      summary: Chat with the meeting assistant about a transcript
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message, transcript]
+              properties:
+                message:    { type: string, description: 'User message (max 10 000 chars after sanitization)' }
+                transcript: { type: string }
+                language:   { type: string }
+                history:
+                  type: array
+                  description: 'Prior turns (last 10 used); each item has role and content'
+                  items:
+                    type: object
+                    properties:
+                      role:    { type: string, enum: [user, assistant] }
+                      content: { type: string }
+      responses:
+        '200':
+          description: Assistant reply
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reply: { type: string }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Rate limited }
+
+  /code-assist:
+    post:
+      summary: Code-assist chat with optional file attachments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+                  description: 'User message (max 20 000 chars after sanitization)'
+                attachments:
+                  type: array
+                  description: 'File attachments (max 30 files, 80 000 chars each, 200 000 total)'
+                  items:
+                    type: object
+                    required: [path, content]
+                    properties:
+                      path:    { type: string }
+                      content: { type: string }
+                history:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      role:    { type: string, enum: [user, assistant] }
+                      content: { type: string }
+                language:     { type: string }
+                agentContext:
+                  type: object
+                  description: 'When present, routes through the tool-capable agent path'
+                  properties:
+                    activeProject:  { type: string, nullable: true }
+                    indexedRepos:   { type: array, items: { type: string } }
+                    recentIssues:   { type: array, items: { type: object } }
+                provider:     { type: string, description: 'LLM provider override' }
+      responses:
+        '200':
+          description: Assistant reply
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reply:       { type: string }
+                  pendingTool: { type: object, nullable: true, description: 'Pending tool call when using agentContext path' }
+                  usage:
+                    type: object
+                    properties:
+                      attachmentCount: { type: integer }
+                      attachmentChars: { type: integer }
+                      paths:           { type: array, items: { type: string } }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: Upstream LLM error }
+        '429': { description: Rate limited }
+
+  /generate-questions:
+    post:
+      summary: Generate targeted follow-up questions from a transcript
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transcript, types]
+              properties:
+                transcript:   { type: string }
+                types:
+                  type: array
+                  items: { type: string, enum: [conflict, confirm, explain] }
+                  description: 'At least one type required'
+                participants:
+                  type: array
+                  items: { type: string }
+                  description: 'Names to target; empty = any participant'
+                language:     { type: string }
+      responses:
+        '200':
+          description: Markdown follow-up questions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  questions: { type: string, description: 'Markdown with one H2 per category' }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Rate limited }
+
+  /extract-entities:
+    post:
+      summary: Extract structured actions, decisions, and blockers from a transcript
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transcript]
+              properties:
+                transcript:   { type: string }
+                participants: { type: array, items: { type: string } }
+                meetingTitle: { type: string }
+                language:     { type: string }
+      responses:
+        '200':
+          description: Extracted entities
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  actions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        text:  { type: string }
+                        owner: { type: string, nullable: true }
+                        due:   { type: string, format: date, nullable: true }
+                        quote: { type: string }
+                  decisions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        text:         { type: string }
+                        participants: { type: array, items: { type: string } }
+                        quote:        { type: string }
+                  blockers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        text:     { type: string }
+                        severity: { type: string, enum: [low, med, high] }
+                        quote:    { type: string }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Rate limited }
+
+  # ── KB core ─────────────────────────────────────────────────────────────
+
+  /kb/meeting/{id}:
+    get:
+      summary: Fetch a single meeting record by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,128}$' }
+      responses:
+        '200':
+          description: Meeting record
+          content:
+            application/json:
+              schema: { type: object, description: 'Meeting with entities, transcript, metadata' }
+        '400': { description: Invalid ID format, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/entity/{id}:
+    get:
+      summary: Fetch a single KB entity (action / decision / blocker / etc.) by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,128}$' }
+      responses:
+        '200':
+          description: Entity record
+          content:
+            application/json:
+              schema: { type: object, description: 'Entity with kind, title, body, metadata' }
+        '400': { description: Invalid ID format, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/stats:
+    get:
+      summary: Per-user KB statistics (meeting count, entity counts, etc.)
+      responses:
+        '200':
+          description: Statistics object
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /kb/system/status:
+    get:
+      summary: Unified system status — KB stats, active captures, agent runs, pending reviews, outcome summary
+      responses:
+        '200':
+          description: System status snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stats: { type: object }
+                  flow:
+                    type: object
+                    properties:
+                      capture:  { type: object, properties: { activeCount: { type: integer }, sessions: { type: array, items: { type: object } } } }
+                      agent:    { type: object, properties: { activeCount: { type: integer }, runs: { type: array, items: { type: object } } } }
+                      review:   { type: object, properties: { pendingCount: { type: integer }, byStatus: { type: object }, pendingItems: { type: array, items: { type: object } } } }
+                      outcomes: { type: object }
+
+  /kb/delete:
+    post:
+      summary: Delete a meeting and its associated entities
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string, description: 'Meeting ID' }
+      responses:
+        '200': { description: ok, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── KB connectors ────────────────────────────────────────────────────────
+
+  /kb/connect-git:
+    post:
+      summary: Index a local Git repo's code files into the KB
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:    { type: string, description: 'Absolute path to the repo root (must be on user allow-list)' }
+                replace: { type: boolean, default: true, description: 'Replace existing code chunks for this repo' }
+      responses:
+        '200':
+          description: Indexing summary
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean }, indexed: { type: integer }, skipped: { type: integer } } }
+        '400': { description: Missing path, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Path not on user allow-list, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/connect-github-issues:
+    post:
+      summary: Fetch and index GitHub issues for a repo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo]
+              properties:
+                repo:  { type: string, description: 'owner/name' }
+                token: { type: string, description: 'GitHub PAT (optional — vault github.token used otherwise)' }
+                state: { type: string, enum: [open, closed, all], default: open }
+      responses:
+        '200':
+          description: Indexing summary
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean }, indexed: { type: integer } } }
+        '400': { description: Validation or indexing error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/connect-tickets-json:
+    post:
+      summary: Index an inline JSON array of tickets (Backlog, Jira, or generic)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tickets]
+              properties:
+                tickets:
+                  type: array
+                  items: { type: object }
+                  description: 'Array of ticket objects (max 8 MB body)'
+                provider: { type: string, description: 'Source label stored on each ticket entity' }
+      responses:
+        '200':
+          description: Indexing summary
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean }, indexed: { type: integer } } }
+        '400': { description: Validation or indexing error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/connect-qa:
+    post:
+      summary: Index JUnit XML test results into the KB
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [xml]
+              properties:
+                xml:    { type: string, description: 'JUnit XML string' }
+                source: { type: string, description: 'Optional label for the test run source' }
+      responses:
+        '200':
+          description: Indexing summary
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean }, indexed: { type: integer } } }
+        '400': { description: Validation or parse error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── KB email ─────────────────────────────────────────────────────────────
+
+  /kb/email/test:
+    post:
+      summary: Test IMAP connection using stored app password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host, user]
+              properties:
+                host:    { type: string }
+                port:    { type: integer, default: 993 }
+                secure:  { type: boolean, default: true }
+                user:    { type: string, format: email }
+                mailbox: { type: string, default: INBOX }
+      responses:
+        '200':
+          description: Connection success with mailbox info
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean }, mailbox: { type: string }, total: { type: integer } } }
+        '400': { description: Missing credentials or no password stored, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: IMAP connection failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/email/fetch:
+    post:
+      summary: Fetch recent emails via IMAP and return them for ingestion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host, user]
+              properties:
+                host:         { type: string }
+                port:         { type: integer, default: 993 }
+                secure:       { type: boolean, default: true }
+                user:         { type: string, format: email }
+                mailbox:      { type: string, default: INBOX }
+                lookbackDays: { type: integer, description: 'How many days back to look' }
+                unreadOnly:   { type: boolean, default: true }
+                fromFilter:   { type: string, description: 'Filter by sender address substring' }
+      responses:
+        '200':
+          description: Fetched messages (server-side high-water mark and dedup applied)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages: { type: array, items: { type: object, description: 'Email message with subject, from, date, body' } }
+                  skipped:  { type: integer }
+        '400': { description: Missing host/user or no IMAP password stored, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: IMAP error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/email/seen:
+    post:
+      summary: Record imported message IDs and advance the IMAP high-water mark
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                messageIds:    { type: array, items: { type: string }, description: 'IMAP message IDs to mark as seen' }
+                lastFetchedAt: { type: string, format: date-time, description: 'Advance the forward-only high-water mark to this timestamp' }
+      responses:
+        '200': { description: ok, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+
+  # ── KB summarize / conflict ──────────────────────────────────────────────
+
+  /kb/summarize:
+    post:
+      summary: Summarize a transcript with LLM (3-minute server timeout)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transcript]
+              properties:
+                transcript:        { type: string }
+                title:             { type: string }
+                language:          { type: string, default: en }
+                started_at:        { type: string, format: date-time, nullable: true }
+                duration_seconds:  { type: integer, nullable: true }
+                participants:      { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: Structured summary
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: Summarize LLM call failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '504': { description: Summarize timed out (>3 min), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Rate limited }
+
+  /kb/conflict-questions:
+    post:
+      summary: Surface cross-meeting conflicts and undecided items from KB history vs current transcript
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                transcript:  { type: string, description: 'Current meeting transcript (max 40 000 chars)' }
+                fileContext: { type: string, description: 'Attached code or notes (max 20 000 chars)' }
+                language:    { type: string, default: en }
+      responses:
+        '200':
+          description: Markdown follow-up questions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  questions: { type: string }
+        '500': { description: LLM error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Rate limited }
+
+  # ── KB providers ─────────────────────────────────────────────────────────
+
+  /kb/providers/verify:
+    post:
+      summary: Verify an LLM provider credential (live probe or CLI binary check)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider]
+              properties:
+                provider: { type: string, description: 'Provider ID (e.g. anthropic, openai, custom)' }
+                mode:     { type: string, enum: [key, cli], default: key }
+                apiKey:   { type: string, description: 'Override — vault value used when absent' }
+                baseUrl:  { type: string, description: 'Required for provider=custom' }
+      responses:
+        '200':
+          description: Verification result (always 200; check ok field)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:     { type: boolean }
+                  detail: { type: string }
+        '400': { description: Unknown provider, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Rate limited }
+
+  /kb/providers/models:
+    post:
+      summary: Fetch the current chat model list for a provider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider]
+              properties:
+                provider: { type: string }
+      responses:
+        '200':
+          description: Sorted model ID list (empty when no key or transient error)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models: { type: array, items: { type: string } }
+                  detail: { type: string, description: 'Human-readable reason when models is empty' }
+        '400': { description: Unknown provider, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Rate limited }
+
+  # ── KB code-sync ─────────────────────────────────────────────────────────
+
+  /kb/code-sync:
+    post:
+      summary: Annotate plan tasks with matching code file references from the KB
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                planId: { type: string, description: 'ID of a stored plan — persists result' }
+                plan:   { $ref: '#/components/schemas/Plan', description: 'Inline draft — returns result without persisting' }
+      responses:
+        '200':
+          description: Plan with code-sync annotations applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Plan' }
+        '400': { description: Neither planId nor plan provided, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Plan not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── KB analyze-risks ─────────────────────────────────────────────────────
+
+  /kb/analyze-risks:
+    post:
+      summary: Re-compute LLM risk assessment for a plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                planId:   { type: string }
+                plan:     { $ref: '#/components/schemas/Plan' }
+                language: { type: string }
+      responses:
+        '200':
+          description: Plan with risk fields updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Plan' }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Plan not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Rate limited }
+
+  # ── KB plan CRUD ─────────────────────────────────────────────────────────
+
+  /kb/plans:
+    get:
+      summary: List plans for the authenticated user
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+      responses:
+        '200':
+          description: Plan list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plans: { type: array, items: { $ref: '#/components/schemas/Plan' } }
+                  count: { type: integer }
+
+  /kb/plan/{id}:
+    get:
+      summary: Fetch a single plan by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Plan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Plan' }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/plan/save:
+    post:
+      summary: Create or update a plan without an LLM call (manual / auto-stub)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                id:        { type: string, description: 'Omit to create a new plan' }
+                title:     { type: string, maxLength: 500 }
+                goal:      { type: string, maxLength: 5000, nullable: true }
+                language:  { type: string, maxLength: 16 }
+                tasks:     { type: array, items: { $ref: '#/components/schemas/PlanTask' } }
+                meetingId: { type: string, nullable: true }
+                meta:      { type: object }
+      responses:
+        '200':
+          description: Saved plan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Plan' }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: SQLite write failed (code SAVE_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/plan/delete:
+    post:
+      summary: Delete a plan and its tasks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+      responses:
+        '200': { description: ok, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        '400': { description: Missing id, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/plan-task/update:
+    post:
+      summary: Patch a single plan task (status, owner, due, risk, etc.)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [taskId]
+              properties:
+                taskId: { type: string }
+                patch:
+                  type: object
+                  description: 'Subset of PlanTask fields to update'
+                  properties:
+                    status:       { type: string, enum: [planned, in_progress, done, blocked] }
+                    owner:        { type: string, nullable: true }
+                    due:          { type: string, format: date, nullable: true }
+                    risk:         { type: string, nullable: true, enum: [low, med, high, null] }
+                    riskReason:   { type: string, nullable: true }
+                    title:        { type: string }
+                    description:  { type: string, nullable: true }
+                    estimateDays: { type: number, nullable: true }
+      responses:
+        '200':
+          description: Updated task
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanTask' }
+        '400': { description: Missing taskId, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Task not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── KB review queue ──────────────────────────────────────────────────────
+
+  /kb/review/list:
+    get:
+      summary: List review items (optionally filtered by status)
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, approved, rejected, executed, failed] }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+      responses:
+        '200':
+          description: Review items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { type: object } }
+                  count: { type: integer }
+
+  /kb/review/get/{id}:
+    get:
+      summary: Fetch a single review item by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Review item
+          content:
+            application/json:
+              schema: { type: object }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/review/reject:
+    post:
+      summary: Reject a pending review item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id:   { type: string }
+                note: { type: string, description: 'Optional reviewer note' }
+      responses:
+        '200':
+          description: Updated review item
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { description: Missing id, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/review/delete:
+    post:
+      summary: Delete a review item from the queue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+      responses:
+        '200': { description: ok, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        '400': { description: Missing id, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── KB outcomes ──────────────────────────────────────────────────────────
+
+  /kb/outcomes/retry-failed:
+    post:
+      summary: Retry all failed dispatched tasks across providers
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                config: { type: object, description: 'Provider credential overrides (same shape as /kb/outcomes/refresh creds)' }
+      responses:
+        '200':
+          description: Retry summary
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '500': { description: Retry failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/outcomes/task/{id}:
+    get:
+      summary: List all outcome records for a specific plan task
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,128}$' }
+      responses:
+        '200':
+          description: Outcome list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  outcomes: { type: array, items: { type: object } }
+        '400': { description: Invalid ID, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/outcomes/stats:
+    get:
+      summary: Aggregate outcome statistics for the user (counts by state)
+      responses:
+        '200':
+          description: Outcome statistics
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  # ── KB live capture ──────────────────────────────────────────────────────
+
+  /kb/live/sessions:
+    get:
+      summary: List active in-memory live capture sessions for the user
+      responses:
+        '200':
+          description: Active sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        sessionId:    { type: string }
+                        meetingTitle: { type: string }
+                        startedAt:    { type: integer, description: 'Unix ms timestamp when session was created' }
+                        lastWrite:    { type: integer, description: 'Unix ms timestamp of last caption append' }
+                        captionCount: { type: integer }
+                        sequence:     { type: integer, description: 'Highest sequence number written so far' }
+
+  /kb/live/{id}:
+    get:
+      summary: Poll for new captions since a sequence number
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+          description: Live session ID
+        - in: query
+          name: since
+          schema: { type: integer, default: 0 }
+          description: Return captions with sequence > this value
+      responses:
+        '200':
+          description: Caption batch
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  captions:     { type: array, items: { type: object } }
+                  sequence:     { type: integer }
+                  finalized:    { type: boolean }
+                  exists:       { type: boolean, description: 'false when the sessionId is unknown (never had captions appended)' }
+                  meetingTitle: { type: string }
+                  startedAt:    { type: integer, description: 'Unix ms timestamp when session was created' }
+
+  /kb/live/{id}/append:
+    post:
+      summary: Append caption chunks to an active live session
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [captions]
+              properties:
+                captions:
+                  type: array
+                  items: { type: object }
+                  description: 'Array of caption objects (text, speaker, timestamp, etc.)'
+                meetingTitle: { type: string }
+      responses:
+        '200':
+          description: Append summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sequence:    { type: integer, description: 'Highest sequence number in the session after this append' }
+                  accepted:    { type: integer, description: 'Number of caption items accepted (0 when session is already finalized)' }
+                  backpressure: { type: boolean, description: 'Advisory — true when the ring buffer is ≥90% full; callers should throttle' }
+                  finalized:   { type: boolean, description: 'Present (true) when the session was already finalized; all captions were dropped' }
+        '400': { description: Missing sessionId or captions, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Rate limited (liveAppend bucket), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/live/{id}/finalize:
+    post:
+      summary: Finalize a live capture session (marks it done; ingest separately via /kb/ingest)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Finalization summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessionId:    { type: string }
+                  finalized:    { type: boolean }
+                  captionCount: { type: integer }
+                  persisted:    { type: boolean, description: 'true when captions were successfully written to SQLite' }
+                  persistError: { type: string, nullable: true, description: 'Error message if SQLite persist failed (session is still marked finalized)' }
+
+  # ── KB agent ─────────────────────────────────────────────────────────────
+
+  /kb/agent/dispatch:
+    post:
+      summary: Attach the meeting agent question-loop to an active live session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sessionId:  { type: string, nullable: true }
+                planId:     { type: string, nullable: true }
+                persona:    { type: string, nullable: true }
+                language:   { type: string, nullable: true }
+                meetingUrl: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Dispatch result
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '400': { description: Dispatch failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Rate limited }
+
+  /kb/agent/stop:
+    post:
+      summary: Detach the meeting agent from a live session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId]
+              properties:
+                sessionId: { type: string }
+      responses:
+        '200':
+          description: Stop result
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '400': { description: Missing sessionId, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/agent/runs:
+    get:
+      summary: List sessions that currently have the agent attached
+      responses:
+        '200':
+          description: Active agent runs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runs: { type: array, items: { type: object } }
+
+  /kb/agent/feedback:
+    post:
+      summary: Record user feedback on an agent question (useful / noise / later)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, captionSeq, verdict]
+              properties:
+                sessionId:  { type: string }
+                captionSeq: { type: integer }
+                verdict:    { type: string, enum: [useful, noise, later] }
+                planTaskId: { type: string, nullable: true }
+                score:      { type: number, nullable: true }
+      responses:
+        '200': { description: ok, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        '400': { description: Feedback failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/agent/feedback/stats:
+    get:
+      summary: Aggregate agent feedback statistics for the user
+      parameters:
+        - in: query
+          name: sinceDays
+          schema: { type: integer, default: 30 }
+      responses:
+        '200':
+          description: Feedback statistics
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /kb/agent/feedback/by-task:
+    get:
+      summary: Per-plan-task agent feedback breakdown
+      parameters:
+        - in: query
+          name: sinceDays
+          schema: { type: integer, default: 30 }
+      responses:
+        '200':
+          description: Feedback breakdown by plan task
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks: { type: array, items: { type: object } }
+
+  /kb/agent/persona:
+    get:
+      summary: Get the user's active agent persona (legacy single-persona surface)
+      responses:
+        '200':
+          description: Active persona or null
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  persona:
+                    nullable: true
+                    type: object
+                    properties:
+                      name:         { type: string }
+                      promptSuffix: { type: string }
+                      autoDispatch: { type: boolean }
+    put:
+      summary: Set or reset the active agent persona
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:         { type: string }
+                promptSuffix: { type: string }
+                autoDispatch: { type: boolean }
+      responses:
+        '200':
+          description: Updated persona
+          content:
+            application/json:
+              schema: { type: object, properties: { persona: { type: object } } }
+
+  /kb/agent/personas:
+    get:
+      summary: List all agent personas and indicate the active one
+      responses:
+        '200':
+          description: Personas list with active marker
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  personas: { type: array, items: { type: object } }
+                  active:   { type: string, nullable: true }
+    post:
+      summary: Create a new agent persona
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:         { type: string }
+                promptSuffix: { type: string }
+                autoDispatch: { type: boolean }
+      responses:
+        '200':
+          description: Created persona plus full list
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { description: Create failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/agent/personas/active:
+    put:
+      summary: Set the active persona by ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+      responses:
+        '200':
+          description: Updated personas list with new active
+          content:
+            application/json:
+              schema: { type: object }
+        '404': { description: Persona not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/agent/personas/{id}:
+    put:
+      summary: Update a persona by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:         { type: string }
+                promptSuffix: { type: string }
+                autoDispatch: { type: boolean }
+      responses:
+        '200':
+          description: Updated persona
+          content:
+            application/json:
+              schema: { type: object, properties: { persona: { type: object } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      summary: Delete a persona by ID (refuses if it is the last one)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Delete result
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { description: Delete failed (e.g. last persona), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/agent/ask:
+    post:
+      summary: Free-text Q&A with the meeting agent (uses active persona voice)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string, description: 'User message (max 8 000 chars after sanitization)' }
+                history:
+                  type: array
+                  description: 'Prior turns (last 10 used)'
+                  items:
+                    type: object
+                    properties:
+                      role:    { type: string, enum: [user, assistant] }
+                      content: { type: string }
+      responses:
+        '200':
+          description: Agent reply
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reply: { type: string }
+        '400': { description: Missing or empty message, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Agent ask failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Rate limited }
+
+  /kb/agent/ask/history:
+    get:
+      summary: Retrieve persisted ask-the-agent conversation history (oldest-first)
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50 }
+      responses:
+        '200':
+          description: Message history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        role:    { type: string, enum: [user, assistant] }
+                        content: { type: string }
