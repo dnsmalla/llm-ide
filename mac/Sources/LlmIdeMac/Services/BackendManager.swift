@@ -239,11 +239,23 @@ final class BackendManager {
         proc.executableURL = URL(fileURLWithPath: nodePath)
         proc.arguments = ["server.mjs"]
         proc.currentDirectoryURL = workURL
-        // Pass the parent's environment through so `claude`, `git`, and
-        // anything else the server shells out to resolve correctly. We
-        // also force a sensible TERM so colour codes don't show up as
-        // escape sequences in the log pane.
-        var env = ProcessInfo.processInfo.environment
+        // Build the child environment from an allowlist instead of inheriting
+        // the full shell env. Passing the full inherited env would expose
+        // unrelated ambient secrets (AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN, etc.)
+        // to the Node server and every subprocess it spawns (claude, git, …).
+        // We preserve exactly what the server legitimately needs: standard
+        // POSIX vars, locale/XDG, NODE_ENV, and our own config prefixes.
+        let base = ProcessInfo.processInfo.environment
+        let exactAllow: Set<String> = [
+            "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM",
+            "LANG", "LC_ALL", "LC_CTYPE", "NODE_ENV",
+            "XDG_CONFIG_HOME", "XDG_DATA_HOME", "APPDATA", "USERPROFILE"
+        ]
+        let prefixAllow = ["LLMIDE_", "MEETNOTES_", "ANTHROPIC_", "LC_", "XDG_"]
+        var env: [String: String] = [:]
+        for (k, v) in base where exactAllow.contains(k) || prefixAllow.contains(where: { k.hasPrefix($0) }) {
+            env[k] = v
+        }
         env["TERM"] = "dumb"
         env["MEETNOTES_LOG_JSON"] = env["MEETNOTES_LOG_JSON"] ?? "0"
         proc.environment = env
