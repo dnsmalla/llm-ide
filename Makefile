@@ -82,3 +82,4 @@ docs-check:
 	python3 -m pytest docs/_scripts/ -q
 	python3 docs/_scripts/check_api_coverage.py
 	python3 docs/_scripts/check_rate_limit_mapping.py
+	python3 docs/_scripts/check_spec_citations.py

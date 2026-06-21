@@ -442,4 +442,4 @@ Linker flags add `-framework Testing` with an `-rpath` pointing at the same Comm
 - [x] Every governed contract (service interfaces, IPC, platform-coupling points, capture pipeline) is present with verified `file:symbol` citations.
 - [x] Every coupling point names its Apple-only API and a portability tag.
 - [x] Spot-check: the app lifecycle, the API client auth/refresh flow, and the AX capture path were rebuilt from this page and match source.
-- [ ] No automated drift guard exists for the Swift surface (no extractor harness) — re-verify against source when the app changes.
+- [x] Cited source files are guarded by `docs/_scripts/check_spec_citations.py` (run in `make docs-check`); note it checks file *existence*, not line numbers or symbols — re-verify those against source when the app changes.
