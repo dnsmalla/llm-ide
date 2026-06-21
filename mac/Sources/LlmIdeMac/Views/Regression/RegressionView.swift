@@ -21,6 +21,7 @@ struct RegressionView: View {
 
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
+    @EnvironmentObject var projectStore: ProjectStore
 
     @StateObject private var runner: RegressionRunner
 
@@ -101,7 +102,13 @@ struct RegressionView: View {
 
     // MARK: - State helpers
 
-    private var activeRepoRoot: URL? { config.activeRepoLocalURL }
+    /// Faults live under the active PROJECT's system/faults (not a repo clone),
+    /// so resolve the same workspace root the Explorer uses — the active
+    /// project — rather than config.activeRepoLocalURL (which pointed at the
+    /// cloned repo and made Regression read faults from the wrong place).
+    private var activeRepoRoot: URL? {
+        WorkspaceRoot.resolve(config: config, projectStore: projectStore)
+    }
 
     private func refresh() async {
         guard let repo = activeRepoRoot else {
