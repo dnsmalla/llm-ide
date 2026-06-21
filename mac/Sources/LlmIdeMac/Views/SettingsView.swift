@@ -24,6 +24,7 @@ struct SettingsView: View {
                         ServerSettingsSection()
                         BackendSettingsSection()
                         ConnectionsSettingsSection(api: api).id("connections")
+                        RemoteSSHSettingsSection().id("remote-ssh")
                         AppearanceSettingsSection()
                         SidebarVisibilitySection()
                         UpdatesSettingsSection()
