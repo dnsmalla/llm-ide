@@ -38,9 +38,15 @@ test('high-water roundtrip is per-user and starts null', () => {
   assert.equal(db.getEmailHighWater('bob'), null);
 });
 
-test('setEmailHighWater no-ops on a falsy userId', () => {
+// KB-3: setEmailHighWater now uses requireUser, so a falsy userId throws
+// instead of silently returning.  This prevents a missing auth context from
+// writing a null-keyed row.
+test('setEmailHighWater throws on a falsy userId', () => {
   reset();
-  assert.doesNotThrow(() => db.setEmailHighWater('', '2026-06-01T00:00:00.000Z'));
+  assert.throws(
+    () => db.setEmailHighWater('', '2026-06-01T00:00:00.000Z'),
+    /userId is required/,
+  );
 });
 
 test('markEmailSeen / getEmailSeenIds roundtrip, scoped per user, dedups', () => {

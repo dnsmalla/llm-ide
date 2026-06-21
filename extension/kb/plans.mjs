@@ -21,12 +21,6 @@ export function savePlan(userId, plan) {
   const id = String(plan.id || genId('plan'));
   const meetingId = plan.meetingId ? String(plan.meetingId) : null;
 
-  // Ownership check on update path: if a plan with this id already
-  // exists, refuse to clobber a row owned by another user.
-  const owner = db.prepare('SELECT user_id FROM plans WHERE id = ?').get(id);
-  if (owner && owner.user_id !== userId) {
-    throw new Error('Plan id is owned by another user');
-  }
   const title = String(plan.title || 'Untitled plan').slice(0, 500);
   const goal = plan.goal ? String(plan.goal).slice(0, 5000) : null;
   const language = plan.language ? String(plan.language).slice(0, 16) : null;
@@ -34,34 +28,42 @@ export function savePlan(userId, plan) {
 
   const tasks = Array.isArray(plan.tasks) ? plan.tasks : [];
 
-  // ── Plan snapshot (version history) ────────────────────────────
-  // Before replacing tasks, read the current state and append it to
-  // meta.snapshots (last 3 versions). This gives lightweight rollback
-  // and an audit trail without a separate table or migration.
-  const SNAPSHOT_KEEP = 3;
-  let metaParsed = {};
-  try { metaParsed = JSON.parse(meta) || {}; } catch { /* empty */ }
-
-  const existing = db.prepare(
-    'SELECT meta FROM plans WHERE id = ? AND user_id = ?',
-  ).get(id, userId);
-  if (existing) {
-    const prevMeta = safeParseMeta(existing.meta) || {};
-    const prevTasks = db.prepare(
-      'SELECT id, title, status, risk, position FROM plan_tasks WHERE plan_id = ? AND user_id = ? ORDER BY position',
-    ).all(id, userId);
-    const snap = {
-      savedAt: new Date().toISOString(),
-      taskCount: prevTasks.length,
-      tasks: prevTasks.map((t) => ({ id: t.id, title: t.title, status: t.status, risk: t.risk })),
-    };
-    const prevSnaps = Array.isArray(prevMeta.snapshots) ? prevMeta.snapshots : [];
-    metaParsed.snapshots = [snap, ...prevSnaps].slice(0, SNAPSHOT_KEEP);
-  }
-  // Re-serialise meta with snapshots merged in.
-  const metaFinal = safeJSONStringify(metaParsed);
-
   const tx = db.transaction(() => {
+    // Ownership check on update path: if a plan with this id already
+    // exists, refuse to clobber a row owned by another user.
+    // Done INSIDE the transaction so check+upsert are atomic.
+    const owner = db.prepare('SELECT user_id FROM plans WHERE id = ?').get(id);
+    if (owner && owner.user_id !== userId) {
+      throw new Error('Plan id is owned by another user');
+    }
+
+    // ── Plan snapshot (version history) ────────────────────────────
+    // Before replacing tasks, read the current state and append it to
+    // meta.snapshots (last 3 versions). This gives lightweight rollback
+    // and an audit trail without a separate table or migration.
+    const SNAPSHOT_KEEP = 3;
+    let metaParsed = {};
+    try { metaParsed = JSON.parse(meta) || {}; } catch { /* empty */ }
+
+    const existing = db.prepare(
+      'SELECT meta FROM plans WHERE id = ? AND user_id = ?',
+    ).get(id, userId);
+    if (existing) {
+      const prevMeta = safeParseMeta(existing.meta) || {};
+      const prevTasks = db.prepare(
+        'SELECT id, title, status, risk, position FROM plan_tasks WHERE plan_id = ? AND user_id = ? ORDER BY position',
+      ).all(id, userId);
+      const snap = {
+        savedAt: new Date().toISOString(),
+        taskCount: prevTasks.length,
+        tasks: prevTasks.map((t) => ({ id: t.id, title: t.title, status: t.status, risk: t.risk })),
+      };
+      const prevSnaps = Array.isArray(prevMeta.snapshots) ? prevMeta.snapshots : [];
+      metaParsed.snapshots = [snap, ...prevSnaps].slice(0, SNAPSHOT_KEEP);
+    }
+    // Re-serialise meta with snapshots merged in.
+    const metaFinal = safeJSONStringify(metaParsed);
+
     db.prepare(`
       INSERT INTO plans (id, user_id, meeting_id, title, goal, language, meta)
       VALUES (@id, @user_id, @meeting_id, @title, @goal, @language, @meta)

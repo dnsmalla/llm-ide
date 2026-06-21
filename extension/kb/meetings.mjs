@@ -38,15 +38,15 @@ export function ingestMeeting(userId, input) {
   };
   if (!meeting.id) throw new Error('Missing meeting id');
 
-  // Refuse upserts that would steal another tenant's row by id collision.
-  // We check ownership BEFORE running the upsert; mismatches throw rather
-  // than silently rebinding the row to the new caller.
-  const existing = lazyPrepare(db, 'SELECT user_id FROM meetings WHERE id = ?').get(meeting.id);
-  if (existing && existing.user_id !== userId) {
-    throw new Error('Meeting id is owned by another user');
-  }
-
   const tx = db.transaction((m, entities) => {
+    // Refuse upserts that would steal another tenant's row by id collision.
+    // Check ownership INSIDE the transaction so the check+upsert are atomic;
+    // mismatches throw rather than silently rebinding the row to the new caller.
+    const existing = lazyPrepare(db, 'SELECT user_id FROM meetings WHERE id = ?').get(m.id);
+    if (existing && existing.user_id !== userId) {
+      throw new Error('Meeting id is owned by another user');
+    }
+
     lazyPrepare(db, `
       INSERT INTO meetings (id, user_id, title, date, duration_sec, language, participants, transcript, meta)
       VALUES (@id, @user_id, @title, @date, @duration_sec, @language, @participants, @transcript, @meta)

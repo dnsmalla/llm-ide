@@ -114,3 +114,22 @@ test('append rejects empty content', () => {
     /content is required/,
   );
 });
+
+// KB-4: created_at must be stored as a numeric unix epoch (REAL column),
+// not an ISO string.  The migration schema declares it REAL NOT NULL.
+test('appended message stores created_at as a numeric unix epoch', () => {
+  reset();
+  const a = provision('alpha@example.test');
+  const before = Date.now() / 1000;
+  db.appendAgentAskMessage(a.id, { role: 'user', content: 'epoch check' });
+  const after = Date.now() / 1000;
+
+  const raw = db.getDb().prepare(
+    'SELECT created_at FROM agent_ask_messages WHERE user_id = ? ORDER BY seq DESC LIMIT 1',
+  ).get(a.id);
+  assert.ok(raw, 'row must exist');
+  assert.equal(typeof raw.created_at, 'number',
+    `created_at must be numeric (REAL), got ${typeof raw.created_at}: ${raw.created_at}`);
+  assert.ok(raw.created_at >= before && raw.created_at <= after + 1,
+    `created_at ${raw.created_at} must be in unix-seconds range [${before}, ${after + 1}]`);
+});

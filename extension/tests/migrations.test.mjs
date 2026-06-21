@@ -93,3 +93,34 @@ test('triggers fire on insert (search index stays current)', () => {
   assert.equal(hits.length, 1);
   assert.equal(hits[0].title, 'Test meeting');
 });
+
+// KB-2: AFTER UPDATE trigger on meetings must update the FTS index so that
+// a re-ingested meeting with a changed title is findable by its new title
+// and not the old one.
+test('trg_meetings_au keeps FTS index current after title update', () => {
+  const db = fresh();
+  applyMigrations(db);
+
+  db.prepare(`
+    INSERT INTO meetings (id, user_id, title, date, duration_sec, transcript)
+    VALUES ('m-upd', 'legacy', 'Old title', '2026-05-01', 60, 'transcript text')
+  `).run();
+
+  // Verify original title is found.
+  const before = db.prepare("SELECT title FROM search WHERE search MATCH 'Old'").all();
+  assert.equal(before.length, 1, 'old title must be in FTS before update');
+
+  // Re-ingest with a changed title (simulate UPDATE).
+  db.prepare(`
+    UPDATE meetings SET title = 'New title' WHERE id = 'm-upd'
+  `).run();
+
+  // New title must be found.
+  const afterNew = db.prepare("SELECT title FROM search WHERE search MATCH 'New'").all();
+  assert.equal(afterNew.length, 1, 'new title must appear in FTS after update');
+  assert.equal(afterNew[0].title, 'New title');
+
+  // Old title must no longer match.
+  const afterOld = db.prepare("SELECT title FROM search WHERE search MATCH 'Old'").all();
+  assert.equal(afterOld.length, 0, 'old title must be gone from FTS after update');
+});

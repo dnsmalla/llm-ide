@@ -220,7 +220,7 @@ export function search(userId, { q, kind, limit = 20, projectId } = {}) {
       .filter((r) => !projectId || safeParseMeta(r.meta)?.projectId === projectId)
       .map((r) => ({
       kind: r.kind,
-      meetingId: r.kind,
+      meetingId: null,
       entityId: String(r.id),
       ref: r.ref,
       title: r.title,
@@ -630,10 +630,9 @@ export function getEmailHighWater(userId) {
 }
 
 // Upsert the user's high-water mark. Caller validates that `iso` is a real
-// date; we just persist the string. No-op guard on a falsy userId so a missing
-// auth context can't silently write a null-keyed row.
+// date; we just persist the string.
 export function setEmailHighWater(userId, iso) {
-  if (!userId || typeof userId !== 'string') return;
+  requireUser(userId);
   const db = getDb();
   lazyPrepare(db, `
     INSERT INTO email_state (user_id, last_fetched_at) VALUES (?, ?)
@@ -656,7 +655,7 @@ export function getEmailSeenIds(userId) {
 // strings and cap the batch defensively, then run the whole batch in one
 // transaction like the other bulk inserts in this module.
 export function markEmailSeen(userId, messageIds) {
-  if (!userId || typeof userId !== 'string') return;
+  requireUser(userId);
   if (!Array.isArray(messageIds)) return;
   const ids = messageIds
     .filter((x) => typeof x === 'string' && x)

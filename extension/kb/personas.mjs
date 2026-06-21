@@ -299,7 +299,7 @@ export function appendAgentAskMessage(userId, { role, content }) {
     lazyPrepare(db, `
       INSERT INTO agent_ask_messages (user_id, seq, role, content, created_at)
       VALUES (?, ?, ?, ?, ?)
-    `).run(uid, nextSeq, r, c, new Date().toISOString());
+    `).run(uid, nextSeq, r, c, Date.now() / 1000);
 
     // Prune: keep the newest ASK_HARD_LIMIT rows, delete the rest.
     // The subquery finds the lowest seq still in the kept window.
