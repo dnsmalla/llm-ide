@@ -122,7 +122,7 @@ description says to start.
   `Models/`, `Services/`, `Views/`, `ViewModels/`. Services follow
   the suffix taxonomy in `CONTRIBUTING.md` (`*Store`, `*Service`,
   `*Client`, `*Manager`, `*Mirror`, `*Router`). Start at
-  `LlmIdeMacApp.swift`.
+  `LlmIdeMacApp.swift`. See [`spec/macos-app.md`](../spec/macos-app.md) for rebuild-grade detail.
 - **`kb/`** — runtime data only: SQLite db, dev secrets, per-user
   vault payloads. Never read this directly from code; go through
   `extension/kb/db.mjs`.
