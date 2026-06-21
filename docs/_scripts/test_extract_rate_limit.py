@@ -105,19 +105,21 @@ def test_render_table_has_all_profiles(tmp_path: Path) -> None:
         assert f"`{name}`" in output
 
 
-def test_real_source_extracts_seven_profiles() -> None:
+def test_real_source_extracts_all_profiles() -> None:
     """Integration test against the actual source file."""
     real_src = Path(__file__).resolve().parents[2] / "extension/server/rate-limit.mjs"
     if not real_src.exists():
         pytest.skip("real source not found")
     rows = extract(real_src)
-    # We saw 5 in PROFILES block + 2 appended (authPublic, authRegister) = 7
-    assert len(rows) == 7
+    # 7 in PROFILES block + 2 appended (authPublic, authRegister) = 9
+    assert len(rows) == 9
     names = {r["name"] for r in rows}
     assert "llm" in names
     assert "llmFast" in names
     assert "dispatch" in names
     assert "outcomePoll" in names
     assert "kbWrite" in names
+    assert "liveAppend" in names
+    assert "kbExport" in names
     assert "authPublic" in names
     assert "authRegister" in names
