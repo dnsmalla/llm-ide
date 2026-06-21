@@ -102,20 +102,6 @@ final class TerminalPanelState {
         isOpen = true
     }
 
-    /// Open a remote SSH session for `host` and reveal the terminal panel.
-    /// The PTY (`ssh -t <alias>`) starts when the session view mounts.
-    func connectRemote(host: RemoteHost) {
-        let session = TerminalSession(
-            number: nextTabNumber,
-            workingDirectory: FileManager.default.homeDirectoryForCurrentUser,
-            remoteAlias: host.alias)
-        nextTabNumber += 1
-        sessions.append(session)
-        activeIndex = sessions.count - 1
-        activeDockTab = .terminal
-        isOpen = true
-    }
-
     /// Terminate a session and remove its tab.
     /// Closes the panel automatically when the last tab is removed.
     func closeTab(at index: Int) {
