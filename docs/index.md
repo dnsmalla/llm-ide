@@ -28,3 +28,8 @@ We follow the [Diátaxis](https://diataxis.fr/) framework — every page is one 
 | [Decisions](decisions/) | (extra) Reading the formal ADR for a design choice |
 
 If you write a new page, copy a template from `docs/_templates/` and place it in the matching folder.
+
+## Two reading depths
+
+- **Explanation** (`explanation/`) — understand, navigate, port, and safely change the system.
+- **Spec** (`spec/`) — rebuild-grade contracts. Read these when reproducing a subsystem exactly.
