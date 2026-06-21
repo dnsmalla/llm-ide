@@ -24,4 +24,3 @@ Messages flow between the content script, the service worker, the side panel, an
 | `ACTIVE_SPEAKER` | Content script → side panel | `speaker` |
 | `PARTICIPANTS_LIST` | Content script → side panel | `participants` |
 | `POST_CHAT` | Content script → side panel | `text` |
-| `ERROR` | Content script → side panel | `message` |

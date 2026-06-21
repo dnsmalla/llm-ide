@@ -207,12 +207,30 @@ def test_real_source_extracts_known_types() -> None:
         pytest.skip("messages.ts not present in this environment")
     rows = extract(source)
     names = {r["name"] for r in rows}
-    assert "START_CAPTION_SCRAPING" in names
-    assert "CAPTION_FINAL" in names
-    assert "ERROR" in names
-    # Verify direction is present on at least one
+    # Assert the complete real MsgType member set (as of messages.ts at time of writing).
+    # If members are added/removed in source, update this set to match.
+    assert names == {
+        "START_CAPTION_SCRAPING",
+        "STOP_CAPTION_SCRAPING",
+        "GET_CAPTION_STATUS",
+        "PING",
+        "OPEN_POPUP",
+        "CAPTION_FINAL",
+        "CAPTION_STATUS",
+        "CAPTION_SCRAPER_READY",
+        "ACTIVE_SPEAKER",
+        "PARTICIPANTS_LIST",
+        "POST_CHAT",
+    }
+    # Verify direction is present on control messages
     by_name = {r["name"]: r for r in rows}
-    assert by_name["START_CAPTION_SCRAPING"]["direction"] != ""
+    assert by_name["START_CAPTION_SCRAPING"]["direction"] == "Side panel → content script"
+    assert by_name["CAPTION_FINAL"]["direction"] == "Content script → side panel"
+    assert by_name["OPEN_POPUP"]["direction"] == "Content script → service worker (popup management)"
     # Verify payload fields on CAPTION_FINAL
-    assert "speaker" in by_name["CAPTION_FINAL"]["payload_fields"]
-    assert "sessionId" in by_name["CAPTION_FINAL"]["payload_fields"]
+    assert set(by_name["CAPTION_FINAL"]["payload_fields"]) == {"speaker", "text", "timestamp", "sessionId"}
+    # Verify payload fields on CAPTION_STATUS
+    assert set(by_name["CAPTION_STATUS"]["payload_fields"]) == {"active", "platform"}
+    # Verify ordering: control messages before data messages
+    names_ordered = [r["name"] for r in rows]
+    assert names_ordered.index("START_CAPTION_SCRAPING") < names_ordered.index("CAPTION_FINAL")
