@@ -1,0 +1,286 @@
+---
+title: API & server — spec
+status: draft
+---
+
+# API & server — spec
+
+This page is the rebuild-grade specification for the HTTP server and its entire request surface. Every contract is stated exactly, every magic number is present, and structured facts link to their extractor-generated reference pages. A reader who has never seen this codebase should be able to reconstruct a compatible server from this document alone.
+
+---
+
+## 1. Scope
+
+The following source files together constitute the server and its API:
+
+| Layer | Files |
+|---|---|
+| Entry point | `extension/server.mjs` |
+| Auth middleware | `extension/server/auth.mjs`, `extension/server/jwt.mjs` |
+| Route handlers | `extension/server/auth-routes.mjs`, `extension/server/ai-routes.mjs`, `extension/server/export-routes.mjs` |
+| KB router | `extension/kb/router.mjs` (mounted under `/kb`) |
+| Rate limiting | `extension/server/rate-limit.mjs` |
+| Observability | `extension/server/audit.mjs`, `extension/server/metrics.mjs` |
+| User / token store | `extension/server/users.mjs`, `extension/server/vault.mjs` |
+| Control-plane helpers | `extension/server/control-plane.mjs` |
+| Shared core | `extension/core/config.mjs`, `extension/core/errors.mjs`, `extension/core/logger.mjs`, `extension/core/utils.mjs` |
+
+`extension/core/env-compat.mjs` aliases legacy `MEETNOTES_*` env vars to `LLMIDE_*` before any config is read (`server.mjs:2`).
+
+---
+
+## 2. Request pipeline
+
+Every inbound HTTP request passes through these stages **in order** (`extension/server.mjs:174–518`):
+
+1. **CORS headers set** (`server.mjs:175`) — `setCORS()` runs unconditionally before any other logic. Never echoes `*`; see [§7 Limits & guards](#7-limits--guards).
+2. **Request-ID & per-request logger** (`server.mjs:183–188`) — `X-Request-ID` is read from the client header (validated: max 128 chars, CR/LF/NUL stripped) or generated fresh. A child logger carrying `{ requestId, method, url }` is attached as `req.log`.
+3. **Response-finish instrumentation** (`server.mjs:192–206`) — a `res.on('finish')` listener records duration + status, calls `recordHttpRequest()`.
+4. **OPTIONS short-circuit** (`server.mjs:208–212`) — preflight requests return `200` immediately.
+5. **Authentication** (`server.mjs:216–221`) — `authenticate(req)` verifies the bearer JWT (or allows public paths). Throws `AppError` → `sendError` on failure; attaches `req.user` on success.
+6. **Auth-route dispatcher** (`server.mjs:226–233`) — `isAuthRoute(url)` matches; if true, `handleAuth()` runs and returns. Auth routes apply their own per-IP rate limits internally (not through the main `profile` lookup below).
+7. **Rate limiting** (`server.mjs:237–247`) — `rateLimitProfile(url, method)` maps the URL to a profile. If a profile is found, `tryConsume(profile, scope)` is called. Scope is `req.user.id` for authenticated requests or `req.socket.remoteAddress` for unauthenticated ones (`server.mjs:239`). On deny: `Retry-After: <N>` header set, `429 RATE_LIMITED` returned.
+8. **KB router** (`server.mjs:254–256`) — any URL starting with `/kb` is dispatched to `handleKB(req, res)`. Returns `true` when handled, `false` to fall through.
+9. **Control-plane endpoints** (`server.mjs:264–286`) — `GET /` and `GET /health` are served here (unauthenticated). Response includes `apiVersion`, `endpoints` array, DB/migration status, Claude-CLI probe result.
+10. **Deep-link redirect** (`server.mjs:302–374`) — `GET /launch-app` returns `302` to a `llmide://` URL. Public path.
+11. **Admin endpoints** (`server.mjs:383–478`) — `POST /admin/backup` and `DELETE /admin/users/:id` require admin role (`requireAdmin(req)`).
+12. **Prometheus metrics** (`server.mjs:482–498`) — `GET /metrics` requires admin role.
+13. **AI and export routes** (`server.mjs:502–503`) — `handleAIRoutes`, then `handleExportRoutes`. Each returns `true` when handled.
+14. **404 fallback** (`server.mjs:505–508`) — `AppError('NOT_FOUND', …)` with the full `ENDPOINTS` array in details.
+15. **Unhandled exception guard** (`server.mjs:510–517`) — non-`AppError` exceptions become `INTERNAL_ERROR 500`; stack is logged but never sent to client.
+
+### API version and stale-server detection
+
+`SERVER_API_VERSION = 18` (`server.mjs:33`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:34–97`) is also returned in both responses so clients can detect missing capabilities by name.
+
+### Server timeouts
+
+| Parameter | Value | Source |
+|---|---|---|
+| `server.requestTimeout` | 300 000 ms (5 min) | `server.mjs:618` |
+| `server.headersTimeout` | 65 000 ms | `server.mjs:619` |
+| `server.keepAliveTimeout` | 60 000 ms | `server.mjs:620` |
+
+---
+
+## 3. Endpoint contracts
+
+The authoritative per-endpoint request/response schema is [`../reference/api/openapi.yaml`](../reference/api/openapi.yaml).
+
+Coverage is verified by `docs/_scripts/check_api_coverage.py`: every URL in the server's `ENDPOINTS` array must have a matching path in the OpenAPI document. The script prints `OK: all N live endpoints documented.` when passing.
+
+**Caveat on schema fidelity:** Presence in the OpenAPI document is checked automatically. Per-endpoint request/response *schema accuracy* for bulk-documented endpoints has only been spot-verified. When relying on the schema for a specific endpoint, confirm against the handler source.
+
+### Global conventions
+
+| Convention | Value |
+|---|---|
+| Base URL | `http://127.0.0.1:3456` (default; `LLMIDE_HOST`/`LLMIDE_PORT` configurable) |
+| Auth header | `Authorization: Bearer <jwt>` |
+| Content-Type | `application/json` for all requests and non-streaming responses |
+| Error envelope | `{ error: { code: string, message: string, details?: unknown } }` |
+
+The error envelope shape is defined in `extension/core/errors.mjs:17–91` and serialized by `sendError()` (`errors.mjs:67`). `details` is only present when `err.details !== undefined` (`errors.mjs:73`).
+
+See [§4 Auth + token lifecycle](#4-auth--token-lifecycle) for auth endpoint contracts and [§5 Error codes](#5-error-codes) for the full error-code table.
+
+---
+
+## 4. Auth + token lifecycle (rebuild-grade)
+
+### JWT algorithm and claims
+
+Source: `extension/server/jwt.mjs`.
+
+- Algorithm: **HS256 only** (`jwt.mjs:12`). The header is hard-coded as `{ alg: 'HS256', typ: 'JWT' }`.
+- On verification, the decoded header is checked: `header.alg !== 'HS256' || header.typ !== 'JWT'` → reject (`jwt.mjs:63`). This guards against `alg: none` and key-confusion attacks.
+- Two keys are tried in order: `config.jwtSecret`, then `config.jwtSecretPrevious` if set (`jwt.mjs:52–55`). This enables zero-downtime rotation.
+- Signature comparison uses a constant-time byte-by-byte XOR accumulator (`jwt.mjs:28–33`).
+
+**Access token claims** (`jwt.mjs:84–95`):
+
+| Claim | Type | Value |
+|---|---|---|
+| `iss` | string | `config.jwtIssuer` (default `"llmide"`, env `LLMIDE_JWT_ISSUER`) |
+| `sub` | string | `String(userId)` |
+| `role` | string | `"user"` or `"admin"` |
+| `typ` | string | `"access"` |
+| `jti` | string | `crypto.randomUUID()` — used for per-token revocation |
+| `iat` | number | Unix seconds at issue time |
+| `exp` | number | `iat + config.accessTokenTTLSec` |
+
+**Access token TTL:** `config.accessTokenTTLSec` = `envInt('LLMIDE_ACCESS_TTL_SEC', 15 * 60)` = **900 s (15 min)** default (`config.mjs:130`).
+
+**Clock-skew tolerance:** `JWT_CLOCK_SKEW_SEC = 2` seconds (`jwt.mjs:14`). Applied as: exp must be `>= now - 2`; iat must be `<= now + 2` (`jwt.mjs:79–80`).
+
+**Issuer verification:** `payload.iss !== config.jwtIssuer` → return null (`jwt.mjs:73`).
+
+**JTI revocation:** After signature and claims verification, `isJtiRevoked(claims.jti)` is called in `auth.mjs:56`. Any revoked JTI causes a 401 `AUTH_REQUIRED`.
+
+`verifyAccessToken()` returns `{ userId, role, jti, exp }` (`jwt.mjs:100`); the server attaches `{ id, role, jti, tokenExp }` to `req.user` (`auth.mjs:57`).
+
+### Refresh token format and storage
+
+- **Format:** 48 random bytes encoded as base64url (`jwt.mjs:107–108`). Opaque to the client.
+- **Hashed at rest:** SHA-256 hex digest (`jwt.mjs:111–112`). DB stores the hash only; plaintext never persisted.
+- **TTL:** `config.refreshTokenTTLSec` = `envInt('LLMIDE_REFRESH_TTL_SEC', 30 * 24 * 60 * 60)` = **2 592 000 s (30 days)** default (`config.mjs:131`).
+- **Rotation on use:** Each `/auth/refresh` call issues a new refresh token and revokes the old one (rotation logic in `extension/server/users.mjs`).
+
+### Password hashing
+
+- **Library:** `bcryptjs` (`users.mjs:5`).
+- **Cost factor:** `config.bcryptCost` = `envInt('LLMIDE_BCRYPT_COST', 12)` (`config.mjs:103`). Enforced range: **10–14** (validated at config load and at `users.mjs` module load, `users.mjs:18–27`).
+- **Sentinel hash for unknown emails:** A real bcrypt hash of a random 32-byte secret is computed once at module load (`users.mjs:36–39`) using `config.bcryptCost`. When a login attempt names an email that does not exist, `bcrypt.compareSync` runs against this dummy hash rather than short-circuiting. This prevents timing-based account enumeration.
+
+### Config keys
+
+| Key | Default | Purpose |
+|---|---|---|
+| `LLMIDE_JWT_SECRET` | auto-generated in dev | HMAC signing key; must be ≥ 32 chars |
+| `LLMIDE_JWT_SECRET_PREVIOUS` | unset | Previous key for zero-downtime rotation |
+| `LLMIDE_JWT_ISSUER` | `"llmide"` | `iss` claim |
+| `LLMIDE_ACCESS_TTL_SEC` | `900` | Access token lifetime |
+| `LLMIDE_REFRESH_TTL_SEC` | `2592000` | Refresh token lifetime |
+| `LLMIDE_BCRYPT_COST` | `12` | bcrypt work factor (range 10–14) |
+| `LLMIDE_VAULT_KEY` | auto-generated in dev | Per-user credential vault key; must be ≥ 32 chars |
+
+### Public paths (no auth required)
+
+Defined in `extension/server/auth.mjs:20–28`:
+
+```
+GET  /
+GET  /health
+GET  /launch-app   (and /launch-app?…)
+POST /auth/register
+POST /auth/login
+POST /auth/refresh
+GET  /auth/well-known
+```
+
+`OPTIONS` requests are also unconditionally public (`auth.mjs:35`).
+
+---
+
+## 5. Error codes
+
+The full table with descriptions is in [`../reference/error-codes.md`](../reference/error-codes.md).
+
+**Architectural rule:** `AppError` is the only exception type that route handlers may throw. Any non-`AppError` that escapes becomes `INTERNAL_ERROR 500`; the stack is logged but never sent to the client (`server.mjs:510–517`, `errors.mjs:68–71`). Factory functions in `errors.mjs`:
+
+| Factory | Code | HTTP status |
+|---|---|---|
+| `errAuth()` | `AUTH_REQUIRED` | 401 |
+| `errForbidden()` | `FORBIDDEN` | 403 |
+| `errNotFound()` | `NOT_FOUND` | 404 |
+| `errValidation()` | `VALIDATION_FAILED` | 400 |
+| `errConflict()` | `CONFLICT` | 409 |
+| `errRateLimit()` | `RATE_LIMITED` | 429 |
+| `errInternal()` | `INTERNAL_ERROR` | 500 |
+
+### Reconciliation: `GUARDRAIL_FAILED` and `UPSTREAM_ERROR`
+
+`docs/reference/api/overview.md` lists both `GUARDRAIL_FAILED` and `UPSTREAM_ERROR` in its error-code table.
+
+**Verified finding:**
+
+- `GUARDRAIL_FAILED`: No `AppError` factory and no `throw` of this code exists anywhere in the server source (grepped all `.mjs` and `.ts` files excluding `dist/` and `node_modules/`). It appears only in comment lines in `extension/core/errors.mjs:7,10`. **This code is never actually emitted by the server.** The `overview.md` entry is aspirational/stale for this code.
+
+- `UPSTREAM_ERROR`: No factory in `errors.mjs`. The code is emitted in **two places** via raw `sendJSON` (bypassing `AppError`/`sendError`):
+  - `extension/kb/router.mjs:447` — catch-all for unexpected errors in the `/kb/summarize` handler
+  - `extension/kb/router.mjs:704` — catch-all for unexpected errors in the `/kb/conflict-questions` handler
+
+  In both cases the response is written directly via `sendJSON(res, 500, { error: { code: 'UPSTREAM_ERROR', … } })`, not through `sendError`. This means the `overview.md` description ("Claude CLI, GitHub, or another upstream failed") is partially accurate — these two handlers use it as a generic upstream-failure fallback — but it is not a first-class `AppError` code and has no factory.
+
+  Additionally, `extension/src/lib/config.ts:439` constructs a client-side `ServerError` with code `'UPSTREAM_ERROR'` for non-OK HTTP responses from the server, but this is client-side only and not emitted by the server.
+
+**Conclusion for implementers:** Clients that switch on error codes will only ever receive `UPSTREAM_ERROR` from `/kb/summarize` and `/kb/conflict-questions` (HTTP 500). `GUARDRAIL_FAILED` is never returned by the current server.
+
+---
+
+## 6. Rate-limit profiles
+
+The full profile table is in [`../reference/rate-limit-profiles.md`](../reference/rate-limit-profiles.md).
+
+### Scope rule
+
+Rate limits are keyed by `(profileName, scope)` (`rate-limit.mjs:96`, `rate-limit.mjs:109`):
+
+- **Authenticated routes:** scope = `req.user.id` (`server.mjs:239`)
+- **Unauthenticated routes (auth-routes):** scope = remote IP — e.g. `login:<ip>`, `reset-request:<ip>` (`auth-routes.mjs:191, 250`)
+
+This means user A exhausting the `llm` profile does not affect user B.
+
+### 429 `Retry-After` contract
+
+When a bucket is exhausted, `tryConsume()` returns `{ ok: false, retryAfterSec: N }` where N = `ceil(need / refillRate)` (`rate-limit.mjs:116–117`). The server sets `Retry-After: N` as a string header and returns `429 RATE_LIMITED` with `details: { retryAfterSec: N }` (`server.mjs:243–244`, `errors.mjs:55–59`).
+
+### Profile summary
+
+| Profile | Capacity | Refill rate | Applied to |
+|---|---|---|---|
+| `llm` | 3 | 1/30 s | `/code-assist`, `/kb/generate-plan`, `/kb/analyze-risks`, `/kb/generate-code`, `/kb/summarize`, `/kb/conflict-questions` |
+| `llmFast` | 6 | 1/5 s | `/generate-notes`, `/chat`, `/kb/agent/ask`, `/generate-questions`, `/extract-entities`, `/generate-docx`, `/kb/providers/verify`, `/kb/providers/models` |
+| `dispatch` | 4 | 1/10 s | `/kb/dispatch`, `/kb/notify/slack`, `/kb/outcomes/refresh`, `/kb/email/test`, `/kb/email/fetch` |
+| `outcomePoll` | 6 | 1/30 s | `/kb/outcomes/refresh` |
+| `kbWrite` | 30 | 5/s | `/kb/ingest`, `/kb/connect-*`, `/kb/review/*`, `/kb/plan-task/*`, `/kb/email/seen` |
+| `liveAppend` | 30 | 5/s | `/kb/live/:id/append` (applied inside `kb/routes/live.mjs:62`) |
+| `kbExport` | 5 | 1/10 s | `GET /kb/export-all` |
+| `authPublic` | 10 | 1/s | `/auth/login`, `/auth/refresh`, password-reset confirm/request |
+| `authRegister` | 3 | 1/60 s | `/auth/register` |
+
+Source: `rate-limit.mjs:59–129`.
+
+### Bucket persistence
+
+Bucket state is saved to `rate_limit_buckets` in SQLite on auth-GC intervals and graceful shutdown (`rate-limit.mjs:151–169`). On startup it is restored, with tokens refilled for elapsed time since save. Rows older than 24 h are pruned (`rate-limit.mjs:143`).
+
+---
+
+## 7. Limits & guards
+
+### JSON body limit
+
+`config.bodyLimitMB` = `envInt('LLMIDE_BODY_LIMIT_MB', 8)` → **8 MB default** (`config.mjs:121`). Applied as bytes in `readBody()` via `DEFAULT_BODY_LIMIT = config.bodyLimitMB * 1024 * 1024` (`utils.mjs:8`). Exceeding the limit returns `413 VALIDATION_FAILED` (`utils.mjs:42`).
+
+**Note:** The task description says the default is 2 MB. The verified source value at `config.mjs:121` is **8 MB**. The `.env.example` at `extension/.env.example:55` also shows `LLMIDE_BODY_LIMIT_MB=8`.
+
+**Plugin install cap:** `MAX_ZIP_BYTES = 5 * 1024 * 1024` = **5 MB** (`extension/plugins/installer.mjs:43`). This is a separate hard limit on plugin zip file size, independent of the body limit.
+
+### Prompt cap
+
+`sanitizeForPrompt()` hard-caps output at **500 000 characters** (`utils.mjs:76`). It also strips `<<<[A-Z_]+>>>` fence markers to prevent prompt injection (`utils.mjs:70–76`). The agent runtime separately caps user message bytes at `MAX_USER_MESSAGE_BYTES = 500_000` bytes (`extension/llm_agent/runtime/loop.mjs:121`).
+
+### CORS
+
+`setCORS()` (`server.mjs:146–172`) never echoes `Access-Control-Allow-Origin: *`. The origin header is only echoed back when it matches one of:
+
+- `chrome-extension://` prefix
+- `http://localhost:<port>` or `https://localhost:<port>`
+- `http://127.0.0.1:<port>` or `https://127.0.0.1:<port>`
+- `http://[::1]:<port>` or `https://[::1]:<port>`
+- an entry in `config.extraCorsOrigins` (env `LLMIDE_CORS_ORIGINS`, comma-separated)
+
+If the origin is not allowed, no `Access-Control-Allow-Origin` header is set at all (`server.mjs:160–164`).
+
+Security headers always set: `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` (`server.mjs:168–171`).
+
+### Bind address
+
+Default: `127.0.0.1:3456` (`config.mjs:113–114`). Binding a non-loopback address requires **both** a non-loopback `LLMIDE_HOST` value **and** `LLMIDE_ALLOW_REMOTE=1`. If `LLMIDE_HOST` is non-loopback and `LLMIDE_ALLOW_REMOTE` is not set, the server calls `process.exit(1)` before listening (`server.mjs:713–723`). When remote binding is active, a startup `warn` log `server_network_exposed` is emitted (`server.mjs:728–736`).
+
+---
+
+## 8. See also
+
+- [`../explanation/server-internals.md`](../explanation/server-internals.md) — narrative explanation of request flow, shutdown, and background tasks
+- [`../explanation/architecture.md`](../explanation/architecture.md) — high-level system architecture
+
+---
+
+## Regeneration checklist
+
+- [ ] Every governed symbol/endpoint/table/prompt is present with its exact shape (no "etc.", no "see code").
+- [ ] Every magic number, timeout, cap, regex, and crypto parameter is stated.
+- [ ] Spot-check: one representative piece rebuilt from this page alone matches source.
+- [ ] Structured facts link to their extractor-generated reference page (no hand-copied drift).
