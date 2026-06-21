@@ -285,3 +285,161 @@ For the full route list see [`api-server.md`](api-server.md) and [`../reference/
 | `GET /kb/live/<id>` | Poll captions for an active live session |
 | `GET /kb/plans` / `GET /kb/plan/<id>` | Plan list and detail |
 | `GET /health` | Backend health probe (used by `BackendManager`) |
+
+---
+
+## §5 Platform-coupling boundary (the porting story)
+
+The table below maps every Apple-only dependency to its source location and a portability tag:
+
+- **LOCKED** — deep OS coupling; no cross-platform alternative without a full re-implementation
+- **REPLACE** — well-isolated behind a service; swap the implementation, keep the interface
+- **ABSTRACT** — already behind a thin wrapper; the wrapper is what needs a new body
+- **PORTABLE** — no Apple dependency; builds on any platform today
+
+| Dependency | Apple API / framework | File : symbol | Tag |
+|---|---|---|---|
+| Accessibility tree walk | `AXUIElementCreateApplication`, `AXUIElementCopyAttributeValue`, `AXIsProcessTrusted`, `kAXChildrenAttribute`, `kAXStaticTextRole`, `kAXWindowsAttribute`, `kAXTitleAttribute`, `kAXRoleAttribute`, `kAXValueAttribute`, `kAXDescriptionAttribute` | `Services/CaptionScraper/AXCaptionReader.swift:AXCaptionReader` | LOCKED |
+| Accessibility trust gate | `AXIsProcessTrusted()`, `AXIsProcessTrustedWithOptions` | `Services/PermissionsService.swift:PermissionsService.refreshAccessibility()` (line 27), `promptAccessibility()` (line 76) | LOCKED |
+| Keychain storage | `SecItemAdd`, `SecItemCopyMatching`, `SecItemDelete`, `kSecClassGenericPassword`, `kSecAttrService`, `kSecAttrAccount`, `kSecAttrAccessible` (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) | `Services/KeychainStore.swift:KeychainStore` | REPLACE |
+| File dialogs | `NSOpenPanel` (10 files) + `NSSavePanel` (3 files) | **Open** panels: `Views/CodeAssistantPanel.swift`, `Views/Library/LibraryView.swift`, `Views/Regression/RegressionView.swift`, `Views/Settings/BackendSettingsSection.swift`, `Views/Settings/PluginsSettingsSection.swift`, `Views/Shared/FileTreePanel.swift`, `Views/Shell/ProjectSwitcher.swift`, `Views/Welcome/WelcomeView.swift`, `Views/CodeGraph/UAGraphView.swift`, `Services/NotesFolder/NotesFolderConfig.swift`. **Save** panels (`NSSavePanel`): `Views/Library/MeetingDetailView.swift`, `Views/Welcome/WelcomeView.swift`, `Views/Regression/RegressionView.swift` | REPLACE |
+| Global local key monitor | `NSEvent.addLocalMonitorForEvents(matching: .keyDown)` | `Views/AppShell.swift:AppShell.body` (line 94) — keyCode 50 (`Ctrl+backtick`) toggles terminal panel | REPLACE |
+| Process / PTY | `Foundation.Process`, `SIGTERM`, `SIGKILL` (`kill(pid, ...)`) | `Services/BackendManager.swift:BackendManager.spawn()` (line 233), `killByPort()` (line 436) | REPLACE |
+| Port listener lookup | `/usr/sbin/lsof -ti :<port> -sTCP:LISTEN` launched via `Process` | `Services/BackendManager.swift:BackendManager.killByPort()` (line 436) | REPLACE |
+| Terminal emulator | SwiftTerm `LocalProcessTerminalView` | `Views/Terminal/TerminalSessionView.swift:TerminalSessionView` (line 5) | REPLACE |
+| Auto-update | Sparkle (`SPUStandardUpdaterController`, `SUFeedURL`, `SUPublicEDKey`) | `Services/UpdateService.swift:UpdateService` | REPLACE |
+| App-support paths | `FileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)` | `Services/LibraryItemStore.swift` (line 32) — `LLM IDE/library_items.json`; `Services/ChatSessionStore.swift` (line 17) — `LLM IDE/sessions/<uuid>.json`; `Models/Config.swift` (line 19) — corrupt-config stash under `LLM IDE/` | ABSTRACT |
+| Screen recording probe | `CGPreflightScreenCaptureAccess()` | `Services/PermissionsService.swift:PermissionsService.refreshScreenRecording()` (line 33) | REPLACE |
+| System Settings deep links | `x-apple.systempreferences:…` URL scheme via `NSWorkspace.shared.open` | `Services/PermissionsService.swift:PermissionsService.openSystemSettings(pane:)` (line 89) | REPLACE |
+
+**Porting strategy (one line):** Keep the Node server and agent runtime verbatim; re-implement the SwiftUI shell in the target UI toolkit; abstract the six service boundaries — caption capture (AX), credential storage (Keychain), file dialogs, key monitoring, process/PTY management, and app-support paths — behind protocol interfaces so the rest of the codebase compiles unchanged.
+
+---
+
+## §6 Capture pipeline (Accessibility)
+
+**Sources:** `Services/CaptionScraper/AXCaptionReader.swift`, `Services/CaptionScraper/ZoomCaptionScraper.swift`, `Services/CaptionScraper/TeamsCaptionScraper.swift`, `Services/CaptionScraper/CaptionScraper.swift`, `Services/CaptionScraper/PlatformDetector.swift`, `Services/PermissionsService.swift`
+
+### AX trust gate
+
+Before any scraper can read another process's UI, macOS requires that the app hold the Accessibility permission. `AXCaptionReader.canRead` (line 81) calls `AXIsProcessTrusted()` — a silent probe that returns a boolean without presenting the system dialog. It is called on every poll tick (`CaptionScraper.swift` line 265).
+
+Permission is requested explicitly via `PermissionsService.promptAccessibility()` (line 76), which calls `AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt: true])` to surface the OS dialog. **The permission change only takes effect after the app relaunches** — there is no notification, so `PermissionsService.startPolling()` (line 56) polls `AXIsProcessTrusted()` every 1 second while the Permissions view is on screen, allowing the UI to update its badge once the user grants access in System Settings.
+
+Mid-session revocation is handled in `CaptionOrchestrator.tick()` (`CaptionScraper.swift` line 265): if `AXCaptionReader.canRead` returns false during an active capture, the orchestrator sets `permissionLost = true`, stops the timer, and surfaces a banner so the user can re-grant without losing the recorded captions.
+
+### AX tree walk mechanics
+
+`AXCaptionReader` (`AXCaptionReader.swift`) provides four primitives used by all scrapers:
+
+- `axElement(forBundleID:)` (line 15) — looks up the process ID of the target app via `NSWorkspace.shared.runningApplications`, then calls `AXUIElementCreateApplication(pid)` to obtain its root AX element.
+- `children(_:attribute:)` (line 33) — reads a child array via `AXUIElementCopyAttributeValue(element, kAXChildrenAttribute)`.
+- `descendants(of:matching:maxDepth:)` (line 42) — depth-bounded recursive walk (default `maxDepth: 12`) collecting all elements whose `kAXRoleAttribute` matches a given role string.
+- `window(in:titleContains:)` (line 65) — finds an `AXWindow` by case-insensitive title substring via `kAXWindowsAttribute`.
+
+### Per-platform scraper logic
+
+**Zoom** (`ZoomCaptionScraper.swift`): locates the "Captions and Subtitles" window by matching `kAXWindowsAttribute` titles containing `"Caption"` (English) or `"字幕"` (Japanese). Descends to all `kAXStaticTextRole` children and splits each text node on the first newline to extract `speaker\nbody` pairs. Falls back to `("Unknown", text)` when no speaker prefix is found. Bundle ID: `us.zoom.xos`.
+
+**Teams** (`TeamsCaptionScraper.swift`): Teams is Electron-based, so captions appear inside the main meeting window rather than a separate window. Walks all windows up to `maxDepth: 16` looking for an `kAXGroupRole` element whose `kAXDescriptionAttribute` contains `"live caption"`. Then reads alternating `kAXStaticTextRole` children as speaker/body pairs. Bundle ID: `com.microsoft.teams2`.
+
+Both scrapers conform to the `CaptionScraper` protocol (`CaptionScraper.swift` line 8), which requires `source: CaptureSource`, `bundleID: String`, and `snapshot() -> [(speaker: String, text: String)]`. The default `isAvailable()` implementation (line 34) calls `AXCaptionReader.canRead` then checks whether `axElement(forBundleID:)` returns non-nil.
+
+`PlatformDetector.allScrapers` (`PlatformDetector.swift` line 7) registers `[ZoomCaptionScraper(), TeamsCaptionScraper()]` — the ordered list the orchestrator iterates.
+
+### Poll cadence
+
+`CaptionOrchestrator` (`CaptionScraper.swift`) uses an **adaptive two-speed timer**:
+
+| State | Interval | Condition |
+|---|---|---|
+| Active (captions arriving) | **250 ms** (4 Hz) | Default; snaps back on any new caption |
+| Idle (no new captions for 5 s) | **500 ms** (2 Hz) | After `idleAfter: TimeInterval = 5.0` (line 86) elapses with no new lines |
+
+The timer is a `Foundation.Timer` added to `RunLoop.main` with `.common` mode (line 137). Changing cadence requires invalidating and re-creating the timer because `Foundation.Timer.timeInterval` is read-only after scheduling (comment at line 310).
+
+On each tick, the orchestrator calls `scrapers.first(where: { $0.isAvailable() })` (line 271), picks the first available platform, calls `snapshot()`, and deduplicates new lines against a 2-second rolling window (`dedupWindow: TimeInterval = 2.0`, line 73) using an O(1) `Set<String>` keyed on `"speaker::text"` (line 293).
+
+### How captured captions reach the server
+
+Captions captured locally by the AX scraper are **not pushed to the server in real time**. They accumulate in `CaptionOrchestrator.captions: [Caption]` (line 50) and in the on-disk partial `.md` file. When the user stops recording, `stopAndIngest(api:meetingTitle:)` (line 162) POSTs the full transcript to **`POST /kb/ingest`** (implemented in `Services/API/LlmIdeAPIClient+KB.swift:ingestMeeting`, line 76). See [`api-server.md`](api-server.md) for the `/kb/ingest` route contract.
+
+The `LiveSessionMirror` service (`Services/LiveSessionMirror.swift`) works in the opposite direction: it polls `GET /kb/live/sessions` and `GET /kb/live/<id>?since=<seq>` to receive captions produced by *other* clients (e.g. the Chrome extension). The Mac AX scraper does not write to the `/kb/live/*` namespace.
+
+**Cross-reference:** This is the macOS analogue of the Chrome extension's DOM-based caption scraper ([`chrome-extension.md`](chrome-extension.md) §3). Both implement the same goal — intercept in-app captions from Zoom/Teams — using OS-specific mechanisms: the extension reads the DOM via a content script injected into the meeting tab; the Mac app walks the AX tree via `ApplicationServices`. The Chrome extension pushes captions to `/kb/live/<sessionId>` in real time; the Mac app batches them and pushes to `/kb/ingest` on session end.
+
+---
+
+## §7 Build & packaging
+
+**Sources:** `mac/Package.swift`, `mac/build_app.sh`, `mac/Scripts/build.sh`, `mac/Scripts/sign.sh`, `mac/Scripts/dmg.sh`, `mac/LlmIdeMac.entitlements`
+
+### SwiftPM target resources
+
+The single executable target in `Package.swift` (lines 28–35) copies the following resources into the app bundle at build time:
+
+| Resource file | Declared at | Purpose |
+|---|---|---|
+| `Resources/note_template.docx` | line 29 | Base template for meeting-note DOCX generation |
+| `Resources/generate_meeting_note.py` | line 30 | Python helper invoked during DOCX generation |
+| `Resources/highlight.min.js` | line 33 | Vendored highlight.js v11.9.0 (BSD-3) — syntax highlighting without a CDN |
+| `Resources/atom-one-dark.min.css` | line 34 | highlight.js dark theme |
+| `Resources/atom-one-light.min.css` | line 35 | highlight.js light theme |
+
+All five are declared `.copy(...)` so SwiftPM copies them verbatim into `Contents/Resources/` without processing.
+
+### Build pipeline (`build_app.sh` / `Scripts/`)
+
+`mac/build_app.sh` is a backward-compat shim (line 7) that delegates to three sub-scripts in order: `Scripts/build.sh` → `Scripts/sign.sh` → `Scripts/dmg.sh`. For a full notarized release, `Scripts/release.sh` adds a `Scripts/notarize.sh` phase between sign and DMG.
+
+**`Scripts/build.sh`:**
+1. Reads the version string from `mac/VERSION` (line 19) — single source of truth for both the Info.plist `CFBundleShortVersionString` and the DMG filename.
+2. Assembles the `.app` bundle skeleton (`Contents/MacOS/`, `Contents/Resources/`).
+3. Generates `AppIcon.icns` from `app_logo.png` using `sips` + `iconutil` (line 40).
+4. Writes `Contents/Info.plist` (lines 77–150) including Sparkle keys (`SUFeedURL`, `SUPublicEDKey`) from environment variables `LLMIDE_SU_FEED_URL` / `LLMIDE_SU_PUBLIC_KEY` (absent for dev builds — Sparkle starts inert), and the URL schemes `llmide` + `meetnotes` for deep linking.
+5. Runs `swift build -c release --product LlmIdeMac` (line 158).
+6. Copies the Sparkle framework from the SPM build cache into `Contents/Frameworks/` and patches `@rpath` with `install_name_tool` (line 181) — without this the app crashes on launch with "Library not loaded: @rpath/Sparkle.framework".
+
+**`Scripts/sign.sh`:** calls `codesign -s "$IDENTITY" --force --deep --options runtime --entitlements LlmIdeMac.entitlements` (line 30). `LLMIDE_SIGN_IDENTITY` defaults to `"-"` (ad-hoc) for dev builds; set to a Developer ID for distribution.
+
+**`Scripts/dmg.sh`:** creates a UDZO-compressed DMG (`hdiutil create -format UDZO`, line 37) named `LlmIdeMac_v<VERSION>.dmg` with a symlink to `/Applications` for drag-install.
+
+### Entitlements (`mac/LlmIdeMac.entitlements`)
+
+| Entitlement key | Value | Reason |
+|---|---|---|
+| `com.apple.security.app-sandbox` | `false` | Sandbox disabled; required to spawn child processes (`node`, `claude` CLI) and walk AX trees of other apps |
+| `com.apple.security.network.client` | `true` | Outbound HTTPS to GitLab, Anthropic, and `127.0.0.1` backend |
+| `com.apple.security.cs.disable-library-validation` | `true` | Allows loading Sparkle's binary framework |
+| `com.apple.security.device.microphone` | `true` | Microphone fallback when AX captions are unavailable |
+| `com.apple.security.device.audio-input` | `true` | Audio-input for meeting capture |
+| `com.apple.security.files.user-selected.read-write` | `true` | Read/write access to files the user selects via file dialogs |
+| `com.apple.security.cs.allow-jit` | `false` | Not required (Node runs as a separate process) |
+| `com.apple.security.cs.allow-unsigned-executable-memory` | `false` | Not required |
+
+### Test target (`LlmIdeMacTests`)
+
+Declared in `Package.swift` lines 41–60. Depends on the main `LlmIdeMac` target. The `Tests/LlmIdeMacTests/` path is excluded from the `README-skipped-tests.md` file. The target requires unsafe Swift flags pointing at `/Library/Developer/CommandLineTools/Library/Developer/Frameworks` to link the Swift Testing framework:
+
+```
+-F /Library/Developer/CommandLineTools/Library/Developer/Frameworks
+-Xfrontend -disable-cross-import-overlays
+```
+
+Linker flags add `-framework Testing` with an `-rpath` pointing at the same CommandLineTools path. This setup is needed because Swift Testing is not yet part of the standard Xcode toolchain search path under SwiftPM on macOS 14.
+
+---
+
+## §8 See also
+
+- [`../explanation/macos-app.md`](../explanation/macos-app.md) — narrative explanation of design decisions and tradeoffs for the macOS app (forward link; created in the next documentation task)
+- [`../explanation/architecture.md`](../explanation/architecture.md) — system-wide architecture explanation covering the relationship between the Node server, the Mac shell, and the Chrome extension
+- [`chrome-extension.md`](chrome-extension.md) — the Chrome-side caption-scraper: same goal (intercept Zoom/Teams captions), different mechanism (DOM content script vs. AX tree), different transport (real-time `POST /kb/live/<id>` vs. batch `POST /kb/ingest`)
+
+---
+
+## Regeneration checklist
+- [x] Every governed contract (service interfaces, IPC, platform-coupling points, capture pipeline) is present with verified `file:symbol` citations.
+- [x] Every coupling point names its Apple-only API and a portability tag.
+- [x] Spot-check: the app lifecycle, the API client auth/refresh flow, and the AX capture path were rebuilt from this page and match source.
+- [ ] No automated drift guard exists for the Swift surface (no extractor harness) — re-verify against source when the app changes.
