@@ -38,6 +38,12 @@ const CB_FAILURE_THRESHOLD = 3;    // consecutive failures → open
 const CB_MAX_COOLDOWN_MS   = 5 * 60 * 1000;  // cap at 5 min
 const CB_BASE_COOLDOWN_MS  = 15_000;          // first open: 15 s
 
+// NOTE: this Map is in-process / in-memory only. It is NOT shared across
+// multiple Node.js processes or workers. The per-process scope is correct
+// for the single-process deployment model documented in the spec — a fresh
+// server process re-probes rather than staying stuck in an open state. If
+// the deployment ever moves to multi-process (cluster mode, multiple pods,
+// etc.) this state would need to migrate to a shared store (e.g. Redis).
 const circuitBreakers = new Map(); // providerKey → { failures, openUntil }
 
 function cbKey(provider, userId) { return `${provider}::${userId}`; }
@@ -91,6 +97,7 @@ const TOKEN_REDACTIONS = [
   /\bxox[abp]-[A-Za-z0-9-]{10,}\b/g,
   /\bAIza[0-9A-Za-z\-_]{35}\b/g,
   /\bAKIA[0-9A-Z]{16}\b/g,
+  /\bsk-ant-[A-Za-z0-9-]{10,}\b/g,
   /Bearer\s+[A-Za-z0-9._-]{20,}/gi,
   /apiKey=[A-Za-z0-9_-]+/gi,
 ];
@@ -99,6 +106,8 @@ function redactTokens(msg) {
   for (const re of TOKEN_REDACTIONS) s = s.replace(re, '[REDACTED]');
   return s.slice(0, 400);
 }
+// Test/utility hook — used by the test suite.
+export { redactTokens as _redactTokensForTests };
 
 export async function refreshAllOutcomes(userId, { creds = {}, taskIds } = {}) {
   let tasks = listDispatchedTasks(userId);

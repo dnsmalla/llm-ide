@@ -55,3 +55,31 @@ test('validateArgs: string[] within limits passes', () => {
   assert.equal(error, undefined);
   assert.deepEqual(value, { tags: ['a', 'bb'] });
 });
+
+// AGT-12: extra/undeclared args must be rejected to prevent a future handler
+// reading raw args from seeing unsanitised input.
+test('AGT-12: validateArgs rejects an extra undeclared argument', () => {
+  const { error } = validateArgs(
+    { q: { type: 'string' } },
+    { q: 'hello', __proto__override: 'evil' },
+  );
+  assert.ok(error, 'should return an error for the undeclared key');
+  assert.match(error, /unexpected argument '__proto__override'/);
+});
+
+test('AGT-12: validateArgs rejects when only an undeclared key is present', () => {
+  const { error } = validateArgs(
+    { q: { type: 'string' } },
+    { q: 'hello', extra: 'sneaky' },
+  );
+  assert.match(error, /unexpected argument 'extra'/);
+});
+
+test('AGT-12: validateArgs still accepts args with only declared keys', () => {
+  const { value, error } = validateArgs(
+    { q: { type: 'string' }, n: { type: 'number' } },
+    { q: 'hi', n: 1 },
+  );
+  assert.equal(error, undefined);
+  assert.deepEqual(value, { q: 'hi', n: 1 });
+});

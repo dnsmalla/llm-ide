@@ -88,5 +88,14 @@ export function validateArgs(schema, args) {
     }
     value[name] = v;
   }
+  // Reject any key present in args that is not declared in the schema.
+  // Silently dropping undeclared keys would allow a future handler that
+  // reads raw args (rather than the validated value) to see unsanitised
+  // input.  Failing fast makes the contract explicit.
+  for (const key of Object.keys(args)) {
+    if (!Object.prototype.hasOwnProperty.call(schema, key)) {
+      return { error: `unexpected argument '${key}'` };
+    }
+  }
   return { value };
 }

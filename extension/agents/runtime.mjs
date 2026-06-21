@@ -100,9 +100,7 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
   // wins — required for `custom`, whose model ids aren't prefix-routable;
   // otherwise infer from the model id. Anthropic keeps the hardened path
   // below (prompt caching, context-overflow retry, operator CLI fallback).
-  const provider = (typeof explicitProvider === 'string' && PROVIDER_IDS.includes(explicitProvider))
-    ? explicitProvider
-    : resolveProvider(model);
+  const { provider, userScopedKey, apiKey, resolvedModel } = resolveClaudeCall({ userId, model, provider: explicitProvider });
   if (provider !== 'anthropic') {
     const key = providerApiKey(userId, provider);
     if (key) {
@@ -128,9 +126,7 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
   // the wrong account and (b) sidestep the user's own quota/rate
   // limits.  Per-process ANTHROPIC_API_KEY is treated as operator
   // default and is allowed to fall back to the CLI like before.
-  const userScopedKey = userId ? safeLookupApiKey(userId) : null;
-  const apiKey = userScopedKey || process.env.ANTHROPIC_API_KEY;
-  const resolvedModel = resolveModel(model);
+  // (userScopedKey, apiKey, resolvedModel are set by resolveClaudeCall above.)
 
   if (apiKey) {
     // Build the messages array. When cacheTranscript is true, use
@@ -359,9 +355,9 @@ export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheT
   if (prompt.length > MAX_PROMPT_CHARS) throw new Error(`runClaudeStream: prompt too long`);
 
   const resolvedMaxTokens = (Number.isFinite(maxTokens) && maxTokens > 0) ? maxTokens : 8192;
-  const userScopedKey = userId ? safeLookupApiKey(userId) : null;
-  const apiKey = userScopedKey || process.env.ANTHROPIC_API_KEY;
-  const resolvedModel = resolveModel(model);
+
+  // Shared key-lookup + provider-routing (same order as runClaude).
+  const { provider: streamProvider, userScopedKey, apiKey, resolvedModel } = resolveClaudeCall({ userId, model, provider: explicitProvider });
 
   // Helper: buffered fallback via runClaude. Delivers the entire result
   // as a single chunk so the caller still gets onChunk() called.
@@ -376,9 +372,6 @@ export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheT
   // single chunk. An explicit non-anthropic provider (e.g. "custom", which
   // isn't prefix-routable) also takes this path. Without this, the streaming
   // code below would send a foreign id to the Anthropic API.
-  const streamProvider = (typeof explicitProvider === 'string' && PROVIDER_IDS.includes(explicitProvider))
-    ? explicitProvider
-    : resolveProvider(model);
   if (streamProvider !== 'anthropic') return fallbackBuffered();
 
   if (!apiKey) return fallbackBuffered();
@@ -526,6 +519,32 @@ function safeLookupApiKey(userId) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Resolve the provider, API key, and model for a Claude call.  Shared by
+ * runClaude and runClaudeStream so the lookup + fallback order is defined
+ * in exactly one place.
+ *
+ * Returns:
+ *   { provider, userScopedKey, apiKey, resolvedModel }
+ *
+ * `provider`      — the effective provider id ('anthropic', 'openai', …)
+ * `userScopedKey` — the key stored in the vault for this userId, or null.
+ *                   When non-null the caller MUST NOT silently fall back to
+ *                   the operator CLI — the user's own Anthropic account is
+ *                   in play.
+ * `apiKey`        — userScopedKey ?? process.env.ANTHROPIC_API_KEY, or null.
+ * `resolvedModel` — validated model id (falls back to DEFAULT_MODEL).
+ */
+function resolveClaudeCall({ userId, model, provider: explicitProvider }) {
+  const provider = (typeof explicitProvider === 'string' && PROVIDER_IDS.includes(explicitProvider))
+    ? explicitProvider
+    : resolveProvider(model);
+  const userScopedKey = userId ? safeLookupApiKey(userId) : null;
+  const apiKey = userScopedKey || process.env.ANTHROPIC_API_KEY;
+  const resolvedModel = resolveModel(model);
+  return { provider, userScopedKey, apiKey, resolvedModel };
 }
 
 export function tryParseJSON(raw) {

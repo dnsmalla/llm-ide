@@ -76,6 +76,13 @@ async function pollGithub(dispatched, { token } = {}) {
 
 // --- Backlog --------------------------------------------------------------
 
+// Mirrors BACKLOG_TLD_RE in agents/dispatcher.mjs:40.  Validates that the
+// `space` hostname parsed from a stored task URL is a legitimate Backlog
+// subdomain before we send a credentialed GET to it.  This prevents a
+// tampered stored-task URL (e.g. "evil.com") from redirecting our request
+// — including the apiKey in the query string — to an arbitrary host.
+const BACKLOG_TLD_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.backlog\.(?:com|jp|tool)$/;
+
 export function parseBacklogUrl(url) {
   // https://<space>/view/<KEY>
   const m = String(url).match(/^https?:\/\/([^/]+)\/view\/([A-Z0-9_-]+)/);
@@ -87,6 +94,13 @@ async function pollBacklog(dispatched, { apiKey } = {}) {
   return safe(async () => {
     const u = parseBacklogUrl(dispatched?.url);
     if (!u) return { state: 'unknown', meta: { error: 'Bad URL' } };
+    // Reject any host that isn't a recognised Backlog subdomain BEFORE
+    // the fetch — a tampered stored URL could otherwise redirect our
+    // credentialed GET (with the apiKey in the query string) to an
+    // arbitrary host outside Backlog's infrastructure.
+    if (!BACKLOG_TLD_RE.test(u.space)) {
+      return { state: 'unknown', meta: { error: 'Backlog URL host is not a valid Backlog domain' } };
+    }
     if (!apiKey) return { state: 'unknown', meta: { error: 'No Backlog apiKey supplied' } };
     // Backlog v2 personal-API-key auth unfortunately requires the key in
     // the query string for GET requests — there is no header equivalent
