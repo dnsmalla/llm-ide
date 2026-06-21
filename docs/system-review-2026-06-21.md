@@ -26,7 +26,29 @@ The critical findings and the secret-leak highs were fixed the same day (commits
 | MAC-3 `BackendManager` leaks full env to Node | ✅ fixed — env allowlist (`swift build` clean) |
 | AGT-2 Backlog key in URL | ✅ verified no-op — already never-logged + redacted |
 
-Everything else below remains **open** (triage / schedule as tech-debt).
+A subsequent full-backlog pass then remediated **the rest** (commits `15aa4a5` server, `5631843` kb, `707a0c5` agent, `276215c` extension, `7f6df07` mac):
+
+| Area | Fixed | Verification |
+|---|---|---|
+| Server | SRV-2, SRV-3, SRV-5, SRV-6, SRV-7, SRV-9, SRV-10 | +5 tests, suite green |
+| KB | KB-2, KB-3, KB-4, KB-6, KB-8, KB-9 (+migrations 0014/0015) | +2 tests, migrations apply |
+| Agent | AGT-8, AGT-9, AGT-10, AGT-11, AGT-12 | +6 tests, suite green |
+| Extension | EXT-1, EXT-3, EXT-4, EXT-5, EXT-6, EXT-7, EXT-8, EXT-9, EXT-10 | `tsc --noEmit` clean |
+| macOS | MAC-1, MAC-2, MAC-4, MAC-6, MAC-7, MAC-10 | `swift build` clean |
+
+**Deferred** (recorded, not abandoned — each needs its own focused pass, not a blind edit):
+
+| ID | Why deferred |
+|---|---|
+| SRV-4 (async bcrypt) | making auth async ripples through 10+ test call sites; half-done silently breaks DB writes |
+| SRV-8 (auth-routes monolith) | 755-line refactor; needs its own pass with full route coverage |
+| KB-10 (UTF-8 checksum) | 11/13 migration files have non-ASCII comments → switch would invalidate every stored checksum; needs comment-cleanup or a reset path first |
+| MAC-5 (adopted-backend health) | wiring reconcile into the API client risks a circular dep + feedback loop on transient errors |
+| MAC-8 (`@Observable` migration) | large cross-cutting refactor |
+| MAC-9 (crash reporting) | needs a new dependency (Sentry/etc.) + product decision |
+| KB-5, KB-7 | non-exploitable / accepted perf trade-off (reviewer recommended accepting) |
+
+Net: **2 critical + ~9 high + ~17 medium + ~14 low addressed; 7 deliberately deferred with rationale.** The detailed findings below are retained as the record; line numbers predate the fixes.
 
 ## Executive summary
 
