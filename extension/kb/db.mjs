@@ -715,6 +715,10 @@ export function deleteUserCascade(userId) {
     counts.user_repos      = del('DELETE FROM user_repos    WHERE user_id = ?');
     counts.user_secrets    = del('DELETE FROM user_secrets  WHERE user_id = ?');
     counts.agent_feedback  = del('DELETE FROM agent_feedback WHERE user_id = ?');
+    // migration 0007 — agent ask/chat transcript. No FK cascade declared, so
+    // a deleted user's conversation history survived account deletion (PII
+    // leak, KB-1).  Explicit delete here closes the gap.
+    counts.agent_ask_messages = del('DELETE FROM agent_ask_messages WHERE user_id = ?');
     counts.refresh_tokens  = del('DELETE FROM refresh_tokens WHERE user_id = ?');
     // migration 0008 — password-reset tokens are tied to a user; if we
     // skip these the column hangs as a dangling reference after the

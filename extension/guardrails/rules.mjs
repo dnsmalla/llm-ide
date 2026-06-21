@@ -62,12 +62,29 @@ function findMatches(text, patterns) {
   // a whitespace-collapsed variant — if the variant matches we report
   // the hit even when the raw text wouldn't.  The snippet we surface is
   // still drawn from the raw text so the reviewer sees the real shape.
-  const collapsed = text.replace(/\s+/g, '');
+  // We match against three representations to defeat common evasion tactics:
+  //
+  //  wsCollapsed  — whitespace stripped: catches line-wrapped secrets where
+  //                 a newline breaks the token so \b boundaries fail.
+  //
+  //  zwCollapsed  — zero-width chars stripped only (U+200B ZWSP, U+200C ZWNJ,
+  //                 U+200D ZWJ, U+2060 word-joiner, U+FEFF BOM/ZWNBSP).
+  //                 \s does NOT match these in JS, so they let an attacker
+  //                 embed an invisible separator inside a token to defeat the
+  //                 whitespace collapse.  Stripping just the zero-width chars
+  //                 preserves surrounding spaces, keeping \b word-boundaries
+  //                 intact for the secret pattern.  The runtime itself inserts
+  //                 U+200D for fence redaction, making this evasion realistic.
+  //
+  // The snippet we surface is always drawn from the raw text so the reviewer
+  // sees the real shape.
+  const wsCollapsed = text.replace(/\s+/g, '');
+  const zwCollapsed = text.replace(/[​‌‍⁠﻿]+/g, '');
   const hits = [];
   for (const { name, re } of patterns) {
     let m = text.match(re);
     if (!m) {
-      const m2 = collapsed.match(re);
+      const m2 = wsCollapsed.match(re) || zwCollapsed.match(re);
       if (m2) {
         // No precise index into the raw text — surface the first 60
         // chars of the raw text after the match position in `collapsed`

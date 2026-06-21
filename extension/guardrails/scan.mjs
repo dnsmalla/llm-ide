@@ -22,11 +22,18 @@ const SECRET_PATTERNS = _namedPatterns.map((p) => p.re);
  */
 export function scanForSecrets(text) {
   if (typeof text !== 'string' || !text) return false;
-  // Match against both raw text and whitespace-collapsed variant to
-  // catch line-wrapped tokens (same technique as rules.mjs findMatches).
-  const collapsed = text.replace(/\s+/g, '');
+  // Match against three representations to defeat evasion (mirrors rules.mjs
+  // findMatches):
+  //   wsCollapsed — whitespace stripped: catches line-wrapped secrets
+  //   zwCollapsed — zero-width chars stripped only (U+200B ZWSP, U+200C ZWNJ,
+  //                 U+200D ZWJ, U+2060 word-joiner, U+FEFF BOM/ZWNBSP).
+  //                 \s does NOT match these in JS, so stripping them separately
+  //                 preserves surrounding spaces and keeps \b word-boundaries
+  //                 intact for the secret patterns.
+  const wsCollapsed = text.replace(/\s+/g, '');
+  const zwCollapsed = text.replace(/[​‌‍⁠﻿]+/g, '');
   for (const re of SECRET_PATTERNS) {
-    if (re.test(text) || re.test(collapsed)) return true;
+    if (re.test(text) || re.test(wsCollapsed) || re.test(zwCollapsed)) return true;
   }
   return false;
 }

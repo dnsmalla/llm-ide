@@ -66,3 +66,23 @@ test('returns false for null / non-string input', () => {
 test('returns false for a URL that is not a token', () => {
   assert.equal(scanForSecrets('https://example.com/api/v2/issues'), false);
 });
+
+// AGT-5: zero-width chars must not allow evasion of secret detection.
+// U+200B (ZWSP), U+200C (ZWNJ), U+200D (ZWJ), U+2060 (word-joiner),
+// and U+FEFF (BOM/ZWNBSP) are invisible and not matched by \s, so an
+// attacker can embed them inside a secret to defeat the \s+ collapse.
+test('detects AWS key split by U+200B zero-width space (AGT-5)', () => {
+  // AKIAIOSFODNN7EXAMPLE — 20 chars. Insert a U+200B after "AKIA" so the
+  // raw text fails the \bAKIA…\b match, and the \s+-only collapse also
+  // fails (U+200B is NOT \s in JS regex).
+  const evaded = 'AKIA​IOSFODNN7EXAMPLE';
+  assert.equal(scanForSecrets(evaded), true,
+    'zero-width U+200B embedded in AWS key must be detected');
+});
+
+test('detects GitHub PAT split by U+200D ZWJ (AGT-5)', () => {
+  // ghp_ + 36 alphanumeric chars — split in the middle with U+200D.
+  const evaded = 'ghp_aaaaaaaaaaaa‍aaaaaaaaaaaaaaaaaaaaaaaa';
+  assert.equal(scanForSecrets(evaded), true,
+    'zero-width U+200D embedded in GitHub PAT must be detected');
+});

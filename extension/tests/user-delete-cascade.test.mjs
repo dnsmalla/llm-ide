@@ -164,12 +164,49 @@ test('cascade is transactional — counts add up across every table', () => {
   const expectedKeys = [
     'outcomes', 'plan_tasks', 'plans', 'review_items', 'entities',
     'sources', 'meetings', 'user_repos', 'user_secrets',
-    'agent_feedback', 'refresh_tokens', 'audit_anonymised', 'user',
+    'agent_feedback', 'agent_ask_messages', 'refresh_tokens', 'audit_anonymised', 'user',
   ];
   for (const k of expectedKeys) {
     assert.ok(k in counts, `counts missing key: ${k}`);
     assert.equal(typeof counts[k], 'number');
   }
+});
+
+// KB-1: agent_ask_messages must be deleted when the user is deleted.
+// Before the fix, deleteUserCascade never touched this table (no FK cascade),
+// so the deleted user's chat transcript survived the account deletion — PII leak.
+test('agent_ask_messages are wiped on user deletion (KB-1)', () => {
+  reset();
+  const alice = provision('alice-ask@example.com').id;
+  const bob   = provision('bob-ask@example.com').id;
+
+  // Insert ask-history for alice and bob.
+  db.appendAgentAskMessage(alice, { role: 'user',      content: 'Hello, agent!' });
+  db.appendAgentAskMessage(alice, { role: 'assistant', content: 'Hello, Alice.' });
+  db.appendAgentAskMessage(bob,   { role: 'user',      content: 'Bob speaking.' });
+
+  const handle = db.getDb();
+  // Pre-deletion sanity.
+  assert.equal(handle.prepare('SELECT COUNT(*) AS n FROM agent_ask_messages WHERE user_id = ?').get(alice).n, 2);
+  assert.equal(handle.prepare('SELECT COUNT(*) AS n FROM agent_ask_messages WHERE user_id = ?').get(bob).n, 1);
+
+  const counts = db.deleteUserCascade(alice);
+
+  // Alice's rows must be gone.
+  assert.equal(
+    handle.prepare('SELECT COUNT(*) AS n FROM agent_ask_messages WHERE user_id = ?').get(alice).n,
+    0,
+    'alice agent_ask_messages should be deleted',
+  );
+  // Bob's row must survive.
+  assert.equal(
+    handle.prepare('SELECT COUNT(*) AS n FROM agent_ask_messages WHERE user_id = ?').get(bob).n,
+    1,
+    'bob agent_ask_messages must not be touched',
+  );
+  // The returned counts receipt must include the key.
+  assert.ok('agent_ask_messages' in counts, 'counts must include agent_ask_messages key');
+  assert.equal(counts.agent_ask_messages, 2);
 });
 
 test('refuses to run with no userId', () => {

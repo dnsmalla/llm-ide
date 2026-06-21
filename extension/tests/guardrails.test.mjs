@@ -140,3 +140,25 @@ test('info findings always include a summary line', () => {
   });
   assert.ok(r.info.some((i) => i.ruleId === 'dispatch.summary'));
 });
+
+// AGT-5: zero-width chars must not allow evasion of secret detection
+// in the guardrail rule engine's findMatches collapse path.
+test('dispatch — AWS key with embedded U+200B is blocked (AGT-5)', () => {
+  // AKIAIOSFODNN7EXAMPLE with a U+200B (ZWSP) after "AKIA". The \s+ collapse
+  // misses it, so the secret evades both raw and collapsed checks before fix.
+  blocking('dispatch', {
+    target: 'github',
+    config: { repo: 'a/b', token: 'x' },
+    items: [{ title: 'ok', body: 'AKIA​IOSFODNN7EXAMPLE is the key' }],
+  }, 'dispatch.secret');
+});
+
+test('codegen-apply — GitHub PAT with embedded U+200D is blocked (AGT-5)', () => {
+  // ghp_ + 36 chars split by U+200D (ZWJ) in the middle.
+  blocking('codegen-apply', {
+    repoPath: '/tmp/repo',
+    allowedRepos: ['/tmp/repo'],
+    files: [{ path: 'src/a.ts', content: 'const t = "ghp_aaaaaaaaaaaa‍aaaaaaaaaaaaaaaaaaaaaaaa"' }],
+    tests: [],
+  }, 'codegen.secret');
+});
