@@ -15,6 +15,9 @@ final class TerminalSession: NSObject {
     var title: String
     var status: SessionStatus = .running
     var workingDirectory: URL
+    /// When non-nil, this session is a remote SSH shell (`ssh -t <alias>`)
+    /// rather than a local login shell. Auth is delegated to ssh/~/.ssh/config.
+    let remoteAlias: String?
     private(set) var termView: LocalProcessTerminalView?
     private(set) var spawnError: String?
     /// Copy read only in `deinit` (which is nonisolated). Assigned once on the
@@ -29,8 +32,9 @@ final class TerminalSession: NSObject {
 
     // MARK: - Init
 
-    init(number: Int, workingDirectory: URL) {
-        self.title = "zsh \(number)"
+    init(number: Int, workingDirectory: URL, remoteAlias: String? = nil) {
+        self.remoteAlias = remoteAlias
+        self.title = remoteAlias.map { "ssh: \($0)" } ?? "zsh \(number)"
         self.workingDirectory = workingDirectory
     }
 
@@ -38,34 +42,44 @@ final class TerminalSession: NSObject {
 
     /// Spawn the PTY. Called once from `TerminalSessionView.makeNSView`.
     func start() {
-        let shellPath: String
-        if FileManager.default.fileExists(atPath: "/bin/zsh") {
-            shellPath = "/bin/zsh"
-        } else if FileManager.default.fileExists(atPath: "/bin/bash") {
-            shellPath = "/bin/bash"
+        let executable: String
+        let args: [String]
+
+        if let alias = remoteAlias {
+            guard FileManager.default.fileExists(atPath: RemoteSSHCommand.sshPath) else {
+                spawnError = "ssh not found at \(RemoteSSHCommand.sshPath)."
+                status = .dead
+                return
+            }
+            executable = RemoteSSHCommand.sshPath
+            args = RemoteSSHCommand.args(forAlias: alias)
         } else {
-            spawnError = "Shell not found. Check /bin/zsh or /bin/bash."
-            status = .dead
-            return
+            if FileManager.default.fileExists(atPath: "/bin/zsh") {
+                executable = "/bin/zsh"
+            } else if FileManager.default.fileExists(atPath: "/bin/bash") {
+                executable = "/bin/bash"
+            } else {
+                spawnError = "Shell not found. Check /bin/zsh or /bin/bash."
+                status = .dead
+                return
+            }
+            args = ["--login"]
         }
 
         // Give the terminal a non-zero initial frame so SwiftTerm calculates
         // a sensible initial PTY size (cols/rows). Programs like vim and htop
-        // read the terminal size at startup; a 0×0 frame causes them to
-        // render incorrectly on first open.
+        // read the terminal size at startup; a 0×0 frame renders incorrectly.
         let tv = LocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 400))
         tv.processDelegate = self
 
         // Curated environment — passes only the variables a user shell needs.
-        // Inheriting nil (the parent env) would leak server secrets such as
-        // ANTHROPIC_API_KEY, JWT_SECRET, and database paths into every tab.
         let env = Self.shellEnvironment()
 
         tv.startProcess(
-            executable: shellPath,
-            args: ["--login"],
+            executable: executable,
+            args: args,
             environment: env,
-            execName: URL(fileURLWithPath: shellPath).lastPathComponent,
+            execName: URL(fileURLWithPath: executable).lastPathComponent,
             currentDirectory: workingDirectory.path
         )
 
