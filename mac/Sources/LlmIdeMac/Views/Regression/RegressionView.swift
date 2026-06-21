@@ -167,7 +167,6 @@ private struct RegressionSourcesPane: View {
 
     @EnvironmentObject var theme: ThemeStore
     @Environment(LibraryItemStore.self) private var libraryStore
-    @State private var expandedPaths: Set<String> = []
 
     var body: some View {
         let t = theme.current
@@ -190,30 +189,21 @@ private struct RegressionSourcesPane: View {
                     }
                 } header: { faultsSectionHeader }
 
-                // CODE section — drives off LibraryItemStore so the
-                // contents match Library tab's CODE section exactly
-                // (same tracked items, same tree shape rooted at
-                // each folder-origin). FSNode + buildTree are
-                // shared with FileTreePanel.
-                let codeTrees = buildCodeTrees()
+                // CODE section — renders EXACTLY like the Library tab: the same
+                // LibraryItemStore items, built into a real nested hierarchy via
+                // CodeEntry (treePath-based) + OutlineGroup. (Previously used the
+                // flat buildCategoryTrees, which grouped by parent-folder name
+                // and collided on duplicate names like CodeGraph.)
+                let codeEntries = CodeEntry.build(from: libraryStore.items(for: .code))
                 Section {
-                    if codeTrees.isEmpty {
+                    if codeEntries.isEmpty {
                         Text("No code in Library yet — add a repo from Settings → GitLab / GitHub.")
                             .font(Typography.fileMeta)
                             .foregroundStyle(.quaternary)
                             .listRowSeparator(.hidden)
                     } else {
-                        ForEach(codeTrees) { root in
-                            RepoFileTreeRow(
-                                node: root,
-                                depth: 0,
-                                expandedPaths: $expandedPaths,
-                                isSelected: { sel in
-                                    if case .file(let u) = selected, u == sel { return true }
-                                    return false
-                                },
-                                onSelect: { url in selected = .file(url) }
-                            )
+                        OutlineGroup(codeEntries, children: \.children) { entry in
+                            codeEntryRow(entry)
                         }
                     }
                 } header: { codeSectionHeader }
@@ -288,12 +278,44 @@ private struct RegressionSourcesPane: View {
         }
     }
 
-    // MARK: - Code trees (delegates to the shared helper in
-    //         FileTreePanel.swift so Library + Regression can't
-    //         drift on grouping / sorting).
+    // MARK: - Code tree row (mirrors LibraryView.codeEntryRow)
 
-    private func buildCodeTrees() -> [FSNode] {
-        buildCategoryTrees(items: libraryStore.items(for: .code))
+    @ViewBuilder
+    private func codeEntryRow(_ entry: CodeEntry) -> some View {
+        let t = theme.current
+        if let item = entry.item {
+            let isSel: Bool = {
+                if case .file(let u) = selected, u == item.url { return true }
+                return false
+            }()
+            Button {
+                selected = .file(item.url)
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "doc")
+                        .font(Typography.filename)
+                        .foregroundStyle(t.textMuted)
+                    Text(entry.name)
+                        .font(Typography.filename)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .listRowBackground(isSel ? Color.accentColor.opacity(0.18) : Color.clear)
+        } else {
+            HStack(spacing: 5) {
+                Image(systemName: "folder.fill")
+                    .font(Typography.filename)
+                    .foregroundStyle(LibraryItem.Category.code.uiColor)
+                Text(entry.name)
+                    .font(Typography.filename)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+        }
     }
 
     // MARK: - Fault row
