@@ -5,6 +5,7 @@
 
 import { config } from '../core/config.mjs';
 import { errAuth, errNotFound, errValidation } from '../core/errors.mjs';
+import { readBody, parseJSON } from '../core/utils.mjs';
 import { requireAdmin } from './auth.mjs';
 import { tryConsume } from './rate-limit.mjs';
 import {
@@ -30,26 +31,25 @@ function send(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+// Hardened body reader: delegates to core/utils readBody (uses req.pause()
+// on overflow, not req.destroy()) so the route handler's catch block can
+// still write a 413/400 JSON response to the now-unblocked res socket.
+// Returns a parsed object; throws with a descriptive message on errors.
 async function readJson(req, max) {
-  return await new Promise((resolve, reject) => {
-    let body = '';
-    let size = 0;
-    req.on('data', (chunk) => {
-      size += chunk.length;
-      if (size > max) {
-        reject(new Error('Body too large'));
-        req.destroy();
-        return;
-      }
-      body += chunk;
-    });
-    req.on('end', () => {
-      if (!body) return resolve({});
-      try { resolve(JSON.parse(body)); }
-      catch { reject(new Error('Body must be valid JSON')); }
-    });
-    req.on('error', reject);
-  });
+  let raw;
+  try {
+    raw = await readBody(req, max);
+  } catch (err) {
+    // Map readBody's AppError (status 413/408) to something the existing
+    // callers already handle: they catch any Error and send a 400/413 response.
+    const e = new Error(err.message || 'Body too large');
+    e.status = err.status || 413;
+    throw e;
+  }
+  if (!raw) return {};
+  const parsed = parseJSON(raw);
+  if (parsed === null) throw new Error('Body must be valid JSON');
+  return parsed;
 }
 
 // Raw-bytes reader for binary uploads (plugin install zips). Uses
@@ -305,6 +305,10 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   }
 
   // ---- Authenticated -------------------------------------------------
+  // Guard placed here — immediately after the last public route block —
+  // so every route below this point is guaranteed to have req.user set.
+  // Adding a new authed route below this line is safe by construction;
+  // adding one ABOVE would bypass auth (don't do that).
 
   if (!req.user) {
     send(res, 401, { error: { code: 'AUTH_REQUIRED', message: 'Authentication required' } });

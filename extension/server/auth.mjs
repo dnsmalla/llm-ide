@@ -13,7 +13,7 @@
 //
 // Anything else returns 401 with a stable `AUTH_REQUIRED` error code.
 
-import { errAuth } from '../core/errors.mjs';
+import { errAuth, errForbidden } from '../core/errors.mjs';
 import { extractBearer, verifyAccessToken } from './jwt.mjs';
 import { isJtiRevoked } from '../kb/db.mjs';
 
@@ -62,6 +62,6 @@ export function authenticate(req) {
 // authorization is "owner of resource" which lives in the route logic.
 export function requireAdmin(req) {
   if (!req.user || req.user.role !== 'admin') {
-    throw errAuth('Admin role required');
+    throw errForbidden('Admin role required');
   }
 }

@@ -72,6 +72,11 @@ function verifyAndDecode(token) {
   const now = Math.floor(Date.now() / 1000);
   if (payload.iss !== config.jwtIssuer) return null;
   if (typeof payload.exp !== 'number' || typeof payload.iat !== 'number') return null;
+  // Require jti so every token is revocable. A jti-less token bypasses
+  // the revocation check in auth.mjs because isJtiRevoked('undefined') is
+  // never true — rejecting here is defense-in-depth (all issued tokens
+  // include a jti, so this only fires for externally crafted tokens).
+  if (!payload.jti || typeof payload.jti !== 'string') return null;
   // A malformed token (exp not after iat) is just an invalid token —
   // return null like every other validation failure here so the caller
   // produces a clean 401 instead of throwing a 500 out of the verifier.

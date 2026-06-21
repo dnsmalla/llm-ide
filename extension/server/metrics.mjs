@@ -3,12 +3,12 @@
 //   2. We don't want to lock the deployment to a specific scraper SDK.
 //
 // Metrics we expose:
-//   meetnotes_uptime_seconds (gauge)
-//   meetnotes_http_requests_total{method, route, status} (counter)
-//   meetnotes_http_request_duration_seconds_bucket{...} (histogram)
-//   meetnotes_kb_records{kind} (gauge)  — pulled from kb stats
-//   meetnotes_audit_events_total (counter)
-//   meetnotes_rate_limit_rejections_total{profile} (counter)
+//   llmide_uptime_seconds (gauge)
+//   llmide_http_requests_total{method, route, status} (counter)
+//   llmide_http_request_duration_seconds_bucket{...} (histogram)
+//   llmide_kb_records{kind} (gauge)  — pulled from kb stats
+//   llmide_audit_events_total (counter)
+//   llmide_rate_limit_rejections_total{profile} (counter)
 //
 // The histogram buckets are tuned for our workload: most KB writes are
 // sub-100ms, LLM calls are 1–60s, dispatch is 1–10s.  Skewing toward
@@ -161,45 +161,45 @@ export function renderPrometheus() {
   const lines = [];
   const uptimeSec = (Date.now() - registry.startedAt) / 1000;
 
-  lines.push('# HELP meetnotes_uptime_seconds Server uptime in seconds.');
-  lines.push('# TYPE meetnotes_uptime_seconds gauge');
-  lines.push(`meetnotes_uptime_seconds ${uptimeSec.toFixed(3)}`);
+  lines.push('# HELP llmide_uptime_seconds Server uptime in seconds.');
+  lines.push('# TYPE llmide_uptime_seconds gauge');
+  lines.push(`llmide_uptime_seconds ${uptimeSec.toFixed(3)}`);
 
-  lines.push('# HELP meetnotes_http_requests_total Total HTTP requests.');
-  lines.push('# TYPE meetnotes_http_requests_total counter');
+  lines.push('# HELP llmide_http_requests_total Total HTTP requests.');
+  lines.push('# TYPE llmide_http_requests_total counter');
   for (const { labels, value } of registry.httpRequests.iterate()) {
-    lines.push(`meetnotes_http_requests_total${fmtLabels(labels)} ${value}`);
+    lines.push(`llmide_http_requests_total${fmtLabels(labels)} ${value}`);
   }
 
-  lines.push('# HELP meetnotes_http_request_duration_seconds HTTP request latency.');
-  lines.push('# TYPE meetnotes_http_request_duration_seconds histogram');
+  lines.push('# HELP llmide_http_request_duration_seconds HTTP request latency.');
+  lines.push('# TYPE llmide_http_request_duration_seconds histogram');
   for (const { labels, counts, sum, count } of registry.httpDuration.iterate()) {
     for (let i = 0; i < HIST_BUCKETS_SEC.length; i += 1) {
       const labelsBucket = { ...labels, le: String(HIST_BUCKETS_SEC[i]) };
-      lines.push(`meetnotes_http_request_duration_seconds_bucket${fmtLabels(labelsBucket)} ${counts[i]}`);
+      lines.push(`llmide_http_request_duration_seconds_bucket${fmtLabels(labelsBucket)} ${counts[i]}`);
     }
     const labelsInf = { ...labels, le: '+Inf' };
-    lines.push(`meetnotes_http_request_duration_seconds_bucket${fmtLabels(labelsInf)} ${count}`);
-    lines.push(`meetnotes_http_request_duration_seconds_sum${fmtLabels(labels)} ${sum.toFixed(3)}`);
-    lines.push(`meetnotes_http_request_duration_seconds_count${fmtLabels(labels)} ${count}`);
+    lines.push(`llmide_http_request_duration_seconds_bucket${fmtLabels(labelsInf)} ${count}`);
+    lines.push(`llmide_http_request_duration_seconds_sum${fmtLabels(labels)} ${sum.toFixed(3)}`);
+    lines.push(`llmide_http_request_duration_seconds_count${fmtLabels(labels)} ${count}`);
   }
 
-  lines.push('# HELP meetnotes_rate_limit_rejections_total Requests rejected by rate limiter.');
-  lines.push('# TYPE meetnotes_rate_limit_rejections_total counter');
+  lines.push('# HELP llmide_rate_limit_rejections_total Requests rejected by rate limiter.');
+  lines.push('# TYPE llmide_rate_limit_rejections_total counter');
   for (const { labels, value } of registry.rateLimitDenies.iterate()) {
-    lines.push(`meetnotes_rate_limit_rejections_total${fmtLabels(labels)} ${value}`);
+    lines.push(`llmide_rate_limit_rejections_total${fmtLabels(labels)} ${value}`);
   }
 
-  lines.push('# HELP meetnotes_audit_events_total Audit log rows written.');
-  lines.push('# TYPE meetnotes_audit_events_total counter');
+  lines.push('# HELP llmide_audit_events_total Audit log rows written.');
+  lines.push('# TYPE llmide_audit_events_total counter');
   for (const { value } of registry.auditEvents.iterate()) {
-    lines.push(`meetnotes_audit_events_total ${value}`);
+    lines.push(`llmide_audit_events_total ${value}`);
   }
 
-  lines.push('# HELP meetnotes_kb_records Knowledge base record counts by kind.');
-  lines.push('# TYPE meetnotes_kb_records gauge');
+  lines.push('# HELP llmide_kb_records Knowledge base record counts by kind.');
+  lines.push('# TYPE llmide_kb_records gauge');
   for (const { labels, value } of registry.kbRecords.iterate()) {
-    lines.push(`meetnotes_kb_records${fmtLabels(labels)} ${value}`);
+    lines.push(`llmide_kb_records${fmtLabels(labels)} ${value}`);
   }
 
   return lines.join('\n') + '\n';

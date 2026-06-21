@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { config } from '../core/config.mjs';
 import { hashRefreshToken, newRefreshToken, signAccessToken } from './jwt.mjs';
 import { errAuth, errConflict, errForbidden, errValidation, errNotFound } from '../core/errors.mjs';
+import { migrateLegacySecrets } from './vault.mjs';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD = 10;
@@ -129,6 +130,10 @@ export function login(db, { email, password, userAgent }) {
   if (row.status !== 'active') throw errForbidden('Account disabled');
 
   db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?").run(row.id);
+
+  // Best-effort legacy-vault migration: re-encrypt any pre-AAD secrets
+  // at login so they gain the stronger AAD binding. Never blocks login.
+  try { migrateLegacySecrets(db, row.id); } catch { /* non-fatal */ }
 
   const access = signAccessToken({ userId: row.id, role: row.role });
   const refresh = newRefreshToken();
@@ -297,9 +302,14 @@ export function createPasswordResetToken(db, { email }) {
   if (!user) {
     // Return a fake-success so enumeration isn't possible. Callers
     // MUST NOT distinguish this from a real success.
+    // Equalize DB ops with the known-user path: a known user triggers
+    // a DELETE + INSERT below; a dummy SELECT 1 approximates that cost
+    // so timing doesn't reveal whether the email is registered.
+    db.prepare('SELECT 1').get();
     return { email: e, expiresAt: new Date(Date.now() + RESET_TTL_SEC * 1000).toISOString() };
   }
   if (user.status !== 'active') {
+    db.prepare('SELECT 1').get();
     return { email: e, expiresAt: new Date(Date.now() + RESET_TTL_SEC * 1000).toISOString() };
   }
 

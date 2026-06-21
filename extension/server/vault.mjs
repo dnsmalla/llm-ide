@@ -191,3 +191,81 @@ export function getSecrets(db, userId, keys) {
 }
 
 export const VAULT_KEYS = Array.from(ALLOWED_KEYS);
+
+/**
+ * Re-encrypt any secrets for `userId` that were stored without AAD
+ * (legacy pre-AAD blobs).  Call once per user at login — best-effort,
+ * never throws so a migration failure never blocks login.
+ *
+ * A legacy blob succeeds under `attempt(false)` but fails under
+ * `attempt(true)`.  We detect it by trying the current-format decrypt
+ * first; if that throws and the legacy path succeeds, we immediately
+ * re-encrypt with AAD and update the row.
+ *
+ * Emits a structured info line to stderr for observability:
+ *   { level: 'info', msg: 'vault_legacy_migrated', userId, key }
+ */
+export function migrateLegacySecrets(db, userId) {
+  let rows;
+  try {
+    rows = db.prepare(
+      'SELECT secret_key, ciphertext FROM user_secrets WHERE user_id = ?',
+    ).all(String(userId));
+  } catch {
+    return; // DB error — don't block login
+  }
+
+  for (const row of rows) {
+    try {
+      const blob = Buffer.isBuffer(row.ciphertext) ? row.ciphertext : Buffer.from(row.ciphertext);
+      if (blob.length < VERSION_BYTE_LEN + IV_LEN + TAG_LEN) continue;
+      const version = blob[0];
+      if (version !== KEY_VERSION) continue;
+
+      const iv = blob.subarray(1, 1 + IV_LEN);
+      const tag = blob.subarray(blob.length - TAG_LEN);
+      const ct = blob.subarray(1 + IV_LEN, blob.length - TAG_LEN);
+      const key = Buffer.from(deriveDataKey(userId));
+      const versionByte = blob.subarray(0, VERSION_BYTE_LEN);
+
+      // Try current-format (with AAD) first — if it succeeds the blob is
+      // already migrated, skip it.
+      let plaintext;
+      let isLegacy = false;
+      try {
+        const d = crypto.createDecipheriv('aes-256-gcm', key, iv);
+        d.setAAD(versionByte);
+        d.setAuthTag(tag);
+        plaintext = Buffer.concat([d.update(ct), d.final()]).toString('utf8');
+      } catch {
+        // Current-format failed — try legacy (no AAD).
+        try {
+          const d = crypto.createDecipheriv('aes-256-gcm', key, iv);
+          d.setAuthTag(tag);
+          plaintext = Buffer.concat([d.update(ct), d.final()]).toString('utf8');
+          isLegacy = true;
+        } catch {
+          continue; // Neither path works — corrupt blob, skip.
+        }
+      }
+
+      if (!isLegacy) continue; // Already uses current format.
+
+      // Re-encrypt with AAD and overwrite the row.
+      const newBlob = encrypt(userId, plaintext);
+      db.prepare(`
+        UPDATE user_secrets SET ciphertext = ?, updated_at = datetime('now')
+        WHERE user_id = ? AND secret_key = ?
+      `).run(newBlob, String(userId), row.secret_key);
+
+      process.stderr.write(JSON.stringify({
+        level: 'info',
+        msg: 'vault_legacy_migrated',
+        userId: String(userId),
+        key: row.secret_key,
+      }) + '\n');
+    } catch {
+      // Per-secret errors are non-fatal — keep going.
+    }
+  }
+}
