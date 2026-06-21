@@ -69,7 +69,7 @@ The authoritative per-endpoint request/response schema is [`../reference/api/ope
 
 Coverage is verified by `docs/_scripts/check_api_coverage.py`: every URL in the server's `ENDPOINTS` array must have a matching path in the OpenAPI document. The script prints `OK: all N live endpoints documented.` when passing.
 
-**Caveat on schema fidelity:** Presence in the OpenAPI document is checked automatically. Per-endpoint request/response *schema accuracy* for bulk-documented endpoints has only been spot-verified. When relying on the schema for a specific endpoint, confirm against the handler source.
+**Schema fidelity:** Endpoint *presence* is checked automatically by `check_api_coverage.py`. Per-endpoint request/response *schemas* were handler-verified in a full sweep (2026-06) that corrected ~33 endpoints (missing request bodies, wrong response field names, missing error codes). The OpenAPI document is the authoritative contract; `check_api_coverage` keeps the endpoint set in sync, but schema bodies are hand-maintained — re-verify against the handler when you change one.
 
 ### Global conventions
 
@@ -280,7 +280,7 @@ Default: `127.0.0.1:3456` (`config.mjs:113–114`). Binding a non-loopback addre
 
 ## Regeneration checklist
 
-- [x] Every governed symbol/endpoint/table/prompt is present with its exact shape — **caveat (§3):** endpoint *presence* is checker-verified; per-endpoint OpenAPI *schema fidelity* for bulk-documented routes is spot-verified only.
+- [x] Every governed symbol/endpoint/table/prompt is present with its exact shape — endpoint presence is checker-verified, and per-endpoint OpenAPI schemas were handler-verified in the 2026-06 fidelity sweep (§3).
 - [x] Every magic number, timeout, cap, regex, and crypto parameter is stated.
 - [x] Spot-check: auth lifecycle, the rate-limit URL→profile mapping, vault crypto, and the body/prompt caps were rebuilt from this page and match source.
 - [x] Structured facts link to their extractor-generated reference page (no hand-copied drift).
