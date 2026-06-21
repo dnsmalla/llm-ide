@@ -178,4 +178,4 @@ or the terminal).
 - `mac/Sources/LlmIdeMac/Views/Terminal/TerminalSession.swift` (remote spawn)
 - `mac/Sources/LlmIdeMac/Views/Terminal/TerminalPanelState.swift`
   (`connectRemote`)
-- `mac/Sources/LlmIdeMac/Views/Settings/SettingsView.swift` (register section)
+- `mac/Sources/LlmIdeMac/Views/SettingsView.swift` (register section)
