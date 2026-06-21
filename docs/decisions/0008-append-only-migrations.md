@@ -12,7 +12,7 @@ The schema evolves as features land. Inline `ALTER TABLE` calls at server start,
 
 ## Decision
 
-Migrations live under `extension/kb/migrations/NNNN_<name>.sql`, applied in lexical order by `migrations.mjs` on server start. A shipped migration is never edited; the only legal change is a new file with the next number. Schema version is tracked in a `_migrations` table.
+Migrations live under `extension/kb/migrations/NNNN_<name>.sql`, applied in lexical order by `migrations.mjs` on server start. A shipped migration is never edited; the only legal change is a new file with the next number. Schema version is tracked in a `schema_migrations` table.
 
 ## Consequences
 
