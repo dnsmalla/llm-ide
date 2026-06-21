@@ -2,10 +2,11 @@
 // the GitHubClient ↔ RepoBackend adapter that translates them into the
 // neutral RepoBackend models.
 //
-// Scope: read-only. POST / PATCH paths (create-issue, comment, close)
-// are intentionally not implemented in v1 — call sites check the
-// `canWriteIssues` flag to disable those affordances when GitHub is
-// the active backend.
+// Scope: read + write. The write paths (create-issue, comment, branch,
+// pull request) are implemented in GitHubClient+RepoBackend.swift, and
+// both capability flags (`canWriteIssues`, `canCreateMergeRequests`) are
+// true — so call sites that gate on those flags enable the affordances
+// for GitHub, same as GitLab.
 
 import Foundation
 

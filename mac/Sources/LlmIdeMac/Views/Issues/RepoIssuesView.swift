@@ -3,12 +3,13 @@
 // RepoBackend protocol, and surfaces a backend toggle when both
 // providers are configured.
 //
-// Scope: read-only. Open / Closed filter, search, label filter, and
-// click-to-open-on-web. Write paths (create, comment, close, MRs / PRs)
-// stay in the dedicated GitLab IssueBoardView for now — that view still
-// owns the full write surface against GitLab. If the user only has
-// GitHub configured, AppShell routes to this view; if only GitLab, it
-// routes to IssueBoardView; if both, the user can toggle.
+// Scope: read + write for BOTH backends. Open / Closed filter, search,
+// label filter, click-to-open-on-web, plus New Issue (compose sheet) and
+// Close / Reopen — all gated on `canWriteIssues` (true for GitLab and
+// GitHub). The dedicated GitLab IssueBoardView still owns the richer
+// GitLab-only affordances (weight, due dates, MR creation UI). If the user
+// only has GitHub configured, AppShell routes here; if only GitLab, to
+// IssueBoardView; if both, the user can toggle.
 
 import SwiftUI
 

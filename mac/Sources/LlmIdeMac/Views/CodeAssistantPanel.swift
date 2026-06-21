@@ -254,20 +254,21 @@ struct CodeAssistantPanel: View {
         .sheet(isPresented: $showingIssueSheet) {
             if let pt = pendingTool,
                let args = pt.createIssueArgs,
-               let proj = config.gitLabSavedProjects.first(where: { $0.isActive }) {
-                CreateGitLabIssueSheet(
+               let target = resolveIssueTarget() {
+                CreateIssueSheet(
                     initialArgs: args,
-                    projectName: proj.displayName.isEmpty ? "project" : proj.displayName,
-                    projectURL: proj.url,
+                    projectName: target.label,
+                    projectURL: target.projectURL,
+                    provider: target.kind == .gitlab ? "GitLab" : "GitHub",
                     onConfirm: { editedArgs in
-                        await confirmCreateIssue(editedArgs, project: proj)
+                        await confirmCreateIssue(editedArgs, target: target)
                     }
                 )
             } else {
                 VStack(spacing: 12) {
-                    Text("Active GitLab project unavailable.")
+                    Text("No issue tracker available.")
                         .font(.system(size: 13))
-                    Text("Add or activate a project in Settings → GitLab.")
+                    Text("Add or activate a project in Settings → GitLab or GitHub.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                     Button("Close") { showingIssueSheet = false }
@@ -363,21 +364,22 @@ struct CodeAssistantPanel: View {
         .sheet(isPresented: $showingCommentSheet) {
             if let pt = pendingTool,
                let args = pt.commentIssueArgs,
-               let proj = config.gitLabSavedProjects.first(where: { $0.isActive }) {
-                CommentGitLabIssueSheet(
+               let target = resolveIssueTarget() {
+                CommentIssueSheet(
                     initialArgs: args,
-                    projectName: proj.displayName.isEmpty ? "project" : proj.displayName,
-                    projectURL: proj.url,
+                    projectName: target.label,
+                    projectURL: target.projectURL,
+                    provider: target.kind == .gitlab ? "GitLab" : "GitHub",
                     issueTitle: recentIssues.first(where: { $0.iid == args.iid })?.title,
                     onConfirm: { editedArgs in
-                        await confirmCommentIssue(editedArgs, project: proj)
+                        await confirmCommentIssue(editedArgs, target: target)
                     }
                 )
             } else {
                 VStack(spacing: 12) {
-                    Text("Active GitLab project unavailable.")
+                    Text("No issue tracker available.")
                         .font(.system(size: 13))
-                    Text("Add or activate a project in Settings → GitLab.")
+                    Text("Add or activate a project in Settings → GitLab or GitHub.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                     Button("Close") { showingCommentSheet = false }
@@ -1545,37 +1547,32 @@ struct CodeAssistantPanel: View {
         }
     }
 
-    /// Calls GitLab directly with the user's edited args. On success,
-    /// appends a synthetic user turn so the agent can acknowledge in
-    /// the next round, and re-POSTs /code-assist with "(continue)".
+    /// Creates the issue via the resolved backend (GitLab or GitHub) with
+    /// the user's edited args. On success, appends a synthetic user turn so
+    /// the agent can acknowledge in the next round, and re-POSTs /code-assist.
     @MainActor
-    private func confirmCreateIssue(_ args: CreateGitLabIssueSheet.Args,
-                                    project: SavedGitLabProject) async -> CreateGitLabIssueSheet.ConfirmResult {
-        guard let pid = project.resolvedId else {
-            return .failure("Project ID not resolved — re-resolve it in Settings → GitLab.")
-        }
-        let client = GitLabClient()
+    private func confirmCreateIssue(_ args: CreateIssueSheet.Args,
+                                    target: IssueTarget) async -> CreateIssueSheet.ConfirmResult {
+        let client: RepoBackend = target.kind == .gitlab
+            ? GitLabClient(config: config) : GitHubClient(config: config)
         do {
-            let payload = GitLabIssuePayload(
+            let payload = RepoIssuePayload(
                 title: args.title,
-                description: args.description.isEmpty ? nil : args.description,
-                labels: args.labels.isEmpty ? nil : args.labels.joined(separator: ","),
-                milestoneId: nil,
-                assigneeIds: nil
+                body: args.description.isEmpty ? nil : args.description,
+                labels: args.labels.isEmpty ? nil : args.labels
             )
-            let issue = try await client.createIssue(projectId: pid, payload: payload)
+            let issue = try await client.createIssue(projectId: target.projectId, payload: payload)
             // Clear the pending tool so the card disappears.
             self.pendingTool = nil
             // Synthetic acknowledgement turn — agent sees the result in history.
-            let issueURL = project.url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-                + "/-/issues/\(issue.iid)"
+            // RepoIssue.webUrl is backend-correct for both providers.
             history.append(.init(
                 role: .user,
-                content: "(executed create-gitlab-issue → #\(issue.iid) \(issueURL))"
+                content: "(executed create-issue → #\(issue.number) \(issue.webUrl))"
             ))
             // Re-invoke the agent so it can acknowledge in natural language.
             await sendFollowup()
-            return .success(issue.iid)
+            return .success(issue.number)
         } catch {
             return .failure(error.localizedDescription)
         }
@@ -1663,27 +1660,23 @@ struct CodeAssistantPanel: View {
         return .success
     }
 
-    /// Calls GitLab directly to post a comment on the given issue.
-    /// Mirrors `confirmCreateIssue`: pushes a synthetic ack turn so the
-    /// agent can acknowledge in the next round.
+    /// Posts a comment on the given issue via the resolved backend (GitLab or
+    /// GitHub). Mirrors `confirmCreateIssue`: pushes a synthetic ack turn so
+    /// the agent can acknowledge in the next round.
     @MainActor
-    private func confirmCommentIssue(_ args: CommentGitLabIssueSheet.Args,
-                                     project: SavedGitLabProject) async -> CommentGitLabIssueSheet.ConfirmResult {
-        guard let pid = project.resolvedId else {
-            return .failure("Project ID not resolved — re-resolve it in Settings → GitLab.")
-        }
-        let client = GitLabClient()
+    private func confirmCommentIssue(_ args: CommentIssueSheet.Args,
+                                     target: IssueTarget) async -> CommentIssueSheet.ConfirmResult {
+        let client: RepoBackend = target.kind == .gitlab
+            ? GitLabClient(config: config) : GitHubClient(config: config)
         do {
-            let note = try await client.createNote(projectId: pid, iid: args.iid, body: args.body)
+            _ = try await client.createNote(projectId: target.projectId, number: args.iid, body: args.body)
             self.pendingTool = nil
-            let issueURL = project.url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-                + "/-/issues/\(args.iid)"
             history.append(.init(
                 role: .user,
-                content: "(executed comment-gitlab-issue → note on #\(args.iid) \(issueURL))"
+                content: "(executed comment-issue → note on #\(args.iid))"
             ))
             await sendFollowup()
-            return .success(note.id)
+            return .success(args.iid)
         } catch {
             return .failure(error.localizedDescription)
         }
