@@ -52,8 +52,11 @@ enum SSHConfig {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             if line.isEmpty || line.hasPrefix("#") { continue }
 
-            // "Key rest of line" — key is the first token, value is the remainder.
-            let parts = line.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+            // "Key rest of line" — key is the first token, value is the
+            // remainder. Split on any run of spaces/tabs: real ~/.ssh/config
+            // files indent and separate key/value with tabs as often as spaces.
+            let isSpaceOrTab: (Character) -> Bool = { $0 == " " || $0 == "\t" }
+            let parts = line.split(maxSplits: 1, omittingEmptySubsequences: true, whereSeparator: isSpaceOrTab)
             guard let keyToken = parts.first else { continue }
             let key = keyToken.lowercased()
             let value = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : ""
@@ -61,7 +64,7 @@ enum SSHConfig {
             if key == "host" {
                 flush()
                 // First concrete pattern (no '*' or '?') becomes the alias.
-                let patterns = value.split(separator: " ").map(String.init)
+                let patterns = value.split(whereSeparator: isSpaceOrTab).map(String.init)
                 alias = patterns.first { !$0.contains("*") && !$0.contains("?") }
                 // wildcard-only block → alias stays nil → flush() skips it
             } else if alias != nil {

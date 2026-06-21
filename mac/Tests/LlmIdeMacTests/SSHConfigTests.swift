@@ -79,4 +79,13 @@ struct SSHConfigTests {
         let h = RemoteHost(alias: "box", hostName: nil, user: nil, port: nil)
         #expect(h.subtitle == "box")
     }
+
+    @Test func parsesTabIndentedAndTabSeparatedConfig() {
+        // Real ~/.ssh/config files frequently use tabs to indent + separate.
+        let cfg = "Host\ttabbed\n\tHostName\t10.0.0.9\n\tPort\t22"
+        let hosts = SSHConfig.parse(cfg)
+        #expect(hosts.map(\.alias) == ["tabbed"])
+        #expect(hosts.first?.hostName == "10.0.0.9")
+        #expect(hosts.first?.port == 22)
+    }
 }
