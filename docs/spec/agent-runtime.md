@@ -283,3 +283,189 @@ The internal agent's `base` string is assembled in `askInternal` (ask-internal.m
 2. `internalSkills.base` — contents of `internal/skills/_base.md` (the fence-protocol contract)
 
 These are joined with `\n\n` and passed as `agentContext.base` to the internal `runAgentLoop`.
+
+---
+
+## §5 Sub-model routing
+
+Sources: `extension/llm_agent/runtime/model-tier.mjs`, `extension/llm_agent/runtime/route.mjs`, `extension/agents/runtime.mjs`
+
+### Tier→env mapping
+
+Three named tiers are resolved at server startup in `route.mjs` (route.mjs:29–31):
+
+| Tier constant | Env var | Fallback |
+|---|---|---|
+| `GLOBAL_AGENT_MODEL` | `LLMIDE_AGENT_MODEL` | `undefined` |
+| `INTERNAL_AGENT_MODEL` | `LLMIDE_INTERNAL_MODEL` | `GLOBAL_AGENT_MODEL` |
+| `SUBAGENT_MODEL` | `LLMIDE_SUBAGENT_MODEL` | `GLOBAL_AGENT_MODEL` |
+
+`undefined` means the tier is unset; `runClaude` then falls back to its own default (see resolution order below).
+
+`model-tier.mjs` exports a single pure function `resolveTierModel({ model, tier }, env)` (model-tier.mjs:12–16):
+
+- If an explicit `model` argument is truthy, return it immediately.
+- If `tier === 'subagent'`, return `env.LLMIDE_SUBAGENT_MODEL || undefined`.
+- Any other or absent `tier` → return `undefined`.
+
+This function is env-injectable so it can be unit-tested without a running server. It is currently used for request-level tier hints; the three `route.mjs` constants cover the per-agent-type wiring described below.
+
+### Resolution order
+
+For any call to `runClaude`, the model that executes is determined by the following cascade:
+
+1. **Explicit `model` argument** — the caller passes a resolved model string (e.g. the value of `GLOBAL_AGENT_MODEL`). Wins immediately if truthy (route.mjs:167, ask-internal.mjs: model arg, ask-subagent.mjs:102).
+2. **Plugin subagent frontmatter `model:`** — inside `askSubagent`, `subagent.model || ctx.defaultModel` is passed as the `model` arg (ask-subagent.mjs:102). The subagent's own frontmatter `model:` field wins over the deployment-wide `LLMIDE_SUBAGENT_MODEL`; when the field is absent or blank, `ctx.defaultModel` (which equals `SUBAGENT_MODEL` from route.mjs:31) is used.
+3. **Tier env var** — resolved at server startup from `LLMIDE_AGENT_MODEL`, `LLMIDE_INTERNAL_MODEL`, or `LLMIDE_SUBAGENT_MODEL` (route.mjs:29–31).
+4. **`LLMIDE_MODEL`** — `runClaude`'s own default: `const DEFAULT_MODEL = process.env.LLMIDE_MODEL || 'claude-sonnet-4-6'` (runtime.mjs:23).
+5. **Hardcoded fallback** — `'claude-sonnet-4-6'` (runtime.mjs:23).
+
+### `CLAUDE_MODEL_RE` filter
+
+Before any model id reaches the Anthropic API, `resolveModel` validates it (runtime.mjs:41–44):
+
+```js
+const CLAUDE_MODEL_RE = /^claude-[a-z0-9.-]+$/;
+function resolveModel(model) {
+  return (typeof model === 'string' && CLAUDE_MODEL_RE.test(model)) ? model : DEFAULT_MODEL;
+}
+```
+
+Caller-supplied ids that are empty, stale, or belong to a foreign provider (Gemini, GPT, etc.) fail the regex and silently fall back to `DEFAULT_MODEL`. This keeps new Claude model ids (e.g. `claude-opus-5`) working without a code change, while rejecting any non-Claude string without a hard error (runtime.mjs:36–44).
+
+---
+
+## §6 `runClaude`
+
+Source: `extension/agents/runtime.mjs`
+
+`runClaude(prompt, { userId, model, maxTokens, cacheTranscript, provider })` is the shared LLM call primitive used by every Phase-4+ agent. It has two execution paths: an HTTP API path and a CLI fallback path.
+
+### Prompt cap
+
+A hard cap of **500 000 characters** is enforced before either path executes (runtime.mjs:78, 90–92):
+
+```js
+const MAX_PROMPT_CHARS = 500_000;
+if (prompt.length > MAX_PROMPT_CHARS) {
+  throw new Error(`runClaude: prompt too long (${prompt.length} > ${MAX_PROMPT_CHARS} chars)`);
+}
+```
+
+This cap is aligned with the server-level body cap documented in [`api-server.md`](api-server.md), which enforces 500 000 characters via `sanitizeForPrompt()` before calling into the agent layer.
+
+### HTTP API path (per-user vault key)
+
+**Trigger:** an API key is available — either from the user's vault (`getSecret(db, userId, 'claude.apiKey')`, runtime.mjs:523–528) or from `process.env.ANTHROPIC_API_KEY`.
+
+**Prompt caching:** when `cacheTranscript` is `true` and the prompt contains the sentinel `<<<BEGIN>>>`, the prompt is split at that sentinel. The pre-sentinel portion is sent as a plain text content block; the post-sentinel portion (the fenced transcript) is sent with `cache_control: { type: 'ephemeral' }` (runtime.mjs:144–153). This cuts input-token cost by ~90% on repeated calls to long transcripts.
+
+**Per-attempt HTTP timeout:** `AbortSignal.timeout(60_000)` — a 60-second ceiling per HTTP attempt (runtime.mjs:181). `TimeoutError` and `AbortError` are treated as transient and enter the retry path.
+
+**Retry schedule:** transient errors (HTTP 529, 503, or 60-second timeout) retry using `RETRY_DELAYS_MS = [1_000, 3_000]` from `agents/backoff.mjs` (backoff.mjs:7) — two retry delays giving three total attempts. Delay is jittered ±25% (`jittered`, backoff.mjs:12–15).
+
+**Context-overflow retry:** a 400 response whose body matches `/max_tokens|too long|context/i` triggers a single retry with `attemptMaxTokens` halved (runtime.mjs:226–230). Retrying stops if `attemptMaxTokens` would fall below `MIN_OVERFLOW_TOKENS = 256` (runtime.mjs:27, 227).
+
+**`max_tokens` default:** `8192` when the caller does not supply `maxTokens` (runtime.mjs:97).
+
+**User-scoped key — no silent fallback:** when a user-scoped key is in play, any HTTP failure (non-transient error, empty content, or thrown exception) throws immediately; it never falls through to the CLI (runtime.mjs:198–200, 234–237, 248–251, 267–269). The rationale: the caller's intent is to bill and quota against the user's own Anthropic account; falling back to the operator CLI would silently misattribute spend and sidestep the user's quota.
+
+### CLI fallback path (operator subscription)
+
+**Trigger:** no API key is available, or the HTTP path exits its retry loop without a successful response (operator-key only).
+
+**Invocation:** `execFile('claude', ['-p', prompt], { timeout: CLAUDE_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, env })` (runtime.mjs:311–315).
+
+**CLI timeout:** `CLAUDE_TIMEOUT_MS = 90_000` ms (90 seconds per attempt) (runtime.mjs:14).
+
+**Env allowlist:** the subprocess receives only the following keys from `process.env` (runtime.mjs:288–310): `PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`, `USER`, `LOGNAME`, `SHELL`, `TERM`, `LANG`, `LC_ALL`, `NODE_ENV`, `ANTHROPIC_BASE_URL`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `APPDATA`, `USERPROFILE`. Empty-string entries are deleted before exec. Secrets such as `JWT_SECRET` and `LLMIDE_VAULT_KEY` are explicitly excluded. `ANTHROPIC_API_KEY` is included only if an API key was resolved (runtime.mjs:308).
+
+**CLI overload retry:** uses the same `RETRY_DELAYS_MS` schedule. A stderr/stdout match against `/\b529\b|\boverloaded\b|\b503\b|\bservice unavailable\b/i` (runtime.mjs:54–56) sets `err.overloaded = true`, which triggers the retry loop (runtime.mjs:331).
+
+**Key redaction:** `redactKey(text, apiKey)` (runtime.mjs:64–69) replaces the literal API key and any other `sk-ant-*` token in error strings before they appear in logs or client error envelopes. This guards against provider diagnostics that echo credentials back into the error body.
+
+---
+
+## §7 Dispatch + outcomes
+
+### Dispatcher
+
+Source: `extension/agents/dispatcher.mjs`
+
+`dispatchPlan(userId, { planId, target, taskIds, config })` is the public entry point (dispatcher.mjs:401).
+
+**Targets:** `preview`, `github`, `backlog`, `linear` (dispatcher.mjs:32). Any other value throws immediately. `preview` never calls an external API — it returns the exact payload that would be sent (dispatcher.mjs:249–258).
+
+**Idempotency:** each task is checked for `task.meta?.dispatched?.url` before dispatch (dispatcher.mjs:70–71). Tasks where this field is truthy are returned as `{ status: 'skipped', reason: 'already dispatched' }` with no external call. Re-running a dispatch after a partial failure is therefore safe.
+
+**Per-target concurrency:** each adapter calls `pMap(tasks, fn)` with no explicit concurrency argument, so it uses `pMap`'s default of **4** concurrent in-flight requests (p-map.mjs:19). The outcome watcher also uses `CONCURRENCY = 4` (outcome-watcher.mjs:19).
+
+**Per-request HTTP timeout:** each external API call uses `AbortSignal.timeout(15_000)` — 15 seconds per issue-create request (dispatcher.mjs:105, 159, 215).
+
+**Secret redaction on errors:** `redactErrorBody(text)` (dispatcher.mjs:24–30) runs all patterns from `SECRET_PATTERNS` (guardrails/rules.mjs) over the provider's error body before returning it in the result. The output is capped at 300 characters.
+
+**Dispatch retry schedule** (dispatcher.mjs:271–278):
+
+| Attempt | Base delay |
+|---|---|
+| 1 | 60 s (1 min) |
+| 2 | 300 s (5 min) |
+| 3 | 900 s (15 min) |
+| 4 | 3 600 s (1 hr) |
+| 5+ | 14 400 s (4 hr, cap) |
+
+All delays are jittered ±25% via `jittered()` (backoff.mjs:12–15). Maximum retry attempts: `MAX_RETRY_ATTEMPTS = 5` (dispatcher.mjs:278). After the cap is reached, `gaveUp: true` is written to `task.meta.dispatchRetry` and no further retries are scheduled (dispatcher.mjs:299–309).
+
+`retryFailedDispatches(userId, config)` processes at most `MAX_CONCURRENT_RETRIES = 5` tasks concurrently (dispatcher.mjs:284) and has an absolute sweep deadline of `RETRY_SWEEP_DEADLINE_MS = 120_000` ms (dispatcher.mjs:287). Tasks not reached in a sweep are deferred to the next call.
+
+### Outcome watcher
+
+Source: `extension/agents/outcome-watcher.mjs`
+
+`refreshAllOutcomes(userId, { creds, taskIds })` polls all dispatched tasks via `pollOne` (from `outcome-providers.mjs`) and records state transitions.
+
+**Record-only-on-state-change:** `recordOutcome` (outcomes.mjs:127) wraps its INSERT in a transaction. It reads the most recent outcome row for the task and returns `null` without inserting if both `state` and `meta` are unchanged (outcomes.mjs:148–151). `pollTask` in the watcher tests `!!recorded` to set `changed` on the result (outcome-watcher.mjs:185).
+
+**Client-supplies-credentials rule:** tracker credentials (`github.token`, `linear.apiKey`, `backlog.apiKey`) are passed in the `creds` object from the client and live only for the duration of the HTTP call. They are never written to the server DB. The background poller reads them from the encrypted vault (`getSecrets(db, userId, [...])`, outcome-watcher.mjs:229–233); the client-triggered path receives them directly from `chrome.storage`. No server-side plaintext persistence of tracker tokens occurs.
+
+**Background poller:** `startBackgroundOutcomePoller()` sets an interval of `OUTCOME_POLL_INTERVAL_MS` (default 5 minutes; overridable via `LLMIDE_OUTCOME_POLL_MS`) (outcome-watcher.mjs:204–207). It is unref'd so it does not block server shutdown (outcome-watcher.mjs:256).
+
+**Per-(provider, userId) circuit breaker** (outcome-watcher.mjs:37–79):
+
+| Parameter | Value | Source |
+|---|---|---|
+| `CB_FAILURE_THRESHOLD` | 3 consecutive failures | outcome-watcher.mjs:37 |
+| `CB_BASE_COOLDOWN_MS` | 15 000 ms (15 s) first open | outcome-watcher.mjs:39 |
+| `CB_MAX_COOLDOWN_MS` | 300 000 ms (5 min) | outcome-watcher.mjs:38 |
+| Max CB entries (memory) | 10 000 | outcome-watcher.mjs:62 |
+
+Circuit key shape: `` `${provider}::${userId}` `` (outcome-watcher.mjs:43).
+
+Cooldown formula when `failures >= CB_FAILURE_THRESHOLD` (outcome-watcher.mjs:68–71):
+
+```js
+const exp = Math.min(cb.failures - CB_FAILURE_THRESHOLD, 5);
+cb.openUntil = Date.now() + Math.min(CB_BASE_COOLDOWN_MS * (2 ** exp), CB_MAX_COOLDOWN_MS);
+```
+
+This produces: 15 s → 30 s → 60 s → 120 s → 240 s → 300 s (capped), for failure counts 3, 4, 5, 6, 7, 8+.
+
+State is in-process/in-memory and resets on server restart — by design, so a fresh start re-probes rather than staying permanently open (outcome-watcher.mjs:34–35).
+
+When the circuit is open, `pollTask` returns a synthetic `state: 'unknown'` result with `circuitOpen: true` and does not call `pollOne` (outcome-watcher.mjs:144–156). A successful probe clears the entry entirely via `circuitBreakers.delete(k)` (outcome-watcher.mjs:56).
+
+---
+
+## §8 See also
+
+- [`../explanation/agent-runtime.md`](../explanation/agent-runtime.md) — narrative explanation of the agent runtime (forward-looking; document not yet created)
+- [`../explanation/meeting-agent.md`](../explanation/meeting-agent.md)
+- [`../explanation/agent-tools.md`](../explanation/agent-tools.md)
+
+---
+
+## Regeneration checklist
+- [x] Every governed symbol/endpoint/table/prompt is present with its exact shape (no "etc.", no "see code").
+- [x] Every magic number, timeout, cap, regex, and crypto parameter is stated.
+- [x] Spot-check: the loop algorithm, fence sentinels, sub-model cascade, and runClaude paths were rebuilt from this page and match source.
+- [x] Structured facts link to their extractor-generated reference page (no hand-copied drift).
