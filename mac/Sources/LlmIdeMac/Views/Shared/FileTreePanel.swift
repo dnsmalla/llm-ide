@@ -100,6 +100,31 @@ func buildCategoryTrees(items: [LibraryItem]) -> [FSNode] {
     return result
 }
 
+/// Nested FSNode forest for CODE items, built from each item's real path
+/// (one tree rooted at the common ancestor of all code files) rather than
+/// grouped by immediate parent-folder name. This is what makes a repo render
+/// as a single nested folder (e.g. `InfiniteBrain → Sources → …`) instead of
+/// a flat list that duplicates same-named folders (CodeGraph ×3). Matches the
+/// Library tab's CodeEntry hierarchy, just emitting FSNode so the existing
+/// rows/context-menus keep working.
+func buildCodeTrees(items: [LibraryItem]) -> [FSNode] {
+    let nested = items.filter { $0.folderOrigin != nil }
+    let loose  = items.filter { $0.folderOrigin == nil }
+    var result: [FSNode] = []
+    for item in loose.sorted(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) {
+        result.append(FSNode(id: item.path, name: item.name, url: item.url, item: item, children: []))
+    }
+    guard !nested.isEmpty else { return result }
+    // Common ancestor of the parent directories → the scan root (e.g. code/
+    // or code/InfiniteBrain). buildTree then nests by full path, so folders
+    // at different depths with the same name stay distinct.
+    let ancestor = commonAncestor(
+        nested.map { URL(fileURLWithPath: $0.path).deletingLastPathComponent().path }
+    )
+    result.append(buildTree(items: nested, root: URL(fileURLWithPath: ancestor)))
+    return result
+}
+
 /// Longest common path shared by all items (used to find the repo root).
 func commonAncestor(_ paths: [String]) -> String {
     guard let first = paths.first else { return "" }
@@ -459,7 +484,10 @@ struct FileTreePanel: View {
     // MARK: - Tree construction
 
     private func buildTrees(for category: LibraryItem.Category) -> [FSNode] {
-        buildCategoryTrees(items: store.items(for: category))
+        let items = store.items(for: category)
+        // Code renders as a real nested hierarchy (one repo folder, no
+        // parent-name collisions); notes/data keep the flat folder grouping.
+        return category == .code ? buildCodeTrees(items: items) : buildCategoryTrees(items: items)
     }
 
     // MARK: - File / folder pickers
