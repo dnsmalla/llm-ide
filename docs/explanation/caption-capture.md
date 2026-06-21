@@ -7,6 +7,8 @@ status: stable
 
 > Why the caption pipeline has its current shape. For the operational rules ("never reintroduce X"), see [Engineering invariants — caption scraper](invariants.md#caption-scraper-extensionsrccontentcaption-scraperts).
 
+See also: [`spec/chrome-extension.md`](../spec/chrome-extension.md) — rebuild-grade contracts for the full extension (message protocol, storage, service worker, build).
+
 ## Core philosophy: mirror CC, nothing more
 
 The caption scraper does exactly one thing: it reads what the platform's built-in closed captions (CC) currently show, compares that to what it last saw, and emits an update when something changed. The speech recognition itself is the platform's problem — Google Meet, Microsoft Teams, and Zoom all handle it far better than the extension ever could. The scraper's job is to faithfully mirror that output, not to augment or second-guess it.
