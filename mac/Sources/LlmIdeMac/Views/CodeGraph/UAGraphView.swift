@@ -178,11 +178,18 @@ struct UAGraphView: View {
         var seen = Set<String>()
         var repos: [CodeRepo] = []
         for item in library.items where item.category == .code {
-            guard let origin = item.folderOrigin, !seen.contains(origin) else { continue }
-            seen.insert(origin)
-            let group = groups[origin] ?? []
-            let ancestor = UAHelpers.commonAncestor(group.map(\.path))
-            repos.append(CodeRepo(folderOrigin: origin, root: URL(fileURLWithPath: ancestor)))
+            // One entry per TOP-LEVEL repo (the first path component under
+            // code/), not per parent-folder name — so the picker lists
+            // "InfiniteBrain" once instead of each inner folder (App, Client,
+            // CodeGraph, improve-note, …).
+            guard let repoName = item.treePath?.first, !seen.contains(repoName) else { continue }
+            seen.insert(repoName)
+            // Repo root: strip the filename + all treePath components back to
+            // the scan root (code/), then append the repo name.
+            var scanRoot = item.url.deletingLastPathComponent()
+            for _ in 0..<(item.treePath?.count ?? 0) { scanRoot.deleteLastPathComponent() }
+            repos.append(CodeRepo(folderOrigin: repoName,
+                                  root: scanRoot.appendingPathComponent(repoName)))
         }
         availableCodeReposCache = repos.sorted {
             $0.folderOrigin.localizedCaseInsensitiveCompare($1.folderOrigin) == .orderedAscending
