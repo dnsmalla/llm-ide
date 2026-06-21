@@ -5,3 +5,4 @@ nav:
   - api-server.md
   - agent-runtime.md
   - chrome-extension.md
+  - macos-app.md
