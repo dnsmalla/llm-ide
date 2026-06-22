@@ -9,6 +9,7 @@
 // ("subscription mode" — same auth the claude/codex/gemini CLIs use).
 
 import { execFile } from 'node:child_process';
+import { lookup } from 'node:dns/promises';
 import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
@@ -78,6 +79,34 @@ export function assertSafeBaseUrl(url) {
   }
   if (isPrivateIPv6(hostname)) {
     throw new Error(`SSRF guard: base URL resolves to a private/loopback IPv6 address (${hostname})`);
+  }
+}
+
+/**
+ * Full SSRF guard for a base URL that is about to be fetched: the synchronous
+ * literal checks above PLUS a DNS-resolution check that rejects a hostname
+ * whose A/AAAA record points at a private/loopback/link-local address (the
+ * "domain → internal IP" attack the literal regex can't catch). Call this at
+ * EVERY network entry point, not just the vault setter — the verify route
+ * forwards a raw, user-supplied baseUrl straight to fetch.
+ *
+ * Residual: this doesn't pin the connection to the validated IP, so a rebind
+ * between this lookup and fetch's own resolution isn't fully closed; it does
+ * block the practical static-resolution case. Full pinning would need a custom
+ * agent/socket (cf. email-source.mjs resolveSafeHost).
+ */
+export async function assertSafeBaseUrlResolved(url) {
+  assertSafeBaseUrl(url);                          // protocol + literal-IP checks
+  const { hostname } = new URL(url);
+  let addrs;
+  try { addrs = await lookup(hostname, { all: true }); }
+  catch { return; }                                // unresolvable → fetch will error; not an SSRF path
+  for (const { address } of addrs) {
+    const addr = String(address).toLowerCase();
+    if (addr === '127.0.0.1' || addr === '::1'
+        || PRIVATE_IPv4_RE.test(addr) || isPrivateIPv6(addr)) {
+      throw new Error(`SSRF guard: base URL host ${hostname} resolves to a private/loopback address (${address})`);
+    }
   }
 }
 
@@ -201,6 +230,8 @@ export async function completeViaApi(provider, { apiKey, model, prompt, maxToken
   const adapter = API_ADAPTERS[provider];
   if (!adapter) throw new Error(`completeViaApi: unsupported provider '${provider}'`);
   if (!apiKey) throw new Error(`completeViaApi: no API key for ${provider}`);
+  // SSRF guard for the custom OpenAI-compatible endpoint before any fetch.
+  if (provider === 'custom' && baseUrl) await assertSafeBaseUrlResolved(baseUrl);
   let lastErr;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     try {
@@ -341,6 +372,11 @@ export async function listProviderModels(provider, { apiKey, baseUrl, signal } =
   let url, headers;
   if (provider === 'custom') {
     if (!baseUrl) throw new Error('custom: no base URL configured');
+    // SSRF guard — this path is reached by /kb/providers/verify with a raw,
+    // user-supplied baseUrl (not routed through customBaseUrl's guard), and
+    // it fetches WITH the API key in the Authorization header. Validate before
+    // any request leaves the box.
+    await assertSafeBaseUrlResolved(baseUrl);
     url = `${baseUrl.replace(/\/+$/, '')}/models`;
     headers = { Authorization: `Bearer ${apiKey}` };
   } else {

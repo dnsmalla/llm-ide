@@ -10,7 +10,7 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
-const { assertSafeBaseUrl, minimalCliEnv } = await import('../agents/providers.mjs');
+const { assertSafeBaseUrl, assertSafeBaseUrlResolved, minimalCliEnv } = await import('../agents/providers.mjs');
 
 // ── assertSafeBaseUrl: URLs that MUST pass ────────────────────────────
 
@@ -68,6 +68,35 @@ test('AGT-1: IPv6 link-local fe80:: is rejected', () => {
 
 test('AGT-1: completely invalid URL is rejected', () => {
   assert.throws(() => assertSafeBaseUrl('not-a-url'), /invalid base URL/i);
+});
+
+// ── assertSafeBaseUrlResolved: the guard the fetch paths (verify/models/
+//    completion) now call. The literal checks run BEFORE any DNS lookup, so
+//    these dangerous vectors are rejected without network access. This is the
+//    fix for the verify-path SSRF (raw body.baseUrl reached fetch unguarded).
+
+test('resolved guard: rejects AWS metadata IP (verify-path SSRF vector)', async () => {
+  await assert.rejects(() => assertSafeBaseUrlResolved('https://169.254.169.254/latest/meta-data'), /private|loopback/i);
+});
+
+test('resolved guard: rejects loopback 127.0.0.1', async () => {
+  await assert.rejects(() => assertSafeBaseUrlResolved('https://127.0.0.1/v1'), /private|loopback/i);
+});
+
+test('resolved guard: rejects localhost', async () => {
+  await assert.rejects(() => assertSafeBaseUrlResolved('https://localhost/v1'), /localhost/i);
+});
+
+test('resolved guard: rejects RFC-1918 10.0.0.1', async () => {
+  await assert.rejects(() => assertSafeBaseUrlResolved('https://10.0.0.1/v1'), /private|loopback/i);
+});
+
+test('resolved guard: rejects http:// scheme', async () => {
+  await assert.rejects(() => assertSafeBaseUrlResolved('http://api.openai.com/v1'), /https/i);
+});
+
+test('resolved guard: rejects invalid URL', async () => {
+  await assert.rejects(() => assertSafeBaseUrlResolved('not-a-url'), /invalid base URL/i);
 });
 
 // ── AGT-4: minimalCliEnv allowlist ───────────────────────────────────
