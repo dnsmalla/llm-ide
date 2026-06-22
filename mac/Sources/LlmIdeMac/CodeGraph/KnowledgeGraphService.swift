@@ -224,6 +224,24 @@ final class KnowledgeGraphService: ObservableObject {
         return out
     }
 
+    /// Render `doc-notes.md`: the doc/InfiniteBrain content for the combined
+    /// memory the agent reads — docs grouped by title, each listing its chunk
+    /// headings. This is the doc half that the memory artifact previously omitted.
+    nonisolated static func renderDocNotes(docCount: Int, chunks: [MemoryChunk]) -> String {
+        var out = "# Documentation memory\n\n"
+        out += "\(docCount) document\(docCount == 1 ? "" : "s") · "
+        out += "\(chunks.count) section\(chunks.count == 1 ? "" : "s").\n\n"
+        let byDoc = Dictionary(grouping: chunks, by: \.docTitle)
+        for docTitle in byDoc.keys.sorted() {
+            out += "## \(docTitle)\n"
+            for chunk in byDoc[docTitle] ?? [] {
+                out += "- \(chunk.displayHeading)\n"
+            }
+            out += "\n"
+        }
+        return out
+    }
+
     /// Merge the code and doc graphs into one and add doc→code cross-links:
     /// a doc chunk that EXPLICITLY references a code symbol via a `[[wikilink]]`
     /// gets a `references` edge to that code node. Only explicit wikilinks are
