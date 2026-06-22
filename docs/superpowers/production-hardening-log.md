@@ -38,3 +38,10 @@ Autonomous self-paced improvement run requested 2026-06-22 ~23:50 (operator asle
 - **Verified:** `make docs-check` green (70 citations resolve).
 - **Limitation noted (follow-up):** §5 line ~334 still says foreign-provider ids (GPT/Gemini) "fail the regex and fall back to DEFAULT_MODEL" — with multi-provider routing that's only true on the Anthropic path; `resolveModel`'s Claude-only regex is computed even for non-Anthropic calls (latent trap the review flagged). Needs a careful §5 cross-reference + a code look at `resolveClaudeCall`'s `resolvedModel` usage. Deferred to a code cycle.
 - **Next up:** Cycle 4 — chrome-extension spec §4.3/4.5: the "chat history has no hard cap" claim is stale (capped at `MAX_STORED_MESSAGES = 200`).
+
+### Cycle 4 — docs: chrome-extension chat-cap drift (2026-06-23 ~00:16)
+- **Reviewed:** `docs/spec/chrome-extension.md` storage table + §4.3/§4.5 vs `hooks/useChat.ts`.
+- **Found:** three "no cap / full conversation" claims (lines 249, 292, 300) — all stale; the write path prunes to the most recent `MAX_STORED_MESSAGES = 200` (`useChat.ts:45–48`). `MAX_HISTORY = 10` (LLM context) was accurate.
+- **Changed:** all three now state the 200-message retention cap with correct citations.
+- **Verified:** `make docs-check` green (70 citations).
+- **Next up:** Cycle 5 — macos-app spec: add the unified-knowledge-graph automation surface (KnowledgeGraphService / GraphAutoUpdater / FileClassifier / GraphSessionStore + the doc-notes memory index), entirely absent from the spec.
