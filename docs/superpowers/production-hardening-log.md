@@ -30,3 +30,11 @@ Autonomous self-paced improvement run requested 2026-06-22 ~23:50 (operator asle
 - **Changed:** added an "Access-token epoch (bulk revocation)" paragraph (cutoff at `auth.mjs:61`, bumped by `logoutAll`/password-reset, strict-`<` same-second window, added by `0016`), added `iat` to the documented return shape, fixed the citation.
 - **Verified:** `make docs-check` green (70 path citations resolve). Caught + fixed a self-inflicted citation slip (`kb/user.mjs` → `extension/kb/user.mjs`) — the guard works.
 - **Next up:** Cycle 3 — agent-runtime spec §6: document the multi-provider routing (OpenAI/Google/custom via `providers.mjs`), `runClaudeStream`, and the `--strict-mcp-config` CLI flag (the most-changed file, currently undocumented).
+
+### Cycle 3 — docs: agent-runtime §6 multi-provider routing (2026-06-23 ~00:10)
+- **Reviewed:** `docs/spec/agent-runtime.md` §6 vs `extension/agents/runtime.mjs` + `providers.mjs`.
+- **Found:** §6 described only "Anthropic HTTP + CLI". Actual `runClaude` routes by provider via `resolveClaudeCall` (runtime.mjs:108) → `completeViaApi`/`runViaCli` for openai/google/custom (`providers.mjs`), with an SSRF guard on `custom.baseUrl`. Also two now-stale specifics: the CLI args gained `--strict-mcp-config` (runtime.mjs:312), and `redactKey` now routes through the shared `core/redact-secrets.mjs` (my earlier merge), not just sk-ant.
+- **Changed:** added a "Provider routing" subsection (provider table, prefix mapping, completeViaApi/runViaCli, SSRF guard, vault-first key); corrected the CLI invocation line (`--strict-mcp-config` + rationale); rewrote the key-redaction paragraph to the shared pattern set.
+- **Verified:** `make docs-check` green (70 citations resolve).
+- **Limitation noted (follow-up):** §5 line ~334 still says foreign-provider ids (GPT/Gemini) "fail the regex and fall back to DEFAULT_MODEL" — with multi-provider routing that's only true on the Anthropic path; `resolveModel`'s Claude-only regex is computed even for non-Anthropic calls (latent trap the review flagged). Needs a careful §5 cross-reference + a code look at `resolveClaudeCall`'s `resolvedModel` usage. Deferred to a code cycle.
+- **Next up:** Cycle 4 — chrome-extension spec §4.3/4.5: the "chat history has no hard cap" claim is stale (capped at `MAX_STORED_MESSAGES = 200`).
