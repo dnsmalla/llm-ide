@@ -127,6 +127,7 @@ function repoMemoryBlock(repo, budget, allowedRoots) {
 
   tryAdd('repo.md', safeRead(join(memDir, 'repo.md'), PER_FILE_CHARS));
   tryAdd('graph-notes.md', safeRead(join(memDir, 'graph-notes.md'), PER_FILE_CHARS));
+  tryAdd('doc-notes.md', safeRead(join(memDir, 'doc-notes.md'), PER_FILE_CHARS));
 
   const bugs = listMdFiles(join(memDir, 'bugs'), MAX_BUG_FILES);
   if (bugs.length > 0 && used < budget) {

@@ -1211,32 +1211,46 @@ struct UAGraphView: View {
     private func generateAll() {
         guard let repo = activeRepoRoot else { return }
         status = .running
+        // Reuse the cached doc index when its fingerprint is unchanged, so "All"
+        // combines the already-built code + doc indexes instead of re-scanning
+        // the docs. (Code reuse is handled below via the cache fallback.)
+        let docFp = KnowledgeGraphService.docSetFingerprint(roots: [repo])
+        let cachedDoc = graphSessionStore.entry(repo: activeRepoRoot, mode: Mode.data.rawValue)
+        let reusedDoc: (graph: CGData, chunks: [MemoryChunk], docs: Int)? =
+            (cachedDoc?.docFingerprint == docFp && !(cachedDoc?.graph.nodes.isEmpty ?? true))
+            ? (cachedDoc!.graph, cachedDoc!.chunks, cachedDoc!.docCount)
+            : nil
         runTask = Task {
-            _ = await codeNoteService.generate(repoRoot: repo)   // @MainActor; heavy scan is internal
+            _ = await codeNoteService.generate(repoRoot: repo)
             if Task.isCancelled { return }
-            // The live scan returns an EMPTY graph when it loses the
-            // cross-instance scan lock (CodeNoteService.inFlightPaths — e.g. the
-            // background GraphAutoUpdater is scanning the same repo). Merging that
-            // empty graph is why "All" could show no code. Fall back to the last
-            // code graph cached for this repo so the code side still renders.
             // "md is doc": strip code-track markdown so it isn't merged twice.
             var code = FileClassifier.strippingDocNodes(from: codeNoteService.graph)
             var codeFromCache = false
+            // The live scan returns an empty graph if it lost the cross-instance
+            // scan lock (CodeNoteService.inFlightPaths — e.g. the background
+            // GraphAutoUpdater scanning the same repo); fall back to the cached
+            // code graph so "All" still shows the code side instead of merging empty.
             if code.nodes.isEmpty, let cachedCode = cachedGraph(.code), !cachedCode.nodes.isEmpty {
                 code = cachedCode   // already markdown-free (stripped when cached)
                 codeFromCache = true
             }
             let result = await Task.detached(priority: .userInitiated) { () -> (data: CGData, chunks: [MemoryChunk], docs: Int) in
-                let docMem = MemoryGenerator.generate(from: repo)
-                let merged = KnowledgeGraphService.merge(code: code, doc: docMem.graph, chunks: docMem.chunks)
+                let doc: (graph: CGData, chunks: [MemoryChunk], docs: Int)
+                if let reusedDoc {
+                    doc = reusedDoc                                   // combine the cached doc index
+                } else {
+                    let docMem = MemoryGenerator.generate(from: repo) // build it if not fresh
+                    doc = (docMem.graph, docMem.chunks, docMem.docCount)
+                }
+                let merged = KnowledgeGraphService.merge(code: code, doc: doc.graph, chunks: doc.chunks)
                 let laid = CodeGraphLayout.compute(merged, canvasSize: CGSize(width: 1200, height: 800))
-                return (laid, docMem.chunks, docMem.docCount)
+                return (laid, doc.chunks, doc.docs)
             }.value
             if Task.isCancelled { return }
             // Generation telemetry (mirrors KnowledgeGraphService's count log):
             // records the code/doc contributions to the merged "All" graph, which
             // also pinpoints a code-vs-doc shortfall if the graph ever looks short.
-            Self.log.info("generateAll[\(repo.lastPathComponent, privacy: .public)]: code=\(code.nodes.count, privacy: .public)\(codeFromCache ? " (cache)" : "", privacy: .public) docFiles=\(result.docs, privacy: .public) docChunks=\(result.chunks.count, privacy: .public) merged=\(result.data.nodes.count, privacy: .public)")
+            Self.log.info("generateAll[\(repo.lastPathComponent, privacy: .public)]: code=\(code.nodes.count, privacy: .public)\(codeFromCache ? " (cache)" : "", privacy: .public)\(reusedDoc != nil ? " doc(cache)" : "", privacy: .public) docFiles=\(result.docs, privacy: .public) docChunks=\(result.chunks.count, privacy: .public) merged=\(result.data.nodes.count, privacy: .public)")
             self.selectedNode = nil
             self.memoryChunks = result.chunks
             self.memoryDocCount = result.docs

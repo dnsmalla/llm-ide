@@ -158,8 +158,10 @@ final class KnowledgeGraphService: ObservableObject {
         // reads it (graphify-out/memory/), fixing the previously-empty memory.
         if let memoryRoot {
             let code = codeGraph, docData = docGraph, mg = mergedGraph
+            let chunks = doc.chunks, dCount = doc.docCount
             await Task.detached(priority: .utility) {
-                Self.writeMemoryArtifact(to: memoryRoot, code: code, doc: docData, merged: mg)
+                Self.writeMemoryArtifact(to: memoryRoot, code: code, doc: docData, merged: mg,
+                                         docCount: dCount, chunks: chunks)
             }.value
         }
 
@@ -173,7 +175,8 @@ final class KnowledgeGraphService: ObservableObject {
     /// `graph-notes.md` (a rendering of the merged graph). Writing these files
     /// is what finally makes the agent's "Repository memory" block non-empty —
     /// no extension change needed since the reader already targets this path.
-    nonisolated static func writeMemoryArtifact(to repoRoot: URL, code: CGData, doc: CGData, merged: CGData) {
+    nonisolated static func writeMemoryArtifact(to repoRoot: URL, code: CGData, doc: CGData, merged: CGData,
+                                                docCount: Int, chunks: [MemoryChunk]) {
         let memDir = repoRoot.appendingPathComponent("graphify-out", isDirectory: true)
             .appendingPathComponent("memory", isDirectory: true)
         do {
@@ -195,6 +198,8 @@ final class KnowledgeGraphService: ObservableObject {
             try repoBody.write(to: memDir.appendingPathComponent("repo.md"), atomically: true, encoding: .utf8)
             try renderGraphNotes(code: code, doc: doc, merged: merged)
                 .write(to: memDir.appendingPathComponent("graph-notes.md"), atomically: true, encoding: .utf8)
+            try renderDocNotes(docCount: docCount, chunks: chunks)
+                .write(to: memDir.appendingPathComponent("doc-notes.md"), atomically: true, encoding: .utf8)
         } catch {
             // Don't fail silently — a write error means the agent keeps reading
             // stale/empty memory with no signal otherwise.
@@ -218,6 +223,24 @@ final class KnowledgeGraphService: ObservableObject {
             out += "## Doc → code references\n"
             for e in crossLinks.prefix(50) {
                 out += "- \(docTitle[e.fromId] ?? e.fromId) → \(codeTitle[e.toId] ?? e.toId)\n"
+            }
+            out += "\n"
+        }
+        return out
+    }
+
+    /// Render `doc-notes.md`: the doc/InfiniteBrain content for the combined
+    /// memory the agent reads — docs grouped by title, each listing its chunk
+    /// headings. This is the doc half that the memory artifact previously omitted.
+    nonisolated static func renderDocNotes(docCount: Int, chunks: [MemoryChunk]) -> String {
+        var out = "# Documentation memory\n\n"
+        out += "\(docCount) document\(docCount == 1 ? "" : "s") · "
+        out += "\(chunks.count) section\(chunks.count == 1 ? "" : "s").\n\n"
+        let byDoc = Dictionary(grouping: chunks, by: \.docTitle)
+        for (docTitle, docChunks) in byDoc.sorted(by: { $0.key < $1.key }) {
+            out += "## \(docTitle)\n"
+            for chunk in docChunks {
+                out += "- \(chunk.displayHeading)\n"
             }
             out += "\n"
         }
