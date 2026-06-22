@@ -44,6 +44,7 @@ struct LlmIdeMacApp: App {
     @StateObject private var updateService = UpdateService()
     @StateObject private var projectStore: ProjectStore
     @StateObject private var agentRuns: AgentRunsStore
+    @StateObject private var graphAutoUpdater: GraphAutoUpdater
     @State private var backend = BackendManager()
     @State private var quickSwitcherShown = false
     private let api: LlmIdeAPIClient
@@ -108,6 +109,7 @@ struct LlmIdeMacApp: App {
         self._projectStore = StateObject(wrappedValue: projectStoreInstance)
         let runs = AgentRunsStore(api: client)
         self._agentRuns = StateObject(wrappedValue: runs)
+        self._graphAutoUpdater = StateObject(wrappedValue: GraphAutoUpdater(projectStore: projectStoreInstance))
         self.api = client
         self.autoCapture = AutoCaptureService(capture: orchestrator, config: cfg)
     }
@@ -137,6 +139,7 @@ struct LlmIdeMacApp: App {
                 .environmentObject(updateService)
                 .environmentObject(projectStore)
                 .environmentObject(agentRuns)
+                .environmentObject(graphAutoUpdater)
                 .environment(backend)
                 // 1000 gives the 3-pane Review layout breathing room
                 // (sidebar ~240 + code ~380 + assistant ~280 = 900,

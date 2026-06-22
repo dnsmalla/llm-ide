@@ -1,6 +1,7 @@
 # Plan — Unified, automatic, incremental knowledge graph
 
-**Status:** in progress (Stage 0–4 ✅; Stage 5 next)
+**Status:** ✅ complete (Stages 0–5). Pipeline is live: auto-runs on project open/switch
++ periodic, gated to repos with an existing graph, and writes the agent-facing memory.
 **Goal:** one knowledge graph for a project, built automatically and incrementally
 from BOTH file types — code files via the Code graph, doc files via InfiniteBrain —
 merged into a single graph, and used to generate the agent's repo memory. No manual
@@ -61,8 +62,12 @@ public init, ids are stable Strings) → mergeable by id-dedup.
   and `graph-notes.md` (counts + doc→code cross-links). Writes where the extension reader
   already targets, so the agent's "Repository memory" stops being empty with **no extension
   change**. Gated by a `memoryRoot` arg (the indexed repo).
-- **Stage 5 — automate:** `@StateObject` service in `LlmIdeMacApp`, `.start()` from AppShell;
-  triggers per Decision 3; guarded against overlap.
+- **Stage 5 — automate** ✅: `GraphAutoUpdater` (`@StateObject` in `LlmIdeMacApp`, injected,
+  `.start()` from AppShell's `.task`) re-runs `KnowledgeGraphService` on `.activeProjectChanged`
+  + a 15-min timer. GATED to repos that already have `system/graph/index.md` (first generation
+  stays the manual button — "update only on the existing data"); `resetCache()` on project
+  switch. Re-runs are cheap (code scan-cache + doc fingerprint skip). Trigger = open/switch +
+  periodic (FSEvents not used, per the chosen option).
 
 ## Notes / open items
 

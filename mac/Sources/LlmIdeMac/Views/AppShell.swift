@@ -10,6 +10,7 @@ struct AppShell: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
+    @EnvironmentObject var graphAutoUpdater: GraphAutoUpdater
     @State private var shell = ShellState()
     @State private var itemStore = LibraryItemStore()
     @State private var catalogStore = AgentCatalogStore()
@@ -198,6 +199,10 @@ struct AppShell: View {
         .onChange(of: config.hiddenSidebarSections)   { _, _ in redirectIfSectionHidden() }
         .task { await checkRecovery() }
         .task { await checkLegacyPrompt() }
+        // Auto-maintain the knowledge graph + memory for any project that
+        // already has a generated graph (first generation stays manual).
+        // Idempotent; re-runs on project open/switch + a periodic timer.
+        .task { graphAutoUpdater.start() }
         .task {
             // Phase D — arm the regression-run button when the app
             // version changes between launches. We record the new
