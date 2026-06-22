@@ -246,7 +246,7 @@ Sources: `extension/src/lib/storage.ts`, `extension/src/sidepanel/hooks/useTrans
 | Key | Type | Written by | Purpose |
 |-----|------|-----------|---------|
 | `transcripts` | `SavedTranscript[]` | `lib/storage.ts:49` | Persisted meeting transcripts (capped at `MAX_TRANSCRIPTS`) |
-| `chatMessages` | `ChatMessage[]` | `hooks/useChat.ts:50` | Full chat history (no cap — see §4.3) |
+| `chatMessages` | `ChatMessage[]` | `hooks/useChat.ts:50` | Chat history, pruned to the most recent `MAX_STORED_MESSAGES = 200` on write — see §4.3 |
 | `primaryLang` | `string` | `hooks/useTranscript.ts:267` | Primary language code preference |
 | `secondaryLang` | `string` | `hooks/useTranscript.ts:272` | Secondary (bilingual) language code preference |
 | `bilingual` | `boolean` | `hooks/useTranscript.ts:277` | Bilingual mode toggle |
@@ -289,7 +289,7 @@ The raw `segments` array is stored alongside the rendered `transcript` string so
 | `MAX_TRANSCRIPTS` | `50` | `lib/storage.ts:10` | Number of saved meetings; oldest entries are pruned first on every `saveTranscript()` call |
 | `MAX_SEGMENTS` | `5000` | `hooks/useTranscript.ts:45` | In-memory live segments; oldest are dropped when exceeded (`next.slice(-MAX_SEGMENTS)`) |
 
-`chrome.storage.local` has a ~5 MB per-extension quota (`lib/storage.ts:7–8`). `saveTranscript()` catches quota errors, drops the oldest half of saved transcripts, and retries once. If the retry also fails, it throws `StorageQuotaError` so the UI can surface a "transcript not saved" warning (`lib/storage.ts:50–62`). Chat history has no hard cap; the UI warns with a `quotaWarning` string if a write fails (`hooks/useChat.ts:52–57`).
+`chrome.storage.local` has a ~5 MB per-extension quota (`lib/storage.ts:7–8`). `saveTranscript()` catches quota errors, drops the oldest half of saved transcripts, and retries once. If the retry also fails, it throws `StorageQuotaError` so the UI can surface a "transcript not saved" warning (`lib/storage.ts:50–62`). Chat history is pruned to the most recent `MAX_STORED_MESSAGES = 200` messages before each write (`hooks/useChat.ts:45–48`); the UI warns with a `quotaWarning` string if a write fails (`hooks/useChat.ts:52–57`).
 
 ### 4.4 Speaker-name persistence
 
@@ -297,7 +297,7 @@ The raw `segments` array is stored alongside the rendered `transcript` string so
 
 ### 4.5 Chat-history retention
 
-The `chatMessages` key persists the full conversation with no item cap (`hooks/useChat.ts:19–21`). When making an LLM request, only the trailing `MAX_HISTORY = 10` messages are sent as context to `/chat` (`hooks/useChat.ts:13`, `76`). The full history remains in storage and is always restored on mount.
+The `chatMessages` key retains the most recent `MAX_STORED_MESSAGES = 200` messages — the write path prunes with `messages.slice(-MAX_STORED_MESSAGES)` before persisting (`hooks/useChat.ts:19`, `45–48`), bounding storage growth. When making an LLM request, only the trailing `MAX_HISTORY = 10` messages are sent as context to `/chat` (`hooks/useChat.ts:13`, `76`). The retained history is restored on mount.
 
 ---
 

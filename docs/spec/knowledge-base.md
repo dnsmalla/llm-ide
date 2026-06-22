@@ -34,7 +34,7 @@ This spec governs the following files:
 | File | Role |
 |---|---|
 | `extension/kb/migrations.mjs` | `applyMigrations()`, `migrationStatus()`, checksum logic |
-| `extension/kb/migrations/0001_initial.sql` through `0013_email_state.sql` | DDL deltas (13 files as of this writing) |
+| `extension/kb/migrations/0001_initial.sql` through `0016_token_epoch.sql` | DDL deltas (16 files as of this writing). Recent: `0014_fts_update_triggers.sql` + `0015_outcomes_fts_body.sql` add AFTER-UPDATE FTS triggers (so edits, not just inserts/deletes, reindex); `0016_token_epoch.sql` adds the `users.tokens_valid_after` access-token-epoch column. No new tables since 0013. |
 
 **HTTP routing**
 

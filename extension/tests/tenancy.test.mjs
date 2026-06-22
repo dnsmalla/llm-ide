@@ -123,6 +123,33 @@ test('search FTS path drops cross-tenant hits', async () => {
   assert.ok(aliceHits.some((h) => h.kind === 'meeting' && h.title === 'Confidential roadmap'));
 });
 
+test('search FTS path gates entity sub-kinds on the entity owner, not the meeting owner', async () => {
+  const { alice, bob } = await setup();
+  // Bob owns a meeting.
+  db.ingestMeeting(bob, {
+    id: 'bm1', title: 'Bob meeting', date: '2026-05-01', duration: 60,
+    transcript: 'bob transcript', entities: [],
+  });
+  // Anomaly: an action entity attached to BOB's meeting but OWNED BY ALICE
+  // (user_id mismatch — the invariant the FTS gate must not silently depend
+  // on). Inserted raw to bypass ingest's owner-consistency; the FTS trigger
+  // indexes it into `search`.
+  db.getDb().prepare(
+    `INSERT INTO entities (id, meeting_id, user_id, kind, text, meta, quote)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run('leak-ent-1', 'bm1', alice, 'action', 'entity-canary-qwerty', '{}', '');
+
+  // Bob owns the MEETING but not the ENTITY — Alice's entity must not surface.
+  const bobHits = db.search(bob, { q: 'entity-canary-qwerty' });
+  assert.equal(bobHits.filter((h) => h.entityId === 'leak-ent-1').length, 0,
+    'entity owned by another user must not surface via the meeting owner');
+
+  // Alice owns the ENTITY — she sees it (gated on entities.user_id directly).
+  const aliceHits = db.search(alice, { q: 'entity-canary-qwerty' });
+  assert.ok(aliceHits.some((h) => h.entityId === 'leak-ent-1'),
+    'entity owner should see her own entity regardless of the meeting owner');
+});
+
 test('findContext drops cross-tenant FTS hits during hydration', async () => {
   const { alice, bob } = await setup();
   db.ingestMeeting(alice, {

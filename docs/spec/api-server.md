@@ -117,7 +117,9 @@ Source: `extension/server/jwt.mjs`.
 
 **JTI revocation:** After signature and claims verification, `isJtiRevoked(claims.jti)` is called in `auth.mjs:56`. Any revoked JTI causes a 401 `AUTH_REQUIRED`.
 
-`verifyAccessToken()` returns `{ userId, role, jti, exp }` (`jwt.mjs:100`); the server attaches `{ id, role, jti, tokenExp }` to `req.user` (`auth.mjs:57`).
+**Access-token epoch (bulk revocation):** Immediately after the JTI check, `auth.mjs:61` rejects any token whose `claims.iat < tokensValidAfter(userId)` (`extension/kb/user.mjs:168`, reading `users.tokens_valid_after`). This is a per-user cutoff that invalidates *every* outstanding access token at once without enumerating their JTIs — used for "log out everywhere". The epoch is bumped to the current second by `logoutAll` (`users.mjs:229`) and by consuming a password-reset token (`users.mjs:368`). The comparison is strict `<`, so a token minted in the same wall-clock second as the bump survives (a ≤1 s window); switch to `<=` if absolute revocation is required. The column was added by migration `0016_token_epoch.sql`.
+
+`verifyAccessToken()` returns `{ userId, role, jti, iat, exp }` (`jwt.mjs:105`); `iat` is load-bearing — the epoch check above depends on it. The server attaches `{ id, role, jti, tokenExp }` to `req.user` (`auth.mjs:57`).
 
 ### Refresh token format and storage
 

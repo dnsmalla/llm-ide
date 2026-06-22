@@ -4,7 +4,8 @@
 // projects rather than being pulled from thin air.
 
 import { runClaude, tryParseJSON, languageDirective, formatContext } from './runtime.mjs';
-import { getMeeting, getMeetingTranscript, findContext } from '../kb/db.mjs';
+import { getMeeting, getMeetingTranscript } from '../kb/db.mjs';
+import { findGraphContext } from '../graphkit/index.mjs';
 import { sanitizeLine as sanitizeStr } from '../core/utils.mjs';
 
 const MAX_TASKS = 30;
@@ -134,7 +135,7 @@ export async function generatePlan(userId, { meetingId, goal, language }) {
   }
 
   const lang = languageDirective(language || meeting.language);
-  const context = findContext(userId, buildContextQuery(meeting, goal), 5);
+  const context = findGraphContext(userId, buildContextQuery(meeting, goal), 5);
 
   // Cap output tokens — plan JSON schema is bounded by task count (max ~30).
   const claudeOpts = { userId, maxTokens: 3000 };

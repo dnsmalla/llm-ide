@@ -331,7 +331,9 @@ function resolveModel(model) {
 }
 ```
 
-Caller-supplied ids that are empty, stale, or belong to a foreign provider (Gemini, GPT, etc.) fail the regex and silently fall back to `DEFAULT_MODEL`. This keeps new Claude model ids (e.g. `claude-opus-5`) working without a code change, while rejecting any non-Claude string without a hard error (runtime.mjs:36–44).
+`resolveModel` is the **Anthropic-path** validator: an id that is empty, stale, or not a valid Claude id falls back to `DEFAULT_MODEL`, so new Claude ids (e.g. `claude-opus-5`) keep working without a code change and no malformed id reaches the Anthropic API as a hard error (runtime.mjs:36–44).
+
+Since multi-provider routing landed (see §6 *Provider routing* below), this fallback is **not** universal: an id recognized as another provider (`gpt-…`, `gemini-…`, etc.) is routed to that provider by `resolveProvider` and used **as-is** — it does not collapse to `DEFAULT_MODEL`. The Claude-only fallback applies only to ids that route to the Anthropic provider (a `claude-…` id, or an unrecognized id, which defaults to Anthropic). `resolveClaudeCall` computes `resolvedModel` on every call (runtime.mjs:555), but the non-Anthropic HTTP path passes the caller's raw `model` to `completeViaApi`, so `resolvedModel` is consumed only on the Anthropic path.
 
 ---
 
@@ -339,7 +341,13 @@ Caller-supplied ids that are empty, stale, or belong to a foreign provider (Gemi
 
 Source: `extension/agents/runtime.mjs`
 
-`runClaude(prompt, { userId, model, maxTokens, cacheTranscript, provider })` is the shared LLM call primitive used by every Phase-4+ agent. It has two execution paths: an HTTP API path and a CLI fallback path.
+`runClaude(prompt, { userId, model, maxTokens, cacheTranscript, provider })` is the shared LLM call primitive used by every Phase-4+ agent. Within a chosen provider it has two execution paths: an HTTP API path and a CLI fallback path.
+
+### Provider routing
+
+`resolveClaudeCall({ userId, model, provider })` (runtime.mjs:108) selects the target provider before execution. `resolveProvider(model)` (providers.mjs:132) maps a model id by prefix — `claude*` → `anthropic`, `gpt*`/`o<n>`/`codex` → `openai`, `gemini*` → `google` — defaulting to `anthropic`. The `custom` provider (a generic OpenAI-compatible endpoint: OpenRouter, Ollama/LM Studio, DeepSeek, …) is **not** id-prefix routable and must be selected explicitly via the `provider` argument (providers.mjs:22–33). For any non-Anthropic provider, `runClaude` calls `completeViaApi(provider, …)` — an OpenAI-compatible HTTP client (providers.mjs:229) — for the HTTP path, and `runViaCli(provider, …)` for the CLI path (runtime.mjs:115–124). A user-supplied `custom.baseUrl` is validated by an SSRF guard (`assertSafeBaseUrl`, providers.mjs:65 — https-only, rejects localhost/private IPv4+IPv6, with a DNS-resolution check) before any fetch. The per-provider API key comes from the user's vault first, then an operator env fallback (`providerApiKey`, providers.mjs:142), so spend bills the user's own account when they've configured a key.
+
+The sections below detail the **Anthropic** provider's two paths; other providers follow the same HTTP-then-CLI shape through `providers.mjs`.
 
 ### Prompt cap
 
@@ -374,7 +382,7 @@ This cap is aligned with the server-level body cap documented in [`api-server.md
 
 **Trigger:** no API key is available, or the HTTP path exits its retry loop without a successful response (operator-key only).
 
-**Invocation:** `execFile('claude', ['-p', prompt], { timeout: CLAUDE_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, env })` (runtime.mjs:311–315).
+**Invocation:** `execFile('claude', ['--strict-mcp-config', '-p', prompt], { timeout: CLAUDE_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, env })` (runtime.mjs:312–316). The `--strict-mcp-config` flag (with no `--mcp-config`) loads **zero** MCP servers, so a cold `claude` spawn skips booting every MCP server the user has configured — the dominant per-call cost in CLI mode. The agent supplies its own context via the prompt and never needs the user's MCP servers here.
 
 **CLI timeout:** `CLAUDE_TIMEOUT_MS = 90_000` ms (90 seconds per attempt) (runtime.mjs:14).
 
@@ -382,7 +390,7 @@ This cap is aligned with the server-level body cap documented in [`api-server.md
 
 **CLI overload retry:** uses the same `RETRY_DELAYS_MS` schedule. A stderr/stdout match against `/\b529\b|\boverloaded\b|\b503\b|\bservice unavailable\b/i` (runtime.mjs:54–56) sets `err.overloaded = true`, which triggers the retry loop (runtime.mjs:331).
 
-**Key redaction:** `redactKey(text, apiKey)` (runtime.mjs:64–69) replaces the literal API key and any other `sk-ant-*` token in error strings before they appear in logs or client error envelopes. This guards against provider diagnostics that echo credentials back into the error body.
+**Key redaction:** `redactKey(text, apiKey)` (runtime.mjs:64–74) first masks the literal in-flight API key, then runs the shared `redactSecrets` pattern set (`extension/core/redact-secrets.mjs`) over the text — scrubbing every recognized credential shape (`sk-ant-*`, `ghp_*`, `github_pat_*`, Slack `xox*`, Google `AIza*`, AWS `AKIA*`, `Bearer …`, `apiKey=…`), not just Anthropic keys — before it reaches logs or client error envelopes. The pattern set is the single source of truth shared with the audit log and outcome watcher, so every sink redacts identically.
 
 ---
 
