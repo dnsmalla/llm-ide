@@ -211,22 +211,31 @@ export function updateTask(userId, taskId, patch) {
       ? null
       : (patch.risk && ALLOWED_RISK.has(patch.risk) ? patch.risk : cur.risk);
 
+    // Distinguish "field absent" (undefined → keep current) from "explicitly
+    // cleared" (null → write null). The old COALESCE(?, col) collapsed both to
+    // the current value, so owner/due/files/riskReason could never be cleared
+    // (e.g. un-assigning an owner from the UI was silently ignored).
+    const riskReason = patch.riskReason !== undefined ? patch.riskReason : cur.risk_reason;
+    const owner = patch.owner !== undefined ? patch.owner : cur.owner;
+    const due = patch.due !== undefined ? patch.due : cur.due;
+    const files = patch.files !== undefined ? safeJSONStringify(patch.files) : cur.files;
+
     db.prepare(`
       UPDATE plan_tasks SET
         status = ?,
         risk = ?,
-        risk_reason = COALESCE(?, risk_reason),
-        owner = COALESCE(?, owner),
-        due = COALESCE(?, due),
-        files = COALESCE(?, files)
+        risk_reason = ?,
+        owner = ?,
+        due = ?,
+        files = ?
       WHERE id = ? AND user_id = ?
     `).run(
       status,
       risk,
-      patch.riskReason !== undefined ? patch.riskReason : null,
-      patch.owner !== undefined ? patch.owner : null,
-      patch.due !== undefined ? patch.due : null,
-      patch.files !== undefined ? safeJSONStringify(patch.files) : null,
+      riskReason,
+      owner,
+      due,
+      files,
       String(taskId),
       userId,
     );

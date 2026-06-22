@@ -194,6 +194,10 @@ export function search(userId, { q, kind, limit = 20, projectId } = {}) {
     }
     // Phase-8 outcomes live in their own table.
     if (kind === 'outcome') {
+      // Outcomes aren't tagged with a projectId, so a project-scoped search
+      // returns none — matching the FTS path, which drops outcome rows when a
+      // projectId filter is in effect rather than leaking cross-project context.
+      if (projectId) return [];
       const rows = lazyPrepare(db, `
         SELECT id, task_id, provider, ref, state, meta, observed_at FROM outcomes
         WHERE user_id = ?
