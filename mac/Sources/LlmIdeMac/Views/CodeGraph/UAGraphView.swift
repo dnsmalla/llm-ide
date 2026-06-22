@@ -30,7 +30,8 @@ struct UAGraphView: View {
     /// tab to whichever engine matches the selected item's category.
     enum Mode: String, Identifiable, CaseIterable {
         case code            // → CodeNoteService generates code notes + graph
-        case data            // → MemoryGenerator on docs
+        case data            // → MemoryGenerator on docs (InfiniteBrain)
+        case all             // → code + doc, merged into one graph
 
         var id: String { rawValue }
 
@@ -38,6 +39,7 @@ struct UAGraphView: View {
             switch self {
             case .code: return "Code Graph"
             case .data: return "InfiniteBrain"
+            case .all:  return "All"
             }
         }
 
@@ -45,6 +47,7 @@ struct UAGraphView: View {
             switch self {
             case .code: return "chevron.left.forwardslash.chevron.right"
             case .data: return "brain.head.profile"
+            case .all:  return "square.grid.2x2"
             }
         }
 
@@ -55,6 +58,17 @@ struct UAGraphView: View {
             switch self {
             case .code: return theme.accent   // brand teal
             case .data: return theme.accent2  // info blue
+            case .all:  return theme.accent3  // unified
+            }
+        }
+
+        /// Library categories shown for this mode: Code Graph → code only,
+        /// InfiniteBrain → docs/data, All → everything.
+        var libraryCategories: [LibraryItem.Category] {
+            switch self {
+            case .code: return [.code]
+            case .data: return [.data, .notes]
+            case .all:  return [.code, .data, .notes]
             }
         }
 
@@ -71,13 +85,15 @@ struct UAGraphView: View {
         var runLabel: String {
             switch self {
             case .code: return "Generate Code Graph"
-            case .data: return "Generate Memory"
+            case .data: return "Generate InfiniteBrain"
+            case .all:  return "Generate Graph"
             }
         }
         var description: String {
             switch self {
             case .code: return "Generate code notes + graph for the selected code folder."
-            case .data: return "Build memory from the selected docs."
+            case .data: return "Build an InfiniteBrain doc graph from the project's docs."
+            case .all:  return "One graph from all code + docs, with cross-links."
             }
         }
     }
@@ -219,23 +235,18 @@ struct UAGraphView: View {
     private var canRun: Bool {
         switch mode {
         case .code: return codeTargetFolder != nil
-        case .data: return selectedItem?.category == .data || selectedItem?.category == .notes || !allDocURLs.isEmpty
+        case .data: return selectedItem?.category == .data || selectedItem?.category == .notes || activeRepoRoot != nil
+        case .all:  return activeRepoRoot != nil
         }
     }
 
-    /// Every doc-extension file in the library (across CODE / DATA / NOTES),
-    /// deduped. Lets InfiniteBrain build a doc graph for the WHOLE project even
-    /// when the docs (README.md, AGENTS.md, docs/…) live under the code tree and
-    /// the DATA section is empty — the project-level counterpart to Code Graph's
-    /// "Generate Code Graph for <repo>".
-    private var allDocURLs: [URL] {
-        var seen = Set<String>()
-        var urls: [URL] = []
-        for item in library.items
-        where FileClassifier.docExtensions.contains(item.url.pathExtension.lowercased()) {
-            if seen.insert(item.url.standardizedFileURL.path).inserted { urls.append(item.url) }
-        }
-        return urls
+    /// The repo to scan for a project-level generate (Code / InfiniteBrain /
+    /// All): the selected code folder, else the single/first available repo.
+    /// InfiniteBrain and All walk this repo ON DISK for docs/code — they do not
+    /// rely on `library.items`, which only indexes code files (so the project's
+    /// README.md / docs/ wouldn't appear there and the doc graph never ran).
+    private var activeRepoRoot: URL? {
+        codeTargetFolder ?? availableCodeRepos.first?.root
     }
 
     /// For Code mode, find the folder root the selected item belongs to.
@@ -353,7 +364,7 @@ struct UAGraphView: View {
             }
             FileTreePanel(
                 title: "Library",
-                categories: [.code, .data],
+                categories: mode.libraryCategories,
                 selectedURL: $selectedURL
             )
             Divider().background(t.border)
@@ -430,7 +441,7 @@ struct UAGraphView: View {
             }
             statusBlock
             switch mode {
-            case .code:
+            case .code, .all:
                 codeNotesProgressView
             case .data:
                 Text("Scans .md / .txt files,\nchunks by headings.")
@@ -450,11 +461,14 @@ struct UAGraphView: View {
             return "Generate Code Graph — pick a Code item"
         case .data:
             if let item = selectedItem, item.category == .data || item.category == .notes {
-                if let origin = item.folderOrigin { return "Generate Memory from \(origin)" }
-                return "Generate Memory from \(item.name)"
+                if let origin = item.folderOrigin { return "Generate InfiniteBrain from \(origin)" }
+                return "Generate InfiniteBrain from \(item.name)"
             }
-            if allDocURLs.isEmpty { return "Generate InfiniteBrain — no docs found" }
-            return "Generate InfiniteBrain — \(allDocURLs.count) docs"
+            if let repo = activeRepoRoot { return "Generate InfiniteBrain for \(repo.lastPathComponent)" }
+            return "Generate InfiniteBrain — pick a Code repo"
+        case .all:
+            if let repo = activeRepoRoot { return "Generate Graph for \(repo.lastPathComponent)" }
+            return "Generate Graph — pick a Code repo"
         }
     }
 
@@ -483,6 +497,7 @@ struct UAGraphView: View {
             Label(m.displayName, systemImage: m.icon)
                 .font(Typography.captionStrong)
                 .lineLimit(1)
+                .minimumScaleFactor(0.7)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 6)
                 .foregroundStyle(active ? m.tint(t) : t.textMuted)
@@ -513,10 +528,15 @@ struct UAGraphView: View {
             if selectedItem?.category == .data || selectedItem?.category == .notes {
                 return mode.description
             }
-            if allDocURLs.isEmpty {
-                return "Add .md / .txt files (or import a docs folder) to build a doc graph."
+            if let repo = activeRepoRoot {
+                return "Builds a doc graph from the .md / .txt docs in \(repo.lastPathComponent) — or pick a file in DATA."
             }
-            return "Builds a doc graph from all \(allDocURLs.count) docs in the project — or pick one in DATA."
+            return "Add a code repo (Settings) or .md / .txt files to build a doc graph."
+        case .all:
+            if let repo = activeRepoRoot {
+                return "Builds one graph from all code + docs in \(repo.lastPathComponent), with cross-links."
+            }
+            return "Add a code repo (Settings) to build the combined graph."
         }
     }
 
@@ -532,7 +552,8 @@ struct UAGraphView: View {
                 Text({
                     switch mode {
                     case .code: return "Generating code graph…"
-                    case .data: return "Generating memory…"
+                    case .data: return "Generating InfiniteBrain…"
+                    case .all:  return "Generating graph…"
                     }
                 }())
                     .font(Typography.caption).foregroundStyle(t.textMuted)
@@ -559,7 +580,7 @@ struct UAGraphView: View {
             switch mode {
             case .code:
                 codeItemsList
-            case .data:
+            case .data, .all:
                 memoryItemsList
             }
         }
@@ -786,15 +807,20 @@ struct UAGraphView: View {
                             switch mode {
                             case .code: return "No code graph yet"
                             case .data: return "No InfiniteBrain graph yet"
+                            case .all:  return "No graph yet"
                             }
                         }(),
                         message: {
                             switch mode {
                             case .code: return "Pick a repo on the left, then click Generate Code Graph."
                             case .data:
-                                return allDocURLs.isEmpty
-                                    ? "Add .md / .txt docs (or import a docs folder), then Generate InfiniteBrain."
+                                return activeRepoRoot == nil
+                                    ? "Add a code repo (or .md / .txt docs), then Generate InfiniteBrain."
                                     : "Click Generate InfiniteBrain to build a doc graph from the project's docs — or pick a single file in DATA."
+                            case .all:
+                                return activeRepoRoot == nil
+                                    ? "Add a code repo, then Generate Graph."
+                                    : "Click Generate Graph to build one graph from all code + docs."
                             }
                         }()
                     )
@@ -1106,7 +1132,8 @@ struct UAGraphView: View {
                     Text({
                         switch mode {
                         case .code: return "Generating code graph…"
-                        case .data: return "Generating memory…"
+                        case .data: return "Generating InfiniteBrain…"
+                        case .all:  return "Generating graph…"
                         }
                     }())
                         .font(Typography.caption)
@@ -1195,6 +1222,7 @@ struct UAGraphView: View {
         switch mode {
         case .code: if let folder = codeTargetFolder { generateCodeNotes(target: folder) }
         case .data: generateMemory()
+        case .all:  generateAll()
         }
     }
 
@@ -1205,20 +1233,31 @@ struct UAGraphView: View {
         // From the selected DATA/NOTES item (or its folder group) when one is
         // chosen; otherwise from the whole project's docs — so InfiniteBrain has
         // a project-level generate, not just a per-file one.
-        let urls: [URL]
+        // A selected DATA/NOTES item (or its folder group) chunks just those
+        // files; otherwise walk the active repo ON DISK for all its .md/.txt
+        // docs — the project's README/docs/, which aren't in library.items.
+        let selectedFiles: [URL]?
         if let item = selectedItem, item.category == .data || item.category == .notes {
             if let origin = item.folderOrigin {
-                urls = library.items.filter { $0.folderOrigin == origin }.map(\.url)
+                selectedFiles = library.items.filter { $0.folderOrigin == origin }.map(\.url)
             } else {
-                urls = [item.url]
+                selectedFiles = [item.url]
             }
         } else {
-            urls = allDocURLs
+            selectedFiles = nil
         }
-        guard !urls.isEmpty else { return }
+        let repo = activeRepoRoot
+        guard selectedFiles != nil || repo != nil else { return }
         status = .running
         runTask = Task.detached(priority: .userInitiated) {
-            let mem = MemoryGenerator.generate(files: urls)
+            let mem: GeneratedMemory
+            if let files = selectedFiles {
+                mem = MemoryGenerator.generate(files: files)
+            } else if let repo {
+                mem = MemoryGenerator.generate(from: repo)
+            } else {
+                return
+            }
             if Task.isCancelled { return }
             let initial = CodeGraphLayout.compute(mem.graph,
                                                   canvasSize: CGSize(width: 1200, height: 800))
@@ -1241,6 +1280,32 @@ struct UAGraphView: View {
     /// `CodeGraphView` so both graphs show an organic cluster instead of the
     /// raw circular rings. No-op for trivially small graphs. The `expectedMode`
     /// guard drops the result if the user switched tabs mid-settle.
+    /// "All" mode — generate the code graph + the InfiniteBrain doc graph for
+    /// the active repo and merge them into one (via KnowledgeGraphService.merge,
+    /// adding doc→code cross-links), then render the unified graph.
+    private func generateAll() {
+        guard let repo = activeRepoRoot else { return }
+        status = .running
+        runTask = Task {
+            _ = await codeNoteService.generate(repoRoot: repo)   // @MainActor; heavy scan is internal
+            let code = codeNoteService.graph
+            if Task.isCancelled { return }
+            let result = await Task.detached(priority: .userInitiated) { () -> (data: CGData, chunks: [MemoryChunk], docs: Int) in
+                let docMem = MemoryGenerator.generate(from: repo)
+                let merged = KnowledgeGraphService.merge(code: code, doc: docMem.graph, chunks: docMem.chunks)
+                let laid = CodeGraphLayout.compute(merged, canvasSize: CGSize(width: 1200, height: 800))
+                return (laid, docMem.chunks, docMem.docCount)
+            }.value
+            if Task.isCancelled { return }
+            self.selectedNode = nil
+            self.memoryChunks = result.chunks
+            self.memoryDocCount = result.docs
+            self.fullData = result.data
+            self.status = .loaded(nodeCount: result.data.nodes.count, edgeCount: result.data.edges.count)
+            self.settlePhysics(from: result.data, expectedMode: .all)
+        }
+    }
+
     private func settlePhysics(from initial: CGData, expectedMode: Mode) {
         let count = initial.nodes.count
         guard count > 2 else { return }
