@@ -219,7 +219,7 @@ test('chatModels: anthropic keeps claude-* only', () => {
 });
 
 test('cliInvocation: standard non-interactive form per provider', () => {
-  assert.deepEqual(cliInvocation('anthropic', 'hi'), { bin: 'claude', args: ['-p', 'hi'] });
+  assert.deepEqual(cliInvocation('anthropic', 'hi'), { bin: 'claude', args: ['--strict-mcp-config', '-p', 'hi'] });
   assert.deepEqual(cliInvocation('openai', 'hi'),    { bin: 'codex',  args: ['exec', 'hi'] });
   assert.deepEqual(cliInvocation('google', 'hi'),    { bin: 'gemini', args: ['-p', 'hi'] });
   assert.equal(cliInvocation('skynet', 'hi'), null);

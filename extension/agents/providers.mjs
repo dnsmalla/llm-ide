@@ -262,7 +262,12 @@ export async function completeViaApi(provider, { apiKey, model, prompt, maxToken
 // differ. (Anthropic's own CLI fallback still lives in runtime.mjs.)
 
 const CLI_ARG_BUILDERS = {
-  anthropic: (p) => ['-p', p],
+  // `--strict-mcp-config` with no `--mcp-config` loads ZERO MCP servers, so a
+  // cold `claude` spawn skips booting every MCP server the user has configured
+  // — the dominant cost when the agent runs in CLI (no-API-key) mode and fires
+  // one of these per hop. The agent supplies its own context/tools via the
+  // prompt, so it never needs the user's MCP servers for a single-shot answer.
+  anthropic: (p) => ['--strict-mcp-config', '-p', p],
   openai:    (p) => ['exec', p],   // codex exec "<prompt>"
   google:    (p) => ['-p', p],     // gemini -p "<prompt>"
 };

@@ -304,7 +304,11 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
         if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
         // Remove empty-string entries so the subprocess env is clean.
         for (const k of Object.keys(env)) if (!env[k]) delete env[k];
-        execFile('claude', ['-p', prompt], {
+        // `--strict-mcp-config` (no --mcp-config) loads zero MCP servers, so a
+        // cold spawn skips booting every MCP server the user has configured —
+        // the dominant per-call cost in CLI mode. The agent supplies its own
+        // context via the prompt and never needs the user's MCP servers here.
+        execFile('claude', ['--strict-mcp-config', '-p', prompt], {
           timeout: CLAUDE_TIMEOUT_MS,
           maxBuffer: 4 * 1024 * 1024,
           env,
