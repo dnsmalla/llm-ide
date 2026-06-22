@@ -1,6 +1,6 @@
 # Plan — Unified, automatic, incremental knowledge graph
 
-**Status:** in progress (Stage 0 ✅, Stage 1 ✅, Stage 2 ✅)
+**Status:** in progress (Stage 0 ✅, Stage 1 ✅, Stage 2 ✅, Stage 3 ✅)
 **Goal:** one knowledge graph for a project, built automatically and incrementally
 from BOTH file types — code files via the Code graph, doc files via InfiniteBrain —
 merged into a single graph, and used to generate the agent's repo memory. No manual
@@ -48,9 +48,14 @@ public init, ids are stable Strings) → mergeable by id-dedup.
   symbol via a `[[wikilink]]` or exact title match gets a `references` edge to that code node.
   Conservative (explicit links + exact titles only); fuzzy body-mention matching is a later
   refinement.
-- **Stage 3 — incremental:** per-doc chunk cache (hash-keyed, like the code `scan-cache`)
-  so only changed docs re-chunk; on change, replace only affected nodes/edges + recompute
-  touched cross-links.
+- **Stage 3 — incremental** ✅: doc-set change detection — `docSetFingerprint` (stat-only
+  `path|size|mtime` hash over doc files) skips the doc-track recompute when nothing changed
+  and reuses the cached graph; recomputes only on add/remove/edit. The code track is already
+  per-file incremental via CodeNoteService's `scan-cache`. `resetCache()` clears on project
+  switch. Note: true *per-doc* surgery (re-chunk only the changed doc, keep cross-doc edges)
+  needs a seam in the graph-kit package — a follow-up there, since MemoryGenerator computes
+  cross-chunk edges over the whole set. Doc chunking is cheap (no LLM), so full-recompute on
+  any doc change is acceptable for now.
 - **Stage 4 — generate memory:** render the merged graph to the agent-facing memory artifact
   at the path the extension reads; update the extension reader if needed (Decision 2).
 - **Stage 5 — automate:** `@StateObject` service in `LlmIdeMacApp`, `.start()` from AppShell;

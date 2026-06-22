@@ -1,5 +1,6 @@
 import Foundation
 import GraphKit
+import CryptoKit
 import os
 
 /// Stage 1 of the unified knowledge graph
@@ -37,6 +38,16 @@ final class KnowledgeGraphService: ObservableObject {
     /// track and the orchestration as a whole.
     private var isRunning = false
 
+    // Stage 3 — doc-track change detection. The doc graph is recomputed only
+    // when the doc set's fingerprint changes; otherwise the cached result is
+    // reused. (The code track is incremental per-file via CodeNoteService's
+    // own scan-cache.) Per-instance/in-session; the Stage 5 auto-updater holds
+    // a long-lived instance, so a periodic refresh that finds no doc change is
+    // near-free. Reset on project switch.
+    private var lastDocFingerprint: String?
+    private var cachedDocGraph: CGData = .empty
+    private var cachedChunks: [MemoryChunk] = []
+
     nonisolated private static let log = Logger(subsystem: "com.llmide.macapp",
                                                 category: "KnowledgeGraphService")
 
@@ -68,24 +79,35 @@ final class KnowledgeGraphService: ObservableObject {
         // Doc track — MemoryGenerator walks each root (bounded) and filters to
         // doc extensions. Pure text chunking (no LLM), run off the main actor.
         let roots = docRoots
-        let doc = await Task.detached(priority: .userInitiated) { () -> (graph: CGData, chunks: [MemoryChunk]) in
-            var nodes: [CGNode] = []
-            var edges: [CGEdge] = []
-            var chunks: [MemoryChunk] = []
-            var seenNode = Set<String>()
-            let fm = FileManager.default
-            for root in roots {
-                var isDir: ObjCBool = false
-                guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { continue }
-                let mem = MemoryGenerator.generate(from: root)
-                for n in mem.graph.nodes where seenNode.insert(n.id).inserted { nodes.append(n) }
-                // CGEdge has no id; doc graphs from distinct roots have disjoint
-                // (path-hashed) node ids, so their edges can't collide — append.
-                edges.append(contentsOf: mem.graph.edges)
-                chunks.append(contentsOf: mem.chunks)
-            }
-            return (CGData(nodes: nodes, edges: edges), chunks)
-        }.value
+        // Recompute the doc graph only when the doc set changed (stat-only
+        // fingerprint); otherwise reuse the cached result.
+        let fingerprint = await Task.detached(priority: .utility) { Self.docSetFingerprint(roots: roots) }.value
+        let doc: (graph: CGData, chunks: [MemoryChunk])
+        if let last = lastDocFingerprint, last == fingerprint {
+            doc = (cachedDocGraph, cachedChunks)
+        } else {
+            doc = await Task.detached(priority: .userInitiated) { () -> (graph: CGData, chunks: [MemoryChunk]) in
+                var nodes: [CGNode] = []
+                var edges: [CGEdge] = []
+                var chunks: [MemoryChunk] = []
+                var seenNode = Set<String>()
+                let fm = FileManager.default
+                for root in roots {
+                    var isDir: ObjCBool = false
+                    guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { continue }
+                    let mem = MemoryGenerator.generate(from: root)
+                    for n in mem.graph.nodes where seenNode.insert(n.id).inserted { nodes.append(n) }
+                    // CGEdge has no id; doc graphs from distinct roots have disjoint
+                    // (path-hashed) node ids, so their edges can't collide — append.
+                    edges.append(contentsOf: mem.graph.edges)
+                    chunks.append(contentsOf: mem.chunks)
+                }
+                return (CGData(nodes: nodes, edges: edges), chunks)
+            }.value
+            lastDocFingerprint = fingerprint
+            cachedDocGraph = doc.graph
+            cachedChunks = doc.chunks
+        }
         docGraph = doc.graph
 
         // Stage 2 — unify code + doc into one graph, with doc→code cross-links.
@@ -129,5 +151,38 @@ final class KnowledgeGraphService: ObservableObject {
             }
         }
         return CGData(nodes: nodes, edges: edges)
+    }
+
+    /// Clear the doc-track cache — call on project switch so a new project
+    /// doesn't reuse the previous project's doc graph.
+    func resetCache() {
+        lastDocFingerprint = nil
+        cachedDocGraph = .empty
+        cachedChunks = []
+    }
+
+    /// Cheap change signal for the doc set: sorted `path|size|mtime` over every
+    /// doc-extension file under the roots, hashed. Stat-only (no file reads),
+    /// so re-running when nothing changed is near-free; the doc track recomputes
+    /// only when a doc is added, removed, or edited.
+    nonisolated static func docSetFingerprint(roots: [URL]) -> String {
+        let fm = FileManager.default
+        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]
+        var entries: [String] = []
+        for root in roots {
+            guard let en = fm.enumerator(at: root, includingPropertiesForKeys: keys,
+                                         options: [.skipsHiddenFiles]) else { continue }
+            for case let url as URL in en {
+                guard FileClassifier.docExtensions.contains(url.pathExtension.lowercased()) else { continue }
+                let vals = try? url.resourceValues(forKeys: Set(keys))
+                guard vals?.isRegularFile == true else { continue }
+                let size = vals?.fileSize ?? 0
+                let mtime = vals?.contentModificationDate?.timeIntervalSince1970 ?? 0
+                entries.append("\(url.path)|\(size)|\(mtime)")
+            }
+        }
+        entries.sort()
+        let digest = SHA256.hash(data: Data(entries.joined(separator: "\n").utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
