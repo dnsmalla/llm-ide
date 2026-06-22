@@ -198,10 +198,16 @@ export default function App() {
   // dispatch a single run.  With the stub above, this fires on
   // virtually every recording — the user gets a working agent out
   // of the box with no manual setup.
+  // Whether a run already exists *for the current session*. The
+  // /kb/agent/runs poll returns ALL of the user's runs, so checking
+  // `runs.length` would let a stale, un-stopped run from a PRIOR meeting read
+  // as "this session is already attached" and block auto-dispatch for the new
+  // session indefinitely. Scope the check to the current sessionId.
+  const sessionHasRun = agent.runs.some((r) => r.sessionId === sessionId);
   useEffect(() => {
     if (!agentEnabled) return;
     if (!transcript.isRecording) return;
-    if (agent.runs.length > 0) return;
+    if (sessionHasRun) return;
     if (agent.busy) return;
     const planId = plan.plan?.id ?? null;
     if (!planId) return; // wait for createStub to complete
@@ -212,7 +218,7 @@ export default function App() {
     // We intentionally omit `agent` from deps to avoid re-firing on
     // every busy/error tick — we only react to (recording, planId,
     // enabled) transitions.
-  }, [transcript.isRecording, agentEnabled, plan.plan?.id, agent.runs.length]);
+  }, [transcript.isRecording, agentEnabled, plan.plan?.id, sessionHasRun]);
   // Flipping the toggle OFF mid-meeting detaches any active run so
   // the agent stops drafting questions immediately.
   useEffect(() => {
@@ -224,7 +230,7 @@ export default function App() {
   // transcript view.  Only polls while at least one run is attached.
   const agentMirror = useAgentMirror({
     sessionId,
-    isAttached: agent.runs.length > 0,
+    isAttached: sessionHasRun,
   });
 
   // Cross-client session discovery and mirroring.
