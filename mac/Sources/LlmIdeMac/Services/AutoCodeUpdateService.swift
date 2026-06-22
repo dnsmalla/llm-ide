@@ -321,6 +321,9 @@ final class AutoCodeUpdateService: ObservableObject {
 
         // 4. Implement pending entries via CLI subprocess
         let pending = registry.pendingEntries()
+        // Capture the base branch once. Each issue is cut from base so the
+        // fix branches don't chain (issue B branching off issue A's fix/…).
+        let baseBranch = await Task.detached { Self.currentBranch(at: capturedGitRoot) }.value
         for entry in pending {
             if Task.isCancelled { break }
             guard let number = entry.issueIid else { continue }
@@ -348,31 +351,62 @@ final class AutoCodeUpdateService: ObservableObject {
                 failedCount += 1
                 continue
             }
+            // Reset to base before each issue so its fix branch is cut from
+            // base, not from the previous issue's fix branch. No-op on the
+            // first iteration. The tree is clean here (the previous CLI
+            // committed its work; runCLI re-verifies before editing).
+            if let base = baseBranch {
+                _ = await Task.detached { Self.checkout(base, at: capturedGitRoot) }.value
+            }
+            let baseSha = await Task.detached { Self.headSha(at: capturedGitRoot) }.value
+
             let succeeded = await runCLI(
                 issue: issue,
                 localPath: capturedGitRoot,
                 logDir: logDir
             )
 
-            if succeeded {
+            // Exit 0 alone does NOT mean work was done — a model that no-ops
+            // still exits 0. Verify a commit actually landed (HEAD advanced
+            // past base) before marking the issue implemented.
+            let headAfter = await Task.detached { Self.headSha(at: capturedGitRoot) }.value
+            let committed = succeeded && headAfter != nil && headAfter != baseSha
+
+            if committed {
+                // Safety: if the CLI committed onto the base branch instead of
+                // cutting a fix branch, move the commit onto a fix branch and
+                // rewind base — so base isn't polluted and the next issue
+                // doesn't chain off it.
+                let branchAfter = await Task.detached { Self.currentBranch(at: capturedGitRoot) }.value
+                if let base = baseBranch, let baseSha, branchAfter == base {
+                    let rescue = "fix/\(number)-auto"
+                    let ok = await Task.detached {
+                        Self.rescueCommitToBranch(rescue, base: base, baseSha: baseSha, at: capturedGitRoot)
+                    }.value
+                    if !ok {
+                        log.error("auto_code_rescue_failed issue=\(number, privacy: .public) — commit left on base branch \(base, privacy: .public)")
+                    }
+                }
+                // The fix is committed to a LOCAL branch only — never pushed
+                // automatically. The commit already exists, so a failed
+                // reviewer note must NOT flip this to "failed" (that would
+                // re-run the issue and collide with the existing fix branch).
+                registry.markDone(id: entry.actionId)
+                implementedCount += 1
                 do {
-                    // Changes are committed to a LOCAL branch only — never
-                    // pushed automatically. Leave a note for the reviewer and
-                    // keep the issue OPEN until a human pushes/merges. Auto-
-                    // closing here would mark unreviewed, unpushed work "done".
                     _ = try await client.createNote(
                         projectId: projectId,
                         number: number,
                         body: "A fix branch was prepared locally by Auto Code Update and is awaiting human review before push. The issue stays open until reviewed."
                     )
-                    registry.markDone(id: entry.actionId)
-                    implementedCount += 1
                 } catch {
-                    log.error("Failed to add review note to issue \(number): \(error)")
-                    registry.markFailed(id: entry.actionId)
-                    failedCount += 1
+                    log.error("Failed to add review note to issue \(number): \(error) — implementation already committed locally")
                 }
             } else {
+                if succeeded {
+                    log.error("auto_code_no_commit issue=\(number, privacy: .public) — CLI exited 0 but produced no commit")
+                    taskErrors["#\(number)"] = "Issue #\(number): the CLI finished but made no commit — nothing was implemented."
+                }
                 registry.markFailed(id: entry.actionId)
                 failedCount += 1
             }
@@ -517,6 +551,43 @@ final class AutoCodeUpdateService: ObservableObject {
         let r = git(["rev-parse", "--abbrev-ref", "HEAD"], at: localPath)
         let b = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
         return (r.code == 0 && !b.isEmpty && b != "HEAD") ? b : nil
+    }
+
+    /// The commit SHA at HEAD, or nil if it can't be read.
+    nonisolated static func headSha(at localPath: String) -> String? {
+        let r = git(["rev-parse", "HEAD"], at: localPath)
+        let s = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (r.code == 0 && !s.isEmpty) ? s : nil
+    }
+
+    /// Check out an existing branch. Returns true on success.
+    nonisolated static func checkout(_ branch: String, at localPath: String) -> Bool {
+        return git(["checkout", branch], at: localPath).code == 0
+    }
+
+    /// The CLI was told to commit on a fix/ branch but committed onto `base`
+    /// instead. Isolate its commit(s) so base isn't polluted (and the next
+    /// issue doesn't chain off it): create `branch` at the current HEAD —
+    /// preserving the work — then rewind `base` to `baseSha` and switch to the
+    /// new branch. Creating the branch first means the commits are safe before
+    /// the reset, and the reset only moves a ref (recoverable via reflog).
+    /// Returns false (leaving the commit on base, no data loss) if `branch`
+    /// already exists or any step fails.
+    nonisolated static func rescueCommitToBranch(_ branch: String, base: String, baseSha: String, at localPath: String) -> Bool {
+        guard git(["branch", branch], at: localPath).code == 0 else { return false }
+        guard git(["reset", "--hard", baseSha], at: localPath).code == 0 else { return false }
+        return git(["checkout", branch], at: localPath).code == 0
+    }
+
+    /// Restore the working tree to pristine (revert tracked edits + remove
+    /// untracked files). Only safe to call when the tree was verified clean
+    /// beforehand, so the only thing discarded is work produced since. Used to
+    /// enforce the read-only contract of review tasks — their findings go to
+    /// the log via stdout, never to the repo. `clean -fd` (no `-x`) leaves
+    /// gitignored files alone.
+    nonisolated static func discardWorkingTreeChanges(at localPath: String) {
+        _ = git(["checkout", "--", "."], at: localPath)
+        _ = git(["clean", "-fd"], at: localPath)
     }
 
     /// Stash uncommitted changes (incl. untracked) so auto-tasks can run on a
@@ -830,6 +901,13 @@ final class AutoCodeUpdateService: ObservableObject {
         }
 
         activeProcess = nil
+        // Read-only enforcement. The tree was verified clean before this
+        // review task ran, so anything it touched is its own output. Reviews
+        // must not mutate the repo — their findings are captured in the log
+        // via stdout. Revert any edits deterministically rather than trusting
+        // the prompt: an uncommitted edit left behind would trip the
+        // dirty-tree guard for every later task AND every subsequent run.
+        await Task.detached { Self.discardWorkingTreeChanges(at: localPath) }.value
         return result
     }
 

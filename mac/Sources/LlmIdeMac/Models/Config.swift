@@ -338,10 +338,12 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(autoCodeRunRegression, forKey: "autoCodeRunRegression") }
     }
 
-    // Default prompt templates for each auto task type.
-    static let defaultTemplateReviewCode = "Review the recent commits in this repository. Check for bugs, security issues, and code style problems. Write a summary to REVIEW.md."
-    static let defaultTemplateReviewDoc = "Review the documentation in this repository. Update any docs that are out of date with recent code changes. Fix unclear or incomplete sections."
-    static let defaultTemplateReviewConflicts = "Check for and resolve any merge conflicts in this repository. Create a branch named fix/conflicts, resolve all conflicts, commit, and push."
+    // Default prompt templates for each auto task type. Review tasks are
+    // READ-ONLY: they must not modify the repo (the loop reverts any stray
+    // edits) — their findings are captured from stdout in the task log.
+    static let defaultTemplateReviewCode = "Review the recent commits in this repository for bugs, security issues, and code style problems. This is a READ-ONLY review: do NOT edit, create, or delete any files, and do NOT commit or push. Print your findings as a summary to your output."
+    static let defaultTemplateReviewDoc = "Review the documentation in this repository for sections that are out of date with recent code changes, unclear, or incomplete. This is a READ-ONLY review: do NOT edit, create, or delete any files, and do NOT commit or push. List the specific docs and the fixes you would make to your output."
+    static let defaultTemplateReviewConflicts = "Check this repository for merge conflicts (conflict markers, unmerged paths). This is a READ-ONLY review: do NOT edit, create, or delete any files, and do NOT commit or push. List which files conflict and how you would resolve each to your output."
 
     @Published var autoTaskTemplateReviewCode: String {
         didSet { defaults.set(autoTaskTemplateReviewCode, forKey: "autoTaskTemplateReviewCode") }
