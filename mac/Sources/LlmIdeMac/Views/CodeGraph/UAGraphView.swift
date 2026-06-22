@@ -125,6 +125,12 @@ struct UAGraphView: View {
     /// based on `showSymbols` so the canvas doesn't have to draw 1k+ nodes
     /// when the user just wants the file-level view.
     @State private var fullData: CGData = .empty
+    /// Last generated graph per mode, kept so switching modes (or a reset
+    /// triggered by selecting a repo / tab) RESTORES the graph instead of
+    /// blanking it — fixes the "graph shows then disappears" race and lets a
+    /// once-generated graph be reused without re-running.
+    @State private var graphCache: [Mode: CGData] = [:]
+    @State private var chunkCacheByMode: [Mode: [MemoryChunk]] = [:]
     @State private var selectedNode: CGNode?
     @State private var runTask: Task<Void, Never>?
     @State private var showSymbols: Bool = false
@@ -315,6 +321,7 @@ struct UAGraphView: View {
             let initial = CodeGraphLayout.compute(
                 newGraph, canvasSize: UAHelpers.layoutSize(for: newGraph.nodes.count))
             self.fullData = initial
+            self.graphCache[.code] = initial
             self.codeArtifacts = UAHelpers.collectCodeArtifacts(newGraph)
             // Flip to .loaded straight from the published graph — don't gate
             // on `progress == .complete`. `@Published` emits `graph` (in
@@ -346,11 +353,22 @@ struct UAGraphView: View {
 
     private func resetDerivedState() {
         selectedNode = nil
-        fullData = .empty
-        codeArtifacts = []
-        memoryChunks = []
-        memoryDocCount = 0
-        status = .idle
+        // Restore the active mode's last graph from the cache rather than
+        // blanking — so switching tabs / picking a repo reuses an already-
+        // generated graph, and a reset that races a fresh generation can't
+        // wipe it (the cache holds the latest result).
+        if let cached = graphCache[mode], !cached.nodes.isEmpty {
+            fullData = cached
+            memoryChunks = chunkCacheByMode[mode] ?? []
+            status = .loaded(nodeCount: cached.nodes.count, edgeCount: cached.edges.count)
+        } else {
+            fullData = .empty
+            codeArtifacts = []
+            memoryChunks = []
+            memoryDocCount = 0
+            status = .idle
+        }
+        recomputeDisplayData()
     }
 
     // MARK: - Panel 1: Library tree + run controls
@@ -1269,6 +1287,8 @@ struct UAGraphView: View {
                 self.memoryChunks = mem.chunks
                 self.memoryDocCount = mem.docCount
                 self.fullData = initial
+                self.graphCache[.data] = initial
+                self.chunkCacheByMode[.data] = mem.chunks
                 self.status = .loaded(nodeCount: mem.graph.nodes.count,
                                       edgeCount: mem.graph.edges.count)
                 // Settle into the same organic layout as the code graph.
@@ -1303,6 +1323,8 @@ struct UAGraphView: View {
             self.memoryChunks = result.chunks
             self.memoryDocCount = result.docs
             self.fullData = result.data
+            self.graphCache[.all] = result.data
+            self.chunkCacheByMode[.all] = result.chunks
             self.status = .loaded(nodeCount: result.data.nodes.count, edgeCount: result.data.edges.count)
             self.settlePhysics(from: result.data, expectedMode: .all)
         }
@@ -1327,6 +1349,7 @@ struct UAGraphView: View {
             if Task.isCancelled { return }
             let settled = sim.appliedData(to: initial)
             await MainActor.run {
+                self.graphCache[expectedMode] = settled
                 guard self.mode == expectedMode,
                       self.fullData.nodes.count == settled.nodes.count else { return }
                 self.fullData = settled
