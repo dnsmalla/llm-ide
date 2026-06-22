@@ -50,9 +50,17 @@ def build_checks() -> list[tuple[str, int | None, int | None, str]]:
     server = _read("extension/server.mjs")
     config = _read("extension/core/config.mjs")
 
+    readme = _read("README.md")
+
     head = migration_head(Path("extension/kb/migrations"))
     api = first_int(server, r"SERVER_API_VERSION\s*=\s*(\d+)")
     body = first_int(config, r"LLMIDE_BODY_LIMIT_MB',\s*(\d+)")
+    adr_nums = [
+        int(m.group(1))
+        for p in Path("docs/decisions").glob("[0-9]*.md")
+        if (m := re.match(r"^(\d{4})-", p.name))
+    ]
+    adr_head = max(adr_nums) if adr_nums else None
 
     return [
         ("migration head — cross-cutting.md 'head migration is `NNNN`'",
@@ -70,6 +78,9 @@ def build_checks() -> list[tuple[str, int | None, int | None, str]]:
         ("body-limit default MB — cross-cutting.md",
          body, first_int(cross, r"\*\*(\d+) MB\*\* default"),
          "docs/spec/cross-cutting.md"),
+        ("ADR range — README.md 'ADRs 0001–NNNN'",
+         adr_head, first_int(readme, r"ADRs 0001[–-]0*(\d+)"),
+         "README.md"),
     ]
 
 

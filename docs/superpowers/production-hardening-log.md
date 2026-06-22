@@ -93,4 +93,11 @@ Autonomous self-paced improvement run requested 2026-06-22 ~23:50 (operator asle
 - **Hardened:** extended `check_spec_values.py` to also guard the explanation/architecture.md migration-head claim (the drift guard previously scanned only `docs/spec/`), so this exact re-drift now fails CI. Guard is now 5 checks; tests green.
 - **Verified:** standalone guard green (5/5); `pytest` 5/5; `make docs-check` green.
 - **Next up:** Cycle 12 — README.md / CONTRIBUTING.md / AGENTS.md professionalism + accuracy pass (low-risk). Then final adversarial review of the whole branch + the operator handoff/recommendations summary, then conclude the loop.
+
+### Cycle 12 — docs: README ADR-range drift + guard extension (2026-06-23 ~01:06)
+- **Reviewed:** `README.md` (49 lines). Badges accurate (API-v18 ✓, version 3.0 ✓ vs package.json 3.0.0, manifest V3 ✓).
+- **Found & fixed:** "Decisions index — ADRs 0001–0010" was stale; `docs/decisions/` has ADRs through **0014**. Fixed to 0001–0014.
+- **Hardened:** extended `check_spec_values.py` to guard the README ADR range against the actual max ADR number in `docs/decisions/`. Guard now 6 checks; all green.
+- **Verified:** standalone guard 6/6; `pytest` 5/5; `make docs-check` green.
+- **Next up:** Cycle 13 (final) — quick sweep of CONTRIBUTING/AGENTS/CHANGELOG for obvious drift, then an adversarial review of the whole branch + write the **Remaining recommendations** (deferred items) and **Operator handoff summary** below, then conclude the loop (high-confidence safe work is essentially exhausted; the rest needs human judgment).
 - **Deferred to recommendations (too risky/cross-package to do unattended):** (a) agent-loop *hard* deadline via `AbortSignal` — invasive (loop engine + runClaude threading); (b) `docSetFingerprint` deterministic ordering — the real fix also needs GraphKit's `MemoryGenerator.collectDocs` to sort-before-cap (external package), so a Mac-only fix is incomplete.
