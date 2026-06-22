@@ -6,6 +6,7 @@ import { execFile } from 'child_process';
 import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
+import { redactSecrets } from '../core/redact-secrets.mjs';
 import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS } from './providers.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 
@@ -64,8 +65,12 @@ function isCliOverloaded(stderr) {
 function redactKey(text, apiKey) {
   if (typeof text !== 'string' || text.length === 0) return text;
   let out = text;
+  // First mask the exact in-flight key (catches any shape, even a custom
+  // provider key that the shared patterns don't recognize), then run the
+  // shared pattern set so other token shapes the provider echoes back
+  // (ghp_, Bearer, AIza, …) are scrubbed too — not just sk-ant-*.
   if (apiKey) out = out.split(apiKey).join('***');
-  return out.replace(/sk-ant-[A-Za-z0-9-]{10,}/g, 'sk-ant-***');
+  return redactSecrets(out);
 }
 
 // Hard cap on prompt length passed to either the HTTP API or the

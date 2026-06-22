@@ -5,6 +5,7 @@
 // don't generate rows so the table stays sane in volume.
 
 import { recordAuditEvent } from './metrics.mjs';
+import { redactSecrets } from '../core/redact-secrets.mjs';
 
 const ALLOWED_OUTCOMES = new Set(['success', 'failure', 'denied']);
 
@@ -38,13 +39,18 @@ function isRedactableKey(k) {
   return REDACT_KEY_PATTERNS.some((p) => lower.includes(p));
 }
 
-function redact(obj, depth = 0) {
+export function redact(obj, depth = 0) {
   if (depth > 4) return '…';
   if (obj == null) return obj;
   if (Array.isArray(obj)) return obj.slice(0, AUDIT_LIMITS.arraySlice).map((v) => redact(v, depth + 1));
   if (typeof obj !== 'object') {
-    if (typeof obj === 'string' && obj.length > AUDIT_LIMITS.stringLength) return obj.slice(0, AUDIT_LIMITS.stringLength) + '…';
-    return obj;
+    if (typeof obj !== 'string') return obj;
+    // Key-name redaction only catches secrets stored under a credential-named
+    // key. A token embedded in a free-text value (an error `message`, a `detail`
+    // string) would otherwise land in the audit log verbatim — scrub by value
+    // shape too. Truncate first so the cap applies to the post-redaction text.
+    const truncated = obj.length > AUDIT_LIMITS.stringLength ? obj.slice(0, AUDIT_LIMITS.stringLength) + '…' : obj;
+    return redactSecrets(truncated);
   }
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
