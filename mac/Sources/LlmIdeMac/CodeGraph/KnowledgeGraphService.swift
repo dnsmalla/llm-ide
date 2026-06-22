@@ -158,8 +158,10 @@ final class KnowledgeGraphService: ObservableObject {
         // reads it (graphify-out/memory/), fixing the previously-empty memory.
         if let memoryRoot {
             let code = codeGraph, docData = docGraph, mg = mergedGraph
+            let chunks = doc.chunks, dCount = doc.docCount
             await Task.detached(priority: .utility) {
-                Self.writeMemoryArtifact(to: memoryRoot, code: code, doc: docData, merged: mg)
+                Self.writeMemoryArtifact(to: memoryRoot, code: code, doc: docData, merged: mg,
+                                         docCount: dCount, chunks: chunks)
             }.value
         }
 
@@ -173,7 +175,8 @@ final class KnowledgeGraphService: ObservableObject {
     /// `graph-notes.md` (a rendering of the merged graph). Writing these files
     /// is what finally makes the agent's "Repository memory" block non-empty —
     /// no extension change needed since the reader already targets this path.
-    nonisolated static func writeMemoryArtifact(to repoRoot: URL, code: CGData, doc: CGData, merged: CGData) {
+    nonisolated static func writeMemoryArtifact(to repoRoot: URL, code: CGData, doc: CGData, merged: CGData,
+                                                docCount: Int, chunks: [MemoryChunk]) {
         let memDir = repoRoot.appendingPathComponent("graphify-out", isDirectory: true)
             .appendingPathComponent("memory", isDirectory: true)
         do {
@@ -195,6 +198,8 @@ final class KnowledgeGraphService: ObservableObject {
             try repoBody.write(to: memDir.appendingPathComponent("repo.md"), atomically: true, encoding: .utf8)
             try renderGraphNotes(code: code, doc: doc, merged: merged)
                 .write(to: memDir.appendingPathComponent("graph-notes.md"), atomically: true, encoding: .utf8)
+            try renderDocNotes(docCount: docCount, chunks: chunks)
+                .write(to: memDir.appendingPathComponent("doc-notes.md"), atomically: true, encoding: .utf8)
         } catch {
             // Don't fail silently — a write error means the agent keeps reading
             // stale/empty memory with no signal otherwise.
