@@ -17,7 +17,21 @@
 
 import { readFileSync, statSync, readdirSync, openSync, readSync, closeSync } from 'node:fs';
 import { join, isAbsolute, normalize, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { userRepoAllowlist } from '../kb/db.mjs';
+
+// Expand a leading `~`/`~/` to the home directory. The Mac client sends
+// home-relative repo paths (homeRelativePath → "~/Developer/foo"), but the
+// reader and the allow-list both work in absolute terms — without this, every
+// home-dir repo's memory was silently dropped at the isAbsolute() gate. The
+// server is always local (clients only reach 127.0.0.1:3456), so the server's
+// home equals the client's. Exported for testing.
+export function expandTilde(p, home = homedir()) {
+  if (typeof p !== 'string') return p;
+  if (p === '~') return home;
+  if (p.startsWith('~/')) return join(home, p.slice(2));
+  return p;
+}
 
 const PER_FILE_CHARS = 4_000;
 const TOTAL_CHARS = 16_000;
@@ -80,16 +94,18 @@ function normalizeForCompare(p) {
 
 function repoMemoryBlock(repo, budget, allowedRoots) {
   if (!repo || typeof repo.path !== 'string' || !repo.path) return null;
-  // Defense-in-depth: only honor absolute paths. The Mac client always
-  // sends absolute paths; relative paths would be ambiguous server-side.
-  if (!isAbsolute(repo.path)) return null;
+  // The Mac client sends home-relative paths ("~/…"); expand to absolute.
+  const expanded = expandTilde(repo.path);
+  // Defense-in-depth: only honor absolute paths post-expansion. A still-
+  // relative path would be ambiguous server-side.
+  if (!isAbsolute(expanded)) return null;
   // Tenancy gate: the path must be in the user's registered repo
   // allow-list. agentContext.indexedRepos is client-supplied, so a
   // hostile or buggy client could otherwise drive the server to read
   // arbitrary `<x>/graphify-out/memory/repo.md` files. resolve() is
   // applied to both sides so `/foo/../bar` and `/bar` compare equal.
   // Pass through normalizeForCompare so APFS case-variants match.
-  const root = resolve(normalize(repo.path));
+  const root = resolve(normalize(expanded));
   if (!allowedRoots.has(normalizeForCompare(root))) return null;
   const memDir = join(root, 'graphify-out', 'memory');
 
@@ -145,8 +161,9 @@ export function renderGraphifyMemory(agentContext, userId) {
     allowedRoots = new Set(
       userRepoAllowlist(userId)
         .filter((p) => typeof p === 'string' && p)
-        // Same normalisation both sides — see normalizeForCompare.
-        .map((p) => normalizeForCompare(resolve(normalize(p)))),
+        // Same normalisation both sides — see normalizeForCompare. Expand
+        // tilde defensively in case a legacy allow-list entry is home-relative.
+        .map((p) => normalizeForCompare(resolve(normalize(expandTilde(p))))),
     );
   } catch {
     // DB hiccup — fail closed.
