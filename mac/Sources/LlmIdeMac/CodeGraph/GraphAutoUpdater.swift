@@ -73,11 +73,18 @@ final class GraphAutoUpdater: ObservableObject {
             // No graph generated yet — first generation stays manual.
             return
         }
-        // Derive doc roots from the SAME root the code graph + memory use, so a
-        // graph living in a code/<child> repo isn't merged against the project
-        // root's unrelated docs (and the memory artifact lands beside its code).
-        let layout = ProjectLayout(root: repoRoot)
-        let docRoots = [layout.notesDir, layout.dataDir]
+        // Feed InfiniteBrain the repo itself — the manual "InfiniteBrain" button
+        // walks the repo the same way (MemoryGenerator.generate(from: repo)), and
+        // a code/<child> repo's docs live *inside* it (e.g. `docs/**/*.md`), not in
+        // repo-relative `notes/`+`data/` dirs that don't exist. The previous
+        // [repoRoot/notes, repoRoot/data] roots were always-missing, so every auto
+        // run recorded "Doc nodes: 0" and the agent memory carried no doc graph.
+        // Scanning the repo root keeps the doc set within the same repo the code
+        // graph + memory use (so a child repo still isn't merged against the
+        // project root's unrelated docs); MemoryGenerator filters to doc
+        // extensions and is bounded, and the stat-only fingerprint makes an
+        // unchanged re-tick near-free.
+        let docRoots = [repoRoot]
         Task {
             await graph.generate(codeRepoRoot: repoRoot, docRoots: docRoots, memoryRoot: repoRoot)
         }
