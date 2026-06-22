@@ -60,3 +60,10 @@ Autonomous self-paced improvement run requested 2026-06-22 ~23:50 (operator asle
 - **Verified:** `make docs-check` green (70 citations).
 - **Doc-drift sweep complete** across all 6 spec pages.
 - **Next up:** Cycle 7 — add a **value-level drift guard** (`docs/_scripts/check_spec_values.py` + pytest) asserting spec-prose values match source: migration head (count `extension/kb/migrations/*.sql`), `SERVER_API_VERSION`, body-limit default. This closes the gap (file-existence-only guard) that let every drift above pass CI. Then code-hardening cycles (extension-first, in-sandbox).
+
+### Cycle 7 — docs tooling: value-level drift guard (2026-06-23 ~00:34)
+- **Built:** `docs/_scripts/check_spec_values.py` — parses specific documented claims (migration head in cross-cutting + knowledge-base; `SERVER_API_VERSION`; body-limit default MB) and asserts each equals its source of truth. A mismatch **or** a missing/reworded claim fails. Wired into `make docs-check` (and the cross-cutting §4 row + Makefile range updated to match).
+- **Tested:** `docs/_scripts/test_check_spec_values.py` — 5 tests (pure `first_int`/`migration_head` helpers + a live-consistency assertion that `main()==0` and every check finds both a source and a documented value).
+- **Verified:** standalone guard green (4 values match); `make docs-check` green (now 85 pytest + 4 standalone guards); the new tests pass explicitly.
+- **Why it matters:** closes the gap (the existing guard checked only file-path *existence*) that let all of Cycles 1–6's drift pass CI. Future value drift now fails the build.
+- **Phase change:** docs phase done (6 drift cycles + 1 guard). **Next: code-hardening, extension-first (in-sandbox, TDD).** Cycle 8 — re-verify + (if clean) route `agents/planner.mjs` retrieval through `graphkit` (`findGraphContext`) instead of reaching into `kb/db.mjs` directly, restoring the single data-access boundary the architecture intends.

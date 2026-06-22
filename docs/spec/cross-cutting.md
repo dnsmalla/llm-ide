@@ -96,7 +96,7 @@ Full CLI reference: [`../reference/cli-scripts.md`](../reference/cli-scripts.md)
 
 ### Makefile targets
 
-`Makefile` defines the following targets (verified at `Makefile:5–85`):
+`Makefile` defines the following targets (verified at `Makefile:5–86`):
 
 | Target | What it does | Line |
 |---|---|---|
@@ -112,7 +112,7 @@ Full CLI reference: [`../reference/cli-scripts.md`](../reference/cli-scripts.md)
 | `docs-build` | `mkdocs build --strict` | 60 |
 | `docs-lint` | markdownlint-cli2 + lychee link check + frontmatter check | 63 |
 | `docs-refresh-reference` | Runs all extractor scripts to regenerate reference pages | 73 |
-| `docs-check` | `pytest docs/_scripts/` + the API-coverage, rate-limit-mapping, and spec-citation drift guards | 81 |
+| `docs-check` | `pytest docs/_scripts/` + the API-coverage, rate-limit-mapping, spec-citation, and spec-value drift guards | 81 |
 
 ### Runtime requirements
 
