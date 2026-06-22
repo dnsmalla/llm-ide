@@ -24,7 +24,9 @@ export interface LiveSyncResult {
 
 export function useLiveSync({ isRecording, sessionId, meetingTitle, segments }: LiveSyncState): LiveSyncResult {
   const lastPushedIndex = useRef(0);
-  const lastPushedTextForLast = useRef('');
+  // Text last pushed for each segment index, so an in-place edit to ANY
+  // segment (not just the trailing one) is detected and re-pushed.
+  const lastPushedTexts = useRef<string[]>([]);
   const lastSessionId = useRef('');
   const debounceHandle = useRef<number | null>(null);
   const retryHandle = useRef<number | null>(null);
@@ -72,7 +74,7 @@ export function useLiveSync({ isRecording, sessionId, meetingTitle, segments }: 
       const segs = segmentsRef.current;
       const title = meetingTitleRef.current;
       if (!sid || segs.length === 0) return;
-      pushPendingSegments(sid, segs, title, lastPushedIndex, lastPushedTextForLast)
+      pushPendingSegments(sid, segs, title, lastPushedIndex, lastPushedTexts)
         .then(markSuccess)
         .catch(() => {
           markFailure();
@@ -92,7 +94,7 @@ export function useLiveSync({ isRecording, sessionId, meetingTitle, segments }: 
       const segs = segmentsRef.current;
       const title = meetingTitleRef.current;
       if (sid && segs.length > 0) {
-        pushPendingSegments(sid, segs, title, lastPushedIndex, lastPushedTextForLast)
+        pushPendingSegments(sid, segs, title, lastPushedIndex, lastPushedTexts)
           .then(markSuccess)
           .catch(() => {
             markFailure();
@@ -106,7 +108,7 @@ export function useLiveSync({ isRecording, sessionId, meetingTitle, segments }: 
     if (sessionId !== lastSessionId.current) {
       lastSessionId.current = sessionId;
       lastPushedIndex.current = 0;
-      lastPushedTextForLast.current = '';
+      lastPushedTexts.current = [];
       failureCount.current = 0;
       setConsecutiveFailures(0);
       setSyncStatus('idle');
@@ -120,7 +122,7 @@ export function useLiveSync({ isRecording, sessionId, meetingTitle, segments }: 
       window.clearTimeout(debounceHandle.current);
     }
     debounceHandle.current = window.setTimeout(() => {
-      pushPendingSegments(sessionId, segments, meetingTitle, lastPushedIndex, lastPushedTextForLast)
+      pushPendingSegments(sessionId, segments, meetingTitle, lastPushedIndex, lastPushedTexts)
         .then(markSuccess)
         .catch(() => {
           markFailure();
@@ -145,7 +147,7 @@ export function useLiveSync({ isRecording, sessionId, meetingTitle, segments }: 
       setSyncStatus('idle');
       return;
     }
-    pushPendingSegments(sessionId, segments, meetingTitle, lastPushedIndex, lastPushedTextForLast)
+    pushPendingSegments(sessionId, segments, meetingTitle, lastPushedIndex, lastPushedTexts)
       .catch(() => {})
       .finally(async () => {
         try {
@@ -174,34 +176,29 @@ async function pushPendingSegments(
   segments: TranscriptSegment[],
   meetingTitle: string | undefined,
   lastPushedIndex: { current: number },
-  lastPushedTextForLast: { current: string },
+  lastPushedTexts: { current: string[] },
 ) {
   if (!sessionId || segments.length === 0) return;
 
-  // What's new: every segment from lastPushedIndex onward, PLUS the
-  // current last segment if its text changed since we last pushed it
-  // (that handles the in-progress utterance whose text grows in
-  // place).  We dedupe by (speaker, text) on the server, but keeping
-  // the client side cheap means fewer wasted requests.
+  // Push every segment that is NEW (index >= lastPushedIndex) OR whose text
+  // changed in place since we last pushed it. In-place growth of a non-last
+  // segment happens whenever speakers interleave — useTranscript merges a
+  // caption back into an earlier segment by sessionId (see useTranscript.ts),
+  // so checking only the trailing segment (the old behaviour) silently dropped
+  // those edits, leaving the mirrored/persisted transcript truncated. The
+  // server dedupes by (speaker, text) within a window, so re-sending an
+  // unchanged segment is a no-op; we only send real changes.
   const toPush: Array<{ speaker: string; text: string; ts: number; source: string }> = [];
-  for (let i = lastPushedIndex.current; i < segments.length; i += 1) {
+  for (let i = 0; i < segments.length; i += 1) {
     const s = segments[i];
     if (!s.speaker || !s.text) continue;
-    toPush.push({
-      speaker: s.speaker,
-      text: s.text,
-      ts: s.timestamp,
-      source: 'extension-cc',
-    });
-  }
-  // If no new index but the last segment's text grew, push that too.
-  if (toPush.length === 0 && segments.length > 0) {
-    const last = segments[segments.length - 1];
-    if (last.text && last.text !== lastPushedTextForLast.current) {
+    const isNew = i >= lastPushedIndex.current;
+    const changed = s.text !== lastPushedTexts.current[i];
+    if (isNew || changed) {
       toPush.push({
-        speaker: last.speaker || 'Unknown',
-        text: last.text,
-        ts: last.timestamp,
+        speaker: s.speaker,
+        text: s.text,
+        ts: s.timestamp,
         source: 'extension-cc',
       });
     }
@@ -216,7 +213,6 @@ async function pushPendingSegments(
   });
 
   lastPushedIndex.current = segments.length;
-  if (segments.length > 0) {
-    lastPushedTextForLast.current = segments[segments.length - 1].text || '';
-  }
+  // Snapshot current text per index so the next push only re-sends real edits.
+  lastPushedTexts.current = segments.map((s) => s.text || '');
 }
