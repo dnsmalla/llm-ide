@@ -62,7 +62,7 @@ An `NSApplicationDelegateAdaptor(AppDelegate.self)` is wired at line 34 to handl
 
 ### EnvironmentObject graph
 
-All objects are constructed once in `init()` and injected at lines 129–140:
+All objects are constructed once in `init()` and injected at lines 129–144:
 
 | Object | Type | Role |
 |---|---|---|
@@ -77,6 +77,8 @@ All objects are constructed once in `init()` and injected at lines 129–140:
 | `updateService` | `UpdateService` | Sparkle updater |
 | `projectStore` | `ProjectStore` | Active project management |
 | `agentRuns` | `AgentRunsStore` | Agent run history |
+| `graphAutoUpdater` | `GraphAutoUpdater` | Auto-maintains the per-project knowledge graph + memory (see §3) |
+| `graphSessionStore` | `GraphSessionStore` | Process-lifetime cache of generated Code Graph results, keyed `repo#mode` |
 
 `BackendManager` is held as `@State private var backend` (line 47, using `@Observable`, not `ObservableObject`), injected via `.environment(backend)` at line 140. `LlmIdeAPIClient` and `AutoCaptureService` are stored as plain `let` properties (lines 49–50) and passed directly to views that need them.
 
@@ -184,6 +186,19 @@ Namespace enum (no instances) that wraps `SecItem*` calls.
 #### Caption orchestrator (`Services/CaptionScraper/CaptionScraper.swift`)
 
 `CaptionOrchestrator` (line 49) is the `@StateObject` named `capture` in `LlmIdeMacApp`. It manages the AX-scraper-based local caption capture, driving meeting-app scrapers (Zoom, Teams) and the `CaptionScraper` protocol. `AutoCaptureService` (`Services/AutoCaptureService.swift`, line 9) wraps it, observing `NSWorkspace` activation/termination notifications to auto-start and auto-stop capture when known meeting bundle IDs become frontmost (line 23, `meetingBundleIDs` from `PlatformDetector.allScrapers`).
+
+#### Knowledge-graph automation (`CodeGraph/`)
+
+A per-project knowledge graph + agent memory, built from two tracks and kept current automatically. Project-scoped — every artifact lives under the project, nothing global.
+
+- **`KnowledgeGraphService`** (`CodeGraph/KnowledgeGraphService.swift`, `@MainActor`) runs both tracks and publishes `codeGraph`, `docGraph`, `mergedGraph`, `docChunks`, `docCount`, `docFingerprint`:
+  - *Code track* — `CodeNoteService` / `StructureScanner` (incremental scan-cache), written to `system/graph/`.
+  - *Doc track* — `GraphKit.MemoryGenerator` over the repo's `.md` / `.txt` docs; recomputed only when a stat-only `docSetFingerprint` changes.
+  - `merge(code:doc:chunks:)` unifies the two, adding doc→code cross-links for explicit `[[wikilinks]]`. **Markdown is a doc, not code** ("md is doc"): `FileClassifier.strippingDocNodes` removes the scanner's `.docPage` markdown nodes from the code graph so a doc isn't double-counted in the merged graph.
+  - **Memory index** — `writeMemoryArtifact(...)` writes `<repo>/graphify-out/memory/`: `repo.md` (code summary), `doc-notes.md` (doc summary), `graph-notes.md` (cross-links). This combined index is what the extension agent reads (`extension/graphkit/memory.mjs`).
+- **`GraphAutoUpdater`** (`CodeGraph/GraphAutoUpdater.swift`, `@MainActor`) drives the service automatically: on project open/switch (`.activeProjectChanged`) and on a 15-minute timer, **gated** to repos that already have a generated graph (`system/graph/index.md`) — first generation stays a manual action. After each run it publishes the graphs into `GraphSessionStore` so the Code Graph view shows the auto-maintained result without re-scanning. Started from `AppShell` via `.task`.
+- **`FileClassifier`** (`CodeGraph/FileClassifier.swift`) routes files to code vs doc by extension — `MemoryGenerator.supportedExtensions` are docs, and the code-extension set subtracts them so `.md` classifies as a doc.
+- **`GraphSessionStore`** (`Views/CodeGraph/GraphSessionStore.swift`, `@MainActor`) caches generated results keyed `repo#mode` (`code` / `data` / `all`) for the view's process lifetime, with a `laidOut` flag (the auto-updater stores raw graphs; the view lays them out on hydrate) and a `docFingerprint` (lets a manual InfiniteBrain re-generate reuse an unchanged doc index).
 
 ---
 

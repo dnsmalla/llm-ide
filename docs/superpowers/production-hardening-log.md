@@ -45,3 +45,10 @@ Autonomous self-paced improvement run requested 2026-06-22 ~23:50 (operator asle
 - **Changed:** all three now state the 200-message retention cap with correct citations.
 - **Verified:** `make docs-check` green (70 citations).
 - **Next up:** Cycle 5 — macos-app spec: add the unified-knowledge-graph automation surface (KnowledgeGraphService / GraphAutoUpdater / FileClassifier / GraphSessionStore + the doc-notes memory index), entirely absent from the spec.
+
+### Cycle 5 — docs: macos-app KG-automation surface (2026-06-23 ~00:22)
+- **Reviewed:** `docs/spec/macos-app.md` §2 EnvironmentObject table + §3 service contracts vs `CodeGraph/*` + this session's memory-index work.
+- **Found:** the entire knowledge-graph automation subsystem was undocumented; the EnvironmentObject table omitted `graphAutoUpdater`/`graphSessionStore` (injected at `LlmIdeMacApp.swift:143–144`) and its line range was stale (129–140 → 129–144).
+- **Changed:** added the two env-object rows + fixed the range; added a "#### Knowledge-graph automation" §3 contract (KnowledgeGraphService two tracks + merge + md-is-doc + memory index; GraphAutoUpdater triggers/gating; FileClassifier routing; GraphSessionStore cache with laidOut + docFingerprint).
+- **Verified:** `make docs-check` green (70 citations).
+- **Next up:** Cycle 6 — cross-cutting spec: migration head `0013`→`0016`, the self-documented body-limit `2MB`→`8MB`, and the missing `docs-check` Makefile target in §4. Then Cycle 7 — the value-level drift guard (new `docs/_scripts` check for migration head / `SERVER_API_VERSION` / body-limit) — the meta-fix that would have caught all of the above.
