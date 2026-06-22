@@ -22,28 +22,26 @@ A **project-scoped** (never global) three-index model:
 
 The **memory index is the single combined artifact** that (a) the agent reads as "Repository memory" and (b) the "All" graph renders. "All" becomes a *combination* of the two separately-built indexes, not a third independent scan.
 
-## Storage layout — all under the project/repo on disk, nothing global
+## Storage layout — project-scoped, nothing global
 
 | Index | Location | Change |
 |---|---|---|
-| Code index | `<repo>/system/graph/` (`index.md` + notes) | none |
-| Doc index | `<repo>/system/graph/doc-index.json` (serialized doc `CGData` + `docCount`) | **new** |
-| Memory index | `<repo>/graphify-out/memory/` (`repo.md`, `graph-notes.md`, + doc content) | **enhanced** |
+| Code index | `<repo>/system/graph/` (`index.md` + notes) on disk | none |
+| Doc index | **in-session** (`KnowledgeGraphService` cache + doc fingerprint; `GraphSessionStore` `.data` entry) | none — already present |
+| Memory index | `<repo>/graphify-out/memory/` on disk — `repo.md` (code) + `doc-notes.md` (doc) + `graph-notes.md` (cross-links) | **enhanced** (`doc-notes.md` is new) |
 
-`CGData` is `Codable`, so the doc index serializes/deserializes directly. All paths derive from the existing `ProjectLayout(root:)`; nothing is written outside the project.
+**Why the doc index is not persisted to disk:** `CGData` is `Codable` but `MemoryChunk` is not, and the chunks carry the `[[wikilinks]]` that produce the doc→code cross-links — so a persisted doc index would lose cross-links on reload. Nothing reads such a file except a hypothetical restart-reuse, and doc generation is fast markdown chunking (no LLM). So the doc index stays in-session (the existing fingerprint cache already gives within-session reuse), and the **combined memory index** is the project-scoped on-disk artifact. The three-index model holds: code index (disk) + doc index (in-session) → memory index (disk), which both the agent reads and "All" renders.
 
 ## Generation flow
 
 In `KnowledgeGraphService.runOnce(codeRepoRoot:docRoots:memoryRoot:)` — the existing pipeline plus persistence and a richer combine:
 
 1. **Code index** — incremental scan (unchanged) → `system/graph/`. Sets `codeGraph`.
-2. **Doc index** — fingerprint-cached generation (unchanged) → **persist** `doc-index.json`. Sets `docGraph`/`docChunks`/`docCount`. On an unchanged fingerprint, the on-disk doc index is left as-is (no rewrite).
+2. **Doc index** — fingerprint-cached generation (unchanged), in-session. Sets `docGraph`/`docChunks`/`docCount`.
 3. **Memory index** = `merge(codeGraph, docGraph, chunks)` (unchanged merge) → write `graphify-out/memory/`:
    - `repo.md` — code summary (as today).
-   - **doc content** — doc/chunk summaries grouped by doc (new). Exact file placement must stay compatible with the extension's `renderGraphifyMemory` reader (see Cross-subsystem contract).
+   - `doc-notes.md` — doc/chunk summaries grouped by doc (**new**). The extension reader's allow-list gains this filename (see Cross-subsystem contract).
    - `graph-notes.md` — counts + doc→code cross-links (as today).
-
-The doc-index write is skipped when the doc fingerprint is unchanged (consistent with the existing near-free no-change tick).
 
 ## "All" graph consumption
 
@@ -58,34 +56,35 @@ So "All" = `merge(code index, doc index)` over the two indexes the user generate
 ## Data flow
 
 ```
-code files ──StructureScanner──▶ code index (system/graph/) ─┐
-                                                              ├─ merge ─▶ memory index (graphify-out/memory/)
-doc files  ──MemoryGenerator───▶ doc index (doc-index.json) ─┘                         │
-                                                                                       ├─▶ agent "Repository memory" (extension reads)
-                                                                                       └─▶ "All" graph (view renders)
+code files ──StructureScanner──▶ code index (system/graph/, disk) ─┐
+                                                                    ├─ merge ─▶ memory index (graphify-out/memory/, disk)
+doc files  ──MemoryGenerator───▶ doc index (in-session) ───────────┘                    │
+                                                                                        ├─▶ agent "Repository memory" (extension reads)
+                                                                                        └─▶ "All" graph (view renders)
 ```
 
 ## Cross-subsystem contract (important)
 
-The extension's `extension/graphkit/memory.mjs` (`renderGraphifyMemory`) reads `<repo>/graphify-out/memory/`. Adding doc content to the memory index must land in the file(s) that reader already consumes, or the reader must be updated in lockstep. The implementation plan must (1) confirm exactly which files `renderGraphifyMemory` reads, and (2) keep the write/read in sync — this is the one place the change crosses the Mac↔extension boundary.
+The extension's `extension/graphkit/memory.mjs` (`renderGraphifyMemory`) reads a fixed allow-list inside `<repo>/graphify-out/memory/`: `repo.md`, `graph-notes.md`, and `.md` files under `bugs/` and `q&a/`. Surfacing doc content adds `doc-notes.md` to that allow-list (one `tryAdd` line). The Mac writer and the extension reader must ship together — this is the one place the change crosses the Mac↔extension boundary.
 
 ## Error handling
 
-- A failed `doc-index.json` write logs (consistent with `writeMemoryArtifact`'s existing error logging) and does not abort the run — the in-session doc graph is still usable.
-- A missing/corrupt `doc-index.json` on read is treated as "no doc index" → regenerate, never crash.
+- A failed `doc-notes.md` write logs (consistent with `writeMemoryArtifact`'s existing error logging) and does not abort the run.
+- The extension reader already tolerates a missing `doc-notes.md` (its `safeRead` returns empty), so the memory section degrades gracefully.
 - Project switch resets caches (`resetCache`) as today; per-project paths guarantee no cross-project leakage.
 
 ## Testing
 
-- **Doc index round-trip** (unit): serialize a doc `CGData` → `doc-index.json` → deserialize → equal graph.
-- **Memory index combination** (unit): given a code graph + doc graph + chunks, the rendered memory index contains both a code section and a doc section, and the cross-links.
-- **Reuse** (unit/logic): unchanged doc fingerprint → doc index not rewritten; "All" combine path uses cached code+doc without re-scanning.
-- **Corrupt/missing doc index** (unit): read path degrades to regenerate.
+- **`renderDocNotes`** (Mac unit): given doc count + chunks, output groups chunks by doc title and lists heading paths.
+- **`writeMemoryArtifact`** (Mac unit): writing to a temp dir produces a `doc-notes.md` whose contents include the doc summaries.
+- **Extension reader** (extension unit): `renderGraphifyMemory` includes `doc-notes.md` content for an allow-listed repo (mirror `graphify-memory-tilde.test.mjs` setup).
+- **"All" reuse** (compile + logic): the combine path uses the cached code + doc graphs without re-running the scans when fingerprints are fresh.
 - Runtime/GUI behavior (canvas, agent memory content) verified by the user in the real app — the Mac GUI can't be driven headlessly here.
 
 ## Out of scope (YAGNI)
 
 - No global/cross-project memory.
-- No new doc-index format beyond serialized `CGData` (+ `docCount`); no embeddings/LLM enrichment.
+- No on-disk doc index (`MemoryChunk` isn't serializable; doc regen is cheap markdown chunking). Doc index stays in-session.
+- No embeddings/LLM enrichment of doc notes.
 - No FSEvents/file-watching (generation stays open/switch + timer + manual, as today).
 - No change to the merge algorithm or cross-link logic.
