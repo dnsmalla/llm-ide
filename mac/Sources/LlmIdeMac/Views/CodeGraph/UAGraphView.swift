@@ -102,7 +102,6 @@ struct UAGraphView: View {
     /// the app uses NavigationSplitView's column toggle — the user can
     /// hide either pane for more graph real-estate.
     @State private var showLibraryPanel: Bool = true
-    @State private var showItemsPanel: Bool = true
     /// When true, the graph canvas is presented as a full-window overlay
     /// (side panels hidden) for distraction-free exploration.
     @State private var graphExpanded: Bool = false
@@ -220,8 +219,23 @@ struct UAGraphView: View {
     private var canRun: Bool {
         switch mode {
         case .code: return codeTargetFolder != nil
-        case .data: return selectedItem?.category == .data || selectedItem?.category == .notes
+        case .data: return selectedItem?.category == .data || selectedItem?.category == .notes || !allDocURLs.isEmpty
         }
+    }
+
+    /// Every doc-extension file in the library (across CODE / DATA / NOTES),
+    /// deduped. Lets InfiniteBrain build a doc graph for the WHOLE project even
+    /// when the docs (README.md, AGENTS.md, docs/…) live under the code tree and
+    /// the DATA section is empty — the project-level counterpart to Code Graph's
+    /// "Generate Code Graph for <repo>".
+    private var allDocURLs: [URL] {
+        var seen = Set<String>()
+        var urls: [URL] = []
+        for item in library.items
+        where FileClassifier.docExtensions.contains(item.url.pathExtension.lowercased()) {
+            if seen.insert(item.url.standardizedFileURL.path).inserted { urls.append(item.url) }
+        }
+        return urls
     }
 
     /// For Code mode, find the folder root the selected item belongs to.
@@ -249,10 +263,6 @@ struct UAGraphView: View {
                           helpOn: "Hide Library", helpOff: "Show Library") {
                 withAnimation(.easeInOut(duration: 0.18)) { showLibraryPanel.toggle() }
             },
-            SectionToggle(icon: "sidebar.squares.left", isOn: showItemsPanel,
-                          helpOn: "Hide panel", helpOff: "Show panel") {
-                withAnimation(.easeInOut(duration: 0.18)) { showItemsPanel.toggle() }
-            },
         ])
     }
 
@@ -265,18 +275,11 @@ struct UAGraphView: View {
             HStack(spacing: 0) {
                 if showLibraryPanel {
                     controlsPanel
-                        .frame(width: 260)
+                        .frame(width: 280)
                         .transition(.move(edge: .leading).combined(with: .opacity))
                     Divider()
                 }
-                if showItemsPanel {
-                    itemsPanel
-                        .frame(width: 300)
-                        .transition(.move(edge: .leading).combined(with: .opacity))
-                    Divider()
-                }
-                canvasPanel
-                    .frame(minWidth: 360, maxWidth: .infinity)
+                canvasArea
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -285,7 +288,6 @@ struct UAGraphView: View {
             if graphExpanded { expandedGraphOverlay }
         }
         .animation(.easeInOut(duration: 0.18), value: showLibraryPanel)
-        .animation(.easeInOut(duration: 0.18), value: showItemsPanel)
         .animation(.easeInOut(duration: 0.2), value: graphExpanded)
         .onAppear {
             rebuildLibraryIndex()
@@ -406,7 +408,10 @@ struct UAGraphView: View {
     private var runFooter: some View {
         let t = theme.current
         return VStack(alignment: .leading, spacing: Spacing.sm) {
-            modeBadge
+            modeButtons
+            Text(modeHelpText)
+                .font(Typography.caption)
+                .foregroundStyle(t.textMuted)
             HStack(spacing: Spacing.sm) {
                 Button(action: run) {
                     Label(currentRunButtonLabel, systemImage: "play.fill")
@@ -444,29 +449,52 @@ struct UAGraphView: View {
             }
             return "Generate Code Graph — pick a Code item"
         case .data:
-            if let item = selectedItem {
+            if let item = selectedItem, item.category == .data || item.category == .notes {
                 if let origin = item.folderOrigin { return "Generate Memory from \(origin)" }
                 return "Generate Memory from \(item.name)"
             }
-            return "Generate Memory — pick a Data item"
+            if allDocURLs.isEmpty { return "Generate InfiniteBrain — no docs found" }
+            return "Generate InfiniteBrain — \(allDocURLs.count) docs"
+        }
+    }
+
+    /// Two-button mode switcher in the left panel (Code Graph / InfiniteBrain).
+    /// Picking a mode clears the node selection (the inspector belonged to the
+    /// previous graph) and tints the matching library section via the active
+    /// accent, so it's clear which part each mode operates on.
+    private var modeButtons: some View {
+        HStack(spacing: Spacing.sm) {
+            ForEach(Mode.allCases, id: \.self) { m in
+                modeButton(m)
+            }
         }
     }
 
     @ViewBuilder
-    private var modeBadge: some View {
+    private func modeButton(_ m: Mode) -> some View {
         let t = theme.current
-        HStack(spacing: 6) {
-            Image(systemName: mode.icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(mode.tint(t))
-            Text("\(mode.displayName) mode")
+        let active = (m == mode)
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                mode = m
+                selectedNode = nil
+            }
+        } label: {
+            Label(m.displayName, systemImage: m.icon)
                 .font(Typography.captionStrong)
-                .foregroundStyle(t.text)
-            Spacer()
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .foregroundStyle(active ? m.tint(t) : t.textMuted)
+                .background(active ? m.tint(t).opacity(0.14) : Color.clear)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(active ? m.tint(t) : t.border, lineWidth: active ? 1 : 0.5)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 6))
         }
-        Text(modeHelpText)
-            .font(Typography.caption)
-            .foregroundStyle(t.textMuted)
+        .buttonStyle(.plain)
+        .help(m.displayName)
     }
 
     /// Hint shown under the mode badge. Tailored to what the user
@@ -485,7 +513,10 @@ struct UAGraphView: View {
             if selectedItem?.category == .data || selectedItem?.category == .notes {
                 return mode.description
             }
-            return "Pick a .md or .txt file from DATA."
+            if allDocURLs.isEmpty {
+                return "Add .md / .txt files (or import a docs folder) to build a doc graph."
+            }
+            return "Builds a doc graph from all \(allDocURLs.count) docs in the project — or pick one in DATA."
         }
     }
 
@@ -697,6 +728,50 @@ struct UAGraphView: View {
 
     // MARK: - Panel 3: Canvas
 
+    /// The graph fills the area; when a node is selected, a resizable detail
+    /// inspector slides in on the RIGHT (HSplitView → user-draggable divider)
+    /// and disappears on deselect. Replaces the old always-on bottom pane.
+    @ViewBuilder
+    private var canvasArea: some View {
+        if selectedNode != nil && !displayData.nodes.isEmpty {
+            HSplitView {
+                canvasPanel
+                    .frame(minWidth: 360, maxWidth: .infinity)
+                inspectorPanel
+                    .frame(minWidth: 280, idealWidth: 360, maxWidth: 620)
+            }
+        } else {
+            canvasPanel
+                .frame(minWidth: 360, maxWidth: .infinity)
+        }
+    }
+
+    /// Right-side detail inspector (node content) with a close button that
+    /// deselects — which collapses the split back to a single graph pane.
+    private var inspectorPanel: some View {
+        let t = theme.current
+        return VStack(spacing: 0) {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(t.textMuted)
+                Text("Inspector").font(Typography.captionStrong).foregroundStyle(t.text)
+                Spacer()
+                Button { selectedNode = nil } label: {
+                    Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(t.textMuted)
+                .help("Close inspector")
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.sm)
+            Divider().background(t.border)
+            detailPanel
+        }
+        .background(t.surface)
+    }
+
     private var canvasPanel: some View {
         let t = theme.current
         return VStack(spacing: 0) {
@@ -710,13 +785,16 @@ struct UAGraphView: View {
                         title: {
                             switch mode {
                             case .code: return "No code graph yet"
-                            case .data: return "No memory yet"
+                            case .data: return "No InfiniteBrain graph yet"
                             }
                         }(),
                         message: {
                             switch mode {
                             case .code: return "Pick a repo on the left, then click Generate Code Graph."
-                            case .data: return "Pick a .md / .txt file in the DATA section, then Generate Memory."
+                            case .data:
+                                return allDocURLs.isEmpty
+                                    ? "Add .md / .txt docs (or import a docs folder), then Generate InfiniteBrain."
+                                    : "Click Generate InfiniteBrain to build a doc graph from the project's docs — or pick a single file in DATA."
                             }
                         }()
                     )
@@ -729,28 +807,8 @@ struct UAGraphView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // Detail inspector only when there's a graph to inspect.
-            // Suppressing it on an empty canvas removes one of the
-            // three "nothing here" panels users would otherwise see
-            // before they've run an analysis — the canvas's empty
-            // state is enough on its own.
-            if !displayData.nodes.isEmpty {
-                Divider().background(t.border)
-                detailPanel
-                    .frame(minHeight: 140,
-                           idealHeight: detailPaneIdealHeight,
-                           maxHeight: detailPaneIdealHeight)
-            }
         }
         .background(t.body)
-    }
-
-    /// 220pt for the lightweight summary states, 420pt when an actual
-    /// file is being rendered via FileDetailView. Coupled with a 140pt
-    /// minimum so SwiftUI can shrink it on small windows.
-    private var detailPaneIdealHeight: CGFloat {
-        guard let node = selectedNode else { return 220 }
-        return shouldRenderFileDetail(for: node) ? 420 : 220
     }
 
     /// True when the selected node has a real on-disk file we can hand
@@ -1144,15 +1202,20 @@ struct UAGraphView: View {
     /// group, chunk every file in that group. If it's a single file,
     /// chunk just that file. Source of truth is LibraryItemStore.
     private func generateMemory() {
-        guard let item = selectedItem else { return }
+        // From the selected DATA/NOTES item (or its folder group) when one is
+        // chosen; otherwise from the whole project's docs — so InfiniteBrain has
+        // a project-level generate, not just a per-file one.
         let urls: [URL]
-        if let origin = item.folderOrigin {
-            urls = library.items
-                .filter { $0.folderOrigin == origin }
-                .map(\.url)
+        if let item = selectedItem, item.category == .data || item.category == .notes {
+            if let origin = item.folderOrigin {
+                urls = library.items.filter { $0.folderOrigin == origin }.map(\.url)
+            } else {
+                urls = [item.url]
+            }
         } else {
-            urls = [item.url]
+            urls = allDocURLs
         }
+        guard !urls.isEmpty else { return }
         status = .running
         runTask = Task.detached(priority: .userInitiated) {
             let mem = MemoryGenerator.generate(files: urls)
