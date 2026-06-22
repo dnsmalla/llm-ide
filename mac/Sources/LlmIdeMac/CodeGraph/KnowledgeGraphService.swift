@@ -63,7 +63,10 @@ final class KnowledgeGraphService: ObservableObject {
     ///   - codeRepoRoot: the git repo to scan for code (nil skips the code track).
     ///   - docRoots: folders whose docs feed InfiniteBrain (typically the
     ///     project's `notes/` and `data/` dirs). Missing folders are skipped.
-    func generate(codeRepoRoot: URL?, docRoots: [URL]) async {
+    ///   - memoryRoot: when set, write the agent-facing memory artifact under
+    ///     `<memoryRoot>/graphify-out/memory/` (the path the extension reads).
+    ///     Pass the repo the user has indexed in the extension.
+    func generate(codeRepoRoot: URL?, docRoots: [URL], memoryRoot: URL? = nil) async {
         if isRunning { return }
         isRunning = true
         defer { isRunning = false }
@@ -113,8 +116,68 @@ final class KnowledgeGraphService: ObservableObject {
         // Stage 2 — unify code + doc into one graph, with doc→code cross-links.
         mergedGraph = Self.merge(code: codeGraph, doc: doc.graph, chunks: doc.chunks)
 
+        // Stage 4 — write the agent-facing memory artifact where the extension
+        // reads it (graphify-out/memory/), fixing the previously-empty memory.
+        if let memoryRoot {
+            let code = codeGraph, docData = docGraph, mg = mergedGraph
+            await Task.detached(priority: .utility) {
+                Self.writeMemoryArtifact(to: memoryRoot, code: code, doc: docData, merged: mg)
+            }.value
+        }
+
         Self.log.info("knowledge graph: code=\(self.codeGraph.nodes.count, privacy: .public) doc=\(self.docGraph.nodes.count, privacy: .public) merged=\(self.mergedGraph.nodes.count, privacy: .public) nodes / \(self.mergedGraph.edges.count, privacy: .public) edges")
         phase = .complete(codeNodes: codeGraph.nodes.count, docNodes: docGraph.nodes.count)
+    }
+
+    /// Stage 4 — render the merged graph to the memory artifact the extension
+    /// agent reads (`<root>/graphify-out/memory/`): `repo.md` (reusing the code
+    /// graph's impact-ranked `system/graph/index.md` when present) and
+    /// `graph-notes.md` (a rendering of the merged graph). Writing these files
+    /// is what finally makes the agent's "Repository memory" block non-empty —
+    /// no extension change needed since the reader already targets this path.
+    nonisolated static func writeMemoryArtifact(to repoRoot: URL, code: CGData, doc: CGData, merged: CGData) {
+        let memDir = repoRoot.appendingPathComponent("graphify-out", isDirectory: true)
+            .appendingPathComponent("memory", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: memDir, withIntermediateDirectories: true)
+        } catch {
+            log.error("memory artifact: mkdir failed at \(memDir.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        // repo.md — reuse the code graph's index.md (impact-ranked summary) if
+        // it exists; otherwise a minimal generated summary.
+        let indexMD = ProjectLayout(root: repoRoot).graphDir.appendingPathComponent("index.md")
+        let repoBody: String
+        if let idx = try? String(contentsOf: indexMD, encoding: .utf8), !idx.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            repoBody = idx
+        } else {
+            repoBody = "# Repository knowledge graph\n\n\(code.nodes.count) code nodes · \(doc.nodes.count) doc nodes · \(merged.edges.count) edges.\n"
+        }
+        try? repoBody.write(to: memDir.appendingPathComponent("repo.md"), atomically: true, encoding: .utf8)
+        try? renderGraphNotes(code: code, doc: doc, merged: merged)
+            .write(to: memDir.appendingPathComponent("graph-notes.md"), atomically: true, encoding: .utf8)
+    }
+
+    /// Render `graph-notes.md`: counts plus the doc→code cross-links (the
+    /// cross-domain edges Stage 2 adds), which are the most useful thing the
+    /// agent can't get from the code or docs alone.
+    nonisolated static func renderGraphNotes(code: CGData, doc: CGData, merged: CGData) -> String {
+        var out = "# Graph notes\n\n"
+        out += "- Code nodes: \(code.nodes.count)\n- Doc nodes: \(doc.nodes.count)\n- Edges: \(merged.edges.count)\n\n"
+        let codeIds = Set(code.nodes.map(\.id))
+        let docTitle = Dictionary(doc.nodes.map { ($0.id, $0.title) }, uniquingKeysWith: { a, _ in a })
+        let codeTitle = Dictionary(code.nodes.map { ($0.id, $0.title) }, uniquingKeysWith: { a, _ in a })
+        let crossLinks = merged.edges.filter {
+            $0.kind == .references && docTitle[$0.fromId] != nil && codeIds.contains($0.toId)
+        }
+        if !crossLinks.isEmpty {
+            out += "## Doc → code references\n"
+            for e in crossLinks.prefix(50) {
+                out += "- \(docTitle[e.fromId] ?? e.fromId) → \(codeTitle[e.toId] ?? e.toId)\n"
+            }
+            out += "\n"
+        }
+        return out
     }
 
     /// Merge the code and doc graphs into one and add doc→code cross-links:

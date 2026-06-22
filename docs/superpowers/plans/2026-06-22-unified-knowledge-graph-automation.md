@@ -1,6 +1,6 @@
 # Plan — Unified, automatic, incremental knowledge graph
 
-**Status:** in progress (Stage 0 ✅, Stage 1 ✅, Stage 2 ✅, Stage 3 ✅)
+**Status:** in progress (Stage 0–4 ✅; Stage 5 next)
 **Goal:** one knowledge graph for a project, built automatically and incrementally
 from BOTH file types — code files via the Code graph, doc files via InfiniteBrain —
 merged into a single graph, and used to generate the agent's repo memory. No manual
@@ -56,8 +56,11 @@ public init, ids are stable Strings) → mergeable by id-dedup.
   needs a seam in the graph-kit package — a follow-up there, since MemoryGenerator computes
   cross-chunk edges over the whole set. Doc chunking is cheap (no LLM), so full-recompute on
   any doc change is acceptable for now.
-- **Stage 4 — generate memory:** render the merged graph to the agent-facing memory artifact
-  at the path the extension reads; update the extension reader if needed (Decision 2).
+- **Stage 4 — generate memory** ✅ (option A): `writeMemoryArtifact` renders the merged graph
+  to `<root>/graphify-out/memory/` — `repo.md` (reusing the code graph's `system/graph/index.md`)
+  and `graph-notes.md` (counts + doc→code cross-links). Writes where the extension reader
+  already targets, so the agent's "Repository memory" stops being empty with **no extension
+  change**. Gated by a `memoryRoot` arg (the indexed repo).
 - **Stage 5 — automate:** `@StateObject` service in `LlmIdeMacApp`, `.start()` from AppShell;
   triggers per Decision 3; guarded against overlap.
 
