@@ -354,9 +354,21 @@ final class AutoCodeUpdateService: ObservableObject {
             // Reset to base before each issue so its fix branch is cut from
             // base, not from the previous issue's fix branch. No-op on the
             // first iteration. The tree is clean here (the previous CLI
-            // committed its work; runCLI re-verifies before editing).
+            // committed its work; runCLI re-verifies before editing). If the
+            // checkout fails we must NOT proceed — the run would chain onto
+            // the previous issue's fix branch and the rescue (which only fires
+            // on `branchAfter == base`) wouldn't catch it. Skip instead.
             if let base = baseBranch {
-                _ = await Task.detached { Self.checkout(base, at: capturedGitRoot) }.value
+                let switched = await Task.detached { Self.checkout(base, at: capturedGitRoot) }.value
+                if !switched {
+                    let msg = "Issue #\(number): couldn't switch to base branch \(base) before implementing — skipped to avoid committing onto another branch."
+                    lastError = msg
+                    taskErrors["#\(number)"] = msg
+                    log.error("auto_code_base_checkout_failed issue=\(number, privacy: .public) base=\(base, privacy: .public)")
+                    registry.markFailed(id: entry.actionId)
+                    failedCount += 1
+                    continue
+                }
             }
             let baseSha = await Task.detached { Self.headSha(at: capturedGitRoot) }.value
 
@@ -586,8 +598,17 @@ final class AutoCodeUpdateService: ObservableObject {
     /// the log via stdout, never to the repo. `clean -fd` (no `-x`) leaves
     /// gitignored files alone.
     nonisolated static func discardWorkingTreeChanges(at localPath: String) {
-        _ = git(["checkout", "--", "."], at: localPath)
-        _ = git(["clean", "-fd"], at: localPath)
+        let co = git(["checkout", "--", "."], at: localPath)
+        // `git clean -fd` prints "Removing <path>" for each entry it deletes.
+        let cl = git(["clean", "-fd"], at: localPath)
+        let log = Logger(subsystem: "com.llmide.macapp", category: "AutoCodeUpdateService")
+        if co.code != 0 || cl.code != 0 {
+            log.error("discardWorkingTreeChanges: revert failed (checkout=\(co.code) clean=\(cl.code)) at \(localPath, privacy: .public) — tree may remain dirty and skip later tasks")
+        }
+        let removed = cl.out.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !removed.isEmpty {
+            log.info("discardWorkingTreeChanges discarded review-task output:\n\(removed, privacy: .public)")
+        }
     }
 
     /// Stash uncommitted changes (incl. untracked) so auto-tasks can run on a
