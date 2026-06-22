@@ -237,9 +237,9 @@ final class KnowledgeGraphService: ObservableObject {
         out += "\(docCount) document\(docCount == 1 ? "" : "s") · "
         out += "\(chunks.count) section\(chunks.count == 1 ? "" : "s").\n\n"
         let byDoc = Dictionary(grouping: chunks, by: \.docTitle)
-        for docTitle in byDoc.keys.sorted() {
+        for (docTitle, docChunks) in byDoc.sorted(by: { $0.key < $1.key }) {
             out += "## \(docTitle)\n"
-            for chunk in byDoc[docTitle] ?? [] {
+            for chunk in docChunks {
                 out += "- \(chunk.displayHeading)\n"
             }
             out += "\n"

@@ -1226,6 +1226,10 @@ struct UAGraphView: View {
             // "md is doc": strip code-track markdown so it isn't merged twice.
             var code = FileClassifier.strippingDocNodes(from: codeNoteService.graph)
             var codeFromCache = false
+            // The live scan returns an empty graph if it lost the cross-instance
+            // scan lock (CodeNoteService.inFlightPaths — e.g. the background
+            // GraphAutoUpdater scanning the same repo); fall back to the cached
+            // code graph so "All" still shows the code side instead of merging empty.
             if code.nodes.isEmpty, let cachedCode = cachedGraph(.code), !cachedCode.nodes.isEmpty {
                 code = cachedCode   // already markdown-free (stripped when cached)
                 codeFromCache = true
