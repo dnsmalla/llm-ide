@@ -81,6 +81,9 @@ def build_checks() -> list[tuple[str, int | None, int | None, str]]:
         ("ADR range — README.md 'ADRs 0001–NNNN'",
          adr_head, first_int(readme, r"ADRs 0001[–-]0*(\d+)"),
          "README.md"),
+        ("ADR range — AGENTS.md 'ADRs 0001–NNNN'",
+         adr_head, first_int(_read("AGENTS.md"), r"ADRs 0001[–-]0*(\d+)"),
+         "AGENTS.md"),
     ]
 
 

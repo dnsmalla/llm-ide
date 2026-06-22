@@ -100,4 +100,35 @@ Autonomous self-paced improvement run requested 2026-06-22 ~23:50 (operator asle
 - **Hardened:** extended `check_spec_values.py` to guard the README ADR range against the actual max ADR number in `docs/decisions/`. Guard now 6 checks; all green.
 - **Verified:** standalone guard 6/6; `pytest` 5/5; `make docs-check` green.
 - **Next up:** Cycle 13 (final) — quick sweep of CONTRIBUTING/AGENTS/CHANGELOG for obvious drift, then an adversarial review of the whole branch + write the **Remaining recommendations** (deferred items) and **Operator handoff summary** below, then conclude the loop (high-confidence safe work is essentially exhausted; the rest needs human judgment).
+
+### Cycle 13 (final) — branch review + AGENTS drift + handoff (2026-06-23 ~01:12)
+- **Found & fixed:** `AGENTS.md:6` had the same ADR-range drift (0001–0010 → 0014); fixed + added to the value guard (now **7** checks).
+- **Final verification gate:** `make docs-check` green (pytest + 4 standalone guards, incl. 7 value checks); extension `npm test` **461/461**; working tree clean.
+- **Loop concluded here** — see the handoff summary below. The remaining items are deliberately deferred (risk/cross-package/runtime-verification needs) rather than forced unattended.
+
+---
+
+## Operator handoff summary
+
+**Branch:** `chore/production-hardening` (13 commits ahead of `main`, pushed). **`main` is untouched** — review and merge at your discretion.
+
+**Review with:** `git log main..chore/production-hardening` and `git diff main..chore/production-hardening`.
+
+### What changed (all verified green, each its own commit)
+- **Docs accuracy (9 commits):** every `docs/spec/*` page (KB migrations, api-server access-token-epoch + `iat`, agent-runtime multi-provider routing + `--strict-mcp-config` + `redactKey`, chrome-extension chat cap, macOS KG-automation section, cross-cutting migration head / body-limit / Makefile, §5 resolveModel), plus `docs/explanation/architecture.md`, `README.md`, and `AGENTS.md`.
+- **New CI guard:** `docs/_scripts/check_spec_values.py` (+ 5 tests, wired into `make docs-check`) — asserts 7 documented values match source (migration head ×3 pages, `SERVER_API_VERSION`, body-limit, ADR range ×2). Closes the gap that let all the above drift through CI (the prior guard checked only file-path existence).
+- **Code hardening (2 commits):** `planner.mjs` retrieval routed through the `graphkit` boundary (no behavior change); `search()` FTS path now gates entity sub-kinds on `entities.user_id` (defense-in-depth tenancy, TDD'd with a cross-owner leak test).
+
+### Verification
+`make docs-check` green; `cd extension && npm test` → 461/461; the new tenancy + value-guard tests pass. No Mac code changed in this run, so no Swift build was needed.
+
+### Remaining recommendations (deferred — your call)
+1. **Agent-loop hard deadline (MED).** The 180s loop deadline is checked between iterations, so a single in-flight `runClaude` can overrun it. Fix = thread an `AbortSignal` (derived from the deadline) into `runClaude`/`completeViaApi`. Deferred: invasive (loop engine + provider HTTP paths) and needs careful timeout-interaction testing — not safe to do unattended.
+2. **`docSetFingerprint` determinism (Mac).** The doc-set fingerprint caps at 500 files from an *unordered* `FileManager.enumerator`, so on >500-doc repos which files are sampled is non-deterministic. The real fix also needs GraphKit's `MemoryGenerator.collectDocs` to sort-before-cap (external `graph-kit` package), so a Mac-only change is incomplete. Cross-package coordination needed.
+3. **Secret-redaction parity on the Mac side.** This run consolidated the extension's redaction into `core/redact-secrets.mjs` (already on `main`), but `mac/.../RepoManager.swift` redacts only the passed token (no `sk-ant`/`ghp_` pattern set). Consider a Swift equivalent of the shared pattern set.
+4. **GraphAutoUpdater lifecycle (MED, from the earlier architecture review).** `start()` is never `stop()`-ped; the 15-min timer keeps scanning the last project after logout. Tie it to auth/session lifecycle. (The disjoint-instance issue from that review was already fixed and shipped earlier this session.)
+5. **Read-tool cache key (LOW).** `loop.mjs` keys the read-result cache on `JSON.stringify(args)` without key-order normalization; the spec calls it "stable". Either normalize or soften the spec wording.
+
+### Why the loop stopped at 13 cycles (~1h20m of the ~7h window)
+The high-confidence, low-risk, verifiable work is done. The remaining items each need human judgment, runtime/GUI verification I can't perform headlessly, or cross-package changes — forcing them unattended would trade quality for activity. Re-run `/loop` (or pick up the items above) when you're back.
 - **Deferred to recommendations (too risky/cross-package to do unattended):** (a) agent-loop *hard* deadline via `AbortSignal` — invasive (loop engine + runClaude threading); (b) `docSetFingerprint` deterministic ordering — the real fix also needs GraphKit's `MemoryGenerator.collectDocs` to sort-before-cap (external package), so a Mac-only fix is incomplete.
