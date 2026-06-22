@@ -476,40 +476,39 @@ struct UAGraphView: View {
     /// Picking a mode clears the node selection (the inspector belonged to the
     /// previous graph) and tints the matching library section via the active
     /// accent, so it's clear which part each mode operates on.
+    /// A joined, branded segmented control for the three modes — active segment
+    /// filled with that mode's accent, inactive segments quiet. One container
+    /// (not three loose buttons) so it reads as a proper control.
     private var modeButtons: some View {
-        HStack(spacing: Spacing.sm) {
-            ForEach(Mode.allCases, id: \.self) { m in
-                modeButton(m)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func modeButton(_ m: Mode) -> some View {
         let t = theme.current
-        let active = (m == mode)
-        Button {
-            withAnimation(.easeInOut(duration: 0.15)) {
-                mode = m
-                selectedNode = nil
+        return HStack(spacing: 0) {
+            ForEach(Array(Mode.allCases.enumerated()), id: \.element) { (idx, m) in
+                let active = (m == mode)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        mode = m
+                        selectedNode = nil
+                    }
+                } label: {
+                    Text(m.displayName)
+                        .font(Typography.captionStrong)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .foregroundStyle(active ? Color.white : t.textMuted)
+                        .background(active ? m.tint(t) : Color.clear)
+                }
+                .buttonStyle(.plain)
+                .help(m.displayName)
+                if idx < Mode.allCases.count - 1 && !active {
+                    Divider().frame(height: 14)
+                }
             }
-        } label: {
-            Label(m.displayName, systemImage: m.icon)
-                .font(Typography.captionStrong)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .foregroundStyle(active ? m.tint(t) : t.textMuted)
-                .background(active ? m.tint(t).opacity(0.14) : Color.clear)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(active ? m.tint(t) : t.border, lineWidth: active ? 1 : 0.5)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 6))
         }
-        .buttonStyle(.plain)
-        .help(m.displayName)
+        .background(t.textMuted.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(t.border, lineWidth: 0.5))
     }
 
     /// Hint shown under the mode badge. Tailored to what the user
@@ -882,56 +881,59 @@ struct UAGraphView: View {
         let t = theme.current
         let nodeColor = CGPalette.color(for: node.kind)
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            // Header row: type swatch + title + type badge + Open button.
-            HStack(spacing: Spacing.sm) {
-                Circle().fill(nodeColor).frame(width: 10, height: 10)
-                Text(node.title)
-                    .font(Typography.title)
-                    .foregroundStyle(t.text)
-                    .lineLimit(1).truncationMode(.middle)
-                Text(node.kind.displayName.uppercased())
-                    .font(Typography.captionStrong)
-                    .foregroundStyle(nodeColor)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Capsule().fill(nodeColor.opacity(0.15)))
-                Spacer()
-                if node.metadata["fileURL"] != nil {
-                    Button("Open") { openNode(node) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                }
-            }
-
-            // Sub-row: heading path (memory) OR file path + line (code).
-            if let heading = node.metadata["heading"] {
-                Label(heading, systemImage: "list.bullet.indent")
-                    .font(Typography.caption).foregroundStyle(t.textMuted)
-                    .lineLimit(1).truncationMode(.middle)
-            }
-            if let source = node.metadata["source_file"] ?? prettyPath(from: node.metadata["fileURL"]) {
-                HStack(spacing: 6) {
-                    Image(systemName: "doc.text")
-                        .font(.system(size: 10))
-                        .foregroundStyle(t.textMuted.opacity(0.7))
-                    Text(source)
-                        .font(Typography.mono).foregroundStyle(t.textMuted)
+            // Card-style header: type swatch + title + kind badge + Open, with
+            // the heading / source path beneath — set apart from the body.
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: Spacing.sm) {
+                    Circle().fill(nodeColor).frame(width: 10, height: 10)
+                    Text(node.title)
+                        .font(Typography.title)
+                        .foregroundStyle(t.text)
                         .lineLimit(1).truncationMode(.middle)
-                    if let line = node.metadata["line"] {
-                        Text(line)
-                            .font(Typography.mono)
-                            .foregroundStyle(t.textMuted.opacity(0.7))
-                    }
-                    if let lang = node.metadata["language"] {
-                        Text(lang).font(Typography.caption)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Capsule().fill(t.surface2))
-                            .foregroundStyle(t.textMuted)
-                    }
+                    Text(node.kind.displayName.uppercased())
+                        .font(Typography.captionStrong)
+                        .foregroundStyle(nodeColor)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Capsule().fill(nodeColor.opacity(0.15)))
                     Spacer()
+                    if node.metadata["fileURL"] != nil {
+                        Button("Open") { openNode(node) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                }
+                if let heading = node.metadata["heading"] {
+                    Label(heading, systemImage: "list.bullet.indent")
+                        .font(Typography.caption).foregroundStyle(t.textMuted)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                if let source = node.metadata["source_file"] ?? prettyPath(from: node.metadata["fileURL"]) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 10))
+                            .foregroundStyle(t.textMuted.opacity(0.7))
+                        Text(source)
+                            .font(Typography.mono).foregroundStyle(t.textMuted)
+                            .lineLimit(1).truncationMode(.middle)
+                        if let line = node.metadata["line"] {
+                            Text(line)
+                                .font(Typography.mono)
+                                .foregroundStyle(t.textMuted.opacity(0.7))
+                        }
+                        if let lang = node.metadata["language"] {
+                            Text(lang).font(Typography.caption)
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Capsule().fill(t.surface2))
+                                .foregroundStyle(t.textMuted)
+                        }
+                        Spacer()
+                    }
                 }
             }
-
-            Divider().background(t.border)
+            .padding(Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8).fill(t.surface2))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(t.border, lineWidth: 0.5))
             // Body: in priority order:
             //   1. Memory chunk → show its chunked body inline.
             //   2. Real on-disk file → embed FileDetailView so the

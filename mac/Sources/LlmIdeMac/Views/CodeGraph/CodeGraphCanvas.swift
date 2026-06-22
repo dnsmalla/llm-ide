@@ -93,6 +93,7 @@ struct CodeGraphCanvas: View {
         let highlight  = highlightKind
         let focusNbrs  = neighbourIds(of: focused?.id)
         let hoverNbrs  = neighbourIds(of: hovered)
+        let selNbrs    = neighbourIds(of: selId)
 
         let viewport = CGRect(x: -offset.width / scale,
                               y: -offset.height / scale,
@@ -121,13 +122,14 @@ struct CodeGraphCanvas: View {
 
             let isHighlighted = (e.fromId == selId || e.toId == selId)
                 || (e.fromId == focused?.id || e.toId == focused?.id)
+                || (e.fromId == hovered || e.toId == hovered)
 
             var path = Path(); path.move(to: p1); path.addLine(to: p2)
             let colour: Color = isHighlighted
                 ? t.accent.opacity(alpha)
-                : t.textMuted.opacity(alpha * 0.55)
+                : t.textMuted.opacity(alpha * 0.5)
             ctx.stroke(path, with: .color(colour),
-                       lineWidth: (isHighlighted ? 2.0 : 0.8) / max(scale, 0.4))
+                       lineWidth: (isHighlighted ? 1.6 : 0.6) / max(scale, 0.4))
         }
 
         // --- Nodes + labels ---
@@ -138,33 +140,57 @@ struct CodeGraphCanvas: View {
             let isFocused = n.id == focused?.id
             let isHovered = n.id == hoveredNodeId
             var alpha     = nodeAlpha(n.id, focused: focused, focusNbrs: focusNbrs,
-                                      hovered: hovered, hoverNbrs: hoverNbrs)
+                                      hovered: hovered, hoverNbrs: hoverNbrs,
+                                      selId: selId, selNbrs: selNbrs)
             if let hk = highlight, n.kind != hk { alpha = min(alpha, 0.15) }
             if alpha < 0.01 { continue }
 
-            let r    = nodeR(id: n.id, prominent: isSel || isFocused || isHovered)
+            let prominent = isSel || isFocused || isHovered
+            let r    = nodeR(id: n.id, prominent: prominent)
             let rect = CGRect(x: pos.x - r, y: pos.y - r, width: r * 2, height: r * 2)
+            let kindColor = CGPalette.color(for: n.kind)
+
+            // Soft glow halo on hover / selection / focus (a larger, low-opacity
+            // disc of the node's own colour) — the "professional" emphasis.
+            if prominent {
+                let glowR = r + (isSel || isFocused ? 9 : 6) / scale
+                let glowRect = CGRect(x: pos.x - glowR, y: pos.y - glowR,
+                                      width: glowR * 2, height: glowR * 2)
+                ctx.fill(Path(ellipseIn: glowRect),
+                         with: .color(kindColor.opacity(0.16 * Double(alpha))))
+            }
 
             ctx.fill(Path(ellipseIn: rect),
-                     with: .color(CGPalette.color(for: n.kind).opacity(Double(alpha))))
+                     with: .color(kindColor.opacity(Double(alpha))))
 
             if isSel || isFocused {
                 ctx.stroke(
-                    Path(ellipseIn: rect.insetBy(dx: -5 / scale, dy: -5 / scale)),
+                    Path(ellipseIn: rect.insetBy(dx: -4 / scale, dy: -4 / scale)),
                     with: .color(t.accent),
                     lineWidth: 2.5 / max(scale, 0.4))
+            } else if isHovered {
+                ctx.stroke(
+                    Path(ellipseIn: rect.insetBy(dx: -3 / scale, dy: -3 / scale)),
+                    with: .color(kindColor.opacity(0.7)),
+                    lineWidth: 1.5 / max(scale, 0.4))
             }
 
-            // Label — scale-corrected so on-screen size ≈ 11pt at any zoom
-            if showLabels && scale > 0.2 {
+            // Labels — fade IN as you zoom past ~1.0 (declutter at low zoom),
+            // but always show the active neighbourhood (selected/hovered/focused
+            // node + its neighbours).
+            let activeLabel = prominent
+                || focusNbrs.contains(n.id) || hoverNbrs.contains(n.id) || selNbrs.contains(n.id)
+            let labelOpacity: Double = activeLabel
+                ? min(1.0, Double(alpha) * 1.3)
+                : max(0, min(1, Double((scale - 0.9) / 0.6))) * Double(alpha)
+            if showLabels && labelOpacity > 0.06 {
                 let fontSize = max(CGFloat(7), CGFloat(11) / scale)
                 let labelX   = pos.x + (r + 4) / scale
                 let labelY   = pos.y - fontSize * 0.5
                 ctx.draw(
                     Text(n.title)
-                        .font(.system(size: fontSize,
-                                      weight: (isSel || isFocused) ? .semibold : .regular))
-                        .foregroundStyle(t.text.opacity(Double(min(1.0, alpha * 1.3)))),
+                        .font(.system(size: fontSize, weight: prominent ? .semibold : .regular))
+                        .foregroundStyle(t.text.opacity(labelOpacity)),
                     at: CGPoint(x: labelX, y: labelY),
                     anchor: .leading
                 )
@@ -176,7 +202,8 @@ struct CodeGraphCanvas: View {
 
     private func nodeAlpha(_ id: String,
                            focused: CGNode?, focusNbrs: Set<String>,
-                           hovered: String?, hoverNbrs: Set<String>) -> Double {
+                           hovered: String?, hoverNbrs: Set<String>,
+                           selId: String?, selNbrs: Set<String>) -> Double {
         if let f = focused {
             if id == f.id              { return 1.0 }
             if focusNbrs.contains(id)  { return 0.90 }
@@ -186,6 +213,13 @@ struct CodeGraphCanvas: View {
             if id == h                 { return 1.0 }
             if hoverNbrs.contains(id)  { return 0.85 }
             return 0.28
+        }
+        // Single-click selection also brightens the neighbourhood and dims the
+        // rest — so clicking a node, not just double-click focus, highlights it.
+        if let s = selId {
+            if id == s                 { return 1.0 }
+            if selNbrs.contains(id)    { return 0.90 }
+            return 0.22
         }
         return 1.0
     }
@@ -202,8 +236,11 @@ struct CodeGraphCanvas: View {
             if e.fromId == h || e.toId == h { return 0.8 }
             return 0.04
         }
-        if e.fromId == selId || e.toId == selId { return 0.85 }
-        return 0.35
+        if let s = selId {
+            if e.fromId == s || e.toId == s { return 0.85 }
+            return 0.10   // dim the rest when a node is selected
+        }
+        return 0.22       // calm default — thin + low-opacity
     }
 
     // MARK: - Caches
