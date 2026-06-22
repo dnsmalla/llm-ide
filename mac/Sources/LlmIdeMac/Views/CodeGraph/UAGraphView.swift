@@ -174,7 +174,9 @@ struct UAGraphView: View {
     /// and `mode`. Cheap when fullData is small; cached so the view
     /// body doesn't re-run it on every redraw.
     private func recomputeDisplayData() {
-        if showSymbols || mode != .code {
+        // The files-only filter applies to modes that HAVE code symbols
+        // (.code and .all); .data has no symbols so it's always full.
+        if showSymbols || mode == .data {
             displayData = fullData
             return
         }
@@ -585,185 +587,6 @@ struct UAGraphView: View {
         }
     }
 
-    // MARK: - Panel 2: Items
-
-    private var itemsPanel: some View {
-        let t = theme.current
-        return VStack(alignment: .leading, spacing: 0) {
-            modeTabs
-            Divider().background(t.border)
-            itemsSubheader
-            Divider().background(t.border)
-            switch mode {
-            case .code:
-                codeItemsList
-            case .data, .all:
-                memoryItemsList
-            }
-        }
-        .background(t.surface)
-    }
-
-    /// Tab switcher at the very top of panel 2. The active tab is the
-    /// source of truth for which engine runs and which artifacts list
-    /// shows below. Library selection (panel 1) nudges this via the
-    /// `onChange(of: selectedURL)` observer.
-    private var modeTabs: some View {
-        let t = theme.current
-        return HStack(spacing: 0) {
-            ForEach(Mode.allCases) { tab in
-                let active = (tab == mode)
-                let tint = tab.tint(t)
-                Button {
-                    if mode != tab { mode = tab }
-                } label: {
-                    VStack(spacing: 4) {
-                        HStack(spacing: 6) {
-                            Image(systemName: tab.icon).font(.system(size: 12, weight: .medium))
-                            Text(tab.displayName).font(Typography.bodyStrong)
-                        }
-                        .foregroundStyle(active ? tint : t.textMuted)
-                        Rectangle()
-                            .fill(active ? tint : Color.clear)
-                            .frame(height: 2)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, Spacing.sm)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(tab.description)
-            }
-        }
-        .frame(height: 40)
-        .background(t.surface)
-    }
-
-    /// Sub-header under the tabs: artifact-count summary on the right,
-    /// human-readable label of what's listed below on the left.
-    private var itemsSubheader: some View {
-        let t = theme.current
-        return HStack {
-            SectionLabel(mode == .code ? "FILES & SYMBOLS" : "MEMORY")
-            Spacer()
-            if mode == .data, memoryDocCount > 0 {
-                Text("\(memoryDocCount) docs")
-                    .font(Typography.caption).foregroundStyle(t.textMuted)
-            } else if mode == .code, !codeArtifacts.isEmpty {
-                Text("\(codeArtifacts.count) items")
-                    .font(Typography.caption).foregroundStyle(t.textMuted)
-            }
-        }
-        .padding(.horizontal, Spacing.lg).padding(.vertical, Spacing.sm)
-    }
-
-    @ViewBuilder
-    private var codeItemsList: some View {
-        let t = theme.current
-        if codeArtifacts.isEmpty {
-            placeholderText("Generate graph to populate.")
-        } else {
-            List(selection: nodeSelectionBinding) {
-                ForEach(codeArtifacts) { artifact in
-                    Section {
-                        ForEach(artifact.symbols) { sym in
-                            HStack(spacing: Spacing.sm) {
-                                Circle().fill(CGPalette.color(for: sym.node.kind))
-                                    .frame(width: 7, height: 7)
-                                Text(sym.node.title)
-                                    .font(Typography.filename)
-                                    .foregroundStyle(t.text)
-                                    .lineLimit(1).truncationMode(.middle)
-                                Spacer()
-                                if let line = sym.node.metadata["line"] {
-                                    Text(line)
-                                        .font(Typography.mono)
-                                        .foregroundStyle(t.textMuted.opacity(0.7))
-                                }
-                            }
-                            .tag(sym.node.id)
-                        }
-                    } header: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "doc.text")
-                                .font(.system(size: 10))
-                                .foregroundStyle(t.textMuted)
-                            Text(artifact.fileNode.title)
-                                .font(Typography.bodyStrong)
-                                .foregroundStyle(t.text)
-                                .tag(artifact.fileNode.id)
-                        }
-                    }
-                }
-            }
-            .listStyle(.sidebar)
-        }
-    }
-
-    @ViewBuilder
-    private var memoryItemsList: some View {
-        let t = theme.current
-        if memoryChunks.isEmpty {
-            placeholderText("Generate Memory to populate.")
-        } else {
-            List(selection: nodeSelectionBinding) {
-                ForEach(groupedChunks, id: \.doc) { group in
-                    Section {
-                        ForEach(group.chunks) { chunk in
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack(spacing: 6) {
-                                    Circle().fill(CGPalette.color(for: chunk.kind))
-                                        .frame(width: 7, height: 7)
-                                    Text(chunk.displayHeading)
-                                        .font(Typography.bodyStrong)
-                                        .foregroundStyle(t.text)
-                                        .lineLimit(1).truncationMode(.tail)
-                                    Spacer()
-                                    if chunk.kind != .memoryChunk {
-                                        Text(chunk.kind.displayName.uppercased())
-                                            .font(Typography.captionStrong)
-                                            .foregroundStyle(CGPalette.color(for: chunk.kind))
-                                            .padding(.horizontal, 5).padding(.vertical, 1)
-                                            .background(Capsule()
-                                                .fill(CGPalette.color(for: chunk.kind).opacity(0.15)))
-                                    }
-                                }
-                                Text(chunk.body.trimmingCharacters(in: .whitespacesAndNewlines))
-                                    .font(Typography.caption)
-                                    .foregroundStyle(t.textMuted)
-                                    .lineLimit(2)
-                            }
-                            .padding(.vertical, 2)
-                            .tag(chunk.id)
-                        }
-                    } header: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "doc.richtext")
-                                .font(.system(size: 10))
-                                .foregroundStyle(t.textMuted)
-                            Text(group.doc)
-                                .font(Typography.bodyStrong)
-                                .foregroundStyle(t.text)
-                        }
-                    }
-                }
-            }
-            .listStyle(.sidebar)
-        }
-    }
-
-    @ViewBuilder
-    private func placeholderText(_ s: String) -> some View {
-        VStack {
-            Spacer()
-            Text(s).foregroundStyle(theme.current.textMuted).font(Typography.emptyHint)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, Spacing.lg)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
-    }
-
     // MARK: - Panel 3: Canvas
 
     /// The graph fills the area; when a node is selected, a resizable detail
@@ -1100,14 +923,17 @@ struct UAGraphView: View {
                     .foregroundStyle(t.text)
             }
 
-            if !fullData.nodes.isEmpty, mode == .code {
-                Divider().frame(height: 14)
-                Toggle(isOn: $showSymbols) {
-                    Label("Symbols", systemImage: showSymbols ? "function" : "doc")
-                        .font(Typography.caption)
+            if !fullData.nodes.isEmpty {
+                // Symbols toggle only where there ARE code symbols (code / all).
+                if mode != .data {
+                    Divider().frame(height: 14)
+                    Toggle(isOn: $showSymbols) {
+                        Label("Symbols", systemImage: showSymbols ? "function" : "doc")
+                            .font(Typography.caption)
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
                 }
-                .toggleStyle(.switch)
-                .controlSize(.small)
                 Divider().frame(height: 14)
                 Toggle(isOn: $showLabels) {
                     Label("Labels", systemImage: showLabels ? "text.bubble.fill" : "text.bubble")
