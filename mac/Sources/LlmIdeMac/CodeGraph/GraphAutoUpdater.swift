@@ -17,6 +17,14 @@ final class GraphAutoUpdater: ObservableObject {
     /// Exposed so the UI can observe the generated graphs.
     let graph = KnowledgeGraphService()
 
+    /// The Code Graph view's session store. Set once by `AppShell` (both are
+    /// app-level objects). After each background run we publish the generated
+    /// graphs here so the view shows the auto-maintained graph on its next
+    /// appearance instead of recomputing the same scan — closing the previous
+    /// "two disjoint graph instances" gap where auto-run results were invisible
+    /// to the UI. `weak` because the store is owned by the app's `@StateObject`.
+    weak var sessionStore: GraphSessionStore?
+
     private weak var projectStore: ProjectStore?
     private let intervalSeconds: TimeInterval
     private var timer: Timer?
@@ -85,9 +93,31 @@ final class GraphAutoUpdater: ObservableObject {
         // extensions and is bounded, and the stat-only fingerprint makes an
         // unchanged re-tick near-free.
         let docRoots = [repoRoot]
-        Task {
-            await graph.generate(codeRepoRoot: repoRoot, docRoots: docRoots, memoryRoot: repoRoot)
+        Task { [weak self] in
+            guard let self else { return }
+            await self.graph.generate(codeRepoRoot: repoRoot, docRoots: docRoots, memoryRoot: repoRoot)
+            self.publishToSession(repoRoot: repoRoot)
         }
+    }
+
+    /// Mirror the freshly generated graphs into the Code Graph view's session
+    /// store, keyed by the same `repo#mode` the view uses. Stored RAW
+    /// (`laidOut: false`): `KnowledgeGraphService` produces position-less graphs
+    /// and layout is the view's job, so the view lays them out with its own
+    /// pipeline on hydrate. No-op until `AppShell` has wired `sessionStore`.
+    private func publishToSession(repoRoot: URL) {
+        guard let store = sessionStore else { return }
+        // Mode raw values mirror UAGraphView.Mode: code / data / all.
+        // Carry the doc fingerprint on the doc-bearing modes so the view's
+        // manual InfiniteBrain re-generate can reuse this result when the docs
+        // are unchanged (preserved across the view's later layout re-cache).
+        let fp = graph.docFingerprint
+        store.store(repo: repoRoot, mode: "code", graph: graph.codeGraph, laidOut: false)
+        store.store(repo: repoRoot, mode: "data", graph: graph.docGraph,
+                    chunks: graph.docChunks, docCount: graph.docCount, laidOut: false, docFingerprint: fp)
+        store.store(repo: repoRoot, mode: "all", graph: graph.mergedGraph,
+                    chunks: graph.docChunks, docCount: graph.docCount, laidOut: false, docFingerprint: fp)
+        Self.log.info("published auto-graph to session store: code=\(self.graph.codeGraph.nodes.count, privacy: .public) doc=\(self.graph.docGraph.nodes.count, privacy: .public) all=\(self.graph.mergedGraph.nodes.count, privacy: .public) for \(repoRoot.lastPathComponent, privacy: .public)")
     }
 
     /// The repo that already has a generated code graph (`system/graph/index.md`):

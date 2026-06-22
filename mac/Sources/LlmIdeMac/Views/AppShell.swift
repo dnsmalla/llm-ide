@@ -11,6 +11,7 @@ struct AppShell: View {
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
     @EnvironmentObject var graphAutoUpdater: GraphAutoUpdater
+    @EnvironmentObject var graphSessionStore: GraphSessionStore
     @State private var shell = ShellState()
     @State private var itemStore = LibraryItemStore()
     @State private var catalogStore = AgentCatalogStore()
@@ -202,7 +203,12 @@ struct AppShell: View {
         // Auto-maintain the knowledge graph + memory for any project that
         // already has a generated graph (first generation stays manual).
         // Idempotent; re-runs on project open/switch + a periodic timer.
-        .task { graphAutoUpdater.start() }
+        .task {
+            // Wire the session store so background runs surface in the Code
+            // Graph view, then begin auto-maintaining the graph.
+            graphAutoUpdater.sessionStore = graphSessionStore
+            graphAutoUpdater.start()
+        }
         .task {
             // Phase D — arm the regression-run button when the app
             // version changes between launches. We record the new
