@@ -77,6 +77,15 @@ const REQUIRED_ENDPOINTS = [
   '/kb/outcomes/refresh',
 ];
 
+// Minimum server API version this client requires. The server reports
+// `apiVersion` in /health (SERVER_API_VERSION in server.mjs). The Mac client
+// enforces the same handshake (BackendManager requires apiVersion >= 18); the
+// extension must too, or a version bump the Mac flags as incompatible would be
+// silently used here. Bump this in lockstep with SERVER_API_VERSION whenever a
+// contract change lands that this client depends on. A NEWER server is fine
+// (backward-compatible), so we only flag servers BELOW this floor.
+const MIN_SERVER_API_VERSION = 18;
+
 export default function App() {
   // Auth gate is the very first hook so login renders before any of the
   // other tabs hit the server.  Their hooks still run unconditionally
@@ -271,7 +280,19 @@ export default function App() {
           const health = await response.json();
           const reported: string[] = Array.isArray(health?.endpoints) ? health.endpoints : [];
           const missing = REQUIRED_ENDPOINTS.filter((e) => !reported.includes(e));
-          setServerStale(reported.length === 0 || missing.length > 0 ? missing : null);
+          // Version handshake (symmetric with the Mac client): a server below
+          // the contract floor is stale even when the endpoint names line up.
+          // A missing/non-numeric apiVersion means a process predating the
+          // version field — also stale.
+          const apiVersion = typeof health?.apiVersion === 'number' ? health.apiVersion : 0;
+          const versionStale = apiVersion < MIN_SERVER_API_VERSION;
+          if (reported.length === 0 || missing.length > 0 || versionStale) {
+            setServerStale(missing.length > 0
+              ? missing
+              : [`server API v${apiVersion} < required v${MIN_SERVER_API_VERSION}`]);
+          } else {
+            setServerStale(null);
+          }
         } catch {
           setServerStale(REQUIRED_ENDPOINTS);
         }

@@ -22,9 +22,12 @@
 import SwiftUI
 import GraphKit
 import AppKit
+import os
 
 @MainActor
 struct UAGraphView: View {
+    nonisolated private static let log = Logger(subsystem: "com.llmide.macapp", category: "UAGraphView")
+
     /// The two engines this view drives. User picks via the tab switcher
     /// at the top of panel 2; library-selection changes also nudge the
     /// tab to whichever engine matches the selected item's category.
@@ -168,9 +171,11 @@ struct UAGraphView: View {
         graphSessionStore.entry(repo: activeRepoRoot, mode: m.rawValue)?.chunks ?? []
     }
     private func cacheGraph(_ m: Mode, _ graph: CGData,
-                            chunks: [MemoryChunk]? = nil, docCount: Int? = nil) {
+                            chunks: [MemoryChunk]? = nil, docCount: Int? = nil,
+                            fingerprint: String? = nil) {
         graphSessionStore.store(repo: activeRepoRoot, mode: m.rawValue,
-                                graph: graph, chunks: chunks, docCount: docCount)
+                                graph: graph, chunks: chunks, docCount: docCount,
+                                docFingerprint: fingerprint)
     }
 
     /// Restore the current mode's graph from the session store when the view
@@ -181,13 +186,28 @@ struct UAGraphView: View {
               let entry = graphSessionStore.entry(repo: activeRepoRoot, mode: mode.rawValue),
               !entry.graph.nodes.isEmpty
         else { return }
-        let cached = entry.graph
-        fullData = cached
         memoryChunks = entry.chunks
         memoryDocCount = entry.docCount
-        if mode == .code { codeArtifacts = UAHelpers.collectCodeArtifacts(cached) }
-        status = .loaded(nodeCount: cached.nodes.count, edgeCount: cached.edges.count)
-        recomputeDisplayData()
+        if mode == .code { codeArtifacts = UAHelpers.collectCodeArtifacts(entry.graph) }
+
+        if entry.laidOut {
+            // The view's own generate stored a positioned graph — show it as-is.
+            fullData = entry.graph
+            status = .loaded(nodeCount: entry.graph.nodes.count, edgeCount: entry.graph.edges.count)
+            recomputeDisplayData()
+        } else {
+            // The background GraphAutoUpdater stored a RAW graph (no positions).
+            // Lay it out with the same pipeline a manual generate uses, then let
+            // physics settle — settlePhysics re-caches the positioned result
+            // (laidOut == true) so a later re-appear skips this step.
+            let initial = CodeGraphLayout.compute(
+                entry.graph, canvasSize: UAHelpers.layoutSize(for: entry.graph.nodes.count))
+            fullData = initial
+            cacheGraph(mode, initial, chunks: entry.chunks, docCount: entry.docCount)
+            status = .loaded(nodeCount: initial.nodes.count, edgeCount: initial.edges.count)
+            recomputeDisplayData()
+            settlePhysics(from: initial, expectedMode: mode)
+        }
     }
 
     /// Kinds shown in the files-only view (Code mode with `showSymbols`
@@ -347,8 +367,12 @@ struct UAGraphView: View {
         .onChange(of: library.items) { _, _ in rebuildLibraryIndex() }
         .onChange(of: fullData)      { _, _ in recomputeDisplayData() }
         .onChange(of: showSymbols)   { _, _ in recomputeDisplayData() }
-        .onReceive(codeNoteService.$graph) { newGraph in
-            guard mode == .code, !newGraph.nodes.isEmpty else { return }
+        .onReceive(codeNoteService.$graph) { rawGraph in
+            guard mode == .code, !rawGraph.nodes.isEmpty else { return }
+            // "md is doc": markdown files (.docPage) belong to InfiniteBrain, not
+            // the Code graph — strip them before display/cache.
+            let newGraph = FileClassifier.strippingDocNodes(from: rawGraph)
+            guard !newGraph.nodes.isEmpty else { return }
             self.selectedNode = self.selectedNode  // keep selection
             // Phase 1: type-clustered circular layout — publish immediately so
             // the canvas isn't blank while physics runs.
@@ -1128,7 +1152,31 @@ struct UAGraphView: View {
         }
         let repo = activeRepoRoot
         guard selectedFiles != nil || repo != nil else { return }
+
+        // Reuse: a whole-repo InfiniteBrain generate is skipped when the doc set
+        // is unchanged since the cached, laid-out .data graph (same stat
+        // fingerprint the auto-updater uses) — so re-clicking Generate on
+        // unchanged docs is instant instead of re-chunking every file. Only the
+        // repo-walk case is fingerprinted; explicit file-scoped generates always
+        // recompute. (Requires laidOut so we never display a raw graph.)
+        if selectedFiles == nil, let repo,
+           let entry = graphSessionStore.entry(repo: activeRepoRoot, mode: Mode.data.rawValue),
+           entry.laidOut, !entry.graph.nodes.isEmpty,
+           let cachedFp = entry.docFingerprint,
+           cachedFp == KnowledgeGraphService.docSetFingerprint(roots: [repo]) {
+            selectedNode = nil
+            memoryChunks = entry.chunks
+            memoryDocCount = entry.docCount
+            fullData = entry.graph
+            status = .loaded(nodeCount: entry.graph.nodes.count, edgeCount: entry.graph.edges.count)
+            recomputeDisplayData()
+            return
+        }
+
         status = .running
+        // Fingerprint only the repo-walk case so an unchanged re-generate can be
+        // skipped next time; nil for file-scoped generates.
+        let fingerprintRepo = selectedFiles == nil ? repo : nil
         runTask = Task.detached(priority: .userInitiated) {
             let mem: GeneratedMemory
             if let files = selectedFiles {
@@ -1139,6 +1187,7 @@ struct UAGraphView: View {
                 return
             }
             if Task.isCancelled { return }
+            let fp = fingerprintRepo.map { KnowledgeGraphService.docSetFingerprint(roots: [$0]) }
             let initial = CodeGraphLayout.compute(mem.graph,
                                                   canvasSize: CGSize(width: 1200, height: 800))
             if Task.isCancelled { return }
@@ -1147,7 +1196,7 @@ struct UAGraphView: View {
                 self.memoryChunks = mem.chunks
                 self.memoryDocCount = mem.docCount
                 self.fullData = initial
-                self.cacheGraph(.data, initial, chunks: mem.chunks, docCount: mem.docCount)
+                self.cacheGraph(.data, initial, chunks: mem.chunks, docCount: mem.docCount, fingerprint: fp)
                 self.status = .loaded(nodeCount: mem.graph.nodes.count,
                                       edgeCount: mem.graph.edges.count)
                 // Settle into the same organic layout as the code graph.
@@ -1164,8 +1213,19 @@ struct UAGraphView: View {
         status = .running
         runTask = Task {
             _ = await codeNoteService.generate(repoRoot: repo)   // @MainActor; heavy scan is internal
-            let code = codeNoteService.graph
             if Task.isCancelled { return }
+            // The live scan returns an EMPTY graph when it loses the
+            // cross-instance scan lock (CodeNoteService.inFlightPaths — e.g. the
+            // background GraphAutoUpdater is scanning the same repo). Merging that
+            // empty graph is why "All" could show no code. Fall back to the last
+            // code graph cached for this repo so the code side still renders.
+            // "md is doc": strip code-track markdown so it isn't merged twice.
+            var code = FileClassifier.strippingDocNodes(from: codeNoteService.graph)
+            var codeFromCache = false
+            if code.nodes.isEmpty, let cachedCode = cachedGraph(.code), !cachedCode.nodes.isEmpty {
+                code = cachedCode   // already markdown-free (stripped when cached)
+                codeFromCache = true
+            }
             let result = await Task.detached(priority: .userInitiated) { () -> (data: CGData, chunks: [MemoryChunk], docs: Int) in
                 let docMem = MemoryGenerator.generate(from: repo)
                 let merged = KnowledgeGraphService.merge(code: code, doc: docMem.graph, chunks: docMem.chunks)
@@ -1173,6 +1233,10 @@ struct UAGraphView: View {
                 return (laid, docMem.chunks, docMem.docCount)
             }.value
             if Task.isCancelled { return }
+            // Generation telemetry (mirrors KnowledgeGraphService's count log):
+            // records the code/doc contributions to the merged "All" graph, which
+            // also pinpoints a code-vs-doc shortfall if the graph ever looks short.
+            Self.log.info("generateAll[\(repo.lastPathComponent, privacy: .public)]: code=\(code.nodes.count, privacy: .public)\(codeFromCache ? " (cache)" : "", privacy: .public) docFiles=\(result.docs, privacy: .public) docChunks=\(result.chunks.count, privacy: .public) merged=\(result.data.nodes.count, privacy: .public)")
             self.selectedNode = nil
             self.memoryChunks = result.chunks
             self.memoryDocCount = result.docs

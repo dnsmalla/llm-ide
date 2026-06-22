@@ -31,6 +31,17 @@ final class KnowledgeGraphService: ObservableObject {
     @Published private(set) var docGraph: CGData = .empty
     /// Code + doc unified into one graph, with doc→code cross-links (Stage 2).
     @Published private(set) var mergedGraph: CGData = .empty
+    /// Doc-track chunks behind `docGraph`/`mergedGraph` — exposed so the
+    /// `GraphAutoUpdater` can hand them to the Code Graph view's session store
+    /// (the view needs them to render doc/chunk detail in `.data`/`.all` modes).
+    @Published private(set) var docChunks: [MemoryChunk] = []
+    /// Number of source docs ingested for the doc track (matches the view's
+    /// `memoryDocCount`, sourced from `MemoryGenerator`).
+    @Published private(set) var docCount: Int = 0
+    /// Stat-fingerprint of the doc set behind the current `docGraph` — published
+    /// so the auto-updater can hand it to the session store, letting the view's
+    /// manual InfiniteBrain re-generate be skipped when docs are unchanged.
+    @Published private(set) var docFingerprint: String?
 
     private let codeNotes: CodeNoteService
     /// Re-entrancy guard — the auto-updater (Stage 5) and a manual run must not
@@ -50,6 +61,7 @@ final class KnowledgeGraphService: ObservableObject {
     private var lastDocFingerprint: String?
     private var cachedDocGraph: CGData = .empty
     private var cachedChunks: [MemoryChunk] = []
+    private var cachedDocCount: Int = 0
 
     nonisolated private static let log = Logger(subsystem: "com.llmide.macapp",
                                                 category: "KnowledgeGraphService")
@@ -93,7 +105,10 @@ final class KnowledgeGraphService: ObservableObject {
         // and is incremental (scan-cache), so this is cheap on re-runs.
         if let codeRepoRoot {
             _ = await codeNotes.generate(repoRoot: codeRepoRoot)
-            codeGraph = codeNotes.graph
+            // "md is doc": the scanner emits markdown as code `.docPage` nodes;
+            // strip them so markdown lives only in the doc track and isn't
+            // double-counted when merged below.
+            codeGraph = FileClassifier.strippingDocNodes(from: codeNotes.graph)
         }
 
         // Doc track — MemoryGenerator walks each root (bounded) and filters to
@@ -102,14 +117,16 @@ final class KnowledgeGraphService: ObservableObject {
         // Recompute the doc graph only when the doc set changed (stat-only
         // fingerprint); otherwise reuse the cached result.
         let fingerprint = await Task.detached(priority: .utility) { Self.docSetFingerprint(roots: roots) }.value
-        let doc: (graph: CGData, chunks: [MemoryChunk])
+        docFingerprint = fingerprint
+        let doc: (graph: CGData, chunks: [MemoryChunk], docCount: Int)
         if let last = lastDocFingerprint, last == fingerprint {
-            doc = (cachedDocGraph, cachedChunks)
+            doc = (cachedDocGraph, cachedChunks, cachedDocCount)
         } else {
-            doc = await Task.detached(priority: .userInitiated) { () -> (graph: CGData, chunks: [MemoryChunk]) in
+            doc = await Task.detached(priority: .userInitiated) { () -> (graph: CGData, chunks: [MemoryChunk], docCount: Int) in
                 var nodes: [CGNode] = []
                 var edges: [CGEdge] = []
                 var chunks: [MemoryChunk] = []
+                var docCount = 0
                 var seenNode = Set<String>()
                 let fm = FileManager.default
                 for root in roots {
@@ -121,14 +138,18 @@ final class KnowledgeGraphService: ObservableObject {
                     // (path-hashed) node ids, so their edges can't collide — append.
                     edges.append(contentsOf: mem.graph.edges)
                     chunks.append(contentsOf: mem.chunks)
+                    docCount += mem.docCount
                 }
-                return (CGData(nodes: nodes, edges: edges), chunks)
+                return (CGData(nodes: nodes, edges: edges), chunks, docCount)
             }.value
             lastDocFingerprint = fingerprint
             cachedDocGraph = doc.graph
             cachedChunks = doc.chunks
+            cachedDocCount = doc.docCount
         }
         docGraph = doc.graph
+        docChunks = doc.chunks
+        docCount = doc.docCount
 
         // Stage 2 — unify code + doc into one graph, with doc→code cross-links.
         mergedGraph = Self.merge(code: codeGraph, doc: doc.graph, chunks: doc.chunks)
@@ -243,6 +264,8 @@ final class KnowledgeGraphService: ObservableObject {
         lastDocFingerprint = nil
         cachedDocGraph = .empty
         cachedChunks = []
+        cachedDocCount = 0
+        docFingerprint = nil
     }
 
     /// Cheap change signal for the doc set: sorted `path|size|mtime` over every

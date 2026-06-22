@@ -11,6 +11,7 @@ import { pMap } from '../core/p-map.mjs';
 import { getDb } from '../kb/db.mjs';
 import { getSecrets } from '../server/vault.mjs';
 import { logger as _bgLogger } from '../core/logger.mjs';
+import { redactSecrets } from '../core/redact-secrets.mjs';
 
 // Tunable concurrency — we keep it small to be polite to free-tier
 // rate limits on the trackers' APIs.  GitHub gives 5000 req/hour
@@ -91,20 +92,10 @@ export function _resetCircuitBreakersForTests() { circuitBreakers.clear(); }
 // error body (e.g. "Bad credentials for ghp_abc...").  Strip the most
 // common token shapes before bubbling the message back to the client so
 // they can't end up in browser DevTools, log shippers, or screenshots.
-const TOKEN_REDACTIONS = [
-  /\bghp_[A-Za-z0-9]{36}\b/g,
-  /\bgithub_pat_[A-Za-z0-9_]{82}\b/g,
-  /\bxox[abp]-[A-Za-z0-9-]{10,}\b/g,
-  /\bAIza[0-9A-Za-z\-_]{35}\b/g,
-  /\bAKIA[0-9A-Z]{16}\b/g,
-  /\bsk-ant-[A-Za-z0-9-]{10,}\b/g,
-  /Bearer\s+[A-Za-z0-9._-]{20,}/gi,
-  /apiKey=[A-Za-z0-9_-]+/gi,
-];
+// Patterns live in one shared module (core/redact-secrets.mjs) so every
+// sink redacts the same way; here we just cap the surfaced length.
 function redactTokens(msg) {
-  let s = typeof msg === 'string' ? msg : String(msg);
-  for (const re of TOKEN_REDACTIONS) s = s.replace(re, '[REDACTED]');
-  return s.slice(0, 400);
+  return redactSecrets(msg).slice(0, 400);
 }
 // Test/utility hook — used by the test suite.
 export { redactTokens as _redactTokensForTests };

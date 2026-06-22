@@ -206,11 +206,21 @@ async function pushPendingSegments(
   if (toPush.length === 0) return;
 
   const serverUrl = await getServerUrl();
-  await authFetch(`${serverUrl}/kb/live/${encodeURIComponent(sessionId)}/append`, {
+  const res = await authFetch(`${serverUrl}/kb/live/${encodeURIComponent(sessionId)}/append`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ captions: toPush, meetingTitle: meetingTitle || '' }),
   });
+
+  // authFetch resolves (does NOT throw) for the breaker-open 503 and for any
+  // 4xx/5xx the server returns. Treat a non-ok response as a failed push:
+  // throw so the caller's .catch runs markFailure + scheduleRetry, and — most
+  // importantly — leave the push cursors UNADVANCED so these segments are
+  // re-sent on the next attempt instead of being silently lost while the UI
+  // shows "synced".
+  if (!res.ok) {
+    throw new Error(`live append failed (${res.status})`);
+  }
 
   lastPushedIndex.current = segments.length;
   // Snapshot current text per index so the next push only re-sends real edits.
