@@ -1,6 +1,6 @@
 # Plan — Unified, automatic, incremental knowledge graph
 
-**Status:** in progress (Stage 0 ✅, Stage 1 ✅ this commit)
+**Status:** in progress (Stage 0 ✅, Stage 1 ✅, Stage 2 ✅)
 **Goal:** one knowledge graph for a project, built automatically and incrementally
 from BOTH file types — code files via the Code graph, doc files via InfiniteBrain —
 merged into a single graph, and used to generate the agent's repo memory. No manual
@@ -43,8 +43,11 @@ public init, ids are stable Strings) → mergeable by id-dedup.
   code/doc by extension (GraphKit `codeExtensions` + `MemoryGenerator.supportedExtensions`);
   `KnowledgeGraphService` runs the code track (`CodeNoteService`) and the doc track
   (`MemoryGenerator`) for a project and exposes both `CGData` outputs.
-- **Stage 2 — merge:** combine the two `CGData` into one; add doc→code cross-links by
-  symbol-name match. (May add a `public` merge helper to graph-kit.)
+- **Stage 2 — merge** ✅: `KnowledgeGraphService.merge(code:doc:chunks:)` unions the two
+  `CGData` (node-dedup by id) and adds doc→code cross-links — a doc chunk that names a code
+  symbol via a `[[wikilink]]` or exact title match gets a `references` edge to that code node.
+  Conservative (explicit links + exact titles only); fuzzy body-mention matching is a later
+  refinement.
 - **Stage 3 — incremental:** per-doc chunk cache (hash-keyed, like the code `scan-cache`)
   so only changed docs re-chunk; on change, replace only affected nodes/edges + recompute
   touched cross-links.

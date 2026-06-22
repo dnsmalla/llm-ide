@@ -28,6 +28,8 @@ final class KnowledgeGraphService: ObservableObject {
     @Published private(set) var codeGraph: CGData = .empty
     /// The InfiniteBrain doc/memory graph (doc + chunk nodes).
     @Published private(set) var docGraph: CGData = .empty
+    /// Code + doc unified into one graph, with doc→code cross-links (Stage 2).
+    @Published private(set) var mergedGraph: CGData = .empty
 
     private let codeNotes: CodeNoteService
     /// Re-entrancy guard — the auto-updater (Stage 5) and a manual run must not
@@ -66,9 +68,10 @@ final class KnowledgeGraphService: ObservableObject {
         // Doc track — MemoryGenerator walks each root (bounded) and filters to
         // doc extensions. Pure text chunking (no LLM), run off the main actor.
         let roots = docRoots
-        let merged = await Task.detached(priority: .userInitiated) { () -> CGData in
+        let doc = await Task.detached(priority: .userInitiated) { () -> (graph: CGData, chunks: [MemoryChunk]) in
             var nodes: [CGNode] = []
             var edges: [CGEdge] = []
+            var chunks: [MemoryChunk] = []
             var seenNode = Set<String>()
             let fm = FileManager.default
             for root in roots {
@@ -79,12 +82,52 @@ final class KnowledgeGraphService: ObservableObject {
                 // CGEdge has no id; doc graphs from distinct roots have disjoint
                 // (path-hashed) node ids, so their edges can't collide — append.
                 edges.append(contentsOf: mem.graph.edges)
+                chunks.append(contentsOf: mem.chunks)
             }
-            return CGData(nodes: nodes, edges: edges)
+            return (CGData(nodes: nodes, edges: edges), chunks)
         }.value
-        docGraph = merged
+        docGraph = doc.graph
 
-        Self.log.info("knowledge graph generated: code=\(self.codeGraph.nodes.count, privacy: .public) doc=\(self.docGraph.nodes.count, privacy: .public) nodes")
+        // Stage 2 — unify code + doc into one graph, with doc→code cross-links.
+        mergedGraph = Self.merge(code: codeGraph, doc: doc.graph, chunks: doc.chunks)
+
+        Self.log.info("knowledge graph: code=\(self.codeGraph.nodes.count, privacy: .public) doc=\(self.docGraph.nodes.count, privacy: .public) merged=\(self.mergedGraph.nodes.count, privacy: .public) nodes / \(self.mergedGraph.edges.count, privacy: .public) edges")
         phase = .complete(codeNodes: codeGraph.nodes.count, docNodes: docGraph.nodes.count)
+    }
+
+    /// Merge the code and doc graphs into one and add doc→code cross-links:
+    /// a doc chunk that names a code symbol — via an explicit `[[wikilink]]` or
+    /// an exact (case-insensitive) title match — gets a `references` edge to
+    /// that code node. Conservative on purpose (explicit links + exact titles
+    /// only) so we don't manufacture false edges; fuzzy body-mention matching
+    /// is a later refinement. Node ids are namespaced (code paths/symbols vs
+    /// `doc:`/chunk hashes) so the union can't collide; chunk graph-node ids
+    /// equal `MemoryChunk.id`, so the cross-link `fromId` resolves to a real node.
+    nonisolated static func merge(code: CGData, doc: CGData, chunks: [MemoryChunk]) -> CGData {
+        var nodes: [CGNode] = []
+        var seen = Set<String>()
+        for n in code.nodes + doc.nodes where seen.insert(n.id).inserted { nodes.append(n) }
+        var edges = code.edges + doc.edges
+
+        // Index code nodes by lowercased title for name matching.
+        var codeIdsByTitle: [String: [String]] = [:]
+        for n in code.nodes { codeIdsByTitle[n.title.lowercased(), default: []].append(n.id) }
+        guard !codeIdsByTitle.isEmpty else { return CGData(nodes: nodes, edges: edges) }
+
+        var crossSeen = Set<String>()
+        for chunk in chunks {
+            var names = chunk.wikiLinks.map { $0.lowercased() }
+            names.append(chunk.title.lowercased())
+            for name in names {
+                guard let targets = codeIdsByTitle[name] else { continue }
+                for codeId in targets {
+                    let key = "\(chunk.id)->\(codeId)"
+                    guard crossSeen.insert(key).inserted else { continue }
+                    edges.append(CGEdge(fromId: chunk.id, toId: codeId,
+                                        kind: .references, confidence: .inferred))
+                }
+            }
+        }
+        return CGData(nodes: nodes, edges: edges)
     }
 }
