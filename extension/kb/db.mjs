@@ -310,6 +310,14 @@ export function search(userId, { q, kind, limit = 20, projectId } = {}) {
   const taskIdSet    = buildIdSet(taskRows,    'plan_tasks');
   const outcomeIdSet = buildIdSet(outcomeRows, 'outcomes');
 
+  // Action/decision/blocker rows are entities — gate them on the ENTITY's own
+  // owner (entities.user_id), not transitively on the meeting owner, so tenant
+  // isolation never depends on the un-enforced "entity.user_id == meeting.user_id"
+  // invariant. ('meeting' rows are the meeting itself; they stay gated on the
+  // meeting owner via meetingMap below.)
+  const subEntityRows = meetingRows.filter((r) => r.kind !== 'meeting');
+  const entityIdSet   = buildIdSet(subEntityRows, 'entities');
+
   // Drop any FTS row whose hydration came up empty — that means the
   // row belongs to another tenant or has been deleted between FTS
   // index time and now.  Either way, don't surface it to this user.
@@ -347,9 +355,14 @@ export function search(userId, { q, kind, limit = 20, projectId } = {}) {
         date: s.indexed_at,
       };
     }
-    // Entity kinds trace via meeting_id.
+    // Entity kinds: 'meeting' traces to a caller-owned meeting; the entity
+    // sub-kinds (action/decision/blocker) are gated on their OWN owner.
     if (ENTITY_KINDS.has(r.kind)) {
-      if (!meetingMap.has(r.meeting_id)) return null;
+      if (r.kind === 'meeting') {
+        if (!meetingMap.has(r.meeting_id)) return null;
+      } else if (!entityIdSet.has(String(r.entity_id))) {
+        return null;
+      }
       return {
         kind: r.kind,
         meetingId: r.meeting_id,
