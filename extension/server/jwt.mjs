@@ -102,7 +102,7 @@ export function signAccessToken({ userId, role = 'user' }) {
 export function verifyAccessToken(token) {
   const payload = verifyAndDecode(token);
   if (!payload || payload.typ !== 'access') return null;
-  return { userId: payload.sub, role: payload.role || 'user', jti: payload.jti, exp: payload.exp };
+  return { userId: payload.sub, role: payload.role || 'user', jti: payload.jti, iat: payload.iat, exp: payload.exp };
 }
 
 // Refresh tokens are opaque random strings rather than JWTs — they're

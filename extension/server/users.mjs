@@ -223,6 +223,11 @@ export function logoutAll(db, userId) {
   db.prepare(
     `UPDATE refresh_tokens SET revoked_at = datetime('now') WHERE user_id = ? AND revoked_at IS NULL`
   ).run(String(userId));
+  // Also invalidate outstanding ACCESS tokens: set the per-user cutoff to now
+  // so authenticate() rejects any token issued before this point. Without
+  // this, a revoked session's bearer token keeps working until its TTL.
+  db.prepare('UPDATE users SET tokens_valid_after = ? WHERE id = ?')
+    .run(Math.floor(Date.now() / 1000), String(userId));
 }
 
 // Sweep expired and revoked refresh token rows.  Call at startup and
@@ -358,6 +363,10 @@ export function consumePasswordResetToken(db, { token, newPassword }) {
     db.prepare(
       "UPDATE refresh_tokens SET revoked_at = datetime('now') WHERE user_id = ? AND revoked_at IS NULL",
     ).run(row.user_id);
+    // Also invalidate outstanding ACCESS tokens (see logoutAll): a stolen
+    // bearer token must not survive a password reset until its TTL.
+    db.prepare('UPDATE users SET tokens_valid_after = ? WHERE id = ?')
+      .run(Math.floor(Date.now() / 1000), String(row.user_id));
   })();
 }
 

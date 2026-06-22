@@ -444,6 +444,7 @@ export {
   setUserPrefs,
   revokeJti,
   isJtiRevoked,
+  tokensValidAfter,
   purgeExpiredJti,
 } from './user.mjs';
 

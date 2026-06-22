@@ -161,6 +161,17 @@ export function revokeJti(jti, userId, expiresAtIso) {
   `).run(String(jti), userId ? String(userId) : null, String(expiresAtIso));
 }
 
+// Per-user access-token cutoff (unix seconds; 0 = never revoked). The auth
+// middleware rejects any access token whose `iat` is below this, so logoutAll
+// / password reset invalidate outstanding ACCESS tokens, not just refresh
+// tokens. Written by server/users.mjs (logoutAll, password reset).
+export function tokensValidAfter(userId) {
+  if (!userId) return 0;
+  const db = getDb();
+  const row = lazyPrepare(db, 'SELECT tokens_valid_after AS t FROM users WHERE id = ?').get(String(userId));
+  return row && Number.isFinite(row.t) ? row.t : 0;
+}
+
 export function isJtiRevoked(jti) {
   if (!jti) return false;
   const db = getDb();

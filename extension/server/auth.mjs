@@ -15,7 +15,7 @@
 
 import { errAuth, errForbidden } from '../core/errors.mjs';
 import { extractBearer, verifyAccessToken } from './jwt.mjs';
-import { isJtiRevoked } from '../kb/db.mjs';
+import { isJtiRevoked, tokensValidAfter } from '../kb/db.mjs';
 
 const PUBLIC_PATHS = new Set([
   '/',
@@ -54,6 +54,13 @@ export function authenticate(req) {
   const claims = verifyAccessToken(token);
   if (!claims) throw errAuth('Invalid or expired access token');
   if (claims.jti && isJtiRevoked(claims.jti)) throw errAuth('Token has been revoked');
+  // Per-user revocation epoch: a "revoke all" (logoutAll / password reset)
+  // sets a cutoff; any access token issued before it is dead, so a stolen
+  // bearer token can't outlive the revocation by its TTL. (`<` not `<=`: a
+  // token minted in the same second as the cutoff is still honoured.)
+  if (typeof claims.iat === 'number' && claims.iat < tokensValidAfter(claims.userId)) {
+    throw errAuth('Session has been revoked — please sign in again');
+  }
   req.user = { id: claims.userId, role: claims.role, jti: claims.jti, tokenExp: claims.exp };
   return true;
 }
