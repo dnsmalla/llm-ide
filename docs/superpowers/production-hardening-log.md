@@ -23,4 +23,10 @@ Autonomous self-paced improvement run requested 2026-06-22 ~23:50 (operator asle
 - **Verified:** 0014/0015 = AFTER-UPDATE FTS triggers; 0016 = `users.tokens_valid_after ADD COLUMN`; no new tables since 0013, so the "20 tables" list stays correct.
 - **Changed:** migrations row now reads "through `0016_token_epoch.sql` (16 files)" with a one-line note on what 0014–0016 added.
 - **Verified:** `make docs-check` green (80 pytest + 3 guards).
-- **Next up:** Cycle 2 — api-server spec: document the access-token-epoch mechanism + `iat` in the `verifyAccessToken` return shape (security-relevant, currently undocumented).
+
+### Cycle 2 — docs: api-server access-token-epoch (2026-06-23 ~00:05)
+- **Reviewed:** `docs/spec/api-server.md` §4 (token verification) vs `jwt.mjs` / `auth.mjs` / `kb/user.mjs` / `users.mjs`.
+- **Found:** (a) spec said `verifyAccessToken()` returns `{ userId, role, jti, exp }` but code returns `{ userId, role, jti, iat, exp }` (`jwt.mjs:105`), and `iat` is load-bearing for the epoch check; (b) the entire access-token-epoch (`tokens_valid_after`) bulk-revocation mechanism — the most security-relevant part of auth — was undocumented; (c) stale line citation (`:100`→`:105`).
+- **Changed:** added an "Access-token epoch (bulk revocation)" paragraph (cutoff at `auth.mjs:61`, bumped by `logoutAll`/password-reset, strict-`<` same-second window, added by `0016`), added `iat` to the documented return shape, fixed the citation.
+- **Verified:** `make docs-check` green (70 path citations resolve). Caught + fixed a self-inflicted citation slip (`kb/user.mjs` → `extension/kb/user.mjs`) — the guard works.
+- **Next up:** Cycle 3 — agent-runtime spec §6: document the multi-provider routing (OpenAI/Google/custom via `providers.mjs`), `runClaudeStream`, and the `--strict-mcp-config` CLI flag (the most-changed file, currently undocumented).
