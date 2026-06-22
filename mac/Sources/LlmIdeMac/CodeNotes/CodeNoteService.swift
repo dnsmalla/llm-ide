@@ -35,6 +35,11 @@ public final class CodeNoteService: ObservableObject {
     /// skeleton and no agent is invoked.
     private let cliExecutable: URL?
 
+    /// Guards against overlapping runs (a manual click racing the auto-updater,
+    /// or two rapid clicks). Both would write the same scan-cache / notes
+    /// concurrently. @MainActor-isolated, so the check + set is atomic.
+    private var isRunning = false
+
     nonisolated private static let log = Logger(subsystem: "com.llmide.macapp", category: "CodeNoteService")
 
     public init(launcher: ProcessLauncher = SystemProcessLauncher(),
@@ -46,6 +51,12 @@ public final class CodeNoteService: ObservableObject {
     /// Scan the repo (incrementally), build the graph, write deterministic
     /// notes + index.md + graph.json. Returns the file+symbol graph.
     public func generate(repoRoot: URL) async -> Result<CGData, CodeNoteError> {
+        // No-op if a run is already in flight (auto-updater vs manual click, or
+        // double-click) — returning the current graph avoids a concurrent write
+        // to the same scan-cache / notes dir.
+        if isRunning { return .success(graph) }
+        isRunning = true
+        defer { isRunning = false }
         guard FileManager.default.fileExists(atPath: repoRoot.path) else {
             progress = .failed("folder not found")
             return .failure(.folderNotWritable(path: repoRoot.path))

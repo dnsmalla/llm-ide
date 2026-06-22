@@ -1206,7 +1206,10 @@ struct UAGraphView: View {
 
     private func generateCodeNotes(target: URL) {
         status = .running
-        Task {
+        // Store the Task so Cancel / onDisappear can actually stop it — the
+        // memory path already does this; the code path previously used a bare
+        // Task that leaked past view dismissal and ignored Cancel.
+        runTask = Task {
             let result = await codeNoteService.generate(repoRoot: target)
             if case .failure(let err) = result {
                 await MainActor.run { self.status = .error("\(err)") }
