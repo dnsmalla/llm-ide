@@ -4,6 +4,8 @@
 // invokes `recordAudit` after a write completes; non-mutating reads
 // don't generate rows so the table stays sane in volume.
 
+import { recordAuditEvent } from './metrics.mjs';
+
 const ALLOWED_OUTCOMES = new Set(['success', 'failure', 'denied']);
 
 // Field limits — defined once so changes stay consistent.
@@ -73,6 +75,7 @@ export function recordAudit(db, {
     outcome,
     detailJson,
   );
+  recordAuditEvent();
 }
 
 export function listAuditForUser(db, userId, { limit = 100, action } = {}) {

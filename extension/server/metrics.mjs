@@ -107,6 +107,13 @@ export function recordRateLimitDeny(profile) {
   registry.rateLimitDenies.inc({ profile });
 }
 
+// Count an audit-log write. Called from recordAudit so the
+// `llmide_audit_events_total` series actually moves (it was declared and
+// rendered but never incremented, so dashboards/alerts saw no data).
+export function recordAuditEvent() {
+  registry.auditEvents.inc();
+}
+
 export function setKbGauge(kind, value) {
   registry.kbRecords.set({ kind }, Number(value) || 0);
 }
