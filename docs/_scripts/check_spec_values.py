@@ -46,6 +46,7 @@ def build_checks() -> list[tuple[str, int | None, int | None, str]]:
     """Return (label, source_value, documented_value, spec_page) tuples."""
     cross = _read("docs/spec/cross-cutting.md")
     kb = _read("docs/spec/knowledge-base.md")
+    arch = _read("docs/explanation/architecture.md")
     server = _read("extension/server.mjs")
     config = _read("extension/core/config.mjs")
 
@@ -60,6 +61,9 @@ def build_checks() -> list[tuple[str, int | None, int | None, str]]:
         ("migration head — knowledge-base.md 'through `NNNN_….sql`'",
          head, first_int(kb, r"through `0*(\d+)_[a-z0-9_]+\.sql`"),
          "docs/spec/knowledge-base.md"),
+        ("migration head — explanation/architecture.md '`0001`–`NNNN`'",
+         head, first_int(arch, r"`0001`[–-]`0*(\d+)`"),
+         "docs/explanation/architecture.md"),
         ("SERVER_API_VERSION — cross-cutting.md",
          api, first_int(cross, r"SERVER_API_VERSION = (\d+)"),
          "docs/spec/cross-cutting.md"),

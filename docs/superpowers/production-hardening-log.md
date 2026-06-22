@@ -86,4 +86,11 @@ Autonomous self-paced improvement run requested 2026-06-22 ~23:50 (operator asle
 - **Changed:** rewrote the §5 paragraph — `resolveModel` is the Anthropic-path validator; recognized foreign ids route via §6 and aren't collapsed; the fallback applies only to ids routing to Anthropic. Referenced §6 by name (avoided a guessed mkdocs anchor that the link-checker would flag).
 - **Verified:** `make docs-check` green.
 - **Next up:** Cycle 11 — review `docs/explanation/*` pages for drift/professionalism (same source-verification rigor as the spec sweep), low-risk. Then README/CONTRIBUTING professionalism. Then a final adversarial review + operator handoff summary.
+
+### Cycle 11 — docs: explanation-page drift + guard extension (2026-06-23 ~01:00)
+- **Reviewed:** all 11 `docs/explanation/*` pages, scanning source-checkable numeric/version claims (body limit, prompt cap, scrape interval, MAX_* caps, API-version handshake, migration range).
+- **Found & fixed:** `architecture.md:72` had the same migration-head drift (`0001`–`0013` → `0001`–`0016`). The rest spot-checked accurate (8 MB, 500k chars, SCRAPE_INTERVAL_MS=800, MAX_HISTORY=10, symmetric apiVersion handshake — now true after the earlier extension fix).
+- **Hardened:** extended `check_spec_values.py` to also guard the explanation/architecture.md migration-head claim (the drift guard previously scanned only `docs/spec/`), so this exact re-drift now fails CI. Guard is now 5 checks; tests green.
+- **Verified:** standalone guard green (5/5); `pytest` 5/5; `make docs-check` green.
+- **Next up:** Cycle 12 — README.md / CONTRIBUTING.md / AGENTS.md professionalism + accuracy pass (low-risk). Then final adversarial review of the whole branch + the operator handoff/recommendations summary, then conclude the loop.
 - **Deferred to recommendations (too risky/cross-package to do unattended):** (a) agent-loop *hard* deadline via `AbortSignal` — invasive (loop engine + runClaude threading); (b) `docSetFingerprint` deterministic ordering — the real fix also needs GraphKit's `MemoryGenerator.collectDocs` to sort-before-cap (external package), so a Mac-only fix is incomplete.

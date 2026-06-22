@@ -69,7 +69,7 @@ Pre-existing rows from earlier single-user installs are back-filled to `user_id 
 
 ## Storage
 
-SQLite, WAL mode, FTS5, foreign keys on. There is no single schema-version number — each migration under `extension/kb/migrations/` (currently `0001`–`0013`) is recorded in the `schema_migrations` table and applied on server start. The head migration is the effective schema version.
+SQLite, WAL mode, FTS5, foreign keys on. There is no single schema-version number — each migration under `extension/kb/migrations/` (currently `0001`–`0016`) is recorded in the `schema_migrations` table and applied on server start. The head migration is the effective schema version.
 
 | Table | Contents |
 |---|---|
