@@ -80,4 +80,10 @@ Autonomous self-paced improvement run requested 2026-06-22 ~23:50 (operator asle
 - **Fixed:** built `entityIdSet = buildIdSet(subEntityRows, 'entities')` and gate action/decision/blocker on the entity's own owner; `meeting` kind still gates on `meetingMap`. GREEN: Bob no longer sees it; Alice (owner) does.
 - **Verified:** new test passes; full `npm test` **461/461**; `eslint --max-warnings 0` clean. Normal-case behavior unchanged (when the invariant holds, both gates agree).
 - **Next up:** Cycle 10 — docs follow-up from Cycle 3: §5 `resolveModel` wording (foreign-provider ids now route via §6, not just "fall back to DEFAULT_MODEL"); add a §5→§6 cross-reference. Low-risk doc.
+
+### Cycle 10 — docs: §5 resolveModel accuracy (2026-06-23 ~00:55)
+- **Verified:** `resolveClaudeCall` (runtime.mjs:549–556) computes `resolvedModel` every call, but the non-Anthropic path passes the raw `model` to `completeViaApi` — so a `gpt-…`/`gemini-…` id routes to its provider and is used as-is, NOT coerced to `DEFAULT_MODEL`. §5 still claimed foreign ids "fall back to DEFAULT_MODEL".
+- **Changed:** rewrote the §5 paragraph — `resolveModel` is the Anthropic-path validator; recognized foreign ids route via §6 and aren't collapsed; the fallback applies only to ids routing to Anthropic. Referenced §6 by name (avoided a guessed mkdocs anchor that the link-checker would flag).
+- **Verified:** `make docs-check` green.
+- **Next up:** Cycle 11 — review `docs/explanation/*` pages for drift/professionalism (same source-verification rigor as the spec sweep), low-risk. Then README/CONTRIBUTING professionalism. Then a final adversarial review + operator handoff summary.
 - **Deferred to recommendations (too risky/cross-package to do unattended):** (a) agent-loop *hard* deadline via `AbortSignal` — invasive (loop engine + runClaude threading); (b) `docSetFingerprint` deterministic ordering — the real fix also needs GraphKit's `MemoryGenerator.collectDocs` to sort-before-cap (external package), so a Mac-only fix is incomplete.

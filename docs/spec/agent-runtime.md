@@ -331,7 +331,9 @@ function resolveModel(model) {
 }
 ```
 
-Caller-supplied ids that are empty, stale, or belong to a foreign provider (Gemini, GPT, etc.) fail the regex and silently fall back to `DEFAULT_MODEL`. This keeps new Claude model ids (e.g. `claude-opus-5`) working without a code change, while rejecting any non-Claude string without a hard error (runtime.mjs:36–44).
+`resolveModel` is the **Anthropic-path** validator: an id that is empty, stale, or not a valid Claude id falls back to `DEFAULT_MODEL`, so new Claude ids (e.g. `claude-opus-5`) keep working without a code change and no malformed id reaches the Anthropic API as a hard error (runtime.mjs:36–44).
+
+Since multi-provider routing landed (see §6 *Provider routing* below), this fallback is **not** universal: an id recognized as another provider (`gpt-…`, `gemini-…`, etc.) is routed to that provider by `resolveProvider` and used **as-is** — it does not collapse to `DEFAULT_MODEL`. The Claude-only fallback applies only to ids that route to the Anthropic provider (a `claude-…` id, or an unrecognized id, which defaults to Anthropic). `resolveClaudeCall` computes `resolvedModel` on every call (runtime.mjs:555), but the non-Anthropic HTTP path passes the caller's raw `model` to `completeViaApi`, so `resolvedModel` is consumed only on the Anthropic path.
 
 ---
 
