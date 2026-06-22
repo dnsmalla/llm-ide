@@ -186,6 +186,15 @@ final class BackendManager {
         // adopted *any* listener — a hung node would hold the port and
         // every request would block for the full URLSession timeout,
         // surfacing as a 4-minute login spinner after relaunch.
+        // Claim `.starting` synchronously NOW — before the Task's first
+        // `await` — so a second concurrent caller (e.g. app-launch
+        // autoStartBackend racing the LoginView Start button) trips the
+        // `.starting` guard above instead of both passing it, both probing the
+        // not-yet-bound port, and both spawning a node child. start() is
+        // @MainActor, so this set completes before control returns to any
+        // other main-actor caller.
+        status = .starting
+
         // BackendManager is singleton-lifetime (held by @State in the app),
         // so a strong capture is correct and avoids re-guarding self across
         // each await boundary.
