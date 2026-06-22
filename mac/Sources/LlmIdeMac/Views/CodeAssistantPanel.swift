@@ -1584,7 +1584,8 @@ struct CodeAssistantPanel: View {
     /// Returns nil if no match — the caller refuses to write in that
     /// case (defence in depth against the agent emitting a path the
     /// user never attached).
-    private func matchingAttachment(for proposedPath: String)
+    private func matchingAttachment(for proposedPath: String,
+                                    allowBasenameFallback: Bool = true)
         -> LlmIdeAPIClient.CodeAttachment?
     {
         let canonProposed = PathUtils.canonicalise(proposedPath)
@@ -1601,7 +1602,11 @@ struct CodeAssistantPanel: View {
         //    agent is supposed to use the exact attachment path, but
         //    LLMs slip — better to update the obviously-intended file
         //    than refuse on a parent-dir difference.
-        if !canonBasename.isEmpty {
+        //    DISABLED in auto-edit mode (allowBasenameFallback=false): with no
+        //    confirmation sheet, a poisoned/hallucinated path that merely
+        //    shares a basename with an attachment would silently overwrite that
+        //    file. Auto mode requires an exact path the agent explicitly chose.
+        if allowBasenameFallback && !canonBasename.isEmpty {
             let matches = attachments.filter {
                 ($0.path as NSString).lastPathComponent == canonBasename
             }
@@ -1626,8 +1631,14 @@ struct CodeAssistantPanel: View {
                                    finalContent: String)
         async -> UpdateFileSheet.ConfirmResult
     {
-        guard let match = matchingAttachment(for: args.path) else {
-            return .failure("That file isn't attached to this chat — refusing to write.")
+        // In auto-edit mode the write happens with no confirmation sheet, so
+        // require an EXACT attached-path match — don't let the lenient basename
+        // fallback silently redirect a write onto a different attached file.
+        guard let match = matchingAttachment(for: args.path,
+                                             allowBasenameFallback: editMode != .auto) else {
+            return .failure(editMode == .auto
+                ? "Auto-edit can only write a file whose exact path is attached — refusing to write '\(args.path)'."
+                : "That file isn't attached to this chat — refusing to write.")
         }
         // Write to the authoritative attached path, not the LLM-emitted path.
         // A basename-fallback match can make args.path diverge from match.path,
