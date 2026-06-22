@@ -44,6 +44,11 @@ struct CodeGraphCanvas: View {
     // MARK: Caches (rebuilt when data changes)
     @State private var nodePositions: [String: CGPoint] = [:]
     @State private var nodeDegree:    [String: Int]     = [:]
+    /// Precomputed per-frame lookups — building these once in rebuildCaches()
+    /// keeps the draw loop O(n) instead of scanning all edges/nodes repeatedly
+    /// (the All graph has ~6k edges; hover redraws were O(edges) × several).
+    @State private var adjacency:     [String: Set<String>] = [:]
+    @State private var nodeKindById:  [String: CGNodeKind]  = [:]
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -114,9 +119,7 @@ struct CodeGraphCanvas: View {
                                   hovered: hovered, hoverNbrs: hoverNbrs, selId: selId)
             // Kind highlight dims edges not touching the highlighted kind
             if let hk = highlight {
-                let fk = data.nodes.first { $0.id == e.fromId }?.kind
-                let tk = data.nodes.first { $0.id == e.toId   }?.kind
-                if fk != hk && tk != hk { alpha = min(alpha, 0.06) }
+                if nodeKindById[e.fromId] != hk && nodeKindById[e.toId] != hk { alpha = min(alpha, 0.06) }
             }
             if alpha < 0.01 { continue }
 
@@ -251,11 +254,16 @@ struct CodeGraphCanvas: View {
                 ($0.id, positionOverrides[$0.id] ?? $0.position)
             })
         var deg: [String: Int] = [:]
+        var adj: [String: Set<String>] = [:]
         for e in data.edges {
             deg[e.fromId, default: 0] += 1
             deg[e.toId,   default: 0] += 1
+            adj[e.fromId, default: []].insert(e.toId)
+            adj[e.toId,   default: []].insert(e.fromId)
         }
         nodeDegree = deg
+        adjacency = adj
+        nodeKindById = Dictionary(data.nodes.map { ($0.id, $0.kind) }, uniquingKeysWith: { a, _ in a })
     }
 
     private func effectivePos(_ id: String) -> CGPoint? {
@@ -270,11 +278,7 @@ struct CodeGraphCanvas: View {
 
     private func neighbourIds(of id: String?) -> Set<String> {
         guard let id else { return [] }
-        return Set(data.edges.compactMap { e in
-            if e.fromId == id { return e.toId }
-            if e.toId   == id { return e.fromId }
-            return nil
-        })
+        return adjacency[id] ?? []
     }
 
     // MARK: - Gestures

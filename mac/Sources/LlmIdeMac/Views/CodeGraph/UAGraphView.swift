@@ -405,6 +405,8 @@ struct UAGraphView: View {
             ForEach(availableCodeRepos) { repo in
                 let isTarget = codeTargetFolder?.path == repo.root.path
                 Button {
+                    mode = .code        // quick-pick is a code-graph action; the
+                                        // $graph observer only publishes in .code
                     selectedURL = nil   // clear file selection; quick-pick is repo-level
                     generateCodeNotes(target: repo.root)
                 } label: {
@@ -1123,11 +1125,6 @@ struct UAGraphView: View {
         }
     }
 
-    /// Phase 2 of layout: run the force-directed `CGSimulation` off the main
-    /// actor, then republish the settled positions. Mirrors InfiniteBrain's
-    /// `CodeGraphView` so both graphs show an organic cluster instead of the
-    /// raw circular rings. No-op for trivially small graphs. The `expectedMode`
-    /// guard drops the result if the user switched tabs mid-settle.
     /// "All" mode — generate the code graph + the InfiniteBrain doc graph for
     /// the active repo and merge them into one (via KnowledgeGraphService.merge,
     /// adding doc→code cross-links), then render the unified graph.
@@ -1156,6 +1153,11 @@ struct UAGraphView: View {
         }
     }
 
+    /// Phase 2 of layout: run the force-directed `CGSimulation` off the main
+    /// actor, then republish the settled positions so both graphs show an
+    /// organic cluster instead of the raw circular rings. No-op for trivially
+    /// small graphs. The `expectedMode` guard drops the result if the user
+    /// switched tabs mid-settle.
     private func settlePhysics(from initial: CGData, expectedMode: Mode) {
         let count = initial.nodes.count
         guard count > 2 else { return }
@@ -1175,10 +1177,12 @@ struct UAGraphView: View {
             if Task.isCancelled { return }
             let settled = sim.appliedData(to: initial)
             await MainActor.run {
-                self.graphCache[expectedMode] = settled
+                // Only cache what we'd also display — guard first so a late
+                // settle from a superseded run can't overwrite a newer cache.
                 guard self.mode == expectedMode,
                       self.fullData.nodes.count == settled.nodes.count else { return }
                 self.fullData = settled
+                self.graphCache[expectedMode] = settled
             }
         }
     }
