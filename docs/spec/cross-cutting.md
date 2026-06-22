@@ -58,7 +58,7 @@ Source: [`../explanation/security-model.md`](../explanation/security-model.md).
 
 `utils.mjs:76`: `return text.replace(PROMPT_FENCE_RE, '').slice(0, 500_000);`
 
-> **Note:** The `security-model.md` explanation page states "2 MB" at line 18 — this is a known drift. The authoritative value is **8 MB** at `config.mjs:121`. Do not reintroduce the 2 MB figure.
+The authoritative body-limit value is **8 MB** at `config.mjs:121`; the `security-model.md` explanation page agrees (8 MB). Do not reintroduce the historical 2 MB figure.
 
 ---
 
@@ -96,7 +96,7 @@ Full CLI reference: [`../reference/cli-scripts.md`](../reference/cli-scripts.md)
 
 ### Makefile targets
 
-`Makefile` defines the following targets (verified at `Makefile:5–79`):
+`Makefile` defines the following targets (verified at `Makefile:5–85`):
 
 | Target | What it does | Line |
 |---|---|---|
@@ -112,6 +112,7 @@ Full CLI reference: [`../reference/cli-scripts.md`](../reference/cli-scripts.md)
 | `docs-build` | `mkdocs build --strict` | 60 |
 | `docs-lint` | markdownlint-cli2 + lychee link check + frontmatter check | 63 |
 | `docs-refresh-reference` | Runs all extractor scripts to regenerate reference pages | 73 |
+| `docs-check` | `pytest docs/_scripts/` + the API-coverage, rate-limit-mapping, and spec-citation drift guards | 81 |
 
 ### Runtime requirements
 
@@ -187,7 +188,7 @@ Detail: [`api-server.md` §2](api-server.md#2-request-pipeline) (API version and
 
 ### Append-only migrations
 
-Migrations are numbered files applied exactly once and recorded in the `schema_migrations` table. The head migration is `0013`. Migrations are never edited after they land; schema changes always add a new migration file.
+Migrations are numbered files applied exactly once and recorded in the `schema_migrations` table. The head migration is `0016` (`0016_token_epoch.sql`). Migrations are never edited after they land; schema changes always add a new migration file.
 
 Source: `extension/kb/migrations.mjs:8`, `migrations.mjs:43`.
 

@@ -52,3 +52,11 @@ Autonomous self-paced improvement run requested 2026-06-22 ~23:50 (operator asle
 - **Changed:** added the two env-object rows + fixed the range; added a "#### Knowledge-graph automation" §3 contract (KnowledgeGraphService two tracks + merge + md-is-doc + memory index; GraphAutoUpdater triggers/gating; FileClassifier routing; GraphSessionStore cache with laidOut + docFingerprint).
 - **Verified:** `make docs-check` green (70 citations).
 - **Next up:** Cycle 6 — cross-cutting spec: migration head `0013`→`0016`, the self-documented body-limit `2MB`→`8MB`, and the missing `docs-check` Makefile target in §4. Then Cycle 7 — the value-level drift guard (new `docs/_scripts` check for migration head / `SERVER_API_VERSION` / body-limit) — the meta-fix that would have caught all of the above.
+
+### Cycle 6 — docs: cross-cutting spec drift (2026-06-23 ~00:28)
+- **Reviewed:** `docs/spec/cross-cutting.md` §2/§4/§6 vs source + `docs/explanation/security-model.md`.
+- **Found & fixed:** (a) head migration `0013` → `0016`; (b) the "known drift: security-model.md says 2 MB" note was itself stale — `security-model.md:18` already says **8 MB**, so I replaced the warning with a statement that both agree; (c) §4 Makefile table omitted `docs-check` (it's at `Makefile:81`, outside the table's "verified 5–79" range) — added the row + extended the range to 5–85.
+- **Not-drift confirmed:** line 184 "clients compare apiVersion" is now accurate — this session's extension `apiVersion` fix (on `main`) made it symmetric with the Mac client.
+- **Verified:** `make docs-check` green (70 citations).
+- **Doc-drift sweep complete** across all 6 spec pages.
+- **Next up:** Cycle 7 — add a **value-level drift guard** (`docs/_scripts/check_spec_values.py` + pytest) asserting spec-prose values match source: migration head (count `extension/kb/migrations/*.sql`), `SERVER_API_VERSION`, body-limit default. This closes the gap (file-existence-only guard) that let every drift above pass CI. Then code-hardening cycles (extension-first, in-sandbox).
