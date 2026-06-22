@@ -45,6 +45,7 @@ struct LlmIdeMacApp: App {
     @StateObject private var projectStore: ProjectStore
     @StateObject private var agentRuns: AgentRunsStore
     @StateObject private var graphAutoUpdater: GraphAutoUpdater
+    @StateObject private var graphSessionStore = GraphSessionStore()
     @State private var backend = BackendManager()
     @State private var quickSwitcherShown = false
     private let api: LlmIdeAPIClient
@@ -140,6 +141,7 @@ struct LlmIdeMacApp: App {
                 .environmentObject(projectStore)
                 .environmentObject(agentRuns)
                 .environmentObject(graphAutoUpdater)
+                .environmentObject(graphSessionStore)
                 .environment(backend)
                 // 1000 gives the 3-pane Review layout breathing room
                 // (sidebar ~240 + code ~380 + assistant ~280 = 900,

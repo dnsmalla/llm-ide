@@ -125,12 +125,6 @@ struct UAGraphView: View {
     /// based on `showSymbols` so the canvas doesn't have to draw 1k+ nodes
     /// when the user just wants the file-level view.
     @State private var fullData: CGData = .empty
-    /// Last generated graph per mode, kept so switching modes (or a reset
-    /// triggered by selecting a repo / tab) RESTORES the graph instead of
-    /// blanking it — fixes the "graph shows then disappears" race and lets a
-    /// once-generated graph be reused without re-running.
-    @State private var graphCache: [Mode: CGData] = [:]
-    @State private var chunkCacheByMode: [Mode: [MemoryChunk]] = [:]
     @State private var selectedNode: CGNode?
     @State private var runTask: Task<Void, Never>?
     @State private var showSymbols: Bool = false
@@ -158,6 +152,43 @@ struct UAGraphView: View {
 
     @StateObject private var codeNoteService = CodeNoteService(
         launcher: SystemProcessLauncher())
+
+    /// Process-lifetime graph cache (per repo+mode). Lives above the view so a
+    /// generated graph survives this view being torn down and rebuilt on
+    /// navigation (AppShell re-instantiates `UAGraphView()`), instead of being
+    /// lost with the view's `@State`. Replaces the old per-view `graphCache`.
+    @EnvironmentObject private var graphSessionStore: GraphSessionStore
+
+    // Cache accessors — key by the active repo so switching projects never
+    // surfaces another repo's graph, and by mode so each engine keeps its own.
+    private func cachedGraph(_ m: Mode) -> CGData? {
+        graphSessionStore.entry(repo: activeRepoRoot, mode: m.rawValue)?.graph
+    }
+    private func cachedChunks(_ m: Mode) -> [MemoryChunk] {
+        graphSessionStore.entry(repo: activeRepoRoot, mode: m.rawValue)?.chunks ?? []
+    }
+    private func cacheGraph(_ m: Mode, _ graph: CGData,
+                            chunks: [MemoryChunk]? = nil, docCount: Int? = nil) {
+        graphSessionStore.store(repo: activeRepoRoot, mode: m.rawValue,
+                                graph: graph, chunks: chunks, docCount: docCount)
+    }
+
+    /// Restore the current mode's graph from the session store when the view
+    /// re-appears after navigation — so a once-generated graph shows instantly
+    /// instead of requiring a regenerate.
+    private func hydrateFromStore() {
+        guard fullData.nodes.isEmpty,
+              let entry = graphSessionStore.entry(repo: activeRepoRoot, mode: mode.rawValue),
+              !entry.graph.nodes.isEmpty
+        else { return }
+        let cached = entry.graph
+        fullData = cached
+        memoryChunks = entry.chunks
+        memoryDocCount = entry.docCount
+        if mode == .code { codeArtifacts = UAHelpers.collectCodeArtifacts(cached) }
+        status = .loaded(nodeCount: cached.nodes.count, edgeCount: cached.edges.count)
+        recomputeDisplayData()
+    }
 
     /// Kinds shown in the files-only view (Code mode with `showSymbols`
     /// off). Includes the memory variants so the same filter logic is
@@ -310,6 +341,7 @@ struct UAGraphView: View {
         .animation(.easeInOut(duration: 0.2), value: graphExpanded)
         .onAppear {
             rebuildLibraryIndex()
+            hydrateFromStore()
         }
         .onDisappear { runTask?.cancel() }
         .onChange(of: library.items) { _, _ in rebuildLibraryIndex() }
@@ -323,7 +355,7 @@ struct UAGraphView: View {
             let initial = CodeGraphLayout.compute(
                 newGraph, canvasSize: UAHelpers.layoutSize(for: newGraph.nodes.count))
             self.fullData = initial
-            self.graphCache[.code] = initial
+            self.cacheGraph(.code, initial)
             self.codeArtifacts = UAHelpers.collectCodeArtifacts(newGraph)
             // Flip to .loaded straight from the published graph — don't gate
             // on `progress == .complete`. `@Published` emits `graph` (in
@@ -359,9 +391,9 @@ struct UAGraphView: View {
         // blanking — so switching tabs / picking a repo reuses an already-
         // generated graph, and a reset that races a fresh generation can't
         // wipe it (the cache holds the latest result).
-        if let cached = graphCache[mode], !cached.nodes.isEmpty {
+        if let cached = cachedGraph(mode), !cached.nodes.isEmpty {
             fullData = cached
-            memoryChunks = chunkCacheByMode[mode] ?? []
+            memoryChunks = cachedChunks(mode)
             status = .loaded(nodeCount: cached.nodes.count, edgeCount: cached.edges.count)
         } else {
             fullData = .empty
@@ -1115,8 +1147,7 @@ struct UAGraphView: View {
                 self.memoryChunks = mem.chunks
                 self.memoryDocCount = mem.docCount
                 self.fullData = initial
-                self.graphCache[.data] = initial
-                self.chunkCacheByMode[.data] = mem.chunks
+                self.cacheGraph(.data, initial, chunks: mem.chunks, docCount: mem.docCount)
                 self.status = .loaded(nodeCount: mem.graph.nodes.count,
                                       edgeCount: mem.graph.edges.count)
                 // Settle into the same organic layout as the code graph.
@@ -1146,8 +1177,7 @@ struct UAGraphView: View {
             self.memoryChunks = result.chunks
             self.memoryDocCount = result.docs
             self.fullData = result.data
-            self.graphCache[.all] = result.data
-            self.chunkCacheByMode[.all] = result.chunks
+            self.cacheGraph(.all, result.data, chunks: result.chunks, docCount: result.docs)
             self.status = .loaded(nodeCount: result.data.nodes.count, edgeCount: result.data.edges.count)
             self.settlePhysics(from: result.data, expectedMode: .all)
         }
@@ -1182,7 +1212,7 @@ struct UAGraphView: View {
                 guard self.mode == expectedMode,
                       self.fullData.nodes.count == settled.nodes.count else { return }
                 self.fullData = settled
-                self.graphCache[expectedMode] = settled
+                self.cacheGraph(expectedMode, settled)
             }
         }
     }
