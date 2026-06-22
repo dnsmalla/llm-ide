@@ -37,6 +37,9 @@ final class KnowledgeGraphService: ObservableObject {
     /// overlap. `CodeNoteService` has its own guard too; this covers the doc
     /// track and the orchestration as a whole.
     private var isRunning = false
+    /// Latest request received while a run was in flight — replayed once on
+    /// completion so a project switch mid-run isn't dropped (coalescing).
+    private var pending: (code: URL?, docs: [URL], memory: URL?)?
 
     // Stage 3 — doc-track change detection. The doc graph is recomputed only
     // when the doc set's fingerprint changes; otherwise the cached result is
@@ -67,9 +70,23 @@ final class KnowledgeGraphService: ObservableObject {
     ///     `<memoryRoot>/graphify-out/memory/` (the path the extension reads).
     ///     Pass the repo the user has indexed in the extension.
     func generate(codeRepoRoot: URL?, docRoots: [URL], memoryRoot: URL? = nil) async {
-        if isRunning { return }
+        // Coalesce: if a run is in flight, stash the latest request and replay
+        // it once when the current run finishes — so a project switch (or any
+        // newer request) mid-run isn't silently dropped until the next tick.
+        if isRunning {
+            pending = (codeRepoRoot, docRoots, memoryRoot)
+            return
+        }
         isRunning = true
-        defer { isRunning = false }
+        await runOnce(codeRepoRoot: codeRepoRoot, docRoots: docRoots, memoryRoot: memoryRoot)
+        isRunning = false
+        if let p = pending {
+            pending = nil
+            await generate(codeRepoRoot: p.code, docRoots: p.docs, memoryRoot: p.memory)
+        }
+    }
+
+    private func runOnce(codeRepoRoot: URL?, docRoots: [URL], memoryRoot: URL?) async {
         phase = .running
 
         // Code track — StructureScanner filters to code extensions internally
@@ -153,9 +170,15 @@ final class KnowledgeGraphService: ObservableObject {
         } else {
             repoBody = "# Repository knowledge graph\n\n\(code.nodes.count) code nodes · \(doc.nodes.count) doc nodes · \(merged.edges.count) edges.\n"
         }
-        try? repoBody.write(to: memDir.appendingPathComponent("repo.md"), atomically: true, encoding: .utf8)
-        try? renderGraphNotes(code: code, doc: doc, merged: merged)
-            .write(to: memDir.appendingPathComponent("graph-notes.md"), atomically: true, encoding: .utf8)
+        do {
+            try repoBody.write(to: memDir.appendingPathComponent("repo.md"), atomically: true, encoding: .utf8)
+            try renderGraphNotes(code: code, doc: doc, merged: merged)
+                .write(to: memDir.appendingPathComponent("graph-notes.md"), atomically: true, encoding: .utf8)
+        } catch {
+            // Don't fail silently — a write error means the agent keeps reading
+            // stale/empty memory with no signal otherwise.
+            log.error("memory artifact: write failed at \(memDir.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     /// Render `graph-notes.md`: counts plus the doc→code cross-links (the
@@ -181,12 +204,12 @@ final class KnowledgeGraphService: ObservableObject {
     }
 
     /// Merge the code and doc graphs into one and add doc→code cross-links:
-    /// a doc chunk that names a code symbol — via an explicit `[[wikilink]]` or
-    /// an exact (case-insensitive) title match — gets a `references` edge to
-    /// that code node. Conservative on purpose (explicit links + exact titles
-    /// only) so we don't manufacture false edges; fuzzy body-mention matching
-    /// is a later refinement. Node ids are namespaced (code paths/symbols vs
-    /// `doc:`/chunk hashes) so the union can't collide; chunk graph-node ids
+    /// a doc chunk that EXPLICITLY references a code symbol via a `[[wikilink]]`
+    /// gets a `references` edge to that code node. Only explicit wikilinks are
+    /// used — a chunk's (heading-derived) title is NOT matched, because generic
+    /// headings like "Config"/"Setup"/"main" collide with code symbol names and
+    /// would manufacture false edges. Node ids are namespaced (code paths/symbols
+    /// vs `doc:`/chunk hashes) so the union can't collide; chunk graph-node ids
     /// equal `MemoryChunk.id`, so the cross-link `fromId` resolves to a real node.
     nonisolated static func merge(code: CGData, doc: CGData, chunks: [MemoryChunk]) -> CGData {
         var nodes: [CGNode] = []
@@ -201,9 +224,7 @@ final class KnowledgeGraphService: ObservableObject {
 
         var crossSeen = Set<String>()
         for chunk in chunks {
-            var names = chunk.wikiLinks.map { $0.lowercased() }
-            names.append(chunk.title.lowercased())
-            for name in names {
+            for name in chunk.wikiLinks.map({ $0.lowercased() }) {
                 guard let targets = codeIdsByTitle[name] else { continue }
                 for codeId in targets {
                     let key = "\(chunk.id)->\(codeId)"
@@ -229,19 +250,31 @@ final class KnowledgeGraphService: ObservableObject {
     /// so re-running when nothing changed is near-free; the doc track recomputes
     /// only when a doc is added, removed, or edited.
     nonisolated static func docSetFingerprint(roots: [URL]) -> String {
+        // Bound the walk to the same window MemoryGenerator actually ingests
+        // (maxFiles 500 / 2 MB per file) so the fingerprint covers exactly the
+        // set that affects output — avoids unbounded stat walks and false-
+        // positive recomputes from files the generator never reads.
+        let maxFiles = 500
+        let maxFileBytes = 2_000_000
         let fm = FileManager.default
         let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]
         var entries: [String] = []
-        for root in roots {
+        outer: for root in roots {
+            // Mirror MemoryGenerator.collectDocs options so the fingerprint
+            // covers exactly the set the generator ingests (it skips package
+            // descendants too — otherwise a doc inside a .bundle would flip the
+            // fingerprint without ever changing output).
             guard let en = fm.enumerator(at: root, includingPropertiesForKeys: keys,
-                                         options: [.skipsHiddenFiles]) else { continue }
+                                         options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
             for case let url as URL in en {
                 guard FileClassifier.docExtensions.contains(url.pathExtension.lowercased()) else { continue }
                 let vals = try? url.resourceValues(forKeys: Set(keys))
                 guard vals?.isRegularFile == true else { continue }
                 let size = vals?.fileSize ?? 0
+                guard size <= maxFileBytes else { continue }
                 let mtime = vals?.contentModificationDate?.timeIntervalSince1970 ?? 0
                 entries.append("\(url.path)|\(size)|\(mtime)")
+                if entries.count >= maxFiles { break outer }
             }
         }
         entries.sort()

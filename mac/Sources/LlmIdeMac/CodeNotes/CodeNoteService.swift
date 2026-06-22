@@ -40,6 +40,13 @@ public final class CodeNoteService: ObservableObject {
     /// concurrently. @MainActor-isolated, so the check + set is atomic.
     private var isRunning = false
 
+    /// Cross-INSTANCE guard keyed by repo path. UAGraphView owns its own
+    /// CodeNoteService and GraphAutoUpdater owns another, so the per-instance
+    /// `isRunning` can't see the other — yet both write the same
+    /// `<repoRoot>/system/graph` dir. Serialize by path so a manual run and an
+    /// auto run for the same repo can't interleave their multi-file writes.
+    @MainActor private static var inFlightPaths: Set<String> = []
+
     nonisolated private static let log = Logger(subsystem: "com.llmide.macapp", category: "CodeNoteService")
 
     public init(launcher: ProcessLauncher = SystemProcessLauncher(),
@@ -54,9 +61,11 @@ public final class CodeNoteService: ObservableObject {
         // No-op if a run is already in flight (auto-updater vs manual click, or
         // double-click) — returning the current graph avoids a concurrent write
         // to the same scan-cache / notes dir.
-        if isRunning { return .success(graph) }
+        let pathKey = repoRoot.standardizedFileURL.path
+        if isRunning || Self.inFlightPaths.contains(pathKey) { return .success(graph) }
         isRunning = true
-        defer { isRunning = false }
+        Self.inFlightPaths.insert(pathKey)
+        defer { isRunning = false; Self.inFlightPaths.remove(pathKey) }
         guard FileManager.default.fileExists(atPath: repoRoot.path) else {
             progress = .failed("folder not found")
             return .failure(.folderNotWritable(path: repoRoot.path))

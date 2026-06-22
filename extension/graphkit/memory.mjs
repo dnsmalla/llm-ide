@@ -96,8 +96,11 @@ function repoMemoryBlock(repo, budget, allowedRoots) {
   if (!repo || typeof repo.path !== 'string' || !repo.path) return null;
   // The Mac client sends home-relative paths ("~/…"); expand to absolute.
   const expanded = expandTilde(repo.path);
-  // Defense-in-depth: only honor absolute paths post-expansion. A still-
-  // relative path would be ambiguous server-side.
+  // Defense-in-depth: reject an unresolved parent-traversal segment. (resolve()
+  // collapses it and the allow-list gates the result anyway, but fail fast.)
+  if (expanded.split(/[/\\]/).includes('..')) return null;
+  // Only honor absolute paths post-expansion. A still-relative path would be
+  // ambiguous server-side.
   if (!isAbsolute(expanded)) return null;
   // Tenancy gate: the path must be in the user's registered repo
   // allow-list. agentContext.indexedRepos is client-supplied, so a

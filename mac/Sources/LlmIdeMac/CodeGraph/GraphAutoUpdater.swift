@@ -73,7 +73,10 @@ final class GraphAutoUpdater: ObservableObject {
             // No graph generated yet — first generation stays manual.
             return
         }
-        let layout = ProjectLayout(root: projectRoot)
+        // Derive doc roots from the SAME root the code graph + memory use, so a
+        // graph living in a code/<child> repo isn't merged against the project
+        // root's unrelated docs (and the memory artifact lands beside its code).
+        let layout = ProjectLayout(root: repoRoot)
         let docRoots = [layout.notesDir, layout.dataDir]
         Task {
             await graph.generate(codeRepoRoot: repoRoot, docRoots: docRoots, memoryRoot: repoRoot)
