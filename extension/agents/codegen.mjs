@@ -12,7 +12,7 @@ import { runClaude, tryParseJSON, languageDirective } from './runtime.mjs';
 import { getTaskById, getPlan, mergeTaskMeta } from '../kb/db.mjs';
 
 const MAX_FILES = 8;
-const MAX_FILE_BYTES = 25 * 1024;
+export const MAX_FILE_BYTES = 25 * 1024;
 
 function sanitizePath(p) {
   if (typeof p !== 'string') return null;
@@ -22,11 +22,6 @@ function sanitizePath(p) {
   if (p.startsWith('/') || p.includes('..')) return null;
   if (p.length > 300) return null;
   return p.replace(/\\/g, '/');
-}
-
-function sanitizeContent(c) {
-  if (typeof c !== 'string') return '';
-  return c.slice(0, MAX_FILE_BYTES);
 }
 
 function readFileSafely(absPath, maxBytes = MAX_FILE_BYTES) {
@@ -90,13 +85,25 @@ ones you actually need to change):
 ${refsBlock}`;
 }
 
-function validate(raw) {
+export function validate(raw) {
   if (!raw || typeof raw !== 'object') return null;
+  // Collect any file whose body exceeds the per-file cap. We must NEVER
+  // silently truncate a generated file — the auto-PR flow writes these to
+  // disk and commits them, so a partial body would be committed as if it
+  // were the complete file. Fail loud instead (see throw below).
+  const oversize = [];
   const cleanArr = (arr) => (Array.isArray(arr) ? arr : [])
     .map((f) => {
       const p = sanitizePath(f?.path);
-      const content = sanitizeContent(f?.content);
-      if (!p || !content) return null;
+      if (!p) return null;
+      const content = typeof f?.content === 'string' ? f.content : '';
+      if (!content) return null;
+      // Measure real UTF-8 bytes — `.length`/`.slice` count UTF-16 code
+      // units, which undercounts multi-byte characters.
+      if (Buffer.byteLength(content, 'utf8') > MAX_FILE_BYTES) {
+        oversize.push(`${p} (${Buffer.byteLength(content, 'utf8')} bytes)`);
+        return null;
+      }
       return {
         path: p,
         kind: f?.kind === 'modify' ? 'modify' : 'create',
@@ -109,6 +116,12 @@ function validate(raw) {
 
   const files = cleanArr(raw.files);
   const tests = cleanArr(raw.tests);
+  if (oversize.length > 0) {
+    throw new Error(
+      `Code generation produced file(s) over the ${Math.floor(MAX_FILE_BYTES / 1024)} KB per-file limit: ` +
+      `${oversize.join(', ')}. Split the task into smaller files — refusing to write a truncated file.`,
+    );
+  }
   if (files.length + tests.length === 0 && !raw.notes) return null;
   return {
     summary: typeof raw.summary === 'string' ? raw.summary.slice(0, 2000) : '',
