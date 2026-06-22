@@ -1,0 +1,91 @@
+# Project-scoped three-index memory (code · doc · memory)
+
+**Date:** 2026-06-22
+**Status:** Approved design — pending implementation plan
+**Scope:** macOS app (`KnowledgeGraphService`, Code Graph view) + a cross-subsystem read contract with the extension's memory reader.
+
+## Problem
+
+The knowledge graph already builds two tracks — a **code** graph (`StructureScanner` → `system/graph/`) and a **doc** graph (`MemoryGenerator`/InfiniteBrain) — and merges them. But three gaps mean the user's mental model ("code index + doc index → memory index, used for the All graph") isn't actually realized:
+
+1. **The doc graph is never persisted.** It lives only in memory; there is no on-disk "doc index" symmetric with the code index in `system/graph/`.
+2. **The agent memory artifact is not a real combination.** `KnowledgeGraphService.writeMemoryArtifact` writes `graphify-out/memory/repo.md` (the *code* graph's summary only) + `graph-notes.md` (cross-links only). The doc/InfiniteBrain *content* never reaches the agent's memory.
+3. **"All" re-scans instead of combining.** The view's `generateAll` re-runs both the code scan and the doc generation from scratch every time, rather than combining the two already-built indexes.
+
+## Goal
+
+A **project-scoped** (never global) three-index model:
+
+- **code index** ← code files
+- **doc index** ← doc files
+- **memory index** = code index ⊕ doc index
+
+The **memory index is the single combined artifact** that (a) the agent reads as "Repository memory" and (b) the "All" graph renders. "All" becomes a *combination* of the two separately-built indexes, not a third independent scan.
+
+## Storage layout — all under the project/repo on disk, nothing global
+
+| Index | Location | Change |
+|---|---|---|
+| Code index | `<repo>/system/graph/` (`index.md` + notes) | none |
+| Doc index | `<repo>/system/graph/doc-index.json` (serialized doc `CGData` + `docCount`) | **new** |
+| Memory index | `<repo>/graphify-out/memory/` (`repo.md`, `graph-notes.md`, + doc content) | **enhanced** |
+
+`CGData` is `Codable`, so the doc index serializes/deserializes directly. All paths derive from the existing `ProjectLayout(root:)`; nothing is written outside the project.
+
+## Generation flow
+
+In `KnowledgeGraphService.runOnce(codeRepoRoot:docRoots:memoryRoot:)` — the existing pipeline plus persistence and a richer combine:
+
+1. **Code index** — incremental scan (unchanged) → `system/graph/`. Sets `codeGraph`.
+2. **Doc index** — fingerprint-cached generation (unchanged) → **persist** `doc-index.json`. Sets `docGraph`/`docChunks`/`docCount`. On an unchanged fingerprint, the on-disk doc index is left as-is (no rewrite).
+3. **Memory index** = `merge(codeGraph, docGraph, chunks)` (unchanged merge) → write `graphify-out/memory/`:
+   - `repo.md` — code summary (as today).
+   - **doc content** — doc/chunk summaries grouped by doc (new). Exact file placement must stay compatible with the extension's `renderGraphifyMemory` reader (see Cross-subsystem contract).
+   - `graph-notes.md` — counts + doc→code cross-links (as today).
+
+The doc-index write is skipped when the doc fingerprint is unchanged (consistent with the existing near-free no-change tick).
+
+## "All" graph consumption
+
+`generateAll` (Code Graph view) builds the "All" graph by **combining the already-built code and doc indexes** rather than re-scanning:
+
+- Use the cached/persisted **code** graph if fresh (the contended-scan fallback already added); otherwise build just the code index.
+- Use the cached/persisted **doc** graph if the doc fingerprint is unchanged (reuse mechanism already added); otherwise build just the doc index.
+- Combine via the existing `merge()`, lay out, display.
+
+So "All" = `merge(code index, doc index)` over the two indexes the user generated separately — never a redundant double-scan when both are fresh.
+
+## Data flow
+
+```
+code files ──StructureScanner──▶ code index (system/graph/) ─┐
+                                                              ├─ merge ─▶ memory index (graphify-out/memory/)
+doc files  ──MemoryGenerator───▶ doc index (doc-index.json) ─┘                         │
+                                                                                       ├─▶ agent "Repository memory" (extension reads)
+                                                                                       └─▶ "All" graph (view renders)
+```
+
+## Cross-subsystem contract (important)
+
+The extension's `extension/graphkit/memory.mjs` (`renderGraphifyMemory`) reads `<repo>/graphify-out/memory/`. Adding doc content to the memory index must land in the file(s) that reader already consumes, or the reader must be updated in lockstep. The implementation plan must (1) confirm exactly which files `renderGraphifyMemory` reads, and (2) keep the write/read in sync — this is the one place the change crosses the Mac↔extension boundary.
+
+## Error handling
+
+- A failed `doc-index.json` write logs (consistent with `writeMemoryArtifact`'s existing error logging) and does not abort the run — the in-session doc graph is still usable.
+- A missing/corrupt `doc-index.json` on read is treated as "no doc index" → regenerate, never crash.
+- Project switch resets caches (`resetCache`) as today; per-project paths guarantee no cross-project leakage.
+
+## Testing
+
+- **Doc index round-trip** (unit): serialize a doc `CGData` → `doc-index.json` → deserialize → equal graph.
+- **Memory index combination** (unit): given a code graph + doc graph + chunks, the rendered memory index contains both a code section and a doc section, and the cross-links.
+- **Reuse** (unit/logic): unchanged doc fingerprint → doc index not rewritten; "All" combine path uses cached code+doc without re-scanning.
+- **Corrupt/missing doc index** (unit): read path degrades to regenerate.
+- Runtime/GUI behavior (canvas, agent memory content) verified by the user in the real app — the Mac GUI can't be driven headlessly here.
+
+## Out of scope (YAGNI)
+
+- No global/cross-project memory.
+- No new doc-index format beyond serialized `CGData` (+ `docCount`); no embeddings/LLM enrichment.
+- No FSEvents/file-watching (generation stays open/switch + timer + manual, as today).
+- No change to the merge algorithm or cross-link logic.
