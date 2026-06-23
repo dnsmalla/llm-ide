@@ -25,11 +25,13 @@ struct SourceIngestService {
     }
 
     /// Fetch + ingest a single source by id (used by the Sources card, which
-    /// shows that source's specific outcome). Runs one rescan/notify after.
+    /// shows that source's specific outcome). Rescans only when the source
+    /// actually did work — `.none`/`.noSource` skip it, matching the original
+    /// behavior (no spurious full re-index + refresh when nothing was imported).
     func importSource(id: String) async -> SourceIngestResult {
         guard let source = SourceRegistry.source(id: id) else { return .noSource }
         let result = await source.fetchAndIngest(context)
-        await rescanAndNotify()
+        if Self.needsRescan(result) { await rescanAndNotify() }
         return result
     }
 
@@ -38,16 +40,30 @@ struct SourceIngestService {
         await importSource(id: "email")
     }
 
-    /// Fetch + ingest every fetch source, then one rescan/notify. Returns the
-    /// per-source outcomes keyed by source id. (Forward-looking: today only
-    /// email is a fetch source; a new fetch source is picked up automatically.)
+    /// Fetch + ingest every fetch source, then ONE rescan/notify if any source
+    /// did work. Returns the per-source outcomes keyed by source id.
+    /// (Forward-looking: today only email is a fetch source; a new fetch source
+    /// is picked up automatically.)
     func importAll() async -> [String: SourceIngestResult] {
         var results: [String: SourceIngestResult] = [:]
+        var didWork = false
         for source in SourceRegistry.fetchSources {
-            results[source.id] = await source.fetchAndIngest(context)
+            let r = await source.fetchAndIngest(context)
+            results[source.id] = r
+            if Self.needsRescan(r) { didWork = true }
         }
-        await rescanAndNotify()
+        if didWork { await rescanAndNotify() }
         return results
+    }
+
+    /// Whether a result warrants a Library re-index: only when content may have
+    /// landed (`.imported`) or a partial import failed mid-batch (`.failure`).
+    /// `.none` (no new items) and `.noSource` change nothing on disk.
+    private static func needsRescan(_ result: SourceIngestResult) -> Bool {
+        switch result {
+        case .imported, .failure: return true
+        case .none, .noSource: return false
+        }
     }
 
     /// One full re-index after ingest + the Library refresh, off-main.
