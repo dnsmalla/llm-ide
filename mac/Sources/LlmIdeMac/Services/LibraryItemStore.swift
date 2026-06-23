@@ -97,13 +97,15 @@ final class LibraryItemStore {
     /// `platform` is the third frontmatter key, so a small head read covers it.
     /// `nonisolated` (pure function) so it can run off the main actor and be
     /// unit-tested directly.
-    nonisolated static func sourceKind(for url: URL) -> LibraryItem.SourceKind {
+    nonisolated static func sourceId(for url: URL) -> String {
         guard url.pathExtension.lowercased() == "md",
-              let handle = try? FileHandle(forReadingFrom: url) else { return .meeting }
+              let handle = try? FileHandle(forReadingFrom: url) else {
+            return MeetingSource().id
+        }
         defer { try? handle.close() }
         let head = (try? handle.read(upToCount: 2048))
             .flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        guard head.hasPrefix("---") else { return .meeting }
+        guard head.hasPrefix("---") else { return MeetingSource().id }
         // Walk the frontmatter block (between the opening and closing "---").
         for raw in head.split(separator: "\n").dropFirst() {
             let line = raw.trimmingCharacters(in: .whitespaces)
@@ -111,10 +113,10 @@ final class LibraryItemStore {
             if line.hasPrefix("platform:") {
                 let value = line.dropFirst("platform:".count)
                     .trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
-                return LibraryItem.SourceKind(platform: value)
+                return SourceRegistry.source(forPlatform: value).id
             }
         }
-        return .meeting
+        return MeetingSource().id
     }
 
     /// Rebuild `items` from the bound project folder.  Authoritative for
@@ -189,7 +191,7 @@ final class LibraryItemStore {
                 // classify by frontmatter platform so the SOURCES section can
                 // split them into Meetings / Mail sub-groups.
                 if category == .meetings {
-                    item.sourceKind = sourceKind(for: fileURL)
+                    item.sourceId = sourceId(for: fileURL)
                 }
                 scanned.append(item)
             }

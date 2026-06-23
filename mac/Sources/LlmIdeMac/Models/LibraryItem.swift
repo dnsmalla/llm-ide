@@ -17,53 +17,10 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     /// a file directly in the project's `code/` → `[]`.
     var treePath: [String]? = nil
 
-    /// For `.meetings` items only: which input the file came from, derived
-    /// from the meeting `.md` frontmatter `platform` field. Drives the
-    /// Meetings / Mail sub-grouping in the Library's SOURCES section. `nil`
-    /// for every other category.
-    var sourceKind: SourceKind? = nil
-
-    /// The input type a `.meetings` file represents. Captured meetings vs
-    /// ingested email both land in `meetings/`; the frontmatter `platform`
-    /// is the only on-disk discriminator (`"email"` → mail).
-    ///
-    /// Self-describing so the Library's SOURCES section can render one
-    /// sub-group per case with `ForEach(SourceKind.allCases)` — adding a new
-    /// input (e.g. Slack) is a single case here, mirroring the
-    /// `InputSourceRegistry` "one entry" idiom.
-    enum SourceKind: String, Codable, CaseIterable {
-        case meeting, mail
-
-        /// Classify from a meeting frontmatter `platform` value
-        /// (`"meet" | "teams" | "zoom" | "mic"` → meeting, `"email"` → mail).
-        init(platform: String) {
-            self = platform.lowercased() == "email" ? .mail : .meeting
-        }
-
-        /// Sub-group header label in the SOURCES section.
-        var title: String {
-            switch self {
-            case .meeting: return "Meetings"
-            case .mail:    return "Mail"
-            }
-        }
-
-        /// SF Symbol for the sub-group label.
-        var icon: String {
-            switch self {
-            case .meeting: return "waveform.and.mic"
-            case .mail:    return "envelope"
-            }
-        }
-
-        /// Muted text shown when the sub-group has no files.
-        var emptyText: String {
-            switch self {
-            case .meeting: return "No meeting files yet"
-            case .mail:    return "No mail yet"
-            }
-        }
-    }
+    /// For `.meetings` items only: the `InputSource.id` this file belongs to
+    /// (from `SourceRegistry`, classified by frontmatter `platform`). Drives
+    /// the SOURCES sub-grouping. `nil` for every other category.
+    var sourceId: String? = nil
 
     /// Identity is DERIVED from `path` (not a stored random UUID) so it is
     /// STABLE across rescans.  `items` is now a scan of the project folder,

@@ -359,19 +359,18 @@ struct LibraryView: View {
     // MARK: - Sources section (Meetings / Mail)
 
     /// The `.meetings` folder rendered as SOURCES: a single header over one
-    /// sub-group per `SourceKind` — captured Meetings and ingested Mail. All
-    /// cases are always shown, so the structure reads as intentionally
-    /// extensible: a new input (e.g. Slack) is one `SourceKind` case, no view
-    /// change. Items partition by an exhaustive switch on `sourceKind` so a
-    /// future case can never silently fall into the wrong group.
+    /// sub-group per registered `InputSource` (captured Meetings, ingested
+    /// Mail, …). Every source in `SourceRegistry.all` is shown, so the
+    /// structure reads as intentionally extensible: a new input (e.g. Slack) is
+    /// one registry entry, no view change. Items partition by `sourceId`.
     @ViewBuilder
     private func sourcesSection(_ category: LibraryItem.Category) -> some View {
         let all = itemStore.items(for: category)
-        let grouped = Dictionary(grouping: all) { $0.sourceKind ?? .meeting }
+        let grouped = Dictionary(grouping: all) { $0.sourceId ?? MeetingSource().id }
         Section {
             if sectionExpanded(sectionId(category)).wrappedValue {
-                ForEach(LibraryItem.SourceKind.allCases, id: \.self) { kind in
-                    sourceSubGroup(kind: kind, items: grouped[kind] ?? [],
+                ForEach(SourceRegistry.all, id: \.id) { source in
+                    sourceSubGroup(source: source, items: grouped[source.id] ?? [],
                                    tint: theme.current.tint(for: category))
                 }
             }
@@ -388,9 +387,9 @@ struct LibraryView: View {
     /// sections, `folderOrigin` nesting is intentionally not reproduced, since
     /// auto-synced meeting/mail files sit directly in `meetings/`.
     @ViewBuilder
-    private func sourceSubGroup(kind: LibraryItem.SourceKind, items: [LibraryItem],
+    private func sourceSubGroup(source: InputSource, items: [LibraryItem],
                                 tint: Color) -> some View {
-        let stateKey = "sources:\(kind.rawValue)"
+        let stateKey = "sources:\(source.id)"
         let isExpanded = Binding(
             get: { !collapsedSourceGroups.contains(stateKey) },
             set: { open in
@@ -400,7 +399,7 @@ struct LibraryView: View {
         )
         DisclosureGroup(isExpanded: isExpanded) {
             if items.isEmpty {
-                emptyRow(kind.emptyText, icon: kind.icon, leading: 6)
+                emptyRow(source.emptyText, icon: source.icon, leading: 6)
             } else {
                 ForEach(items) { item in
                     LibraryFileRow(item: item)
@@ -414,10 +413,10 @@ struct LibraryView: View {
             }
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: kind.icon)
+                Image(systemName: source.icon)
                     .font(Typography.filename)
                     .foregroundStyle(tint)
-                Text(kind.title)
+                Text(source.displayName)
                     .font(Typography.filename)
                     .foregroundStyle(.primary)
                 if !items.isEmpty {
