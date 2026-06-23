@@ -1,7 +1,7 @@
 # Unified Input-Source Abstraction (Phase 1) — Design
 
 **Date:** 2026-06-23
-**Status:** Approved (brainstorm)
+**Status:** Implemented 2026-06-23
 **Component:** macOS app (`mac/`)
 **Phase:** 1 of 2 — Phase 2 (add Slack as a source) is a separate spec that builds on this.
 
