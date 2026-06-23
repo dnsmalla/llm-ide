@@ -1,7 +1,7 @@
 # Slack as an Input Source (Phase 2) — Design
 
 **Date:** 2026-06-23
-**Status:** Approved (brainstorm)
+**Status:** Implemented 2026-06-23 (server 2a + Mac 2b)
 **Component:** macOS app (`mac/`) + extension server (`extension/`)
 **Builds on:** Phase 1 — `docs/superpowers/specs/2026-06-23-input-source-abstraction-design.md` (the `InputSource`/`SourceRegistry` abstraction).
 
