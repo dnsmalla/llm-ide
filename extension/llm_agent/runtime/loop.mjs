@@ -22,6 +22,19 @@ function redactDeep(val) {
   return val;
 }
 
+// Deterministic JSON for the read-cache key: object keys are emitted in
+// sorted order at every depth, so {a,b} and {b,a} produce the same string
+// (arrays keep their order — element position is semantically meaningful).
+// validateArgs already happens to reconstruct args in schema order, but
+// keying the cache on this makes stability self-contained rather than a
+// silent dependency on that distant invariant.
+export function stableStringify(val) {
+  if (val === null || typeof val !== 'object') return JSON.stringify(val) ?? 'null';
+  if (Array.isArray(val)) return `[${val.map(stableStringify).join(',')}]`;
+  const keys = Object.keys(val).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(val[k])}`).join(',')}}`;
+}
+
 // Internal — only the loop dispatches read handlers; nothing imports
 // this (was previously exported with no users).
 async function runReadHandler(name, args, ctx) {
@@ -168,12 +181,20 @@ export async function runAgentLoop({
   let toolError;
   let preToolText = '';
 
+  // Return the standard graceful "ran out of time" reply. Shared by the
+  // between-iteration check and the in-flight abort path so both look
+  // identical to the client.
+  const deadlineReply = (iters) => {
+    const elapsed = Math.round((Date.now() - startTs) / 1000);
+    return {
+      reply: (preToolText.trim() + `\n\n_(reached the ${elapsed}s deadline — try again)_`),
+      pendingTool: null, iterations: iters, cacheHits,
+    };
+  };
+
   for (let i = 0; i < cap; i++) {
-    if (Date.now() - startTs > deadline) {
-      const elapsed = Math.round((Date.now() - startTs) / 1000);
-      const msg = `\n\n_(reached the ${elapsed}s deadline — try again)_`;
-      return { reply: (preToolText.trim() + msg), pendingTool: null, iterations: i, cacheHits };
-    }
+    const remaining = deadline - (Date.now() - startTs);
+    if (remaining <= 0) return deadlineReply(i);
     const prompt = buildIterationPrompt({
       systemPrompt, history, userMessage, prevOutput, toolResult, toolError,
     });
@@ -186,11 +207,24 @@ export async function runAgentLoop({
     // loop to a specific (sub-)model — global, internal, and plugin
     // subagents can each run on a different tier; undefined falls
     // through to runClaude's LLMIDE_MODEL default.
-    const out = await runClaude(prompt, {
-      userId,
-      model,
-      maxTokens: (Number.isFinite(maxTokens) && maxTokens > 0) ? maxTokens : 2048,
-    });
+    // Bound the in-flight call to the remaining wall-clock budget. The
+    // between-iteration check above only catches overruns *between* calls;
+    // without this a single slow runClaude could blow past the deadline.
+    // The signal fires at the deadline; runClaude funnels it through as an
+    // abort, which we turn into the same graceful deadline reply.
+    const callSignal = AbortSignal.timeout(remaining);
+    let out;
+    try {
+      out = await runClaude(prompt, {
+        userId,
+        model,
+        maxTokens: (Number.isFinite(maxTokens) && maxTokens > 0) ? maxTokens : 2048,
+        signal: callSignal,
+      });
+    } catch (err) {
+      if (callSignal.aborted) return deadlineReply(i);
+      throw err;
+    }
     prevOutput = out;
     const { text, fence, parseError } = parseFence(out);
     preToolText += text;
@@ -224,7 +258,7 @@ export async function runAgentLoop({
 
     // read tool — check cache first, then execute
     let result;
-    const cacheKey = `${skill.name}:${JSON.stringify(validation.value)}`;
+    const cacheKey = `${skill.name}:${stableStringify(validation.value)}`;
     if (readCache.has(cacheKey)) {
       result = readCache.get(cacheKey);
       cacheHits += 1;

@@ -88,7 +88,7 @@ const MAX_PROMPT_CHARS = 500_000;
 // so multi-user deployments charge each user's own Anthropic account
 // rather than the operator's CLI login.  When userId is omitted (or
 // the user has no stored key) we fall back to the operator's CLI auth.
-export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscript, provider: explicitProvider } = {}) {
+export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider } = {}) {
   if (typeof prompt !== 'string') {
     throw new Error('runClaude: prompt must be a string');
   }
@@ -112,9 +112,9 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
       if (provider === 'custom') {
         const baseUrl = customBaseUrl(userId);
         if (!baseUrl) throw new Error('No base URL configured for the custom provider. Add one in Settings → Model Providers.');
-        return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl });
+        return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl, signal });
       }
-      return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens });
+      return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, signal });
     }
     // custom has no CLI subscription mode; other providers fall back to their
     // logged-in CLI.
@@ -178,8 +178,11 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
           // fetch can hang indefinitely if Anthropic's edge stalls,
           // leaking the request socket and blocking the agent loop.
           // AbortError surfaces in the catch below and is funnelled
-          // through the same retry path as a transient 529/503.
-          signal: AbortSignal.timeout(60_000)
+          // through the same retry path as a transient 529/503. When the
+          // caller passes a deadline `signal`, combine it so the fetch also
+          // aborts the moment the agent-loop deadline fires (see the catch:
+          // a caller-signal abort is propagated, not retried).
+          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000)
         });
 
         if (response.ok) {
@@ -254,6 +257,10 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
         log.warn('runClaude HTTP API failed, falling back to CLI', { status: response.status });
         break;
       } catch (err) {
+        // Caller's deadline fired mid-flight — propagate immediately.
+        // Retrying with backoff or falling through to the CLI would
+        // overrun the very loop deadline the signal exists to enforce.
+        if (signal?.aborted) throw err;
         // AbortSignal.timeout fires a DOMException named 'TimeoutError'
         // (also surfaced as AbortError in some runtimes). Treat the
         // 60 s ceiling as a transient failure and retry with backoff,
@@ -275,6 +282,9 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
   }
 
   // CLI path with backoff on stderr-detected overload.
+  // Don't start (or continue) the CLI fallback once the caller's deadline
+  // has passed — a fresh `claude` spawn would overrun it.
+  if (signal?.aborted) throw new Error('runClaude: deadline reached before CLI fallback');
   let lastError;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     try {
@@ -317,6 +327,8 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
           timeout: CLAUDE_TIMEOUT_MS,
           maxBuffer: 4 * 1024 * 1024,
           env,
+          // Kill an in-flight CLI call if the caller's deadline fires.
+          signal,
         }, (error, stdout, stderr) => {
           if (error) {
             if (error.code === 'ENOENT') {

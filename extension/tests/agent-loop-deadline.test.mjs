@@ -42,6 +42,45 @@ test('runAgentLoop: deadline terminates a runaway loop with notice', async () =>
   assert.ok(calls >= 1 && calls <= 3, `expected 1-3 calls, got ${calls}`);
 });
 
+test('runAgentLoop: aborts an in-flight runClaude when the deadline passes mid-call', async () => {
+  // The between-iteration check can't catch a SINGLE slow call overrunning
+  // the deadline. The loop must pass an AbortSignal derived from the
+  // remaining budget so an in-flight call is cancelled at the deadline.
+  let sawSignal = false;
+  let wasAborted = false;
+  const runClaude = async (_prompt, { signal } = {}) => {
+    if (signal) sawSignal = true;
+    return await new Promise((resolve, reject) => {
+      const t = setTimeout(() => resolve('plain reply (call finished)'), 1000);
+      signal?.addEventListener('abort', () => {
+        clearTimeout(t);
+        wasAborted = true;
+        const e = new Error('aborted'); e.name = 'AbortError'; reject(e);
+      }, { once: true });
+    });
+  };
+
+  const start = Date.now();
+  const out = await runAgentLoop({
+    skills: new Map(),
+    userMessage: 'x',
+    history: [],
+    agentContext: { base: '' },
+    runClaude,
+    kb: null,
+    userId: 'u1',
+    handlers: {},
+    maxIterations: 99,
+    deadlineMs: 80,
+  });
+  const elapsed = Date.now() - start;
+
+  assert.ok(sawSignal, 'loop should pass an AbortSignal to runClaude');
+  assert.ok(wasAborted, 'the in-flight call should be aborted at the deadline');
+  assert.match(out.reply, /deadline/);
+  assert.ok(elapsed < 800, `should bail near the 80ms deadline, not wait ~1000ms (took ${elapsed}ms)`);
+});
+
 test('runAgentLoop: deadline default of 120s does NOT fire for a fast loop', async () => {
   const runClaude = async () => 'plain reply'; // no fence → exits after 1 call
   const skills = new Map();
