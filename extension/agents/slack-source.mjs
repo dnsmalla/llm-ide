@@ -82,6 +82,17 @@ export async function testConnection({ token }) {
   } finally { clearTimeout(killer); }
 }
 
+// Fetch replies for a single thread (ts === thread_ts). The first element
+// returned by conversations.replies is the root message (already in history),
+// so we drop it and return only the child replies.
+async function fetchReplies(token, channelId, threadTs, signal) {
+  const r = await slackCall('conversations.replies',
+    token, { channel: channelId, ts: threadTs, limit: String(MAX_MESSAGES) }, signal);
+  // The first element is the root (ts === thread_ts); drop it (already in history).
+  return (r.messages || []).filter((m) => String(m.ts) !== String(threadTs)
+    && m.type === 'message' && !m.subtype);
+}
+
 // Resolve a set of user ids → display names, caching within this fetch so we
 // call users.info at most once per distinct user. Failures degrade to null.
 async function resolveUserNames(ids, token, signal) {
@@ -110,10 +121,29 @@ export async function fetchChannelHistory({ token, channelId, oldestTs, seenTs }
     const raw = (r.messages || [])
       .filter((m) => m.type === 'message' && !m.subtype)
       .filter((m) => !seen.has(String(m.ts)));
-    const skipped = { overCap: Math.max(0, raw.length - MAX_MESSAGES) };
     const selected = raw.slice(0, MAX_MESSAGES);
-    const names = await resolveUserNames(selected.map((m) => m.user), token, ctrl.signal);
-    const messages = selected.map((m) => normalizeMessage(m, channelId, names.get(m.user) ?? null));
+
+    // Identify thread parents among `selected` and fetch their replies.
+    const threadParents = selected.filter(
+      (m) => m.thread_ts && String(m.thread_ts) === String(m.ts) && m.reply_count > 0,
+    );
+    const replyLists = await Promise.all(threadParents.map(async (parent) => {
+      try {
+        return await fetchReplies(token, channelId, parent.ts, ctrl.signal);
+      } catch { return []; }
+    }));
+    const allReplies = replyLists.flat();
+
+    // Combine top-level selected + replies, drop already-seen ts's, sort
+    // newest-first, then cap at MAX_MESSAGES.
+    const combined = [...selected, ...allReplies]
+      .filter((m) => !seen.has(String(m.ts)))
+      .sort((a, b) => Number(b.ts) - Number(a.ts));
+    const skipped = { overCap: Math.max(0, combined.length - MAX_MESSAGES) };
+    const finalSelected = combined.slice(0, MAX_MESSAGES);
+
+    const names = await resolveUserNames(finalSelected.map((m) => m.user), token, ctrl.signal);
+    const messages = finalSelected.map((m) => normalizeMessage(m, channelId, names.get(m.user) ?? null));
     return { messages, skipped };
   } finally { clearTimeout(killer); }
 }
