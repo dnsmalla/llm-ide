@@ -86,6 +86,12 @@ final class ShellState {
         set { librarySelection = newValue.map { .meeting($0) } }
     }
 
+    /// Set by the Library list's "Re-summarize" context action. The meeting
+    /// detail consumes it once its view model has loaded for this id (and
+    /// clears it), so the action works even when that meeting's detail pane
+    /// isn't open yet — surviving the async mount a notification can't.
+    var pendingResummarizeMeetingId: String?
+
     var selectedFileURL: URL? {
         if case .file(let url) = librarySelection { return url }
         return nil

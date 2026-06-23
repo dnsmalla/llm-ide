@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LibraryRow: View {
     let row: MeetingIndex.Row
+    @Environment(ShellState.self) private var shell
 
     private var needsSummary: Bool {
         (row.gist ?? "").isEmpty && (row.tldrJSON ?? "").isEmpty
@@ -95,8 +96,11 @@ struct LibraryRow: View {
     @ViewBuilder
     private var contextMenuItems: some View {
         Button {
-            NotificationCenter.default.post(
-                name: .resummarizeMeeting, object: row.id)
+            // Select the meeting (mounts its detail) and flag the intent; the
+            // detail re-summarizes once loaded. A bare notification was lost
+            // when the detail pane wasn't already showing this meeting.
+            shell.pendingResummarizeMeetingId = row.id
+            shell.selectedMeetingId = row.id
         } label: {
             Label("Re-summarize", systemImage: "sparkles")
         }

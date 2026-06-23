@@ -38,13 +38,14 @@ struct MeetingDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
             Task { await reload(for: shell.selectedMeetingId) }
         }
-        // Context-menu re-summarize from LibraryRow
-        .onReceive(NotificationCenter.default.publisher(for: .resummarizeMeeting)) { note in
-            guard note.object as? String == shell.selectedMeetingId else { return }
-            Task { await vm?.resummarize() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .exportMeeting)) { note in
-            exportMeeting(id: note.object as? String)
+        // Library list "Re-summarize" already-open case: when the flagged
+        // meeting is the one currently loaded, run now. The just-mounted case
+        // is handled in reload(for:) after the view model loads. (Export from
+        // the list is handled by LibraryView, which is always mounted.)
+        .onChange(of: shell.pendingResummarizeMeetingId) { _, pending in
+            guard let pending, pending == shell.selectedMeetingId, let vm else { return }
+            shell.pendingResummarizeMeetingId = nil
+            Task { await vm.resummarize() }
         }
         .toolbar { toolbarContent }
     }
@@ -303,6 +304,12 @@ struct MeetingDetailView: View {
         do {
             try await newVM.load()
             vm = newVM
+            // Just-mounted case for the Library list "Re-summarize" action:
+            // the view model is now loaded for this id, so honor the flag.
+            if shell.pendingResummarizeMeetingId == id {
+                shell.pendingResummarizeMeetingId = nil
+                await newVM.resummarize()
+            }
         } catch {
             loadError = error.localizedDescription
             vm = nil
@@ -310,22 +317,30 @@ struct MeetingDetailView: View {
     }
 
     private func exportMeeting(id: String?) {
-        guard let id,
-              let row = try? env.index.get(id: id) else { return }
-        let src = env.notesConfig.currentFolder.appendingPathComponent(row.path)
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.plainText]
-        panel.nameFieldStringValue = src.lastPathComponent
-        panel.title = "Export Meeting"
-        panel.message = "Save this meeting as a Markdown file"
-        guard panel.runModal() == .OK, let dst = panel.url else { return }
-        do {
-            if FileManager.default.fileExists(atPath: dst.path) {
-                try FileManager.default.removeItem(at: dst)
-            }
-            try FileManager.default.copyItem(at: src, to: dst)
-        } catch {
-            NSAlert(error: error).runModal()
+        presentMeetingExportPanel(id: id, env: env)
+    }
+}
+
+/// Shared "save this meeting as Markdown" panel — used by the meeting detail's
+/// toolbar/menu and by the Library list's Export context action (LibraryView,
+/// which is always mounted, unlike the detail pane). Self-contained: resolves
+/// the file from the index, so it needs no meeting view model.
+@MainActor
+func presentMeetingExportPanel(id: String?, env: AppEnvironment) {
+    guard let id, let row = try? env.index.get(id: id) else { return }
+    let src = env.notesConfig.currentFolder.appendingPathComponent(row.path)
+    let panel = NSSavePanel()
+    panel.allowedContentTypes = [.plainText]
+    panel.nameFieldStringValue = src.lastPathComponent
+    panel.title = "Export Meeting"
+    panel.message = "Save this meeting as a Markdown file"
+    guard panel.runModal() == .OK, let dst = panel.url else { return }
+    do {
+        if FileManager.default.fileExists(atPath: dst.path) {
+            try FileManager.default.removeItem(at: dst)
         }
+        try FileManager.default.copyItem(at: src, to: dst)
+    } catch {
+        NSAlert(error: error).runModal()
     }
 }

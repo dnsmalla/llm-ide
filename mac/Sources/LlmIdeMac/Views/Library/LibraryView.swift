@@ -11,11 +11,25 @@ struct LibraryView: View {
     @State private var vm: LibraryViewModel?
     @State private var loadError: String?
     @FocusState private var filterFocused: Bool
-    /// Tracks which folder groups are expanded per category
-    @State private var expandedFolders: Set<String> = []
-    /// Tracks which SOURCES sub-groups (Meetings / Mail) are collapsed.
-    /// Absence means expanded, so both groups are open by default.
-    @State private var collapsedSourceGroups: Set<String> = []
+    /// Which folder groups are expanded per category. Persisted across relaunch
+    /// (newline-joined — folder names may contain commas). Backed by AppStorage
+    /// via the computed `expandedFolders` below.
+    @AppStorage("library.expandedFolders") private var expandedFoldersRaw = ""
+    /// Which SOURCES sub-groups (Meetings / Mail) are collapsed. Absence means
+    /// expanded, so both groups are open by default. Persisted across relaunch.
+    @AppStorage("library.collapsedSourceGroups") private var collapsedSourceGroupsRaw = ""
+
+    /// Set views over the persisted newline-joined strings. Get-modify-set works
+    /// (`.insert`/`.remove`) because each has a setter; AppStorage writes are
+    /// nonmutating, so the computed setters are too.
+    private var expandedFolders: Set<String> {
+        get { Set(expandedFoldersRaw.split(separator: "\n").map(String.init)) }
+        nonmutating set { expandedFoldersRaw = newValue.joined(separator: "\n") }
+    }
+    private var collapsedSourceGroups: Set<String> {
+        get { Set(collapsedSourceGroupsRaw.split(separator: "\n").map(String.init)) }
+        nonmutating set { collapsedSourceGroupsRaw = newValue.joined(separator: "\n") }
+    }
     /// Installed plugins for the current user. Loaded once on appear
     /// and refreshed when the user (re-)opens Library. Failures are
     /// silent — the sidebar just shows an empty Plugins section.
@@ -69,6 +83,11 @@ struct LibraryView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .deleteMeeting)) { note in
             deleteMeeting(id: note.object as? String)
+        }
+        // Export from the list context menu: handled here (always mounted), not
+        // in MeetingDetailView which only exists while a meeting is selected.
+        .onReceive(NotificationCenter.default.publisher(for: .exportMeeting)) { note in
+            presentMeetingExportPanel(id: note.object as? String, env: env)
         }
     }
 

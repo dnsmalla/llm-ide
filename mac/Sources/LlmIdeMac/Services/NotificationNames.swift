@@ -45,8 +45,8 @@ extension Notification.Name {
     // MARK: - Library / meetings
 
     /// Posted by LibraryRow when the user requests an action on a
-    /// meeting row's context menu.
-    static let resummarizeMeeting    = Notification.Name("resummarizeMeeting")
+    /// meeting row's context menu. (Re-summarize now flows through
+    /// ShellState.pendingResummarizeMeetingId instead of a notification.)
     static let exportMeeting         = Notification.Name("exportMeeting")
     static let revealMeetingInFinder = Notification.Name("revealMeetingInFinder")
     /// Posted by LibraryRow "Delete" context-menu item. `object` is the
