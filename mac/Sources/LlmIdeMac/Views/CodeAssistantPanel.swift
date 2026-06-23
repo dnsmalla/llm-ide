@@ -2,8 +2,7 @@ import SwiftUI
 import AppKit
 
 /// Claude-Code-style chat panel embedded inside ReviewView.  The user
-/// can attach files (NSOpenPanel) or whole folders (recursive walk
-/// with an extension allow-list), then ask the LLM to review, refactor,
+/// can attach files from the Library, then ask the LLM to review, refactor,
 /// explain, or generate code.  Each round-trip POSTs to /code-assist
 /// with the message + attachments + the last few turns of history.
 ///
@@ -34,7 +33,7 @@ struct CodeAssistantPanel: View {
     let api: LlmIdeAPIClient
     /// When set, this file is attached automatically the first time the panel appears.
     var initialURL: URL? = nil
-    /// Hide "+ Add files" / "+ Add folder" from the input bar (use when file is auto-attached).
+    /// Hide "Add from Library" from the input bar (use when file is auto-attached).
     var showFileAttachButtons: Bool = true
     /// Show Cursor-style agent + model picker row in the input bar.
     var showModelPicker: Bool = false
@@ -47,6 +46,7 @@ struct CodeAssistantPanel: View {
     @AppStorage("MEETNOTES_CURRENT_CHAT_SESSION_ID") private var currentSessionIDString: String = ""
 
     @State private var attachments: [LlmIdeAPIClient.CodeAttachment] = []
+    @State private var showLibraryPicker = false
     @State private var history: [LlmIdeAPIClient.CodeAssistTurn] = []
     @State private var sessions: [ChatSession] = []
     @State private var showingSessionPicker: Bool = false
@@ -105,21 +105,6 @@ struct CodeAssistantPanel: View {
         let prompt: String
         let response: String
     }
-
-    /// Extensions we'll walk into when the user picks a folder.  Keeps
-    /// us out of node_modules / images / binaries.  The user can still
-    /// pick individual files of any type — this is just the recursive
-    /// folder filter.
-    private static let walkableExtensions: Set<String> = [
-        "ts", "tsx", "js", "jsx", "mjs", "cjs",
-        "py", "rb", "go", "rs", "java", "kt", "swift",
-        "c", "cc", "cpp", "h", "hpp", "m", "mm",
-        "md", "mdx", "txt", "rst",
-        "json", "yml", "yaml", "toml", "ini", "cfg",
-        "sql", "sh", "bash", "html", "css", "scss",
-        "vue", "svelte",
-    ]
-    private static let skipDirs: Set<String> = IgnoreList.directories
 
     /// Live-tracked rendered width of the panel. Drives the compact-mode
     /// switch so controls collapse gracefully when the user drags the
@@ -406,6 +391,24 @@ struct CodeAssistantPanel: View {
                 .environmentObject(config)
             }
         }
+        .sheet(isPresented: $showLibraryPicker) {
+            LibraryPicker(
+                allowed: [.code, .notes, .data],
+                mode: .multi,
+                title: "Add from Library"
+            ) { items in
+                attachNotice = nil
+                var rejected: [String] = []
+                for item in items where addFile(url: item.url) == .notText {
+                    rejected.append(item.name)
+                }
+                if !rejected.isEmpty {
+                    attachNotice = rejected.count == 1
+                        ? "\u{201C}\(rejected[0])\u{201D} can\u{2019}t be attached \u{2014} images and binary files aren\u{2019}t supported in chat yet."
+                        : "\(rejected.count) files couldn\u{2019}t be attached \u{2014} images and binary files aren\u{2019}t supported in chat yet."
+                }
+            }
+        }
     }
 
     // MARK: - Fault → Issue routing
@@ -666,8 +669,8 @@ struct CodeAssistantPanel: View {
     }
 
     /// Refined empty state.  Subtle, centered, no oversized hero cards —
-    /// the input toolbar at the bottom already exposes "+ Add files" and
-    /// "+ Add folder" as primary actions, so we don't duplicate them here.
+    /// the input toolbar at the bottom already exposes "Add from Library"
+    /// as the primary action, so we don't duplicate it here.
     private var emptyState: some View {
         VStack(spacing: 0) {
             Spacer()
@@ -996,8 +999,7 @@ struct CodeAssistantPanel: View {
     private var toolbarSingleRow: some View {
         HStack(spacing: 6) {
             if showFileAttachButtons {
-                contextButton(icon: "plus",   label: "Add files",  action: pickFiles)
-                contextButton(icon: "folder", label: "Add folder", action: pickFolder)
+                contextButton(icon: "plus", label: "Add from Library", action: { showLibraryPicker = true })
                 if !attachments.isEmpty {
                     Text("\(attachments.count) file\(attachments.count == 1 ? "" : "s") · \(formatBytes(totalAttachmentChars))")
                         .font(.system(size: 10, design: .monospaced))
@@ -1021,8 +1023,7 @@ struct CodeAssistantPanel: View {
             if showFileAttachButtons || showModelPicker {
                 HStack(spacing: 6) {
                     if showFileAttachButtons {
-                        contextButton(icon: "plus",   label: "Add files",  action: pickFiles)
-                        contextButton(icon: "folder", label: "Add folder", action: pickFolder)
+                        contextButton(icon: "plus", label: "Add from Library", action: { showLibraryPicker = true })
                     }
                     if showModelPicker { modelPickerChips }
                     editModeChip
@@ -1286,46 +1287,11 @@ struct CodeAssistantPanel: View {
         attachments.reduce(0) { $0 + $1.content.count }
     }
 
-    // MARK: - File pickers
-
-    private func pickFiles() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowsMultipleSelection = true
-        panel.message = "Attach files for Claude to read"
-        panel.prompt = "Attach"
-        if panel.runModal() == .OK {
-            attachNotice = nil
-            var rejected: [String] = []
-            for url in panel.urls {
-                if addFile(url: url) == .notText { rejected.append(url.lastPathComponent) }
-            }
-            if !rejected.isEmpty {
-                attachNotice = rejected.count == 1
-                    ? "“\(rejected[0])” can’t be attached — images and binary files aren’t supported in chat yet."
-                    : "\(rejected.count) files couldn’t be attached — images and binary files aren’t supported in chat yet."
-            }
-        }
-    }
-
-    private func pickFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.message = "Attach every text file under this folder"
-        panel.prompt = "Attach folder"
-        if panel.runModal() == .OK, let dir = panel.url {
-            walkFolder(dir)
-        }
-    }
-
     enum AttachOutcome { case added, duplicate, notText, unreadable }
 
-    /// Attaches a file's text content. Returns why it did or didn't so
+    /// Attaches a file’s text content. Returns why it did or didn’t so
     /// single-file callers can surface a notice instead of dropping
-    /// silently (the bug behind the "Visual" page ignoring images).
+    /// silently (the bug behind the “Visual” page ignoring images).
     @discardableResult
     private func addFile(url: URL) -> AttachOutcome {
         let path = displayPath(url)
@@ -1342,30 +1308,6 @@ struct CodeAssistantPanel: View {
             return .added
         } catch {
             return .unreadable
-        }
-    }
-
-    private func walkFolder(_ root: URL) {
-        let fm = FileManager.default
-        guard let enumerator = fm.enumerator(at: root,
-                                             includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
-                                             options: [.skipsHiddenFiles])
-        else { return }
-        var added = 0
-        let maxFiles = 50           // hard cap so a wrong-folder doesn't blow up the prompt
-        while let url = enumerator.nextObject() as? URL {
-            if added >= maxFiles { break }
-            let name = url.lastPathComponent
-            // Skip noisy dirs.
-            if Self.skipDirs.contains(name) {
-                enumerator.skipDescendants()
-                continue
-            }
-            let ext = url.pathExtension.lowercased()
-            guard !ext.isEmpty, Self.walkableExtensions.contains(ext) else { continue }
-            let before = attachments.count
-            addFile(url: url)
-            if attachments.count > before { added += 1 }
         }
     }
 
