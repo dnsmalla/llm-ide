@@ -138,6 +138,11 @@ final class LibraryItemStore {
         let scanned = await Task.detached(priority: .utility) {
             Self.performScan(root: root, externalFolders: external)
         }.value
+        // Drop a stale result: if the bound project changed while this scan
+        // was in flight, `scanned` is the OLD project's items — assigning it
+        // would show the previous project's files until the next rescan.
+        // (projectRoot only mutates on the main actor, so this is atomic.)
+        guard projectRoot == root else { return }
         items = scanned
     }
 
@@ -384,14 +389,17 @@ final class LibraryItemStore {
         // External (out-of-project) files are referenced in place — never
         // delete the user's file. Single-file delete is unsupported for them.
         guard ProjectPaths.isInside(item.url, root: root) else { return }
+        // Always reconcile `items` to disk afterwards — even on failure. If the
+        // file was already gone (e.g. deleted in Finder), removeItem throws but
+        // the rescan still drops the now-stale row; previously it returned early
+        // and the row lingered in the sidebar.
+        defer { rescan() }
         do {
             try FileManager.default.removeItem(at: item.url)
         } catch {
             os_log(.error, "LibraryItemStore: failed to delete %{public}@: %{public}@",
                    item.path, "\(error)")
-            return
         }
-        rescan()
     }
 
     /// Un-link the external code folder(s) whose basename matches
