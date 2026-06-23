@@ -12,7 +12,10 @@ enum SourceIngestResult {
     case imported(Int, moreAvailable: Int, oversize: Int) // N notes; more left; large skipped
     case none                          // fetched, but nothing new
     case noSource                      // no configured/enabled source
-    case failure(String)               // fetch or ingest error
+    /// Fetch or ingest error. `imported` = notes that DID land before the
+    /// failure (0 for a fetch error that wrote nothing). The driver rescans
+    /// only when `imported > 0`, matching the original behavior.
+    case failure(String, imported: Int)
 }
 
 /// Runtime dependencies a fetch source needs to ingest. Bundled so sources stay

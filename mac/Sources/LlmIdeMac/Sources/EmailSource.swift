@@ -27,7 +27,7 @@ struct EmailSource: InputSource {
         do {
             result = try await ctx.api.fetchEmails(source)
         } catch {
-            return .failure(error.localizedDescription)
+            return .failure(error.localizedDescription, imported: 0)
         }
 
         let messages = result.messages
@@ -57,7 +57,7 @@ struct EmailSource: InputSource {
         try? await ctx.api.markEmailSeen(messageIds: importedIds,
                                          lastFetchedAt: drained ? fetchStart : nil)
 
-        if let failure { return .failure(failure) }
+        if let failure { return .failure(failure, imported: importedIds.count) }
         let moreAvailable = (messages.count - batch.count) + result.skipped.overCap
         return .imported(importedIds.count, moreAvailable: moreAvailable,
                          oversize: result.skipped.oversize)

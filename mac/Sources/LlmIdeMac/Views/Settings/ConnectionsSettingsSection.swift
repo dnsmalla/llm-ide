@@ -225,7 +225,7 @@ struct ConnectionsSettingsSection: View {
         case .noSource:
             lastEmailWasError = false
             lastEmailResult = nil
-        case .failure(let msg):
+        case .failure(let msg, _):
             lastEmailWasError = true
             lastEmailResult = "Fetch failed: \(msg)"
         }

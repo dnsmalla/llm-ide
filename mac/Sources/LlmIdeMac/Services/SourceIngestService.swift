@@ -61,7 +61,8 @@ struct SourceIngestService {
     /// `.none` (no new items) and `.noSource` change nothing on disk.
     private static func needsRescan(_ result: SourceIngestResult) -> Bool {
         switch result {
-        case .imported, .failure: return true
+        case .imported: return true
+        case .failure(_, let imported): return imported > 0  // rescan only if notes landed
         case .none, .noSource: return false
         }
     }
