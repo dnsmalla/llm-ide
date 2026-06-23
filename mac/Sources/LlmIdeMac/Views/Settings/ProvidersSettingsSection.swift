@@ -17,8 +17,9 @@ struct ProvidersSettingsSection: View {
         let hint: String
         /// The composer/CLI tool this provider maps to — drives the "active
         /// default" radio + default-model picker (folded in from the old CLI
-        /// Tool section so providers live in ONE place).
-        let tool: AICliTool
+        /// Tool section so providers live in ONE place). Nil for non-model
+        /// providers like web-search (tools, not chat models).
+        let tool: AICliTool?
         /// OpenAI-compatible "custom" provider also needs an endpoint base URL.
         var needsBaseURL: Bool = false
     }
@@ -40,6 +41,10 @@ struct ProvidersSettingsSection: View {
                  placeholder: "API key (any value for local servers)",
                  hint: "Any OpenAI-compatible endpoint — OpenRouter, Ollama / LM Studio (local), DeepSeek, Mistral. Add a model below or in the composer.",
                  tool: .custom, needsBaseURL: true),
+        Provider(id: "web-search", label: "Web Search (SerpAPI)", vaultKey: "serpapi.apiKey",
+                 placeholder: "Your SerpAPI key from https://serpapi.com",
+                 hint: "Search the web in the Code Assistant using SerpAPI. Free tier includes ~100 searches/month.",
+                 tool: nil),
     ]
 
     @State private var drafts: [String: String] = [:]
@@ -59,11 +64,15 @@ struct ProvidersSettingsSection: View {
         .onAppear(perform: normalizeActiveCLI)
     }
 
-    private func isActive(_ p: Provider) -> Bool { config.activeCLI == p.tool.rawValue }
+    private func isActive(_ p: Provider) -> Bool {
+        guard let tool = p.tool else { return false }
+        return config.activeCLI == tool.rawValue
+    }
 
     private func setActive(_ p: Provider) {
-        config.activeCLI = p.tool.rawValue
-        config.defaultModelId = p.tool.defaultModelId
+        guard let tool = p.tool else { return }
+        config.activeCLI = tool.rawValue
+        config.defaultModelId = tool.defaultModelId
     }
 
     /// Keep `activeCLI` pointing at a selectable provider (a stale persisted
@@ -79,12 +88,15 @@ struct ProvidersSettingsSection: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: Spacing.sm) {
                 // Active-default selector (replaces the old CLI Tool radio list).
-                Button { setActive(p) } label: {
-                    Image(systemName: isActive(p) ? "circle.inset.filled" : "circle")
-                        .foregroundStyle(isActive(p) ? theme.current.accent : theme.current.textMuted)
+                // Only show for model providers (tool != nil).
+                if p.tool != nil {
+                    Button { setActive(p) } label: {
+                        Image(systemName: isActive(p) ? "circle.inset.filled" : "circle")
+                            .foregroundStyle(isActive(p) ? theme.current.accent : theme.current.textMuted)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Use as the default provider for new chats")
                 }
-                .buttonStyle(.plain)
-                .help("Use as the default provider for new chats")
                 Text(p.label).font(Typography.bodyStrong)
                 if isActive(p) {
                     Text("Active")
@@ -127,7 +139,7 @@ struct ProvidersSettingsSection: View {
                     Button("Clear") { Task { await clear(p) } }
                         .disabled(busy.contains(p.id))
                 }
-                if !p.needsBaseURL {
+                if p.tool != nil && !p.needsBaseURL {
                     Button("Check CLI") { Task { await checkCli(p) } }
                         .disabled(busy.contains(p.id))
                         .help("Verify this provider's logged-in CLI for subscription mode (no key needed)")
@@ -136,14 +148,15 @@ struct ProvidersSettingsSection: View {
 
             // Default model for the active provider (folded in from the old
             // CLI Tool section). Custom has no built-in list — its model is
-            // chosen in the composer ("Add model…").
-            if isActive(p), !p.tool.models.isEmpty {
+            // chosen in the composer ("Add model…"). Only shown for model
+            // providers (tool != nil).
+            if isActive(p), let tool = p.tool, !tool.models.isEmpty {
                 HStack(spacing: Spacing.sm) {
                     Text("Default model")
                         .font(Typography.caption)
                         .foregroundStyle(theme.current.textMuted)
                     Picker("", selection: $config.defaultModelId) {
-                        ForEach(p.tool.models) { Text($0.displayName).tag($0.id) }
+                        ForEach(tool.models) { Text($0.displayName).tag($0.id) }
                     }
                     .labelsHidden().pickerStyle(.menu).fixedSize()
                 }
