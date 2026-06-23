@@ -62,6 +62,7 @@ struct LibraryView: View {
         // minWidth here (was 260) fought AppShell's 180 column and the
         // oversized content got centered, clipping headers on the left.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear { migrateLegacySourceCollapseKeys() }
         .task { await load() }
         .task { await loadAgentsAndPlugins() }
         .onReceive(NotificationCenter.default.publisher(for: .agentPersonaChanged)) { _ in
@@ -357,6 +358,20 @@ struct LibraryView: View {
     }
 
     // MARK: - Sources section (Meetings / Mail)
+
+    /// One-time migration of the persisted SOURCES collapse key after the
+    /// SourceKind→InputSource refactor: the email sub-group's key changed from
+    /// `sources:mail` (old `SourceKind.mail` rawValue) to `sources:email`
+    /// (`EmailSource.id`). Without this, a user who had Mail collapsed would
+    /// see it silently re-expand. Idempotent: a no-op once the legacy key is
+    /// gone. (Meetings is unaffected — its id "meeting" matches the old raw.)
+    private func migrateLegacySourceCollapseKeys() {
+        guard collapsedSourceGroups.contains("sources:mail") else { return }
+        var updated = collapsedSourceGroups
+        updated.remove("sources:mail")
+        updated.insert("sources:email")
+        collapsedSourceGroups = updated
+    }
 
     /// The `.meetings` folder rendered as SOURCES: a single header over one
     /// sub-group per registered `InputSource` (captured Meetings, ingested
