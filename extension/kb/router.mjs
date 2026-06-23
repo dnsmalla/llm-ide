@@ -443,8 +443,14 @@ export async function handleKB(req, res) {
       const channelId = typeof body.channelId === 'string' ? body.channelId.trim() : '';
       const tsList = Array.isArray(body.messageTs) ? body.messageTs : [];
       kb.markSlackSeen(userId, tsList);
-      if (channelId && typeof body.lastTs === 'string' && body.lastTs) {
-        kb.setSlackHighWater(userId, channelId, body.lastTs);
+      // Only advance the high-water mark if lastTs is a valid Slack timestamp
+      // (Unix-epoch float as string, e.g. "1718900000.000100") — a bad value
+      // must never poison the per-user channel bound.
+      if (channelId && typeof body.lastTs === 'string') {
+        const n = Number(body.lastTs);
+        if (Number.isFinite(n) && n > 0) {
+          kb.setSlackHighWater(userId, channelId, body.lastTs);
+        }
       }
       sendJSON(res, 200, { ok: true });
       return true;

@@ -164,7 +164,9 @@ test('cascade is transactional — counts add up across every table', () => {
   const expectedKeys = [
     'outcomes', 'plan_tasks', 'plans', 'review_items', 'entities',
     'sources', 'meetings', 'user_repos', 'user_secrets',
-    'agent_feedback', 'agent_ask_messages', 'refresh_tokens', 'audit_anonymised', 'user',
+    'agent_feedback', 'agent_ask_messages', 'refresh_tokens',
+    'email_seen', 'email_state', 'slack_seen', 'slack_state',
+    'audit_anonymised', 'user',
   ];
   for (const k of expectedKeys) {
     assert.ok(k in counts, `counts missing key: ${k}`);
@@ -207,6 +209,57 @@ test('agent_ask_messages are wiped on user deletion (KB-1)', () => {
   // The returned counts receipt must include the key.
   assert.ok('agent_ask_messages' in counts, 'counts must include agent_ask_messages key');
   assert.equal(counts.agent_ask_messages, 2);
+});
+
+// KB-2: slack_seen + slack_state must be deleted when the user is deleted.
+// Before the fix, deleteUserCascade never touched these tables (added in
+// migration 0017, no FK cascade declared), so a deleted user's Slack
+// timestamps and high-water state survived account deletion — PII leak.
+test('slack_seen and slack_state are wiped on user deletion (KB-2)', () => {
+  reset();
+  const alice = provision('alice-slack@example.com').id;
+  const bob   = provision('bob-slack@example.com').id;
+
+  // Seed Slack dedup + high-water for alice and bob.
+  db.markSlackSeen(alice, ['1.1', '1.2']);
+  db.setSlackHighWater(alice, 'C1', '1.2');
+  db.markSlackSeen(bob, ['2.1']);
+  db.setSlackHighWater(bob, 'C2', '2.1');
+
+  const handle = db.getDb();
+  // Pre-deletion sanity.
+  assert.equal(handle.prepare('SELECT COUNT(*) AS n FROM slack_seen  WHERE user_id = ?').get(alice).n, 2);
+  assert.equal(handle.prepare('SELECT COUNT(*) AS n FROM slack_state WHERE user_id = ?').get(alice).n, 1);
+
+  const counts = db.deleteUserCascade(alice);
+
+  // Alice's rows must be gone.
+  assert.equal(
+    handle.prepare('SELECT COUNT(*) AS n FROM slack_seen WHERE user_id = ?').get(alice).n,
+    0,
+    'alice slack_seen should be deleted',
+  );
+  assert.equal(
+    handle.prepare('SELECT COUNT(*) AS n FROM slack_state WHERE user_id = ?').get(alice).n,
+    0,
+    'alice slack_state should be deleted',
+  );
+  // Bob's rows must survive.
+  assert.equal(
+    handle.prepare('SELECT COUNT(*) AS n FROM slack_seen WHERE user_id = ?').get(bob).n,
+    1,
+    'bob slack_seen must not be touched',
+  );
+  assert.equal(
+    handle.prepare('SELECT COUNT(*) AS n FROM slack_state WHERE user_id = ?').get(bob).n,
+    1,
+    'bob slack_state must not be touched',
+  );
+  // The returned counts receipt must include the keys.
+  assert.ok('slack_seen'  in counts, 'counts must include slack_seen key');
+  assert.ok('slack_state' in counts, 'counts must include slack_state key');
+  assert.equal(counts.slack_seen, 2);
+  assert.equal(counts.slack_state, 1);
 });
 
 test('refuses to run with no userId', () => {

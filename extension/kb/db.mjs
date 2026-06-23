@@ -801,6 +801,11 @@ export function deleteUserCascade(userId) {
     // delete explicitly or the seen-set/high-water would outlive the account.
     counts.email_seen      = del('DELETE FROM email_seen   WHERE user_id = ?');
     counts.email_state     = del('DELETE FROM email_state  WHERE user_id = ?');
+    // migration 0017 — per-user Slack dedup + high-water state. Same pattern as
+    // email: no FK cascade, so explicit deletes are required to avoid PII surviving
+    // account deletion.
+    counts.slack_seen      = del('DELETE FROM slack_seen   WHERE user_id = ?');
+    counts.slack_state     = del('DELETE FROM slack_state  WHERE user_id = ?');
     // migration 0009 — rate_limit_buckets has no user_id column; the key
     // column stores "<profile>::<scope>" where scope == userId for
     // authenticated KB routes.  We match by suffix so all per-user
