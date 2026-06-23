@@ -209,6 +209,12 @@ struct AppShell: View {
             graphAutoUpdater.sessionStore = graphSessionStore
             graphAutoUpdater.start()
         }
+        // Tie the auto-updater to the auth/session lifecycle: AppShell is only
+        // mounted while signed in (ContentView swaps in LoginView on logout), so
+        // its teardown is the logout signal. Without this the 15-min timer keeps
+        // scanning the last project after logout, since GraphAutoUpdater is an
+        // app-level object that outlives this view.
+        .onDisappear { graphAutoUpdater.stop() }
         .task {
             // Phase D — arm the regression-run button when the app
             // version changes between launches. We record the new
