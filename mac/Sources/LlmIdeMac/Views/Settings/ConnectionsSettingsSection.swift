@@ -25,16 +25,23 @@ struct ConnectionsSettingsSection: View {
     @AppStorage("settings.section.Connections.expanded") private var isExpanded = false
 
     @State private var showingEmailSheet = false
+    @State private var showSlackSheet = false
     @State private var fetching = false
     /// Short human-readable line shown under the Email card after a fetch.
     @State private var lastEmailResult: String?
     /// True when `lastEmailResult` describes an error (drives the colour).
     @State private var lastEmailWasError = false
+    /// Short human-readable line shown under the Slack card after a fetch.
+    @State private var lastSlackResult: String?
+    /// True when `lastSlackResult` describes an error (drives the colour).
+    @State private var lastSlackWasError = false
+    @State private var fetchingSlack = false
     /// Meetings "Advanced" (poll interval) disclosure, collapsed by default.
     @State private var showMeetingAdvanced = false
     /// Handle for a manual "Fetch now" import so we can cancel it if the view
     /// disappears mid-import (the `.task` auto-fetch already auto-cancels).
     @State private var importTask: Task<Void, Never>?
+    @State private var slackImportTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -44,6 +51,7 @@ struct ConnectionsSettingsSection: View {
                     SettingsHint("Connect the sources that feed your Library.")
                     meetingsCard
                     emailCard
+                    slackCard
 
                     Text("More inputs")
                         .font(Typography.section)
@@ -63,13 +71,22 @@ struct ConnectionsSettingsSection: View {
                         .environmentObject(theme)
                         .environmentObject(config)
                 }
+                .sheet(isPresented: $showSlackSheet) {
+                    SlackSourceSheet(api: api)
+                        .environmentObject(theme)
+                        .environmentObject(config)
+                }
                 // Light auto-fetch when the section is opened (no global timer).
                 // Only runs when a source is configured + enabled. `.task`
                 // auto-cancels when the view disappears.
                 .task {
                     if config.emailSource?.enabled == true { await runImport() }
+                    if config.slackSource?.enabled == true { await runSlackImport() }
                 }
-                .onDisappear { importTask?.cancel() }
+                .onDisappear {
+                    importTask?.cancel()
+                    slackImportTask?.cancel()
+                }
             }
         }
         .animation(.easeInOut(duration: 0.18), value: isExpanded)
@@ -199,6 +216,54 @@ struct ConnectionsSettingsSection: View {
         }
     }
 
+    // MARK: - Slack add-on
+
+    private var slackCard: some View {
+        let configured = config.slackSource != nil
+        let enabled = config.slackSource?.enabled == true
+        return InputSourceCard(
+            icon: "number",
+            title: "Slack",
+            subtitle: "Fetch messages and turn them into notes",
+            badgeText: !configured ? "Not set up" : (enabled ? "Connected" : "Paused"),
+            badgeTone: !configured ? .accent : (enabled ? .positive : .neutral)
+        ) {
+            if let s = config.slackSource {
+                Text(s.displayName.isEmpty ? "Configured" : s.displayName)
+                    .font(Typography.body)
+                    .foregroundStyle(theme.current.text)
+            }
+
+            HStack(spacing: Spacing.sm) {
+                Button(configured ? "Edit…" : "Configure…") {
+                    showSlackSheet = true
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+
+                if enabled {
+                    Button(fetchingSlack ? "Fetching…" : "Fetch now") {
+                        slackImportTask = Task { await runSlackImport() }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(fetchingSlack)
+                    if fetchingSlack {
+                        ProgressView().controlSize(.mini).scaleEffect(0.8)
+                    }
+                }
+            }
+            .padding(.top, Spacing.xs)
+
+            if let line = lastSlackResult {
+                Text(line)
+                    .font(Typography.caption)
+                    .foregroundStyle(lastSlackWasError ? theme.current.danger : theme.current.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     /// Run the email import flow and reflect the outcome on the card.
@@ -228,6 +293,35 @@ struct ConnectionsSettingsSection: View {
         case .failure(let msg, _):
             lastEmailWasError = true
             lastEmailResult = "Fetch failed: \(msg)"
+        }
+    }
+
+    /// Run the Slack import flow and reflect the outcome on the card.
+    private func runSlackImport() async {
+        guard !fetchingSlack else { return }
+        fetchingSlack = true
+        defer { fetchingSlack = false }
+
+        let service = SourceIngestService(
+            api: api,
+            config: config,
+            root: env.notesConfig.currentFolder,
+            notesOutputFolder: env.notesOutputFolder,
+            indexer: env.indexer)
+        switch await service.importSource(id: "slack") {
+        case .imported(let n, let more, _):
+            lastSlackWasError = false
+            lastSlackResult = "Imported \(n) Slack message\(n == 1 ? "" : "s")."
+                + (more > 0 ? " \(more) more pending — Fetch again." : "")
+        case .none:
+            lastSlackWasError = false
+            lastSlackResult = "No new messages."
+        case .noSource:
+            lastSlackWasError = false
+            lastSlackResult = nil
+        case .failure(let msg, _):
+            lastSlackWasError = true
+            lastSlackResult = "Fetch failed: \(msg)"
         }
     }
 }
