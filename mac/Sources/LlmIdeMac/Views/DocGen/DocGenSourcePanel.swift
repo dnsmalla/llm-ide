@@ -7,8 +7,6 @@ struct DocGenSourcePanel: View {
     @EnvironmentObject private var templateStore: DocTemplateStore
     @EnvironmentObject private var theme: ThemeStore
     @Environment(LibraryItemStore.self) private var itemStore
-    @State private var showFileImporter = false
-    @State private var importCategory: LibraryItem.Category = .notes
     @State private var showTemplateImporter = false
     @State private var showTemplateManager = false
     @State private var failedFileIDs: Set<String> = []
@@ -22,6 +20,8 @@ struct DocGenSourcePanel: View {
                     notesSection
                     Divider().padding(.vertical, 6)
                     dataSection
+                    Divider().padding(.vertical, 6)
+                    sourcesSection
                 }
                 .padding(.bottom, 12)
             }
@@ -34,15 +34,6 @@ struct DocGenSourcePanel: View {
             DocTemplateManagerSheet()
                 .environmentObject(templateStore)
                 .frame(minWidth: 580, minHeight: 500)
-        }
-        .fileImporter(
-            isPresented: $showFileImporter,
-            allowedContentTypes: [.item],
-            allowsMultipleSelection: true
-        ) { result in
-            if case .success(let urls) = result {
-                for url in urls { itemStore.add(url: url, category: importCategory) }
-            }
         }
         .fileImporter(
             isPresented: $showTemplateImporter,
@@ -226,7 +217,6 @@ struct DocGenSourcePanel: View {
             HStack {
                 sectionHeader(title: "Notes", icon: "note.text", color: .blue)
                 Spacer()
-                addButton(for: .notes)
             }
 
             if items.isEmpty {
@@ -247,7 +237,6 @@ struct DocGenSourcePanel: View {
             HStack {
                 sectionHeader(title: "Data", icon: "tablecells", color: .purple)
                 Spacer()
-                addButton(for: .data)
             }
 
             if items.isEmpty {
@@ -260,35 +249,39 @@ struct DocGenSourcePanel: View {
         }
     }
 
+    // MARK: - Sources (meetings) section
+
+    private var sourcesSection: some View {
+        let items = itemStore.items(for: .meetings)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                sectionHeader(title: "Sources", icon: "waveform.and.mic", color: .indigo)
+                Spacer()
+            }
+            if items.isEmpty {
+                emptyHint("No sources captured yet")
+            } else {
+                ForEach(items) { item in
+                    fileRow(item: item, iconColor: .indigo)
+                }
+            }
+        }
+    }
+
     // MARK: - Footer
 
     private var footer: some View {
-        Menu {
-            Button {
-                importCategory = .notes
-                showFileImporter = true
-            } label: { Label("Import into Notes", systemImage: "note.text") }
-
-            Button {
-                importCategory = .data
-                showFileImporter = true
-            } label: { Label("Import into Data", systemImage: "tablecells") }
-        } label: {
-            HStack(spacing: 7) {
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 13))
-                    .foregroundStyle(theme.current.accent)
-                Text("Add file or folder")
-                    .font(.callout)
-                    .foregroundStyle(.primary)
-                Spacer()
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
+        HStack(spacing: 7) {
+            Image(systemName: "books.vertical")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            Text("Add notes, data, or sources from the Library")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 
     // MARK: - Reusable components
@@ -303,22 +296,6 @@ struct DocGenSourcePanel: View {
         .padding(.horizontal, 14)
         .padding(.top, 14)
         .padding(.bottom, 6)
-    }
-
-    private func addButton(for category: LibraryItem.Category) -> some View {
-        Button {
-            importCategory = category
-            showFileImporter = true
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 20, height: 20)
-                .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
-        }
-        .buttonStyle(.plain)
-        .padding(.trailing, 14)
-        .padding(.top, 10)
     }
 
     private func emptyHint(_ text: String) -> some View {
