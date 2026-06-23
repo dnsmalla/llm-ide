@@ -4,7 +4,7 @@ import Foundation
 /// source-related uses (classification, Library SOURCES display, ingestion).
 /// Adding a source is one entry here plus its `InputSource` struct.
 enum SourceRegistry {
-    static let all: [InputSource] = [MeetingSource(), EmailSource()]
+    static let all: [InputSource] = [MeetingSource(), EmailSource(), SlackSource()]
 
     /// Match a frontmatter `platform` value to its source. Unknown/empty →
     /// the meeting source (preserves the historical default-to-meeting).

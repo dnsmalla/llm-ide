@@ -19,7 +19,7 @@ struct SourceRegistryTests {
     @Test("unknown or empty platform defaults to the meeting source")
     func unknownDefaults() {
         #expect(SourceRegistry.source(forPlatform: "").id == "meeting")
-        #expect(SourceRegistry.source(forPlatform: "slack").id == "meeting")
+        #expect(SourceRegistry.source(forPlatform: "unknown-xyz").id == "meeting")
     }
 
     @Test("id lookup finds registered sources, nil otherwise")
@@ -44,5 +44,16 @@ struct SourceRegistryTests {
             #expect(!s.emptyText.isEmpty)
             #expect(!s.platforms.isEmpty)
         }
+    }
+
+    @Test("slack platform resolves to the slack source")
+    func slackPlatform() {
+        #expect(SourceRegistry.source(forPlatform: "slack").id == "slack")
+    }
+
+    @Test("slack is a registered fetch source")
+    func slackIsFetch() {
+        #expect(SourceRegistry.source(id: "slack")?.id == "slack")
+        #expect(SourceRegistry.fetchSources.map(\.id).contains("slack"))
     }
 }
