@@ -53,6 +53,9 @@ const ENDPOINTS = [
   '/kb/email/test',
   '/kb/email/fetch',
   '/kb/email/seen',
+  '/kb/slack/test',
+  '/kb/slack/fetch',
+  '/kb/slack/seen',
   '/kb/generate-plan',
   '/kb/analyze-risks',
   '/kb/summarize',
@@ -136,6 +139,10 @@ function rateLimitProfile(url, method) {
   // /kb/email/seen is a cheap LOCAL write (dedup ledger + high-water) — no
   // outbound IMAP — so it belongs on the kbWrite bucket, not dispatch.
   if (url === '/kb/email/seen') return 'kbWrite';
+  // Slack routes mirror email: test/fetch hit the Slack API (dispatch bucket);
+  // seen is a cheap local write (kbWrite bucket).
+  if (url === '/kb/slack/test' || url === '/kb/slack/fetch') return 'dispatch';
+  if (url === '/kb/slack/seen') return 'kbWrite';
   return null;
 }
 

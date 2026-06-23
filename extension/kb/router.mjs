@@ -26,6 +26,7 @@ import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatM
 import { iterateUserMeetings } from './exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails } from '../agents/email-source.mjs';
+import { testConnection as slackTest, fetchChannelHistory } from '../agents/slack-source.mjs';
 import { logger } from '../core/logger.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 
@@ -391,6 +392,59 @@ export async function handleKB(req, res) {
       if (typeof body.lastFetchedAt === 'string' && body.lastFetchedAt) {
         const d = new Date(body.lastFetchedAt);
         if (!Number.isNaN(d.getTime())) kb.setEmailHighWater(userId, body.lastFetchedAt);
+      }
+      sendJSON(res, 200, { ok: true });
+      return true;
+    }
+
+    // Slack input (twin of /kb/email/*) ---
+    if (req.method === 'POST' && (url === '/kb/slack/test' || url === '/kb/slack/fetch')) {
+      const body = parseJSON(await readBody(req)) || {};
+      const token = getSecret(kb.getDb(), userId, 'slack.botToken');
+      if (!token) {
+        sendJSON(res, 400, { error: { code: 'SLACK_NO_TOKEN', message: 'No Slack bot token saved. Save one first.' } });
+        return true;
+      }
+
+      if (url === '/kb/slack/test') {
+        try {
+          const r = await slackTest({ token });
+          logger.info('slack_test', { userId, team: r.team });
+          sendJSON(res, 200, r);
+        } catch (e) {
+          logger.error('slack_test_failed', { userId, reason: e.message });
+          sendJSON(res, 502, { error: { code: 'SLACK_CONNECT_FAILED', message: e.message } });
+        }
+        return true;
+      }
+
+      // url === '/kb/slack/fetch'
+      const channelId = typeof body.channelId === 'string' ? body.channelId.trim() : '';
+      if (!channelId) {
+        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'channelId is required' } });
+        return true;
+      }
+      const seenTs = kb.getSlackSeenTs(userId);
+      const oldestTs = kb.getSlackHighWater(userId, channelId);
+      const started = Date.now();
+      try {
+        const { messages, skipped } = await fetchChannelHistory({ token, channelId, oldestTs, seenTs });
+        logger.info('slack_fetch', { userId, channelId, count: messages.length, durationMs: Date.now() - started, skipped });
+        sendJSON(res, 200, { messages, skipped });
+      } catch (e) {
+        logger.error('slack_fetch_failed', { userId, channelId, reason: e.message });
+        sendJSON(res, 502, { error: { code: 'SLACK_FETCH_FAILED', message: e.message } });
+      }
+      return true;
+    }
+
+    if (req.method === 'POST' && url === '/kb/slack/seen') {
+      const body = parseJSON(await readBody(req)) || {};
+      const channelId = typeof body.channelId === 'string' ? body.channelId.trim() : '';
+      const tsList = Array.isArray(body.messageTs) ? body.messageTs : [];
+      kb.markSlackSeen(userId, tsList);
+      if (channelId && typeof body.lastTs === 'string' && body.lastTs) {
+        kb.setSlackHighWater(userId, channelId, body.lastTs);
       }
       sendJSON(res, 200, { ok: true });
       return true;
