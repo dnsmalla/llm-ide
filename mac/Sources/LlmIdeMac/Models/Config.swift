@@ -90,6 +90,25 @@ struct SavedEmailSource: Codable, Equatable {
     }
 }
 
+struct SavedSlackSource: Codable, Equatable {
+    var displayName: String = ""
+    /// Slack channel IDs (e.g. "C0123ABCD") the bot is invited to.
+    var channels: [String] = []
+    var lookbackDays: Int = 7
+    var enabled: Bool = true
+
+    init() {}
+
+    /// Tolerant decoder — every field falls back to its default when absent.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        displayName  = try c.decodeIfPresent(String.self, forKey: .displayName) ?? ""
+        channels     = try c.decodeIfPresent([String].self, forKey: .channels) ?? []
+        lookbackDays = try c.decodeIfPresent(Int.self, forKey: .lookbackDays) ?? 7
+        enabled      = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+    }
+}
+
 /// User-tunable settings persisted to UserDefaults.
 final class AppConfig: ObservableObject {
     static let shared = AppConfig()
@@ -216,6 +235,16 @@ final class AppConfig: ObservableObject {
                 defaults.set(data, forKey: "emailSource")
             } else {
                 defaults.removeObject(forKey: "emailSource")
+            }
+        }
+    }
+
+    @Published var slackSource: SavedSlackSource? {
+        didSet {
+            if let s = slackSource, let data = try? AppJSON.encoder.encode(s) {
+                defaults.set(data, forKey: "slackSource")
+            } else {
+                defaults.removeObject(forKey: "slackSource")
             }
         }
     }
@@ -482,6 +511,12 @@ final class AppConfig: ObservableObject {
             self.emailSource = decoded
         } else {
             self.emailSource = nil
+        }
+        if let data = defaults.data(forKey: "slackSource"),
+           let decoded = decodeConfigOrStash(SavedSlackSource.self, key: "slackSource", data: data, defaults: defaults) {
+            self.slackSource = decoded
+        } else {
+            self.slackSource = nil
         }
         self.autoCodeUpdateEnabled = defaults.object(forKey: "autoCodeUpdateEnabled") as? Bool ?? false
         self.autoCodeUpdateLookbackCount = defaults.object(forKey: "autoCodeUpdateLookbackCount") as? Int ?? 5
