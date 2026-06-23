@@ -1,7 +1,7 @@
 # Library as the Single Input Hub — Design
 
 **Date:** 2026-06-23
-**Status:** Approved (brainstorm)
+**Status:** Implemented 2026-06-23
 **Component:** macOS app (`mac/`)
 
 ## Goal
