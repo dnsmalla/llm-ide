@@ -637,6 +637,9 @@ export function findContext(userId, query, limit = 5) {
 // unbounded array to fan out into one giant transaction.
 const EMAIL_SEEN_MAX_PER_CALL = 1000;
 
+// Mirror of EMAIL_SEEN_MAX_PER_CALL for the Slack seen-ledger.
+const SLACK_SEEN_MAX_PER_CALL = 1000;
+
 // The forward-only fetch lower bound for this user, or null if never fetched.
 export function getEmailHighWater(userId) {
   requireUser(userId);
@@ -686,6 +689,58 @@ export function markEmailSeen(userId, messageIds) {
   const tx = db.transaction((rows) => {
     for (const mid of rows) stmt.run(userId, mid);
   });
+  tx(ids);
+}
+
+// ---------------------------------------------------------------------------
+// Slack state helpers (twin of email helpers above).
+// High-water is per-channel because Slack `ts` ordering is per-conversation.
+// ---------------------------------------------------------------------------
+
+// The forward-only fetch lower bound for this user+channel, or null if never
+// fetched.
+export function getSlackHighWater(userId, channelId) {
+  requireUser(userId);
+  const db = getDb();
+  const row = lazyPrepare(db,
+    'SELECT last_ts FROM slack_state WHERE user_id = ? AND channel_id = ?',
+  ).get(userId, channelId);
+  return row?.last_ts ?? null;
+}
+
+// Upsert the channel's high-water mark. Caller validates that `ts` is a real
+// Slack timestamp string; we just persist it.
+export function setSlackHighWater(userId, channelId, ts) {
+  requireUser(userId);
+  const db = getDb();
+  lazyPrepare(db, `
+    INSERT INTO slack_state (user_id, channel_id, last_ts) VALUES (?, ?, ?)
+    ON CONFLICT(user_id, channel_id) DO UPDATE SET last_ts = excluded.last_ts
+  `).run(userId, channelId, typeof ts === 'string' ? ts : null);
+}
+
+// Every message ts this user has already imported. Returned as a plain array;
+// the caller builds a Set from it for O(1) membership tests during fetch.
+export function getSlackSeenTs(userId) {
+  requireUser(userId);
+  const db = getDb();
+  return lazyPrepare(db,
+    'SELECT message_ts FROM slack_seen WHERE user_id = ?',
+  ).all(userId).map((r) => r.message_ts);
+}
+
+// Record message timestamps as seen for this user. INSERT OR IGNORE makes
+// re-marking a ts a harmless no-op (the composite PK dedups). We filter to
+// non-empty strings and cap the batch defensively, then run the whole batch
+// in one transaction like the other bulk inserts in this module.
+export function markSlackSeen(userId, tsList) {
+  requireUser(userId);
+  if (!Array.isArray(tsList)) return;
+  const ids = tsList.filter((x) => typeof x === 'string' && x).slice(0, SLACK_SEEN_MAX_PER_CALL);
+  if (ids.length === 0) return;
+  const db = getDb();
+  const stmt = lazyPrepare(db, 'INSERT OR IGNORE INTO slack_seen (user_id, message_ts) VALUES (?, ?)');
+  const tx = db.transaction((rows) => { for (const ts of rows) stmt.run(userId, ts); });
   tx(ids);
 }
 
