@@ -83,6 +83,12 @@ final class DocGenViewModel: ObservableObject {
         do {
             let url = try api.exportMarkdown(content: content, filename: filename, projectRoot: projectRoot)
             NSWorkspace.shared.activateFileViewerSelecting([url])
+            // A doc exported into <project>/data/ is a new Library file; nudge
+            // the sidebar to rescan (the de-facto "library changed" signal) so
+            // it appears immediately instead of only after the next index event.
+            if projectRoot != nil {
+                NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
+            }
         } catch {
             let alert = NSAlert()
             alert.messageText = "Export Failed"
