@@ -89,5 +89,6 @@ Mirror email: per-fetch errors surfaced on the Slack card; high-water advanced o
 - Slack DMs / private channels beyond what the bot token is invited to.
 - Per-thread note granularity (v1 is per-channel-per-fetch).
 - Real-time/streaming Slack (Events API) — forward-only polling only.
+- **Pagination:** a fetch reads a single `conversations.history` page (newest-first, ≤MAX_MESSAGES, replies combined). If more than that accumulates between polls, the oldest in that window can be missed once the high-water advances. Acceptable for frequent polling; revisit with cursor pagination if high-volume channels need it. `users.info` is resolved per distinct author per fetch (cached within the fetch) — fine at these caps, batchable later if it rate-limits.
 - The MCP/agent-driven path (rejected above).
 - Two-way Slack (posting) — the existing output webhook is unchanged.
