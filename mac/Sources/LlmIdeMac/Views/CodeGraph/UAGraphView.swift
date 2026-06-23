@@ -636,8 +636,18 @@ struct UAGraphView: View {
                     .font(Typography.caption).foregroundStyle(t.textMuted)
             }
         case .loaded(let n, let e):
-            Label("\(n) nodes · \(e) edges", systemImage: "checkmark.circle.fill")
-                .font(Typography.caption).foregroundStyle(t.accent3)
+            let split = FileClassifier.nodeCounts(fullData.nodes)
+            HStack(spacing: 8) {
+                Label("\(n) nodes · \(e) edges", systemImage: "checkmark.circle.fill")
+                    .font(Typography.caption).foregroundStyle(t.accent3)
+                // Code + doc unification badge: surface the code/doc split when
+                // the graph carries docs (data/all modes) — on a pure code graph
+                // doc == 0 and the breakdown would just be noise.
+                if split.doc > 0 {
+                    Text("\(split.code) code · \(split.doc) doc")
+                        .font(Typography.caption).foregroundStyle(t.textMuted)
+                }
+            }
         case .error(let m):
             Label(m, systemImage: "exclamationmark.triangle.fill")
                 .font(Typography.caption).foregroundStyle(t.danger)

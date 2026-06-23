@@ -59,4 +59,27 @@ final class FileClassifierTests: XCTestCase {
         let graph = CGData(nodes: [srcFile], edges: [])
         XCTAssertEqual(FileClassifier.strippingDocNodes(from: graph).nodes.count, 1)
     }
+
+    func testNodeCountsSplitsCodeVsDoc() {
+        // A merged "all" graph: code structure + doc/notes from InfiniteBrain.
+        let nodes = [
+            CGNode(id: "a.swift", title: "a.swift", kind: .file),
+            CGNode(id: "a#f", title: "f()", kind: .symbol),
+            CGNode(id: "mod", title: "Module", kind: .module),
+            CGNode(id: "d1", title: "Guide", kind: .memoryDoc),
+            CGNode(id: "c1", title: "Setup", kind: .memoryChunk),
+            CGNode(id: "n1", title: "Decision", kind: .noteDecision),
+        ]
+        let split = FileClassifier.nodeCounts(nodes)
+        XCTAssertEqual(split.code, 3, "file/symbol/module are code")
+        XCTAssertEqual(split.doc, 3, "memoryDoc/memoryChunk/note* are doc")
+    }
+
+    func testNodeCountsBucketsUnknownKindsAsCode() {
+        // Kinds this app's two tracks never emit (other GraphKit consumers')
+        // default to the code bucket rather than being miscounted as docs.
+        let nodes = [CGNode(id: "x", title: "x", kind: .other)]
+        XCTAssertEqual(FileClassifier.nodeCounts(nodes).code, 1)
+        XCTAssertEqual(FileClassifier.nodeCounts(nodes).doc, 0)
+    }
 }

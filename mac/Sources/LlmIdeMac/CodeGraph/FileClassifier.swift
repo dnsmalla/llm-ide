@@ -57,6 +57,30 @@ enum FileClassifier {
         return CGData(nodes: nodes, edges: edges)
     }
 
+    /// Node kinds the doc/InfiniteBrain track emits: `MemoryGenerator` produces
+    /// `memoryDoc`/`memoryChunk` plus the vault `note*` kinds (see its
+    /// `kindFromTypeString`/`classify`), and markdown enters as `docPage`.
+    /// Everything else in a graph this app builds is code structure
+    /// (`file`/`symbol`/`module` from `StructureGraphBuilder`). The richer
+    /// `CGNodeKind` cases (`function`, `entity`, `domain`, …) belong to other
+    /// GraphKit consumers, not this app's two tracks — so `nodeCounts` buckets
+    /// any non-doc kind as code rather than enumerate kinds we never emit.
+    static let docNodeKinds: Set<CGNodeKind> = [
+        .docPage, .memoryDoc, .memoryChunk,
+        .noteDecision, .noteTask, .noteQuestion, .noteFact, .noteConcept,
+        .notePlaybook, .noteHypothesis, .noteEvent, .noteSource,
+    ]
+
+    /// Split graph nodes into doc (`docNodeKinds`) vs code (everything else)
+    /// counts — the "N code · M doc" breakdown for the graph status badge.
+    static func nodeCounts(_ nodes: [CGNode]) -> (code: Int, doc: Int) {
+        var code = 0, doc = 0
+        for n in nodes {
+            if docNodeKinds.contains(n.kind) { doc += 1 } else { code += 1 }
+        }
+        return (code, doc)
+    }
+
     /// Partition a flat file list into code / doc URLs, dropping everything else.
     static func partition(_ files: [URL]) -> (code: [URL], doc: [URL]) {
         var code: [URL] = []
