@@ -428,7 +428,9 @@ export async function handleKB(req, res) {
       const oldestTs = kb.getSlackHighWater(userId, channelId);
       const started = Date.now();
       try {
-        const { messages, skipped } = await fetchChannelHistory({ token, channelId, oldestTs, seenTs });
+        const { messages, skipped } = await fetchChannelHistory({
+          token, channelId, oldestTs, lookbackDays: body.lookbackDays, seenTs,
+        });
         logger.info('slack_fetch', { userId, channelId, count: messages.length, durationMs: Date.now() - started, skipped });
         sendJSON(res, 200, { messages, skipped });
       } catch (e) {

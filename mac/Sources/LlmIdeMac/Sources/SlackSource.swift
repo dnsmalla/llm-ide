@@ -25,7 +25,7 @@ struct SlackSource: InputSource {
             if Task.isCancelled { break }
             let result: LlmIdeAPIClient.SlackFetchResult
             do {
-                result = try await ctx.api.fetchSlack(channelId: channelId)
+                result = try await ctx.api.fetchSlack(channelId: channelId, lookbackDays: s.lookbackDays)
             } catch {
                 failure = error.localizedDescription
                 break

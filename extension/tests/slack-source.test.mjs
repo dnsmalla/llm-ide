@@ -1,6 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stripMrkdwn, normalizeMessage, fetchChannelHistory } from '../agents/slack-source.mjs';
+import { stripMrkdwn, normalizeMessage, fetchChannelHistory, resolveOldestTs } from '../agents/slack-source.mjs';
+
+test('resolveOldestTs: high-water wins; else lookbackDays, clamped 1..60', () => {
+  // Forward-only high-water always wins, verbatim.
+  assert.equal(resolveOldestTs({ oldestTs: '1718900000.000100', lookbackDays: 7 }), '1718900000.000100');
+  const now = Date.now() / 1000;
+  // No high-water → ~7 days ago.
+  const seven = Number(resolveOldestTs({ oldestTs: null, lookbackDays: 7 }));
+  assert.ok(seven < now && seven > now - 8 * 86400, `7d bound off: ${seven}`);
+  // Clamp: 1000 days → 60 days.
+  const clamped = Number(resolveOldestTs({ oldestTs: null, lookbackDays: 1000 }));
+  assert.ok(clamped >= now - 61 * 86400 && clamped <= now - 59 * 86400, `clamp off: ${clamped}`);
+  // Invalid → default 7 days.
+  const def = Number(resolveOldestTs({ oldestTs: null, lookbackDays: 'x' }));
+  assert.ok(def < now && def > now - 8 * 86400, `default off: ${def}`);
+});
 
 test('stripMrkdwn unwraps links and decodes entities', () => {
   assert.equal(stripMrkdwn('see <https://x.com|the docs> &amp; more'), 'see the docs & more');

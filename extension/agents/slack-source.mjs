@@ -107,16 +107,29 @@ async function resolveUserNames(ids, token, signal) {
   return names;
 }
 
-// Fetch messages in `channelId` newer than `oldestTs` (forward-only). Drops
-// already-seen ts's, caps the count (newest kept), resolves user names, and
-// normalizes. Returns { messages, skipped: { overCap } }.
-export async function fetchChannelHistory({ token, channelId, oldestTs, seenTs }) {
+// PURE. Resolve the `oldest` lower bound for conversations.history. The
+// forward-only per-channel high-water (`oldestTs`, a Slack ts) wins; on the
+// first fetch (no high-water) fall back to `lookbackDays` (clamped 1..60,
+// default 7) converted to a Slack ts (epoch seconds). Mirrors the email
+// connector's resolveSince. Exported for unit testing.
+export function resolveOldestTs({ oldestTs, lookbackDays }) {
+  if (oldestTs) return String(oldestTs);
+  const raw = Number(lookbackDays);
+  const days = Number.isFinite(raw) ? Math.min(60, Math.max(1, Math.round(raw))) : 7;
+  return ((Date.now() - days * 86400000) / 1000).toFixed(6);
+}
+
+// Fetch messages in `channelId` newer than the resolved `oldest` bound
+// (high-water if present, else lookbackDays). Drops already-seen ts's, caps
+// the count (newest kept), resolves user names, and normalizes. Returns
+// { messages, skipped: { overCap } }.
+export async function fetchChannelHistory({ token, channelId, oldestTs, lookbackDays, seenTs }) {
   const seen = seenTs instanceof Set ? seenTs : new Set(seenTs || []);
   const ctrl = new AbortController();
   const killer = setTimeout(() => ctrl.abort(), FETCH_DEADLINE_MS);
   try {
     const params = { channel: channelId, limit: String(MAX_MESSAGES + 50) };
-    if (oldestTs) params.oldest = oldestTs;
+    params.oldest = resolveOldestTs({ oldestTs, lookbackDays });
     const r = await slackCall('conversations.history', token, params, ctrl.signal);
     const raw = (r.messages || [])
       .filter((m) => m.type === 'message' && !m.subtype)

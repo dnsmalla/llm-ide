@@ -35,9 +35,9 @@ extension LlmIdeAPIClient {
         return try await post("/kb/slack/test", body: Req(), authenticated: true)
     }
 
-    func fetchSlack(channelId: String) async throws -> SlackFetchResult {
-        struct Req: Encodable { let channelId: String }
-        return try await post("/kb/slack/fetch", body: Req(channelId: channelId), authenticated: true)
+    func fetchSlack(channelId: String, lookbackDays: Int) async throws -> SlackFetchResult {
+        struct Req: Encodable { let channelId: String; let lookbackDays: Int }
+        return try await post("/kb/slack/fetch", body: Req(channelId: channelId, lookbackDays: lookbackDays), authenticated: true)
     }
 
     func markSlackSeen(channelId: String, messageTs: [String], lastTs: String?) async throws {
