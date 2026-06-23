@@ -187,11 +187,17 @@ final class RepoManager {
     /// `nonisolated` because it's pure string work and is called from the
     /// background git queue (outside the main actor).
     private nonisolated static func redact(_ text: String, token: String?) -> String {
-        guard let token, !token.isEmpty else { return text }
-        let basic = Data("x-access-token:\(token)".utf8).base64EncodedString()
-        return text
-            .replacingOccurrences(of: token, with: "***")
-            .replacingOccurrences(of: basic, with: "***")
+        var out = text
+        if let token, !token.isEmpty {
+            let basic = Data("x-access-token:\(token)".utf8).base64EncodedString()
+            out = out
+                .replacingOccurrences(of: token, with: "***")
+                .replacingOccurrences(of: basic, with: "***")
+        }
+        // Defense-in-depth: scrub any *other* recognized credential shape git or
+        // a remote echoed back (a token we never held), mirroring the
+        // extension's shared redaction pattern set.
+        return SecretRedactor.redact(out)
     }
 
     private func gitOutput(_ args: [String], cwd: URL) async throws -> String {
