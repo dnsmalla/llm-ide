@@ -88,13 +88,17 @@ const MAX_PROMPT_CHARS = 500_000;
 // so multi-user deployments charge each user's own Anthropic account
 // rather than the operator's CLI login.  When userId is omitted (or
 // the user has no stored key) we fall back to the operator's CLI auth.
-export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscript, provider: explicitProvider } = {}) {
+export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscript, provider: explicitProvider, images } = {}) {
   if (typeof prompt !== 'string') {
     throw new Error('runClaude: prompt must be a string');
   }
   if (prompt.length > MAX_PROMPT_CHARS) {
     throw new Error(`runClaude: prompt too long (${prompt.length} > ${MAX_PROMPT_CHARS} chars)`);
   }
+  // Optional vision input: an array of { mediaType, data(base64) }. Only the
+  // Anthropic HTTP path below can carry image content blocks; the CLI and
+  // other providers are text-only, so we fail loudly rather than drop them.
+  const hasImages = Array.isArray(images) && images.length > 0;
   // Allow callers to pass a tighter max_tokens budget.
   // Meeting-agent question drafts only need ~512 tokens; using 8192
   // for every call over-spends on short structured outputs.
@@ -106,6 +110,9 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
   // otherwise infer from the model id. Anthropic keeps the hardened path
   // below (prompt caching, context-overflow retry, operator CLI fallback).
   const { provider, userScopedKey, apiKey, resolvedModel } = resolveClaudeCall({ userId, model, provider: explicitProvider });
+  if (hasImages && (provider !== 'anthropic' || !apiKey)) {
+    throw new Error('Image input requires an Anthropic API key configured for this account (Settings → Model Providers).');
+  }
   if (provider !== 'anthropic') {
     const key = providerApiKey(userId, provider);
     if (key) {
@@ -142,7 +149,16 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
     // Prompt caching requires the content to be structured as an array
     // of content blocks (not a plain string).
     let messages;
-    if (cacheTranscript && prompt.includes('<<<BEGIN>>>')) {
+    if (hasImages) {
+      // Vision: text first, then each image as a base64 content block.
+      messages = [{ role: 'user', content: [
+        { type: 'text', text: prompt },
+        ...images.map((img) => ({
+          type: 'image',
+          source: { type: 'base64', media_type: img.mediaType, data: img.data },
+        })),
+      ]}];
+    } else if (cacheTranscript && prompt.includes('<<<BEGIN>>>')) {
       const splitIdx = prompt.indexOf('<<<BEGIN>>>');
       const systemPart = prompt.slice(0, splitIdx);
       const transcriptPart = prompt.slice(splitIdx);
