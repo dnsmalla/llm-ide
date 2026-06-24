@@ -42,6 +42,20 @@ const MAX_QA_FILES = 8;
 // more than two repos at once dilutes the signal and bloats the prompt.
 const MAX_REPOS = 2;
 
+// Relative-age phrase for a file mtime. Pure + exported for unit tests.
+// Facts only: a future/non-finite delta (clock skew, bad input) clamps to
+// "just now" rather than emitting a negative or NaN age.
+export function relativeAge(mtimeMs, nowMs = Date.now()) {
+  const delta = nowMs - mtimeMs;
+  if (!Number.isFinite(delta) || delta < 60_000) return 'just now';
+  const mins = Math.floor(delta / 60_000);
+  if (mins < 60) return `~${mins} minute${mins === 1 ? '' : 's'} ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `~${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return `~${days} day${days === 1 ? '' : 's'} ago`;
+}
+
 function safeRead(path, maxChars) {
   try {
     const st = statSync(path);
