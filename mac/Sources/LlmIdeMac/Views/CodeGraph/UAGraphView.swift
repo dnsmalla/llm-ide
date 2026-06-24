@@ -390,7 +390,11 @@ struct UAGraphView: View {
             positions3DByMode[mode] = nil          // 3D layout is stale for this mode
             if render3D { settle3DIfNeeded() }
         }
-        .onChange(of: showSymbols)   { _, _ in recomputeDisplayData() }
+        .onChange(of: showSymbols)   { _, _ in
+            recomputeDisplayData()
+            positions3DByMode[mode] = nil          // 3D positions are keyed to the old node set
+            if render3D { settle3DIfNeeded() }
+        }
         .onReceive(codeNoteService.$graph) { rawGraph in
             guard mode == .code, !rawGraph.nodes.isEmpty else { return }
             // "md is doc": markdown files (.docPage) belong to InfiniteBrain, not
