@@ -148,6 +148,20 @@ test('POST /kb/activity rejects a missing title with 400', async () => {
   assert.equal(res.json().error.code, 'VALIDATION_FAILED');
 });
 
+test('recordActivity is called for email_fetched with count>0 shape', async () => {
+  // Guard test: the email_fetched kind is in the allow-list and round-trips.
+  const { getDb } = await import('../kb/db.mjs');
+  const { registerUser } = await import('../server/users.mjs');
+  const { recordActivity, listActivity } = await import('../kb/activity.mjs');
+  resetDb();
+  getDb();
+  const { id: userId } = registerUser(getDb(), { email: 'u-email-evt@example.com', password: 'pw-12345678', displayName: 'evttest' });
+  const dbInst = getDb();
+  recordActivity(dbInst, { userId, kind: 'email_fetched', title: 'Fetched 7 new emails', detail: { count: 7 } });
+  const items = listActivity(dbInst, userId, {});
+  assert.equal(items[0].kind, 'email_fetched');
+});
+
 test('GET /kb/activity?since=<id> returns only newer items', async () => {
   resetDb();
   const users = await import('../server/users.mjs');

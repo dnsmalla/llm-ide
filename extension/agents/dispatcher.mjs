@@ -10,11 +10,12 @@
 // re-running the dispatch is idempotent — handy when only a subset
 // failed on the first attempt.
 
-import { getPlan, mergeTaskMeta, getTaskById } from '../kb/db.mjs';
+import { getPlan, mergeTaskMeta, getTaskById, getDb } from '../kb/db.mjs';
 import { pMap } from '../core/p-map.mjs';
 import { SECRET_PATTERNS } from '../guardrails/rules.mjs';
 import { jittered } from './runtime.mjs';
 import { logger } from '../core/logger.mjs';
+import { recordActivity } from '../kb/activity.mjs';
 
 const log = logger.child({ component: 'dispatcher' });
 
@@ -116,6 +117,15 @@ async function dispatchGithub(userId, { plan, tasks, repo, token, labels = [] })
       dispatchedAt: new Date().toISOString(),
     };
     mergeTaskMeta(userId, task.id, { dispatched });
+    try {
+      recordActivity(getDb(), {
+        userId,
+        kind: 'dispatch_issue_created',
+        title: `Dispatched issue to ${dispatched.provider} — #${dispatched.number}`,
+        detail: { provider: dispatched.provider, url: dispatched.url, number: dispatched.number },
+        link: dispatched.url,
+      });
+    } catch {}
     return { taskId: task.id, status: 'ok', ...dispatched };
   });
 }
@@ -170,6 +180,15 @@ async function dispatchBacklog(userId, { plan, tasks, space, projectId, apiKey, 
       dispatchedAt: new Date().toISOString(),
     };
     mergeTaskMeta(userId, task.id, { dispatched });
+    try {
+      recordActivity(getDb(), {
+        userId,
+        kind: 'dispatch_issue_created',
+        title: `Dispatched issue to ${dispatched.provider} — #${dispatched.number}`,
+        detail: { provider: dispatched.provider, url: dispatched.url, number: dispatched.number },
+        link: dispatched.url,
+      });
+    } catch {}
     return { taskId: task.id, status: 'ok', ...dispatched };
   });
 }
@@ -240,6 +259,15 @@ async function dispatchLinear(userId, { plan, tasks, teamId, apiKey, projectId }
       dispatchedAt: new Date().toISOString(),
     };
     mergeTaskMeta(userId, task.id, { dispatched });
+    try {
+      recordActivity(getDb(), {
+        userId,
+        kind: 'dispatch_issue_created',
+        title: `Dispatched issue to ${dispatched.provider} — #${dispatched.number}`,
+        detail: { provider: dispatched.provider, url: dispatched.url, number: dispatched.number },
+        link: dispatched.url,
+      });
+    } catch {}
     return { taskId: task.id, status: 'ok', ...dispatched };
   });
 }

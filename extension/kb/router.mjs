@@ -366,11 +366,22 @@ export async function handleKB(req, res) {
           fromFilter: typeof body.fromFilter === 'string' ? body.fromFilter : '',
           seenIds,
         });
+        const fetchCount = messages.length;
         logger.info('email_fetch', {
           userId, mailbox: mailbox || 'INBOX',
-          count: messages.length, durationMs: Date.now() - started, skipped,
+          count: fetchCount, durationMs: Date.now() - started, skipped,
         });
         sendJSON(res, 200, { messages, skipped });
+        if (fetchCount > 0) {
+          try {
+            recordActivity(kb.getDb(), {
+              userId,
+              kind: 'email_fetched',
+              title: `Fetched ${fetchCount} new email${fetchCount === 1 ? '' : 's'}`,
+              detail: { count: fetchCount },
+            });
+          } catch {}
+        }
       } catch (e) {
         logger.error('email_fetch_failed', { userId, host, reason: e.message });
         sendJSON(res, 502, { error: { code: 'EMAIL_FETCH_FAILED', message: e.message } });
@@ -432,8 +443,19 @@ export async function handleKB(req, res) {
         const { messages, skipped } = await fetchChannelHistory({
           token, channelId, oldestTs, lookbackDays: body.lookbackDays, seenTs,
         });
-        logger.info('slack_fetch', { userId, channelId, count: messages.length, durationMs: Date.now() - started, skipped });
+        const slackCount = messages.length;
+        logger.info('slack_fetch', { userId, channelId, count: slackCount, durationMs: Date.now() - started, skipped });
         sendJSON(res, 200, { messages, skipped });
+        if (slackCount > 0) {
+          try {
+            recordActivity(kb.getDb(), {
+              userId,
+              kind: 'slack_fetched',
+              title: `Fetched ${slackCount} new Slack message${slackCount === 1 ? '' : 's'}${channelId ? ` (#${channelId})` : ''}`,
+              detail: { channelId, count: slackCount },
+            });
+          } catch {}
+        }
       } catch (e) {
         logger.error('slack_fetch_failed', { userId, channelId, reason: e.message });
         sendJSON(res, 502, { error: { code: 'SLACK_FETCH_FAILED', message: e.message } });

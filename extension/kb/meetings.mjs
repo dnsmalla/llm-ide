@@ -13,6 +13,7 @@ import {
   requireUser,
 } from './db.mjs';
 import { outcomeStats as outcomeStatsImpl } from './outcomes.mjs';
+import { recordActivity } from './activity.mjs';
 
 const ALLOWED_KINDS = new Set(['action', 'decision', 'blocker']);
 
@@ -86,6 +87,18 @@ export function ingestMeeting(userId, input) {
 
   const entityList = Array.isArray(input.entities) ? input.entities : [];
   tx(meeting, entityList);
+
+  const title = String(input.title || 'Untitled meeting');
+  const participantCount = Array.isArray(input.participants) ? input.participants.length : 0;
+  const date = String(input.date || new Date().toISOString());
+  try {
+    recordActivity(getDb(), {
+      userId,
+      kind: 'meeting_added',
+      title: `Meeting added — ${title}${participantCount ? ` (${participantCount} participants)` : ''}`,
+      detail: { title, participantCount, date },
+    });
+  } catch {}
 
   return { meetingId: meeting.id, entityCount: entityList.length };
 }

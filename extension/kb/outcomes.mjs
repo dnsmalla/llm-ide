@@ -14,6 +14,7 @@ import {
   requireUser,
 } from './db.mjs';
 import { logger } from '../core/logger.mjs';
+import { recordActivity } from './activity.mjs';
 
 // ── Outcome → task-status auto-sync ──────────────────────────────────────
 //
@@ -150,6 +151,7 @@ export function recordOutcome(userId, { taskId, provider, ref, state, meta = {} 
       const next = safeJSONStringify(meta || {});
       if (prev === next) return null;
     }
+    const fromState = last?.state || null;
     const isTerminal = TERMINAL_STATES.has(state) ? 1 : 0;
     const info = lazyPrepare(db, `
       INSERT INTO outcomes (task_id, user_id, provider, ref, state, is_terminal, meta)
@@ -195,6 +197,15 @@ export function recordOutcome(userId, { taskId, provider, ref, state, meta = {} 
         });
       }
     }
+
+    try {
+      recordActivity(db, {
+        userId,
+        kind: 'outcome_changed',
+        title: `${ref} ${state}`,
+        detail: { resource: ref, fromState, toState: state },
+      });
+    } catch {}
 
     return { id: info.lastInsertRowid, state, isTerminal: Boolean(isTerminal) };
   })();
