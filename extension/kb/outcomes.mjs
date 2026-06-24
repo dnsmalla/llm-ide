@@ -198,14 +198,16 @@ export function recordOutcome(userId, { taskId, provider, ref, state, meta = {} 
       }
     }
 
-    try {
-      recordActivity(db, {
-        userId,
-        kind: 'outcome_changed',
-        title: `${ref} ${state}`,
-        detail: { resource: ref, fromState, toState: state },
-      });
-    } catch {}
+    if (fromState !== state) {
+      try {
+        recordActivity(db, {
+          userId,
+          kind: 'outcome_changed',
+          title: `${ref} ${state}`,
+          detail: { resource: ref, fromState, toState: state },
+        });
+      } catch {}
+    }
 
     return { id: info.lastInsertRowid, state, isTerminal: Boolean(isTerminal) };
   })();

@@ -92,7 +92,7 @@ export function ingestMeeting(userId, input) {
   const participantCount = Array.isArray(input.participants) ? input.participants.length : 0;
   const date = String(input.date || new Date().toISOString());
   try {
-    recordActivity(getDb(), {
+    recordActivity(db, {
       userId,
       kind: 'meeting_added',
       title: `Meeting added — ${title}${participantCount ? ` (${participantCount} participants)` : ''}`,
