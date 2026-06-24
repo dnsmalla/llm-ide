@@ -157,6 +157,29 @@ final class RepoManager {
         return "agent/\(base.isEmpty ? "change" : base)"
     }
 
+    /// A user-supplied git ref/branch must not look like a flag or contain
+    /// whitespace. We do NOT use `--` to guard these: for checkout/diff/reset/log
+    /// `--` switches git to pathspec mode and would reinterpret the ref as a file
+    /// path. Rejecting flag-like values is the correct guard for a ref/branch.
+    private func safeRef(_ s: String) throws -> String {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, !t.hasPrefix("-"),
+              t.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else {
+            throw RepoError.commandFailed("invalid git ref/branch: \(s)")
+        }
+        return t
+    }
+
+    /// The repo's default branch: whichever of main/master exists, preferring main.
+    private func resolveDefaultBranch(at repoURL: URL) async throws -> String {
+        for name in ["main", "master"] {
+            if (try? await git(["rev-parse", "--verify", "--quiet", name], cwd: repoURL)) != nil {
+                return name
+            }
+        }
+        return "main"
+    }
+
     /// Execute an allow-listed git op on `repoURL`, enforcing branch-first /
     /// protected-main. Returns combined output text. Throws on git failure or a
     /// policy violation (which the caller surfaces to the agent).
@@ -174,8 +197,12 @@ final class RepoManager {
         switch a.op {
         // ---- read (no policy) ----
         case .status:  return try await run(["status", "--short", "--branch"])
-        case .log:     return try await run(["log", "--oneline", "-n", "20", "--", a.ref ?? "HEAD"].compactMap { $0 == "--" && a.ref == nil ? nil : $0 })
-        case .diff:    return try await run(a.ref.map { ["diff", "--stat", $0] } ?? ["diff", "--stat"])
+        case .log:
+            let r = try safeRef(a.ref ?? "HEAD")
+            return try await run(["log", "--oneline", "-n", "20", r])
+        case .diff:
+            if let ref = a.ref { return try await run(["diff", "--stat", try safeRef(ref)]) }
+            return try await run(["diff", "--stat"])
         case .branch:  return try await run(["branch", "--all"])
 
         // ---- safe-write ----
@@ -185,7 +212,7 @@ final class RepoManager {
             return try await run(["checkout", "-b", name])
         case .checkout:
             guard let b = a.branch else { throw RepoError.commandFailed("checkout needs a branch") }
-            return try await run(["checkout", b])
+            return try await run(["checkout", try safeRef(b)])
         case .commit:
             guard let msg = a.message, !msg.isEmpty else { throw RepoError.commandFailed("commit needs a message") }
             // BRANCH-FIRST: never commit on the default branch — make a feature branch first.
@@ -210,12 +237,15 @@ final class RepoManager {
             if onDefault {
                 throw RepoError.commandFailed("Refusing to merge into the default branch directly. Use merge_to_main for that explicit step.")
             }
-            return try await run(["merge", "--no-ff", "--", src])
+            return try await run(["merge", "--no-ff", try safeRef(src)])
         case .revert:
-            return try await run(["revert", "--no-edit", "--", a.ref ?? "HEAD"])
+            return try await run(["revert", "--no-edit", try safeRef(a.ref ?? "HEAD")])
         case .reset:
             let mode = a.mode ?? "mixed"
-            return try await run(["reset", "--\(mode)", "--", a.ref ?? "HEAD"])
+            guard ["soft", "mixed", "hard"].contains(mode) else {
+                throw RepoError.commandFailed("reset mode must be soft, mixed, or hard")
+            }
+            return try await run(["reset", "--\(mode)", try safeRef(a.ref ?? "HEAD")])
         case .stash:
             return try await run(["stash", "push", "-u"])
         case .clean:
@@ -226,9 +256,10 @@ final class RepoManager {
             guard let src = a.branch, !Self.defaultBranchNames.contains(src) else {
                 throw RepoError.commandFailed("merge_to_main needs a non-default source branch")
             }
-            let target = Self.defaultBranchNames.contains(branch) ? branch : "main"
+            let safeSrc = try safeRef(src)
+            let target = try await resolveDefaultBranch(at: repoURL)
             _ = try await run(["checkout", target])
-            _ = try await run(["merge", "--ff-only", "--", src])
+            _ = try await run(["merge", "--ff-only", safeSrc])
             return try await run(["push", "origin", target], tok: token)
         }
     }
