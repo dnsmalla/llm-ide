@@ -53,6 +53,9 @@ struct CodeAssistantPanel: View {
     @State private var draft: String = ""
     @State private var busy: Bool = false
     @State private var error: String?
+    /// Measured render height per assistant turn, keyed by turn id, so each
+    /// markdown web-view bubble can be sized to its content in the scroll list.
+    @State private var bubbleHeights: [UUID: CGFloat] = [:]
     @State private var prefLanguage: String = "en"
     @State private var didAttachInitial = false
     /// Path of the file auto-attached from the tree selection (`initialURL`),
@@ -733,17 +736,32 @@ struct CodeAssistantPanel: View {
                 Text(isUser ? "You" : "Claude")
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
-                Text(turn.content)
-                    .font(.system(size: 12, design: turn.content.contains("```") ? .monospaced : .default))
-                    .foregroundStyle(theme.current.text)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: 720, alignment: isUser ? .trailing : .leading)
+                if isUser {
+                    // User input is plain text — render verbatim (no markdown).
+                    Text(turn.content)
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.current.text)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: 720, alignment: .trailing)
+                        .padding(10)
+                        .background(theme.current.accent.opacity(0.14))
+                        .cornerRadius(8)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    // Assistant replies are markdown — render headings, tables,
+                    // code blocks, lists, links via the shared MarkdownRenderer.
+                    SelfSizingMarkdownView(
+                        markdown: turn.content,
+                        isDark: theme.current.isDark
+                    ) { h in
+                        if bubbleHeights[turn.id] != h { bubbleHeights[turn.id] = h }
+                    }
+                    .frame(maxWidth: 720, alignment: .leading)
+                    .frame(height: max(bubbleHeights[turn.id] ?? 24, 24))
                     .padding(10)
-                    .background(isUser
-                                ? theme.current.accent.opacity(0.14)
-                                : theme.current.surface)
+                    .background(theme.current.surface)
                     .cornerRadius(8)
-                    .fixedSize(horizontal: false, vertical: true)
+                }
                 if !isUser, activeRepoRoot != nil {
                     Button {
                         reportingFault = FaultReportContext(
