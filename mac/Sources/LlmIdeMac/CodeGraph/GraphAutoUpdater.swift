@@ -30,6 +30,11 @@ final class GraphAutoUpdater: ObservableObject {
     private var timer: Timer?
     private var observer: NSObjectProtocol?
     private var started = false
+    // Recursive FSEvents watcher on the active graphed repo — fires a debounced
+    // incremental regen on edits, so memory tracks code/docs in ~seconds rather
+    // than waiting for the interval timer. nil until a graphed project is active.
+    private var watcher: RepoFileWatcher?
+    private var watchedRoot: String?   // standardized path the watcher is on, or nil
 
     nonisolated private static let log = Logger(subsystem: "com.llmide.macapp",
                                                 category: "GraphAutoUpdater")
@@ -50,7 +55,7 @@ final class GraphAutoUpdater: ObservableObject {
             // The notification block is not @MainActor-typed; hop on.
             Task { @MainActor in
                 self?.graph.resetCache()
-                self?.runIfEligible()
+                self?.runIfEligible()   // also (re)points the file watcher
             }
         }
         scheduleTimer()
@@ -62,7 +67,35 @@ final class GraphAutoUpdater: ObservableObject {
         timer = nil
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
+        watcher?.stop()
+        watcher = nil
         started = false
+    }
+
+    /// Ensure the file watcher is watching `repoRoot` (or stopped when nil).
+    /// Idempotent: restarts only when the watched repo actually changes, so the
+    /// per-tick call from `runIfEligible` is near-free. Driving watcher
+    /// lifecycle from `runIfEligible` (rather than only `start()` + the
+    /// project-switch notification) makes it self-healing: a project restored
+    /// on launch posts no `.activeProjectChanged`, but `runIfEligible` reads the
+    /// live `activeProject` on start and on every timer tick, so the watcher
+    /// still engages — the same way the periodic regen does.
+    private func ensureWatcher(_ repoRoot: URL?) {
+        let target = repoRoot?.standardizedFileURL.path
+        if target == watchedRoot { return }   // already correct (or already nil)
+        watcher?.stop()
+        watcher = nil
+        watchedRoot = nil
+        guard let repoRoot else { return }
+        watcher = RepoFileWatcher(repoRoot: repoRoot) { [weak self] in
+            // FSEvents callback is off the main actor — hop on, then run the
+            // same gated/coalesced regen the timer and project-switch use.
+            Task { @MainActor in self?.runIfEligible() }
+        }
+        if watcher != nil {
+            watchedRoot = target
+            Self.log.info("file watcher started for \(repoRoot.lastPathComponent, privacy: .public)")
+        }
     }
 
     private func scheduleTimer() {
@@ -75,12 +108,15 @@ final class GraphAutoUpdater: ObservableObject {
     /// Resolve the active project's repo + doc roots and, if a graph already
     /// exists for the repo, run an incremental update. No-op otherwise.
     private func runIfEligible() {
-        guard let ap = projectStore?.activeProject else { return }
+        guard let ap = projectStore?.activeProject else { ensureWatcher(nil); return }
         let projectRoot = URL(fileURLWithPath: ap.localPath)
         guard let repoRoot = Self.existingGraphRepo(projectRoot: projectRoot) else {
-            // No graph generated yet — first generation stays manual.
+            // No graph generated yet — first generation stays manual; stop any
+            // watcher left over from a previous (graphed) project.
+            ensureWatcher(nil)
             return
         }
+        ensureWatcher(repoRoot)   // self-healing: engage/repoint the watcher
         // Feed InfiniteBrain the repo itself — the manual "InfiniteBrain" button
         // walks the repo the same way (MemoryGenerator.generate(from: repo)), and
         // a code/<child> repo's docs live *inside* it (e.g. `docs/**/*.md`), not in
