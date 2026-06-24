@@ -33,7 +33,7 @@ version (1 byte) || iv (12 bytes) || AES-256-GCM(plaintext) || tag (16 bytes)
 
 Each user's data key is derived as `HKDF-SHA256(masterKey, salt=userId, info='llmide-vault-v1', length=32)`. The master key never leaves the server process. A DB-only leak yields ciphertext that cannot be decrypted without the master key; one user's ciphertext cannot be used to attack another's because the derived keys differ.
 
-Allowed secret keys are `github.token`, `backlog.apiKey`, `linear.apiKey`, `slack.webhookUrl`, `email.imapPassword`, `claude.apiKey`, `openai.apiKey`, `google.apiKey`, `custom.apiKey`, and `custom.baseUrl` (10 keys total). Attempts to store keys outside this allowlist are rejected at the route layer.
+Allowed secret keys are `github.token`, `backlog.apiKey`, `linear.apiKey`, `slack.webhookUrl`, `slack.botToken`, `email.imapPassword`, `claude.apiKey`, `openai.apiKey`, `google.apiKey`, `custom.apiKey`, and `custom.baseUrl` (11 keys total). Attempts to store keys outside this allowlist are rejected at the route layer.
 
 ## Tenancy
 
@@ -62,6 +62,8 @@ The same `sanitizeLine()` function in the caption scraper strips these delimiter
 ## Audit log
 
 Sensitive operations are recorded in `audit_log(user_id, request_id, ip, ua, action, resource, outcome, detail, created_at)`. Covered actions include: account registration, login success, login failure, password change, secret set, secret delete, logout, and the high-blast-radius KB operations (dispatch, code apply, review approval). The `detail` column is JSON; any field whose key matches credential patterns (`token`, `apiKey`, `password`, `webhookUrl`, etc.) is redacted before the row is written.
+
+**Retention:** audit rows are not kept forever — `purgeOldAuditRows(db, 90)` (`server/audit.mjs`) deletes rows older than 90 days, run on the same auth-GC interval (~6 h) as the token/JTI purges. This bounds both the IP/user-agent retention window and table growth.
 
 ## Known limitations
 

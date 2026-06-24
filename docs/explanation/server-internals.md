@@ -119,8 +119,8 @@ Every owned row carries a `user_id` foreign key.  The tenancy contract:
   info='llmide-vault-v1', length=32)`.  An attacker who reads the
   DB can't decrypt without the master key, and a leak of one user's
   rows doesn't help against another.
-- Allow-listed keys (10): `github.token`, `backlog.apiKey`,
-  `linear.apiKey`, `slack.webhookUrl`, `email.imapPassword`,
+- Allow-listed keys (11): `github.token`, `backlog.apiKey`,
+  `linear.apiKey`, `slack.webhookUrl`, `slack.botToken`, `email.imapPassword`,
   `claude.apiKey`, `openai.apiKey`, `google.apiKey`, `custom.apiKey`,
   `custom.baseUrl`. Authoritative list in `server/vault.mjs`.
 

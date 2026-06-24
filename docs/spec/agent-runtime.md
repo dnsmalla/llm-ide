@@ -288,7 +288,7 @@ The repo-memory block is the **only** app-specific context the global agent rece
 4. `renderIndexedRepos(agentContext)` — `## Indexed code repositories` list (render-indexed-repos.mjs:3–15)
 5. `renderRecentIssues(agentContext)` — `## Recent open issues` list; omitted when empty (render-recent-issues.mjs:6–22)
 6. `renderRecentMeetings(agentContext)` — `## Recent meetings` list; omitted when empty (render-recent-meetings.mjs:4–15)
-7. `renderGraphifyMemory(agentContext, userId)` — Graphify-generated repo memory (repo.md, graph-notes.md, prior Q&A); gated on user's repo allow-list (compose.mjs:35)
+7. `renderGraphifyMemory(agentContext, userId)` — Graphify-generated repo memory (repo.md, graph-notes.md, prior Q&A); gated on user's repo allow-list (compose.mjs:35). Each present repo's block header carries a freshness clause — `(updated ~N ago)` from the memory files' mtime — and an indexed, allow-listed repo with **no** generated memory emits an explicit `No code-graph memory generated for this repo yet.` marker instead of silently contributing nothing, so the agent can weigh or caveat stale/absent grounding (facts only — no "stale" verdict; `memory.mjs`)
 
 Empty sections (empty string return) are filtered before joining, and the **entire assembled block is run through `redactFence`** (compose.mjs) — issue titles, meeting content, repo names, and Graphify memory are all external/user-derived and flow into the internal agent's system prompt, so a `<<<TOOL_CALL>>>` smuggled via (say) a meeting title cannot prime a forged tool call. This block is only injected when `agentContext.includeSystemContext === true` (loop.mjs), which is set only by `askInternal` (ask-internal.mjs).
 
@@ -405,7 +405,7 @@ This cap is aligned with the server-level body cap documented in [`api-server.md
 
 **CLI overload retry:** uses the same `RETRY_DELAYS_MS` schedule. A stderr/stdout match against `/\b529\b|\boverloaded\b|\b503\b|\bservice unavailable\b/i` (runtime.mjs:54–56) sets `err.overloaded = true`, which triggers the retry loop (runtime.mjs:331).
 
-**Key redaction:** `redactKey(text, apiKey)` (runtime.mjs:64–74) first masks the literal in-flight API key, then runs the shared `redactSecrets` pattern set (`extension/core/redact-secrets.mjs`) over the text — scrubbing every recognized credential shape (`sk-ant-*`, `ghp_*`, `github_pat_*`, Slack `xox*`, Google `AIza*`, AWS `AKIA*`, `Bearer …`, `apiKey=…`), not just Anthropic keys — before it reaches logs or client error envelopes. The pattern set is the single source of truth shared with the audit log and outcome watcher, so every sink redacts identically.
+**Key redaction:** `redactKey(text, apiKey)` (runtime.mjs:64–74) first masks the literal in-flight API key, then runs the shared `redactSecrets` pattern set (`extension/core/redact-secrets.mjs`) over the text — scrubbing every recognized credential shape (`sk-ant-*`, OpenAI `sk-proj-*` / `sk-…` classic, `ghp_*`, `github_pat_*`, Slack `xox*`, Google `AIza*`, AWS `AKIA*`, `Bearer …`, `apiKey=…`), not just Anthropic keys — before it reaches logs or client error envelopes. The pattern set is the single source of truth shared with the audit log and outcome watcher, so every sink redacts identically.
 
 ---
 

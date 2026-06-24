@@ -9,6 +9,29 @@ source: extension/kb/migrations/*.sql
 
 SQLite, WAL + FTS5. Source: `extension/kb/migrations/*.sql`.
 
+## `activity`
+
+_From `0018_activity.sql`._
+
+| Column | Type / constraints |
+|---|---|
+| `id` | INTEGER PRIMARY KEY AUTOINCREMENT |
+| `user_id` | TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE |
+| `kind` | TEXT NOT NULL |
+| `title` | TEXT NOT NULL |
+| `detail` | TEXT |
+| `link` | TEXT |
+| `created_at` | TEXT NOT NULL DEFAULT (datetime('now')) |
+
+## `activity_seen`
+
+_From `0018_activity.sql`._
+
+| Column | Type / constraints |
+|---|---|
+| `user_id` | TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE |
+| `last_seen_id` | INTEGER NOT NULL DEFAULT 0 |
+
 ## `agent_ask_messages`
 
 _From `0007_agent_ask_history.sql`._
@@ -228,6 +251,26 @@ _From `0003_user_repos.sql`._
 | `user_id` | TEXT REFERENCES users(id) ON DELETE CASCADE |
 | `expires_at` | TEXT NOT NULL |
 
+## `slack_seen`
+
+_From `0017_slack_state.sql`._
+
+| Column | Type / constraints |
+|---|---|
+| `user_id` | TEXT NOT NULL |
+| `message_ts` | TEXT NOT NULL |
+| `seen_at` | TEXT NOT NULL DEFAULT (datetime('now')) |
+
+## `slack_state`
+
+_From `0017_slack_state.sql`._
+
+| Column | Type / constraints |
+|---|---|
+| `user_id` | TEXT NOT NULL |
+| `channel_id` | TEXT NOT NULL |
+| `last_ts` | TEXT |
+
 ## `sources`
 
 _From `0005_doc_source_kind.sql`._
@@ -292,6 +335,7 @@ _From `0002_multitenancy.sql`._
 | `status` | TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','disabled')) |
 | `created_at` | TEXT NOT NULL DEFAULT (datetime('now')) |
 | `last_login_at` | TEXT |
+| `tokens_valid_after` | INTEGER NOT NULL DEFAULT 0 |
 
 ## Full-text search
 
@@ -309,6 +353,7 @@ CREATE VIRTUAL TABLE search USING fts5(meeting_id UNINDEXED, entity_id UNINDEXED
 
 | Index | Table | Columns | WHERE clause | Source |
 |---|---|---|---|---|
+| `idx_activity_user_time` | `activity` | `user_id, created_at DESC, id DESC` |  | `0018_activity.sql` |
 | `agent_ask_messages_user_seq` | `agent_ask_messages` | `user_id, seq DESC` |  | `0007_agent_ask_history.sql` |
 | `idx_agent_feedback_task` | `agent_feedback` | `user_id, plan_task_id` |  | `0004_agent_feedback.sql` |
 | `idx_agent_feedback_user_time` | `agent_feedback` | `user_id, recorded_at` |  | `0004_agent_feedback.sql` |
@@ -357,13 +402,16 @@ All triggers keep the `search` FTS5 table in sync with their owning tables.
 | `trg_entities_ai` | AFTER | INSERT | `entities` | `0001_initial.sql` |
 | `trg_meetings_ad` | AFTER | DELETE | `meetings` | `0001_initial.sql` |
 | `trg_meetings_ai` | AFTER | INSERT | `meetings` | `0001_initial.sql` |
+| `trg_meetings_au` | AFTER | UPDATE | `meetings` | `0014_fts_update_triggers.sql` |
 | `trg_outcomes_ad` | AFTER | DELETE | `outcomes` | `0001_initial.sql` |
-| `trg_outcomes_ai` | AFTER | INSERT | `outcomes` | `0001_initial.sql` |
+| `trg_outcomes_ai` | AFTER | INSERT | `outcomes` | `0015_outcomes_fts_body.sql` |
+| `trg_outcomes_au` | AFTER | UPDATE | `outcomes` | `0015_outcomes_fts_body.sql` |
 | `trg_plan_tasks_ad` | AFTER | DELETE | `plan_tasks` | `0011_plan_tasks_indexes.sql` |
 | `trg_plan_tasks_ai` | AFTER | INSERT | `plan_tasks` | `0011_plan_tasks_indexes.sql` |
 | `trg_plan_tasks_au` | AFTER | UPDATE | `plan_tasks` | `0011_plan_tasks_indexes.sql` |
 | `trg_plans_ad` | AFTER | DELETE | `plans` | `0001_initial.sql` |
 | `trg_plans_ai` | AFTER | INSERT | `plans` | `0001_initial.sql` |
+| `trg_plans_au` | AFTER | UPDATE | `plans` | `0014_fts_update_triggers.sql` |
 | `trg_sources_ad` | AFTER | DELETE | `sources` | `0005_doc_source_kind.sql` |
 | `trg_sources_ai` | AFTER | INSERT | `sources` | `0005_doc_source_kind.sql` |
 | `trg_sources_au` | AFTER | UPDATE | `sources` | `0005_doc_source_kind.sql` |

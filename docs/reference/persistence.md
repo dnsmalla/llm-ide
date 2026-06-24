@@ -95,7 +95,7 @@ breaking change that resets that value to its default.
 | Mac service id | `com.llmide.macapp` |
 | Mac entries | `<host>::refresh_token`, `gitlab::<host>::token` |
 | Server vault | `user_secrets(user_id, key, ciphertext)` table; ciphertext = `version ‖ iv(12) ‖ aes-256-gcm ‖ tag(16)` |
-| Server allowed keys | `claude.apiKey`, `github.token`, `backlog.apiKey`, `linear.apiKey`, `slack.webhookUrl` |
+| Server allowed keys | 11 keys: `github.token`, `backlog.apiKey`, `linear.apiKey`, `slack.webhookUrl`, `slack.botToken`, `email.imapPassword`, `claude.apiKey`, `openai.apiKey`, `google.apiKey`, `custom.apiKey`, `custom.baseUrl` (authoritative list in `server/vault.mjs`) |
 | Migration policy | The leading byte of every ciphertext is a version tag — bump it (and add a parallel decrypt branch) when rotating crypto. See ADR-0007. |
 
 ## Schema-change checklist

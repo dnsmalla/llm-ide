@@ -61,7 +61,7 @@ Pre-existing rows from earlier single-user installs are back-filled to `user_id 
 | Auth | JWT HS256, 15-minute access tokens. Refresh tokens are opaque base64url, hashed (sha256) at rest, rotate on every refresh. |
 | Password | Bcrypt cost 12. Unknown-email login compares against a sentinel hash so timing can't reveal account existence. |
 | Vault | `user_secrets(user_id, key, ciphertext)` where ciphertext = `version \|\| iv(12) \|\| aes-256-gcm(plaintext) \|\| tag(16)`. Per-user data key =`HKDF-SHA256(masterKey, salt=userId, info='llmide-vault-v1')`. |
-| Allowed secret keys | 10 total — `github.token`, `backlog.apiKey`, `linear.apiKey`, `slack.webhookUrl`, `email.imapPassword`, `claude.apiKey`, `openai.apiKey`, `google.apiKey`, `custom.apiKey`, `custom.baseUrl`. Authoritative list in `server/vault.mjs`; see [`spec/knowledge-base.md`](../spec/knowledge-base.md) §6. |
+| Allowed secret keys | 11 total — `github.token`, `backlog.apiKey`, `linear.apiKey`, `slack.webhookUrl`, `slack.botToken`, `email.imapPassword`, `claude.apiKey`, `openai.apiKey`, `google.apiKey`, `custom.apiKey`, `custom.baseUrl`. Authoritative list in `server/vault.mjs`; see [`spec/knowledge-base.md`](../spec/knowledge-base.md) §6. |
 | Rate limiting | Token-bucket per `(profile, scope)`. Scope = `userId` for authed routes, remote IP for unauthed. 429 carries `Retry-After`. |
 | Guardrails | 7 secret patterns, 5 PII patterns, 5 destructive-op patterns. Run at submit AND at approval. |
 | Prompt injection | User content fenced with `<<<BEGIN>>>…<<<END>>>`; sanitizer strips those delimiters from input. |

@@ -73,7 +73,7 @@ The complete DDL — column types, constraints, indexes, the `search` FTS5 virtu
 
 That page is generated from `extension/kb/migrations/*.sql` and must not be edited by hand. Summary of what is there:
 
-- 20 tables: `agent_ask_messages`, `agent_feedback`, `audit_log`, `email_seen`, `email_state`, `entities`, `meetings`, `outcomes`, `password_reset_tokens`, `plan_tasks`, `plans`, `rate_limit_buckets`, `refresh_tokens`, `review_items`, `revoked_jti`, `schema_migrations`, `sources`, `user_flags`, `user_repos`, `user_secrets`, `users`.
+- 24 tables: `activity`, `activity_seen`, `agent_ask_messages`, `agent_feedback`, `audit_log`, `email_seen`, `email_state`, `entities`, `meetings`, `outcomes`, `password_reset_tokens`, `plan_tasks`, `plans`, `rate_limit_buckets`, `refresh_tokens`, `review_items`, `revoked_jti`, `slack_seen`, `slack_state`, `sources`, `user_flags`, `user_repos`, `user_secrets`, `users`.
 - 1 FTS5 virtual table: `search` (columns: `meeting_id UNINDEXED`, `entity_id UNINDEXED`, `kind UNINDEXED`, `title`, `body`; tokenizer: `unicode61 remove_diacritics 2`).
 - Triggers maintaining the FTS index automatically on INSERT/UPDATE/DELETE of `meetings`, `entities`, `sources`, `plans`, `plan_tasks`, and `outcomes`.
 - 38 explicit indexes (see the reference page's Indexes table).
@@ -308,13 +308,14 @@ AES-256-GCM (`vault.mjs:58`): `crypto.createCipheriv('aes-256-gcm', key, iv)`.
 
 ### Allow-listed vault keys
 
-`vault.mjs:110–133`. Any `setSecret` / `getSecret` call with a key not in this set throws `Error('Unknown vault key: <key>')`:
+`vault.mjs:110–137`. Any `setSecret` / `getSecret` call with a key not in this set throws `Error('Unknown vault key: <key>')`:
 
 ```
 'github.token'
 'backlog.apiKey'
 'linear.apiKey'
 'slack.webhookUrl'
+'slack.botToken'
 'email.imapPassword'
 'claude.apiKey'
 'openai.apiKey'
