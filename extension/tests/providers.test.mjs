@@ -11,7 +11,7 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
-const { resolveProvider, providerApiKey, completeViaApi, verifyProvider, cliInvocation, listProviderModels, chatModels, customBaseUrl, spawnCli, runViaCli } =
+const { resolveProvider, providerApiKey, completeViaApi, verifyProvider, cliInvocation, listProviderModels, chatModels, customBaseUrl, spawnCli, runViaCli, anthropicWebCliArgs } =
   await import('../agents/providers.mjs');
 
 function mockFetch(handler) {
@@ -223,6 +223,20 @@ test('cliInvocation: standard non-interactive form per provider', () => {
   assert.deepEqual(cliInvocation('openai', 'hi'),    { bin: 'codex',  args: ['exec', 'hi'] });
   assert.deepEqual(cliInvocation('google', 'hi'),    { bin: 'gemini', args: ['-p', 'hi'] });
   assert.equal(cliInvocation('skynet', 'hi'), null);
+});
+
+test('anthropicWebCliArgs: enables AND pre-approves a single web tool', () => {
+  // Both flags matter: --tools makes the tool available, --allowedTools
+  // pre-approves it so headless `-p` mode runs it instead of declining
+  // ("I don't have permission to use WebFetch yet"). Regression guard.
+  assert.deepEqual(
+    anthropicWebCliArgs('q', { tool: 'WebSearch' }),
+    ['--strict-mcp-config', '--tools', 'WebSearch', '--allowedTools', 'WebSearch', '-p', 'q'],
+  );
+  assert.deepEqual(
+    anthropicWebCliArgs('q', { tool: 'WebFetch' }),
+    ['--strict-mcp-config', '--tools', 'WebFetch', '--allowedTools', 'WebFetch', '-p', 'q'],
+  );
 });
 
 test('cliInvocation: binary overridable via LLMIDE_<PROVIDER>_CLI', () => {

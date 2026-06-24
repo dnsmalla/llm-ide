@@ -285,9 +285,14 @@ const CLI_ARG_BUILDERS = {
  * prompt, { args })`. Unlike the default loop's `--tools ''`, this allowlists a
  * single tool so the bounded search/fetch subprocess can act, while still
  * loading zero MCP servers (`--strict-mcp-config`).
+ *
+ * Both flags are required: `--tools` makes the tool AVAILABLE, but Claude
+ * Code's permission layer still gates its USE — in headless `-p` mode it can't
+ * prompt, so an un-approved tool is declined ("I don't have permission to use
+ * WebFetch yet"). `--allowedTools` pre-approves it so the call actually runs.
  */
 export function anthropicWebCliArgs(prompt, { tool = 'WebSearch' } = {}) {
-  return ['--strict-mcp-config', '--tools', tool, '-p', prompt];
+  return ['--strict-mcp-config', '--tools', tool, '--allowedTools', tool, '-p', prompt];
 }
 
 /** The {bin, args} a provider's CLI is invoked with for a prompt. Pure —
