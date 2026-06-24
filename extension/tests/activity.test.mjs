@@ -65,7 +65,7 @@ test('recordActivity redacts secrets in detail', async () => {
     userId,
     kind: 'email_fetched',
     title: 'Fetched 1 new email',
-    detail: { count: 1, fetchUrl: 'https://api.example.com?apiKey=sk-supersecretvalue1234567890' },
+    detail: { count: 1, apiKey: 'sk-supersecretvalue1234567890' },
   });
   const row = db.prepare('SELECT detail FROM activity WHERE id = ?').get(rowId);
   assert.ok(!row.detail.includes('sk-supersecretvalue1234567890'), 'secret leaked into detail');

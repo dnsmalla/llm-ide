@@ -4,7 +4,7 @@
 //
 // All functions are best-effort: callers wrap in try/catch and a failure here
 // must never throw into the operation that triggered the event.
-import { redactSecrets } from '../core/redact-secrets.mjs';
+import { redact } from '../server/audit.mjs';
 
 // The v1 event-kind allow-list (shared contract; Swift mirrors this).
 export const ACTIVITY_KINDS = new Set([
@@ -30,14 +30,14 @@ function clamp(str, cap) {
 }
 
 // Redact + stringify a detail object, capped to DETAIL_CAP chars.
+// Mirrors recordAudit: structured key-name redaction first (catches
+// object-property secrets like { apiKey: 'sk-...' }), then stringify,
+// then cap — the same order audit.mjs uses.
 function encodeDetail(detail) {
   if (detail == null) return null;
   let json;
-  try { json = JSON.stringify(detail); } catch { return null; }
-  // redactSecrets operates on the serialized string (same posture as
-  // recordAudit, which truncates first then redacts the text).
-  const redacted = redactSecrets(json.length > DETAIL_CAP ? json.slice(0, DETAIL_CAP) : json);
-  return redacted.length > DETAIL_CAP ? redacted.slice(0, DETAIL_CAP) : redacted;
+  try { json = JSON.stringify(redact(detail)); } catch { return null; }
+  return json.length > DETAIL_CAP ? json.slice(0, DETAIL_CAP) : json;
 }
 
 // Insert one event and prune the user's feed to the newest KEEP_PER_USER rows.
