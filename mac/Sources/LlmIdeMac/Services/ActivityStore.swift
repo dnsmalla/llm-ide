@@ -60,6 +60,7 @@ final class ActivityStore {
     // MARK: Internals
 
     private weak var api: LlmIdeAPIClient?
+    // pollTask uses [weak self]; it self-terminates on deallocation.
     private var pollTask: Task<Void, Never>?
     private let pollInterval: Duration = .seconds(25)
     private let log = Logger(subsystem: "com.llmide.macapp", category: "ActivityStore")
@@ -107,7 +108,7 @@ final class ActivityStore {
                 authenticated: true
             )
 
-            let newItems = resp.items.map { $0.toActivityItem() }
+            let newItems = resp.items.map { $0.toActivityItem() }.filter { $0.id > self.lastId }
             if !newItems.isEmpty {
                 // Prepend newest-first so the feed shows recent events at top.
                 items = newItems + items
@@ -176,6 +177,8 @@ final class ActivityStore {
             } catch {
                 self.log.error("activity markSeen failed: \(error.localizedDescription, privacy: .public)")
             }
+            // Optimistic clear: hide the badge immediately on open. If the POST failed,
+            // the next refresh() resyncs unreadCount from the server.
             self.unreadCount = 0
         }
     }
@@ -274,12 +277,4 @@ final class ActivityStore {
         let ok: Bool
     }
 
-    // MARK: - Deinit
-
-    // The poll loop captures [weak self] so it self-terminates when the
-    // store is released.  ActivityStore is singleton-lifetime in practice
-    // (AppShell holds it for the app's duration) so explicit Task
-    // cancellation in deinit is not needed — and the @MainActor isolation
-    // makes it impossible without a nonisolated workaround.
-    deinit {}
 }
