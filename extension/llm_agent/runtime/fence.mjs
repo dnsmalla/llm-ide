@@ -58,6 +58,9 @@ export function validateArgs(schema, args) {
       if (def.maxLength != null && v.length > def.maxLength) {
         return { error: `argument '${name}' exceeds maxLength ${def.maxLength}` };
       }
+      if (Array.isArray(def.enum) && def.enum.length && !def.enum.includes(v)) {
+        return { error: `argument '${name}' must be one of: ${def.enum.join(', ')}` };
+      }
     } else if (def.type === 'number') {
       if (typeof v !== 'number' || !Number.isFinite(v)) {
         return { error: `argument '${name}' must be a finite number` };
