@@ -92,6 +92,11 @@ final class RegressionRunner: ObservableObject {
     /// available in StateObject init). Tests leave it nil.
     weak var config: AppConfig?
 
+    /// Activity feed store. Set by the owning context (app entry or
+    /// service) after init. Mirrors the `weak var config` pattern.
+    /// Tests leave it nil.
+    weak var activity: ActivityStore?
+
     init(prompter: RegressionPrompter,
          judge: RegressionJudge? = nil,
          store: MemoryStore = MemoryStore(),
@@ -195,6 +200,14 @@ final class RegressionRunner: ObservableObject {
         }
         let summary = "Run complete · regressed: \(results.filter { $0.verdict == .regressed }.count) · unchanged: \(results.filter { $0.verdict == .unchanged }.count) · failed: \(results.filter { if case .failed = $0.verdict { return true }; return false }.count) · elapsed: \(String(format: "%.1fs", Date().timeIntervalSince(startedAt)))"
         appendLog(.info, summary)
+        let regressedCount = results.filter { $0.verdict == .regressed }.count
+        let unchangedCount = results.filter { $0.verdict == .unchanged }.count
+        let failedCount = results.filter { if case .failed = $0.verdict { return true }; return false }.count
+        activity?.report(
+            kind: .regressionDone,
+            title: "Regression complete — \(regressedCount) regressed, \(unchangedCount) unchanged",
+            detail: ["regressed": regressedCount, "unchanged": unchangedCount, "failed": failedCount]
+        )
 
         // Refresh the faults registry CSV so it always reflects the
         // post-run state. When auto-reopen is on, regressed faults were

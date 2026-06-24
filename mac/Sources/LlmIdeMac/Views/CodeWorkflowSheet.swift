@@ -5,6 +5,7 @@ import SwiftUI
 struct CodeWorkflowSheet: View {
     @StateObject private var svc: CodeWorkflowService
     @Environment(\.dismiss) private var dismiss
+    @Environment(ActivityStore.self) private var activity
     @EnvironmentObject private var appConfig: AppConfig
     @EnvironmentObject private var theme: ThemeStore
     @State private var showExistingPicker = false
@@ -58,6 +59,8 @@ struct CodeWorkflowSheet: View {
         }
         .frame(minWidth: 640, minHeight: 520)
         .task {
+            // Wire the activity store so createIssue() can report events.
+            svc.activity = activity
             if let pf = prefill, svc.createdIssue == nil {
                 await svc.bootstrapFromExistingIssue(number: pf.number, plan: pf.plan)
             }

@@ -25,6 +25,11 @@ final class GraphAutoUpdater: ObservableObject {
     /// to the UI. `weak` because the store is owned by the app's `@StateObject`.
     weak var sessionStore: GraphSessionStore?
 
+    /// Activity feed store. Set once by the app entry after construction.
+    /// `weak` because the store is owned by the app's `@State`. Mirrors the
+    /// `weak var config` pattern on `RegressionRunner`.
+    weak var activity: ActivityStore?
+
     private weak var projectStore: ProjectStore?
     private let intervalSeconds: TimeInterval
     private var timer: Timer?
@@ -154,6 +159,14 @@ final class GraphAutoUpdater: ObservableObject {
         store.store(repo: repoRoot, mode: "all", graph: graph.mergedGraph,
                     chunks: graph.docChunks, docCount: graph.docCount, laidOut: false, docFingerprint: fp)
         Self.log.info("published auto-graph to session store: code=\(self.graph.codeGraph.nodes.count, privacy: .public) doc=\(self.graph.docGraph.nodes.count, privacy: .public) all=\(self.graph.mergedGraph.nodes.count, privacy: .public) for \(repoRoot.lastPathComponent, privacy: .public)")
+        activity?.report(
+            kind: .knowledgeUpdated,
+            title: "Project knowledge updated — \(graph.codeGraph.nodes.count) code · \(graph.docGraph.nodes.count) doc nodes",
+            detail: ["repo": repoRoot.lastPathComponent,
+                     "codeNodes": graph.codeGraph.nodes.count,
+                     "docNodes": graph.docGraph.nodes.count,
+                     "mergedNodes": graph.mergedGraph.nodes.count]
+        )
     }
 
     /// The repo that already has a generated code graph (`system/graph/index.md`):

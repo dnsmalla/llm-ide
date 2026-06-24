@@ -40,6 +40,11 @@ final class AutoCodeUpdateService: ObservableObject {
     private let api: LlmIdeAPIClient?
     private let log = Logger(subsystem: "com.llmide.macapp", category: "AutoCodeUpdateService")
 
+    /// Activity feed store. Set once by the app entry after construction.
+    /// `weak` because the store is owned by the app's `@State`. Mirrors the
+    /// `weak var config` pattern on `RegressionRunner`.
+    weak var activity: ActivityStore?
+
     private var timer: Timer?
     /// Floor for the configurable cadence so a 0/garbage value can't spin
     /// the timer hot.
@@ -314,6 +319,12 @@ final class AutoCodeUpdateService: ObservableObject {
                 let created = try await client.createIssue(projectId: projectId, payload: payload)
                 registry.register(action: action, issueIid: created.number)
                 createdCount += 1
+                activity?.report(
+                    kind: .issueCreated,
+                    title: "Issue created — \(created.title)",
+                    detail: ["title": created.title, "number": created.number, "url": created.webUrl],
+                    link: created.webUrl
+                )
             } catch {
                 log.error("Failed to create issue for action \(action.id): \(error)")
             }
@@ -517,6 +528,7 @@ final class AutoCodeUpdateService: ObservableObject {
         let runner = RegressionRunner(prompter: prompter, judge: judge,
                                       verifier: ShellFaultVerifier(), repairer: repairer,
                                       verifyTimeout: config.regressionVerifyTimeout, config: config)
+        runner.activity = activity
         await runner.run(faultsRoot: faultsRoot, gitRoot: gitRootURL,
                          autoReopen: config.regressionAutoReopen,
                          attemptRepair: config.regressionAttemptRepair)

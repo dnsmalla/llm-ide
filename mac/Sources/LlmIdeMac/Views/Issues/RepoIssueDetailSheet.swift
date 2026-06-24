@@ -20,6 +20,7 @@ struct RepoIssueDetailSheet: View {
     var onDismiss: () -> Void
 
     @EnvironmentObject var theme: ThemeStore
+    @Environment(ActivityStore.self) private var activity
 
     @State private var current: RepoIssue
     @State private var notes: [RepoNote] = []
@@ -285,6 +286,12 @@ struct RepoIssueDetailSheet: View {
             // list reflects the new total without another round trip.
             current = current.bumping(commentCount: 1)
             onIssueChanged(current)
+            activity.report(
+                kind: .commentAdded,
+                title: "Comment added to issue #\(current.number)",
+                detail: ["iid": current.number, "url": current.webUrl],
+                link: current.webUrl
+            )
         } catch {
             topError = error.localizedDescription
         }

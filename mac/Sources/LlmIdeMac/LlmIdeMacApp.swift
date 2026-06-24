@@ -48,6 +48,7 @@ struct LlmIdeMacApp: App {
     @StateObject private var graphSessionStore = GraphSessionStore()
     @State private var backend = BackendManager()
     @State private var quickSwitcherShown = false
+    @State private var activityStore: ActivityStore
     private let api: LlmIdeAPIClient
     private let autoCapture: AutoCaptureService
 
@@ -110,7 +111,15 @@ struct LlmIdeMacApp: App {
         self._projectStore = StateObject(wrappedValue: projectStoreInstance)
         let runs = AgentRunsStore(api: client)
         self._agentRuns = StateObject(wrappedValue: runs)
-        self._graphAutoUpdater = StateObject(wrappedValue: GraphAutoUpdater(projectStore: projectStoreInstance))
+        let autoUpdater = GraphAutoUpdater(projectStore: projectStoreInstance)
+        self._graphAutoUpdater = StateObject(wrappedValue: autoUpdater)
+        let activity = ActivityStore(api: client)
+        self._activityStore = State(wrappedValue: activity)
+        // Wire activity store weak refs on app-level services so they can
+        // report events without a global singleton. Mirrors weak var config
+        // on RegressionRunner.
+        autoUpdater.activity = activity
+        autoCode.activity = activity
         self.api = client
         self.autoCapture = AutoCaptureService(capture: orchestrator, config: cfg)
     }
@@ -143,6 +152,7 @@ struct LlmIdeMacApp: App {
                 .environmentObject(graphAutoUpdater)
                 .environmentObject(graphSessionStore)
                 .environment(backend)
+                .environment(activityStore)
                 // 1000 gives the 3-pane Review layout breathing room
                 // (sidebar ~240 + code ~380 + assistant ~280 = 900,
                 // plus toolbar + dividers + comfort).  Users can still

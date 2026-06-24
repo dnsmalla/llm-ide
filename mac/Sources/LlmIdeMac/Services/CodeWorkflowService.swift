@@ -102,6 +102,10 @@ final class CodeWorkflowService: ObservableObject {
     private let api: LlmIdeAPIClient
     private let log = Logger(subsystem: "com.llmide.macapp", category: "CodeWorkflowService")
 
+    /// Activity feed store. Set by the presenting view after init
+    /// (mirrors the `weak var config` pattern on `RegressionRunner`).
+    weak var activity: ActivityStore?
+
     // MARK: - Init
 
     init(backend: RepoBackend,
@@ -176,6 +180,12 @@ final class CodeWorkflowService: ObservableObject {
             mrDescription = "Closes #\(issue.number)\n\n\(issueDescription)"
             aiPrompt = "Implement the following in the linked repo:\n\n\(issue.title)\n\n\(issueDescription)"
             log.info("issue_created number=\(issue.number, privacy: .public)")
+            activity?.report(
+                kind: .issueCreated,
+                title: "Issue created — \(issue.title)",
+                detail: ["title": issue.title, "number": issue.number, "url": issue.webUrl],
+                link: issue.webUrl
+            )
             advance()
         } catch {
             stepError = error.localizedDescription
