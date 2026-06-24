@@ -140,6 +140,99 @@ final class RepoManager {
         try content.write(to: fileURL, atomically: true, encoding: .utf8)
     }
 
+    // MARK: - Agent git-op
+
+    static let defaultBranchNames: Set<String> = ["main", "master"]
+
+    /// Current branch name, or "" if detached/unknown.
+    func currentBranch(at repoURL: URL) async throws -> String {
+        let (out, _) = try await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd: repoURL)
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func agentBranchName(from slug: String?) -> String {
+        let base = (slug ?? "change").lowercased()
+            .replacingOccurrences(of: "[^a-z0-9-]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return "agent/\(base.isEmpty ? "change" : base)"
+    }
+
+    /// Execute an allow-listed git op on `repoURL`, enforcing branch-first /
+    /// protected-main. Returns combined output text. Throws on git failure or a
+    /// policy violation (which the caller surfaces to the agent).
+    func runGitOp(_ a: GitOpArgs, at repoURL: URL, token: String? = nil) async throws -> String {
+        // Confirm it's a git repo (clean error if not).
+        _ = try await git(["rev-parse", "--is-inside-work-tree"], cwd: repoURL)
+        let branch = try await currentBranch(at: repoURL)
+        let onDefault = Self.defaultBranchNames.contains(branch)
+
+        func run(_ argv: [String], tok: String? = nil) async throws -> String {
+            let (out, err) = try await git(argv, cwd: repoURL, token: tok)
+            return [out, err].filter { !$0.isEmpty }.joined(separator: "\n")
+        }
+
+        switch a.op {
+        // ---- read (no policy) ----
+        case .status:  return try await run(["status", "--short", "--branch"])
+        case .log:     return try await run(["log", "--oneline", "-n", "20", "--", a.ref ?? "HEAD"].compactMap { $0 == "--" && a.ref == nil ? nil : $0 })
+        case .diff:    return try await run(a.ref.map { ["diff", "--stat", $0] } ?? ["diff", "--stat"])
+        case .branch:  return try await run(["branch", "--all"])
+
+        // ---- safe-write ----
+        case .add:     return try await run(["add", "-A"])
+        case .create_branch:
+            let name = a.branch ?? agentBranchName(from: a.slug)
+            return try await run(["checkout", "-b", name])
+        case .checkout:
+            guard let b = a.branch else { throw RepoError.commandFailed("checkout needs a branch") }
+            return try await run(["checkout", b])
+        case .commit:
+            guard let msg = a.message, !msg.isEmpty else { throw RepoError.commandFailed("commit needs a message") }
+            // BRANCH-FIRST: never commit on the default branch — make a feature branch first.
+            if onDefault {
+                let name = agentBranchName(from: a.slug)
+                _ = try await run(["checkout", "-b", name])
+            }
+            _ = try await run(["add", "-A"])
+            return try await run(["commit", "-m", msg])
+        case .pull_ff:
+            return try await run(["pull", "--ff-only", "origin", branch], tok: token)
+        case .push:
+            // PROTECTED MAIN: only ever push the CURRENT (non-default) branch.
+            if onDefault {
+                throw RepoError.commandFailed("Refusing to push the default branch (\(branch)). I work on a feature branch; use merge_to_main to land changes.")
+            }
+            return try await run(["push", "--set-upstream", "origin", branch], tok: token)
+
+        // ---- destructive ----
+        case .merge:
+            guard let src = a.branch else { throw RepoError.commandFailed("merge needs a source branch") }
+            if onDefault {
+                throw RepoError.commandFailed("Refusing to merge into the default branch directly. Use merge_to_main for that explicit step.")
+            }
+            return try await run(["merge", "--no-ff", "--", src])
+        case .revert:
+            return try await run(["revert", "--no-edit", "--", a.ref ?? "HEAD"])
+        case .reset:
+            let mode = a.mode ?? "mixed"
+            return try await run(["reset", "--\(mode)", "--", a.ref ?? "HEAD"])
+        case .stash:
+            return try await run(["stash", "push", "-u"])
+        case .clean:
+            return try await run(["clean", "-fd"])   // NOT -x; never nukes ignored files without explicit intent
+        case .merge_to_main:
+            // The ONLY op allowed to reach origin/<default>. Caller (sheet) has
+            // confirmed at destructive tier.
+            guard let src = a.branch, !Self.defaultBranchNames.contains(src) else {
+                throw RepoError.commandFailed("merge_to_main needs a non-default source branch")
+            }
+            let target = Self.defaultBranchNames.contains(branch) ? branch : "main"
+            _ = try await run(["checkout", target])
+            _ = try await run(["merge", "--ff-only", "--", src])
+            return try await run(["push", "origin", target], tok: token)
+        }
+    }
+
     // MARK: - Private helpers
 
     /// If a previous app version baked credentials into the `origin` URL
