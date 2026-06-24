@@ -24,6 +24,8 @@ The following files are governed by this document.
 - `extension/llm_agent/runtime/handlers/ask-internal.mjs`
 - `extension/llm_agent/runtime/handlers/ask-subagent.mjs`
 - `extension/llm_agent/runtime/handlers/search-kb.mjs`
+- `extension/llm_agent/runtime/handlers/web-search.mjs` — web search; backed by `extension/agents/web-client.mjs`
+- `extension/llm_agent/runtime/handlers/fetch-url.mjs` — URL fetch (SSRF-guarded); same backend
 
 **Skill loading and registry**
 
@@ -34,7 +36,7 @@ The following files are governed by this document.
 **Prompt and skill content** (linked, not reproduced here)
 
 - `extension/llm_agent/global/prompt.md` — global agent role
-- `extension/llm_agent/global/ask-internal.md`, `ask-subagent.md`, `update-file.md` — global skill bodies
+- `extension/llm_agent/global/ask-internal.md`, `ask-subagent.md`, `update-file.md`, `web-search.md`, `fetch-url.md` — global skill bodies
 - `extension/llm_agent/global/compose-prompt.mjs` — global prompt assembly
 - `extension/llm_agent/internal/prompt.md` — internal agent role
 - `extension/llm_agent/internal/skills/*.md` — internal skill bodies (`_base.md`, `search-kb.md`, `create-gitlab-issue.md`, `comment-gitlab-issue.md`, `trigger-review-code.md`)
@@ -183,6 +185,8 @@ The result is visually identical but is no longer matched by the `indexOf`-based
 - Tool results (nested agent answers, KB snippets): `redactDeep` is applied recursively before embedding as `<<<TOOL_RESULT>>>` (loop.mjs:111)
 - Tool errors: redacted inline (loop.mjs:113)
 - Sub-loop replies: redacted at the handler boundary before returning — `ask-internal` (ask-internal.mjs:64) and `ask-subagent` (ask-subagent.mjs:113) both call `redactFence(result.reply)` — providing defense-in-depth before the outer loop's `redactDeep` runs
+- Internal system context: the entire `composeSystemContext` block — app state (issues, meetings, project, repos) plus the Graphify repo-memory — is redacted before it becomes the internal agent's `# System context` (compose.mjs)
+- Global repo-memory: the Graphify memory block injected into the global agent's base is redacted before injection (route.mjs)
 
 **Threat addressed:** a meeting title, issue body, or KB snippet containing the literal string `<<<TOOL_CALL>>>` would otherwise survive `JSON.stringify` as a parseable sentinel and forge a write-tool invocation when the outer loop embeds the answer (loop.mjs:9–13).
 
@@ -218,6 +222,16 @@ Valid `schema` argument types: `string`, `number`, `boolean`, `string[]` (loader
 **Read skills** have a server-side handler function registered in `INTERNAL_HANDLERS` (ask-internal.mjs:21) or the global handler map (route.mjs:115–146). When the loop dispatches a read skill, the handler runs server-side and its result is fed back into the loop as `<<<TOOL_RESULT>>>`. The model sees the result and may make further tool calls.
 
 **Write skills** cause the loop to exit immediately, returning `{ reply: preToolText, pendingTool: { name, arguments } }` to the caller (loop.mjs:218–223). No server-side code executes; the client is responsible for showing the editable sheet and applying the change. A write fence surfaced from a nested internal loop is propagated up through any intermediate read-handler results unchanged (loop.mjs:252–258).
+
+### Web tools (`web-search`, `fetch-url`)
+
+Both are global read skills. Their handlers resolve a backend at call time, reusing the app's existing Anthropic credential the same way `runClaude` does — no SerpAPI key required by default:
+
+1. **Anthropic API key present** (`providerApiKey(userId, 'anthropic')`) → the Messages API's native `web_search` / `web_fetch` server tools (`web-client.mjs` → `searchWebViaAnthropic` / `fetchUrlViaAnthropic`).
+2. **Otherwise** → the `claude` CLI's built-in `WebSearch` / `WebFetch` via the operator/subscription login. The CLI argv (`anthropicWebCliArgs`, providers.mjs) passes both `--tools <tool>` (makes it available) **and** `--allowedTools <tool>` (pre-approves it) — without the latter, headless `-p` mode declines the tool ("I don't have permission to use WebFetch yet").
+3. **Fallback** → SerpAPI (`searchWeb`, vault `serpapi.apiKey` or `LLMIDE_SERPAPI_KEY`) / a direct HTTP fetch with HTML stripped.
+
+`web-search` returns `{ answer, sources: [{title, url}], count }`; `fetch-url` returns `{ title, text }`. `fetch-url` runs `assertSafeBaseUrlResolved` (providers.mjs) first as an SSRF guard (blocks localhost/private targets) — the only thing between the URL and the backend's own network on the direct-fetch path.
 
 ### Per-user skill set (`buildPerUserSkillSet`, registry.mjs:201–245)
 
@@ -255,13 +269,14 @@ Verbatim prompt and skill files (version-controlled; read the source, do not rel
 
 **Global agent** (`extension/llm_agent/global/compose-prompt.mjs`)
 
-`composeGlobalPrompt({ skills })` (compose-prompt.mjs:16–23) assembles:
+`composeGlobalPrompt()` (compose-prompt.mjs) returns the role **base only** — `rolePrompt`, the contents of `global/prompt.md` cached at module load. It does **not** embed skill bodies: `buildSystemPrompt` renders `# Available skills` + bodies exactly once (it already holds the skills map for dispatch — §2), so the base omits them. This mirrors the internal agent (role-only base, skills rendered by the loop); embedding them here too previously double-sent the global agent's skills.
 
-1. `rolePrompt` — contents of `global/prompt.md`, cached at module load (compose-prompt.mjs:14)
-2. `# Available skills` heading
-3. All global skill bodies joined with `\n\n---\n\n`
+This is computed once at server start as `globalPromptBase` (route.mjs) and used as `agentContext.base`. Per request, `route.mjs` appends to the base, in order:
 
-This is computed once at server start as `globalPromptBase` (route.mjs:37) and passed into `runAgentLoop` as `agentContext.base`. The global agent's context block is intentionally empty — no app-state leaks to it (route.mjs:162).
+1. an optional **persona** suffix (the user's configured voice), and
+2. the **redacted Graphify repository-memory block** — the same `renderGraphifyMemory(agentContext, userId)` output the internal agent gets, run through `redactFence` before injection. This lets the global Code Assistant ground project answers in repo memory even when it answers directly instead of delegating to `ask-internal`.
+
+The repo-memory block is the **only** app-specific context the global agent receives — active project, indexed repos, recent issues/meetings, and app-capabilities all stay internal-only (the global agent's `agentContext.includeSystemContext` is never set, so the loop composes no `# System context` for it — route.mjs).
 
 **Internal agent** (`extension/llm_agent/internal/context/compose.mjs`)
 
@@ -275,7 +290,7 @@ This is computed once at server start as `globalPromptBase` (route.mjs:37) and p
 6. `renderRecentMeetings(agentContext)` — `## Recent meetings` list; omitted when empty (render-recent-meetings.mjs:4–15)
 7. `renderGraphifyMemory(agentContext, userId)` — Graphify-generated repo memory (repo.md, graph-notes.md, prior Q&A); gated on user's repo allow-list (compose.mjs:35)
 
-Empty sections (empty string return) are filtered before joining (compose.mjs:37). This block is only injected when `agentContext.includeSystemContext === true` (loop.mjs:148), which is set only by `askInternal` (ask-internal.mjs:42).
+Empty sections (empty string return) are filtered before joining, and the **entire assembled block is run through `redactFence`** (compose.mjs) — issue titles, meeting content, repo names, and Graphify memory are all external/user-derived and flow into the internal agent's system prompt, so a `<<<TOOL_CALL>>>` smuggled via (say) a meeting title cannot prime a forged tool call. This block is only injected when `agentContext.includeSystemContext === true` (loop.mjs), which is set only by `askInternal` (ask-internal.mjs).
 
 The internal agent's `base` string is assembled in `askInternal` (ask-internal.mjs:29–32) as:
 

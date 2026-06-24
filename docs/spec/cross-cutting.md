@@ -188,7 +188,7 @@ Detail: [`api-server.md` §2](api-server.md#2-request-pipeline) (API version and
 
 ### Append-only migrations
 
-Migrations are numbered files applied exactly once and recorded in the `schema_migrations` table. The head migration is `0016` (`0016_token_epoch.sql`). Migrations are never edited after they land; schema changes always add a new migration file.
+Migrations are numbered files applied exactly once and recorded in the `schema_migrations` table. The head migration is `0017` (`0017_slack_state.sql`). Migrations are never edited after they land; schema changes always add a new migration file.
 
 Source: `extension/kb/migrations.mjs:8`, `migrations.mjs:43`.
 

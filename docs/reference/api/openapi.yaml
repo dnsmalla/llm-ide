@@ -414,6 +414,65 @@ paths:
         '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '500': { description: Plan generation failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
+  /kb/slack/test:
+    post:
+      summary: Verify the saved Slack bot token (auth.test); no request body
+      responses:
+        '200':
+          description: Token valid — Slack workspace info
+          content:
+            application/json:
+              schema: { type: object, properties: { team: { type: string } } }
+        '400': { description: No Slack bot token saved, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: Slack connection failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/slack/fetch:
+    post:
+      summary: Fetch new messages from a Slack channel (incremental, past the per-channel high-water mark)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channelId]
+              properties:
+                channelId:    { type: string }
+                lookbackDays: { type: integer }
+      responses:
+        '200':
+          description: New messages plus a skipped count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages: { type: array, items: { type: object } }
+                  skipped:  { type: integer }
+        '400': { description: Validation error or no token saved, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: Slack fetch failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/slack/seen:
+    post:
+      summary: Mark Slack messages seen and advance the per-channel high-water mark
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messageTs]
+              properties:
+                channelId: { type: string }
+                messageTs: { type: array, items: { type: string } }
+                lastTs:    { type: string }
+      responses:
+        '200':
+          description: Acknowledged
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean } } }
+
   /kb/dispatch:
     post:
       summary: Preview / send tasks to GitHub, Backlog, or Linear
