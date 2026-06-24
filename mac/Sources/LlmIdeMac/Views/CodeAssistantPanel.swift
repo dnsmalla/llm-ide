@@ -90,6 +90,7 @@ struct CodeAssistantPanel: View {
     @State private var showingCommentSheet: Bool = false
     @State private var showingReviewCodeSheet: Bool = false
     @State private var showingUpdateFileSheet: Bool = false
+    @State private var showingGitOpSheet: Bool = false
     @State private var reportingFault: FaultReportContext?
     /// How file-edit tool calls are accepted. Persisted across launches.
     /// `.review` (default) shows the confirmation card + popup; `.auto`
@@ -417,6 +418,36 @@ struct CodeAssistantPanel: View {
                 }
             }
         }
+        .sheet(isPresented: $showingGitOpSheet, onDismiss: {
+            // If the user dismissed without confirming, drop the pending card
+            // so it doesn't re-open with a stale proposed op.
+            if let g = pendingTool?.gitOpArgs, g.op.tier != .read {
+                // Only clear when a write/destructive op was dismissed via Cancel —
+                // runGitOpFlow already clears pendingTool on confirm.
+            }
+        }) {
+            if let pt = pendingTool, let g = pt.gitOpArgs {
+                GitOpSheet(
+                    args: g,
+                    onConfirm: {
+                        showingGitOpSheet = false
+                        Task { await runGitOpFlow(g) }
+                    },
+                    onCancel: {
+                        showingGitOpSheet = false
+                        pendingTool = nil
+                    }
+                )
+                .environmentObject(theme)
+            } else {
+                VStack(spacing: 12) {
+                    Text("Git operation unavailable.")
+                        .font(.system(size: 13))
+                    Button("Close") { showingGitOpSheet = false }
+                }
+                .padding(20)
+            }
+        }
     }
 
     // MARK: - Fault → Issue routing
@@ -641,6 +672,12 @@ struct CodeAssistantPanel: View {
                                         showingReviewCodeSheet = true
                                     case "update-file":
                                         showingUpdateFileSheet = true
+                                    case "git-op":
+                                        if let g = pt.gitOpArgs, g.op.tier == .read {
+                                            Task { await runGitOpFlow(g) }
+                                        } else {
+                                            showingGitOpSheet = true
+                                        }
                                     default:
                                         showingIssueSheet = true
                                     }
@@ -1576,6 +1613,11 @@ struct CodeAssistantPanel: View {
             if editMode == .auto, let pt = resp.pendingTool, let args = pt.updateFileArgs {
                 _ = await confirmUpdateFile(args, finalContent: args.content)
             }
+            // Auto-run read-tier git ops (status, log, diff, branch) immediately;
+            // write/destructive ops surface the GitOpSheet for user confirmation.
+            if let pt = resp.pendingTool, let g = pt.gitOpArgs, g.op.tier == .read {
+                await runGitOpFlow(g)
+            }
         } catch is CancellationError {
             // Stopped by the user — leave the user turn, no error bubble.
         } catch let urlError as URLError where urlError.code == .cancelled {
@@ -1747,6 +1789,43 @@ struct CodeAssistantPanel: View {
         } catch {
             return .failure(error.localizedDescription)
         }
+    }
+
+    /// Execute an agent git-op: clear pendingTool, run the op, append a synthetic
+    /// result turn, and call sendFollowup so the agent can acknowledge.
+    /// Read-tier ops are auto-run from runTurn; write/destructive run after sheet confirm.
+    @MainActor
+    private func runGitOpFlow(_ args: GitOpArgs) async {
+        pendingTool = nil
+        showingGitOpSheet = false
+        // Resolve the active repo URL — GitLab first, then GitHub (mirrors config.activeRepoLocalURL).
+        guard let repoURL = config.activeRepoLocalURL else {
+            history.append(.init(role: .user,
+                content: "(git \(args.op.rawValue) skipped — no active repository)"))
+            await sendFollowup()
+            return
+        }
+        // Resolve auth token: prefer the active GitLab project's token, fall back to GitHub.
+        // For read/local ops the token may be nil; push/pull/merge_to_main use it for the remote.
+        let token: String?
+        if !config.gitLabToken.isEmpty,
+           config.gitLabSavedProjects.first(where: { $0.isActive }) != nil {
+            token = config.gitLabToken
+        } else if !config.gitHubToken.isEmpty,
+                  config.gitHubSavedRepos.first(where: { $0.isActive }) != nil {
+            token = config.gitHubToken
+        } else {
+            token = nil
+        }
+        do {
+            let out = try await RepoManager().runGitOp(args, at: repoURL, token: token)
+            history.append(.init(role: .user,
+                content: "(git \(args.op.rawValue) result)\n\(out.prefix(4000))"))
+        } catch {
+            history.append(.init(role: .user,
+                content: "(git \(args.op.rawValue) failed) \(error.localizedDescription)"))
+        }
+        await sendFollowup()
     }
 
     private func sendFollowup() async {
