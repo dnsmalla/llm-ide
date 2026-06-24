@@ -119,4 +119,36 @@ struct PendingTool: Codable, Equatable {
         var path: String
         var content: String
     }
+
+    /// Typed view for the git-op variant. Returns nil if `name`
+    /// is different or the payload doesn't fit the schema.
+    var gitOpArgs: GitOpArgs? {
+        guard name == "git-op" else { return nil }
+        return try? AppJSON.decoder.decode(GitOpArgs.self, from: arguments.raw)
+    }
+}
+
+enum GitOpTier { case read, write, destructive }
+
+enum GitOp: String, Codable, CaseIterable {
+    case status, log, diff, branch
+    case add, commit, create_branch, checkout, pull_ff, push
+    case merge, revert, reset, stash, clean, merge_to_main
+
+    var tier: GitOpTier {
+        switch self {
+        case .status, .log, .diff, .branch: return .read
+        case .add, .commit, .create_branch, .checkout, .pull_ff, .push: return .write
+        case .merge, .revert, .reset, .stash, .clean, .merge_to_main: return .destructive
+        }
+    }
+}
+
+struct GitOpArgs: Codable {
+    let op: GitOp
+    let message: String?
+    let branch: String?
+    let ref: String?
+    let mode: String?
+    let slug: String?
 }
