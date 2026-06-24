@@ -200,8 +200,17 @@ struct UAGraphView: View {
             // Lay it out with the same pipeline a manual generate uses, then let
             // physics settle — settlePhysics re-caches the positioned result
             // (laidOut == true) so a later re-appear skips this step.
+            //
+            // The auto-updater caches the doc / All graphs UNPRUNED, so this
+            // hydrate path must apply the same per-node edge cap the manual
+            // generate paths do — otherwise the dense doc graph (avg degree
+            // ~40, hubs >200) collapses into a single overlapping blob. The
+            // sparse code graph is below the cap, so capDegree is a no-op there.
+            let rawGraph = (mode == .data || mode == .all)
+                ? GraphPrune.capDegree(entry.graph, maxDegree: Self.docGraphMaxDegree)
+                : entry.graph
             let initial = CodeGraphLayout.compute(
-                entry.graph, canvasSize: UAHelpers.layoutSize(for: entry.graph.nodes.count))
+                rawGraph, canvasSize: UAHelpers.layoutSize(for: rawGraph.nodes.count))
             fullData = initial
             cacheGraph(mode, initial, chunks: entry.chunks, docCount: entry.docCount)
             status = .loaded(nodeCount: initial.nodes.count, edgeCount: initial.edges.count)
