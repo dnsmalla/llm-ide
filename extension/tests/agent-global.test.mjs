@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { askInternal } from '../llm_agent/runtime/handlers/ask-internal.mjs';
 import { composeGlobalPrompt } from '../llm_agent/global/compose-prompt.mjs';
+import { buildSystemPrompt } from '../llm_agent/runtime/loop.mjs';
 import { loadSkills } from '../llm_agent/skills/loader.mjs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -11,16 +12,27 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const INTERNAL_SKILLS_DIR = join(__dirname, '..', 'llm_agent', 'internal', 'skills');
 const GLOBAL_SKILLS_DIR = join(__dirname, '..', 'llm_agent', 'global');
 
-test('composeGlobalPrompt is lean — no system context, only role + ask-internal skill', () => {
-  const skills = loadSkills(GLOBAL_SKILLS_DIR);
-  const prompt = composeGlobalPrompt({ skills: skills.skills });
-  assert.match(prompt, /Code Assistant for LLM IDE/);
-  assert.match(prompt, /# ask-internal/);
+test('composeGlobalPrompt is the role BASE only — no skills, no system context', () => {
+  const prompt = composeGlobalPrompt();
+  assert.match(prompt, /Code Assistant for LLM IDE/);          // role present
+  // Skill bodies are NOT embedded in the base — the loop renders them once
+  // (see the dedup guard below). Embedding them here too double-sent skills.
+  assert.doesNotMatch(prompt, /# Available skills/);
   // Regression guard: no app-specific context leaks into global.
   assert.doesNotMatch(prompt, /## Active project/);
   assert.doesNotMatch(prompt, /## Recent open issues/);
   assert.doesNotMatch(prompt, /## Recent meetings/);
   assert.doesNotMatch(prompt, /## App capabilities/);
+});
+
+test('assembled global prompt renders skills exactly once (dedup guard)', () => {
+  const skills = loadSkills(GLOBAL_SKILLS_DIR);
+  // What the loop actually builds for the global agent: base + (no context) + skills.
+  const full = buildSystemPrompt({ base: composeGlobalPrompt(), skills: skills.skills, agentContextBlock: '' });
+  assert.match(full, /Code Assistant for LLM IDE/);            // role still there
+  assert.match(full, /# ask-internal/);                        // skills present (rendered by the loop)
+  // Exactly one "# Available skills" header — previously two (base + loop).
+  assert.equal((full.match(/# Available skills/g) || []).length, 1);
 });
 
 test('askInternal — plain reply from internal propagates as answer', async () => {

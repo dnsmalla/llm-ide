@@ -38,7 +38,7 @@ const SUBAGENT_MODEL = process.env.LLMIDE_SUBAGENT_MODEL || GLOBAL_AGENT_MODEL;
 // We pass it as `agentContext.base` so the existing composer in
 // loop.mjs picks it up; the rest of the agentContext fields are
 // intentionally empty so no app-state leaks into global's prompt.
-const globalPromptBase = composeGlobalPrompt({ skills: globalSkills.skills });
+const globalPromptBase = composeGlobalPrompt();
 
 export async function handleCodeAssist({
   message,
