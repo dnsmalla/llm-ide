@@ -419,12 +419,10 @@ struct CodeAssistantPanel: View {
             }
         }
         .sheet(isPresented: $showingGitOpSheet, onDismiss: {
-            // If the user dismissed without confirming, drop the pending card
-            // so it doesn't re-open with a stale proposed op.
-            if let g = pendingTool?.gitOpArgs, g.op.tier != .read {
-                // Only clear when a write/destructive op was dismissed via Cancel —
-                // runGitOpFlow already clears pendingTool on confirm.
-            }
+            // System dismissal (Escape/swipe): clear the stale pending op.
+            // (runGitOpFlow already nils pendingTool before this fires on the confirm
+            // path, so this only catches Cancel/Escape.)
+            if pendingTool?.gitOpArgs != nil { pendingTool = nil }
         }) {
             if let pt = pendingTool, let g = pt.gitOpArgs {
                 GitOpSheet(

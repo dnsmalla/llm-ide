@@ -32,6 +32,7 @@ struct GitOpSheet: View {
                 Button("Cancel", role: .cancel) { onCancel() }.keyboardShortcut(.cancelAction)
                 Button(isDestructive ? "Run anyway" : "Confirm") { onConfirm() }
                     .buttonStyle(.borderedProminent)
+                    .tint(isDestructive ? .red : .accentColor)
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -41,7 +42,7 @@ struct GitOpSheet: View {
     // A human-readable preview of what will run (not the exact argv, but the intent).
     private var commandPreview: String {
         switch args.op {
-        case .commit:        return "git commit -m \"\(args.message ?? "")\"  (on a feature branch)"
+        case .commit:        return "git commit -m \"\(args.message ?? "<message>")\"  (on a feature branch)"
         case .create_branch: return "git checkout -b \(args.branch ?? "agent/\(args.slug ?? "change")")"
         case .checkout:      return "git checkout \(args.branch ?? "")"
         case .push:          return "git push origin <current-branch>"
