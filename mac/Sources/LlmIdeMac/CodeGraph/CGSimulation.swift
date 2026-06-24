@@ -59,6 +59,16 @@ public final class CGSimulation: @unchecked Sendable {
         let kAttraction: CGFloat = 0.07
         let restLength:  CGFloat = 80.0
         let damping:     CGFloat = 0.88
+        // Per-node speed cap. A high-degree hub (a dense doc graph can have a
+        // node with 1000+ edges) accumulates one spring kick per edge each
+        // tick, far more than damping removes — so velocity, and therefore
+        // position, diverges to astronomically large values. (A real 11k-node /
+        // 700k-edge InfiniteBrain graph exploded to ~1e27 px; fit() then crushed
+        // every node into a 1px horizontal line.) Clamping speed bounds movement
+        // to maxV * alpha per tick, which keeps the layout finite and spread
+        // regardless of density. It's a no-op for sparse graphs (their
+        // velocities never approach the cap).
+        let maxV:        CGFloat = 120.0
         let center = CGPoint(x: 600, y: 400)
 
         // Spring attraction along edges
@@ -94,6 +104,12 @@ public final class CGSimulation: @unchecked Sendable {
         for i in 0..<n {
             nodes[i].velocity.x += (center.x - nodes[i].position.x) * 0.008
             nodes[i].velocity.y += (center.y - nodes[i].position.y) * 0.008
+            let speed = hypot(nodes[i].velocity.x, nodes[i].velocity.y)
+            if speed > maxV {
+                let scale = maxV / speed
+                nodes[i].velocity.x *= scale
+                nodes[i].velocity.y *= scale
+            }
             nodes[i].position.x += nodes[i].velocity.x * alpha
             nodes[i].position.y += nodes[i].velocity.y * alpha
             nodes[i].velocity.x *= damping
