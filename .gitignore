@@ -63,3 +63,12 @@ docs/.cache/
 __pycache__/
 *.pyc
 .claude/worktrees/
+
+# Regenerated code-graph / Graphify output (per-checkout, rebuilt by the app's
+# indexer — the same dirs RepoFileWatcher treats as regen output). These are
+# generated, not source, so they must not show up as untracked "changes" in the
+# IDE git panel or the agent's git status.
+graphify-out/
+system/
+.code-notes/
+.understand-anything/

@@ -201,7 +201,10 @@ final class RepoManager {
 
         switch a.op {
         // ---- read (no policy) ----
-        case .status:  return try await run(["status", "--short", "--branch"])
+        // -uall lists every untracked file individually (default -unormal
+        // collapses an untracked dir to one entry) so the agent's report
+        // matches the file-level view the IDE git panel shows.
+        case .status:  return try await run(["status", "--short", "--branch", "-uall"])
         case .log:
             let r = try safeRef(a.ref ?? "HEAD")
             return try await run(["log", "--oneline", "-n", "20", r])
