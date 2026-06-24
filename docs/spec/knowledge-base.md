@@ -34,7 +34,16 @@ This spec governs the following files:
 | File | Role |
 |---|---|
 | `extension/kb/migrations.mjs` | `applyMigrations()`, `migrationStatus()`, checksum logic |
-| `extension/kb/migrations/0001_initial.sql` through `0017_slack_state.sql` | DDL deltas (17 files as of this writing). Recent: `0015_outcomes_fts_body.sql` adds AFTER-UPDATE FTS triggers (so edits, not just inserts/deletes, reindex); `0016_token_epoch.sql` adds the `users.tokens_valid_after` access-token-epoch column; `0017_slack_state.sql` adds the `slack_seen` and `slack_state` tables (Slack sync de-dup + cursor state). |
+| `extension/kb/migrations/0001_initial.sql` through `0018_activity.sql` | DDL deltas (18 files as of this writing). Recent: `0015_outcomes_fts_body.sql` adds AFTER-UPDATE FTS triggers (so edits, not just inserts/deletes, reindex); `0016_token_epoch.sql` adds the `users.tokens_valid_after` access-token-epoch column; `0017_slack_state.sql` adds the `slack_seen` and `slack_state` tables (Slack sync de-dup + cursor state); `0018_activity.sql` adds the `activity` and `activity_seen` tables (see below). |
+
+Notable tables added in recent migrations:
+
+- **`activity`** / **`activity_seen`** (migration `0018_activity.sql`): per-user
+  durable feed of auto-generated events. `activity` holds
+  `{ kind, title, detail (redacted JSON), link, created_at }`, pruned to the
+  newest 500 rows per user; `activity_seen` is a single per-user last-seen cursor
+  for the unread badge. Both cascade-delete with the user. Store module
+  (the store module and HTTP routes are added in subsequent tasks).
 
 **HTTP routing**
 
