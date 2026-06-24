@@ -29,6 +29,7 @@ import { testConnection, fetchRecentEmails } from '../agents/email-source.mjs';
 import { testConnection as slackTest, fetchChannelHistory } from '../agents/slack-source.mjs';
 import { logger } from '../core/logger.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
+import { recordActivity, listActivity, unreadCount, markSeen, ACTIVITY_KINDS } from './activity.mjs';
 
 // SSE concurrency tracking now lives in routes/live.mjs alongside
 // the stream route itself.
@@ -455,6 +456,45 @@ export async function handleKB(req, res) {
         }
       }
       sendJSON(res, 200, { ok: true });
+      return true;
+    }
+
+    // Activity feed ---------------------------------------------------
+
+    if (req.method === 'GET' && (url === '/kb/activity' || url.startsWith('/kb/activity?'))) {
+      const u = new URL(url, 'http://127.0.0.1');
+      const sinceId = Number(u.searchParams.get('since')) || 0;
+      const limit = Math.min(Math.max(Number(u.searchParams.get('limit')) || 100, 1), 200);
+      const db = kb.getDb();
+      const items = listActivity(db, userId, { sinceId, limit });
+      const lastId = items.length ? items[0].id : sinceId;
+      sendJSON(res, 200, { items, unread: unreadCount(db, userId), lastId });
+      return true;
+    }
+
+    if (req.method === 'POST' && url === '/kb/activity/seen') {
+      const body = parseJSON(await readBody(req, 16 * 1024)) || {};
+      const db = kb.getDb();
+      markSeen(db, userId, Number(body.uptoId) || 0);
+      sendJSON(res, 200, { ok: true, unread: unreadCount(db, userId) });
+      return true;
+    }
+
+    if (req.method === 'POST' && url === '/kb/activity') {
+      const body = parseJSON(await readBody(req, 16 * 1024)) || {};
+      if (!ACTIVITY_KINDS.has(body.kind) || typeof body.title !== 'string' || !body.title) {
+        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid activity kind or title' } });
+        return true;
+      }
+      const db = kb.getDb();
+      const id = recordActivity(db, {
+        userId, kind: body.kind, title: body.title, detail: body.detail, link: body.link,
+      });
+      if (id == null) {
+        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Could not record activity' } });
+        return true;
+      }
+      sendJSON(res, 200, { ok: true, id });
       return true;
     }
 

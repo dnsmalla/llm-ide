@@ -473,6 +473,65 @@ paths:
             application/json:
               schema: { type: object, properties: { ok: { type: boolean } } }
 
+  /kb/activity:
+    get:
+      summary: List the authenticated user's activity feed
+      responses:
+        '200':
+          description: Activity items + unread count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:  { type: array, items: { type: object } }
+                  unread: { type: integer }
+                  lastId: { type: integer }
+    post:
+      summary: Record an in-process activity event (Mac app)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, title]
+              properties:
+                kind:   { type: string }
+                title:  { type: string }
+                detail: { type: object, additionalProperties: true }
+                link:   { type: string }
+      responses:
+        '200':
+          description: Event recorded
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean }, id: { type: integer } } }
+        '400':
+          description: Invalid kind or title
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /kb/activity/seen:
+    post:
+      summary: Advance the activity last-seen cursor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [uptoId]
+              properties:
+                uptoId: { type: integer }
+      responses:
+        '200':
+          description: Cursor advanced
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean }, unread: { type: integer } } }
+
   /kb/dispatch:
     post:
       summary: Preview / send tasks to GitHub, Backlog, or Linear

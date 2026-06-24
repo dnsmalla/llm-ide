@@ -56,6 +56,8 @@ const ENDPOINTS = [
   '/kb/slack/test',
   '/kb/slack/fetch',
   '/kb/slack/seen',
+  '/kb/activity',
+  '/kb/activity/seen',
   '/kb/generate-plan',
   '/kb/analyze-risks',
   '/kb/summarize',
@@ -143,6 +145,7 @@ function rateLimitProfile(url, method) {
   // seen is a cheap local write (kbWrite bucket).
   if (url === '/kb/slack/test' || url === '/kb/slack/fetch') return 'dispatch';
   if (url === '/kb/slack/seen') return 'kbWrite';
+  if (url === '/kb/activity' || url === '/kb/activity/seen') return 'kbWrite';
   return null;
 }
 

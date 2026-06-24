@@ -225,7 +225,7 @@ When a bucket is exhausted, `tryConsume()` returns `{ ok: false, retryAfterSec: 
 | `llmFast` | 6 | 1/5 s | `/generate-notes`, `/chat`, `/kb/agent/ask`, `/generate-questions`, `/extract-entities`, `/generate-docx`, `/kb/providers/verify`, `/kb/providers/models` |
 | `dispatch` | 4 | 1/10 s | `/kb/dispatch`, `/kb/notify/slack`, `/kb/email/test`, `/kb/email/fetch`, `/kb/slack/test`, `/kb/slack/fetch` |
 | `outcomePoll` | 6 | 1/30 s | `/kb/outcomes/refresh` |
-| `kbWrite` | 30 | 5/s | `/kb/ingest`, `/kb/connect-*`, `/kb/review/*`, `/kb/plan-task/*`, `/kb/email/seen`, `/kb/slack/seen` |
+| `kbWrite` | 30 | 5/s | `/kb/ingest`, `/kb/connect-*`, `/kb/review/*`, `/kb/plan-task/*`, `/kb/email/seen`, `/kb/slack/seen`, `POST /kb/activity`, `POST /kb/activity/seen` |
 | `liveAppend` | 30 | 5/s | `/kb/live/:id/append` (applied inside `kb/routes/live.mjs:62`) |
 | `kbExport` | 5 | 1/10 s | `GET /kb/export-all` |
 | `authPublic` | 10 | 1/s | `/auth/login`, `/auth/refresh`, password-reset confirm/request |
