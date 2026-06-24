@@ -446,7 +446,47 @@ Linker flags add `-framework Testing` with an `-rpath` pointing at the same Comm
 
 ---
 
-## §8 See also
+## §8 Activity feed
+
+The activity feed surfaces backend events in the Mac status bar without requiring the user to navigate to a specific section.
+
+### ActivityStore (`mac/Sources/LlmIdeMac/Services/ActivityStore.swift`)
+
+`@MainActor @Observable final class ActivityStore` owns the live activity state:
+
+| Symbol | Behaviour |
+|---|---|
+| `items: [ActivityItem]` | All fetched activity rows, newest-first. |
+| `unreadCount: Int` | Count of items newer than the last `markSeen()` call, as reported by the server. |
+| `lastId: Int` | Highest item `id` seen; used as the `since` cursor for incremental polling. |
+| `start()` | Begins a poll loop (`GET /kb/activity?since=<lastId>&limit=50`) every ~25 s.  Idempotent. |
+| `refresh()` | Single-shot fetch; called by the poll loop and on focus. |
+| `report(kind:title:detail:link:)` | Fire-and-forget `POST /kb/activity`; used by the four Mac call sites (knowledge graph update, regression run, issue create, issue comment) to write their own events. |
+| `markSeen()` | Optimistically clears `unreadCount` and sends `POST /kb/activity/seen` to persist the watermark. Called when the `ActivityPanel` popover opens. |
+
+`ActivityStore` is constructed in `LlmIdeMacApp.init` and injected via `.environment(activityStore)` on the root scene so all sheets and popovers can read it with `@Environment(ActivityStore.self)`.
+
+`ActivityItem` fields: `id: Int`, `kind: ActivityKind?`, `title: String`, `detail: [String: Any]?`, `link: String?`, `createdAt: Date`.
+
+The nine `ActivityKind` cases (with matching backend string raw values): `knowledgeUpdated`, `regressionDone`, `issueCreated`, `commentAdded`, `dispatchIssueCreated`, `outcomeChanged`, `meetingAdded`, `emailFetched`, `slackFetched`.
+
+### ActivityBell + ActivityPanel (`mac/Sources/LlmIdeMac/Views/Shell/ActivityBell.swift`)
+
+`ActivityBell` sits in `StatusBar` alongside `AgentStatusBadge` (added inside the trailing `HStack(spacing: 12)`).  It renders:
+
+- A plain `bell` SF Symbol when `unreadCount == 0`.
+- A `bell.badge` symbol with a red count badge (capped at 99) when there are unread items.
+- A `popover` containing `ActivityPanel` on tap; `markSeen()` is called on open.
+
+`ActivityPanel` is a 360 × 420 pt `ScrollView` wrapping a `LazyVStack`.  Items are grouped into day buckets ("Today", "Yesterday", or an abbreviated date) and each row is an `ActivityRow`.
+
+`ActivityRow` shows an SF Symbol icon keyed on `ActivityKind?` (all 9 kinds + `nil` covered), the item title (2-line limit), and a relative timestamp via `Text(item.createdAt, format: .relative(presentation: .named))`.  Tapping a row posts `NotificationCenter.default.post(name: .openSection, object: item.link)` when `item.link` is non-nil — `AppShell` handles `.openSection` by casting the object to `String` and mapping it to a `ShellState.Section` rawValue, so the deep-link navigates to the matching section.  Links that do not match a known Section rawValue are a silent no-op (AppShell ignores the cast failure).
+
+This feature pairs with the backend `activity` table and module documented in [`knowledge-base.md`](knowledge-base.md).
+
+---
+
+## §9 See also
 
 - [`../explanation/macos-app.md`](../explanation/macos-app.md) — narrative explanation of design decisions and tradeoffs for the macOS app (forward link; created in the next documentation task)
 - [`../explanation/architecture.md`](../explanation/architecture.md) — system-wide architecture explanation covering the relationship between the Node server, the Mac shell, and the Chrome extension
@@ -454,7 +494,7 @@ Linker flags add `-framework Testing` with an `-rpath` pointing at the same Comm
 
 ---
 
-## Regeneration checklist
+## §10 Regeneration checklist
 - [x] Every governed contract (service interfaces, IPC, platform-coupling points, capture pipeline) is present with verified `file:symbol` citations.
 - [x] Every coupling point names its Apple-only API and a portability tag.
 - [x] Spot-check: the app lifecycle, the API client auth/refresh flow, and the AX capture path were rebuilt from this page and match source.

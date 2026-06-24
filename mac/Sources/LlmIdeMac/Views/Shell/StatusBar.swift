@@ -32,6 +32,7 @@ struct StatusBar: View {
             ProjectSwitcher()
             Spacer()
             terminalToggleButton
+            ActivityBell()
             AgentStatusBadge(api: api)
         }
         .padding(.horizontal, 10)
