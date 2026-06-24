@@ -12,6 +12,7 @@ import { logger, newRequestId } from './core/logger.mjs';
 import { authenticate, requireAdmin } from './server/auth.mjs';
 import { handleAuth, isAuthRoute } from './server/auth-routes.mjs';
 import { purgeExpiredRefreshTokens, purgeExpiredResetTokens } from './server/users.mjs';
+import { purgeOldAuditRows } from './server/audit.mjs';
 import { AppError, sendError, errInternal, errNotFound, errValidation, errRateLimit } from './core/errors.mjs';
 import { tryConsume, saveBuckets, loadBuckets } from './server/rate-limit.mjs';
 import { recordHttpRequest, recordRateLimitDeny, setKbGauge, renderPrometheus } from './server/metrics.mjs';
@@ -653,9 +654,11 @@ function runAuthGc(stage) {
     const purgedJti    = purgeExpiredJti();
     const purgedTokens = purgeExpiredRefreshTokens(getDb({ logger }));
     const purgedReset  = purgeExpiredResetTokens(getDb({ logger }));
+    const purgedAudit  = purgeOldAuditRows(getDb({ logger }));
     if (purgedJti    > 0) logger.info(`jti_purge_${stage}`,            { purged: purgedJti });
     if (purgedTokens > 0) logger.info(`refresh_token_purge_${stage}`,  { purged: purgedTokens });
     if (purgedReset  > 0) logger.info(`reset_token_purge_${stage}`,    { purged: purgedReset });
+    if (purgedAudit  > 0) logger.info(`audit_purge_${stage}`,          { purged: purgedAudit });
     // Persist rate-limit bucket state so a restart doesn't give a free burst window.
     try { saveBuckets(getDb({ logger })); } catch (err) {
       logger.warn(`rate_limit_save_${stage}_failed`, { error: err.message });

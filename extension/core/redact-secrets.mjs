@@ -19,6 +19,8 @@ export const SECRET_PATTERNS = [
   /\bAIza[0-9A-Za-z\-_]{35}\b/g,              // Google API key
   /\bAKIA[0-9A-Z]{16}\b/g,                    // AWS access key id
   /\bsk-ant-[A-Za-z0-9-]{10,}\b/g,            // Anthropic API key
+  /\bsk-proj-[A-Za-z0-9_-]{20,}\b/g,          // OpenAI project-scoped key
+  /\bsk-[A-Za-z0-9]{32,}\b/g,                 // OpenAI classic secret key (won't match sk-ant-/sk-proj-)
   /Bearer\s+[A-Za-z0-9._-]{20,}/gi,           // Authorization: Bearer <jwt/opaque>
   /apiKey=[A-Za-z0-9_-]+/gi,                  // apiKey=<value> in query strings
 ];

@@ -82,11 +82,28 @@ test('recordActivity enforces length caps', async () => {
     userId,
     kind: 'issue_created',
     title: 'T'.repeat(500),
-    link: 'L'.repeat(1000),
+    link: 'https://example.com/' + 'a'.repeat(1000),
   });
   const row = db.prepare('SELECT title, link FROM activity WHERE id = ?').get(rowId);
   assert.ok(row.title.length <= 200);
   assert.ok(row.link.length <= 512);
+});
+
+test('recordActivity stores only http(s) links and drops other schemes', async () => {
+  await freshDb();
+  const { getDb } = await import('../kb/db.mjs');
+  const { registerUser } = await import('../server/users.mjs');
+  const { recordActivity } = await import('../kb/activity.mjs');
+  const db = getDb();
+  const { id: userId } = registerUser(db, { email: 'u-link@example.com', password: 'pw-12345678' });
+
+  const okId = recordActivity(db, { userId, kind: 'issue_created', title: 'ok', link: 'https://example.com/issues/1' });
+  assert.equal(db.prepare('SELECT link FROM activity WHERE id = ?').get(okId).link, 'https://example.com/issues/1');
+
+  // A javascript: (or any non-http) scheme is a latent stored-XSS vector if a
+  // client renders link as an href — it must be dropped, not stored.
+  const badId = recordActivity(db, { userId, kind: 'issue_created', title: 'xss', link: 'javascript:alert(1)' });
+  assert.equal(db.prepare('SELECT link FROM activity WHERE id = ?').get(badId).link, null);
 });
 
 test('recordActivity prunes to the newest 500 rows per user', async () => {

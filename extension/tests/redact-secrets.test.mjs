@@ -15,6 +15,8 @@ import { redact as auditRedact } from '../server/audit.mjs';
 test('redactSecrets scrubs every known token shape', () => {
   const cases = [
     'sk-ant-api03-abcdefghijklmnopqrstuvwxyz',
+    'sk-' + 'a'.repeat(48),                      // OpenAI classic secret key
+    'sk-proj-' + 'b'.repeat(40),                 // OpenAI project-scoped key
     'ghp_' + 'a'.repeat(36),
     'github_pat_' + 'b'.repeat(82),
     'xoxb-0123456789abcdef',

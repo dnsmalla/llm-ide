@@ -59,6 +59,17 @@ export function redact(obj, depth = 0) {
   return out;
 }
 
+// Retention sweep: delete audit rows older than `ageDays`. The audit log
+// otherwise grows unbounded (indefinite retention of IPs/user-agents + DB
+// bloat). Called on the auth GC interval alongside the token purges. Returns
+// the number of rows deleted.
+export function purgeOldAuditRows(db, ageDays = 90) {
+  const info = db.prepare(
+    `DELETE FROM audit_log WHERE created_at < datetime('now', ?)`,
+  ).run(`-${Number(ageDays) || 90} days`);
+  return info.changes;
+}
+
 export function recordAudit(db, {
   userId, requestId, ip, userAgent, action, resource, outcome = 'success', detail,
 }) {

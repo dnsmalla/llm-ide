@@ -29,6 +29,20 @@ function clamp(str, cap) {
   return str.length > cap ? str.slice(0, cap) : str;
 }
 
+// A feed link is a deep-link target a client may render as an href, so only
+// http(s) schemes are stored — a `javascript:`/`data:`/etc. link is dropped
+// (returns null) to avoid a stored-XSS vector. Capped to LINK_CAP first.
+function safeLink(link) {
+  const clamped = clamp(link, LINK_CAP);
+  if (clamped == null || clamped === '') return null;
+  try {
+    const proto = new URL(clamped).protocol;
+    return (proto === 'http:' || proto === 'https:') ? clamped : null;
+  } catch {
+    return null;
+  }
+}
+
 // Redact + stringify a detail object, capped to DETAIL_CAP chars.
 // Mirrors recordAudit: structured key-name redaction first (catches
 // object-property secrets like { apiKey: 'sk-...' }), then stringify,
@@ -49,7 +63,7 @@ export function recordActivity(db, { userId, kind, title, detail, link } = {}) {
   try {
     const info = db.prepare(
       `INSERT INTO activity (user_id, kind, title, detail, link) VALUES (?, ?, ?, ?, ?)`
-    ).run(userId, kind, clamp(title, TITLE_CAP), encodeDetail(detail), clamp(link, LINK_CAP));
+    ).run(userId, kind, clamp(title, TITLE_CAP), encodeDetail(detail), safeLink(link));
     const id = Number(info.lastInsertRowid);
     db.prepare(
       `DELETE FROM activity
