@@ -53,3 +53,22 @@ test('purgeOldAuditRows defaults to a 90-day retention window', () => {
   const purged = purgeOldAuditRows(db);
   assert.equal(purged, 1);
 });
+
+test('purgeOldAuditRows falls back to 90 days on ageDays=0 (does not wipe recent rows)', () => {
+  const db = auditDb();
+  const ins = db.prepare(`INSERT INTO audit_log (action, created_at) VALUES (?, datetime('now', ?))`);
+  ins.run('recent', '-1 days');
+  ins.run('old', '-200 days');
+  // 0 is falsy — must NOT mean "delete everything"; falls back to 90-day retention.
+  const purged = purgeOldAuditRows(db, 0);
+  assert.equal(purged, 1, 'only the >90d row should go');
+  assert.deepEqual(db.prepare('SELECT action FROM audit_log').all().map(r => r.action), ['recent']);
+})
+
+test('purgeOldAuditRows treats a negative ageDays as the 90-day default, not an invalid modifier', () => {
+  const db = auditDb();
+  db.prepare(`INSERT INTO audit_log (action, created_at) VALUES (?, datetime('now', ?))`).run('old', '-200 days');
+  // -5 would build "--5 days" (invalid → silent no-op); the guard normalizes to 90.
+  const purged = purgeOldAuditRows(db, -5);
+  assert.equal(purged, 1);
+})

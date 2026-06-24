@@ -79,6 +79,9 @@ export function recordActivity(db, { userId, kind, title, detail, link } = {}) {
 // Newest-first feed.  sinceId>0 → only rows after that id (incremental poll);
 // otherwise the newest `limit` rows.
 export function listActivity(db, userId, { sinceId = 0, limit = 100 } = {}) {
+  // Clamp defensively: the HTTP route already bounds limit, but other callers
+  // could pass 0 (SQLite LIMIT 0 → no rows) or a negative (LIMIT -1 → no limit).
+  limit = Math.max(1, Math.min(Number(limit) || 100, 500));
   const rows = sinceId > 0
     ? db.prepare(
         `SELECT id, kind, title, detail, link, created_at
@@ -107,7 +110,9 @@ export function unreadCount(db, userId) {
 
 // Advance the last-seen cursor; never lowers it.
 export function markSeen(db, userId, uptoId) {
-  const upto = Number(uptoId) || 0;
+  // Only a positive integer id advances the cursor; anything else is a no-op
+  // floor of 0 (the MAX upsert below never lowers an existing cursor).
+  const upto = Number.isInteger(uptoId) && uptoId > 0 ? uptoId : 0;
   db.prepare(
     `INSERT INTO activity_seen (user_id, last_seen_id) VALUES (?, ?)
        ON CONFLICT(user_id) DO UPDATE SET last_seen_id = MAX(last_seen_id, excluded.last_seen_id)`

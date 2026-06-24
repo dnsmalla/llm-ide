@@ -64,9 +64,13 @@ export function redact(obj, depth = 0) {
 // bloat). Called on the auth GC interval alongside the token purges. Returns
 // the number of rows deleted.
 export function purgeOldAuditRows(db, ageDays = 90) {
+  // Guard the modifier: a non-positive/NaN ageDays would otherwise build an
+  // invalid SQLite datetime modifier (e.g. "--1 days") that silently deletes
+  // nothing. Falls back to the 90-day default.
+  const days = Number.isFinite(ageDays) && ageDays > 0 ? Math.floor(ageDays) : 90;
   const info = db.prepare(
     `DELETE FROM audit_log WHERE created_at < datetime('now', ?)`,
-  ).run(`-${Number(ageDays) || 90} days`);
+  ).run(`-${days} days`);
   return info.changes;
 }
 

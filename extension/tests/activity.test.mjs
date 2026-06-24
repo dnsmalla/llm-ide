@@ -189,3 +189,33 @@ test('unreadCount and markSeen track the cursor monotonically', async () => {
   markSeen(db, userId, ids[2]);
   assert.equal(unreadCount(db, userId), 0);
 });
+
+test('markSeen ignores non-positive / non-integer uptoId (cursor unchanged)', async () => {
+  await freshDb();
+  const { getDb } = await import('../kb/db.mjs');
+  const { registerUser } = await import('../server/users.mjs');
+  const { recordActivity, markSeen, unreadCount } = await import('../kb/activity.mjs');
+  const db = getDb();
+  const { id: userId } = registerUser(db, { email: 'u-mark-guard@example.com', password: 'pw-12345678' });
+  const id = recordActivity(db, { userId, kind: 'meeting_added', title: 'm' });
+  markSeen(db, userId, id);                 // advance to the real id
+  assert.equal(unreadCount(db, userId), 0);
+  // Bad inputs must not move (or corrupt) the cursor.
+  for (const bad of ['abc', -5, 2.5, undefined, null, NaN]) {
+    markSeen(db, userId, bad);
+    assert.equal(unreadCount(db, userId), 0, `cursor moved on bad uptoId=${String(bad)}`);
+  }
+})
+
+test('listActivity clamps a non-positive limit instead of returning nothing', async () => {
+  await freshDb();
+  const { getDb } = await import('../kb/db.mjs');
+  const { registerUser } = await import('../server/users.mjs');
+  const { recordActivity, listActivity } = await import('../kb/activity.mjs');
+  const db = getDb();
+  const { id: userId } = registerUser(db, { email: 'u-limit-guard@example.com', password: 'pw-12345678' });
+  for (let i = 0; i < 3; i++) recordActivity(db, { userId, kind: 'meeting_added', title: `m${i}` });
+  // limit:0 would be SQLite LIMIT 0 (no rows) without the clamp.
+  assert.ok(listActivity(db, userId, { limit: 0 }).length >= 1);
+  assert.ok(listActivity(db, userId, { limit: -1 }).length >= 1);
+})

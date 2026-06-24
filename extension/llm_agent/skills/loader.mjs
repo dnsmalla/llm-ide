@@ -10,6 +10,7 @@ import yaml from 'js-yaml';
 
 const VALID_KINDS = new Set(['read', 'write']);
 const VALID_SCHEMA_TYPES = new Set(['string', 'number', 'boolean', 'string[]']);
+const VALID_CONFIRMATIONS = new Set(['editable-sheet', 'gitop-sheet']);
 
 // Per-file content cap — prevents a single oversized skill from
 // exhausting the Claude context window.  Core skills are small and
@@ -61,6 +62,13 @@ function validateSchema(schema) {
     }
     if (!VALID_SCHEMA_TYPES.has(def.type)) {
       return { error: `argument '${name}' has unsupported type '${def.type}'` };
+    }
+    // enum is matched against validated string args, so its elements must be
+    // strings — a YAML `enum: [1, 2]` (parsed as numbers) would silently never
+    // match any input and permanently reject a valid op.
+    if (def.enum !== undefined &&
+        (!Array.isArray(def.enum) || !def.enum.every((e) => typeof e === 'string'))) {
+      return { error: `argument '${name}' enum must be an array of strings` };
     }
     out[name] = {
       type: def.type,
@@ -128,7 +136,6 @@ export function loadSkills(dir) {
       warnings.push(`${entry}: kind '${fm.kind}' is not 'read' or 'write'`);
       continue;
     }
-    const VALID_CONFIRMATIONS = new Set(['editable-sheet', 'gitop-sheet']);
     if (fm.kind === 'write' && !VALID_CONFIRMATIONS.has(fm.confirmation)) {
       warnings.push(`${entry}: write skills must have confirmation: editable-sheet or gitop-sheet`);
       continue;
