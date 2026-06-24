@@ -806,6 +806,11 @@ export function deleteUserCascade(userId) {
     // account deletion.
     counts.slack_seen      = del('DELETE FROM slack_seen   WHERE user_id = ?');
     counts.slack_state     = del('DELETE FROM slack_state  WHERE user_id = ?');
+    // migration 0018 — activity feed + read cursor. Both have ON DELETE CASCADE
+    // on the users FK, but we delete explicitly so the count appears in the
+    // receipt and so the contract holds regardless of FK enforcement.
+    counts.activity        = del('DELETE FROM activity      WHERE user_id = ?');
+    counts.activity_seen   = del('DELETE FROM activity_seen WHERE user_id = ?');
     // migration 0009 — rate_limit_buckets has no user_id column; the key
     // column stores "<profile>::<scope>" where scope == userId for
     // authenticated KB routes.  We match by suffix so all per-user

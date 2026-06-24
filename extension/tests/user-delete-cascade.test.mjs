@@ -166,6 +166,7 @@ test('cascade is transactional — counts add up across every table', () => {
     'sources', 'meetings', 'user_repos', 'user_secrets',
     'agent_feedback', 'agent_ask_messages', 'refresh_tokens',
     'email_seen', 'email_state', 'slack_seen', 'slack_state',
+    'activity', 'activity_seen',
     'audit_anonymised', 'user',
   ];
   for (const k of expectedKeys) {
@@ -260,6 +261,44 @@ test('slack_seen and slack_state are wiped on user deletion (KB-2)', () => {
   assert.ok('slack_state' in counts, 'counts must include slack_state key');
   assert.equal(counts.slack_seen, 2);
   assert.equal(counts.slack_state, 1);
+});
+
+// KB-3: activity + activity_seen must be deleted when the user is deleted.
+// Before the fix, deleteUserCascade never touched these tables (added in the
+// activity-feed feature), so a deleted user's feed and read-cursor survived
+// account deletion — PII leak.
+test('deleteUserCascade removes activity + activity_seen rows (KB-3)', async () => {
+  reset();
+  const { recordActivity, markSeen } = await import('../kb/activity.mjs');
+  const handle = db.getDb();
+  const userId = provision('u-cascade-activity@example.com').id;
+
+  const id = recordActivity(handle, { userId, kind: 'meeting_added', title: 'm' });
+  assert.ok(id != null, 'recordActivity should return a row id');
+  markSeen(handle, userId, id);
+
+  // Pre-deletion: both tables have rows for this user.
+  assert.ok(
+    handle.prepare('SELECT COUNT(*) AS c FROM activity WHERE user_id = ?').get(userId).c > 0,
+    'activity row should exist before cascade',
+  );
+  assert.ok(
+    handle.prepare('SELECT COUNT(*) AS c FROM activity_seen WHERE user_id = ?').get(userId).c > 0,
+    'activity_seen row should exist before cascade',
+  );
+
+  db.deleteUserCascade(userId);
+
+  assert.equal(
+    handle.prepare('SELECT COUNT(*) AS c FROM activity WHERE user_id = ?').get(userId).c,
+    0,
+    'activity rows should be gone after cascade',
+  );
+  assert.equal(
+    handle.prepare('SELECT COUNT(*) AS c FROM activity_seen WHERE user_id = ?').get(userId).c,
+    0,
+    'activity_seen rows should be gone after cascade',
+  );
 });
 
 test('refuses to run with no userId', () => {
