@@ -40,7 +40,17 @@ final class RepoFileWatcher: @unchecked Sendable {
         var context = FSEventStreamContext(version: 0, info: nil, retain: nil, release: nil, copyDescription: nil)
         context.info = Unmanaged.passUnretained(self).toOpaque()
 
-        let flags = FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer)
+        // UseCFTypes is REQUIRED: without it FSEvents delivers `eventPaths` as a
+        // C `char **`, but the callback bridges it as a CFArray/NSArray of String
+        // (line below). With this flag `eventPaths` is a real CFArray<CFString>,
+        // so the `unsafeBitCast(... to: NSArray.self) as? [String]` bridge is
+        // valid; without it the cast reinterprets a `char**` as an object pointer
+        // and crashes (EXC_BAD_ACCESS) the moment any path is delivered.
+        let flags = FSEventStreamCreateFlags(
+            kFSEventStreamCreateFlagFileEvents
+            | kFSEventStreamCreateFlagNoDefer
+            | kFSEventStreamCreateFlagUseCFTypes
+        )
         guard let stream = FSEventStreamCreate(
             kCFAllocatorDefault,
             { _, info, _, eventPaths, _, _ in
