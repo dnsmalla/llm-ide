@@ -66,11 +66,36 @@ if [ "$mac_changed" -eq 1 ]; then
         exit 1
     fi
     echo "pre-push: mac/ changed — running regression gate (make regression)…"
-    if ! make regression; then
+    # tee the gate output so progress still streams live, while we keep a copy
+    # to classify the failure. pipefail (set above) makes the pipe carry make's
+    # exit status, not tee's.
+    gate_log="$(mktemp -t prepush-regression)"
+    if ! make regression 2>&1 | tee "$gate_log"; then
+        # An Xcode/CommandLineTools Swift-version skew makes `swift test` pull a
+        # Testing.framework built with a different compiler than the active one
+        # ("failed to build module 'Testing' … select a toolchain which matches
+        # the SDK"). That's a toolchain problem, not a code problem — surface the
+        # fix instead of leaving the contributor to decode the swift-testing dump.
+        if grep -q "failed to build module 'Testing'" "$gate_log" 2>/dev/null; then
+            xcode_swift=$(swift --version 2>/dev/null | grep -oE 'Apple Swift version [0-9.]+' | head -1)
+            clt_swift=$(/Library/Developer/CommandLineTools/usr/bin/swift --version 2>/dev/null | grep -oE 'version [0-9.]+' | head -1)
+            echo "" >&2
+            echo "pre-push: this is an Xcode / CommandLineTools Swift toolchain mismatch, NOT a" >&2
+            echo "          code failure — swift test loaded a Testing.framework built with a" >&2
+            echo "          different Swift than the active compiler (active: ${xcode_swift:-unknown};" >&2
+            echo "          CommandLineTools: ${clt_swift:-unknown})." >&2
+            echo "          Fix one of, then re-push:" >&2
+            echo "            • sudo xcode-select -s /Applications/Xcode.app/Contents/Developer && sudo xcodebuild -runFirstLaunch" >&2
+            echo "            • update Xcode so its Swift matches CommandLineTools" >&2
+            echo "          'swift build' + the node suite still gate this branch, so to ship now:" >&2
+            echo "            git push --no-verify" >&2
+        fi
+        rm -f "$gate_log"
         echo "pre-push: regression gate FAILED — push aborted." >&2
         echo "          Fix the failure, or bypass with: git push --no-verify" >&2
         exit 1
     fi
+    rm -f "$gate_log"
 fi
 
 if [ "$ext_changed" -eq 1 ]; then
