@@ -112,6 +112,10 @@ const ALLOWED_KEYS = new Set([
   'backlog.apiKey',
   'linear.apiKey',
   'slack.webhookUrl',
+  // Slack bot token (xoxb-…) for the Slack input source. The Mac client stores
+  // it here via /auth/me/secrets (SlackSourceSheet); the server reads it back in
+  // /kb/slack/test and /kb/slack/fetch to read channel messages.
+  'slack.botToken',
   // IMAP app password for the Email input source. The Mac client stores
   // it here via /auth/me/secrets; the server reads it back when fetching
   // recent messages so the password never travels on the fetch request.

@@ -13,7 +13,33 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
-const { encrypt, decrypt, migrateLegacySecrets } = await import('../server/vault.mjs');
+const { encrypt, decrypt, migrateLegacySecrets, setSecret, getSecret, VAULT_KEYS } = await import('../server/vault.mjs');
+
+function secretsDb() {
+  const db = new Database(':memory:');
+  db.exec(`
+    CREATE TABLE user_secrets (
+      user_id TEXT NOT NULL,
+      secret_key TEXT NOT NULL,
+      ciphertext BLOB NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, secret_key)
+    )
+  `);
+  return db;
+}
+
+// The Slack input source (Views/Sources/SlackSourceSheet.swift) stores a bot
+// token under `slack.botToken` and the /kb/slack/* routes read it back. If the
+// key is not allow-listed, setSecret/getSecret throw "Unknown vault key" and the
+// entire Slack source is dead — a user can't even save the token.
+test('slack.botToken is an allowed vault key and round-trips', () => {
+  assert.ok(VAULT_KEYS.includes('slack.botToken'), 'slack.botToken must be allow-listed');
+  const db = secretsDb();
+  const userId = 'user-slack-1';
+  assert.doesNotThrow(() => setSecret(db, userId, 'slack.botToken', 'xoxb-abc-123'));
+  assert.equal(getSecret(db, userId, 'slack.botToken'), 'xoxb-abc-123');
+});
 
 test('encrypt/decrypt roundtrips for the same user', () => {
   const blob = encrypt('user-1', 'super-secret-token');
