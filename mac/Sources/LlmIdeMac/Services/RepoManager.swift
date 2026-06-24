@@ -208,7 +208,7 @@ final class RepoManager {
         // ---- safe-write ----
         case .add:     return try await run(["add", "-A"])
         case .create_branch:
-            let name = a.branch ?? agentBranchName(from: a.slug)
+            let name = try (a.branch.map { try safeRef($0) }) ?? agentBranchName(from: a.slug)
             return try await run(["checkout", "-b", name])
         case .checkout:
             guard let b = a.branch else { throw RepoError.commandFailed("checkout needs a branch") }
