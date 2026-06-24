@@ -56,6 +56,19 @@ export function relativeAge(mtimeMs, nowMs = Date.now()) {
   return `~${days} day${days === 1 ? '' : 's'} ago`;
 }
 
+// Newest mtime (epoch ms) across the given paths, or null if none stat.
+// Best-effort: a missing/unstattable file is skipped, never throws.
+function newestMtimeMs(paths) {
+  let newest = null;
+  for (const p of paths) {
+    try {
+      const ms = statSync(p).mtimeMs;
+      if (newest === null || ms > newest) newest = ms;
+    } catch { /* missing / unstattable — skip */ }
+  }
+  return newest;
+}
+
 function safeRead(path, maxChars) {
   try {
     const st = statSync(path);
@@ -161,8 +174,20 @@ function repoMemoryBlock(repo, budget, allowedRoots) {
     tryAdd(`q&a/ (${qa.length})`, qaBodies);
   }
 
-  if (parts.length === 0) return null;
-  return `## ${repo.name || 'Repository'} — memory\n_(from \`${root}/graphify-out/memory/\`)_\n\n${parts.join('\n\n')}`;
+  const name = repo.name || 'Repository';
+  if (parts.length === 0) {
+    // Allow-gate passed but no readable memory: tell the agent explicitly
+    // instead of contributing nothing. (The path/tenancy guards above still
+    // return null and stay silent — this is NOT one of those cases.)
+    return `## ${name} — memory\n_No code-graph memory generated for this repo yet._`;
+  }
+  const mtime = newestMtimeMs([
+    join(memDir, 'repo.md'),
+    join(memDir, 'graph-notes.md'),
+    join(memDir, 'doc-notes.md'),
+  ]);
+  const ageClause = mtime != null ? ` (updated ${relativeAge(mtime)})` : '';
+  return `## ${name} — memory${ageClause}\n_(from \`${root}/graphify-out/memory/\`)_\n\n${parts.join('\n\n')}`;
 }
 
 export function renderGraphifyMemory(agentContext, userId) {
