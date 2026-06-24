@@ -52,6 +52,11 @@ struct CodeAssistantPanel: View {
     @State private var showingSessionPicker: Bool = false
     @State private var draft: String = ""
     @State private var busy: Bool = false
+    /// Handle to the in-flight user turn, so Stop can cancel it.
+    @State private var runTask: Task<Void, Never>?
+    /// A single message the user submitted while a turn was running; it auto-sends
+    /// as the next turn when the current one finishes (or is stopped).
+    @State private var queued: String?
     @State private var error: String?
     /// Measured render height per assistant turn, keyed by turn id, so each
     /// markdown web-view bubble can be sized to its content in the scroll list.
@@ -968,6 +973,32 @@ struct CodeAssistantPanel: View {
 
     private var inputBar: some View {
         VStack(spacing: 0) {
+            // A message queued while a turn is running — auto-sends next.
+            if let q = queued {
+                HStack(spacing: 6) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.current.textMuted)
+                    Text("Queued: \(q)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.current.textMuted)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer()
+                    Button { queued = nil } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.current.textMuted)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Cancel queued message")
+                    .accessibilityLabel("Cancel queued message")
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(theme.current.surface)
+                Divider().background(theme.current.border)
+            }
             // Text area
             ZStack(alignment: .topLeading) {
                 if draft.isEmpty {
@@ -1070,23 +1101,36 @@ struct CodeAssistantPanel: View {
     }
 
     private var sendButton: some View {
-        Button {
-            Task { await send() }
-        } label: {
+        HStack(spacing: 6) {
+            // While a turn is running, offer a Stop control that cancels it.
             if busy {
-                ProgressView().controlSize(.small).frame(width: 24, height: 24)
-            } else {
-                Image(systemName: "arrow.up")
+                Button { stop() } label: {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)   // Esc
+                .help("Stop the running response (Esc)")
+                .accessibilityLabel("Stop")
+            }
+            // ⌘↵ submits the draft: sends now when idle, queues when a turn is
+            // already running (auto-sends as the next turn).
+            Button {
+                submit()
+            } label: {
+                Image(systemName: busy ? "arrow.up.to.line" : "arrow.up")
                     .font(.system(size: 12, weight: .semibold))
                     .frame(width: 24, height: 24)
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .keyboardShortcut(.return, modifiers: .command)
+            .help(busy ? "Queue this message — sends when the current response finishes (⌘↵)" : "Send (⌘↵)")
+            .accessibilityLabel(busy ? "Queue message" : "Send message")
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.small)
-        .disabled(busy || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        .keyboardShortcut(.return, modifiers: .command)
-        .help("Send (⌘↵)")
-        .accessibilityLabel(busy ? "Sending message" : "Send message")
     }
 
     /// CLI-branded agent chip + model picker.
@@ -1457,32 +1501,52 @@ struct CodeAssistantPanel: View {
     // MARK: - Send
 
     @MainActor
-    private func send() async {
-        // Defensive: callers (button, keyboard shortcut) already gate on
-        // `busy`, but a programmatic invocation must not stack requests.
-        guard !busy else { return }
+    /// ⌘↵ / Send button. Sends the draft now when idle; queues it when a turn
+    /// is already running (it auto-sends as the next turn). Single queue slot —
+    /// a second submit while running replaces the queued message.
+    private func submit() {
         let msg = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !msg.isEmpty else { return }
-        _ = session.record(prompt: msg)
-        if session.shouldNudge(for: msg) {
-            nudgePrompt = msg
+        draft = ""
+        if busy {
+            queued = msg
+        } else {
+            startTurn(msg)
+        }
+    }
+
+    /// Launch a turn as an unstructured Task whose handle Stop can cancel.
+    private func startTurn(_ message: String) {
+        runTask = Task { await runTurn(message) }
+    }
+
+    /// Cancel the in-flight turn. URLSession.data(for:) throws on cancellation,
+    /// so the network request is actually aborted; runTurn treats that as a
+    /// clean stop (no error bubble) and then drains any queued message.
+    private func stop() {
+        runTask?.cancel()
+    }
+
+    /// Run one user turn end-to-end. On completion it drains `queued` (if any)
+    /// as a FRESH task — an unstructured `Task {}` does NOT inherit the current
+    /// task's cancellation, so a stopped turn still lets the queued message run.
+    private func runTurn(_ message: String) async {
+        _ = session.record(prompt: message)
+        if session.shouldNudge(for: message) {
+            nudgePrompt = message
         }
         // Append the user turn FIRST so the message appears immediately
-        // even if the network call is slow.  Clear the draft on success
-        // path; if the call errors, we leave history with the user turn
-        // showing and surface an error bubble underneath.
-        history.append(.init(role: .user, content: msg))
-        draft = ""
+        // even if the network call is slow.
+        history.append(.init(role: .user, content: message))
         busy = true
         error = nil
-        defer { busy = false }
         do {
             // Send the most recent ~8 turns as history — server caps too
             // but we'd rather not push a huge payload over the wire.
             let recent = history.count > 8 ? Array(history.suffix(8)) : history
             let agentContext = buildAgentContext()
             let resp = try await api.codeAssist(
-                message: msg,
+                message: message,
                 language: prefLanguage,
                 model: selectedModel.isEmpty ? nil : selectedModel,
                 provider: (AICliTool(rawValue: config.activeCLI) ?? .claudeCode).provider,
@@ -1490,6 +1554,8 @@ struct CodeAssistantPanel: View {
                 attachments: attachments,
                 agentContext: agentContext,
             )
+            // If Stop fired during the await, don't append the (now-unwanted) reply.
+            try Task.checkCancellation()
             history.append(.init(role: .assistant, content: resp.reply))
             self.pendingTool = resp.pendingTool
             // Fast path: in Auto mode, apply a proposed file edit immediately
@@ -1502,8 +1568,20 @@ struct CodeAssistantPanel: View {
             if editMode == .auto, let pt = resp.pendingTool, let args = pt.updateFileArgs {
                 _ = await confirmUpdateFile(args, finalContent: args.content)
             }
+        } catch is CancellationError {
+            // Stopped by the user — leave the user turn, no error bubble.
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // Stopped: Task cancellation surfaced as a cancelled URLSession request.
         } catch {
             self.error = error.localizedDescription
+        }
+        // Drain the queued message (if any) as a fresh, un-cancelled turn.
+        if let next = queued {
+            queued = nil
+            startTurn(next)
+        } else {
+            busy = false
+            runTask = nil
         }
     }
 
@@ -1630,12 +1708,13 @@ struct CodeAssistantPanel: View {
             role: .user,
             content: "(applied update to \(basename): \(deltaStr))"
         ))
-        // In auto-edit mode confirmUpdateFile is called from inside send(),
+        // In auto-edit mode confirmUpdateFile is called from inside runTurn,
         // which has already set busy = true. sendFollowup() guards on !busy
         // and would silently skip. Clear busy here so the follow-up fires;
-        // send()'s defer { busy = false } will run afterwards (a benign
-        // no-op). In manual-mode the sheet calls us directly with busy already
-        // false, so this is also safe.
+        // runTurn sets busy = false at its tail afterwards (a benign no-op,
+        // unless a queued message is waiting — which it then drains). In
+        // manual mode the sheet calls us directly with busy already false,
+        // so this is also safe.
         busy = false
         await sendFollowup()
         return .success
