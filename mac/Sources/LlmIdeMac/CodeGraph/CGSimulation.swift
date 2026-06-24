@@ -55,9 +55,9 @@ public final class CGSimulation: @unchecked Sendable {
         guard n > 1 else { return }
 
         let alpha:       CGFloat = 0.05
-        let kRepulsion:  CGFloat = 900.0
+        let kRepulsion:  CGFloat = 1500.0
         let kAttraction: CGFloat = 0.07
-        let restLength:  CGFloat = 80.0
+        let restLength:  CGFloat = 90.0
         let damping:     CGFloat = 0.88
         // Per-node speed cap. A high-degree hub (a dense doc graph can have a
         // node with 1000+ edges) accumulates one spring kick per edge each
@@ -67,8 +67,9 @@ public final class CGSimulation: @unchecked Sendable {
         // every node into a 1px horizontal line.) Clamping speed bounds movement
         // to maxV * alpha per tick, which keeps the layout finite and spread
         // regardless of density. It's a no-op for sparse graphs (their
-        // velocities never approach the cap).
-        let maxV:        CGFloat = 120.0
+        // velocities never approach the cap). Set high enough that legitimate
+        // spreading isn't strangled, but low enough to stop runaway divergence.
+        let maxV:        CGFloat = 250.0
         let center = CGPoint(x: 600, y: 400)
 
         // Spring attraction along edges
@@ -102,8 +103,8 @@ public final class CGSimulation: @unchecked Sendable {
 
         // Centering + integrate
         for i in 0..<n {
-            nodes[i].velocity.x += (center.x - nodes[i].position.x) * 0.008
-            nodes[i].velocity.y += (center.y - nodes[i].position.y) * 0.008
+            nodes[i].velocity.x += (center.x - nodes[i].position.x) * 0.03
+            nodes[i].velocity.y += (center.y - nodes[i].position.y) * 0.03
             let speed = hypot(nodes[i].velocity.x, nodes[i].velocity.y)
             if speed > maxV {
                 let scale = maxV / speed

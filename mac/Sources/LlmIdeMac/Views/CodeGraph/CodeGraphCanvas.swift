@@ -403,11 +403,22 @@ struct CodeGraphCanvas: View {
     private func fit(animated: Bool, in size: CGSize, force: Bool) {
         guard size.width > 0, size.height > 0, !data.nodes.isEmpty else { return }
         let positions = data.nodes.compactMap { effectivePos($0.id) }
+            .filter { $0.x.isFinite && $0.y.isFinite }
+        guard positions.count > 1 else { return }
+        // Frame to the central 2nd–98th percentile rather than the absolute
+        // min/max: a force layout often flings a few weakly-connected nodes far
+        // out, and fitting to those extremes would zoom the whole graph down to
+        // a tiny dot. Clipping the tails keeps the bulk of the graph filling the
+        // viewport; the strays are still reachable by panning.
+        func pct(_ a: [CGFloat], _ p: Double) -> CGFloat {
+            let s = a.sorted()
+            let i = Int((Double(s.count - 1) * p).rounded())
+            return s[min(max(i, 0), s.count - 1)]
+        }
         let xs = positions.map { $0.x }
         let ys = positions.map { $0.y }
-        guard let minX = xs.min(), let maxX = xs.max(),
-              let minY = ys.min(), let maxY = ys.max(),
-              minX.isFinite, maxX.isFinite, minY.isFinite, maxY.isFinite else { return }
+        let minX = pct(xs, 0.02), maxX = pct(xs, 0.98)
+        let minY = pct(ys, 0.02), maxY = pct(ys, 0.98)
         let spanX = maxX - minX, spanY = maxY - minY
         let cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
         // Degenerate bounds: if a (possibly collapsed) layout has near-zero

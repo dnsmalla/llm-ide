@@ -221,6 +221,12 @@ struct UAGraphView: View {
         .noteEvent, .noteSource,
     ]
 
+    /// Max edges kept per node in the doc / All graph before layout. The doc
+    /// graph's title-match + tag rules over-generate links (measured ~700k
+    /// edges on a real repo); capping to each node's strongest few keeps the
+    /// layout legible. 6 was chosen by rendering the settled result headlessly.
+    private static let docGraphMaxDegree = 6
+
     /// Recompute `displayData` from `fullData` based on `showSymbols`
     /// and `mode`. Cheap when fullData is small; cached so the view
     /// body doesn't re-run it on every redraw.
@@ -1198,7 +1204,11 @@ struct UAGraphView: View {
             }
             if Task.isCancelled { return }
             let fp = fingerprintRepo.map { KnowledgeGraphService.docSetFingerprint(roots: [$0]) }
-            let initial = CodeGraphLayout.compute(mem.graph,
+            // Cap per-node edges before layout: the doc graph over-generates
+            // links (a real repo hit ~700k edges / avg degree 124), which no
+            // force layout can untangle — it collapses into a hairball line.
+            let docGraph = GraphPrune.capDegree(mem.graph, maxDegree: Self.docGraphMaxDegree)
+            let initial = CodeGraphLayout.compute(docGraph,
                                                   canvasSize: CGSize(width: 1200, height: 800))
             if Task.isCancelled { return }
             await MainActor.run {
@@ -1207,8 +1217,8 @@ struct UAGraphView: View {
                 self.memoryDocCount = mem.docCount
                 self.fullData = initial
                 self.cacheGraph(.data, initial, chunks: mem.chunks, docCount: mem.docCount, fingerprint: fp)
-                self.status = .loaded(nodeCount: mem.graph.nodes.count,
-                                      edgeCount: mem.graph.edges.count)
+                self.status = .loaded(nodeCount: docGraph.nodes.count,
+                                      edgeCount: docGraph.edges.count)
                 // Settle into the same organic layout as the code graph.
                 self.settlePhysics(from: initial, expectedMode: .data)
             }
@@ -1252,7 +1262,11 @@ struct UAGraphView: View {
                     let docMem = MemoryGenerator.generate(from: repo) // build it if not fresh
                     doc = (docMem.graph, docMem.chunks, docMem.docCount)
                 }
-                let merged = KnowledgeGraphService.merge(code: code, doc: doc.graph, chunks: doc.chunks)
+                // Cap the doc side's per-node edges (the code side is already
+                // sparse and meaningful) before merging — otherwise the doc
+                // graph's edge explosion collapses the combined layout too.
+                let prunedDoc = GraphPrune.capDegree(doc.graph, maxDegree: Self.docGraphMaxDegree)
+                let merged = KnowledgeGraphService.merge(code: code, doc: prunedDoc, chunks: doc.chunks)
                 let laid = CodeGraphLayout.compute(merged, canvasSize: CGSize(width: 1200, height: 800))
                 return (laid, doc.chunks, doc.docs)
             }.value
@@ -1284,10 +1298,10 @@ struct UAGraphView: View {
         // early-exit on low velocity usually stops sooner anyway.
         let maxIterations: Int
         switch count {
-        case ..<300:   maxIterations = 200
-        case ..<700:   maxIterations = 140
-        case ..<1200:  maxIterations = 90
-        default:       maxIterations = 60
+        case ..<300:   maxIterations = 220
+        case ..<700:   maxIterations = 180
+        case ..<1200:  maxIterations = 150
+        default:       maxIterations = 120
         }
         Task.detached(priority: .userInitiated) {
             let sim = CGSimulation(data: initial)
