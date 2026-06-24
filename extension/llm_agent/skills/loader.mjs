@@ -67,6 +67,7 @@ function validateSchema(schema) {
       required: def.required === true,
       maxLength: typeof def.maxLength === 'number' ? def.maxLength : null,
       description: typeof def.description === 'string' ? def.description : null,
+      enum: Array.isArray(def.enum) && def.enum.length > 0 ? def.enum : undefined,
     };
   }
   return { schema: out };
@@ -127,8 +128,9 @@ export function loadSkills(dir) {
       warnings.push(`${entry}: kind '${fm.kind}' is not 'read' or 'write'`);
       continue;
     }
-    if (fm.kind === 'write' && fm.confirmation !== 'editable-sheet') {
-      warnings.push(`${entry}: write skills must have confirmation: editable-sheet`);
+    const VALID_CONFIRMATIONS = new Set(['editable-sheet', 'gitop-sheet']);
+    if (fm.kind === 'write' && !VALID_CONFIRMATIONS.has(fm.confirmation)) {
+      warnings.push(`${entry}: write skills must have confirmation: editable-sheet or gitop-sheet`);
       continue;
     }
     const schemaResult = validateSchema(fm.schema);
