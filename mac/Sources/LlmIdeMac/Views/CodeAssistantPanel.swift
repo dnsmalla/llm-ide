@@ -1953,7 +1953,20 @@ struct CodeAssistantPanel: View {
 
     /// Spawn a new empty session, persist it, switch to it, and clear
     /// in-memory composer state. Per-project `recentIssues` stays.
+    /// Cancel any in-flight turn and clear per-conversation transient state.
+    /// Called when the active session changes so a running turn can't land its
+    /// reply in — or leave `busy` stuck locking — the new session, and so
+    /// queued messages / expanded-turn ids don't bleed across sessions.
+    private func resetActiveTurnState() {
+        runTask?.cancel()
+        runTask = nil
+        busy = false
+        queued.removeAll()
+        expandedTurns.removeAll()
+    }
+
     private func createNewSession() {
+        resetActiveTurnState()
         let fresh = ChatSession()
         ChatSessionStore.save(fresh)
         currentSessionIDString = fresh.id.uuidString
@@ -1970,6 +1983,7 @@ struct CodeAssistantPanel: View {
     private func switchSession(to id: UUID) {
         guard id.uuidString != currentSessionIDString else { return }
         guard let session = ChatSessionStore.load(id: id) else { return }
+        resetActiveTurnState()
         currentSessionIDString = id.uuidString
         history = session.history
         draft = ""

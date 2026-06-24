@@ -188,6 +188,11 @@ final class RepoManager {
         _ = try await git(["rev-parse", "--is-inside-work-tree"], cwd: repoURL)
         let branch = try await currentBranch(at: repoURL)
         let onDefault = Self.defaultBranchNames.contains(branch)
+        // Detached HEAD: `git rev-parse --abbrev-ref HEAD` returns "HEAD". A
+        // commit here would be orphaned and a push would use "HEAD" as a
+        // refspec — so treat it like "not on a usable branch" for mutations
+        // (commit auto-branches; push/pull/merge refuse). Reads are unaffected.
+        let detached = branch == "HEAD" || branch.isEmpty
 
         func run(_ argv: [String], tok: String? = nil) async throws -> String {
             let (out, err) = try await git(argv, cwd: repoURL, token: tok)
@@ -215,27 +220,30 @@ final class RepoManager {
             return try await run(["checkout", try safeRef(b)])
         case .commit:
             guard let msg = a.message, !msg.isEmpty else { throw RepoError.commandFailed("commit needs a message") }
-            // BRANCH-FIRST: never commit on the default branch — make a feature branch first.
-            if onDefault {
+            // BRANCH-FIRST: never commit on the default branch (or detached
+            // HEAD) — make a feature branch first.
+            if onDefault || detached {
                 let name = agentBranchName(from: a.slug)
                 _ = try await run(["checkout", "-b", name])
             }
             _ = try await run(["add", "-A"])
             return try await run(["commit", "-m", msg])
         case .pull_ff:
+            guard !detached else { throw RepoError.commandFailed("Can't pull in a detached HEAD — checkout a branch first.") }
             return try await run(["pull", "--ff-only", "origin", branch], tok: token)
         case .push:
-            // PROTECTED MAIN: only ever push the CURRENT (non-default) branch.
-            if onDefault {
-                throw RepoError.commandFailed("Refusing to push the default branch (\(branch)). I work on a feature branch; use merge_to_main to land changes.")
+            // PROTECTED MAIN: only ever push the CURRENT non-default branch;
+            // never the default branch and never a detached HEAD.
+            if onDefault || detached {
+                throw RepoError.commandFailed("Refusing to push: not on a feature branch (current: \(branch)). I work on a feature branch; use merge_to_main to land changes.")
             }
             return try await run(["push", "--set-upstream", "origin", branch], tok: token)
 
         // ---- destructive ----
         case .merge:
             guard let src = a.branch else { throw RepoError.commandFailed("merge needs a source branch") }
-            if onDefault {
-                throw RepoError.commandFailed("Refusing to merge into the default branch directly. Use merge_to_main for that explicit step.")
+            if onDefault || detached {
+                throw RepoError.commandFailed("Refusing to merge into the default branch (or a detached HEAD) directly. Use merge_to_main for that explicit step.")
             }
             return try await run(["merge", "--no-ff", try safeRef(src)])
         case .revert:
@@ -259,7 +267,15 @@ final class RepoManager {
             let safeSrc = try safeRef(src)
             let target = try await resolveDefaultBranch(at: repoURL)
             _ = try await run(["checkout", target])
-            _ = try await run(["merge", "--ff-only", safeSrc])
+            do {
+                _ = try await run(["merge", "--ff-only", safeSrc])
+            } catch {
+                // A non-fast-forward (default branch moved) leaves us checked
+                // out on the default branch — return to the original branch so
+                // a later commit can't accidentally land on the default.
+                _ = try? await run(["checkout", branch])
+                throw error
+            }
             return try await run(["push", "origin", target], tok: token)
         }
     }
