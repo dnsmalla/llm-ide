@@ -7,6 +7,18 @@ import AppKit
 /// vertically-sized chat bubble inside a scroll view (where a plain web view
 /// would have no intrinsic height). Links open in the user's browser rather
 /// than navigating the embedded view.
+/// A `WKWebView` that forwards scroll-wheel events to its enclosing scroll
+/// view instead of consuming them. The chat bubble web view is sized to its
+/// content (no internal scrolling), but a stock `WKWebView` still captures the
+/// scroll gesture — so scrolling with the cursor over a bubble would do nothing
+/// and the conversation `ScrollView` wouldn't move. Forwarding to `nextResponder`
+/// lets the parent SwiftUI `ScrollView` scroll normally.
+final class PassthroughWebView: WKWebView {
+    override func scrollWheel(with event: NSEvent) {
+        nextResponder?.scrollWheel(with: event)
+    }
+}
+
 struct SelfSizingMarkdownView: NSViewRepresentable {
     let markdown: String
     let isDark: Bool
@@ -17,11 +29,12 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
-        let web = WKWebView(frame: .zero, configuration: config)
+        // PassthroughWebView forwards scroll-wheel events to the enclosing
+        // conversation ScrollView — the view is content-sized, so it must not
+        // capture the scroll gesture (see PassthroughWebView above).
+        let web = PassthroughWebView(frame: .zero, configuration: config)
         web.navigationDelegate = context.coordinator
         web.setValue(false, forKey: "drawsBackground")
-        // No internal scrolling — the view is sized to its content.
-        web.enclosingScrollView?.hasVerticalScroller = false
         context.coordinator.load(into: web, markdown: markdown, isDark: isDark)
         return web
     }
