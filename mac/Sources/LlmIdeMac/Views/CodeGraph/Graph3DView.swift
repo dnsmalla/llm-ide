@@ -13,8 +13,6 @@ struct Graph3DView: NSViewRepresentable {
     let positions: [String: SIMD3<Float>]
     @Binding var selected: CGNode?
 
-    @EnvironmentObject private var theme: ThemeStore
-
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> SCNView {
