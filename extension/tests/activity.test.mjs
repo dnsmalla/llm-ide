@@ -122,3 +122,53 @@ test('0018 migration creates activity + activity_seen tables', async () => {
     assert.ok(cols.includes(c), `activity.${c} missing`);
   }
 });
+
+test('listActivity returns newest-first and honours sinceId', async () => {
+  await freshDb();
+  const { getDb } = await import('../kb/db.mjs');
+  const { registerUser } = await import('../server/users.mjs');
+  const { recordActivity, listActivity } = await import('../kb/activity.mjs');
+  const db = getDb();
+  const { id: userId } = registerUser(db, { email: 'u-list@example.com', password: 'pw-12345678' });
+  const ids = [];
+  for (let i = 0; i < 3; i++) ids.push(recordActivity(db, { userId, kind: 'meeting_added', title: `m${i}` }));
+  const all = listActivity(db, userId, {});
+  assert.equal(all.length, 3);
+  assert.equal(all[0].title, 'm2', 'newest first');
+  const sinceFirst = listActivity(db, userId, { sinceId: ids[0] });
+  assert.deepEqual(sinceFirst.map((r) => r.title), ['m2', 'm1']);
+});
+
+test('listActivity isolates users and parses detail', async () => {
+  await freshDb();
+  const { getDb } = await import('../kb/db.mjs');
+  const { registerUser } = await import('../server/users.mjs');
+  const { recordActivity, listActivity } = await import('../kb/activity.mjs');
+  const db = getDb();
+  const a = registerUser(db, { email: 'u-a@example.com', password: 'pw-12345678' }).id;
+  const b = registerUser(db, { email: 'u-b@example.com', password: 'pw-12345678' }).id;
+  recordActivity(db, { userId: a, kind: 'email_fetched', title: 'a', detail: { count: 3 } });
+  recordActivity(db, { userId: b, kind: 'email_fetched', title: 'b', detail: { count: 9 } });
+  const forA = listActivity(db, a, {});
+  assert.equal(forA.length, 1);
+  assert.deepEqual(forA[0].detail, { count: 3 });
+});
+
+test('unreadCount and markSeen track the cursor monotonically', async () => {
+  await freshDb();
+  const { getDb } = await import('../kb/db.mjs');
+  const { registerUser } = await import('../server/users.mjs');
+  const { recordActivity, unreadCount, markSeen } = await import('../kb/activity.mjs');
+  const db = getDb();
+  const { id: userId } = registerUser(db, { email: 'u-seen@example.com', password: 'pw-12345678' });
+  const ids = [];
+  for (let i = 0; i < 3; i++) ids.push(recordActivity(db, { userId, kind: 'meeting_added', title: `m${i}` }));
+  assert.equal(unreadCount(db, userId), 3);
+  markSeen(db, userId, ids[1]);
+  assert.equal(unreadCount(db, userId), 1);
+  // markSeen never lowers the cursor.
+  markSeen(db, userId, ids[0]);
+  assert.equal(unreadCount(db, userId), 1);
+  markSeen(db, userId, ids[2]);
+  assert.equal(unreadCount(db, userId), 0);
+});

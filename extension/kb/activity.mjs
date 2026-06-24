@@ -61,3 +61,43 @@ export function recordActivity(db, { userId, kind, title, detail, link } = {}) {
     return null;
   }
 }
+
+// Newest-first feed.  sinceId>0 → only rows after that id (incremental poll);
+// otherwise the newest `limit` rows.
+export function listActivity(db, userId, { sinceId = 0, limit = 100 } = {}) {
+  const rows = sinceId > 0
+    ? db.prepare(
+        `SELECT id, kind, title, detail, link, created_at
+           FROM activity WHERE user_id = ? AND id > ? ORDER BY id DESC LIMIT ?`
+      ).all(userId, sinceId, limit)
+    : db.prepare(
+        `SELECT id, kind, title, detail, link, created_at
+           FROM activity WHERE user_id = ? ORDER BY id DESC LIMIT ?`
+      ).all(userId, limit);
+  return rows.map((r) => {
+    let detail = null;
+    if (r.detail) { try { detail = JSON.parse(r.detail); } catch { detail = null; } }
+    return { id: r.id, kind: r.kind, title: r.title, detail, link: r.link, created_at: r.created_at };
+  });
+}
+
+// Number of events newer than the user's last-seen cursor.
+export function unreadCount(db, userId) {
+  const row = db.prepare(
+    `SELECT COUNT(*) AS c FROM activity
+      WHERE user_id = ?
+        AND id > COALESCE((SELECT last_seen_id FROM activity_seen WHERE user_id = ?), 0)`
+  ).get(userId, userId);
+  return row ? row.c : 0;
+}
+
+// Advance the last-seen cursor; never lowers it.
+export function markSeen(db, userId, uptoId) {
+  const upto = Number(uptoId) || 0;
+  db.prepare(
+    `INSERT INTO activity_seen (user_id, last_seen_id) VALUES (?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET last_seen_id = MAX(last_seen_id, excluded.last_seen_id)`
+  ).run(userId, upto);
+  const row = db.prepare(`SELECT last_seen_id FROM activity_seen WHERE user_id = ?`).get(userId);
+  return row ? row.last_seen_id : 0;
+}
