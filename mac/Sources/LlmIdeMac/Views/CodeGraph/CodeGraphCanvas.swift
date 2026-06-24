@@ -273,7 +273,9 @@ struct CodeGraphCanvas: View {
     private func nodeR(id: String, prominent: Bool) -> CGFloat {
         let deg  = CGFloat(nodeDegree[id] ?? 0)
         let base: CGFloat = prominent ? 10 : 5
-        return base + sqrt(deg) * 1.4
+        // Cap the degree contribution so a hub node (e.g. a doc-graph root linked
+        // to hundreds of pages) can't balloon into a screen-filling circle.
+        return base + min(sqrt(deg) * 1.4, 24)
     }
 
     private func neighbourIds(of id: String?) -> Set<String> {
@@ -404,10 +406,18 @@ struct CodeGraphCanvas: View {
         let xs = positions.map { $0.x }
         let ys = positions.map { $0.y }
         guard let minX = xs.min(), let maxX = xs.max(),
-              let minY = ys.min(), let maxY = ys.max() else { return }
-        let s  = min(size.width  * 0.88 / max(maxX - minX, 1),
-                     size.height * 0.88 / max(maxY - minY, 1))
+              let minY = ys.min(), let maxY = ys.max(),
+              minX.isFinite, maxX.isFinite, minY.isFinite, maxY.isFinite else { return }
+        let spanX = maxX - minX, spanY = maxY - minY
         let cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
+        // Degenerate bounds: if a (possibly collapsed) layout has near-zero
+        // extent in BOTH axes, the naive fit would divide by ~1 and slam scale
+        // to the 6.0 cap — rendering every node screen-huge and overlapping.
+        // Show such a cluster at 1:1 instead so it stays pannable/zoomable.
+        let s: CGFloat = (spanX < 1 && spanY < 1)
+            ? 1.0
+            : min(size.width  * 0.88 / max(spanX, 1),
+                  size.height * 0.88 / max(spanY, 1))
         let apply = {
             self.scale  = max(0.05, min(6.0, s))
             self.offset = CGSize(width:  size.width  / 2 - cx * s,
