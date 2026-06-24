@@ -476,6 +476,15 @@ paths:
   /kb/activity:
     get:
       summary: List the authenticated user's activity feed
+      parameters:
+        - in: query
+          name: since
+          schema: { type: integer }
+          description: Return only items with id > this value (incremental poll cursor)
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+          description: Maximum number of items to return
       responses:
         '200':
           description: Activity items + unread count

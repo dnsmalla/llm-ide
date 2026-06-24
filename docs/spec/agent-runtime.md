@@ -160,6 +160,8 @@ Iterates the skill's `schema` object. For each declared argument:
 - **type `boolean`** — checks `typeof v !== 'boolean'` (fence.mjs:65–66)
 - **type `string[]`** — checks array-of-strings; checks element count against `maxItems` (default 512, fence.mjs:74); applies `maxLength` per element (fence.mjs:78–85)
 - **Unsupported type** → error (fence.mjs:87)
+- **Enum constraint** — a `string` arg with a non-empty `enum` array in its schema rejects any value not present in that list, returning `"must be one of: <values>"`.
+- **Undeclared-key rejection** — any key present in `fence.arguments` that is not declared in the skill's schema is rejected with `"unexpected argument '<key>'"`. This prevents the model from passing extra keys that the handler never reads, which would otherwise be silently ignored.
 
 Returns `{ value }` on success or `{ error }` on first failure.
 
@@ -206,14 +208,14 @@ Each skill is a Markdown file with a YAML frontmatter block. The loader validate
 | `kind` | yes | `'read'` or `'write'` | loader.mjs:117–129 |
 | `description` | no | 1–2 sentence summary; falls back to first prose line of body | loader.mjs:143–145 |
 | `schema` | no | object mapping arg name → `{ type, required?, maxLength?, description? }` | loader.mjs:52–73 |
-| `confirmation` | no (required for write) | write skills must have `confirmation: editable-sheet` | loader.mjs:130–132 |
+| `confirmation` | no (required for write) | write skills must have `confirmation: editable-sheet` or `confirmation: gitop-sheet` | loader.mjs:130–132 |
 | `model` | no | model string (used by subagent frontmatter, not core skills) | — |
 
 **Per-file size cap:** `MAX_SKILL_BYTES = 32_768` bytes (32 KB) per skill file including `_base.md` (loader.mjs:17). Files exceeding this limit are dropped with a warning. `_base.md` is rejected entirely (not truncated) because truncating the fence-protocol contract mid-sentence produces subtly malformed tool calls (loader.mjs:93–99).
 
 **Name must match filename** (loader.mjs:121–125): `fm.name` is compared against the filename with `.md` stripped. A mismatch is a loader error, not a warning, so skill files cannot be silently mis-keyed.
 
-**Write skills require `confirmation: editable-sheet`** (loader.mjs:130–132). This field is the wire contract with the client: the client receives `pendingTool` and shows an editable confirmation sheet before applying the change.
+**Write skills require `confirmation: editable-sheet` or `confirmation: gitop-sheet`** (loader.mjs:130–132). This field is the wire contract with the client: the client receives `pendingTool` and shows a confirmation sheet before applying the change. `editable-sheet` is for file-edit and issue-create tools; `gitop-sheet` is for the `git-op` tool (which shows a git-specific confirmation UI, with a red warning banner for destructive ops).
 
 Valid `schema` argument types: `string`, `number`, `boolean`, `string[]` (loader.mjs:12).
 
@@ -229,7 +231,7 @@ Both are global read skills. Their handlers resolve a backend at call time, reus
 
 1. **Anthropic API key present** (`providerApiKey(userId, 'anthropic')`) → the Messages API's native `web_search` / `web_fetch` server tools (`web-client.mjs` → `searchWebViaAnthropic` / `fetchUrlViaAnthropic`).
 2. **Otherwise** → the `claude` CLI's built-in `WebSearch` / `WebFetch` via the operator/subscription login. The CLI argv (`anthropicWebCliArgs`, providers.mjs) passes both `--tools <tool>` (makes it available) **and** `--allowedTools <tool>` (pre-approves it) — without the latter, headless `-p` mode declines the tool ("I don't have permission to use WebFetch yet").
-3. **Fallback** → SerpAPI (`searchWeb`, vault `serpapi.apiKey` or `LLMIDE_SERPAPI_KEY`) / a direct HTTP fetch with HTML stripped.
+3. **Fallback** → SerpAPI (`searchWeb`, `LLMIDE_SERPAPI_KEY` env var only) / a direct HTTP fetch with HTML stripped. Note: `serpapi.apiKey` is NOT in the vault `ALLOWED_KEYS` set (`extension/server/vault.mjs`), so any attempt to read it via `getSecret` silently no-ops. SerpAPI is only activated when `LLMIDE_SERPAPI_KEY` is set in the server process environment.
 
 `web-search` returns `{ answer, sources: [{title, url}], count }`; `fetch-url` returns `{ title, text }`. `fetch-url` runs `assertSafeBaseUrlResolved` (providers.mjs) first as an SSRF guard (blocks localhost/private targets) — the only thing between the URL and the backend's own network on the direct-fetch path.
 
@@ -258,6 +260,9 @@ Verbatim prompt and skill files (version-controlled; read the source, do not rel
 - `extension/llm_agent/global/ask-internal.md` — `ask-internal` skill body
 - `extension/llm_agent/global/ask-subagent.md` — `ask-subagent` skill body
 - `extension/llm_agent/global/update-file.md` — `update-file` write skill body
+- `extension/llm_agent/global/git-op.md` — `git-op` write skill body
+- `extension/llm_agent/global/web-search.md` — `web-search` read skill body
+- `extension/llm_agent/global/fetch-url.md` — `fetch-url` read skill body
 - `extension/llm_agent/internal/prompt.md` — internal agent role and rules
 - `extension/llm_agent/internal/skills/search-kb.md`
 - `extension/llm_agent/internal/skills/create-gitlab-issue.md`
@@ -397,7 +402,13 @@ This cap is aligned with the server-level body cap documented in [`api-server.md
 
 **Trigger:** no API key is available, or the HTTP path exits its retry loop without a successful response (operator-key only).
 
-**Invocation:** `execFile('claude', ['--strict-mcp-config', '-p', prompt], { timeout: CLAUDE_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, env })` (runtime.mjs:312–316). The `--strict-mcp-config` flag (with no `--mcp-config`) loads **zero** MCP servers, so a cold `claude` spawn skips booting every MCP server the user has configured — the dominant per-call cost in CLI mode. The agent supplies its own context via the prompt and never needs the user's MCP servers here.
+**Invocation:** `execFile('claude', ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '-p', prompt], { timeout: CLAUDE_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, env })` (runtime.mjs:312–316, argv built by `CLI_ARG_BUILDERS.anthropic` in `providers.mjs:285`). The flags serve distinct purposes:
+
+- `--strict-mcp-config` (with no `--mcp-config`) loads **zero** MCP servers, so a cold `claude` spawn skips booting every MCP server the user has configured — the dominant per-call cost in CLI mode.
+- `--setting-sources ''` loads zero user/project/local settings, so the operator's hooks (e.g. a superpowers SessionStart plugin) do not inject into the agent's context.
+- `--tools ''` makes `claude -p` a pure text-completion call — no built-in tools are available. (Web handlers opt in separately via `anthropicWebCliArgs`, which passes `--tools <tool> --allowedTools <tool>` instead.)
+
+The agent supplies its own context via the prompt and never needs the user's MCP servers here.
 
 **CLI timeout:** `CLAUDE_TIMEOUT_MS = 90_000` ms (90 seconds per attempt) (runtime.mjs:14).
 

@@ -62,7 +62,7 @@ An `NSApplicationDelegateAdaptor(AppDelegate.self)` is wired at line 34 to handl
 
 ### EnvironmentObject graph
 
-All objects are constructed once in `init()` and injected at lines 129–144:
+Most objects are constructed once in `init()` and injected at lines 129–144. Two exceptions use a `@State` wrapper instead of the "constructed once in init()" form: `BackendManager` (`@State private var backend`) and `ActivityStore` (`@State private var activityStore`, line 51) — both are `@Observable` rather than `ObservableObject`, so SwiftUI requires `@State` for storage.
 
 | Object | Type | Role |
 |---|---|---|
@@ -79,6 +79,7 @@ All objects are constructed once in `init()` and injected at lines 129–144:
 | `agentRuns` | `AgentRunsStore` | Agent run history |
 | `graphAutoUpdater` | `GraphAutoUpdater` | Auto-maintains the per-project knowledge graph + memory (see §3) |
 | `graphSessionStore` | `GraphSessionStore` | Process-lifetime cache of generated Code Graph results, keyed `repo#mode` |
+| `activityStore` | `ActivityStore` | Activity feed state: bell badge count, poll loop, mark-seen cursor (see §8). Uses `@State` wrapper — injected via `.environment(activityStore)` at line 156. |
 
 `BackendManager` is held as `@State private var backend` (line 47, using `@Observable`, not `ObservableObject`), injected via `.environment(backend)` at line 140. `LlmIdeAPIClient` and `AutoCaptureService` are stored as plain `let` properties (lines 49–50) and passed directly to views that need them.
 
@@ -224,7 +225,9 @@ Two sessions are created in `init()` (lines 152–161):
 | Session | Timeout (request / resource) | Used for |
 |---|---|---|
 | `authSession` | 10 s / 15 s | Paths starting with `/auth/` |
-| `llmSession` | 240 s / 600 s (10 min) | All other paths (LLM-backed endpoints) |
+| `llmSession` | 330 s / 600 s (10 min) | All other paths (LLM-backed endpoints) |
+
+The `llmSession` request timeout is 330 s (source: `LlmIdeAPIClient.swift` line 167: `llmCfg.timeoutIntervalForRequest = 330`). 330 s covers the server worst case — the global agent loop (180 s) plus a single internal delegation's own up-to-120 s sub-loop, whose deadlines are independent — with margin. The resource timeout stays at 600 s / 10 min.
 
 Route selection happens in `session(for: path)` (line 384): paths with prefix `/auth/` use `authSession`; everything else uses `llmSession`.
 
@@ -264,7 +267,7 @@ Backoff strategy (`backoffNanos`, lines 345–348): `0.4 × 2^(attempt-1)` secon
 The Code Assistant sends a `POST /code-assist` request and receives a `CodeAssistResponse` (defined in `LlmIdeAPIClient+CodeAssist.swift`, lines 52–61). The response carries an optional `pendingTool: PendingTool?`.
 
 `PendingTool` (`Agent/Models/AgentTypes.swift`, line 40) has:
-- `name: String` — the tool name (e.g. `"update-file"`, `"create-gitlab-issue"`, `"comment-issue"`, `"trigger-review-code"`)
+- `name: String` — the tool name (e.g. `"update-file"`, `"create-gitlab-issue"`, `"comment-gitlab-issue"`, `"trigger-review-code"`)
 - `arguments: AnyArguments` — raw JSON payload stored as `Data`, decoded lazily into typed structs via accessor properties (`updateFileArgs`, `createIssueArgs`, etc.)
 
 **Flow for `update-file` (the file-edit path):**
@@ -279,10 +282,52 @@ The Code Assistant sends a `POST /code-assist` request and receives a `CodeAssis
 
 **Other tool names** follow the same card → sheet → confirm → synthetic-turn → follow-up pattern:
 - `"create-gitlab-issue"` / `"create-github-issue"` → `CreateIssueSheet` → calls `GitLabClient` or `GitHubClient` → synthetic `(executed create-issue → #N ...)` turn
-- `"comment-issue"` → `CommentIssueSheet` → calls `client.createNote(...)`
+- `"comment-gitlab-issue"` → `CommentIssueSheet` → calls `client.createNote(...)`
 - `"trigger-review-code"` → `TriggerReviewCodeSheet`
+- `"git-op"` → see **git-op capability** subsection below.
+
+#### git-op capability
+
+**Sources:** `Agent/Models/AgentTypes.swift`, `Services/RepoManager.swift`, `Views/CodeAssistantPanel.swift`, `Views/GitOpSheet.swift`
+
+The `git-op` tool gives the Code Assistant agent the ability to run git operations on the active repository.
+
+**Model** (`Agent/Models/AgentTypes.swift`):
+
+- `GitOp` — a 16-op `enum`: `status`, `log`, `diff`, `branch` (read tier); `add`, `commit`, `create_branch`, `checkout`, `pull_ff`, `push` (safe-write tier); `merge`, `revert`, `reset`, `stash`, `clean`, `merge_to_main` (destructive tier).
+- `GitOpTier` — `case read, write, destructive`.
+- `GitOpArgs: Codable` — `{ op: GitOp, message?, branch?, ref?, mode?, slug? }`.
+- `PendingTool.gitOpArgs` — accessor on `PendingTool` that decodes `GitOpArgs` when `name == "git-op"`.
+
+**Confirmation tier** (`Views/CodeAssistantPanel.swift`):
+
+- **Read-tier ops** (`status`, `log`, `diff`, `branch`) — auto-run without any confirmation sheet.
+- **Safe-write and destructive ops** — surface `GitOpSheet` before execution. Destructive ops additionally show a red warning banner inside the sheet so the user understands the operation is irreversible.
+
+**Branch-first / protected-main policy** (`Services/RepoManager.runGitOp`):
+
+- **commit on the default branch or a detached HEAD** — `runGitOp` auto-creates an `agent/<slug>` branch first (BRANCH-FIRST rule), so agent commits never land directly on `main`/`master`.
+- **`push`** — refused when not on a named non-default branch (`"Refusing to push: not on a feature branch"`).
+- **direct `merge` into the default branch or a detached HEAD** — refused (`"Refusing to merge into the default branch (or a detached HEAD) directly. Use merge_to_main for that explicit step."`).
+- **`merge_to_main`** — the only operation that pushes `origin <default-branch>`; it performs a fast-forward merge from a feature branch and rolls back to the original branch if the ff-merge fails.
+- **`safeRef()`** (`RepoManager.safeRef`, line 164) — rejects flag-like strings (starting with `-`) and strings containing whitespace, preventing shell-injection via ref names.
+
+**Skill file:** `extension/llm_agent/global/git-op.md`  
+**Confirmation tag:** `confirmation: gitop-sheet`
 
 There is no separate `/code-assist/tool-result` endpoint. The tool result is communicated back to the server by appending a synthetic acknowledgement turn to `history` and making a fresh `POST /code-assist` call. The server sees the outcome in the conversation history.
+
+#### Chat Stop, message queue, and reply collapse
+
+**Source:** `Views/CodeAssistantPanel.swift`
+
+**Stop control:** while a turn is running, a Stop button (also triggered by Esc, line 1224) is visible in the chat input area. Tapping it cancels the in-flight `Task` handle stored at line 55 (`@State private var runningTurn: Task<Void, Never>?`). Cancellation is a clean stop — no error bubble — after which the queue is drained (line 1634–1641).
+
+**Message queue:** messages submitted while a turn is already running are appended to `@State private var queued: [String]` (line 59) — a FIFO list. When the current turn finishes or is stopped, `startTurn(queued.removeFirst())` is called (line 1693) so queued messages auto-send oldest-first without user intervention. The queue UI renders below the input field (lines 1077–1102); each pending item shows a cancel (×) button.
+
+**Session reset:** switching to a different session or creating a new one calls `resetActiveTurnState()` (line 1960), which cancels the running turn, clears `isBusy`, and calls `queued.removeAll()` so busy/queued state never bleeds across sessions (line 1964–1969).
+
+**Collapse-old-replies:** only the latest assistant reply renders a full `SelfSizingMarkdownView` (the expensive web-view-backed renderer). Older assistant turns collapse to a lightweight text preview via `markdownPreview(_:)` (line 787), which strips markdown to plain text. A collapsed reply expands on tap: tapping inserts the turn's `id` into `expandedTurns: Set<UUID>` (line 97); `isAssistantExpanded(_:)` (line 781) returns true when `turn.id == lastAssistantTurnId || expandedTurns.contains(turn.id)`. An expanded old reply shows a "Collapse" button (line 832) that removes it from `expandedTurns`.
 
 ### Central routes called by the app
 
@@ -300,6 +345,9 @@ For the full route list see [`api-server.md`](api-server.md) and [`../reference/
 | `GET /kb/live/sessions` | Discover active live sessions |
 | `GET /kb/live/<id>` | Poll captions for an active live session |
 | `GET /kb/plans` / `GET /kb/plan/<id>` | Plan list and detail |
+| `GET /kb/activity?since=&limit=` | Activity feed poll (incremental, since cursor) |
+| `POST /kb/activity` | Report an activity event (knowledge graph update, regression run, issue create/comment) |
+| `POST /kb/activity/seen` | Advance the unread-badge watermark |
 | `GET /health` | Backend health probe (used by `BackendManager`) |
 
 ---

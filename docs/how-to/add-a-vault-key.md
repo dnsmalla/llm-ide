@@ -11,7 +11,7 @@ Extend the credential vault's allow-list with a new key (e.g., `notion.apiKey`).
 
 ## Steps
 
-1. **Edit the allow-list.** In `extension/server/vault.mjs`, add the new key to `ALLOWED_SECRET_KEYS`.
+1. **Edit the allow-list.** In `extension/server/vault.mjs`, add the new key to `ALLOWED_KEYS`.
 2. **Document it.** Add a row to the vault section in [explanation/security-model.md](../explanation/security-model.md).
 3. **Add a UI input** under Settings → Secrets in `extension/src/sidepanel/`.
 4. **Use it.** Read the secret via `vault.get(userId, 'notion.apiKey')`. Never log it; redact it in audit `detail` by name.

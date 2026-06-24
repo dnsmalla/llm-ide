@@ -42,8 +42,10 @@ Notable tables added in recent migrations:
   durable feed of auto-generated events. `activity` holds
   `{ kind, title, detail (redacted JSON), link, created_at }`, pruned to the
   newest 500 rows per user; `activity_seen` is a single per-user last-seen cursor
-  for the unread badge. Both cascade-delete with the user. Store module
-  (the store module and HTTP routes are added in subsequent tasks).
+  for the unread badge. Both cascade-delete with the user. The store module is
+  `extension/kb/activity.mjs`; the HTTP routes are `GET /kb/activity`,
+  `POST /kb/activity`, and `POST /kb/activity/seen`, all handled in
+  `extension/kb/router.mjs`.
 
 **HTTP routing**
 
