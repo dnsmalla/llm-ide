@@ -1445,14 +1445,18 @@ struct UAGraphView: View {
 
     // MARK: - Kind filter bar
 
-    /// Compact inline legend — click a kind pill to highlight only those nodes;
-    /// click again to clear. Resets automatically via onChange(of: mode).
+    /// Compact inline legend / colour key — one pill per kind actually present,
+    /// click a pill to highlight only those nodes; click again to clear. Resets
+    /// automatically via onChange(of: mode).
+    ///
+    /// Shows EVERY present kind: it used to intersect with a code-only set
+    /// (file/module/class/function/…), so the InfiniteBrain / All doc graph —
+    /// whose nodes are memoryChunk / memoryDoc / note* — got an empty legend and
+    /// no colour key at all. Driving it off the present kinds gives every mode
+    /// (incl. 3D, which shares this toolbar) a legend.
     @ViewBuilder
     private func kindFilterBar(t: Theme) -> some View {
-        let filterableKinds: Set<CGNodeKind> = [.file, .module, .classType, .function,
-                                                 .service, .endpoint, .table, .config]
-        let presentKinds = Array(Set(displayData.nodes.map(\.kind))
-            .intersection(filterableKinds))
+        let presentKinds = Array(Set(displayData.nodes.map(\.kind)))
             .sorted { $0.rawValue < $1.rawValue }
 
         ScrollView(.horizontal, showsIndicators: false) {
