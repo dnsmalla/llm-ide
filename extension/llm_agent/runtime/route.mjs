@@ -16,6 +16,8 @@ import { composeGlobalPrompt } from '../global/compose-prompt.mjs';
 import { expandSlashCommand } from '../../plugins/loader.mjs';
 import { globalSkills, internalSkills, buildPerUserSkillSet } from '../skills/index.mjs';
 import { sanitizePersonaSuffix } from '../../agents/prompt-utils.mjs';
+import { renderGraphifyMemory } from '../../graphkit/index.mjs';
+import { redactFence } from './redaction.mjs';
 
 // Re-exported for the HTTP routes that historically imported these
 // from here (server/auth-routes.mjs, kb/routes/agent.mjs import the
@@ -108,6 +110,29 @@ export async function handleCodeAssist({
       }
     }
   } catch { /* keep the un-persona'd base */ }
+
+  // Repository memory (Graphify): inject the SAME compact, token-capped
+  // repo-memory block the internal agent already gets — directly into the
+  // GLOBAL agent's base. This is what lets the Code Assistant ground project
+  // answers in real, auto-generated memory even when it answers directly
+  // instead of delegating to ask-internal (the common case). It is the ONLY
+  // app-specific context global receives: active project / issues / meetings /
+  // capabilities still stay internal-only, preserving the lean-global split.
+  // renderGraphifyMemory is self-gated — it enforces the per-user repo
+  // allow-list, applies its own char caps (16 KB total / 2 repos / head-only
+  // reads), and returns '' when there are no indexed repos or no userId — so
+  // this adds nothing for users without a generated graph. Best-effort: a DB
+  // or read error must never break code-assist. The block is run through
+  // redactFence first: memory is derived from indexed-repo files (which can
+  // include untrusted content — a dependency README, a generated doc), and the
+  // global agent is the primary tool-emitter, so a stray `<<<TOOL_CALL>>>` in
+  // repo content must not be able to prime a forged tool call from the system
+  // prompt. (Same defense the loop applies to user messages / tool results.)
+  try {
+    const memBlock = renderGraphifyMemory(agentContext, userId);
+    if (memBlock) personaBase += `\n\n${redactFence(memBlock)}`;
+  } catch { /* memory is best-effort — keep the base without it */ }
+
   // Global handler set: ask-internal (for app-state-aware questions)
   // plus ask-subagent (for plugin-defined named delegates). The
   // ask-subagent handler is registered unconditionally — when no

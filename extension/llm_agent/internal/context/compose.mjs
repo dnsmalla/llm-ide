@@ -11,6 +11,7 @@ import { renderIndexedRepos } from './render-indexed-repos.mjs';
 import { renderRecentIssues } from './render-recent-issues.mjs';
 import { renderRecentMeetings } from './render-recent-meetings.mjs';
 import { renderGraphifyMemory } from '../../../graphkit/index.mjs';
+import { redactFence } from '../../runtime/redaction.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const APP_CAPABILITIES_PATH = join(__dirname, 'app-capabilities.md');
@@ -34,5 +35,14 @@ export function composeSystemContext(agentContext, userId) {
     // registered repo allow-list.
     renderGraphifyMemory(agentContext, userId),
   ];
-  return sections.filter((s) => typeof s === 'string' && s.length > 0).join('\n\n');
+  // Neutralise fence sentinels across the whole block: issue titles, meeting
+  // content, repo names, and Graphify memory are all external/user-derived and
+  // flow straight into the internal agent's system prompt. A `<<<TOOL_CALL>>>`
+  // smuggled in via a meeting title or a repo doc must not be able to prime a
+  // forged tool call. (Same defense the loop applies to user messages, history,
+  // and tool results — and that route.mjs applies to the global memory block.)
+  // redactFence only touches `<<<`/`>>>`, so the static capabilities text and
+  // section headers are unchanged.
+  const block = sections.filter((s) => typeof s === 'string' && s.length > 0).join('\n\n');
+  return redactFence(block);
 }
