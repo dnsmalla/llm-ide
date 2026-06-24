@@ -91,6 +91,10 @@ struct CodeAssistantPanel: View {
     @State private var showingReviewCodeSheet: Bool = false
     @State private var showingUpdateFileSheet: Bool = false
     @State private var showingGitOpSheet: Bool = false
+    /// Assistant turns the user has explicitly expanded. Combined with the
+    /// "latest is always open" rule (see isAssistantExpanded), this collapses
+    /// older replies to a lightweight text preview so a long chat stays short.
+    @State private var expandedTurns: Set<UUID> = []
     @State private var reportingFault: FaultReportContext?
     /// How file-edit tool calls are accepted. Persisted across launches.
     /// `.review` (default) shows the confirmation card + popup; `.auto`
@@ -767,6 +771,30 @@ struct CodeAssistantPanel: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// The most recent assistant turn — always rendered expanded.
+    private var lastAssistantTurnId: UUID? {
+        history.last(where: { $0.role == .assistant })?.id
+    }
+
+    /// An assistant turn renders in full iff it's the latest one or the user
+    /// expanded it; otherwise it collapses to a preview.
+    private func isAssistantExpanded(_ turn: LlmIdeAPIClient.CodeAssistTurn) -> Bool {
+        turn.id == lastAssistantTurnId || expandedTurns.contains(turn.id)
+    }
+
+    /// A short plain-text preview of a markdown reply for the collapsed state —
+    /// strips common markdown so the bubble reads cleanly without a web view.
+    private func markdownPreview(_ content: String) -> String {
+        var s = content
+        // [text](url) -> text
+        s = s.replacingOccurrences(of: "\\[([^\\]]+)\\]\\([^\\)]*\\)", with: "$1", options: .regularExpression)
+        // strip structural markdown chars (leave inline hyphens intact)
+        s = s.replacingOccurrences(of: "[`#*_>~]", with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.count > 160 ? String(s.prefix(160)) + "…" : s
+    }
+
     @ViewBuilder
     private func turnView(_ turn: LlmIdeAPIClient.CodeAssistTurn) -> some View {
         let isUser = turn.role == .user
@@ -787,20 +815,58 @@ struct CodeAssistantPanel: View {
                         .background(theme.current.accent.opacity(0.14))
                         .cornerRadius(8)
                         .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    // Assistant replies are markdown — render headings, tables,
-                    // code blocks, lists, links via the shared MarkdownRenderer.
-                    SelfSizingMarkdownView(
-                        markdown: turn.content,
-                        isDark: theme.current.isDark
-                    ) { h in
-                        if bubbleHeights[turn.id] != h { bubbleHeights[turn.id] = h }
+                } else if isAssistantExpanded(turn) {
+                    // Expanded assistant reply — full markdown render (web view).
+                    VStack(alignment: .leading, spacing: 4) {
+                        SelfSizingMarkdownView(
+                            markdown: turn.content,
+                            isDark: theme.current.isDark
+                        ) { h in
+                            if bubbleHeights[turn.id] != h { bubbleHeights[turn.id] = h }
+                        }
+                        .frame(maxWidth: 720, alignment: .leading)
+                        .frame(height: max(bubbleHeights[turn.id] ?? 24, 24))
+                        // Older expanded replies can be collapsed again; the
+                        // latest stays open and shows no collapse control.
+                        if turn.id != lastAssistantTurnId {
+                            Button { expandedTurns.remove(turn.id) } label: {
+                                Label("Collapse", systemImage: "chevron.up")
+                                    .font(Typography.caption)
+                                    .foregroundStyle(theme.current.textMuted)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     .frame(maxWidth: 720, alignment: .leading)
-                    .frame(height: max(bubbleHeights[turn.id] ?? 24, 24))
                     .padding(10)
                     .background(theme.current.surface)
                     .cornerRadius(8)
+                } else {
+                    // Collapsed older reply — lightweight text preview, NO web
+                    // view (keeps a long chat short and avoids one WKWebView per
+                    // old reply). Tap to expand into the full render.
+                    Button {
+                        expandedTurns.insert(turn.id)
+                    } label: {
+                        HStack(alignment: .top, spacing: 6) {
+                            Text(markdownPreview(turn.content))
+                                .font(.system(size: 12))
+                                .foregroundStyle(theme.current.textMuted)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.down")
+                                .font(.caption2)
+                                .foregroundStyle(theme.current.textMuted)
+                        }
+                        .frame(maxWidth: 720, alignment: .leading)
+                        .padding(10)
+                        .background(theme.current.surface)
+                        .cornerRadius(8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Show full reply")
                 }
                 if !isUser, activeRepoRoot != nil {
                     Button {
