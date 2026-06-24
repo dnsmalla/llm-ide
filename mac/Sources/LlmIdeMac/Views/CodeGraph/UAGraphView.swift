@@ -23,6 +23,7 @@ import SwiftUI
 import GraphKit
 import AppKit
 import os
+import simd
 
 @MainActor
 struct UAGraphView: View {
@@ -129,6 +130,10 @@ struct UAGraphView: View {
     /// when the user just wants the file-level view.
     @State private var fullData: CGData = .empty
     @State private var selectedNode: CGNode?
+    /// 3D rendering toggle + per-mode cache of settled 3D positions, so
+    /// flipping 2D⇄3D (or revisiting a mode) doesn't re-run the 3D settle.
+    @State private var render3D = false
+    @State private var positions3DByMode: [Mode: [String: SIMD3<Float>]] = [:]
     @State private var runTask: Task<Void, Never>?
     @State private var showSymbols: Bool = false
     /// Double-click on canvas sets focus; dims non-neighbours.
@@ -380,7 +385,11 @@ struct UAGraphView: View {
         }
         .onDisappear { runTask?.cancel() }
         .onChange(of: library.items) { _, _ in rebuildLibraryIndex() }
-        .onChange(of: fullData)      { _, _ in recomputeDisplayData() }
+        .onChange(of: fullData)      { _, _ in
+            recomputeDisplayData()
+            positions3DByMode[mode] = nil          // 3D layout is stale for this mode
+            if render3D { settle3DIfNeeded() }
+        }
         .onChange(of: showSymbols)   { _, _ in recomputeDisplayData() }
         .onReceive(codeNoteService.$graph) { rawGraph in
             guard mode == .code, !rawGraph.nodes.isEmpty else { return }
@@ -747,6 +756,10 @@ struct UAGraphView: View {
                             }
                         }()
                     )
+                } else if render3D {
+                    Graph3DView(data: displayData,
+                                positions: positions3DByMode[mode] ?? [:],
+                                selected: $selectedNode)
                 } else {
                     CodeGraphCanvas(data: displayData, selected: $selectedNode,
                                     focusedNode: $focusedNode,
@@ -1018,6 +1031,15 @@ struct UAGraphView: View {
                     .controlSize(.small)
                 }
                 Divider().frame(height: 14)
+                Picker("", selection: $render3D) {
+                    Text("2D").tag(false)
+                    Text("3D").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .onChange(of: render3D) { _, on in if on { settle3DIfNeeded() } }
+                .help("Switch between the 2D canvas and the 3D scene")
+                Divider().frame(height: 14)
                 Toggle(isOn: $showLabels) {
                     Label("Labels", systemImage: showLabels ? "text.bubble.fill" : "text.bubble")
                         .font(Typography.caption)
@@ -1094,11 +1116,17 @@ struct UAGraphView: View {
         let t = theme.current
         return ZStack(alignment: .topTrailing) {
             t.body.ignoresSafeArea()
-            CodeGraphCanvas(data: displayData, selected: $selectedNode,
-                                    focusedNode: $focusedNode,
-                                    showLabels: showLabels,
-                                    highlightKind: filterKind,
-                                    onNodeOpen: openNode)
+            if render3D {
+                Graph3DView(data: displayData,
+                            positions: positions3DByMode[mode] ?? [:],
+                            selected: $selectedNode)
+            } else {
+                CodeGraphCanvas(data: displayData, selected: $selectedNode,
+                                focusedNode: $focusedNode,
+                                showLabels: showLabels,
+                                highlightKind: filterKind,
+                                onNodeOpen: openNode)
+            }
             Button {
                 graphExpanded = false
             } label: {
@@ -1324,6 +1352,37 @@ struct UAGraphView: View {
                       self.fullData.nodes.count == settled.nodes.count else { return }
                 self.fullData = settled
                 self.cacheGraph(expectedMode, settled)
+            }
+        }
+    }
+
+    /// Compute 3D positions for the current mode's displayData in the
+    /// background, once, and cache them. Mirrors settlePhysics's guard so a
+    /// stale run can't overwrite a newer mode's cache.
+    private func settle3DIfNeeded() {
+        let expectedMode = mode
+        guard positions3DByMode[expectedMode] == nil else { return }
+        let data = displayData
+        guard data.nodes.count > 2 else {
+            positions3DByMode[expectedMode] = [:]   // trivial graph: nothing to settle
+            return
+        }
+        let iterations: Int
+        switch data.nodes.count {
+        case ..<300:   iterations = 220
+        case ..<700:   iterations = 180
+        case ..<1200:  iterations = 150
+        default:       iterations = 120
+        }
+        Task.detached(priority: .userInitiated) {
+            let sim = CGSimulation3D(data: data)
+            sim.settle(maxIterations: iterations)
+            if Task.isCancelled { return }
+            let pos = sim.positions()
+            await MainActor.run {
+                guard self.mode == expectedMode,
+                      self.displayData.nodes.count == data.nodes.count else { return }
+                self.positions3DByMode[expectedMode] = pos
             }
         }
     }
