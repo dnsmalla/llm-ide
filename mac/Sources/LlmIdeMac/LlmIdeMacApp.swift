@@ -114,6 +114,7 @@ struct LlmIdeMacApp: App {
         let autoUpdater = GraphAutoUpdater(projectStore: projectStoreInstance)
         self._graphAutoUpdater = StateObject(wrappedValue: autoUpdater)
         let activity = ActivityStore(api: client)
+        activity.start()
         self._activityStore = State(wrappedValue: activity)
         // Wire activity store weak refs on app-level services so they can
         // report events without a global singleton. Mirrors weak var config
