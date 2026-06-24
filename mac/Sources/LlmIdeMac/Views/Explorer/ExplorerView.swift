@@ -28,11 +28,12 @@ struct ExplorerView: View {
     // Bottom terminal dock (shared, rendered at AppShell level) — toggled
     // from this view's toolbar.
     @Environment(TerminalPanelState.self) private var terminalState
+    @Environment(ShellState.self) private var shell
 
     // Cursor/VSCode-style panel visibility. Tree shows by default; the AI
-    // chat panel opens on demand from the toolbar (the "chat from click").
+    // chat panel's open-state lives on ShellState (app-session scope) so it
+    // survives navigating away and back — see shell.exploreChatVisible.
     @State private var treeVisible = true
-    @State private var assistantVisible = false
     /// Persisted chat-panel width (HSplitView has no width binding — read it
     /// back via GeometryReader, same pattern as ReviewView).
     @AppStorage("EXPLORER_CHAT_PANEL_WIDTH") private var chatPanelWidth: Double = 180
@@ -77,7 +78,7 @@ struct ExplorerView: View {
                         editorArea
                             .frame(minWidth: 360, maxWidth: .infinity)
 
-                        if assistantVisible {
+                        if shell.exploreChatVisible {
                             CodeAssistantPanel(api: api,
                                                initialURL: activeTab,
                                                showFileAttachButtons: true,
@@ -124,13 +125,13 @@ struct ExplorerView: View {
             .help(treeVisible ? "Hide Files" : "Show Files")
             Spacer(minLength: 0)
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) { assistantVisible.toggle() }
+                withAnimation(.easeInOut(duration: 0.2)) { shell.exploreChatVisible.toggle() }
             } label: {
                 Image(systemName: "sidebar.right")
-                    .symbolVariant(assistantVisible ? .fill : .none)
+                    .symbolVariant(shell.exploreChatVisible ? .fill : .none)
             }
             .buttonStyle(.borderless)
-            .help(assistantVisible ? "Hide Chat" : "Show Chat")
+            .help(shell.exploreChatVisible ? "Hide Chat" : "Show Chat")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)

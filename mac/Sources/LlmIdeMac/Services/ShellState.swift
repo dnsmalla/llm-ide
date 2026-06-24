@@ -78,6 +78,11 @@ final class ShellState {
     }
 
     var section: Section = .library
+    /// Whether the Explorer's chat panel is open. Lives here (app-session
+    /// scope) rather than as ExplorerView @State so it survives navigating
+    /// away and back — ExplorerView is torn down on a section switch, which
+    /// would otherwise reset it. A fresh ShellState per app launch resets it.
+    var exploreChatVisible: Bool = false
     var librarySelection: LibrarySelection?
     var libraryFilter: String = ""
 
