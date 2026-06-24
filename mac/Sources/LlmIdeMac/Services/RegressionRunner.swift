@@ -198,11 +198,11 @@ final class RegressionRunner: ObservableObject {
                 await runAnswerCompareFault(idx: idx, fault: fault, url: url, autoReopen: autoReopen)
             }
         }
-        let summary = "Run complete · regressed: \(results.filter { $0.verdict == .regressed }.count) · unchanged: \(results.filter { $0.verdict == .unchanged }.count) · failed: \(results.filter { if case .failed = $0.verdict { return true }; return false }.count) · elapsed: \(String(format: "%.1fs", Date().timeIntervalSince(startedAt)))"
-        appendLog(.info, summary)
         let regressedCount = results.filter { $0.verdict == .regressed }.count
         let unchangedCount = results.filter { $0.verdict == .unchanged }.count
         let failedCount = results.filter { if case .failed = $0.verdict { return true }; return false }.count
+        let summary = "Run complete · regressed: \(regressedCount) · unchanged: \(unchangedCount) · failed: \(failedCount) · elapsed: \(String(format: "%.1fs", Date().timeIntervalSince(startedAt)))"
+        appendLog(.info, summary)
         activity?.report(
             kind: .regressionDone,
             title: "Regression complete — \(regressedCount) regressed, \(unchangedCount) unchanged",

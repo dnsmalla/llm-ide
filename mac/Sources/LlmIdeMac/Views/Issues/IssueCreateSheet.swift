@@ -10,6 +10,7 @@ struct IssueCreateSheet: View {
     let onCreate: (GitLabIssue) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(ActivityStore.self) private var activity
     @EnvironmentObject var theme: ThemeStore
 
     @State private var title = ""
@@ -194,6 +195,12 @@ struct IssueCreateSheet: View {
                 assigneeIds: selectedAssigneeIds.isEmpty ? nil : selectedAssigneeIds
             )
             let created = try await gitlab.createIssue(projectId: project.id, payload: payload)
+            activity.report(
+                kind: .issueCreated,
+                title: "Issue created — \(created.title)",
+                detail: ["title": created.title, "number": created.iid, "url": created.webUrl],
+                link: created.webUrl
+            )
             onCreate(created)
             dismiss()
         } catch {
