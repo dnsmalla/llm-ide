@@ -33,8 +33,11 @@ You have a specific URL (from the user, from search results, or from a GitHub li
 }
 ```
 
-The text is the readable content of the page with HTML stripped and whitespace normalized.
+`text` is the readable content of the page. Like `web-search`, this runs
+through the assistant's existing Anthropic access (native `web_fetch`, or the
+`claude` CLI's built-in fetch via your Claude login); it falls back to a direct
+HTTP fetch with HTML stripped to text. No extra setup or key is required.
 
 ## Security
 
-Private/localhost URLs are rejected. Only public HTTPS URLs are allowed.
+Private/localhost URLs are rejected — only public URLs are fetched.

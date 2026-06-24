@@ -2,12 +2,11 @@
 // extraction, and language directive.  Kept in its own module so
 // planner/risk/code-sync don't each grow their own subtle copy.
 
-import { execFile } from 'child_process';
 import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactSecrets } from '../core/redact-secrets.mjs';
-import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS } from './providers.mjs';
+import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS, spawnCli, minimalCliEnv } from './providers.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 
 const log = logger.child({ component: 'claude-runtime' });
@@ -304,70 +303,48 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
   let lastError;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     try {
-      return await new Promise((resolve, reject) => {
-        // Pass a minimal allowlist rather than spreading all of
-        // process.env.  Spreading the full env exposes every secret
-        // the server was started with (JWT_SECRET, LLMIDE_VAULT_KEY,
-        // DB path, etc.) to the Claude CLI subprocess and any logging
-        // it performs.  Claude CLI needs PATH + HOME to locate configs
-        // and optional helper binaries; everything else is application
-        // state that the subprocess has no business seeing.
-        const env = {
-          PATH:                   process.env.PATH             || '',
-          HOME:                   process.env.HOME             || '',
-          TMPDIR:                 process.env.TMPDIR           || '',
-          TMP:                    process.env.TMP              || '',
-          TEMP:                   process.env.TEMP             || '',
-          USER:                   process.env.USER             || '',
-          LOGNAME:                process.env.LOGNAME          || '',
-          SHELL:                  process.env.SHELL            || '',
-          TERM:                   process.env.TERM             || '',
-          LANG:                   process.env.LANG             || '',
-          LC_ALL:                 process.env.LC_ALL           || '',
-          NODE_ENV:               process.env.NODE_ENV         || '',
-          ANTHROPIC_BASE_URL:     process.env.ANTHROPIC_BASE_URL || '',
-          // Claude Code needs XDG / AppData dirs for its own config.
-          XDG_CONFIG_HOME:        process.env.XDG_CONFIG_HOME  || '',
-          XDG_DATA_HOME:          process.env.XDG_DATA_HOME    || '',
-          APPDATA:                process.env.APPDATA          || '',
-          USERPROFILE:            process.env.USERPROFILE      || '',
-        };
-        if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
-        // Remove empty-string entries so the subprocess env is clean.
-        for (const k of Object.keys(env)) if (!env[k]) delete env[k];
-        // `--strict-mcp-config` (no --mcp-config) loads zero MCP servers, so a
-        // cold spawn skips booting every MCP server the user has configured —
-        // the dominant per-call cost in CLI mode. The agent supplies its own
-        // context via the prompt and never needs the user's MCP servers here.
-        execFile('claude', ['--strict-mcp-config', '-p', prompt], {
-          timeout: CLAUDE_TIMEOUT_MS,
-          maxBuffer: 4 * 1024 * 1024,
-          env,
-          // Kill an in-flight CLI call if the caller's deadline fires.
-          signal,
-        }, (error, stdout, stderr) => {
-          if (error) {
-            if (error.code === 'ENOENT') {
-              reject(new Error('Claude CLI not found. Install: npm install -g @anthropic-ai/claude-code'));
-              return;
-            }
-            const e = new Error(`Claude error: ${redactKey(stderr?.slice(0, 200) || error.message, apiKey)}`);
-            e.overloaded = isCliOverloaded(stderr) || isCliOverloaded(stdout);
-            reject(e);
-            return;
-          }
-          resolve(stdout);
-        });
+      // Pass a minimal allowlist rather than spreading all of process.env.
+      // Spreading the full env exposes every secret the server was started
+      // with (JWT_SECRET, LLMIDE_VAULT_KEY, DB path, etc.) to the Claude CLI
+      // subprocess and any logging it performs. minimalCliEnv() owns that
+      // allowlist (shared with the provider CLI paths); here we add the two
+      // Anthropic-specific extras (base URL + the resolved key, when present).
+      // Empty values are stripped by minimalCliEnv.
+      const env = minimalCliEnv({
+        ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL || '',
+        ...(apiKey ? { ANTHROPIC_API_KEY: apiKey } : {}),
       });
+      // spawnCli is the single source of truth for HOW `claude` is invoked:
+      // `--strict-mcp-config` (no --mcp-config) loads zero MCP servers so a
+      // cold spawn skips booting every configured MCP server (the dominant
+      // per-call cost), and `--tools ''` disables built-in tools so `claude -p`
+      // behaves as a single text completion instead of a full autonomous agent
+      // (which on a heavy prompt would read files / web-fetch / shell out to
+      // `gh` — work that blew past CLAUDE_TIMEOUT_MS and surfaced as a 502).
+      // This server runs its own tool loop, so the CLI must answer, not act.
+      // spawnCli also closes the child's stdin (else the CLI blocks ~3s on
+      // piped input and warns on stderr) and forwards `signal` so an in-flight
+      // call is killed when the caller's deadline fires.
+      const { stdout } = await spawnCli('anthropic', prompt, {
+        env,
+        timeoutMs: CLAUDE_TIMEOUT_MS,
+        signal,
+      });
+      return stdout;
     } catch (err) {
-      lastError = err;
-      if (err.overloaded && attempt < RETRY_DELAYS_MS.length) {
+      if (err.code === 'ENOENT') {
+        throw new Error('Claude CLI not found. Install: npm install -g @anthropic-ai/claude-code');
+      }
+      const e = new Error(`Claude error: ${redactKey(err.stderr?.slice(0, 200) || err.message, apiKey)}`);
+      e.overloaded = isCliOverloaded(err.stderr) || isCliOverloaded(err.stdout);
+      lastError = e;
+      if (e.overloaded && attempt < RETRY_DELAYS_MS.length) {
         const delay = jittered(RETRY_DELAYS_MS[attempt]);
         log.warn('runClaude CLI retry', { attempt: attempt + 1, reason: 'overloaded', delayMs: delay });
         await sleep(delay);
         continue;
       }
-      throw err;
+      throw e;
     }
   }
   throw lastError;

@@ -11,7 +11,7 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
-const { resolveProvider, providerApiKey, completeViaApi, verifyProvider, cliInvocation, listProviderModels, chatModels, customBaseUrl } =
+const { resolveProvider, providerApiKey, completeViaApi, verifyProvider, cliInvocation, listProviderModels, chatModels, customBaseUrl, spawnCli, runViaCli } =
   await import('../agents/providers.mjs');
 
 function mockFetch(handler) {
@@ -219,7 +219,7 @@ test('chatModels: anthropic keeps claude-* only', () => {
 });
 
 test('cliInvocation: standard non-interactive form per provider', () => {
-  assert.deepEqual(cliInvocation('anthropic', 'hi'), { bin: 'claude', args: ['--strict-mcp-config', '-p', 'hi'] });
+  assert.deepEqual(cliInvocation('anthropic', 'hi'), { bin: 'claude', args: ['--strict-mcp-config', '--tools', '', '-p', 'hi'] });
   assert.deepEqual(cliInvocation('openai', 'hi'),    { bin: 'codex',  args: ['exec', 'hi'] });
   assert.deepEqual(cliInvocation('google', 'hi'),    { bin: 'gemini', args: ['-p', 'hi'] });
   assert.equal(cliInvocation('skynet', 'hi'), null);
@@ -229,6 +229,47 @@ test('cliInvocation: binary overridable via LLMIDE_<PROVIDER>_CLI', () => {
   process.env.LLMIDE_OPENAI_CLI = 'my-codex';
   try {
     assert.deepEqual(cliInvocation('openai', 'x'), { bin: 'my-codex', args: ['exec', 'x'] });
+  } finally {
+    delete process.env.LLMIDE_OPENAI_CLI;
+  }
+});
+
+test('spawnCli: rejects an unknown provider without spawning', async () => {
+  await assert.rejects(() => spawnCli('skynet', 'hi'), /unknown provider 'skynet'/);
+});
+
+test('spawnCli: invokes cliInvocation argv, closes stdin, resolves {stdout,stderr,bin}', async () => {
+  // Override the binary to a harmless `echo`; cliInvocation('openai') yields
+  // args ['exec', prompt], so this round-trips ['exec','hi'] back as stdout.
+  // Proves the spawn resolves (stdin closed → no ~3s hang) and the shape.
+  process.env.LLMIDE_OPENAI_CLI = 'echo';
+  try {
+    const out = await spawnCli('openai', 'hi');
+    assert.equal(out.bin, 'echo');
+    assert.equal(out.stdout.trim(), 'exec hi');
+    assert.equal(out.stderr, '');
+  } finally {
+    delete process.env.LLMIDE_OPENAI_CLI;
+  }
+});
+
+test('runViaCli: rejects an unknown provider with its own message', async () => {
+  await assert.rejects(() => runViaCli('skynet', 'hi'), /runViaCli: unknown provider 'skynet'/);
+});
+
+test('runViaCli: trims CLI stdout and reports it', async () => {
+  process.env.LLMIDE_OPENAI_CLI = 'echo';
+  try {
+    assert.equal(await runViaCli('openai', 'hi'), 'exec hi');
+  } finally {
+    delete process.env.LLMIDE_OPENAI_CLI;
+  }
+});
+
+test('runViaCli: ENOENT surfaces the install/login hint', async () => {
+  process.env.LLMIDE_OPENAI_CLI = 'definitely-not-a-real-binary-xyz';
+  try {
+    await assert.rejects(() => runViaCli('openai', 'hi'), /CLI not found — install it and log in/);
   } finally {
     delete process.env.LLMIDE_OPENAI_CLI;
   }

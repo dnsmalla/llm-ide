@@ -41,9 +41,9 @@ struct ProvidersSettingsSection: View {
                  placeholder: "API key (any value for local servers)",
                  hint: "Any OpenAI-compatible endpoint — OpenRouter, Ollama / LM Studio (local), DeepSeek, Mistral. Add a model below or in the composer.",
                  tool: .custom, needsBaseURL: true),
-        Provider(id: "web-search", label: "Web Search (SerpAPI)", vaultKey: "serpapi.apiKey",
-                 placeholder: "Your SerpAPI key from https://serpapi.com",
-                 hint: "Search the web in the Code Assistant using SerpAPI. Free tier includes ~100 searches/month.",
+        Provider(id: "web-search", label: "Web Search (SerpAPI, optional)", vaultKey: "serpapi.apiKey",
+                 placeholder: "Optional — your SerpAPI key from https://serpapi.com",
+                 hint: "Web search works automatically through your Claude login (or Anthropic API key) — no setup needed. A SerpAPI key is only an optional fallback.",
                  tool: nil),
     ]
 

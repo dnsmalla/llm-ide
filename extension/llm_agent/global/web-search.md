@@ -12,7 +12,7 @@ schema:
 
 # web-search
 
-Search the web and get ranked results with snippets.
+Search the web and get a synthesized summary plus the sources behind it.
 
 ## When to use
 
@@ -30,15 +30,21 @@ The user asks a question that requires current information not in the local code
 
 ```json
 {
-  "results": [
-    {
-      "title": "Page Title",
-      "link": "https://example.com/page",
-      "snippet": "A brief snippet from the page..."
-    }
+  "answer": "A concise summary of what the search found...",
+  "sources": [
+    { "title": "Page Title", "url": "https://example.com/page" }
   ],
-  "count": 5
+  "count": 1
 }
 ```
 
-Each result is ranked by relevance. Use the snippets to decide whether to fetch the full page via `fetch-url`.
+`answer` is a summary synthesized from live search results. `sources` lists the
+pages behind it — fetch any of them in full via `fetch-url` when you need more
+than the summary.
+
+## Backends
+
+No setup is required in the common case — web search runs through the same
+Anthropic access the assistant already uses (the Anthropic API key when one is
+configured, otherwise the `claude` CLI's built-in search via your Claude login).
+A SerpAPI key (Settings → Providers) is only an optional fallback.

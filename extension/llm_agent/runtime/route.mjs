@@ -10,6 +10,8 @@
 import { runAgentLoop } from './loop.mjs';
 import { askInternal } from './handlers/ask-internal.mjs';
 import { askSubagent } from './handlers/ask-subagent.mjs';
+import { handleWebSearch } from './handlers/web-search.mjs';
+import { handleFetchUrl } from './handlers/fetch-url.mjs';
 import { composeGlobalPrompt } from '../global/compose-prompt.mjs';
 import { expandSlashCommand } from '../../plugins/loader.mjs';
 import { globalSkills, internalSkills, buildPerUserSkillSet } from '../skills/index.mjs';
@@ -143,6 +145,12 @@ export async function handleCodeAssist({
       // duplicate the protocol description.
       internalSkillsBase: internalSkills.base,
     }),
+    // Web tools resolve their own backend (Anthropic API key → native
+    // web_search/web_fetch, else the `claude` CLI's built-in tools, else
+    // SerpAPI/direct fetch). They only need the userId to look up a
+    // per-user Anthropic/SerpAPI key.
+    'web-search': (args) => handleWebSearch(args, { userId }),
+    'fetch-url': (args) => handleFetchUrl(args, { userId }),
   };
 
   const out = await runAgentLoop({

@@ -267,10 +267,28 @@ const CLI_ARG_BUILDERS = {
   // — the dominant cost when the agent runs in CLI (no-API-key) mode and fires
   // one of these per hop. The agent supplies its own context/tools via the
   // prompt, so it never needs the user's MCP servers for a single-shot answer.
-  anthropic: (p) => ['--strict-mcp-config', '-p', p],
+  //
+  // `--tools ''` disables the CLI's built-in tools so `claude -p` behaves as a
+  // single text completion rather than a full autonomous agent. Without it, a
+  // heavy prompt sends the CLI off reading files / web-fetching / shelling to
+  // `gh` — work that overran the per-call timeout and surfaced as a 502. The
+  // server runs its own tool loop, so the CLI must answer, not act.
+  anthropic: (p) => ['--strict-mcp-config', '--tools', '', '-p', p],
   openai:    (p) => ['exec', p],   // codex exec "<prompt>"
   google:    (p) => ['-p', p],     // gemini -p "<prompt>"
 };
+
+/**
+ * Argv for driving the Claude CLI with exactly one built-in web tool enabled
+ * (`WebSearch` or `WebFetch`) — the "like Claude Code" web path that uses the
+ * user's subscription login and needs no API key. Pass to `spawnCli('anthropic',
+ * prompt, { args })`. Unlike the default loop's `--tools ''`, this allowlists a
+ * single tool so the bounded search/fetch subprocess can act, while still
+ * loading zero MCP servers (`--strict-mcp-config`).
+ */
+export function anthropicWebCliArgs(prompt, { tool = 'WebSearch' } = {}) {
+  return ['--strict-mcp-config', '--tools', tool, '-p', prompt];
+}
 
 /** The {bin, args} a provider's CLI is invoked with for a prompt. Pure —
  *  exported so the invocation is testable without spawning anything. */
@@ -316,32 +334,78 @@ export function minimalCliEnv(extraKeys = {}) {
   return env;
 }
 
+/**
+ * Spawn a provider's CLI for a prompt and resolve its raw `{ stdout, stderr,
+ * bin }`. This is the single source of truth for HOW a provider CLI is
+ * invoked: the argv (from `cliInvocation`), the execFile options (maxBuffer,
+ * optional `timeoutMs`/`signal`), and the stdin-close that stops the CLI
+ * blocking ~3s on piped input.
+ *
+ * Both the generic provider path (`runViaCli`) and runtime.mjs's hardened
+ * Anthropic CLI fallback build on this; each layers its own env, retry,
+ * output validation, and error-message policy on top — which is why this
+ * returns raw output and rejects with the raw execFile error (with `stdout`,
+ * `stderr`, and `bin` attached so callers can inspect `err.code`, e.g.
+ * 'ENOENT', and the captured streams).
+ *
+ * `env` defaults to a minimal allowlist; callers pass their own to add
+ * provider-specific vars (an API key, ANTHROPIC_BASE_URL, …).
+ */
+export function spawnCli(provider, prompt, { env, timeoutMs = CLI_TIMEOUT_MS, signal, args: argsOverride } = {}) {
+  const inv = cliInvocation(provider, prompt);
+  if (!inv) return Promise.reject(new Error(`spawnCli: unknown provider '${provider}'`));
+  // `argsOverride` lets a caller drive the SAME provider binary with a different
+  // argv than the default single-shot completion form — e.g. enabling the
+  // Claude CLI's built-in WebSearch/WebFetch (`--tools WebSearch`) for a
+  // dedicated, bounded web-tool subprocess. The default loop still uses
+  // `--tools ''` (no tools); only the web handlers opt in.
+  const args = argsOverride || inv.args;
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      inv.bin, args,
+      { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env: env || minimalCliEnv(), signal },
+      (err, stdout, stderr) => {
+        if (err) {
+          err.stdout = stdout;
+          err.stderr = stderr;
+          err.bin = inv.bin;
+          reject(err);
+          return;
+        }
+        resolve({ stdout, stderr, bin: inv.bin });
+      },
+    );
+    // The prompt is passed via argv, not stdin. Leaving stdin open makes the
+    // CLI block ~3s waiting for piped input (and warn on stderr); close it so
+    // the subprocess proceeds immediately.
+    child.stdin?.end();
+  });
+}
+
 /** Run a prompt through the provider's logged-in CLI, returning stdout. */
 export function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS } = {}) {
-  const inv = cliInvocation(provider, prompt);
-  if (!inv) return Promise.reject(new Error(`runViaCli: unknown provider '${provider}'`));
+  const cfg = PROVIDERS[provider];
+  if (!cfg) return Promise.reject(new Error(`runViaCli: unknown provider '${provider}'`));
   // Use a minimal env allowlist — never inherit LLMIDE_JWT_SECRET,
   // LLMIDE_VAULT_KEY, or other server secrets into provider CLI subprocesses.
   // Include the provider's own API key env var only when it is available.
-  const cfg = PROVIDERS[provider];
-  const extraKeys = cfg?.env && process.env[cfg.env] ? { [cfg.env]: process.env[cfg.env] } : {};
+  const extraKeys = cfg.env && process.env[cfg.env] ? { [cfg.env]: process.env[cfg.env] } : {};
   const env = minimalCliEnv(extraKeys);
-  return new Promise((resolve, reject) => {
-    execFile(inv.bin, inv.args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env }, (err, stdout, stderr) => {
-      if (err) {
-        if (err.code === 'ENOENT') {
-          reject(new Error(`${inv.bin} CLI not found — install it and log in, or add an API key in Settings → Model Providers.`));
-          return;
-        }
-        reject(new Error(`${inv.bin} error: ${String(stderr || err.message || '').slice(0, 200)}`));
-        return;
-      }
+  return spawnCli(provider, prompt, { env, timeoutMs }).then(
+    ({ stdout, bin }) => {
       const text = String(stdout || '').trim();
-      if (!text) { reject(new Error(`${inv.bin} returned empty output`)); return; }
-      log.info('provider_cli_complete', { provider, bin: inv.bin });
-      resolve(text);
-    });
-  });
+      if (!text) throw new Error(`${bin} returned empty output`);
+      log.info('provider_cli_complete', { provider, bin });
+      return text;
+    },
+    (err) => {
+      const bin = err.bin || cfg.cli;
+      if (err.code === 'ENOENT') {
+        throw new Error(`${bin} CLI not found — install it and log in, or add an API key in Settings → Model Providers.`);
+      }
+      throw new Error(`${bin} error: ${String(err.stderr || err.message || '').slice(0, 200)}`);
+    },
+  );
 }
 
 // ── Model discovery ───────────────────────────────────────────────────

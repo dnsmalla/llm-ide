@@ -1,73 +1,116 @@
-import { searchWeb } from '../../../agents/web-client.mjs';
+import {
+  searchWebViaAnthropic,
+  searchWebViaCli,
+  searchWeb,
+} from '../../../agents/web-client.mjs';
+import { providerApiKey } from '../../../agents/providers.mjs';
 import { getSecret } from '../../../server/vault.mjs';
 import { getDb } from '../../../kb/db.mjs';
 
+// Optional SerpAPI key (last-resort fallback): user vault first, then env.
+function serpApiKey(userId) {
+  if (userId) {
+    try { return getSecret(getDb(), userId, 'serpapi.apiKey') || process.env.LLMIDE_SERPAPI_KEY || null; }
+    catch { /* no key stored */ }
+  }
+  return process.env.LLMIDE_SERPAPI_KEY || null;
+}
+
 /**
- * Handler for the web-search read-skill.
- * Calls SerpAPI to search the web.
+ * Handler for the web-search read-skill. Web search "like Claude does":
+ *   1. Anthropic API key present → native `web_search` tool (no SerpAPI).
+ *   2. Otherwise → the `claude` CLI's built-in WebSearch (subscription login).
+ *   3. Otherwise, if a SerpAPI key is configured → SerpAPI (fallback).
+ * Returns { answer, sources: [{title, url}], count } on success.
  */
-export async function handleWebSearch(args, { userId }) {
+export async function handleWebSearch(args, { userId } = {}) {
   if (!args?.query) {
     return { error: 'Missing query argument' };
   }
 
-  // Get SerpAPI key from vault or env
-  let apiKey = null;
-  if (userId) {
+  const errors = [];
+
+  // 1. Native Anthropic API (reuses the existing Anthropic credential).
+  const apiKey = providerApiKey(userId, 'anthropic');
+  if (apiKey) {
     try {
-      apiKey = getSecret(getDb(), userId, 'serpapi.apiKey');
-    } catch {
-      // User may not have a key stored
-    }
-  }
-  apiKey = apiKey || process.env.LLMIDE_SERPAPI_KEY;
-
-  if (!apiKey) {
-    return { error: 'SerpAPI key not configured. Add one in Settings → Providers → Web Search.' };
+      const { answer, sources } = await searchWebViaAnthropic(args.query, { apiKey });
+      if (answer) return { answer, sources, count: sources.length };
+    } catch (err) { errors.push(`api: ${err.message}`); }
   }
 
+  // 2. claude CLI WebSearch (subscription login, no key).
   try {
-    const { results } = await searchWeb(args.query, { apiKey });
-    return {
-      results: results.map((r, i) => ({ ...r, rank: i + 1 })),
-      count: results.length
-    };
-  } catch (err) {
-    return { error: `Web search failed: ${err.message}` };
+    const { answer, sources } = await searchWebViaCli(args.query);
+    if (answer) return { answer, sources, count: sources.length };
+  } catch (err) { errors.push(`cli: ${err.message}`); }
+
+  // 3. SerpAPI fallback — normalized into the same { answer, sources } shape.
+  const serp = serpApiKey(userId);
+  if (serp) {
+    try {
+      const { results } = await searchWeb(args.query, { apiKey: serp });
+      const sources = results.map(r => ({ title: r.title, url: r.link }));
+      const answer = results.map(r => `- ${r.title}: ${r.snippet} (${r.link})`).join('\n');
+      return { answer, sources, count: sources.length };
+    } catch (err) { errors.push(`serpapi: ${err.message}`); }
   }
+
+  return {
+    error: 'Web search unavailable. Configure an Anthropic API key, log in to the `claude` CLI, '
+      + 'or set a SerpAPI key in Settings → Providers.'
+      + (errors.length ? ` (${errors.join('; ')})` : ''),
+  };
 }
 
-// ──── Tests (run via: cd extension && npm test -- tests/web-search.test.mjs)
+// ──── Tests (run via: node llm_agent/runtime/handlers/web-search.mjs)
 
 export async function runTests() {
+  const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
   const tests = [];
 
   tests.push({
     name: 'handleWebSearch: returns error on missing query',
     fn: async () => {
       const result = await handleWebSearch({}, { userId: null });
-      if (!result.error) throw new Error('expected error');
-      if (!result.error.includes('query')) throw new Error('wrong error message');
-    }
+      assert(result.error, 'expected error');
+      assert(result.error.includes('query'), 'wrong error message');
+    },
   });
 
   tests.push({
-    name: 'handleWebSearch: returns error on missing API key',
+    name: 'handleWebSearch: uses native Anthropic web_search when an API key is present',
     fn: async () => {
-      // Ensure env var is not set
-      const saved = process.env.LLMIDE_SERPAPI_KEY;
-      delete process.env.LLMIDE_SERPAPI_KEY;
+      const savedFetch = globalThis.fetch;
+      const savedKey = process.env.ANTHROPIC_API_KEY;
+      process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
+      globalThis.fetch = async (url) => {
+        assert(String(url).includes('api.anthropic.com'), `unexpected url ${url}`);
+        return {
+          ok: true,
+          json: async () => ({
+            stop_reason: 'end_turn',
+            content: [
+              { type: 'text', text: 'Node uses an event loop.' },
+              { type: 'web_search_tool_result', content: [{ type: 'web_search_result', title: 'Node docs', url: 'https://nodejs.org' }] },
+            ],
+          }),
+        };
+      };
       try {
-        const result = await handleWebSearch({ query: 'test' }, { userId: null });
-        if (!result.error) throw new Error('expected error');
-        if (!result.error.includes('not configured')) throw new Error('wrong error message');
+        const result = await handleWebSearch({ query: 'node event loop' }, { userId: null });
+        assert(!result.error, `unexpected error: ${result.error}`);
+        assert(result.answer.includes('event loop'), 'answer should carry the synthesized text');
+        assert(result.sources[0]?.url === 'https://nodejs.org', 'source url should be parsed');
+        assert(result.count === 1, 'count should match sources');
       } finally {
-        if (saved) process.env.LLMIDE_SERPAPI_KEY = saved;
+        globalThis.fetch = savedFetch;
+        if (savedKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+        else process.env.ANTHROPIC_API_KEY = savedKey;
       }
-    }
+    },
   });
 
-  // Run all
   for (const t of tests) {
     try {
       await t.fn();
@@ -79,7 +122,6 @@ export async function runTests() {
   }
 }
 
-// Run tests if invoked directly
 if (import.meta.url === `file://${process.argv[1]}`) {
   await runTests();
 }

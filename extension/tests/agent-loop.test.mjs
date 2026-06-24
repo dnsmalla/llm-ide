@@ -16,25 +16,30 @@ const handlers = {
 };
 
 test('agent loop: can emit web-search and get results', async () => {
-  // Mock fetch to return test results
+  // Mock the Anthropic Messages API (native web_search backend).
   const savedFetch = globalThis.fetch;
+  const savedKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
   globalThis.fetch = async (url) => {
-    if (url.includes('serpapi.com')) {
+    if (String(url).includes('api.anthropic.com')) {
       return {
         ok: true,
         json: async () => ({
-          organic_results: [
-            { title: 'Result 1', link: 'https://example.com/1', snippet: 'Test snippet 1' },
-            { title: 'Result 2', link: 'https://example.com/2', snippet: 'Test snippet 2' }
-          ]
-        })
+          stop_reason: 'end_turn',
+          content: [
+            { type: 'text', text: 'Best practices: Result 1 and Result 2 cover error handling and async patterns.' },
+            { type: 'web_search_tool_result', content: [
+              { type: 'web_search_result', title: 'Result 1', url: 'https://example.com/1' },
+              { type: 'web_search_result', title: 'Result 2', url: 'https://example.com/2' },
+            ] },
+          ],
+        }),
       };
     }
     throw new Error(`Unexpected URL: ${url}`);
   };
 
   try {
-    process.env.LLMIDE_SERPAPI_KEY = 'test-key';
     const { skills } = loadSkills(SKILLS_DIR);
 
     // First iteration: agent calls web-search
@@ -65,17 +70,28 @@ test('agent loop: can emit web-search and get results', async () => {
     );
   } finally {
     globalThis.fetch = savedFetch;
-    delete process.env.LLMIDE_SERPAPI_KEY;
+    if (savedKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = savedKey;
   }
 });
 
 test('agent loop: can emit fetch-url and get content', async () => {
   const savedFetch = globalThis.fetch;
+  const savedKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
   globalThis.fetch = async (url) => {
-    if (url.includes('example.com')) {
+    if (String(url).includes('api.anthropic.com')) {
       return {
         ok: true,
-        text: async () => '<html><title>Example Page</title><body>Hello World</body></html>'
+        json: async () => ({
+          stop_reason: 'end_turn',
+          content: [
+            { type: 'text', text: 'The page titled "Example Page" says Hello World.' },
+            { type: 'web_fetch_tool_result', content: [
+              { type: 'web_fetch_result', title: 'Example Page', url: 'https://example.com' },
+            ] },
+          ],
+        }),
       };
     }
     throw new Error(`Unexpected URL: ${url}`);
@@ -112,5 +128,7 @@ test('agent loop: can emit fetch-url and get content', async () => {
     );
   } finally {
     globalThis.fetch = savedFetch;
+    if (savedKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = savedKey;
   }
 });
