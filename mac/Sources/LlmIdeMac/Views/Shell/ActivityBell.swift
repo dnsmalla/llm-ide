@@ -120,8 +120,8 @@ struct ActivityRow: View {
 
     var body: some View {
         Button {
-            if let link = item.link {
-                NotificationCenter.default.post(name: .openSection, object: link)
+            if let raw = sectionRawValue(for: item.kind) {
+                NotificationCenter.default.post(name: .openSection, object: raw)
             }
         } label: {
             HStack(spacing: 10) {
@@ -138,7 +138,7 @@ struct ActivityRow: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if item.link != nil {
+                if sectionRawValue(for: item.kind) != nil {
                     Image(systemName: "chevron.right")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
@@ -163,6 +163,19 @@ struct ActivityRow: View {
         case .emailFetched:         return "envelope"
         case .slackFetched:         return "number"
         case .none:                 return "circle"
+        }
+    }
+
+    private func sectionRawValue(for kind: ActivityKind?) -> String? {
+        switch kind {
+        case .issueCreated, .commentAdded, .dispatchIssueCreated, .outcomeChanged:
+            return "issues"
+        case .regressionDone:
+            return "regression"
+        case .knowledgeUpdated:
+            return "codeGraph"
+        default:
+            return nil   // meetingAdded, emailFetched, slackFetched: non-navigable in v1
         }
     }
 }
