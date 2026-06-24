@@ -54,9 +54,9 @@ struct CodeAssistantPanel: View {
     @State private var busy: Bool = false
     /// Handle to the in-flight user turn, so Stop can cancel it.
     @State private var runTask: Task<Void, Never>?
-    /// A single message the user submitted while a turn was running; it auto-sends
-    /// as the next turn when the current one finishes (or is stopped).
-    @State private var queued: String?
+    /// Messages the user submitted while a turn was running, in FIFO order; they
+    /// auto-send one per turn as the current run finishes (or is stopped).
+    @State private var queued: [String] = []
     @State private var error: String?
     /// Measured render height per assistant turn, keyed by turn id, so each
     /// markdown web-view bubble can be sized to its content in the scroll list.
@@ -973,29 +973,37 @@ struct CodeAssistantPanel: View {
 
     private var inputBar: some View {
         VStack(spacing: 0) {
-            // A message queued while a turn is running — auto-sends next.
-            if let q = queued {
-                HStack(spacing: 6) {
-                    Image(systemName: "clock")
-                        .font(.system(size: 10))
-                        .foregroundStyle(theme.current.textMuted)
-                    Text("Queued: \(q)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.current.textMuted)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Spacer()
-                    Button { queued = nil } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(theme.current.textMuted)
+            // Messages queued while a turn is running — they auto-send in order,
+            // one per turn. Each is individually removable.
+            if !queued.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(queued.enumerated()), id: \.offset) { index, q in
+                        HStack(spacing: 6) {
+                            Image(systemName: "clock")
+                                .font(.system(size: 10))
+                                .foregroundStyle(theme.current.textMuted)
+                            Text("Queued #\(index + 1): \(q)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(theme.current.textMuted)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Spacer()
+                            Button {
+                                guard queued.indices.contains(index) else { return }
+                                queued.remove(at: index)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(theme.current.textMuted)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Cancel this queued message")
+                            .accessibilityLabel("Cancel queued message \(index + 1)")
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
                     }
-                    .buttonStyle(.plain)
-                    .help("Cancel queued message")
-                    .accessibilityLabel("Cancel queued message")
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 5)
                 .background(theme.current.surface)
                 Divider().background(theme.current.border)
             }
@@ -1501,15 +1509,15 @@ struct CodeAssistantPanel: View {
     // MARK: - Send
 
     @MainActor
-    /// ⌘↵ / Send button. Sends the draft now when idle; queues it when a turn
-    /// is already running (it auto-sends as the next turn). Single queue slot —
-    /// a second submit while running replaces the queued message.
+    /// ⌘↵ / Send button. Sends the draft now when idle; appends it to the queue
+    /// when a turn is already running (queued messages auto-send in FIFO order,
+    /// one per turn).
     private func submit() {
         let msg = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !msg.isEmpty else { return }
         draft = ""
         if busy {
-            queued = msg
+            queued.append(msg)
         } else {
             startTurn(msg)
         }
@@ -1575,10 +1583,9 @@ struct CodeAssistantPanel: View {
         } catch {
             self.error = error.localizedDescription
         }
-        // Drain the queued message (if any) as a fresh, un-cancelled turn.
-        if let next = queued {
-            queued = nil
-            startTurn(next)
+        // Drain the next queued message (FIFO) as a fresh, un-cancelled turn.
+        if !queued.isEmpty {
+            startTurn(queued.removeFirst())
         } else {
             busy = false
             runTask = nil
