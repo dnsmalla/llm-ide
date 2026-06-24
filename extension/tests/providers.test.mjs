@@ -219,7 +219,7 @@ test('chatModels: anthropic keeps claude-* only', () => {
 });
 
 test('cliInvocation: standard non-interactive form per provider', () => {
-  assert.deepEqual(cliInvocation('anthropic', 'hi'), { bin: 'claude', args: ['--strict-mcp-config', '--tools', '', '-p', 'hi'] });
+  assert.deepEqual(cliInvocation('anthropic', 'hi'), { bin: 'claude', args: ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '-p', 'hi'] });
   assert.deepEqual(cliInvocation('openai', 'hi'),    { bin: 'codex',  args: ['exec', 'hi'] });
   assert.deepEqual(cliInvocation('google', 'hi'),    { bin: 'gemini', args: ['-p', 'hi'] });
   assert.equal(cliInvocation('skynet', 'hi'), null);
@@ -231,11 +231,11 @@ test('anthropicWebCliArgs: enables AND pre-approves a single web tool', () => {
   // ("I don't have permission to use WebFetch yet"). Regression guard.
   assert.deepEqual(
     anthropicWebCliArgs('q', { tool: 'WebSearch' }),
-    ['--strict-mcp-config', '--tools', 'WebSearch', '--allowedTools', 'WebSearch', '-p', 'q'],
+    ['--strict-mcp-config', '--setting-sources', '', '--tools', 'WebSearch', '--allowedTools', 'WebSearch', '-p', 'q'],
   );
   assert.deepEqual(
     anthropicWebCliArgs('q', { tool: 'WebFetch' }),
-    ['--strict-mcp-config', '--tools', 'WebFetch', '--allowedTools', 'WebFetch', '-p', 'q'],
+    ['--strict-mcp-config', '--setting-sources', '', '--tools', 'WebFetch', '--allowedTools', 'WebFetch', '-p', 'q'],
   );
 });
 

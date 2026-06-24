@@ -273,7 +273,16 @@ const CLI_ARG_BUILDERS = {
   // heavy prompt sends the CLI off reading files / web-fetching / shelling to
   // `gh` — work that overran the per-call timeout and surfaced as a 502. The
   // server runs its own tool loop, so the CLI must answer, not act.
-  anthropic: (p) => ['--strict-mcp-config', '--tools', '', '-p', p],
+  //
+  // `--setting-sources ''` loads ZERO setting sources (user/project/local), so
+  // the spawn ignores the operator's personal Claude Code config — most
+  // importantly their hooks. Without it a user-level SessionStart hook (e.g.
+  // the `superpowers` plugin) injects its block into the agent's context and
+  // the model narrates "I'll disregard the injected superpowers/SessionStart
+  // block…" straight into the reply (and again on the nested ask-internal hop
+  // → duplicated). Auth + model still resolve, so the subscription-login path
+  // is unaffected — `claude -p` becomes a clean, hook-free model endpoint.
+  anthropic: (p) => ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '-p', p],
   openai:    (p) => ['exec', p],   // codex exec "<prompt>"
   google:    (p) => ['-p', p],     // gemini -p "<prompt>"
 };
@@ -292,7 +301,9 @@ const CLI_ARG_BUILDERS = {
  * WebFetch yet"). `--allowedTools` pre-approves it so the call actually runs.
  */
 export function anthropicWebCliArgs(prompt, { tool = 'WebSearch' } = {}) {
-  return ['--strict-mcp-config', '--tools', tool, '--allowedTools', tool, '-p', prompt];
+  // `--setting-sources ''`: same hook isolation as the default builder above —
+  // don't let the operator's user-level hooks/skills leak into this web hop.
+  return ['--strict-mcp-config', '--setting-sources', '', '--tools', tool, '--allowedTools', tool, '-p', prompt];
 }
 
 /** The {bin, args} a provider's CLI is invoked with for a prompt. Pure —
