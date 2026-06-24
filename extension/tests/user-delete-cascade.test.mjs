@@ -267,6 +267,10 @@ test('slack_seen and slack_state are wiped on user deletion (KB-2)', () => {
 // Before the fix, deleteUserCascade never touched these tables (added in the
 // activity-feed feature), so a deleted user's feed and read-cursor survived
 // account deletion — PII leak.
+// The zero-row assertions below pass via FK cascade as well, so they alone
+// don't prove the explicit deletes are needed. The binding regression guard is
+// the expectedKeys receipt check in the "cascade is transactional" test above —
+// removing the explicit deletes drops activity/activity_seen from that receipt.
 test('deleteUserCascade removes activity + activity_seen rows (KB-3)', async () => {
   reset();
   const { recordActivity, markSeen } = await import('../kb/activity.mjs');
