@@ -113,8 +113,15 @@ final class ArrowInterceptingTextView: NSTextView {
     override func keyDown(with event: NSEvent) {
         // Only plain arrows (no ⌘/⌥/⌃/⇧) drive history; modified arrows keep
         // their normal selection/word-movement behaviour.
-        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        let bare = mods.isEmpty
+        //
+        // CRITICAL: arrow keys ALWAYS carry `.function` (and usually
+        // `.numericPad`) in their modifier flags, so the old
+        // `intersection(.deviceIndependentFlagsMask).isEmpty` check was NEVER
+        // true for an arrow — it silently rejected every bare ↑/↓ and history
+        // recall (plus menu nav) never fired. Only the real chord modifiers
+        // (⌘⌥⌃⇧) should disqualify a "bare" arrow.
+        let chordMods: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
+        let bare = event.modifierFlags.intersection(chordMods).isEmpty
         // Menu keys take priority while the autocomplete menu is open (the
         // handler returns false when it's closed, so normal editing — newline
         // on Return, tab insertion — is untouched). Return stays bare-only so
