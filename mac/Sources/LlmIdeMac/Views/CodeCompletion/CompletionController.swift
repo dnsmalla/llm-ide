@@ -11,7 +11,7 @@ import Foundation
 @MainActor
 final class CompletionController: ObservableObject {
 
-    enum Kind { case command, skill, file }
+    enum Kind { case command, skill, subagent, file }
 
     struct Item: Identifiable, Equatable {
         let id: String
@@ -40,6 +40,7 @@ final class CompletionController: ObservableObject {
     // Caches. Commands+skills load once; files reload when the repo root changes.
     private var commandItems: [Item] = []
     private var skillItems: [Item] = []
+    private var subagentItems: [Item] = []
     private var fileItems: [Item] = []
     private var metaLoaded = false
     private var filesLoadedFor: URL?
@@ -97,6 +98,18 @@ final class CompletionController: ObservableObject {
                 }
             }
             skillItems = skills
+            // Plugin-defined named subagents — the "other" delegates. Discovery
+            // only (the agent invokes them via ask-subagent), so accepting
+            // inserts a mention like a skill does.
+            var subs: [Item] = []
+            for g in catalog.subagents.plugins {
+                for s in g.subagents {
+                    subs.append(Item(id: "sub:\(g.pluginName):\(s.name)", kind: .subagent,
+                                     label: s.name, detail: s.description,
+                                     insert: "Use the \(s.name) subagent: ", fileURL: nil))
+                }
+            }
+            subagentItems = subs
         }
         rebuild()
     }
@@ -143,7 +156,7 @@ final class CompletionController: ObservableObject {
         guard isOpen, items.indices.contains(selected) else { return nil }
         let item = items[selected]
         switch item.kind {
-        case .command, .skill:
+        case .command, .skill, .subagent:
             return .replaceDraft(item.insert ?? item.label)
         case .file:
             guard let url = item.fileURL else { return nil }
@@ -160,7 +173,9 @@ final class CompletionController: ObservableObject {
         case .none:
             closeInternal(); return
         case .command:
-            let pool = commandItems + skillItems
+            // Everything invokable/discoverable from "/": commands, skills, and
+            // plugin subagents — comprehensive, nothing filtered out.
+            let pool = commandItems + skillItems + subagentItems
             // Match against the label without its leading "/" so typing "sum"
             // prefix-matches "/summary" (the query never includes the slash).
             items = Self.rank(pool, query: q, keys: {

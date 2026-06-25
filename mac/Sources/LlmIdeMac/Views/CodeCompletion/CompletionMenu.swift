@@ -65,9 +65,10 @@ struct CompletionMenu: View {
 
     private func icon(_ kind: CompletionController.Kind) -> String {
         switch kind {
-        case .command: return "terminal"
-        case .skill:   return "sparkles"
-        case .file:    return "doc.text"
+        case .command:  return "terminal"
+        case .skill:    return "sparkles"
+        case .subagent: return "person.2"
+        case .file:     return "doc.text"
         }
     }
 }
