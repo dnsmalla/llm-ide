@@ -100,6 +100,20 @@ function format(level, msg, fields) {
   return parts.join(' ') + '\n';
 }
 
+// A broken stdout/stderr pipe must NEVER crash the server. The Node server is
+// supervised by the Mac app, which reads the child's stdout/stderr into an
+// in-app buffer; when that pipe breaks or stops being drained (app backgrounded,
+// pipe buffer full, app quit), the next write emits EPIPE. Without an 'error'
+// listener that EPIPE becomes an uncaughtException → process.exit(1) — i.e. a
+// broken LOG pipe was tearing the whole server down (observed: repeated
+// "write EPIPE" uncaught_exception crashes → backend flapping). Swallow EPIPE
+// (and EBADF/ERR_STREAM_DESTROYED from a closed pipe); re-throw anything truly
+// unexpected so real stream bugs still surface.
+const _BENIGN_STREAM_ERRS = new Set(['EPIPE', 'EBADF', 'ERR_STREAM_DESTROYED', 'ERR_STREAM_WRITE_AFTER_END']);
+for (const s of [process.stdout, process.stderr]) {
+  try { s.on('error', (err) => { if (!_BENIGN_STREAM_ERRS.has(err?.code)) throw err; }); } catch { /* ignore */ }
+}
+
 function log(level, msg, fields) {
   const lvl = LEVELS[level];
   // Persist warn+ to the on-disk crash log ALWAYS — independent of the console
@@ -110,7 +124,9 @@ function log(level, msg, fields) {
   }
   if (lvl < minLevel) return;
   const stream = lvl >= LEVELS.warn ? process.stderr : process.stdout;
-  stream.write(format(level, msg, fields));
+  // Belt-and-braces against a synchronous throw on a broken pipe (the async
+  // 'error' listener above handles the deferred case). Never let logging throw.
+  try { stream.write(format(level, msg, fields)); } catch { /* broken pipe — see above */ }
 }
 
 export const logger = {

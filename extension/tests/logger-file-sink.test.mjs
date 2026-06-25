@@ -45,6 +45,19 @@ test('file sink ignores console minLevel (error) and still records warn', () => 
   assert.ok(msgs.includes('warn-line'));
 });
 
+test('a broken stdout/stderr pipe does not crash logging (EPIPE is swallowed)', () => {
+  // Regression: a broken log pipe to the supervising app threw EPIPE from
+  // stream.write → uncaughtException → process.exit(1), flapping the backend.
+  const orig = process.stderr.write;
+  process.stderr.write = () => { const e = new Error('write EPIPE'); e.code = 'EPIPE'; throw e; };
+  try {
+    assert.doesNotThrow(() => logger.error('uncaught_exception', { error: 'pipe broke' }));
+    assert.doesNotThrow(() => logger.warn('still alive', {}));
+  } finally {
+    process.stderr.write = orig;
+  }
+});
+
 test('cleanup', () => {
   for (const f of [logFile, `${logFile}.old`]) { try { fs.rmSync(f, { force: true }); } catch { /* ignore */ } }
 });
