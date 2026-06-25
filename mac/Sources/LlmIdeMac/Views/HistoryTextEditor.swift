@@ -22,6 +22,12 @@ struct HistoryTextEditor: NSViewRepresentable {
     /// the text view move the caret normally.
     var onArrowUp: () -> Bool
     var onArrowDown: () -> Bool
+    /// Autocomplete-menu keys. Each returns `true` to consume the key (menu
+    /// open) or `false` to fall through to the text view's default (newline /
+    /// tab insertion / nothing). nil = no menu wired (default behaviour).
+    var onReturn: (() -> Bool)? = nil
+    var onTab: (() -> Bool)? = nil
+    var onEscape: (() -> Bool)? = nil
 
     func makeNSView(context: Context) -> NSScrollView {
         let textView = ArrowInterceptingTextView()
@@ -53,6 +59,9 @@ struct HistoryTextEditor: NSViewRepresentable {
         // current view state (sentPrompts / historyIndex / draft).
         textView.onArrowUp = onArrowUp
         textView.onArrowDown = onArrowDown
+        textView.onReturn = onReturn
+        textView.onTab = onTab
+        textView.onEscape = onEscape
         textView.font = font
         textView.textColor = textColor
         // Only push the binding into the view when it actually differs — e.g. a
@@ -85,12 +94,22 @@ struct HistoryTextEditor: NSViewRepresentable {
 final class ArrowInterceptingTextView: NSTextView {
     var onArrowUp: (() -> Bool)?
     var onArrowDown: (() -> Bool)?
+    var onReturn: (() -> Bool)?
+    var onTab: (() -> Bool)?
+    var onEscape: (() -> Bool)?
 
     override func keyDown(with event: NSEvent) {
         // Only plain arrows (no ⌘/⌥/⌃/⇧) drive history; modified arrows keep
         // their normal selection/word-movement behaviour.
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let bare = mods.isEmpty
+        // Menu keys take priority while the autocomplete menu is open (the
+        // handler returns false when it's closed, so normal editing — newline
+        // on Return, tab insertion — is untouched). Return stays bare-only so
+        // ⌘↵ keeps submitting via the SwiftUI button.
+        if bare, event.keyCode == 36 /* return */, onReturn?() == true { return }
+        if bare, event.keyCode == 48 /* tab */, onTab?() == true { return }
+        if event.keyCode == 53 /* esc */, onEscape?() == true { return }
         if bare, event.keyCode == 126 /* up */, onArrowUp?() == true { return }
         if bare, event.keyCode == 125 /* down */, onArrowDown?() == true { return }
         super.keyDown(with: event)

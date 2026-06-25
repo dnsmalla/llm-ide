@@ -114,6 +114,10 @@ struct CodeAssistantPanel: View {
     @AppStorage("codeAssist.editMode") private var editModeRaw = EditAcceptanceMode.review.rawValue
     private var editMode: EditAcceptanceMode { EditAcceptanceMode(rawValue: editModeRaw) ?? .review }
     @StateObject private var session = CodeAssistantSession()
+    /// Cursor-style "/" (command/skill) + "@" (file) autocomplete for the input.
+    @StateObject private var completion = CompletionController()
+    /// Project-memory viewer sheet (what the assistant auto-learned).
+    @State private var showProjectMemory = false
     /// Captured at the moment the banner appears so Save uses the
     /// prompt+answer that triggered the threshold, not whatever the
     /// user types next.
@@ -162,6 +166,17 @@ struct CodeAssistantPanel: View {
         )
         .background(theme.current.body)
         .task { await loadLanguage() }
+        // Configure autocomplete for the active repo and load the command/skill
+        // catalog. Re-runs on repo switch so the "@" file index tracks the repo.
+        .task(id: activeRepoKey) {
+            completion.configure(api: api, repoRoot: activeRepoRoot)
+            await completion.loadMetaIfNeeded()
+        }
+        .onChange(of: draft) { _, newValue in completion.update(draft: newValue) }
+        .sheet(isPresented: $showProjectMemory) {
+            ProjectMemoryView(api: api, repo: activeMemoryRepo)
+                .environmentObject(theme)
+        }
         .task { await refreshRecentIssuesLoop() }
         .task { await loadModels(for: AICliTool(rawValue: config.activeCLI) ?? .claudeCode) }
         .onAppear {
@@ -930,6 +945,46 @@ struct CodeAssistantPanel: View {
         return "none"
     }
 
+    /// Home-relative ("~/…") path of the repo whose chat-memory the assistant
+    /// reads/writes — the first indexed repo, matching the backend's write
+    /// target so the viewer shows exactly what gets recalled. "" if none.
+    private var activeMemoryRepo: String {
+        buildAgentContext().indexedRepos.first?.path ?? ""
+    }
+
+    // MARK: - Autocomplete actions
+
+    /// ↑ moves the autocomplete selection when the menu is open, otherwise walks
+    /// prompt history (the original behaviour).
+    private func arrowUpAction() -> Bool {
+        if completion.isOpen { completion.moveUp(); return true }
+        return historyUp() == .handled
+    }
+    private func arrowDownAction() -> Bool {
+        if completion.isOpen { completion.moveDown(); return true }
+        return historyDown() == .handled
+    }
+
+    /// Apply the highlighted completion: rewrite the draft for a command/skill,
+    /// or attach the chosen file and strip its "@token" from the draft.
+    private func acceptCompletion() {
+        guard let accept = completion.acceptSelected(currentDraft: draft) else {
+            completion.close(); return
+        }
+        switch accept {
+        case .replaceDraft(let s):
+            draft = s
+        case .attachFile(let url, let newDraft):
+            switch addFile(url: url) {
+            case .added, .duplicate: break
+            case .notText:   attachNotice = "That file isn't text — not attached."
+            case .unreadable: attachNotice = "Couldn't read that file."
+            }
+            draft = newDraft
+        }
+        completion.close()
+    }
+
     @ViewBuilder
     private func nudgeBanner(prompt: String) -> some View {
         let t = theme.current
@@ -1119,6 +1174,13 @@ struct CodeAssistantPanel: View {
                 .background(theme.current.surface)
                 Divider().background(theme.current.border)
             }
+            // Autocomplete dropdown — sits directly above the editor (Cursor-style).
+            if completion.isOpen {
+                CompletionMenu(controller: completion, onAccept: { acceptCompletion() })
+                    .environmentObject(theme)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 4)
+            }
             // Text area
             ZStack(alignment: .topLeading) {
                 // Keep the placeholder ALWAYS in the tree and toggle its
@@ -1147,8 +1209,11 @@ struct CodeAssistantPanel: View {
                     text: $draft,
                     font: .systemFont(ofSize: 12),
                     textColor: NSColor(theme.current.text),
-                    onArrowUp: { historyUp() == .handled },
-                    onArrowDown: { historyDown() == .handled }
+                    onArrowUp: { arrowUpAction() },
+                    onArrowDown: { arrowDownAction() },
+                    onReturn: { if completion.isOpen { acceptCompletion(); return true }; return false },
+                    onTab: { if completion.isOpen { acceptCompletion(); return true }; return false },
+                    onEscape: { if completion.isOpen { completion.close(); return true }; return false }
                 )
                 .frame(height: composerHeight)
                 .padding(.horizontal, 8)
@@ -1195,6 +1260,7 @@ struct CodeAssistantPanel: View {
             }
             if showModelPicker { modelPickerChips }
             editModeChip
+            memoryButton
             Spacer()
             keyHint
             sendButton
@@ -1212,6 +1278,7 @@ struct CodeAssistantPanel: View {
                     }
                     if showModelPicker { modelPickerChips }
                     editModeChip
+                    memoryButton
                     Spacer(minLength: 0)
                 }
                 if showFileAttachButtons && !attachments.isEmpty {
@@ -1227,6 +1294,19 @@ struct CodeAssistantPanel: View {
                 sendButton
             }
         }
+    }
+
+    /// Opens the project-memory viewer (auto-captured facts about this repo).
+    private var memoryButton: some View {
+        Button { showProjectMemory = true } label: {
+            Image(systemName: "brain")
+                .font(.system(size: 11))
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(theme.current.textMuted)
+        .help("Project memory — what the assistant has learned about this repo")
+        .accessibilityLabel("Project memory")
     }
 
     private var keyHint: some View {
