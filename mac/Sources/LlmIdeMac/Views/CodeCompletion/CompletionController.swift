@@ -43,6 +43,7 @@ final class CompletionController: ObservableObject {
     private var subagentItems: [Item] = []
     private var fileItems: [Item] = []
     private var metaLoaded = false
+    private var loadingMeta = false
     private var filesLoadedFor: URL?
     private var loadingFiles = false
 
@@ -65,9 +66,14 @@ final class CompletionController: ObservableObject {
         }
     }
 
-    /// Load the "/" command + skill catalog once. Best-effort.
+    /// Load the "/" command + skill catalog. Best-effort, retryable: latches
+    /// `metaLoaded` only on a successful fetch, so a fetch that hit the backend
+    /// during a restart/cold-start window can be retried (e.g. the next time the
+    /// user types "/"). The `loadingMeta` guard prevents overlapping fetches.
     func loadMetaIfNeeded() async {
-        guard !metaLoaded, let api else { return }
+        guard !metaLoaded, !loadingMeta, let api else { return }
+        loadingMeta = true
+        defer { loadingMeta = false }
         async let cmds = try? api.listAgentCommands()
         async let cat = try? api.listAgentSkillCatalog()
         let commands = await cmds
@@ -130,7 +136,13 @@ final class CompletionController: ObservableObject {
         if draft.hasPrefix("/") {
             let after = String(draft.dropFirst())
             if !after.contains(where: \.isWhitespace) {
-                mode = .command; query = after; rebuild(); return
+                mode = .command; query = after
+                // Retry the catalog fetch on demand: if the initial load (on
+                // panel appear) failed — e.g. the backend was mid-restart — this
+                // recovers the menu the moment the user reaches for it, instead
+                // of leaving "/" permanently empty until the panel reappears.
+                if !metaLoaded { Task { await loadMetaIfNeeded() } }
+                rebuild(); return
             }
         }
         // File: the last token starts with "@".
