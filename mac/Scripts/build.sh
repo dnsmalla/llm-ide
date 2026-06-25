@@ -153,9 +153,45 @@ if [ -d "$PROJ_DIR/Sources/LlmIdeMac/Resources" ]; then
   rsync -a "$PROJ_DIR/Sources/LlmIdeMac/Resources/" "$APP_DIR/Contents/Resources/"
 fi
 
-echo -e "${BLUE}[build]${NC} compiling via swift build (release)..."
 cd "$PROJ_DIR"
-swift build -c release --product "$APP_NAME"
+
+# Dependency resolution. One dependency (graph-kit) is a PRIVATE repo, so a
+# plain `swift build` — which contacts every remote to check for updates —
+# fails with "could not read Username for 'https://github.com'" on any machine
+# without git credentials, even when the pinned versions are already cached.
+#
+# So resolve OFFLINE first: `--disable-automatic-resolution` uses only the
+# versions in Package.resolved and never re-checks remotes. When the local
+# cache already satisfies Package.resolved (the common case — warm `.build/`)
+# this needs no network and no credentials. We then build with the same flag
+# so the build step can't reach out either.
+#
+# Only when the cache can't satisfy Package.resolved (fresh checkout, or a
+# deliberate dependency bump) do we fall back to a networked resolve — which
+# does require credentials for graph-kit. Set LLMIDE_FORCE_RESOLVE=1 to skip
+# the offline attempt and always resolve from remotes.
+SPM_OFFLINE="--disable-automatic-resolution"
+if [ "${LLMIDE_FORCE_RESOLVE:-}" = "1" ]; then
+  echo -e "${BLUE}[build]${NC} LLMIDE_FORCE_RESOLVE=1 — resolving dependencies from remotes..."
+  swift package resolve
+  SPM_OFFLINE=""
+elif swift package resolve --disable-automatic-resolution >/dev/null 2>&1; then
+  echo -e "${BLUE}[build]${NC} dependencies satisfied from Package.resolved (offline — no remote fetch)"
+else
+  echo -e "${BLUE}[build]${NC} Package.resolved not fully cached — resolving from remotes (needs network + git credentials for graph-kit)..."
+  swift package resolve
+  SPM_OFFLINE=""
+fi
+
+echo -e "${BLUE}[build]${NC} compiling via swift build (release)..."
+if ! swift build -c release --product "$APP_NAME" $SPM_OFFLINE; then
+  echo -e "${RED}[build] swift build failed.${NC}" >&2
+  echo -e "${RED}[build] If the error mentions 'could not read Username for https://github.com',${NC}" >&2
+  echo -e "${RED}[build] the private graph-kit dependency needs to be fetched once with git${NC}" >&2
+  echo -e "${RED}[build] credentials. Run 'swift package resolve' with credentials available,${NC}" >&2
+  echo -e "${RED}[build] then re-run this script (the warm cache then builds offline).${NC}" >&2
+  exit 1
+fi
 
 BUILT_BIN="$PROJ_DIR/.build/release/$APP_NAME"
 if [ ! -f "$BUILT_BIN" ]; then

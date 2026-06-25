@@ -239,7 +239,9 @@ export function listOutcomesForTask(userId, taskId, limit = 20) {
 // Capped at 1 000 rows: a user with thousands of dispatched tasks would
 // otherwise serialize the entire table in one response, both slowing
 // the watcher and allocating unbounded memory.  The watcher polls every
-// 60 s and will eventually cycle through all tasks over multiple passes.
+// OUTCOME_POLL_INTERVAL_MS (default 5 min; env override
+// LLMIDE_OUTCOME_POLL_MS) and will eventually cycle through all tasks
+// over multiple passes.
 const MAX_DISPATCHED_ROWS = 1_000;
 
 export function listDispatchedTasks(userId) {

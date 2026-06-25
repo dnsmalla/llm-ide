@@ -31,7 +31,7 @@ Common entry points:
 - [System architecture](docs/explanation/architecture.md)
 - [API overview](docs/reference/api/overview.md)
 - [Engineering invariants](docs/explanation/invariants.md) — read before changing the hot paths
-- [Decisions index](docs/decisions/) — ADRs 0001–0014
+- [Decisions index](docs/decisions/) — ADRs 0001–0015
 - [How to contribute](docs/how-to/contribute.md)
 
 ## Project layout

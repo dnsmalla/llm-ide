@@ -1,10 +1,20 @@
 ---
 title: "0001. Use the Claude CLI shell-out instead of accepting an API key"
-status: accepted
+status: superseded
 date: 2026-05-18
+superseded-by: "0015"
 ---
 
 # 0001. Use the Claude CLI shell-out instead of accepting an API key
+
+> **Superseded (2026-06-25) by [ADR-0015](0015-multi-provider-vaulted-api-keys.md).**
+> The "neither accepts nor stores an API key / no HTTP API client / do not
+> replace `claude -p` with direct API calls" decision below no longer holds:
+> the server now accepts **optional** per-user API keys via the encrypted
+> vault and routes to provider HTTP clients, with the Claude CLI retained as
+> the no-key fallback. The local-first, CLI-as-default intent still stands.
+> See ADR-0015 and [`invariants.md`](../explanation/invariants.md#local-server-extensionservermjs)
+> for the current rules. The original decision is preserved below as the record.
 
 ## Context
 

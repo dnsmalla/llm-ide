@@ -14,6 +14,7 @@ import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
+import { Semaphore } from '../core/semaphore.mjs';
 
 const log = logger.child({ component: 'providers' });
 
@@ -318,6 +319,19 @@ export function cliInvocation(provider, prompt) {
 
 const CLI_TIMEOUT_MS = 120_000;
 
+// Cap on concurrent CLI subprocesses across the whole process. Every CLI
+// spawn (runtime.mjs's Anthropic fallback and the generic `runViaCli`) routes
+// through `spawnCli`, so gating it here is the single chokepoint. Without a
+// cap, N concurrent LLM requests spawn N `claude`/`codex`/`gemini` children,
+// each holding file descriptors and tens-to-hundreds of MB — enough to hit
+// the macOS FD ceiling and exhaust memory under load. 6 keeps a single-user
+// laptop responsive while leaving headroom; override for heavier hosts.
+const MAX_CONCURRENT_CLI = (() => {
+  const v = Number(process.env.LLMIDE_MAX_CONCURRENT_CLI);
+  return Number.isFinite(v) && v >= 1 ? Math.floor(v) : 6;
+})();
+const cliSemaphore = new Semaphore(MAX_CONCURRENT_CLI);
+
 /**
  * Build a minimal environment for provider CLI subprocesses.
  * Mirrors the allowlist in runtime.mjs (~line 288) so that secrets like
@@ -376,25 +390,35 @@ export function spawnCli(provider, prompt, { env, timeoutMs = CLI_TIMEOUT_MS, si
   // dedicated, bounded web-tool subprocess. The default loop still uses
   // `--tools ''` (no tools); only the web handlers opt in.
   const args = argsOverride || inv.args;
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      inv.bin, args,
-      { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env: env || minimalCliEnv(), signal },
-      (err, stdout, stderr) => {
-        if (err) {
-          err.stdout = stdout;
-          err.stderr = stderr;
-          err.bin = inv.bin;
-          reject(err);
-          return;
-        }
-        resolve({ stdout, stderr, bin: inv.bin });
-      },
-    );
-    // The prompt is passed via argv, not stdin. Leaving stdin open makes the
-    // CLI block ~3s waiting for piped input (and warn on stderr); close it so
-    // the subprocess proceeds immediately.
-    child.stdin?.end();
+  // Gate the spawn behind the process-wide concurrency cap. `run` acquires a
+  // slot, spawns, and releases when the child settles — so excess concurrent
+  // callers queue here rather than forking unbounded subprocesses.
+  return cliSemaphore.run(() => {
+    // If the caller already aborted while we were queued for a slot, fail
+    // fast instead of spawning a child only to immediately kill it.
+    if (signal?.aborted) {
+      return Promise.reject(Object.assign(new Error('spawnCli: aborted'), { name: 'AbortError', bin: inv.bin }));
+    }
+    return new Promise((resolve, reject) => {
+      const child = execFile(
+        inv.bin, args,
+        { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env: env || minimalCliEnv(), signal },
+        (err, stdout, stderr) => {
+          if (err) {
+            err.stdout = stdout;
+            err.stderr = stderr;
+            err.bin = inv.bin;
+            reject(err);
+            return;
+          }
+          resolve({ stdout, stderr, bin: inv.bin });
+        },
+      );
+      // The prompt is passed via argv, not stdin. Leaving stdin open makes the
+      // CLI block ~3s waiting for piped input (and warn on stderr); close it so
+      // the subprocess proceeds immediately.
+      child.stdin?.end();
+    });
   });
 }
 

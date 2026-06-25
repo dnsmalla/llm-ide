@@ -11,7 +11,7 @@ System-wide architecture for LLM IDE. For server-internal details (request pipel
 
 - **Local-first.** All data and AI calls run through a server bound to `127.0.0.1`. Nothing leaves the machine unless the user approves a delivery action (GitHub PR, Slack webhook, ticket dispatch).
 - **Multi-surface, one backend.** A Chrome extension and a native macOS app talk to the same local HTTP API and the same SQLite knowledge base.
-- **AI as a tool, not a service.** The Claude CLI provides the LLM; the server shells out to it. No API key is configured or accepted by the server.
+- **AI as a tool, not a service.** The Claude CLI is the always-available baseline — the server shells out to it when a user has no stored key. Users may **optionally** add a per-user API key (Claude / OpenAI / Google / OpenAI-compatible) via the encrypted vault, which the server then prefers so multi-user installs bill each user's own account. See [ADR-0015](../decisions/0015-multi-provider-vaulted-api-keys.md).
 - **Outcome-aware.** Dispatched work (PRs, tickets) is polled and the result lands back in the KB, so future planning is grounded in what actually happened.
 
 ## Components
@@ -202,7 +202,7 @@ keyed by the same `id`.
 
 | Choice | Decision |
 |---|---|
-| Claude CLI, not API keys | [ADR-0001](../decisions/0001-claude-cli-not-api-key.md) |
+| Claude CLI default; optional vaulted API keys | [ADR-0001](../decisions/0001-claude-cli-not-api-key.md) (superseded by [ADR-0015](../decisions/0015-multi-provider-vaulted-api-keys.md)) |
 | No HTTP framework | [ADR-0002](../decisions/0002-no-server-framework.md) |
 | SQLite FTS5 vs Elastic | [ADR-0003](../decisions/0003-sqlite-fts5-not-elastic.md) |
 | Loopback-only bind | [ADR-0004](../decisions/0004-bind-to-localhost-only.md) |
