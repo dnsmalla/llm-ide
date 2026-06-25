@@ -172,7 +172,19 @@ struct CodeAssistantPanel: View {
             completion.configure(api: api, repoRoot: activeRepoRoot)
             await completion.loadMetaIfNeeded()
         }
-        .onChange(of: draft) { _, newValue in completion.update(draft: newValue) }
+        .onChange(of: draft) { _, newValue in
+            // While walking prompt history (historyIndex != nil), a recalled
+            // prompt that begins with "/" would otherwise re-open the
+            // autocomplete menu, which then hijacks the next ↑/↓ into menu
+            // navigation instead of continuing through history. Suppress the
+            // menu during recall; normal typing (historyIndex == nil) is
+            // unaffected.
+            if historyIndex == nil {
+                completion.update(draft: newValue)
+            } else {
+                completion.close()
+            }
+        }
         .sheet(isPresented: $showProjectMemory) {
             ProjectMemoryView(api: api, repos: activeMemoryRepos)
                 .environmentObject(theme)
@@ -1589,9 +1601,13 @@ struct CodeAssistantPanel: View {
         do {
             let data = try Data(contentsOf: url)
             // Reject obviously-binary files (≥1% NUL bytes in the first 4K).
+            // An empty file has no bytes to probe — it's valid (empty) text, so
+            // don't let the `0 >= 0` ratio misclassify it as binary.
             let probe = data.prefix(4096)
-            let nulCount = probe.reduce(into: 0) { acc, b in if b == 0 { acc += 1 } }
-            if nulCount * 100 >= probe.count { return .notText }
+            if !probe.isEmpty {
+                let nulCount = probe.reduce(into: 0) { acc, b in if b == 0 { acc += 1 } }
+                if nulCount * 100 >= probe.count { return .notText }
+            }
             guard let text = String(data: data, encoding: .utf8) else { return .notText }
             attachments.append(.init(path: path, content: text))
             return .added
@@ -2208,6 +2224,10 @@ struct CodeAssistantPanel: View {
     }
 
     private func deleteSession(_ id: UUID) {
+        // If we're deleting the ACTIVE session, cancel any in-flight turn first
+        // (mirrors switch/create). Otherwise the running turn would append its
+        // reply onto the next session's history and leave `busy` stuck.
+        if id.uuidString == currentSessionIDString { resetActiveTurnState() }
         ChatSessionStore.delete(id: id)
         sessions = ChatSessionStore.listSessions()
         if id.uuidString == currentSessionIDString {

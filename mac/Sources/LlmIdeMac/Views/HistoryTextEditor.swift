@@ -50,6 +50,18 @@ struct HistoryTextEditor: NSViewRepresentable {
         scroll.drawsBackground = false
         scroll.backgroundColor = .clear
         scroll.borderType = .noBorder
+
+        // Grab first responder once the view is in a window. Without this the
+        // composer starts unfocused, so keyDown never fires and ↑/↓ recall (and
+        // typing) appear dead until the user clicks into the field. Deferred so
+        // the window hierarchy exists; guarded so we only claim focus when
+        // nothing else holds it (don't steal focus from another field).
+        DispatchQueue.main.async { [weak textView] in
+            guard let tv = textView, let win = tv.window else { return }
+            if win.firstResponder !== tv && (win.firstResponder is NSWindow || win.firstResponder == nil) {
+                win.makeFirstResponder(tv)
+            }
+        }
         return scroll
     }
 
