@@ -98,7 +98,10 @@ export default function TranscriptView({
   useEffect(() => {
     // Don't auto-scroll while the user is searching — keep their results visible.
     if (query.trim()) return;
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Instant (not smooth) scroll: captions append every ~800ms, and an
+    // animated scroll on every tick visibly thrashes and fights the user
+    // during a live meeting. A jump-to-bottom is snappier and cheaper.
+    bottomRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [segments, interimText, captions, query]);
 
   const handleSpeakerClick = (speakerId: string) => {
