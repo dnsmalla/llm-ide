@@ -257,16 +257,13 @@ struct ExplorerView: View {
     // MARK: - Empty state
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "folder")
-                .font(.system(size: 40, weight: .thin))
-                .foregroundStyle(.quaternary)
-            Text("Open a project or activate a repo to browse files.")
-                .font(Typography.emptyTitle)
-                .foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.background)
+        EmptyStateView(
+            icon: "folder",
+            title: "No files to browse yet",
+            message: "Open a project, or set a code folder in Settings → Paths to browse files here.",
+            actionLabel: "Open Settings",
+            action: { NotificationCenter.default.post(name: .openSection, object: "settings") }
+        )
     }
 
     // MARK: - Behavior

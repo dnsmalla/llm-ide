@@ -276,10 +276,13 @@ struct SearchView: View {
     }
 
     private func emptyState(_ msg: String) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").font(.system(size: 26)).foregroundStyle(theme.current.textMuted)
-            Text(msg).font(Typography.caption).foregroundStyle(theme.current.textMuted)
-        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            icon: "magnifyingglass",
+            title: "Nothing to search yet",
+            message: msg,
+            actionLabel: "Open Settings",
+            action: { NotificationCenter.default.post(name: .openSection, object: "settings") }
+        )
     }
 
     // MARK: - Highlighting

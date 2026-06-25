@@ -193,7 +193,14 @@ struct LlmIdeMacApp: App {
                         // on a cold launch. Returns immediately once healthy
                         // (e.g. an adopted server); bounded so a genuinely
                         // down backend can't stall the first frame.
-                        await Self.awaitBackendReady(timeoutSec: 3)
+                        //
+                        // ONLY wait when there's a stored session to restore.
+                        // A logged-out / first-run user has nothing to restore,
+                        // so skip the wait and paint login immediately — it
+                        // auto-retries when the backend reports `.running`.
+                        if session.hasStoredSession {
+                            await Self.awaitBackendReady(timeoutSec: 3)
+                        }
                     }
                     // Restore persisted session on launch, if any.
                     await session.bootstrap(api: api)

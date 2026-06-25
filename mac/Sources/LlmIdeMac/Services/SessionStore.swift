@@ -31,6 +31,12 @@ final class SessionStore: ObservableObject {
 
     var isAuthenticated: Bool { accessToken != nil && user != nil }
 
+    /// Whether a refresh token is persisted — i.e. there's a session worth
+    /// waiting for the backend to come up to restore on launch. When false,
+    /// the launch path skips the backend-readiness wait and shows login
+    /// immediately (LoginView auto-retries once the backend reports `.running`).
+    var hasStoredSession: Bool { KeychainStore.loadToken(host: host) != nil }
+
     init(server: String) {
         self.host = server
     }

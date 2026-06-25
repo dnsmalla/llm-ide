@@ -476,11 +476,12 @@ struct AppShell: View {
             let indexRoot = projectStore.activeProject
                 .map { URL(fileURLWithPath: $0.localPath) }
             self.appEnv = try AppEnvironment(indexRootURL: indexRoot)
-            // Populate the NOTES and MEETINGS sections immediately so every
-            // view that reads LibraryItemStore has the correct files before
-            // any notification fires.  rescan() enumerates the bound project's
-            // meetings/ and notes/ folders authoritatively.
-            itemStore.rescan()
+            // Populate the NOTES and MEETINGS sections from the bound project's
+            // meetings/ and notes/ folders. Run OFF the main thread
+            // (rescanAsync) so a large project's directory walk doesn't freeze
+            // first paint — the Library fills in a beat later instead of the
+            // window hanging on open.
+            Task { await itemStore.rescanAsync() }
         } catch {
             self.envInitError = error.localizedDescription
         }

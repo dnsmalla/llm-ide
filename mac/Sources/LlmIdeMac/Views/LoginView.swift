@@ -73,6 +73,12 @@ struct LoginView: View {
 
                 if let error {
                     errorBanner(message: error)
+                } else if !backendReady {
+                    // Proactive first-run guidance: when the local server
+                    // isn't up yet, surface setup help BEFORE a failed sign-in
+                    // (previously a new user only learned the server wasn't
+                    // running by trying to log in and failing).
+                    backendSetupBanner
                 }
 
                 Button(action: submit) {
@@ -154,6 +160,37 @@ struct LoginView: View {
         }
         .padding(Spacing.sm)
         .background(theme.current.danger.opacity(theme.current.isDark ? 0.12 : 0.08))
+        .clipShape(RoundedRectangle(cornerRadius: Radius.sm))
+    }
+
+    /// True once the backend reports `.running` — used to hide the proactive
+    /// setup banner once the server is actually up.
+    private var backendReady: Bool {
+        if case .running = backend.status { return true }
+        return false
+    }
+
+    /// Neutral first-run banner shown when the server isn't running yet (and
+    /// there's no sign-in error to show instead). Reuses `startServerRow`, which
+    /// adapts to: starting → progress; configured → a "Start Server" button;
+    /// unconfigured → "configure the backend path in Settings → Backend".
+    @ViewBuilder
+    private var backendSetupBanner: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "bolt.horizontal.circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.current.textMuted)
+                Text("The local server isn't running yet — start it to sign in.")
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            startServerRow
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Spacing.sm)
+        .background(theme.current.surface.opacity(0.6))
         .clipShape(RoundedRectangle(cornerRadius: Radius.sm))
     }
 

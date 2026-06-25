@@ -48,9 +48,11 @@ struct LibraryFileRow: View {
         }
     }
 
+    // Size is captured during the (off-main) library scan and read straight off
+    // the model — no synchronous `stat()` per row in `body`, which previously
+    // ran hundreds of blocking filesystem calls per layout pass on big folders.
     private var fileSize: String? {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: item.path),
-              let bytes = attrs[.size] as? Int else { return nil }
+        guard let bytes = item.sizeBytes else { return nil }
         return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 }

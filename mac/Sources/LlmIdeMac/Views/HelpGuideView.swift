@@ -82,9 +82,9 @@ struct HelpGuideView: View {
 
             helpCard("How it works", icon: "arrow.triangle.2.circlepath") {
                 helpStep(1, "Open a meeting in Zoom or Teams on your Mac")
-                helpStep(2, "Click Record in the sidebar to start capturing captions")
+                helpStep(2, "Press ⌘N (or Record in the account menu) to start capturing captions")
                 helpStep(3, "When the meeting ends, click Stop — notes are generated automatically")
-                helpStep(4, "Find your notes in the Library, ready to review, edit, or export")
+                helpStep(4, "Find your notes in the Library tool, ready to review, edit, or export")
             }
 
             helpCard("First-time setup", icon: "checkmark.seal") {
@@ -131,7 +131,7 @@ struct HelpGuideView: View {
             helpCard("How to start a live session", icon: "play.circle") {
                 helpStep(1, "Join your meeting in Zoom or Teams")
                 helpStep(2, "Make sure captions/subtitles are turned on in the meeting app")
-                helpStep(3, "Click the Record button in the sidebar footer")
+                helpStep(3, "Press ⌘N (or Record in the account menu) to start")
                 helpStep(4, "The Live tab appears automatically with a red dot indicator")
             }
 
@@ -157,7 +157,7 @@ struct HelpGuideView: View {
 
             helpCard("How to use it", icon: "doc.text.magnifyingglass") {
                 helpStep(1, "Link your project to a GitLab or GitHub repository in Settings")
-                helpStep(2, "Open Review Code from the sidebar")
+                helpStep(2, "Open Review Doc from the toolbar")
                 helpStep(3, "Paste an MR/PR URL or select from recent merge requests")
                 helpStep(4, "The AI reads the diff and returns a structured review with severity ratings")
             }
@@ -281,7 +281,7 @@ struct HelpGuideView: View {
             helpParagraph("Visualize your codebase as an interactive knowledge graph powered by Understand-Anything. Nodes represent files, functions, or modules — edges show how they connect. Great for understanding unfamiliar repos or spotting architectural patterns.")
 
             helpCard("How to build a graph", icon: "hammer") {
-                helpStep(1, "Open Code Graph from the sidebar")
+                helpStep(1, "Open Code Graph from the toolbar")
                 helpStep(2, "Select a folder or file set to analyze")
                 helpStep(3, "The AI parses the code and builds a graph of relationships")
                 helpStep(4, "Explore — click nodes to see details, drag to rearrange, zoom to focus")
@@ -320,7 +320,7 @@ struct HelpGuideView: View {
                 helpBullet("Server — configure which LLM IDE server to connect to")
                 helpBullet("Backend — choose AI providers and models for note generation")
                 helpBullet("Appearance — switch between light, dark, and system themes")
-                helpBullet("Sidebar — show or hide sidebar sections you don't use")
+                helpBullet("Menu Bar — show or hide the toolbar tools you don't use")
                 helpBullet("Capture — configure how captions are captured (Accessibility settings)")
                 helpBullet("Updates — check for app updates (powered by Sparkle)")
             }
@@ -346,7 +346,6 @@ struct HelpGuideView: View {
 
             helpParagraph("Speed up your workflow with these keyboard shortcuts.")
 
-            shortcutRow("⌘1 – ⌘9", "Jump to sidebar sections (Library, Live, Review, etc.)")
             shortcutRow("⌘F", "Focus the Library search bar")
             shortcutRow("⌘N", "Start recording a new meeting")
             shortcutRow("⌘,", "Open Settings")

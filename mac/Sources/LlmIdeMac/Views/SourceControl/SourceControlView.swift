@@ -576,13 +576,13 @@ struct SourceControlView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: Spacing.sm) {
-            Image(systemName: "arrow.triangle.branch").font(.system(size: 28))
-                .foregroundStyle(theme.current.textMuted)
-            Text("No active repository").font(Typography.bodyStrong)
-            Text("Activate a cloned repo in Settings → GitLab / GitHub.")
-                .font(Typography.caption).foregroundStyle(theme.current.textMuted)
-        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        EmptyStateView(
+            icon: "arrow.triangle.branch",
+            title: "No active repository",
+            message: "Activate a cloned repo in Settings → GitLab / GitHub to see changes here.",
+            actionLabel: "Open Settings",
+            action: { NotificationCenter.default.post(name: .openSection, object: "settings") }
+        )
     }
 
     private func badge(_ s: FileChange.Status) -> String {

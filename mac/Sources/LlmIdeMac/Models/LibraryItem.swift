@@ -22,6 +22,11 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     /// the SOURCES sub-grouping. `nil` for every other category.
     var sourceId: String? = nil
 
+    /// File size in bytes, captured once during the (off-main) scan from the
+    /// enumerator's prefetched resource values. Lets `LibraryFileRow` show the
+    /// size without a synchronous `stat()` per row in its `body`.
+    var sizeBytes: Int? = nil
+
     /// Identity is DERIVED from `path` (not a stored random UUID) so it is
     /// STABLE across rescans.  `items` is now a scan of the project folder,
     /// rebuilt on every `rescan()`; a fresh `UUID()` per construction would
