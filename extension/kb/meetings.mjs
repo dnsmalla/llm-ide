@@ -213,8 +213,25 @@ export function getEntity(userId, entityId) {
 
 // ── Stats ─────────────────────────────────────────────────────────
 
+// `stats()` runs ~9 COUNT/GROUP-BY scans and is hit repeatedly — /kb/stats and
+// /kb/system/status both call it, often back-to-back and on a poll. A tiny
+// per-user TTL cache collapses those bursts into one scan set. The window is
+// short enough that dashboard counts stay effectively live; single-process +
+// single-writer means there's no cross-process coherence to worry about.
+const STATS_TTL_MS = 2_000;
+const _statsCache = new Map(); // userId -> { at, value }
+
 export function stats(userId) {
   requireUser(userId);
+  const now = Date.now();
+  const cached = _statsCache.get(userId);
+  if (cached && now - cached.at < STATS_TTL_MS) return cached.value;
+  const value = computeStats(userId);
+  _statsCache.set(userId, { at: now, value });
+  return value;
+}
+
+function computeStats(userId) {
   const db = getDb();
   const m = lazyPrepare(db, 'SELECT COUNT(*) AS n FROM meetings WHERE user_id = ?').get(userId).n;
   const e = lazyPrepare(db, 'SELECT COUNT(*) AS n FROM entities WHERE user_id = ?').get(userId).n;
