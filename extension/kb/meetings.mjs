@@ -241,6 +241,10 @@ export function getEntity(userId, entityId) {
 // short enough that dashboard counts stay effectively live; single-process +
 // single-writer means there's no cross-process coherence to worry about.
 const STATS_TTL_MS = 2_000;
+// Bound the per-user cache so it can't grow without limit on a multi-tenant
+// server (mirrors the rate-limiter's capped bucket map). With a 2s TTL almost
+// every entry is already expired at any sweep, so this stays tiny.
+const STATS_CACHE_MAX = 2_000;
 const _statsCache = new Map(); // userId -> { at, value }
 
 export function stats(userId) {
@@ -249,6 +253,13 @@ export function stats(userId) {
   const cached = _statsCache.get(userId);
   if (cached && now - cached.at < STATS_TTL_MS) return cached.value;
   const value = computeStats(userId);
+  // Opportunistic eviction: when the map hits the cap, drop expired entries
+  // before inserting (keeps memory bounded without a background timer).
+  if (_statsCache.size >= STATS_CACHE_MAX) {
+    for (const [k, v] of _statsCache) {
+      if (now - v.at >= STATS_TTL_MS) _statsCache.delete(k);
+    }
+  }
   _statsCache.set(userId, { at: now, value });
   return value;
 }
