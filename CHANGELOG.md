@@ -58,6 +58,30 @@ yet have published releases so dates are commit-day-of-merge.
 
 ### Fixed
 
+- Code Assistant no longer collapses every backend failure into the
+  generic "The assistant is temporarily unavailable." A server-sent SSE
+  `{type:"error"}` event now surfaces its real (already-redacted) reason:
+  it maps to a new `APIError.agent` case instead of `.http`, so
+  `codeAssistRoundTrip` no longer mistakes it for a transport failure and
+  retries on the buffered endpoint (which re-ran the same failing call and
+  replaced the reason with the 502 envelope). E.g. an expired Claude CLI
+  login now shows "Claude error: …" rather than a dead end.
+- Code Assistant prompt-history recall (↑ / ↓) walks through *all* prior
+  prompts again. The composer is now backed by an `NSTextView`
+  (`HistoryTextEditor`) that intercepts the arrows in `keyDown`; SwiftUI's
+  `TextEditor` swallowed them for caret movement once the field had text,
+  capping recall at a single prompt. The placeholder is also kept in the
+  view tree (opacity toggle) instead of `if draft.isEmpty`, which had
+  rebuilt the editor subtree on first recall and dropped first-responder.
+- Chat sessions flush synchronously before switching / starting a new
+  chat, so the last reply is no longer lost — the `.onChange(of: history)`
+  persist is deferred and could miss the final turn on same-runloop
+  navigation.
+- macOS GUI-launched backend prepends the standard CLI dirs
+  (`~/.local/bin`, Homebrew, …) to `PATH`, so the spawned Node server can
+  resolve `claude` / `git` / `codex`. Finder/launchd hand the app a
+  minimal `PATH` that omits them, which made every CLI-backed AI call fail
+  with `ENOENT`.
 - `readBody` no longer calls `req.destroy()` before writing the 413
   envelope; clients now receive proper "Request body too large" instead
   of hanging after `100 Continue`.

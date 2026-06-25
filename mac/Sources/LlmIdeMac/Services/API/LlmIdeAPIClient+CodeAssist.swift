@@ -175,8 +175,13 @@ extension LlmIdeAPIClient {
                 pendingTool = evt.pendingTool
                 usage = evt.usage
             case "error":
-                throw APIError.http(status: 500, code: "AGENT_ERROR",
-                                    message: evt.error ?? "Code Assistant failed", details: nil)
+                // The backend explicitly reported a failure for THIS turn (the
+                // reason is already redacted server-side). Surface it verbatim
+                // via `.agent` — not `.http`, which codeAssistRoundTrip would
+                // mistake for a transport failure and retry on the buffered
+                // endpoint, re-running the same failing call and replacing this
+                // real reason with the generic "temporarily unavailable" 502.
+                throw APIError.agent(message: evt.error ?? "Code Assistant failed")
             default:
                 break
             }

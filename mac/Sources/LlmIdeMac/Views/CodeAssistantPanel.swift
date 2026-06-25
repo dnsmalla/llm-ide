@@ -51,6 +51,13 @@ struct CodeAssistantPanel: View {
     @State private var sessions: [ChatSession] = []
     @State private var showingSessionPicker: Bool = false
     @State private var draft: String = ""
+    /// Shell / Claude-Code-style prompt history: submitted prompts (oldest →
+    /// newest). Up-arrow walks back through them, Down walks forward, Down past
+    /// the newest restores the in-progress draft. `historyIndex == nil` means
+    /// we're editing the live draft, not browsing.
+    @State private var sentPrompts: [String] = []
+    @State private var historyIndex: Int? = nil
+    @State private var draftStash: String = ""
     @State private var busy: Bool = false
     /// Live agent status streamed from /code-assist (SSE): "Searching the web…",
     /// "Writing the answer…", etc. Shown in place of a static "Thinking…" so a
@@ -1114,22 +1121,38 @@ struct CodeAssistantPanel: View {
             }
             // Text area
             ZStack(alignment: .topLeading) {
-                if draft.isEmpty {
-                    Text(isCompact ? "Ask Claude…" : "Ask Claude about the attached code…")
-                        .font(.system(size: 12))
-                        .foregroundStyle(theme.current.textMuted.opacity(0.6))
-                        .padding(.horizontal, 12)
-                        .padding(.top, 10)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .allowsHitTesting(false)
-                }
-                TextEditor(text: $draft)
+                // Keep the placeholder ALWAYS in the tree and toggle its
+                // opacity — do NOT wrap it in `if draft.isEmpty`. Inserting/
+                // removing this sibling on the first recall (empty → text)
+                // rebuilds the editor subtree, and the NSTextView loses first
+                // responder, so the second ↑ never reaches keyDown — which is
+                // why recall got stuck after a single prompt.
+                Text(isCompact ? "Ask Claude…" : "Ask Claude about the attached code…")
                     .font(.system(size: 12))
-                    .scrollContentBackground(.hidden)
-                    .frame(height: composerHeight)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .foregroundStyle(theme.current.textMuted.opacity(0.6))
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .allowsHitTesting(false)
+                    .opacity(draft.isEmpty ? 1 : 0)
+                // Recall previous prompts with ↑ / ↓ (like a shell / Claude
+                // Code). Backed by NSTextView so the arrows are reliably
+                // intercepted: SwiftUI's TextEditor swallows them for caret
+                // movement once the field has text, which capped recall at a
+                // single prompt. historyUp/historyDown still own the gating —
+                // they only hijack the arrows when the field is empty or we're
+                // already browsing; otherwise the caret moves normally.
+                HistoryTextEditor(
+                    text: $draft,
+                    font: .systemFont(ofSize: 12),
+                    textColor: NSColor(theme.current.text),
+                    onArrowUp: { historyUp() == .handled },
+                    onArrowDown: { historyDown() == .handled }
+                )
+                .frame(height: composerHeight)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
             }
             .background(theme.current.body)
 
@@ -1621,11 +1644,47 @@ struct CodeAssistantPanel: View {
         let msg = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !msg.isEmpty else { return }
         draft = ""
+        // Record for ↑ recall (skip consecutive duplicates; cap to 100).
+        if sentPrompts.last != msg {
+            sentPrompts.append(msg)
+            if sentPrompts.count > 100 { sentPrompts.removeFirst(sentPrompts.count - 100) }
+        }
+        historyIndex = nil
+        draftStash = ""
         if busy {
             queued.append(msg)
         } else {
             startTurn(msg)
         }
+    }
+
+    /// ↑ in the composer: walk back through previously-sent prompts. Returns
+    /// `.ignored` (so the cursor moves normally) unless the field is empty or
+    /// we're already browsing history.
+    private func historyUp() -> KeyPress.Result {
+        guard !sentPrompts.isEmpty, draft.isEmpty || historyIndex != nil else { return .ignored }
+        if let i = historyIndex {
+            guard i > 0 else { return .handled }   // already at the oldest
+            historyIndex = i - 1
+        } else {
+            draftStash = draft                     // stash the live draft
+            historyIndex = sentPrompts.count - 1
+        }
+        draft = sentPrompts[historyIndex!]
+        return .handled
+    }
+
+    /// ↓ in the composer: walk forward; past the newest, restore the draft.
+    private func historyDown() -> KeyPress.Result {
+        guard let i = historyIndex else { return .ignored }
+        if i < sentPrompts.count - 1 {
+            historyIndex = i + 1
+            draft = sentPrompts[historyIndex!]
+        } else {
+            historyIndex = nil
+            draft = draftStash
+        }
+        return .handled
     }
 
     /// Launch a turn as an unstructured Task whose handle Stop can cancel.
@@ -1996,6 +2055,11 @@ struct CodeAssistantPanel: View {
     }
 
     private func createNewSession() {
+        // Flush the outgoing session synchronously first. The
+        // .onChange(of: history) persist is deferred to the next view update,
+        // so without this an explicit save the last reply can be lost when we
+        // immediately repoint currentSessionIDString / clear history below.
+        persistCurrentSession(history: Array(history.suffix(50)))
         resetActiveTurnState()
         let fresh = ChatSession()
         ChatSessionStore.save(fresh)
@@ -2013,6 +2077,11 @@ struct CodeAssistantPanel: View {
     private func switchSession(to id: UUID) {
         guard id.uuidString != currentSessionIDString else { return }
         guard let session = ChatSessionStore.load(id: id) else { return }
+        // Flush the OUTGOING session (current id + current history, incl. its
+        // last reply) before repointing — the .onChange persist is deferred,
+        // so relying on it alone can drop the final reply on a same-runloop
+        // navigation away.
+        persistCurrentSession(history: Array(history.suffix(50)))
         resetActiveTurnState()
         currentSessionIDString = id.uuidString
         history = session.history

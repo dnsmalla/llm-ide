@@ -379,6 +379,22 @@ Run through this against a real meeting before merging:
 
 ---
 
+## macOS Code Assistant panel (`mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift`, `HistoryTextEditor.swift`)
+
+### ✅ MUST preserve
+
+- **The composer is backed by `NSTextView` (`HistoryTextEditor`), not `TextEditor`.** ↑ / ↓ prompt-history recall is driven from a `keyDown` override — the only point that reliably sees the arrows. SwiftUI's `TextEditor` consumes ↑ / ↓ for caret movement as soon as the field holds text, so `.onKeyPress(.upArrow)` only fires while empty and recall dies after one prompt. `historyUp`/`historyDown` still own the gating (empty or already-browsing); the view only routes the keystroke.
+- **The composer placeholder stays in the view tree, toggled by `.opacity`** — never wrap it in `if draft.isEmpty { … }`. Inserting/removing that sibling on the first recall (empty → text) rebuilds the editor subtree, the `NSTextView` loses first responder, and the *second* ↑ never reaches `keyDown` (recall sticks after one prompt).
+- **A server-sent SSE `{type:"error"}` maps to `APIError.agent`, not `.http`.** `codeAssistRoundTrip` retries on the buffered endpoint only for `.http` (transport) failures; an `.agent` error is an explicit, already-redacted application failure and must surface verbatim. Mapping it to `.http` re-ran the same failing call and replaced the real reason with the generic 502 "temporarily unavailable."
+- **Flush the active chat session before switching / creating one.** `switchSession` and `createNewSession` call `persistCurrentSession(...)` up front because the `.onChange(of: history)` save is deferred to the next view update — relying on it alone can drop the last reply on a same-runloop navigation away.
+
+### ❌ DO NOT do these
+
+- **Do NOT replace `HistoryTextEditor` with `TextEditor` + `.onKeyPress` for the arrows** — it regresses history recall to a single prompt.
+- **Do NOT broaden `codeAssistRoundTrip`'s buffered fallback to also catch `.agent`** — that re-masks real backend errors behind the generic 502.
+
+---
+
 ## Quick reference: where to add X
 
 | I want to… | Touch these files |

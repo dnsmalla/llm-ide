@@ -9,6 +9,11 @@ enum APIError: LocalizedError {
     case decoding(Error)
     case invalidURL
     case noSession
+    /// A server-sent application error (e.g. an SSE `{type:"error"}` event):
+    /// the request reached the backend and it reported a real, already-redacted
+    /// reason. Distinct from `.http` so callers can show this verbatim instead
+    /// of treating it as a transport failure to retry on a different endpoint.
+    case agent(message: String)
 
     private static let log = Logger(subsystem: "com.llmide.macapp", category: "APIError")
 
@@ -44,6 +49,7 @@ enum APIError: LocalizedError {
             return "The server returned an unexpected response."
         case .invalidURL: return "Invalid server URL."
         case .noSession: return "Not signed in."
+        case .agent(let message): return message
         }
     }
 
@@ -54,6 +60,7 @@ enum APIError: LocalizedError {
         case .decoding: return "DECODING_ERROR"
         case .invalidURL: return "INVALID_URL"
         case .noSession: return "AUTH_REQUIRED"
+        case .agent: return "AGENT_ERROR"
         }
     }
 }

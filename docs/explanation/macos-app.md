@@ -69,6 +69,7 @@ The app deliberately minimises platform lock-in in its core logic. The porting b
 - Global hotkeys — `CGEventTap` / Carbon `EventHotKeyRef`
 - Auto-update — Sparkle (macOS DMG workflow)
 - Path conventions — `~/Library/Application Support/…`
+- Code Assistant composer — `HistoryTextEditor` wraps `NSTextView` to intercept ↑ / ↓ for prompt-history recall (SwiftUI `TextEditor` can't reliably see the arrows once it holds text)
 
 **Portable Swift** (moves to Linux / visionOS with minor changes):
 

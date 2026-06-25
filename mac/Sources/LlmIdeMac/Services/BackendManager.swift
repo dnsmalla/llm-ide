@@ -269,6 +269,21 @@ final class BackendManager {
         }
         env["TERM"] = "dumb"
         env["MEETNOTES_LOG_JSON"] = env["MEETNOTES_LOG_JSON"] ?? "0"
+        // macOS GUI apps (launched via Finder/launchd) inherit a minimal PATH
+        // (`/usr/bin:/bin:…`) that omits the user CLI dirs the LLM tools install
+        // to — `~/.local/bin` (the `claude` CLI), Homebrew, etc. Without this the
+        // spawned Node server can't find `claude`/`codex`/`gemini` (or `git`),
+        // so every CLI-backed AI call fails with ENOENT and the user sees a
+        // generic "assistant unavailable". Prepend the standard CLI locations to
+        // whatever PATH we inherited, deduped, so the tools are resolvable.
+        let home = base["HOME"] ?? NSHomeDirectory()
+        let cliDirs = ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin",
+                       "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        let inherited = (env["PATH"] ?? "").split(separator: ":").map(String.init)
+        var seenPath = Set<String>()
+        env["PATH"] = (cliDirs + inherited)
+            .filter { !$0.isEmpty && seenPath.insert($0).inserted }
+            .joined(separator: ":")
         proc.environment = env
 
         let stdOut = Pipe()
