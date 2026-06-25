@@ -11,6 +11,8 @@ interface Props {
   onRenameSpeaker: (speakerId: string, name: string) => void;
   agentCaptions?: AgentCaption[];
   onAgentFeedback?: (seq: number, verdict: AgentFeedbackVerdict) => Promise<void>;
+  /** Whether capture is active — drives the "no captions yet" empty-state hint. */
+  isRecording?: boolean;
 }
 
 function formatTimestamp(ts: number): string {
@@ -67,6 +69,7 @@ export default function TranscriptView({
   onRenameSpeaker,
   agentCaptions,
   onAgentFeedback,
+  isRecording = false,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [editingSpeaker, setEditingSpeaker] = useState<string | null>(null);
@@ -130,7 +133,18 @@ export default function TranscriptView({
   if (segments.length === 0 && !interimText && captions.length === 0) {
     return (
       <div className="transcript-empty">
-        <p>Transcript will appear here when recording starts.</p>
+        {isRecording ? (
+          <>
+            <p>Listening for captions…</p>
+            <p className="transcript-empty-hint">
+              Nothing yet? Turn on closed captions (CC) in your meeting — that's
+              what we read. Captions appear here within a few seconds of someone
+              speaking.
+            </p>
+          </>
+        ) : (
+          <p>Transcript will appear here when recording starts.</p>
+        )}
       </div>
     );
   }

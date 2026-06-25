@@ -598,6 +598,7 @@ export default function App() {
               onRenameSpeaker={transcript.renameSpeaker}
               agentCaptions={isMirroring ? mirror.agentCaptions : agentMirror.captions}
               onAgentFeedback={agentMirror.submitFeedback}
+              isRecording={!isMirroring && transcript.isRecording}
             />
             {transcript.segments.length > 0 && (
               <div className="transcript-save-row">
