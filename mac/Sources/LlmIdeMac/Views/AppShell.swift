@@ -336,6 +336,17 @@ struct AppShell: View {
 
     @ToolbarContentBuilder
     private func shellToolbar() -> some ToolbarContent {
+        // Leading "Home" button — always returns to Explorer (the default
+        // home). Explorer/Source Control/Search live only in the panel-header
+        // switcher, so from a tool section (Issues, Gantt, …) this is the way
+        // back without hunting for the switcher.
+        ToolbarItem(placement: .navigation) {
+            Button { shell.section = .explorer } label: {
+                Label("Home", systemImage: "house")
+            }
+            .help("Home — Explorer")
+            .accessibilityLabel("Home — Explorer")
+        }
         // One group of named tool buttons. AppKit moves whichever don't fit
         // into the native `»` overflow menu. (ForEach can't emit individual
         // ToolbarItems — its closure is a ViewBuilder — but a group of views is
