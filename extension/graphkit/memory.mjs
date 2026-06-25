@@ -119,24 +119,56 @@ function normalizeForCompare(p) {
   return process.platform === 'darwin' ? p.toLowerCase() : p;
 }
 
-function repoMemoryBlock(repo, budget, allowedRoots) {
-  if (!repo || typeof repo.path !== 'string' || !repo.path) return null;
+// Tenancy + traversal gate, shared by the reader and the chat-memory writer
+// (memory-writer.mjs). Given a client-supplied repo path and the user's
+// allow-set, return the absolute, allow-listed repo root — or null if the path
+// is relative, contains a `..` segment, or is not in the allow-list.
+//
+// This is the single security boundary for ALL filesystem access into a repo's
+// graphify-out/ tree: anything that resolves a repo path to disk MUST go
+// through here so a hostile/buggy client can't drive reads or writes outside
+// the user's registered repos.
+export function resolveAllowedRepoRoot(repoPath, allowedRoots) {
+  if (typeof repoPath !== 'string' || !repoPath) return null;
   // The Mac client sends home-relative paths ("~/…"); expand to absolute.
-  const expanded = expandTilde(repo.path);
+  const expanded = expandTilde(repoPath);
   // Defense-in-depth: reject an unresolved parent-traversal segment. (resolve()
   // collapses it and the allow-list gates the result anyway, but fail fast.)
   if (expanded.split(/[/\\]/).includes('..')) return null;
   // Only honor absolute paths post-expansion. A still-relative path would be
   // ambiguous server-side.
   if (!isAbsolute(expanded)) return null;
-  // Tenancy gate: the path must be in the user's registered repo
-  // allow-list. agentContext.indexedRepos is client-supplied, so a
-  // hostile or buggy client could otherwise drive the server to read
-  // arbitrary `<x>/graphify-out/memory/repo.md` files. resolve() is
-  // applied to both sides so `/foo/../bar` and `/bar` compare equal.
-  // Pass through normalizeForCompare so APFS case-variants match.
+  // Tenancy gate: the path must be in the user's registered repo allow-list.
+  // resolve() is applied to both sides so `/foo/../bar` and `/bar` compare
+  // equal. Pass through normalizeForCompare so APFS case-variants match.
   const root = resolve(normalize(expanded));
   if (!allowedRoots.has(normalizeForCompare(root))) return null;
+  return root;
+}
+
+// Build the per-user allow-set, normalised the same way resolveAllowedRepoRoot
+// normalises candidate paths, so the .has() comparison is symmetric. A user
+// with no registered repos gets an empty set → every repo fails the gate.
+// Returns null on a DB error so callers can fail closed.
+export function buildAllowedRoots(userId) {
+  if (!userId) return null;
+  try {
+    return new Set(
+      userRepoAllowlist(userId)
+        .filter((p) => typeof p === 'string' && p)
+        // Expand tilde defensively in case a legacy allow-list entry is
+        // home-relative.
+        .map((p) => normalizeForCompare(resolve(normalize(expandTilde(p))))),
+    );
+  } catch {
+    return null;
+  }
+}
+
+function repoMemoryBlock(repo, budget, allowedRoots) {
+  if (!repo) return null;
+  const root = resolveAllowedRepoRoot(repo.path, allowedRoots);
+  if (!root) return null;
   const memDir = join(root, 'graphify-out', 'memory');
 
   const parts = [];
@@ -155,6 +187,10 @@ function repoMemoryBlock(repo, budget, allowedRoots) {
   tryAdd('repo.md', safeRead(join(memDir, 'repo.md'), PER_FILE_CHARS));
   tryAdd('graph-notes.md', safeRead(join(memDir, 'graph-notes.md'), PER_FILE_CHARS));
   tryAdd('doc-notes.md', safeRead(join(memDir, 'doc-notes.md'), PER_FILE_CHARS));
+  // Auto-captured facts the Code Assistant learned in prior chats about this
+  // project (written by memory-writer.mjs after each turn). Same dir, same
+  // gate — recall is free because this reader already runs every request.
+  tryAdd('chat-memory.md', safeRead(join(memDir, 'chat-memory.md'), PER_FILE_CHARS));
 
   const bugs = listMdFiles(join(memDir, 'bugs'), MAX_BUG_FILES);
   if (bugs.length > 0 && used < budget) {
@@ -195,24 +231,11 @@ export function renderGraphifyMemory(agentContext, userId) {
   if (!Array.isArray(repos) || repos.length === 0) return '';
   if (!userId) return '';   // no anonymous reads
 
-  // Build the allow-set once, normalised the same way repo paths are
-  // normalised inside repoMemoryBlock, so the .has() comparison is
-  // symmetric. A user with no registered repos gets an empty set →
-  // every repo silently fails the gate.
-  let allowedRoots;
-  try {
-    allowedRoots = new Set(
-      userRepoAllowlist(userId)
-        .filter((p) => typeof p === 'string' && p)
-        // Same normalisation both sides — see normalizeForCompare. Expand
-        // tilde defensively in case a legacy allow-list entry is home-relative.
-        .map((p) => normalizeForCompare(resolve(normalize(expandTilde(p))))),
-    );
-  } catch {
-    // DB hiccup — fail closed.
-    return '';
-  }
-  if (allowedRoots.size === 0) return '';
+  // Build the allow-set once (shared helper; see buildAllowedRoots). A user
+  // with no registered repos gets an empty set → every repo silently fails the
+  // gate; a DB hiccup returns null → fail closed.
+  const allowedRoots = buildAllowedRoots(userId);
+  if (!allowedRoots || allowedRoots.size === 0) return '';
 
   const candidates = repos.slice(0, MAX_REPOS);
   const blocks = [];

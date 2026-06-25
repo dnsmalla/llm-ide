@@ -9,4 +9,10 @@
 // behind this surface.
 
 export { findRelatedCode, findGraphContext, rollupCodeRefs } from './graph.mjs';
-export { renderGraphifyMemory } from './memory.mjs';
+export { renderGraphifyMemory, buildAllowedRoots, resolveAllowedRepoRoot } from './memory.mjs';
+export {
+  readChatMemoryFacts,
+  writeChatMemoryFacts,
+  appendChatMemory,
+  parseChatMemoryFacts,
+} from './memory-writer.mjs';

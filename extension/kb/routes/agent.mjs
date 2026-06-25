@@ -12,8 +12,17 @@ import * as kb from '../db.mjs';
 import { dispatchAgent, stopAgent, listRuns, getDiagnostics } from '../../agents/meeting-agent.mjs';
 import { runClaude } from '../../agents/runtime.mjs';
 import { sendJSON, readBody, parseJSON, sanitizeForPrompt } from '../../core/utils.mjs';
-import { listAllSkills, listInstalledPlugins } from '../../llm_agent/skills/index.mjs';
+import { listAllSkills, listInstalledPlugins, buildPerUserSkillSet } from '../../llm_agent/skills/index.mjs';
 import { sanitizePersonaSuffix, personaConfigBlock } from '../../agents/prompt-utils.mjs';
+import {
+  buildAllowedRoots,
+  resolveAllowedRepoRoot,
+  readChatMemoryFacts,
+  writeChatMemoryFacts,
+} from '../../graphkit/index.mjs';
+
+// Normalised key for matching a fact line (mirrors memory-writer.factKey).
+const normFact = (s) => String(s).trim().replace(/\s+/g, ' ').toLowerCase();
 
 // Vision input for /kb/agent/ask. Accepts a data URL string
 // ("data:image/jpeg;base64,…") or { mediaType, data } objects, one or many.
@@ -327,6 +336,64 @@ export async function handleAgentRoutes(req, res, ctx) {
       skills,
       subagents: { plugins: pluginSubagents },
     });
+    return true;
+  }
+
+  // GET /kb/agent/commands
+  //   Enabled slash-commands for THIS user (plugin-enable-aware), powering the
+  //   chat input's "/" autocomplete. Shape mirrors /kb/agent/skills.
+  //   { commands: [{ trigger, description, args: [{name, required}], pluginName }] }
+  if (req.method === 'GET' && url.split('?')[0] === '/kb/agent/commands') {
+    const { commands } = buildPerUserSkillSet(userId);
+    const list = [];
+    for (const [trigger, cmd] of commands) {
+      list.push({
+        trigger,
+        description: cmd.description || '',
+        args: Object.entries(cmd.args || {}).map(([name, def]) => ({
+          name,
+          required: !!(def && def.required),
+        })),
+        pluginName: cmd.pluginName || null,
+      });
+    }
+    list.sort((a, b) => a.trigger.localeCompare(b.trigger));
+    sendJSON(res, 200, { commands: list });
+    return true;
+  }
+
+  // GET /kb/agent/project-memory?repo=<homeRelativePath>
+  //   The auto-captured chat-memory facts for one repo, for the in-app viewer.
+  //   Gated by the user's repo allow-list (the SAME boundary as the reader) —
+  //   a non-allow-listed path returns an empty list rather than reading disk.
+  //   { facts: string[], repo: <absolute root | null> }
+  if (req.method === 'GET' && new URL(url, 'http://127.0.0.1').pathname === '/kb/agent/project-memory') {
+    const repoParam = new URL(url, 'http://127.0.0.1').searchParams.get('repo') || '';
+    const allowed = buildAllowedRoots(userId);
+    const root = allowed ? resolveAllowedRepoRoot(repoParam, allowed) : null;
+    if (!root) { sendJSON(res, 200, { facts: [], repo: null }); return true; }
+    sendJSON(res, 200, { facts: readChatMemoryFacts(root), repo: root });
+    return true;
+  }
+
+  // DELETE /kb/agent/project-memory   body: { repo, fact } | { repo, all: true }
+  //   Remove one captured fact, or clear them all, for a repo. Same gate.
+  //   { facts: string[] }  (the remaining facts)
+  if (req.method === 'DELETE' && new URL(url, 'http://127.0.0.1').pathname === '/kb/agent/project-memory') {
+    const body = parseJSON(await readBody(req, 8 * 1024)) || {};
+    const allowed = buildAllowedRoots(userId);
+    const root = allowed ? resolveAllowedRepoRoot(body.repo, allowed) : null;
+    if (!root) {
+      sendJSON(res, 404, { error: { code: 'REPO_NOT_ALLOWED', message: 'repo not in allow-list' } });
+      return true;
+    }
+    if (body.all === true) {
+      sendJSON(res, 200, { facts: writeChatMemoryFacts(root, []) });
+      return true;
+    }
+    const target = normFact(body.fact);
+    const remaining = readChatMemoryFacts(root).filter((f) => normFact(f) !== target);
+    sendJSON(res, 200, { facts: writeChatMemoryFacts(root, remaining) });
     return true;
   }
 

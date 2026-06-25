@@ -247,6 +247,12 @@ const STATS_TTL_MS = 2_000;
 const STATS_CACHE_MAX = 2_000;
 const _statsCache = new Map(); // userId -> { at, value }
 
+// Test-only introspection into the bounded stats cache (size + cap), mirroring
+// the `_resetForTests` hooks elsewhere. Not used in production paths.
+export function _statsCacheStateForTests() {
+  return { size: _statsCache.size, max: STATS_CACHE_MAX };
+}
+
 export function stats(userId) {
   requireUser(userId);
   const now = Date.now();
@@ -258,6 +264,13 @@ export function stats(userId) {
   if (_statsCache.size >= STATS_CACHE_MAX) {
     for (const [k, v] of _statsCache) {
       if (now - v.at >= STATS_TTL_MS) _statsCache.delete(k);
+    }
+    // Hard ceiling: if a burst of distinct users left nothing expired to
+    // sweep, evict oldest-first (Map preserves insertion order) until there's
+    // room. Guarantees the cap holds even when every entry is still live.
+    while (_statsCache.size >= STATS_CACHE_MAX) {
+      const oldest = _statsCache.keys().next().value;
+      _statsCache.delete(oldest);
     }
   }
   _statsCache.set(userId, { at: now, value });

@@ -17,6 +17,7 @@ import { expandSlashCommand } from '../../plugins/loader.mjs';
 import { globalSkills, internalSkills, buildPerUserSkillSet } from '../skills/index.mjs';
 import { sanitizePersonaSuffix } from '../../agents/prompt-utils.mjs';
 import { renderGraphifyMemory } from '../../graphkit/index.mjs';
+import { persistTurnMemory } from './memory-persist.mjs';
 import { redactFence } from './redaction.mjs';
 
 // Re-exported for the HTTP routes that historically imported these
@@ -207,5 +208,22 @@ export async function handleCodeAssist({
     // still bounding a truly stuck loop.
     deadlineMs: 180_000,
   });
+
+  // Auto project-memory capture. Distill durable, project-specific facts from
+  // this turn and merge them into the active repo's chat-memory.md, which
+  // renderGraphifyMemory inlines into the prompt on the NEXT request (free
+  // recall — no separate retrieval path). Fire-and-forget: it runs after the
+  // reply is ready, is never awaited (zero added latency), and persistTurnMemory
+  // swallows all of its own errors — the trailing .catch is belt-and-braces.
+  if (out && out.reply) {
+    void persistTurnMemory({
+      agentContext,
+      userId,
+      userMessage: effectiveMessage,
+      reply: out.reply,
+      runClaude,
+    }).catch(() => {});
+  }
+
   return expandedFrom ? { ...out, expandedFrom } : out;
 }
