@@ -1,0 +1,92 @@
+// The central skills repo (dnsmalla/skills) as a discovery catalog for the
+// chat "/" menu. The agent only LOADS the agent-globals/agent-tools families
+// (those have handlers it can invoke); but the repo is the center of all
+// skills, and the IDE surfaces the rest — the `skills/` library family and the
+// `runtime/` app-skill family — for discovery. Picking one in the UI attaches
+// its SKILL.md as context so the agent can follow it.
+//
+// Repo is resolved the SAME way scripts/sync-skills.sh resolves it
+// ($SKILLS_REPO → ~/skills → ~/Desktop/skills → cache), but READ-ONLY and
+// network-free: if no local clone exists we return an empty catalog rather than
+// cloning. All I/O is best-effort and never throws.
+
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+
+// Families NOT already surfaced via /kb/agent/catalog (which covers
+// agent-globals + agent-tools). These are the "all the other skills".
+const LIBRARY_FAMILIES = ['skills', 'runtime'];
+const MAX_DESC = 200;
+
+let _cache = null;
+
+// Locate the central skills checkout on disk. Marker: registry.yaml or an
+// agent-tools/ dir (mirrors sync-skills.sh). No network clone.
+export function resolveCentralSkillsRepo() {
+  const candidates = [];
+  if (process.env.SKILLS_REPO) candidates.push(process.env.SKILLS_REPO);
+  candidates.push(join(homedir(), 'skills'));
+  candidates.push(join(homedir(), 'Desktop', 'skills'));
+  candidates.push(join(homedir(), '.cache', 'dnsmalla-skills'));
+  for (const c of candidates) {
+    try {
+      if (existsSync(join(c, 'registry.yaml')) || existsSync(join(c, 'agent-tools'))) return c;
+    } catch { /* skip */ }
+  }
+  return null;
+}
+
+// Pull just name + description from a SKILL.md frontmatter block. Deliberately
+// a tiny scalar reader (not a full YAML parse) — we only need two single-line
+// fields and want zero parser deps in this path.
+function readNameDesc(file) {
+  try {
+    const raw = readFileSync(file, 'utf8');
+    const m = raw.match(/^---\n([\s\S]*?)\n---/);
+    if (!m) return null;
+    const block = m[1];
+    const name = (block.match(/^name:\s*(.+?)\s*$/m) || [])[1];
+    if (!name) return null;
+    let desc = (block.match(/^description:\s*(.+?)\s*$/m) || [])[1] || '';
+    desc = desc.replace(/^["']|["']$/g, '').trim().slice(0, MAX_DESC);
+    return { name: name.replace(/^["']|["']$/g, '').trim(), description: desc };
+  } catch {
+    return null;
+  }
+}
+
+// { repo: <path|null>, skills: [{ id, family, name, description, path }] }.
+// Cached for the process — the central repo doesn't change under a running
+// server; a server restart (or sync) picks up changes.
+export function listSkillLibrary() {
+  if (_cache) return _cache;
+  const repo = resolveCentralSkillsRepo();
+  if (!repo) { _cache = { repo: null, skills: [] }; return _cache; }
+
+  const skills = [];
+  for (const family of LIBRARY_FAMILIES) {
+    let entries;
+    try { entries = readdirSync(join(repo, family), { withFileTypes: true }); }
+    catch { continue; }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const skillMd = join(repo, family, e.name, 'SKILL.md');
+      const fm = readNameDesc(skillMd);
+      if (!fm) continue;
+      skills.push({
+        id: `${family}/${e.name}`,
+        family,
+        name: fm.name,
+        description: fm.description,
+        path: skillMd,
+      });
+    }
+  }
+  skills.sort((a, b) => a.family.localeCompare(b.family) || a.name.localeCompare(b.name));
+  _cache = { repo, skills };
+  return _cache;
+}
+
+// Test hook — drop the cache so a test can point at a different repo via env.
+export function _resetSkillLibraryCache() { _cache = null; }

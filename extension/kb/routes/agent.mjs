@@ -12,7 +12,7 @@ import * as kb from '../db.mjs';
 import { dispatchAgent, stopAgent, listRuns, getDiagnostics } from '../../agents/meeting-agent.mjs';
 import { runClaude } from '../../agents/runtime.mjs';
 import { sendJSON, readBody, parseJSON, sanitizeForPrompt } from '../../core/utils.mjs';
-import { listAllSkills, listInstalledPlugins, buildPerUserSkillSet } from '../../llm_agent/skills/index.mjs';
+import { listAllSkills, listInstalledPlugins, buildPerUserSkillSet, listSkillLibrary } from '../../llm_agent/skills/index.mjs';
 import { sanitizePersonaSuffix, personaConfigBlock } from '../../agents/prompt-utils.mjs';
 import {
   buildAllowedRoots,
@@ -359,6 +359,16 @@ export async function handleAgentRoutes(req, res, ctx) {
     }
     list.sort((a, b) => a.trigger.localeCompare(b.trigger));
     sendJSON(res, 200, { commands: list });
+    return true;
+  }
+
+  // GET /kb/agent/skill-library
+  //   The central skills repo's discovery catalog (the `skills/` + `runtime/`
+  //   families NOT already in /kb/agent/catalog) for the chat "/" menu. The
+  //   agent can't execute these; the client attaches a chosen skill's SKILL.md
+  //   as context. { repo: <path|null>, skills: [{id, family, name, description, path}] }
+  if (req.method === 'GET' && url.split('?')[0] === '/kb/agent/skill-library') {
+    sendJSON(res, 200, listSkillLibrary());
     return true;
   }
 
