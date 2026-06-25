@@ -11,7 +11,7 @@ import Foundation
 @MainActor
 final class CompletionController: ObservableObject {
 
-    enum Kind { case command, skill, subagent, file }
+    enum Kind { case command, skill, subagent, librarySkill, file }
 
     struct Item: Identifiable, Equatable {
         let id: String
@@ -41,6 +41,7 @@ final class CompletionController: ObservableObject {
     private var commandItems: [Item] = []
     private var skillItems: [Item] = []
     private var subagentItems: [Item] = []
+    private var libraryItems: [Item] = []
     private var fileItems: [Item] = []
     private var metaLoaded = false
     private var loadingMeta = false
@@ -76,13 +77,23 @@ final class CompletionController: ObservableObject {
         defer { loadingMeta = false }
         async let cmds = try? api.listAgentCommands()
         async let cat = try? api.listAgentSkillCatalog()
+        async let lib = try? api.skillLibrary()
         let commands = await cmds
         let catalog = await cat
+        let library = await lib
         // Only latch as loaded once a fetch actually succeeds — otherwise a
         // cold-start failure (server not up yet) would permanently disable the
         // "/" menu; leaving metaLoaded false lets a later .task retry.
-        guard commands != nil || catalog != nil else { return }
+        guard commands != nil || catalog != nil || library != nil else { return }
         metaLoaded = true
+        // Central skills-repo catalog (the skills the IDE agent can't itself
+        // run): discovery entries whose SKILL.md is attached as context on
+        // select. fileURL = the SKILL.md path so accept reuses the file-attach.
+        libraryItems = (library ?? []).map { s in
+            Item(id: "lib:\(s.id)", kind: .librarySkill,
+                 label: s.name, detail: "\(s.family) · \(s.description)",
+                 insert: nil, fileURL: URL(fileURLWithPath: s.path))
+        }
         commandItems = (commands ?? []).map { c in
             Item(id: "cmd:\(c.trigger)", kind: .command,
                  label: "/\(c.trigger)", detail: c.description,
@@ -170,7 +181,10 @@ final class CompletionController: ObservableObject {
         switch item.kind {
         case .command, .skill, .subagent:
             return .replaceDraft(item.insert ?? item.label)
-        case .file:
+        case .librarySkill, .file:
+            // A library skill attaches its SKILL.md (fileURL) as context so the
+            // agent can follow it; a file attaches itself. Both strip the
+            // in-progress "/query" or "@token" from the draft.
             guard let url = item.fileURL else { return nil }
             let newDraft = Self.draftRemovingLastToken(currentDraft)
             return .attachFile(url: url, newDraft: newDraft)
@@ -185,9 +199,10 @@ final class CompletionController: ObservableObject {
         case .none:
             closeInternal(); return
         case .command:
-            // Everything invokable/discoverable from "/": commands, skills, and
-            // plugin subagents — comprehensive, nothing filtered out.
-            let pool = commandItems + skillItems + subagentItems
+            // Everything discoverable from "/": commands, the agent's own
+            // skills, plugin subagents, and the full central skills-repo library
+            // — comprehensive, nothing filtered out.
+            let pool = commandItems + skillItems + subagentItems + libraryItems
             // Match against the label without its leading "/" so typing "sum"
             // prefix-matches "/summary" (the query never includes the slash).
             items = Self.rank(pool, query: q, keys: {

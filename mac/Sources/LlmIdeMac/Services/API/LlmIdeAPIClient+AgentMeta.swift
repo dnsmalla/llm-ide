@@ -27,6 +27,24 @@ extension LlmIdeAPIClient {
         return resp.commands
     }
 
+    // MARK: Central skills-repo catalog (discovery)
+
+    struct SkillLibraryEntry: Decodable, Identifiable, Equatable {
+        let id: String          // "<family>/<dir>"
+        let family: String      // "skills" | "runtime"
+        let name: String
+        let description: String
+        let path: String        // absolute SKILL.md path (attached as context on select)
+    }
+    private struct SkillLibraryResponse: Decodable { let repo: String?; let skills: [SkillLibraryEntry] }
+
+    /// The central skills repo's discovery catalog (the skills the IDE agent
+    /// doesn't itself load). Fails gracefully → [].
+    func skillLibrary() async throws -> [SkillLibraryEntry] {
+        let resp: SkillLibraryResponse = try await get("/kb/agent/skill-library", authenticated: true)
+        return resp.skills
+    }
+
     // MARK: Project memory (auto-captured chat facts)
 
     private struct ProjectMemoryResponse: Decodable { let facts: [String]; let repo: String? }
