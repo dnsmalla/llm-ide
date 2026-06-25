@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Settings card that lets the user toggle which sidebar sections are
-/// visible. Library, Live, and Settings are intentionally absent — the
-/// first is the fallback landing, the second is condition-driven, and
-/// the third is the only way back if everything else is hidden.
+/// Settings card that lets the user toggle which tool sections appear as
+/// buttons in the top toolbar. Library, Live, and Settings are intentionally
+/// absent — the first is the fallback landing, the second is condition-driven,
+/// and the third is reached from the account menu.
 struct SidebarVisibilitySection: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig

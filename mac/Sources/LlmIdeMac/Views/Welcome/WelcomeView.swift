@@ -9,6 +9,7 @@ struct WelcomeView: View {
     @EnvironmentObject var projectStore: ProjectStore
 
     @State private var error: String?
+    @State private var showingHelp = false
 
     var body: some View {
         let t = theme.current
@@ -22,6 +23,15 @@ struct WelcomeView: View {
                 explainer(t)
                 if !projectStore.recents.isEmpty { recentsSection(t) }
                 if let err = error { errorBanner(err, t) }
+
+                // First-run discoverability: the guide is otherwise only in the
+                // account menu, which a new user has no reason to open.
+                Button { showingHelp = true } label: {
+                    Label("New here? Open the guide", systemImage: "questionmark.circle")
+                        .font(Typography.caption)
+                }
+                .buttonStyle(.link)
+                .help("How LLM IDE works — capture, notes, projects")
             }
             .frame(maxWidth: 840)
             .frame(maxWidth: .infinity)
@@ -30,6 +40,10 @@ struct WelcomeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(t.body)
+        .sheet(isPresented: $showingHelp) {
+            HelpGuideView { showingHelp = false }
+                .environmentObject(theme)
+        }
     }
 
     // MARK: - Hero
