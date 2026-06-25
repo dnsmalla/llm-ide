@@ -246,14 +246,14 @@ Sources: `extension/src/lib/storage.ts`, `extension/src/sidepanel/hooks/useTrans
 | Key | Type | Written by | Purpose |
 |-----|------|-----------|---------|
 | `transcripts` | `SavedTranscript[]` | `lib/storage.ts:49` | Persisted meeting transcripts (capped at `MAX_TRANSCRIPTS`) |
-| `chatMessages` | `ChatMessage[]` | `hooks/useChat.ts:50` | Chat history, pruned to the most recent `MAX_STORED_MESSAGES = 200` on write — see §4.3 |
-| `primaryLang` | `string` | `hooks/useTranscript.ts:267` | Primary language code preference |
-| `secondaryLang` | `string` | `hooks/useTranscript.ts:272` | Secondary (bilingual) language code preference |
-| `bilingual` | `boolean` | `hooks/useTranscript.ts:277` | Bilingual mode toggle |
-| `speakerNames` | `Record<string, string>` | `hooks/useTranscript.ts:285` | Speaker-id → display-name map, persisted across sessions |
+| `chatMessages` | `ChatMessage[]` | `hooks/useChat.ts:49` | Chat history, pruned to the most recent `MAX_STORED_MESSAGES = 200` on write — see §4.3 |
+| `primaryLang` | `string` | `hooks/useTranscript.ts:276` | Primary language code preference |
+| `secondaryLang` | `string` | `hooks/useTranscript.ts:281` | Secondary (bilingual) language code preference |
+| `bilingual` | `boolean` | `hooks/useTranscript.ts:286` | Bilingual mode toggle |
+| `speakerNames` | `Record<string, string>` | `hooks/useTranscript.ts:294` | Speaker-id → display-name map, persisted across sessions |
 | `micDeviceId` | `string` | `hooks/useAudioDevices.ts:53` | Selected microphone device ID |
 | `micVolume` | `number` | `hooks/useAudioDevices.ts:58` | Mic volume boost (50–300%) |
-| `firstRunHintDismissed` | `boolean` | `sidepanel/App.tsx:130` | Whether the first-run tip has been dismissed |
+| `firstRunHintDismissed` | `boolean` | `sidepanel/App.tsx:139` | Whether the first-run tip has been dismissed |
 | `serverUrl` | `string` | (set externally via `chrome.storage.local.set`) | Configurable API server URL (validated on read by `getServerUrl()`) |
 | `auth.refreshToken` | `string` | `lib/config.ts:134` | Auth refresh token (persisted so a service-worker restart can re-mint an access token silently) |
 | `connector.git.path` | `string` | `components/ConnectorsSettings.tsx:38` | Local git repo path for KB indexing |
@@ -268,7 +268,7 @@ Sources: `extension/src/lib/storage.ts`, `extension/src/sidepanel/hooks/useTrans
 
 ```typescript
 interface SavedTranscript {
-  id: string;                        // `${Date.now()}-${8-byte hex random}` (storage.ts:14, generateId() at line 26)
+  id: string;                        // `${Date.now()}-${8-byte hex random}` (storage.ts:14, generateId() at line 25)
   meetingTitle: string;
   date: string;                      // ISO timestamp when stopRecording() fired
   duration: number;                  // elapsed seconds of recording
@@ -293,11 +293,11 @@ The raw `segments` array is stored alongside the rendered `transcript` string so
 
 ### 4.4 Speaker-name persistence
 
-`renameSpeaker()` (`hooks/useTranscript.ts:280–288`) immediately calls `chrome.storage.local.set({ speakerNames: updated })`. On mount, `useTranscript` reads `speakerNames` back from storage (`hooks/useTranscript.ts:147–154`), so renamed speakers survive a side-panel reload or browser restart.
+`renameSpeaker()` (`hooks/useTranscript.ts:289–297`) immediately calls `chrome.storage.local.set({ speakerNames: updated })`. On mount, `useTranscript` reads `speakerNames` back from storage (`hooks/useTranscript.ts:147–157`), so renamed speakers survive a side-panel reload or browser restart.
 
 ### 4.5 Chat-history retention
 
-The `chatMessages` key retains the most recent `MAX_STORED_MESSAGES = 200` messages — the write path prunes with `messages.slice(-MAX_STORED_MESSAGES)` before persisting (`hooks/useChat.ts:19`, `45–48`), bounding storage growth. When making an LLM request, only the trailing `MAX_HISTORY = 10` messages are sent as context to `/chat` (`hooks/useChat.ts:13`, `76`). The retained history is restored on mount.
+The `chatMessages` key retains the most recent `MAX_STORED_MESSAGES = 200` messages — the write path prunes with `messages.slice(-MAX_STORED_MESSAGES)` before persisting (`hooks/useChat.ts:19`, `45–48`), bounding storage growth. When making an LLM request, only the trailing `MAX_HISTORY = 10` messages are sent as context to `/chat` (`hooks/useChat.ts:13`, `75`). The retained history is restored on mount.
 
 ---
 
@@ -305,17 +305,17 @@ The `chatMessages` key retains the most recent `MAX_STORED_MESSAGES = 200` messa
 
 ### 5.1 Content-script injection
 
-`ensureContentScriptInjected()` (`service-worker.ts:27–80`) is called for every `START_CAPTION_SCRAPING` dispatch. The function:
+`ensureContentScriptInjected()` (`service-worker.ts:27–83`) is called for every `START_CAPTION_SCRAPING` dispatch. The function:
 
-1. **Returns early** if the URL is not a supported platform (`service-worker.ts:28`).
-2. **PING check** — sends `{ type: MsgType.PING }` to the tab (`service-worker.ts:31`). If the content script responds `{ pong: true }`, injection is skipped.
-3. **Page-sentinel check** — falls through to an inline `executeScript` that reads `window.__llmideCaptionScraperInjected || window.__llmideSpeakerDetectorInjected || window.__llmideFloatingOverlayInjected` (`service-worker.ts:44–59`). If any sentinel is set, the scripts are already present and re-injection is skipped (re-injecting throws a console error about already-injected scripts).
-4. **Injection** — reads the content-script file list from `chrome.runtime.getManifest().content_scripts[].js` (`service-worker.ts:67–71`), never from hardcoded paths. Because `@crxjs/vite-plugin` hashes content-script filenames at build time, the manifest is the only reliable source of the actual deployed paths.
-5. Calls `chrome.scripting.executeScript({ target: { tabId }, files })` (`service-worker.ts:74`).
+1. **Returns early** if the URL is not a supported platform (`service-worker.ts:31`).
+2. **PING check** — sends `{ type: MsgType.PING }` to the tab (`service-worker.ts:34`). If the content script responds `{ pong: true }`, injection is skipped.
+3. **Page-sentinel check** — falls through to an inline `executeScript` that reads `window.__llmideCaptionScraperInjected || window.__llmideSpeakerDetectorInjected || window.__llmideFloatingOverlayInjected` (`service-worker.ts:47–62`). If any sentinel is set, the scripts are already present and re-injection is skipped (re-injecting throws a console error about already-injected scripts).
+4. **Injection** — reads the content-script file list from `chrome.runtime.getManifest().content_scripts[].js` (`service-worker.ts:70–73`), never from hardcoded paths. Because `@crxjs/vite-plugin` hashes content-script filenames at build time, the manifest is the only reliable source of the actual deployed paths.
+5. Calls `chrome.scripting.executeScript({ target: { tabId }, files })` (`service-worker.ts:77`).
 
 ### 5.2 Post-injection readiness poll
 
-After a successful injection, the service worker does **not** use a fixed sleep. Instead it polls with PING up to 5 attempts with 150 ms between each attempt (`service-worker.ts:154–165`):
+After a successful injection, the service worker does **not** use a fixed sleep. Instead it polls with PING up to 5 attempts with 150 ms between each attempt (`service-worker.ts:158–169`):
 
 ```
 for (let attempt = 0; attempt < 5; attempt++) {
@@ -324,23 +324,23 @@ for (let attempt = 0; attempt < 5; attempt++) {
 }
 ```
 
-`TIMING.CONTENT_SCRIPT_INJECT_DELAY_MS = 200` is defined in `lib/config.ts:469` but is not used inside `service-worker.ts` itself — the service worker owns its own 150 ms poll interval. If none of the 5 poll attempts succeed, the dispatch is abandoned with `{ ok: false, error: 'script_not_ready' }` (`service-worker.ts:167–169`).
+`TIMING.CONTENT_SCRIPT_INJECT_DELAY_MS = 200` is defined in `lib/config.ts:468` but is not used inside `service-worker.ts` itself — the service worker owns its own 150 ms poll interval. If none of the 5 poll attempts succeed, the dispatch is abandoned with `{ ok: false, error: 'script_not_ready' }` (`service-worker.ts:170–173`).
 
 ### 5.3 Single `onMessage` listener rule
 
-There is exactly **one** `chrome.runtime.onMessage.addListener` call in `service-worker.ts` (`service-worker.ts:84`). The listener handles three message types:
+There is exactly **one** `chrome.runtime.onMessage.addListener` call in `service-worker.ts` (`service-worker.ts:87`). The listener handles three message types:
 
 | Message type | Handling |
 |---|---|
-| `OPEN_POPUP` | Opens the side panel for the sender's window + opens the Mac app via `/launch-app` deep link (`service-worker.ts:104–113`) |
-| `START_CAPTION_SCRAPING` | Async: injects content scripts, polls for readiness, forwards message; returns `true` to keep channel open (`service-worker.ts:115–193`) |
-| `STOP_CAPTION_SCRAPING` | Async: queries relevant tabs and forwards message; returns `true` to keep channel open (`service-worker.ts:115–193`) |
+| `OPEN_POPUP` | Opens the side panel for the sender's window + opens the Mac app via `/launch-app` deep link (`service-worker.ts:107–116`) |
+| `START_CAPTION_SCRAPING` | Async: injects content scripts, polls for readiness, forwards message; returns `true` to keep channel open (`service-worker.ts:118–196`) |
+| `STOP_CAPTION_SCRAPING` | Async: queries relevant tabs and forwards message; returns `true` to keep channel open (`service-worker.ts:118–196`) |
 
-All other messages receive `{ ok: true }` and `return false` (synchronous, channel closes immediately, `service-worker.ts:195–196`). Messages from other extensions are rejected: `_sender.id !== chrome.runtime.id` (`service-worker.ts:90–93`).
+All other messages receive `{ ok: true }` and `return false` (synchronous, channel closes immediately, `service-worker.ts:198–199`). Messages from other extensions are rejected: `_sender.id !== chrome.runtime.id` (`service-worker.ts:93–96`).
 
 ### 5.4 Side-panel opening
 
-`chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })` is called at module top level (`service-worker.ts:199`), making the toolbar icon click open the side panel automatically without any explicit user-gesture forwarding in the message handler.
+`chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })` is called at module top level (`service-worker.ts:202`), making the toolbar icon click open the side panel automatically without any explicit user-gesture forwarding in the message handler.
 
 ---
 
@@ -350,11 +350,11 @@ All other messages receive `{ ok: true }` and `return false` (synchronous, chann
 
 `sidepanel/main.tsx:1–13` mounts `<App />` wrapped in `<ErrorBoundary>` into `document.getElementById('root')`. The bundle is the same React application regardless of how the panel opens.
 
-There is **no `chrome.windows.create({ type: 'popup' })`** call anywhere in the extension source — the "popup" pattern was removed. The `OPEN_POPUP` message type is now historical (`service-worker.ts:103`): it opens the native Mac app via a server-side redirect to `llmide://` rather than spawning a detached Chrome popup window. Floating side panels use Chrome's built-in side panel API only.
+There is **no `chrome.windows.create({ type: 'popup' })`** call anywhere in the extension source — the "popup" pattern was removed. The `OPEN_POPUP` message type is now historical (`service-worker.ts:104`): it opens the native Mac app via a server-side redirect to `llmide://` rather than spawning a detached Chrome popup window. Floating side panels use Chrome's built-in side panel API only.
 
 ### 6.2 Cross-context state sync
 
-The side panel and any other extension context (e.g. a `chrome.sidePanel.open()` call from another window) share state via two mechanisms (`hooks/useTranscript.ts:194–208`):
+The side panel and any other extension context (e.g. a `chrome.sidePanel.open()` call from another window) share state via two mechanisms (`hooks/useTranscript.ts:196–210`):
 
 1. `chrome.runtime.onMessage` — `CAPTION_STATUS` broadcasts from the content script carry `{ active: boolean; platform: string | null }` and all open extension contexts subscribe to them. When `active === true`, the receiving context sets `isRecording = true` and `captureMode = 'captions'` — so a newly-opened side panel joins an in-progress recording session without calling `startRecording()` again.
 2. `chrome.storage.local` — language prefs (`primaryLang`, `secondaryLang`, `bilingual`), speaker names, and mic settings are read on mount and persisted on change. All contexts reading the same keys see consistent preferences after a reload.
@@ -365,11 +365,11 @@ Each hook that calls an LLM endpoint follows a shared pattern:
 
 | Contract point | Detail | File:line |
 |---|---|---|
-| `language?` parameter | Every public `generate`/`sendMessage` function accepts an optional `language` string that is forwarded to the server endpoint | `hooks/useChat.ts:62`, `hooks/useQuestions.ts:15`, `hooks/useNotes.ts:21` |
-| `AbortController` on every request | Each hook holds an `abortRef` and creates a fresh `AbortController` per call; the previous request is aborted before the next one starts | `hooks/useChat.ts:28,81–83`, `hooks/useNotes.ts:8,34–35` |
-| Timeout | `REQUEST_TIMEOUT_MS = 120_000` ms (2 minutes) is set via `setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)` | `lib/config.ts:47`, `hooks/useChat.ts:84`, `hooks/useQuestions.ts:31` |
-| Timeout vs user-cancel distinction | Timeout aborts are `DOMException { name: 'AbortError' }` — hooks catch them separately; `useQuestions` surfaces `'Request timed out. Try again.'`; `useChat` and `useNotes` silently swallow user-cancel AbortErrors | `hooks/useQuestions.ts:56–58`, `hooks/useChat.ts:111`, `hooks/useNotes.ts:67` |
-| Response-shape validation | Before consuming a response, each hook checks the exact field it expects: `useChat` checks `typeof data?.reply !== 'string'` (`hooks/useChat.ts:101`); `useQuestions` checks `typeof data?.questions !== 'string'` (`hooks/useQuestions.ts:51`) |  |
+| `language?` parameter | Every public `generate`/`sendMessage` function accepts an optional `language` string that is forwarded to the server endpoint | `hooks/useChat.ts:61`, `hooks/useQuestions.ts:15`, `hooks/useNotes.ts:21` |
+| `AbortController` on every request | Each hook holds an `abortRef` and creates a fresh `AbortController` per call; the previous request is aborted before the next one starts | `hooks/useChat.ts:26,80–82`, `hooks/useNotes.ts:8,34–35` |
+| Timeout | `REQUEST_TIMEOUT_MS = 120_000` ms (2 minutes) is set via `setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)` | `lib/config.ts:47`, `hooks/useChat.ts:83`, `hooks/useQuestions.ts:31` |
+| Timeout vs user-cancel distinction | Timeout aborts are `DOMException { name: 'AbortError' }` — hooks catch them separately; `useQuestions` surfaces `'Request timed out. Try again.'`; `useChat` and `useNotes` silently swallow user-cancel AbortErrors | `hooks/useQuestions.ts:56–58`, `hooks/useChat.ts:110`, `hooks/useNotes.ts:68` |
+| Response-shape validation | Before consuming a response, each hook checks the exact field it expects: `useChat` checks `typeof data?.reply !== 'string'` (`hooks/useChat.ts:100`); `useQuestions` checks `typeof data?.questions !== 'string'` (`hooks/useQuestions.ts:51`) |  |
 
 ### 6.4 `REQUIRED_ENDPOINTS` and stale-server banner
 
@@ -385,7 +385,13 @@ const REQUIRED_ENDPOINTS = [
 ];
 ```
 
-`checkServer()` (`App.tsx:239–265`) fetches `GET /` with a `HEALTH_CHECK_TIMEOUT_MS = 3_000` ms timeout (`lib/config.ts:48`). The server's JSON response is expected to include an `endpoints` array. Any endpoint in `REQUIRED_ENDPOINTS` that is absent from the reported list causes `serverStale` to be set to the missing array. The UI renders a "Server needs to be restarted" banner when `serverOnline && serverStale` is truthy (`App.tsx:468–479`). The health check repeats every `TIMING.SERVER_HEALTH_CHECK_INTERVAL_MS = 30_000` ms (`lib/config.ts:467`, `App.tsx:269`).
+`checkServer()` (`App.tsx:266–304`) fetches `GET /` with a `HEALTH_CHECK_TIMEOUT_MS = 3_000` ms timeout (`lib/config.ts:48`). The server's JSON response is expected to include an `endpoints` array and a numeric `apiVersion`. `serverStale` is set (to the missing-endpoint array, or a version message) when **any** of these hold (`App.tsx:282–297`):
+
+- the reported `endpoints` list is empty / absent (treated as stale);
+- any endpoint in `REQUIRED_ENDPOINTS` is absent from the reported list (`missing` array);
+- **the server is below the version floor** — `MIN_SERVER_API_VERSION = 18` (`App.tsx:87`) and `apiVersion < MIN_SERVER_API_VERSION` (a missing/non-numeric `apiVersion` is coerced to `0`, so an old server fails this even when all endpoint names line up). The stale reason becomes `` [`server API v${apiVersion} < required v${MIN_SERVER_API_VERSION}`] ``.
+
+This mirrors the Mac client's handshake (`BackendManager.minimumServerApiVersion = 18`). The UI renders a "Server needs to be restarted" banner when `serverOnline && serverStale` is truthy (`App.tsx:507–518`). The health check repeats every `TIMING.SERVER_HEALTH_CHECK_INTERVAL_MS = 30_000` ms (`lib/config.ts:467`, `App.tsx:308`).
 
 For the server endpoints consumed by the extension, see [`api-server.md`](api-server.md).
 
@@ -451,10 +457,10 @@ Vite plugins used (`vite.config.ts:33–36`):
 
 | Plugin | Source | Role |
 |---|---|---|
-| `@vitejs/plugin-react` (`react()`) | `vite.config.ts:33` | JSX transform for React 18 |
+| `@vitejs/plugin-react` (`react()`) | `vite.config.ts:34` | JSX transform for React 18 |
 | `@crxjs/vite-plugin` (`crx({ manifest })`) | `vite.config.ts:35` | Reads `manifest.json`, rewrites content-script paths to hashed filenames, emits a well-formed `dist/manifest.json` |
 
-`@crxjs/vite-plugin` v2 (beta.28) emits hashed filenames for content scripts (e.g. `assets/caption-scraper-Bx3kYpQm.js`). The service worker reads the actual deployed paths from `chrome.runtime.getManifest().content_scripts[].js` at runtime rather than hardcoding them (`service-worker.ts:67–71`), so the injection path always matches the hashed build artifact.
+`@crxjs/vite-plugin` v2 (beta.28) emits hashed filenames for content scripts (e.g. `assets/caption-scraper-Bx3kYpQm.js`). The service worker reads the actual deployed paths from `chrome.runtime.getManifest().content_scripts[].js` at runtime rather than hardcoding them (`service-worker.ts:70–73`), so the injection path always matches the hashed build artifact.
 
 Build output directory: `dist/` (`vite.config.ts:38`). Source maps are disabled in production (`vite.config.ts:39`).
 
@@ -498,7 +504,7 @@ https://zoom.us/{wc,j}/*
 https://*.zoom.us/{wc,j}/*
 ```
 
-These patterns must match the patterns used in `chrome.tabs.query({ url: [...] })` in the service worker (`service-worker.ts:128–139`) exactly — mismatches produce `inject_failed` errors.
+These patterns must match the patterns used in `chrome.tabs.query({ url: [...] })` in the service worker (`service-worker.ts:130–143`) exactly — mismatches produce `inject_failed` errors.
 
 **Content-script injection** (`manifest.json:37–57`):
 

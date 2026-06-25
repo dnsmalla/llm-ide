@@ -1,12 +1,18 @@
 from pathlib import Path
 
-from check_spec_values import build_checks, first_int, main, migration_head
+from check_spec_values import build_checks, first_int, first_str, main, migration_head
 
 
 def test_first_int_extracts_capture_group():
     assert first_int("SERVER_API_VERSION = 18;", r"SERVER_API_VERSION = (\d+)") == 18
     assert first_int("head migration is `0016`", r"head migration is `0*(\d+)`") == 16
     assert first_int("nothing here", r"(\d+) widgets") is None
+
+
+def test_first_str_extracts_capture_group():
+    assert first_str('from: "1.5.3"', r'from: "([\d.]+)"') == "1.5.3"
+    assert first_str("# TYPE llmide_uptime_seconds gauge", r"# TYPE (\w+) gauge") == "llmide_uptime_seconds"
+    assert first_str("nothing here", r"from: \"([\d.]+)\"") is None
 
 
 def test_migration_head_picks_highest(tmp_path: Path):

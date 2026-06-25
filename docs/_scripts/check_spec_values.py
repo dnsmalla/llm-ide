@@ -28,6 +28,12 @@ def first_int(text: str, pattern: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def first_str(text: str, pattern: str) -> str | None:
+    """First capture group of `pattern` in `text`, as str, or None if no match."""
+    m = re.search(pattern, text)
+    return m.group(1) if m else None
+
+
 def migration_head(migrations_dir: Path) -> int | None:
     """Highest NNNN prefix among NNNN_*.sql files in the dir, or None if none."""
     heads = [
@@ -42,19 +48,31 @@ def _read(path: str) -> str:
     return Path(path).read_text()
 
 
-def build_checks() -> list[tuple[str, int | None, int | None, str]]:
+def build_checks() -> list[tuple[str, object, object, str]]:
     """Return (label, source_value, documented_value, spec_page) tuples."""
     cross = _read("docs/spec/cross-cutting.md")
     kb = _read("docs/spec/knowledge-base.md")
     arch = _read("docs/explanation/architecture.md")
     server = _read("extension/server.mjs")
     config = _read("extension/core/config.mjs")
+    macos = _read("docs/spec/macos-app.md")
+    chrome = _read("docs/spec/chrome-extension.md")
+    package_swift = _read("mac/Package.swift")
+    metrics = _read("extension/server/metrics.mjs")
+    sidepanel_app = _read("extension/src/sidepanel/App.tsx")
 
     readme = _read("README.md")
 
     head = migration_head(Path("extension/kb/migrations"))
     api = first_int(server, r"SERVER_API_VERSION\s*=\s*(\d+)")
     body = first_int(config, r"LLMIDE_BODY_LIMIT_MB',\s*(\d+)")
+    # graph-kit dependency version — pin the graph-kit.git line specifically so a
+    # bump shows up as drift (SwiftTerm also uses from: "1.2.0", so anchor on the url).
+    graphkit = first_str(package_swift, r'graph-kit\.git",\s*from:\s*"([\d.]+)"')
+    # Prometheus uptime metric name — renamed meetnotes_→llmide_; lock the name.
+    uptime_metric = first_str(metrics, r"# TYPE (\w+_uptime_seconds) gauge")
+    # Extension's server-version floor (separate value from SERVER_API_VERSION).
+    ext_min_api = first_int(sidepanel_app, r"MIN_SERVER_API_VERSION\s*=\s*(\d+)")
     adr_nums = [
         int(m.group(1))
         for p in Path("docs/decisions").glob("[0-9]*.md")
@@ -84,6 +102,15 @@ def build_checks() -> list[tuple[str, int | None, int | None, str]]:
         ("ADR range — AGENTS.md 'ADRs 0001–NNNN'",
          adr_head, first_int(_read("AGENTS.md"), r"ADRs 0001[–-]0*(\d+)"),
          "AGENTS.md"),
+        ("graph-kit version — macos-app.md dependency table",
+         graphkit, first_str(macos, r"graph-kit \(`GraphKit`\) \| `from: \"([\d.]+)\"`"),
+         "docs/spec/macos-app.md"),
+        ("uptime metric name — cross-cutting.md Prometheus section",
+         uptime_metric, first_str(cross, r"server uptime \(`(\w+_uptime_seconds)`"),
+         "docs/spec/cross-cutting.md"),
+        ("extension server-version floor — chrome-extension.md §6.4",
+         ext_min_api, first_int(chrome, r"`MIN_SERVER_API_VERSION = (\d+)`"),
+         "docs/spec/chrome-extension.md"),
     ]
 
 

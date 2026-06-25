@@ -26,7 +26,7 @@ The macOS app (`LlmIdeMac`) is the primary IDE client — a single-window SwiftU
 | Yams | `from: "5.1.0"` |
 | Sparkle | `from: "2.6.0"` |
 | SwiftTerm | `from: "1.2.0"` |
-| graph-kit (`GraphKit`) | `from: "1.2.0"` |
+| graph-kit (`GraphKit`) | `from: "1.5.3"` |
 
 **Bundled resources** (lines 28–35): `note_template.docx`, `generate_meeting_note.py`, vendored highlight.js v11.9.0 (`highlight.min.js`), and two highlight.js themes (`atom-one-dark.min.css`, `atom-one-light.min.css`).
 
@@ -50,19 +50,19 @@ The macOS app (`LlmIdeMac`) is the primary IDE client — a single-window SwiftU
 
 **Source:** `mac/Sources/LlmIdeMac/LlmIdeMacApp.swift`
 
-The `@main` struct is `LlmIdeMacApp: App` (line 29). It uses a **`Window`** scene (not `WindowGroup`), declared at line 127:
+The `@main` struct is `LlmIdeMacApp: App` (line 29). It uses a **`Window`** scene (not `WindowGroup`), declared at line 140:
 
 ```swift
 Window(L.App.name, id: "main") { … }
 ```
 
-The comment at lines 117–126 explains the choice: `WindowGroup` allows a second window to open on a deep-link arrival (which would produce two login screens), while `Window` enforces one window per process — the canonical macOS pattern for single-window apps.
+The comment at lines 129–139 explains the choice: `WindowGroup` allows a second window to open on a deep-link arrival (which would produce two login screens), while `Window` enforces one window per process — the canonical macOS pattern for single-window apps.
 
 An `NSApplicationDelegateAdaptor(AppDelegate.self)` is wired at line 34 to handle reopen and should-quit events that SwiftUI cannot express.
 
 ### EnvironmentObject graph
 
-Most objects are constructed once in `init()` and injected at lines 129–144. Two exceptions use a `@State` wrapper instead of the "constructed once in init()" form: `BackendManager` (`@State private var backend`) and `ActivityStore` (`@State private var activityStore`, line 51) — both are `@Observable` rather than `ObservableObject`, so SwiftUI requires `@State` for storage.
+Most objects are constructed once in `init()` and injected at lines 142–156. Two exceptions use a `@State` wrapper instead of the "constructed once in init()" form: `BackendManager` (`@State private var backend`) and `ActivityStore` (`@State private var activityStore`, line 51) — both are `@Observable` rather than `ObservableObject`, so SwiftUI requires `@State` for storage.
 
 | Object | Type | Role |
 |---|---|---|
@@ -81,31 +81,31 @@ Most objects are constructed once in `init()` and injected at lines 129–144. T
 | `graphSessionStore` | `GraphSessionStore` | Process-lifetime cache of generated Code Graph results, keyed `repo#mode` |
 | `activityStore` | `ActivityStore` | Activity feed state: bell badge count, poll loop, mark-seen cursor (see §8). Uses `@State` wrapper — injected via `.environment(activityStore)` at line 156. |
 
-`BackendManager` is held as `@State private var backend` (line 47, using `@Observable`, not `ObservableObject`), injected via `.environment(backend)` at line 140. `LlmIdeAPIClient` and `AutoCaptureService` are stored as plain `let` properties (lines 49–50) and passed directly to views that need them.
+`BackendManager` is held as `@State private var backend` (line 49, using `@Observable`, not `ObservableObject`), injected via `.environment(backend)` at line 155. `LlmIdeAPIClient` and `AutoCaptureService` are stored as plain `let` properties (lines 52–53) and passed directly to views that need them.
 
 ### Launch `.task` bootstrap order
 
-The single `.task` block attached to `ContentView` (lines 146–186) runs the following steps in sequence:
+The single `.task` block attached to `ContentView` (lines 162–202) runs the following steps in sequence:
 
-1. **ProjectMigrator** (lines 153–160) — one-shot import of legacy `SavedGitLab/HubRepo` entries. Runs first so an imported `activeProject` is visible to every subsequent step.
-2. **`templateStore.bootstrap()`** (line 166) — deferred disk read of doc templates.
-3. **`autoStartBackend()`** (lines 173–175, conditional on `config.backendAutoStart`) — resolves node/server.mjs paths and calls `backend.start()`.
-4. **`awaitBackendReady(timeoutSec: 3)`** (lines 177–181) — polls `/health` for up to 3 seconds so session restore has a live backend to talk to.
-5. **`session.bootstrap(api: api)`** (line 183) — attempts to restore a persisted session by calling `/auth/refresh` with the Keychain-stored refresh token.
-6. **`autoCapture.start()`** (line 184) — arms the auto-capture service (workspace-activation observer).
-7. **`autoCodeUpdate.start()`** (line 185, conditional on `config.autoCodeUpdateEnabled`) — starts the auto-code-update polling loop.
+1. **ProjectMigrator** (lines 169–176) — one-shot import of legacy `SavedGitLab/HubRepo` entries. Runs first so an imported `activeProject` is visible to every subsequent step.
+2. **`templateStore.bootstrap()`** (line 182) — deferred disk read of doc templates.
+3. **`autoStartBackend()`** (lines 189–190, conditional on `config.backendAutoStart`) — resolves node/server.mjs paths and calls `backend.start()`.
+4. **`awaitBackendReady(timeoutSec: 3)`** (line 196) — polls `/health` for up to 3 seconds so session restore has a live backend to talk to.
+5. **`session.bootstrap(api: api)`** (line 199) — attempts to restore a persisted session by calling `/auth/refresh` with the Keychain-stored refresh token.
+6. **`autoCapture.start()`** (line 200) — arms the auto-capture service (workspace-activation observer).
+7. **`autoCodeUpdate.start()`** (line 201, conditional on `config.autoCodeUpdateEnabled`) — starts the auto-code-update polling loop.
 
-After bootstrap, `liveMirror` is started/stopped in lockstep with `session.isAuthenticated` via `.onChange` (lines 191–193).
+After bootstrap, `liveMirror` is started/stopped in lockstep with `session.isAuthenticated` via `.onChange` (lines 207–209).
 
 ### MenuBarExtra
 
-A `MenuBarExtra` is declared at lines 256–269. Its icon (`record.circle.fill` / `record.circle`) reflects `capture.isRunning`. The label turns red while recording. The menu (struct `MenuBarMenu`) shows start/stop recording, open-fault count, last regression run timestamp, and a quit button.
+A `MenuBarExtra` is declared at lines 272–285. Its icon (`record.circle.fill` / `record.circle`) reflects `capture.isRunning`. The label turns red while recording. The menu (struct `MenuBarMenu`) shows start/stop recording, open-fault count, last regression run timestamp, and a quit button.
 
 ### ContentView and AppShell
 
 **Source:** `mac/Sources/LlmIdeMac/Views/ContentView.swift`
 
-`ContentView` (line 6) switches on `session.bootstrapping` and `session.isAuthenticated`:
+`ContentView` (line 5) switches on `session.bootstrapping` and `session.isAuthenticated`:
 
 - While bootstrapping → `ProgressView("Connecting…")`
 - Not authenticated → `LoginView(api: api)`
@@ -113,7 +113,7 @@ A `MenuBarExtra` is declared at lines 256–269. Its icon (`record.circle.fill` 
 
 **Source:** `mac/Sources/LlmIdeMac/Views/AppShell.swift`
 
-`AppShell` is the authenticated shell. It renders `WelcomeView` when `projectStore.activeProject == nil` (lines 37–39), and the full section layout when a project is active. The section layout is driven by `ShellState.section` (an `@Observable` object, `mac/Sources/LlmIdeMac/Services/ShellState.swift`). `ShellState` is created once at the `AppShell` root and injected via `.environment(shell)`, so it has **app-session scope**: it survives section navigation (which tears the section views down and recreates them) and is reset only when the app relaunches. UI state that must outlive a section switch lives here rather than as the section view's `@State` — e.g. `ShellState.exploreChatVisible` keeps the Explorer's chat panel open across navigation (it would otherwise reset to closed every time `ExplorerView` is rebuilt), while still starting closed on a fresh launch.
+`AppShell` is the authenticated shell. It renders `WelcomeView` when `projectStore.activeProject == nil` (lines 39–40), and the full section layout when a project is active. The section layout is driven by `ShellState.section` (an `@Observable` object, `mac/Sources/LlmIdeMac/Services/ShellState.swift`). `ShellState` is created once at the `AppShell` root and injected via `.environment(shell)`, so it has **app-session scope**: it survives section navigation (which tears the section views down and recreates them) and is reset only when the app relaunches. UI state that must outlive a section switch lives here rather than as the section view's `@State` — e.g. `ShellState.exploreChatVisible` keeps the Explorer's chat panel open across navigation (it would otherwise reset to closed every time `ExplorerView` is rebuilt), while still starting closed on a fresh launch.
 
 **Sections** (`ShellState.Section`, `ShellState.swift` line 9):
 
@@ -159,16 +159,16 @@ Supervises the local Node `server.mjs` process (`@MainActor @Observable`, lines 
 - `status: Status` — `.stopped | .starting | .running | .crashed(exitCode:)` (lines 24–29)
 - `pid: Int32?`, `log: [BackendLogLine]` (lines 32–33)
 - `start(nodePath:workingDirectory:)` (line 156) — checks if port 3456 is in use; if so, probes `/health` within 2 s. If healthy, adopts the external server; if not, kills the listener and spawns a fresh process. If the port is free, spawns immediately.
-- `spawn(...)` (line 233) — calls `Process.run()`, stays in `.starting` until `/health` responds, then calls `markRunning(...)` (line 338) which flips to `.running`
+- `spawn(...)` (line 244) — calls `Process.run()`, stays in `.starting` until `/health` responds, then calls `markRunning(...)` (line 361) which flips to `.running`
 - Auto-restart: up to 3 attempts with backoffs of 1 s, 5 s, 30 s (`restartBackoffsSec`, line 47); skipped on user-initiated stop (`userInitiatedStop` flag)
-- `probeHealthDetail()` (line 477) — 2 s ephemeral URLSession GET to `http://127.0.0.1:3456/health`; also checks `apiVersion` against `minimumServerApiVersion = 18` (line 465)
-- `stop()` (line 402) — SIGTERMs the spawned process; for adopted externals, uses `lsof -ti :<port>` to find and kill the listener
+- `probeHealthDetail()` (line 517) — 2 s ephemeral URLSession GET to `http://127.0.0.1:3456/health`; also checks `apiVersion` against `minimumServerApiVersion = 18` (line 505)
+- `stop()` (line 425) — SIGTERMs the spawned process; for adopted externals, uses `lsof -ti :<port>` to find and kill the listener
 
 #### `LiveSessionMirror` (`Services/LiveSessionMirror.swift`)
 
 Polls the backend for live caption streams from other clients (e.g., the Chrome extension).
 
-- `@Published var captions: [MirroredCaption]`, `activeSession: LiveSessionInfo?`, `isPolling: Bool` (lines 23–25)
+- `@Published var captions: [MirroredCaption]`, `activeSession: LiveSessionInfo?`, `isPolling: Bool` (lines 22–24)
 - `start()` / `stop()` (lines 67–80) — controlled by `AppShell` in response to `session.isAuthenticated` changes
 - Discovery loop: `GET /kb/live/sessions` every **5 s** (line 60, `discoveryIntervalNs`)
 - Caption poll: `GET /kb/live/<sessionId>?since=<seq>` every **1.5 s** while a session is active (line 61, `captionIntervalNs`), slowing to 5 s after finalize (line 62)
@@ -202,6 +202,14 @@ A per-project knowledge graph + agent memory, built from two tracks and kept cur
 - **`FileClassifier`** (`CodeGraph/FileClassifier.swift`) routes files to code vs doc by extension — `MemoryGenerator.supportedExtensions` are docs, and the code-extension set subtracts them so `.md` classifies as a doc.
 - **`GraphSessionStore`** (`Views/CodeGraph/GraphSessionStore.swift`, `@MainActor`) caches generated results keyed `repo#mode` (`code` / `data` / `all`) for the view's process lifetime, with a `laidOut` flag (the auto-updater stores raw graphs; the view lays them out on hydrate) and a `docFingerprint` (lets a manual InfiniteBrain re-generate reuse an unchanged doc index).
 
+##### Graph rendering view (2D + 3D)
+
+`UAGraphView` (`Views/CodeGraph/UAGraphView.swift`) is the interactive graph view that hydrates from `GraphSessionStore` and renders the selected `Mode` (`code` / `data` / `all`). It supports two renderers, toggled by a `Picker` bound to `@State private var render3D` (line 135):
+
+- **2D** — `CodeGraphCanvas` over a 2D force layout (`CodeGraph/CGSimulation.swift`, with `QuadTree` Barnes-Hut approximation and `CodeGraphLayout`). Large graphs are pruned by `GraphPrune` (`CodeGraph/GraphPrune.swift`, e.g. `capDegree` at line 24) before layout.
+- **3D** — `Graph3DView` (`Views/CodeGraph/Graph3DView.swift`), a SceneKit `NSViewRepresentable`, over the 3D force layout `CGSimulation3D` (`CodeGraph/CGSimulation3D.swift`: `settle` / `positions`). 3D positions are cached per mode in `@State private var positions3DByMode: [Mode: SIMD3<Float>…]` (line 136); the cache is invalidated (`positions3DByMode[mode] = nil`) when the mode changes or the Symbols filter toggles (lines 390, 395), and re-settled lazily via `settle3DIfNeeded()` only while `render3D` is on.
+- **Colour legend** — a kind-keyed colour legend (one pill per doc kind, sourced from `CGPalette.swift`) is rendered inline so InfiniteBrain / All / 3D views share a consistent node-colour key.
+
 ---
 
 ## §4 Server IPC
@@ -210,17 +218,17 @@ A per-project knowledge graph + agent memory, built from two tracks and kept cur
 
 **Source:** `Services/LlmIdeAPIClient.swift`
 
-`LlmIdeAPIClient` (line 122) is initialized with `baseURL: String` read from `AppConfig.shared.serverURL` (set in `LlmIdeMacApp.init()`, line 59). Every authenticated request sets `Authorization: Bearer <accessToken>` (line 253):
+`LlmIdeAPIClient` (line 122) is initialized with `baseURL: String` read from `AppConfig.shared.serverURL` (set in `LlmIdeMacApp.init()`, line 62). Every authenticated request sets `Authorization: Bearer <accessToken>` (line 261):
 
 ```swift
 req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 ```
 
-The access token is read from `SessionStore` via a `MainActor.run` hop on every call (line 251) so background concurrent calls always see the latest rotated token.
+The access token is read from `SessionStore` via a `MainActor.run` hop on every call (line 259) so background concurrent calls always see the latest rotated token.
 
 ### URLSession configurations
 
-Two sessions are created in `init()` (lines 152–161):
+Two sessions are created in `init()` (lines 153–169):
 
 | Session | Timeout (request / resource) | Used for |
 |---|---|---|
@@ -229,29 +237,29 @@ Two sessions are created in `init()` (lines 152–161):
 
 The `llmSession` request timeout is 330 s (source: `LlmIdeAPIClient.swift` line 167: `llmCfg.timeoutIntervalForRequest = 330`). 330 s covers the server worst case — the global agent loop (180 s) plus a single internal delegation's own up-to-120 s sub-loop, whose deadlines are independent — with margin. The resource timeout stays at 600 s / 10 min.
 
-Route selection happens in `session(for: path)` (line 384): paths with prefix `/auth/` use `authSession`; everything else uses `llmSession`.
+Route selection happens in `session(for: path)` (line 392): paths with prefix `/auth/` use `authSession`; everything else uses `llmSession`.
 
 ### On-401 refresh-and-retry flow
 
-Implemented in `send(path:method:body:authenticated:isRetry:)` (lines 239–327). When a response is HTTP 401 and `isRetry == false`:
+Implemented in `send(path:method:body:authenticated:isRetry:)` (lines 247–335). When a response is HTTP 401 and `isRetry == false`:
 
-1. Check `store.refreshToken != nil` on MainActor (line 285).
-2. Call `store.attemptRefresh(via: self)` (line 287) — this is coalesced in `SessionStore` so N concurrent 401 callers share one `/auth/refresh` request.
-3. If refresh succeeds, recursively call `send(...)` with `isRetry: true` (line 289).
-4. If refresh fails or `isRetry == true`, throw `APIError.noSession` (line 306) so the UI can route to the login screen.
+1. Check `store.refreshToken != nil` on MainActor (line 293).
+2. Call `store.attemptRefresh(via: self)` (line 295) — this is coalesced in `SessionStore` so N concurrent 401 callers share one `/auth/refresh` request.
+3. If refresh succeeds, recursively call `send(...)` with `isRetry: true` (line 297).
+4. If refresh fails or `isRetry == true`, throw `APIError.noSession` (line 314) so the UI can route to the login screen.
 
-The same pattern is applied in `postRawBytes(...)` (lines 215–222).
+The same pattern is applied in `postRawBytes(...)` (lines 223–231).
 
 ### GET retry + backoff
 
-Only GET requests are retried (comment at line 259 explains why: re-issuing a POST/PUT/DELETE could double-apply a side effect). Up to `maxAttempts = 3` (line 263). Retried on:
+Only GET requests are retried (comment at line 267 explains why: re-issuing a POST/PUT/DELETE could double-apply a side effect). Up to `maxAttempts = 3` (line 271). Retried on:
 
-- Network errors classified as transient by `isTransient(_:)` (lines 332–341): `NSURLErrorTimedOut`, `NSURLErrorCannotConnectToHost`, `NSURLErrorNetworkConnectionLost`, `NSURLErrorDNSLookupFailed`
-- Server status codes 429, 502, 503, 504 (line 296)
+- Network errors classified as transient by `isTransient(_:)` (lines 340–350): `NSURLErrorTimedOut`, `NSURLErrorCannotConnectToHost`, `NSURLErrorNetworkConnectionLost`, `NSURLErrorDNSLookupFailed`
+- Server status codes 429, 502, 503, 504 (line 304)
 
-Backoff strategy (`backoffNanos`, lines 345–348): `0.4 × 2^(attempt-1)` seconds, capped at 5 s.
+Backoff strategy (`backoffNanos`, lines 353–356): `0.4 × 2^(attempt-1)` seconds, capped at 5 s.
 
-`Retry-After` header honoring (`retryAfterNanos`, lines 351–356): delta-seconds form parsed, capped at 10 s.
+`Retry-After` header honoring (`retryAfterNanos`, lines 359–364): delta-seconds form parsed, capped at 10 s.
 
 ### Token storage summary
 
@@ -272,13 +280,13 @@ The Code Assistant sends a `POST /code-assist` request and receives a `CodeAssis
 
 **Flow for `update-file` (the file-edit path):**
 
-1. `api.codeAssist(...)` returns a response; `self.pendingTool = resp.pendingTool` is set at `CodeAssistantPanel.swift` line 1534.
-2. **Auto mode** (`editMode == .auto`): `confirmUpdateFile(args, finalContent: args.content)` is called immediately (line 1542–1543), bypassing the sheet.
-3. **Manual mode**: A `PendingActionCard` is rendered in the chat bubble (line 625). When the user taps the card, `showingUpdateFileSheet = true` is set (line 632), presenting `UpdateFileSheet` as a `.sheet` (lines 304–356).
+1. `api.codeAssist(...)` returns a response; `self.pendingTool = resp.pendingTool` is set at `CodeAssistantPanel.swift` line 1669.
+2. **Auto mode** (`editMode == .auto`): `confirmUpdateFile(args, finalContent: args.content)` is called immediately (line 1677–1678), bypassing the sheet.
+3. **Manual mode**: A `PendingActionCard` is rendered in the chat bubble (line 669). When the user taps the card, `showingUpdateFileSheet = true` is set (line 676), presenting `UpdateFileSheet` as a `.sheet` (lines 302–361).
 4. `UpdateFileSheet` shows the original content alongside the proposed content (a diff view). The user can edit the proposed content before confirming.
-5. On confirm, `confirmUpdateFile(_:finalContent:)` (line 1625) is called: it validates the path against the `attachments` list (only files the user has attached can be written — defence in depth), writes the file to disk with `String.write(to:atomically:encoding:)`, refreshes the in-memory attachment, appends a synthetic `(applied update to <file>: ±N lines)` user turn to history, and calls `sendFollowup()` (line 1659).
-6. `sendFollowup()` (line 1685) POSTs another `POST /code-assist` with `message: "(continue)"` and the updated history so the agent can acknowledge in natural language.
-7. `pendingTool` is set to `nil` (line 1645) after write; if the follow-up response contains another `pendingTool`, the cycle repeats.
+5. On confirm, `confirmUpdateFile(_:finalContent:)` (line 1781) is called: it validates the path against the `attachments` list (only files the user has attached can be written — defence in depth), writes the file to disk with `String.write(to:atomically:encoding:)`, refreshes the in-memory attachment, appends a synthetic `(applied update to <file>: ±N lines)` user turn to history, and calls `sendFollowup()` (line 1832).
+6. `sendFollowup()` (line 1901) POSTs another `POST /code-assist` with `message: "(continue)"` and the updated history so the agent can acknowledge in natural language.
+7. `pendingTool` is set to `nil` (line 1810) after write; if the follow-up response contains another `pendingTool`, the cycle repeats.
 
 **Other tool names** follow the same card → sheet → confirm → synthetic-turn → follow-up pattern:
 - `"create-gitlab-issue"` / `"create-github-issue"` → `CreateIssueSheet` → calls `GitLabClient` or `GitHubClient` → synthetic `(executed create-issue → #N ...)` turn
@@ -321,11 +329,11 @@ There is no separate `/code-assist/tool-result` endpoint. The tool result is com
 
 **Source:** `Views/CodeAssistantPanel.swift`
 
-**Stop control:** while a turn is running, a Stop button (also triggered by Esc, line 1224) is visible in the chat input area. Tapping it cancels the in-flight `Task` handle stored at line 55 (`@State private var runningTurn: Task<Void, Never>?`). Cancellation is a clean stop — no error bubble — after which the queue is drained (line 1634–1641).
+**Stop control:** while a turn is running, a Stop button (also triggered by Esc, line 1224) is visible in the chat input area. Tapping it cancels the in-flight `Task` handle stored at line 56 (`@State private var runTask: Task<Void, Never>?`, cancel sites lines 1636 / 1961). Cancellation is a clean stop — no error bubble — after which the queue is drained (line 1634–1641).
 
-**Message queue:** messages submitted while a turn is already running are appended to `@State private var queued: [String]` (line 59) — a FIFO list. When the current turn finishes or is stopped, `startTurn(queued.removeFirst())` is called (line 1693) so queued messages auto-send oldest-first without user intervention. The queue UI renders below the input field (lines 1077–1102); each pending item shows a cancel (×) button.
+**Message queue:** messages submitted while a turn is already running are appended to `@State private var queued: [String]` (line 59) — a FIFO list. When the current turn finishes or is stopped, `startTurn(queued.removeFirst())` is called (line 1694) so queued messages auto-send oldest-first without user intervention. The queue UI renders below the input field (lines 1077–1102); each pending item shows a cancel (×) button.
 
-**Session reset:** switching to a different session or creating a new one calls `resetActiveTurnState()` (line 1960), which cancels the running turn, clears `isBusy`, and calls `queued.removeAll()` so busy/queued state never bleeds across sessions (line 1964–1969).
+**Session reset:** switching to a different session or creating a new one calls `resetActiveTurnState()` (line 1960), which cancels the running turn, clears the `busy` flag (line 54), and calls `queued.removeAll()` so busy/queued state never bleeds across sessions (line 1964–1969).
 
 **Collapse-old-replies:** only the latest assistant reply renders a full `SelfSizingMarkdownView` (the expensive web-view-backed renderer). Older assistant turns collapse to a lightweight text preview via `markdownPreview(_:)` (line 787), which strips markdown to plain text. A collapsed reply expands on tap: tapping inserts the turn's `id` into `expandedTurns: Set<UUID>` (line 97); `isAssistantExpanded(_:)` (line 781) returns true when `turn.id == lastAssistantTurnId || expandedTurns.contains(turn.id)`. An expanded old reply shows a "Collapse" button (line 832) that removes it from `expandedTurns`.
 
@@ -364,13 +372,13 @@ The table below maps every Apple-only dependency to its source location and a po
 | Dependency | Apple API / framework | File : symbol | Tag |
 |---|---|---|---|
 | Accessibility tree walk | `AXUIElementCreateApplication`, `AXUIElementCopyAttributeValue`, `AXIsProcessTrusted`, `kAXChildrenAttribute`, `kAXStaticTextRole`, `kAXWindowsAttribute`, `kAXTitleAttribute`, `kAXRoleAttribute`, `kAXValueAttribute`, `kAXDescriptionAttribute` | `Services/CaptionScraper/AXCaptionReader.swift:AXCaptionReader` | LOCKED |
-| Accessibility trust gate | `AXIsProcessTrusted()`, `AXIsProcessTrustedWithOptions` | `Services/PermissionsService.swift:PermissionsService.refreshAccessibility()` (line 27), `promptAccessibility()` (line 76) | LOCKED |
+| Accessibility trust gate | `AXIsProcessTrusted()`, `AXIsProcessTrustedWithOptions` | `Services/PermissionsService.swift:PermissionsService.refreshAccessibility()` (line 26), `promptAccessibility()` (line 75) | LOCKED |
 | Keychain storage | `SecItemAdd`, `SecItemCopyMatching`, `SecItemDelete`, `kSecClassGenericPassword`, `kSecAttrService`, `kSecAttrAccount`, `kSecAttrAccessible` (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) | `Services/KeychainStore.swift:KeychainStore` | REPLACE |
-| File dialogs | `NSOpenPanel` (10 files) + `NSSavePanel` (3 files) | **Open** panels: `Views/CodeAssistantPanel.swift`, `Views/Library/LibraryView.swift`, `Views/Regression/RegressionView.swift`, `Views/Settings/BackendSettingsSection.swift`, `Views/Settings/PluginsSettingsSection.swift`, `Views/Shared/FileTreePanel.swift`, `Views/Shell/ProjectSwitcher.swift`, `Views/Welcome/WelcomeView.swift`, `Views/CodeGraph/UAGraphView.swift`, `Services/NotesFolder/NotesFolderConfig.swift`. **Save** panels (`NSSavePanel`): `Views/Library/MeetingDetailView.swift`, `Views/Welcome/WelcomeView.swift`, `Views/Regression/RegressionView.swift` | REPLACE |
-| Global local key monitor | `NSEvent.addLocalMonitorForEvents(matching: .keyDown)` | `Views/AppShell.swift:AppShell.body` (line 94) — keyCode 50 (`Ctrl+backtick`) toggles terminal panel | REPLACE |
-| Process / PTY | `Foundation.Process`, `SIGTERM`, `SIGKILL` (`kill(pid, ...)`) | `Services/BackendManager.swift:BackendManager.spawn()` (line 233), `killByPort()` (line 436) | REPLACE |
-| Port listener lookup | `/usr/sbin/lsof -ti :<port> -sTCP:LISTEN` launched via `Process` | `Services/BackendManager.swift:BackendManager.killByPort()` (line 436) | REPLACE |
-| Terminal emulator | SwiftTerm `LocalProcessTerminalView` | `Views/Terminal/TerminalSessionView.swift:TerminalSessionView` (line 5) | REPLACE |
+| File dialogs | `NSOpenPanel` (7 files) + `NSSavePanel` (3 files) | **Open** panels: `Views/Library/LibraryView.swift`, `Views/Regression/RegressionView.swift`, `Views/Settings/BackendSettingsSection.swift`, `Views/Settings/PluginsSettingsSection.swift`, `Views/Shared/FileTreePanel.swift`, `Views/Shell/ProjectSwitcher.swift`, `Views/Welcome/WelcomeView.swift`. **Save** panels (`NSSavePanel`): `Views/Library/MeetingDetailView.swift`, `Views/Welcome/WelcomeView.swift`, `Views/Regression/RegressionView.swift` | REPLACE |
+| Global local key monitor | `NSEvent.addLocalMonitorForEvents(matching: .keyDown)` | `Views/AppShell.swift:AppShell.body` (monitor line 96) — matches the backtick **character** (`event.charactersIgnoringModifiers == "\`"` + `.control`, line 99) rather than keyCode 50, so the Ctrl+backtick terminal-panel toggle works on all keyboard layouts | REPLACE |
+| Process / PTY | `Foundation.Process`, `SIGTERM`, `SIGKILL` (`kill(pid, ...)`) | `Services/BackendManager.swift:BackendManager.spawn()` (line 244), `killExternalListener()` (line 457) | REPLACE |
+| Port listener lookup | `/usr/sbin/lsof -ti :<port> -sTCP:LISTEN` launched via `Process` | `Services/BackendManager.swift:BackendManager.killExternalListener()` (line 457) | REPLACE |
+| Terminal emulator | SwiftTerm `LocalProcessTerminalView` | `Views/Terminal/TerminalSessionView.swift:TerminalSessionView` (line 8) | REPLACE |
 | Auto-update | Sparkle (`SPUStandardUpdaterController`, `SUFeedURL`, `SUPublicEDKey`) | `Services/UpdateService.swift:UpdateService` | REPLACE |
 | App-support paths | `FileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)` | `Services/LibraryItemStore.swift` (line 32) — `LLM IDE/library_items.json`; `Services/ChatSessionStore.swift` (line 17) — `LLM IDE/sessions/<uuid>.json`; `Models/Config.swift` (line 19) — corrupt-config stash under `LLM IDE/` | ABSTRACT |
 | Screen recording probe | `CGPreflightScreenCaptureAccess()` | `Services/PermissionsService.swift:PermissionsService.refreshScreenRecording()` (line 33) | REPLACE |
@@ -388,7 +396,7 @@ The table below maps every Apple-only dependency to its source location and a po
 
 Before any scraper can read another process's UI, macOS requires that the app hold the Accessibility permission. `AXCaptionReader.canRead` (line 81) calls `AXIsProcessTrusted()` — a silent probe that returns a boolean without presenting the system dialog. It is called on every poll tick (`CaptionScraper.swift` line 265).
 
-Permission is requested explicitly via `PermissionsService.promptAccessibility()` (line 76), which calls `AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt: true])` to surface the OS dialog. **The permission change only takes effect after the app relaunches** — there is no notification, so `PermissionsService.startPolling()` (line 56) polls `AXIsProcessTrusted()` every 1 second while the Permissions view is on screen, allowing the UI to update its badge once the user grants access in System Settings.
+Permission is requested explicitly via `PermissionsService.promptAccessibility()` (line 75), which calls `AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt: true])` to surface the OS dialog. **The permission change only takes effect after the app relaunches** — there is no notification, so `PermissionsService.startPolling()` (line 55) polls `AXIsProcessTrusted()` every 1 second while the Permissions view is on screen, allowing the UI to update its badge once the user grants access in System Settings.
 
 Mid-session revocation is handled in `CaptionOrchestrator.tick()` (`CaptionScraper.swift` line 265): if `AXCaptionReader.canRead` returns false during an active capture, the orchestrator sets `permissionLost = true`, stops the timer, and surfaces a banner so the user can re-grant without losing the recorded captions.
 
@@ -407,7 +415,7 @@ Mid-session revocation is handled in `CaptionOrchestrator.tick()` (`CaptionScrap
 
 **Teams** (`TeamsCaptionScraper.swift`): Teams is Electron-based, so captions appear inside the main meeting window rather than a separate window. Walks all windows up to `maxDepth: 16` looking for an `kAXGroupRole` element whose `kAXDescriptionAttribute` contains `"live caption"`. Then reads alternating `kAXStaticTextRole` children as speaker/body pairs. Bundle ID: `com.microsoft.teams2`.
 
-Both scrapers conform to the `CaptionScraper` protocol (`CaptionScraper.swift` line 8), which requires `source: CaptureSource`, `bundleID: String`, and `snapshot() -> [(speaker: String, text: String)]`. The default `isAvailable()` implementation (line 34) calls `AXCaptionReader.canRead` then checks whether `axElement(forBundleID:)` returns non-nil.
+Both scrapers conform to the `CaptionScraper` protocol (`CaptionScraper.swift` line 8), which requires `source: CaptureSource`, `bundleID: String`, and `snapshot() -> [(speaker: String, text: String)]`. The default `isAvailable()` implementation (line 35) calls `AXCaptionReader.canRead` then checks whether `axElement(forBundleID:)` returns non-nil.
 
 `PlatformDetector.allScrapers` (`PlatformDetector.swift` line 7) registers `[ZoomCaptionScraper(), TeamsCaptionScraper()]` — the ordered list the orchestrator iterates.
 
@@ -422,7 +430,7 @@ Both scrapers conform to the `CaptionScraper` protocol (`CaptionScraper.swift` l
 
 The timer is a `Foundation.Timer` added to `RunLoop.main` with `.common` mode (line 137). Changing cadence requires invalidating and re-creating the timer because `Foundation.Timer.timeInterval` is read-only after scheduling (comment at line 310).
 
-On each tick, the orchestrator calls `scrapers.first(where: { $0.isAvailable() })` (line 271), picks the first available platform, calls `snapshot()`, and deduplicates new lines against a 2-second rolling window (`dedupWindow: TimeInterval = 2.0`, line 73) using an O(1) `Set<String>` keyed on `"speaker::text"` (line 293).
+On each tick, the orchestrator calls `scrapers.first(where: { $0.isAvailable() })` (line 271), picks the first available platform, calls `snapshot()`, and deduplicates new lines against a 2-second rolling window (`dedupWindow: TimeInterval = 2.0`, line 73) using an O(1) `Set<String>` keyed on `"speaker::text"` (line 292).
 
 ### How captured captions reach the server
 
@@ -454,12 +462,12 @@ All five are declared `.copy(...)` so SwiftPM copies them verbatim into `Content
 
 ### Build pipeline (`build_app.sh` / `Scripts/`)
 
-`mac/build_app.sh` is a backward-compat shim (line 7) that delegates to three sub-scripts in order: `Scripts/build.sh` → `Scripts/sign.sh` → `Scripts/dmg.sh`. For a full notarized release, `Scripts/release.sh` adds a `Scripts/notarize.sh` phase between sign and DMG.
+`mac/build_app.sh` is a backward-compat shim (line 3) that delegates to three sub-scripts in order: `Scripts/build.sh` → `Scripts/sign.sh` → `Scripts/dmg.sh`. For a full notarized release, `Scripts/release.sh` adds a `Scripts/notarize.sh` phase between sign and DMG.
 
 **`Scripts/build.sh`:**
 1. Reads the version string from `mac/VERSION` (line 19) — single source of truth for both the Info.plist `CFBundleShortVersionString` and the DMG filename.
 2. Assembles the `.app` bundle skeleton (`Contents/MacOS/`, `Contents/Resources/`).
-3. Generates `AppIcon.icns` from `app_logo.png` using `sips` + `iconutil` (line 40).
+3. Generates `AppIcon.icns` from `app_logo.png` using `sips` + `iconutil` (line 41).
 4. Writes `Contents/Info.plist` (lines 77–150) including Sparkle keys (`SUFeedURL`, `SUPublicEDKey`) from environment variables `LLMIDE_SU_FEED_URL` / `LLMIDE_SU_PUBLIC_KEY` (absent for dev builds — Sparkle starts inert), and the URL schemes `llmide` + `meetnotes` for deep linking.
 5. Runs `swift build -c release --product LlmIdeMac` (line 158).
 6. Copies the Sparkle framework from the SPM build cache into `Contents/Frameworks/` and patches `@rpath` with `install_name_tool` (line 181) — without this the app crashes on launch with "Library not loaded: @rpath/Sparkle.framework".

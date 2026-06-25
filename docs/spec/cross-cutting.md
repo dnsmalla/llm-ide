@@ -43,7 +43,7 @@ Source: [`../explanation/security-model.md`](../explanation/security-model.md).
 | **Identity** | JWT HS256, bcrypt cost 12, opaque refresh tokens (SHA-256 stored, never plaintext), per-refresh rotation, clock skew ±2 s (`jwt.mjs:14`) | [`api-server.md` §4](api-server.md#4-auth--token-lifecycle-rebuild-grade) |
 | **Vault** | AES-256-GCM + HKDF-SHA256, 11 allow-listed keys (`vault.mjs:110–137`): `github.token`, `backlog.apiKey`, `linear.apiKey`, `slack.webhookUrl`, `slack.botToken`, `email.imapPassword`, `claude.apiKey`, `openai.apiKey`, `google.apiKey`, `custom.apiKey`, `custom.baseUrl` | [`knowledge-base.md` §6](knowledge-base.md#6-vault-crypto) |
 | **Guardrails** | Secret/PII/destructive scanners in `extension/guardrails/rules.mjs`; applied at submit and again at approval | [`../reference/guardrail-rules.md`](../reference/guardrail-rules.md) |
-| **Prompt injection** | Tool-call fences (`<<<BEGIN>>>`/`<<<END>>>`) + ZWJ redaction of fence markers in model output (`redaction.mjs:16–19`); server-side `sanitizeForPrompt()` (`extension/core/utils.mjs:72–76`) strips fence markers and hard-caps at 500 000 chars | [`agent-runtime.md` §3](agent-runtime.md#3-fence-protocol) |
+| **Prompt injection** | Tool-result fences (`<<<TOOL_RESULT>>>`/`<<<END_TOOL_RESULT>>>` wrapping each result; forged `<<<TOOL_CALL>>>` blocks rejected) + ZWJ redaction of any `<<<`/`>>>` markers in embedded external text (`redaction.mjs:16–18`); server-side `sanitizeForPrompt()` (`extension/core/utils.mjs:72–76`) strips fence markers and hard-caps at 500 000 chars | [`agent-runtime.md` §3](agent-runtime.md#3-fence-protocol) |
 | **Rate limiting** | Token-bucket per `(profile, scope)`; 9 profiles | [`api-server.md` §6](api-server.md#6-rate-limit-profiles) + [`../reference/rate-limit-profiles.md`](../reference/rate-limit-profiles.md) |
 | **Audit log** | `audit_log(user_id, request_id, ip, ua, action, resource, outcome, detail, created_at)`; credential-pattern fields redacted before write | [`../explanation/security-model.md`](../explanation/security-model.md#audit-log) |
 
@@ -84,7 +84,7 @@ When `NODE_ENV` is not `production` and either `LLMIDE_JWT_SECRET` or `LLMIDE_VA
 
 ### Loopback override
 
-`LLMIDE_ALLOW_REMOTE=1` is required to bind a non-loopback address. Without it, a non-loopback `LLMIDE_HOST` causes `process.exit(1)` at startup (`server.mjs:713–723`).
+`LLMIDE_ALLOW_REMOTE=1` is required to bind a non-loopback address. Without it, a non-loopback `LLMIDE_HOST` causes `process.exit(1)` at startup (`server.mjs:721–735`).
 
 Do not restate the full env-var table here — consult [`../reference/env-vars.md`](../reference/env-vars.md).
 
@@ -141,15 +141,15 @@ Source: `extension/core/config.mjs:141–142`, `extension/core/logger.mjs`.
 | `LLMIDE_LOG_JSON` | `true`/`1` → newline-delimited JSON; default `true` in production, pretty-print in dev TTY (`logger.mjs:13`) |
 | `LLMIDE_LOG_LEVEL` | `debug` / `info` / `warn` / `error`; default `debug` in dev, `info` in prod (`config.mjs:141`) |
 
-Every request generates a `requestId` (read from `X-Request-ID` or generated fresh at `server.mjs:183–188`). It is threaded through the per-request child logger as `req.log` and appears in every log line emitted during that request (`logger.mjs:35`).
+Every request generates a `requestId` (read from `X-Request-ID` or generated fresh at `server.mjs:194–199`). It is threaded through the per-request child logger as `req.log` and appears in every log line emitted during that request (`logger.mjs:35`).
 
 ### Prometheus metrics
 
-`GET /metrics` — requires **admin JWT** (`server.mjs:482–498`, `auth.test.mjs:140–141`). Returns Prometheus text format. Served by `extension/server/metrics.mjs` (`renderPrometheus`). Metrics include HTTP request counts, rate-limit deny counts, KB gauge, and server uptime (`meetnotes_uptime_seconds`, `metrics.mjs:164–166`).
+`GET /metrics` — requires **admin JWT** (`server.mjs:493–509`, `auth.test.mjs:140–141`). Returns Prometheus text format. Served by `extension/server/metrics.mjs` (`renderPrometheus`). Metrics include HTTP request counts, rate-limit deny counts, KB gauge, and server uptime (`llmide_uptime_seconds`, `metrics.mjs:171–173`).
 
 ### Health probe
 
-`GET /health` (also `GET /`) — **unauthenticated**, public (`server.mjs:264`, `auth.mjs:22`). Response shape (from `extension/server/control-plane.mjs:1–21`):
+`GET /health` (also `GET /`) — **unauthenticated**, public (`server.mjs:275`, `auth.mjs:22`). Response shape (from `extension/server/control-plane.mjs:1–21`):
 
 ```json
 {
@@ -182,7 +182,7 @@ Detail: [`knowledge-base.md` §4](knowledge-base.md#4-tenancy-contract).
 
 ### Stale-server detection
 
-`SERVER_API_VERSION = 18` (`server.mjs:33`). Both `GET /` and `GET /health` return this value as `apiVersion`. Clients compare against their expected version; a mismatch surfaces "restart the server" rather than a raw 404. The `endpoints` array is also returned so clients can detect missing capabilities by name.
+`SERVER_API_VERSION = 18` (`server.mjs:34`). Both `GET /` and `GET /health` return this value as `apiVersion`. Clients compare against their expected version; a mismatch surfaces "restart the server" rather than a raw 404. The `endpoints` array is also returned so clients can detect missing capabilities by name.
 
 Detail: [`api-server.md` §2](api-server.md#2-request-pipeline) (API version and stale-server detection).
 

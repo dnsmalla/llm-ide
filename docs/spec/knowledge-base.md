@@ -100,7 +100,7 @@ On graceful shutdown (`closeDb()`), the server calls `PRAGMA wal_checkpoint(TRUN
 
 ### ID generation
 
-Non-integer primary keys are minted by `genId(prefix)` (`extension/kb/db.mjs:410–418`):
+Non-integer primary keys are minted by `genId(prefix)` (`extension/kb/db.mjs:427–435`):
 
 ```
 `${prefix}-${Date.now().toString(36)}-${crypto.randomBytes(12).toString('base64url')}`
@@ -130,7 +130,7 @@ Defined at `migrations.mjs:42–49`:
 1. Migration files must match `FILE_RE = /^(\d{3,4})_([\w.-]+)\.sql$/` (`migrations.mjs:21`). Files that do not match are silently skipped.
 2. Files are sorted numerically by the leading digit prefix (`migrations.mjs:61`), not lexically.
 3. Each migration runs inside a `db.transaction()` so it is atomic — either the SQL and the `schema_migrations` INSERT both succeed, or neither does (`migrations.mjs:108–113`).
-4. There are no down-migrations. Rollback = restore from backup (`migrations.mjs:11–13`).
+4. There are no down-migrations. Rollback = restore from backup (`migrations.mjs:10–12`).
 5. There is no single schema-version constant. The effective schema version is the `version` of the last row in `schema_migrations` (i.e. the highest-numbered applied migration).
 
 ### Checksum algorithm
@@ -177,13 +177,13 @@ It throws `Error('userId is required for tenanted operations')` on any falsy or 
 
 ### (b) FTS index is shared; hydration is `user_id`-scoped
 
-The `search` FTS5 virtual table is NOT partitioned by `user_id`. An FTS MATCH query returns rows from all tenants. Tenancy is enforced in the hydration step: after fetching FTS hits, `search()` and `findContext()` join each result back to its owning table (e.g. `meetings WHERE user_id = ?`, `plan_tasks WHERE user_id = ?`) and drop any hit whose hydration returns empty (`extension/kb/db.mjs:248–376`, especially lines 273–307 and 309–376).
+The `search` FTS5 virtual table is NOT partitioned by `user_id`. An FTS MATCH query returns rows from all tenants. Tenancy is enforced in the hydration step: after fetching FTS hits, `search()` and `findContext()` join each result back to its owning table (e.g. `meetings WHERE user_id = ?`, `plan_tasks WHERE user_id = ?`) and drop any hit whose hydration returns empty (`extension/kb/db.mjs:252–393`, especially lines 277–319 and 324–393).
 
-In `findContext()`, an overshoot strategy is used to handle multi-tenant databases where other users' rows dominate the top of the global BM25 ranking: the first pass fetches `cap * 4` hits; if owned hits come up short and the pass hit its LIMIT, a second pass fetches up to `OVERSHOOT_DEEP_LIMIT = 400` hits (`extension/kb/db.mjs:524`).
+In `findContext()`, an overshoot strategy is used to handle multi-tenant databases where other users' rows dominate the top of the global BM25 ranking: the first pass fetches `cap * 4` hits; if owned hits come up short and the pass hit its LIMIT, a second pass fetches up to `OVERSHOOT_DEEP_LIMIT = 400` hits (`extension/kb/db.mjs:542`).
 
 ### (c) Router reads `req.user.id`; returns 401 if absent
 
-`extension/kb/router.mjs:61–65`:
+`extension/kb/router.mjs:63–67`:
 
 ```js
 const userId = req.user?.id;
@@ -239,7 +239,7 @@ return tokens.map((t) => `"${t.replace(/"/g, '""')}"`).join(joiner);
 
 Each token is wrapped in double-quotes (FTS5 phrase syntax) with internal double-quotes escaped by doubling.
 
-**Empty-query fallback** (`db.mjs:155–231`):
+**Empty-query fallback** (`db.mjs:155–235`):
 
 When `buildMatchExpr(q)` returns `null` (empty string, non-string, or all tokens filtered out), the FTS path is skipped entirely. Instead, `search()` returns rows directly from the backing tables ordered by date DESC:
 
@@ -258,7 +258,7 @@ The `search()` function accepts the following `kind` values:
 - Outcome kind: `'outcome'`
 - Source kinds: `'code'`, `'ticket'`, `'qa'`, `'doc'`
 
-The `findContext()` function always queries with explicit kind arguments: `'meeting'`, `'task'`, `'code'`, `'ticket'`, `'blocker'` (`db.mjs:543–595`).
+The `findContext()` function always queries with explicit kind arguments: `'meeting'`, `'task'`, `'code'`, `'ticket'`, `'blocker'` (`db.mjs:561–621`).
 
 **`limit` cap**: maximum 100 results (`db.mjs:151`):
 
@@ -302,7 +302,7 @@ Hash: SHA-256. Output: 32 bytes (256 bits) — the AES-256 key. A distinct key i
 
 Total overhead: 1 + 12 + 16 = 29 bytes. Blobs shorter than 29 bytes are rejected at decrypt time (`vault.mjs:72`).
 
-The key-version byte is bound as GCM Additional Authenticated Data (AAD) in the current format (`vault.mjs:63–64`). Blobs written before AAD was introduced are transparently decrypted without AAD on first access and re-encrypted with AAD on the next `setSecret` write (`vault.mjs:83–104`).
+The key-version byte is bound as GCM Additional Authenticated Data (AAD) in the current format (`vault.mjs:63–64`). Blobs written before AAD was introduced are transparently decrypted without AAD on first access and re-encrypted with AAD on the next `setSecret` write (`vault.mjs:82–104`).
 
 ### Algorithm
 
@@ -326,11 +326,11 @@ AES-256-GCM (`vault.mjs:58`): `crypto.createCipheriv('aes-256-gcm', key, iv)`.
 'custom.baseUrl'
 ```
 
-The full array is also exported as `VAULT_KEYS` (`vault.mjs:193`).
+The full array is also exported as `VAULT_KEYS` (`vault.mjs:197`).
 
 ### DB storage
 
-Ciphertext is stored as `BLOB` in `user_secrets(user_id, secret_key, ciphertext)`. Setting a secret to `null` or `''` DELETEs the row rather than storing an empty blob (`vault.mjs:145–149`).
+Ciphertext is stored as `BLOB` in `user_secrets(user_id, secret_key, ciphertext)`. Setting a secret to `null` or `''` DELETEs the row rather than storing an empty blob (`vault.mjs:149–153`).
 
 ---
 
