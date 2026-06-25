@@ -1175,12 +1175,20 @@ struct CodeAssistantPanel: View {
                 Divider().background(theme.current.border)
             }
             // Autocomplete dropdown — sits directly above the editor (Cursor-style).
-            if completion.isOpen {
-                CompletionMenu(controller: completion, onAccept: { acceptCompletion() })
-                    .environmentObject(theme)
-                    .padding(.horizontal, 8)
-                    .padding(.top, 4)
-            }
+            // Kept ALWAYS in the tree and toggled via height/opacity — do NOT
+            // wrap in `if completion.isOpen`. Inserting/removing this sibling
+            // adjacent to the editor rebuilds the editor subtree and drops the
+            // NSTextView's first responder, which silently kills ↑ history
+            // recall after the menu has been used once (same fragility the
+            // placeholder below documents).
+            CompletionMenu(controller: completion, onAccept: { acceptCompletion() })
+                .environmentObject(theme)
+                .padding(.horizontal, 8)
+                .padding(.top, 4)
+                .frame(height: completion.isOpen ? nil : 0)
+                .opacity(completion.isOpen ? 1 : 0)
+                .allowsHitTesting(completion.isOpen)
+                .clipped()
             // Text area
             ZStack(alignment: .topLeading) {
                 // Keep the placeholder ALWAYS in the tree and toggle its
