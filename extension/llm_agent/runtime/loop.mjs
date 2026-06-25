@@ -142,8 +142,13 @@ const MAX_LOOP_DEPTH = 2;
 
 export async function runAgentLoop({
   skills, userMessage, history, agentContext, runClaude, kb, userId, handlers,
-  maxIterations, deadlineMs, model, maxTokens, depth = 0,
+  maxIterations, deadlineMs, model, maxTokens, depth = 0, onProgress,
 }) {
+  // onProgress is an optional best-effort callback used to surface live
+  // status to the client (the macOS Code Assistant turns these into a status
+  // line instead of a frozen "Thinking…"). Never let a progress callback
+  // throw into the loop.
+  const emit = (event) => { try { onProgress?.(event); } catch { /* ignore */ } };
   if (typeof userMessage === 'string' && userMessage.length > MAX_USER_MESSAGE_BYTES) {
     throw new Error(`userMessage exceeds ${MAX_USER_MESSAGE_BYTES} byte limit`);
   }
@@ -195,6 +200,9 @@ export async function runAgentLoop({
   for (let i = 0; i < cap; i++) {
     const remaining = deadline - (Date.now() - startTs);
     if (remaining <= 0) return deadlineReply(i);
+    // First pass = "thinking"; later passes mean we're folding a tool result
+    // back in = "writing the answer".
+    emit({ phase: i === 0 ? 'thinking' : 'writing', iteration: i + 1 });
     const prompt = buildIterationPrompt({
       systemPrompt, history, userMessage, prevOutput, toolResult, toolError,
     });
@@ -257,6 +265,7 @@ export async function runAgentLoop({
     }
 
     // read tool — check cache first, then execute
+    emit({ phase: 'tool', tool: skill.name, iteration: i + 1 });
     let result;
     const cacheKey = `${skill.name}:${stableStringify(validation.value)}`;
     if (readCache.has(cacheKey)) {

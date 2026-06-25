@@ -49,6 +49,7 @@ export async function handleCodeAssist({
   runClaude,
   kb,
   userId,
+  onProgress,               // optional: live status callback (SSE → client)
 }) {
   // Per-user plugin view. Building it is cheap (Map clone + readdir
   // for each enabled plugin's skills/). Done per request so a user
@@ -197,6 +198,7 @@ export async function handleCodeAssist({
     kb,
     userId,
     handlers,
+    onProgress,
     model: GLOBAL_AGENT_MODEL,
     maxIterations: 3,         // global cap is tighter; see runAgentLoop DEFAULT_MAX_ITERATIONS (10)
     // Long-form writing / refactoring asks routinely take 60-90s per

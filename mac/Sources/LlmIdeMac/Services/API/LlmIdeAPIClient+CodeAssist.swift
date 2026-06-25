@@ -89,4 +89,102 @@ extension LlmIdeAPIClient {
             authenticated: true,
         )
     }
+
+    // One SSE event from the streaming /code-assist endpoint.
+    private struct CodeAssistSSEEvent: Decodable {
+        let type: String                 // "progress" | "done" | "error"
+        let phase: String?               // progress: "thinking" | "tool" | "writing"
+        let tool: String?                // progress (phase == "tool"): tool name
+        let reply: String?               // done
+        let pendingTool: PendingTool?    // done
+        let usage: CodeAssistResponse.Usage?  // done
+        let error: String?               // error
+    }
+
+    /// Human-readable status for a progress event — shown as a live line in the
+    /// Code Assistant instead of a frozen "Thinking…".
+    static func progressLabel(phase: String?, tool: String?) -> String {
+        switch phase {
+        case "writing": return "Writing the answer…"
+        case "tool":
+            switch tool {
+            case "web-search":   return "Searching the web…"
+            case "fetch-url":    return "Fetching a page…"
+            case "ask-internal": return "Checking app context…"
+            case "ask-subagent": return "Delegating to a subagent…"
+            default:             return tool.map { "Using \($0)…" } ?? "Working…"
+            }
+        default: return "Thinking…"
+        }
+    }
+
+    /// Streaming variant of `codeAssist`. POSTs the same body but with
+    /// `Accept: text/event-stream`; the server streams live agent progress
+    /// (thinking / tool / writing) which we surface via `onProgress`, then the
+    /// final reply lands as one `done` event. The Mac uses the agent path, so
+    /// this replaces a 60–90s frozen spinner with a live status line. The
+    /// reply itself still arrives whole (token-level streaming of the agent
+    /// synthesis turn is a separate follow-up).
+    func codeAssistStream(
+        message: String,
+        language: String?,
+        model: String? = nil,
+        provider: String? = nil,
+        tier: String? = nil,
+        history: [CodeAssistTurn],
+        attachments: [CodeAttachment],
+        agentContext: AgentContext? = nil,
+        onProgress: @escaping @MainActor (String) -> Void,
+    ) async throws -> CodeAssistResponse {
+        guard let url = URL(string: baseURL + "/code-assist") else { throw APIError.invalidURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        if let token = await MainActor.run(body: { _sessionStore?.accessToken }) {
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        req.httpBody = try JSONEncoder().encode(CodeAssistRequest(
+            message: message, language: language, model: model, provider: provider,
+            tier: tier, history: history, attachments: attachments, agentContext: agentContext))
+
+        let (bytes, response) = try await session(for: "/code-assist").bytes(for: req)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.http(status: 0, code: "NO_RESPONSE", message: "No HTTP response", details: nil)
+        }
+        guard http.statusCode == 200 else {
+            throw APIError.http(status: http.statusCode, code: "HTTP_ERROR",
+                                message: "Code Assistant request failed (\(http.statusCode))", details: nil)
+        }
+
+        var reply: String?
+        var pendingTool: PendingTool?
+        var usage: CodeAssistResponse.Usage?
+        for try await line in bytes.lines {
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            guard !payload.isEmpty, let data = payload.data(using: .utf8),
+                  let evt = try? JSONDecoder().decode(CodeAssistSSEEvent.self, from: data)
+            else { continue }
+            switch evt.type {
+            case "progress":
+                let label = Self.progressLabel(phase: evt.phase, tool: evt.tool)
+                await onProgress(label)
+            case "done":
+                reply = evt.reply ?? ""
+                pendingTool = evt.pendingTool
+                usage = evt.usage
+            case "error":
+                throw APIError.http(status: 500, code: "AGENT_ERROR",
+                                    message: evt.error ?? "Code Assistant failed", details: nil)
+            default:
+                break
+            }
+        }
+        guard let reply else {
+            throw APIError.http(status: 500, code: "STREAM_INCOMPLETE",
+                                message: "The response stream ended unexpectedly.", details: nil)
+        }
+        return CodeAssistResponse(reply: reply, usage: usage, pendingTool: pendingTool)
+    }
 }

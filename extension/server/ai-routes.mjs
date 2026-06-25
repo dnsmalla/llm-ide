@@ -348,6 +348,52 @@ export async function handleAIRoutes(req, res) {
         }
         const languageDirective = languageLine;
 
+        const usage = {
+          attachmentCount: files.length,
+          attachmentChars: totalChars,
+          paths: files.map((f) => f.path),
+        };
+
+        // SSE path: when the client sends `Accept: text/event-stream`, stream
+        // live agent progress (thinking / tool:<name> / writing) so the Mac
+        // Code Assistant shows a status line instead of a frozen "Thinking…"
+        // for the 60–90s an agent turn can take. The final reply still lands
+        // as one `done` event (the agent loop is multi-iteration; token-level
+        // streaming of the synthesis turn is a separate follow-up).
+        if ((req.headers.accept || '').includes('text/event-stream')) {
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+          });
+          const ac = new AbortController();
+          req.on('close', () => ac.abort());
+          const writeEvent = (obj) => {
+            if (!res.writableEnded && !ac.signal.aborted) {
+              res.write(`data: ${JSON.stringify(obj)}\n\n`);
+            }
+          };
+          try {
+            const out = await handleCodeAssist({
+              message,
+              history: Array.isArray(body.history) ? body.history : [],
+              agentContext: enrichedAgentContext,
+              attachmentsText,
+              languageDirective,
+              runClaude: (p) => runClaude(p, { userId: req.user?.id, model: tierModel, provider: body.provider, signal: ac.signal }),
+              kb,
+              userId: req.user?.id,
+              onProgress: (ev) => writeEvent({ type: 'progress', ...ev }),
+            });
+            writeEvent({ type: 'done', reply: out.reply, pendingTool: out.pendingTool, usage });
+          } catch (err) {
+            if (!ac.signal.aborted) writeEvent({ type: 'error', error: err?.message || 'code-assist failed' });
+          }
+          if (!res.writableEnded) res.end();
+          return true;
+        }
+
         const out = await handleCodeAssist({
           message,
           history: Array.isArray(body.history) ? body.history : [],
@@ -361,11 +407,7 @@ export async function handleAIRoutes(req, res) {
         sendJSON(res, 200, {
           reply: out.reply,
           pendingTool: out.pendingTool,
-          usage: {
-            attachmentCount: files.length,
-            attachmentChars: totalChars,
-            paths: files.map((f) => f.path),
-          },
+          usage,
         });
         return true;
       }

@@ -52,6 +52,10 @@ struct CodeAssistantPanel: View {
     @State private var showingSessionPicker: Bool = false
     @State private var draft: String = ""
     @State private var busy: Bool = false
+    /// Live agent status streamed from /code-assist (SSE): "Searching the web…",
+    /// "Writing the answer…", etc. Shown in place of a static "Thinking…" so a
+    /// 60–90s agent turn doesn't look hung. Reset at the start/end of each turn.
+    @State private var statusText: String = ""
     /// Handle to the in-flight user turn, so Stop can cancel it.
     @State private var runTask: Task<Void, Never>?
     /// Messages the user submitted while a turn was running, in FIFO order; they
@@ -690,7 +694,7 @@ struct CodeAssistantPanel: View {
                         if busy {
                             HStack(spacing: 6) {
                                 ProgressView().controlSize(.small)
-                                Text("Thinking…")
+                                Text(statusText.isEmpty ? "Thinking…" : statusText)
                                     .font(Typography.caption)
                                     .foregroundStyle(theme.current.textMuted)
                             }
@@ -1648,20 +1652,20 @@ struct CodeAssistantPanel: View {
         // even if the network call is slow.
         history.append(.init(role: .user, content: message))
         busy = true
+        statusText = ""
         error = nil
         do {
             // Send the most recent ~8 turns as history — server caps too
             // but we'd rather not push a huge payload over the wire.
             let recent = history.count > 8 ? Array(history.suffix(8)) : history
-            let agentContext = buildAgentContext()
-            let resp = try await api.codeAssist(
+            // Stream so the user sees live progress ("Searching the web…",
+            // "Writing the answer…") instead of a frozen spinner for the
+            // 60–90s an agent turn can take. Falls back to buffered on a
+            // stream failure (see codeAssistRoundTrip).
+            let resp = try await codeAssistRoundTrip(
                 message: message,
-                language: prefLanguage,
-                model: selectedModel.isEmpty ? nil : selectedModel,
-                provider: (AICliTool(rawValue: config.activeCLI) ?? .claudeCode).provider,
-                history: recent.dropLast(),     // exclude the just-pushed user turn — server appends it
+                history: Array(recent.dropLast()),  // exclude the just-pushed user turn — server appends it
                 attachments: attachments,
-                agentContext: agentContext,
             )
             // If Stop fired during the await, don't append the (now-unwanted) reply.
             try Task.checkCancellation()
@@ -1898,28 +1902,54 @@ struct CodeAssistantPanel: View {
         await sendFollowup()
     }
 
+    /// One code-assist round-trip that streams live status, with a safety net:
+    /// if the SSE transport fails for any reason other than a user cancellation,
+    /// fall back to the buffered endpoint once. So a streaming/parse bug can
+    /// never break the feature — the worst case is losing the live status line.
+    private func codeAssistRoundTrip(
+        message: String,
+        history: [LlmIdeAPIClient.CodeAssistTurn],
+        attachments: [LlmIdeAPIClient.CodeAttachment],
+    ) async throws -> LlmIdeAPIClient.CodeAssistResponse {
+        let provider = (AICliTool(rawValue: config.activeCLI) ?? .claudeCode).provider
+        let model = selectedModel.isEmpty ? nil : selectedModel
+        let ctx = buildAgentContext()
+        do {
+            return try await api.codeAssistStream(
+                message: message, language: prefLanguage, model: model, provider: provider,
+                history: history, attachments: attachments, agentContext: ctx,
+                onProgress: { statusText = $0 })
+        } catch let e as APIError {
+            // APIError == a server/stream/format failure (cancellations surface
+            // as CancellationError / URLError.cancelled, which propagate). Retry
+            // once on the buffered path so streaming issues degrade gracefully.
+            if case .http = e {
+                return try await api.codeAssist(
+                    message: message, language: prefLanguage, model: model, provider: provider,
+                    history: history, attachments: attachments, agentContext: ctx)
+            }
+            throw e
+        }
+    }
+
     private func sendFollowup() async {
         // Don't fire a second round-trip if one is already in flight.
         // Without this guard, rapid confirms or a manual ⌘↵ during
         // model streaming would stack overlapping /code-assist requests.
         guard !busy else { return }
         busy = true
+        statusText = ""
         defer { busy = false }
         do {
-            let agentContext = buildAgentContext()
             let recent = history.count > 8 ? Array(history.suffix(8)) : history
             // The synthetic "(executed create-gitlab-issue …)" turn we
             // pushed before this call IS the signal the agent needs to
             // see. Keep it in `history`; pass "(continue)" as the user
             // message purely to pass the server's empty-message guard.
-            let resp = try await api.codeAssist(
+            let resp = try await codeAssistRoundTrip(
                 message: "(continue)",
-                language: prefLanguage,
-                model: selectedModel.isEmpty ? nil : selectedModel,
-                provider: (AICliTool(rawValue: config.activeCLI) ?? .claudeCode).provider,
                 history: recent,
                 attachments: [],
-                agentContext: agentContext
             )
             history.append(.init(role: .assistant, content: resp.reply))
             self.pendingTool = resp.pendingTool
