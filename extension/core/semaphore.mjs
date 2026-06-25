@@ -12,9 +12,16 @@
 // race window.
 
 export class Semaphore {
-  /** @param {number} max maximum concurrent holders (clamped to >= 1) */
-  constructor(max) {
+  /**
+   * @param {number} max maximum concurrent holders (clamped to >= 1)
+   * @param {{maxQueue?: number}} [opts] maxQueue caps how many callers may wait
+   *   for a slot; acquire() rejects past the cap so an overload sheds load (a
+   *   clean "busy" error) instead of piling up unbounded pending promises, each
+   *   pinning its prompt in memory. Default Infinity preserves prior behavior.
+   */
+  constructor(max, { maxQueue = Infinity } = {}) {
     this.max = Math.max(1, Math.floor(max) || 1);
+    this.maxQueue = (Number.isFinite(maxQueue) && maxQueue >= 0) ? Math.floor(maxQueue) : Infinity;
     this.active = 0;
     /** @type {Array<() => void>} */
     this.queue = [];
@@ -25,6 +32,11 @@ export class Semaphore {
     if (this.active < this.max) {
       this.active++;
       return Promise.resolve();
+    }
+    if (this.queue.length >= this.maxQueue) {
+      // Shed load rather than queue unboundedly. Callers treat this like any
+      // other transient failure (surfaced as a 503/"busy" upstream).
+      return Promise.reject(new Error('Semaphore: queue full (server busy)'));
     }
     return new Promise((resolve) => this.queue.push(resolve));
   }

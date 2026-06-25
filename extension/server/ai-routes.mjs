@@ -381,7 +381,18 @@ export async function handleAIRoutes(req, res) {
               agentContext: enrichedAgentContext,
               attachmentsText,
               languageDirective,
-              runClaude: (p) => runClaude(p, { userId: req.user?.id, model: tierModel, provider: body.provider, signal: ac.signal }),
+              // Forward the agent loop's per-call opts (maxTokens budget +
+              // deadline signal) — without this the loop's AbortSignal.timeout
+              // and maxTokens never reach runClaude, so the deadline-abort is
+              // dead code and every call uses the 8192 default. Merge the loop's
+              // signal with the route's client-disconnect signal so EITHER aborts.
+              runClaude: (p, opts = {}) => runClaude(p, {
+                userId: req.user?.id,
+                model: tierModel,
+                provider: body.provider,
+                maxTokens: opts.maxTokens,
+                signal: opts.signal ? AbortSignal.any([opts.signal, ac.signal]) : ac.signal,
+              }),
               kb,
               userId: req.user?.id,
               onProgress: (ev) => writeEvent({ type: 'progress', ...ev }),
@@ -400,7 +411,15 @@ export async function handleAIRoutes(req, res) {
           agentContext: enrichedAgentContext,
           attachmentsText,
           languageDirective,
-          runClaude: (p) => runClaude(p, { userId: req.user?.id, model: tierModel, provider: body.provider }),
+          // Forward the loop's per-call opts here too (buffered path): the
+          // loop's maxTokens budget + its deadline signal must reach runClaude.
+          runClaude: (p, opts = {}) => runClaude(p, {
+            userId: req.user?.id,
+            model: tierModel,
+            provider: body.provider,
+            maxTokens: opts.maxTokens,
+            signal: opts.signal,
+          }),
           kb,
           userId: req.user?.id,
         });

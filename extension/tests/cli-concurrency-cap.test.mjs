@@ -84,6 +84,38 @@ test('Semaphore: max clamps to >= 1 for bad input', () => {
   assert.equal(new Semaphore(4).max, 4);
 });
 
+test('Semaphore: maxQueue sheds load past the cap instead of queuing unboundedly', async () => {
+  const sem = new Semaphore(1, { maxQueue: 2 });
+  const hold = defer();
+  const first = sem.run(async () => { await hold.promise; }); // holds the only slot
+  await new Promise((r) => setImmediate(r));
+  // Two may queue (cap=2)…
+  const q1 = sem.acquire();
+  const q2 = sem.acquire();
+  // …the third is rejected ("busy") rather than piling up.
+  await assert.rejects(sem.acquire(), /queue full/);
+  assert.equal(sem.waiting, 2);
+  // Drain cleanly.
+  hold.resolve();
+  await first;
+  await q1; sem.release();
+  await q2; sem.release();
+  assert.equal(sem.active, 0);
+  assert.equal(sem.waiting, 0);
+});
+
+test('Semaphore: default is unbounded (no maxQueue) — preserves prior behavior', async () => {
+  const sem = new Semaphore(1);
+  const hold = defer();
+  const first = sem.run(async () => { await hold.promise; });
+  await new Promise((r) => setImmediate(r));
+  const waiters = [sem.acquire(), sem.acquire(), sem.acquire(), sem.acquire()];
+  assert.equal(sem.waiting, 4, 'all queue, none rejected');
+  hold.resolve(); await first;
+  for (const w of waiters) { await w; sem.release(); }
+  assert.equal(sem.active, 0);
+});
+
 test('spawnCli: pre-aborted signal fails fast without spawning', async () => {
   const ac = new AbortController();
   ac.abort();
