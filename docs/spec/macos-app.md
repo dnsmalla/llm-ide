@@ -119,7 +119,7 @@ A `MenuBarExtra` is declared at lines 272–285. Its icon (`record.circle.fill` 
 
 `library`, `live`, `explorer`, `search`, `plans`, `conflicts`, `sourceControl`, `issues`, `gantt`, `visual`, `docGen`, `autoCode`, `codeGraph`, `regression`, `settings`
 
-The Library section gets a 3-column layout (sidebar | list | detail). All other sections use a 2-column layout (AppShell sidebar rail | content). A `TerminalPanelView` docks at the bottom of the content area for most sections. The activity bar (section-icon rail) is a `.principal` `ToolbarItem` (`TopActivityBar`) inside the unified title bar.
+The Library section gets a 3-column layout (sidebar | list | detail). All other sections use a 2-column layout (AppShell sidebar rail | content). A `TerminalPanelView` docks at the bottom of the content area for most sections. `ShellState.section` defaults to `.explorer`, so a fresh launch lands on the Explorer. The "tool" sections render as named buttons (`ToolbarToolButton`) in a `ToolbarItemGroup` inside the unified title bar (AppKit collapses overflow into the native `»` menu); `explorer`, `sourceControl`, and `search` are instead a panel-header switcher (`PanelSectionTabs`) shown in those three sections' headers, Cursor-style.
 
 ---
 

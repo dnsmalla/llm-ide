@@ -309,20 +309,45 @@ struct AppShell: View {
     /// Library gets a true 3-column layout (sidebar | list | detail).
     /// Every other section is a clean 2-column layout (sidebar | content)
     /// with no wasted middle column.
+    /// The "tool" sections shown as named buttons in the title bar. `.search`
+    /// is the field; `.explorer`/`.sourceControl` are the panel-header switcher;
+    /// `.settings` is in the account menu; `.live` only while a session runs.
+    private static let toolOrder: [ShellState.Section] = [
+        .codeGraph, .autoCode, .plans, .conflicts, .issues,
+        .gantt, .regression, .docGen, .visual, .library, .live,
+    ]
+    private var liveActive: Bool { capture.isRunning || liveMirror.activeSession != nil }
+    private var toolSections: [ShellState.Section] {
+        Self.toolOrder.filter { section in
+            if section == .live { return liveActive }
+            return !config.hiddenSidebarSections.contains(section.rawValue)
+        }
+    }
+
     @ViewBuilder
     private func splitContent() -> some View {
-        // Cursor/VS Code style: the section icons live in the unified window
-        // title bar (a `.principal` toolbar item), so the top header IS the
-        // activity bar — no separate row. The active section renders below.
+        // Title bar holds the named tool buttons (trailing) and the account
+        // menu. AppKit collapses whichever tools don't fit into the native `»`
+        // overflow menu. Explorer · Source Control · Search are NOT here —
+        // they're the panel-header switcher (`PanelSectionTabs`), Cursor-style.
         sectionLayout()
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    TopActivityBar(api: api)
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    HeaderAccountMenu()
-                }
+            .toolbar(content: shellToolbar)
+    }
+
+    @ToolbarContentBuilder
+    private func shellToolbar() -> some ToolbarContent {
+        // One group of named tool buttons. AppKit moves whichever don't fit
+        // into the native `»` overflow menu. (ForEach can't emit individual
+        // ToolbarItems — its closure is a ViewBuilder — but a group of views is
+        // fine and still overflows.)
+        ToolbarItemGroup(placement: .primaryAction) {
+            ForEach(toolSections, id: \.self) { section in
+                ToolbarToolButton(section: section)
             }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            HeaderAccountMenu()
+        }
     }
 
     @ViewBuilder

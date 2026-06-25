@@ -77,7 +77,7 @@ final class ShellState {
         case skill(String)
     }
 
-    var section: Section = .library
+    var section: Section = .explorer
     /// Whether the Explorer's chat panel is open. Lives here (app-session
     /// scope) rather than as ExplorerView @State so it survives navigating
     /// away and back — ExplorerView is torn down on a section switch, which

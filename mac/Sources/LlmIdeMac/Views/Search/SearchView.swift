@@ -38,6 +38,27 @@ struct SearchView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            searchHeaderBar
+            Divider()
+            content
+        }
+    }
+
+    /// Thin panel header mirroring Explorer's / Source Control's, carrying the
+    /// Explorer · Source Control · Search switcher.
+    private var searchHeaderBar: some View {
+        HStack(spacing: 6) {
+            PanelSectionTabs()
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(.bar)
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if root == nil {
             emptyState("Open a project or activate a repo to search")
         } else {

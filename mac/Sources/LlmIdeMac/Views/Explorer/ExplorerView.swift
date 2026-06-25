@@ -123,6 +123,8 @@ struct ExplorerView: View {
             }
             .buttonStyle(.borderless)
             .help(treeVisible ? "Hide Files" : "Show Files")
+            // Explorer ⇄ Source Control switcher, right after the panel toggle.
+            PanelSectionTabs()
             Spacer(minLength: 0)
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) { shell.exploreChatVisible.toggle() }

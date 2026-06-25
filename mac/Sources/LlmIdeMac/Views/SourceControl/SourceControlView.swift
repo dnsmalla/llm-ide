@@ -69,6 +69,18 @@ struct SourceControlView: View {
         return scm.resolveCredentials?(root) != nil
     }
 
+    /// Thin panel header mirroring Explorer's, carrying the Explorer ⇄ Source
+    /// Control switcher so you can return to the file tree from here.
+    private var scmHeaderBar: some View {
+        HStack(spacing: 6) {
+            PanelSectionTabs()
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(.bar)
+    }
+
     @ViewBuilder private var content: some View {
         if let root {
             // Fixed-width changes column — HSplitView overrides a child's
@@ -89,7 +101,11 @@ struct SourceControlView: View {
     }
 
     private var mainBody: some View {
-        content
+        VStack(spacing: 0) {
+            scmHeaderBar
+            Divider()
+            content
+        }
         .background(theme.current.body)
         .task(id: root?.path) {
             scm.resolveCredentials = { repo in
