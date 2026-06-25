@@ -67,7 +67,11 @@ struct CodeAssistantPanel: View {
     @State private var runTask: Task<Void, Never>?
     /// Messages the user submitted while a turn was running, in FIFO order; they
     /// auto-send one per turn as the current run finishes (or is stopped).
-    @State private var queued: [String] = []
+    /// FIFO of messages queued while a turn runs. Identifiable so a cancel
+    /// button removes the RIGHT entry even after the queue shifts (drain pops
+    /// the head between render and tap) — index-keyed rows deleted the wrong one.
+    private struct QueuedMessage: Identifiable { let id = UUID(); let text: String }
+    @State private var queued: [QueuedMessage] = []
     @State private var error: String?
     /// Measured render height per assistant turn, keyed by turn id, so each
     /// markdown web-view bubble can be sized to its content in the scroll list.
@@ -1159,20 +1163,21 @@ struct CodeAssistantPanel: View {
             // one per turn. Each is individually removable.
             if !queued.isEmpty {
                 VStack(spacing: 0) {
-                    ForEach(Array(queued.enumerated()), id: \.offset) { index, q in
+                    ForEach(Array(queued.enumerated()), id: \.element.id) { index, q in
                         HStack(spacing: 6) {
                             Image(systemName: "clock")
                                 .font(.system(size: 10))
                                 .foregroundStyle(theme.current.textMuted)
-                            Text("Queued #\(index + 1): \(q)")
+                            Text("Queued #\(index + 1): \(q.text)")
                                 .font(.system(size: 11))
                                 .foregroundStyle(theme.current.textMuted)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                             Spacer()
                             Button {
-                                guard queued.indices.contains(index) else { return }
-                                queued.remove(at: index)
+                                // Remove by stable id, not index — the queue may
+                                // have shifted (FIFO drain) since this row rendered.
+                                queued.removeAll { $0.id == q.id }
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 11))
@@ -1759,7 +1764,7 @@ struct CodeAssistantPanel: View {
         historyIndex = nil
         draftStash = ""
         if busy {
-            queued.append(msg)
+            queued.append(.init(text: msg))
         } else {
             startTurn(msg)
         }
@@ -1838,6 +1843,9 @@ struct CodeAssistantPanel: View {
         busy = true
         statusText = ""
         error = nil
+        // Clear any stale pending-tool card from a prior turn the user ignored —
+        // otherwise it stays interactive against the old args while a new turn runs.
+        pendingTool = nil
         do {
             // Send the most recent ~8 turns as history — server caps too
             // but we'd rather not push a huge payload over the wire.
@@ -1879,7 +1887,7 @@ struct CodeAssistantPanel: View {
         }
         // Drain the next queued message (FIFO) as a fresh, un-cancelled turn.
         if !queued.isEmpty {
-            startTurn(queued.removeFirst())
+            startTurn(queued.removeFirst().text)
         } else {
             busy = false
             runTask = nil

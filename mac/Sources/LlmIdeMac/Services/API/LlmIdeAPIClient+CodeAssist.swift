@@ -160,6 +160,7 @@ extension LlmIdeAPIClient {
         var reply: String?
         var pendingTool: PendingTool?
         var usage: CodeAssistResponse.Usage?
+        var sawProgress = false
         for try await line in bytes.lines {
             guard line.hasPrefix("data:") else { continue }
             let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
@@ -168,6 +169,7 @@ extension LlmIdeAPIClient {
             else { continue }
             switch evt.type {
             case "progress":
+                sawProgress = true
                 let label = Self.progressLabel(phase: evt.phase, tool: evt.tool)
                 await onProgress(label)
             case "done":
@@ -187,6 +189,16 @@ extension LlmIdeAPIClient {
             }
         }
         guard let reply else {
+            // The stream ended without a `done` event. If the agent had already
+            // streamed progress (it likely ran server-side tools — web-search,
+            // create-issue, a git op), retrying on the buffered endpoint would
+            // RE-RUN those side effects. Surface as `.agent` (which
+            // codeAssistRoundTrip does NOT retry) rather than `.http` (which it
+            // does). Only a stream that produced no progress at all is safe to
+            // retry, so that case keeps the retryable `.http`.
+            if sawProgress {
+                throw APIError.agent(message: "The response stream ended after the agent had started working — not retried, to avoid repeating actions it may have already taken.")
+            }
             throw APIError.http(status: 500, code: "STREAM_INCOMPLETE",
                                 message: "The response stream ended unexpectedly.", details: nil)
         }
