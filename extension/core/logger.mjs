@@ -8,10 +8,68 @@
 // of the project's stated values is "zero deps for the HTTP layer."
 
 import { randomBytes } from 'crypto';
+import { appendFileSync, statSync, renameSync, mkdirSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 
 const LEVELS = { trace: 10, debug: 20, info: 30, warn: 40, error: 50 };
 const isPretty = process.stdout.isTTY && !process.env.LLMIDE_LOG_JSON;
 const minLevel = LEVELS[(process.env.LLMIDE_LOG_LEVEL || 'info').toLowerCase()] ?? LEVELS.info;
+
+// File sink for warn+ lines. The Mac app supervises the Node server and only
+// captures its stdout/stderr in an in-memory buffer — when the server crashes
+// (uncaught_exception → process.exit(1)) that buffer is the ONLY record, and
+// it's invisible outside the running app. Persisting warn/error to disk makes
+// an intermittent backend crash diagnosable after the fact.
+//
+// Writes are SYNCHRONOUS on purpose: the uncaught-exception handler logs and
+// then immediately process.exit(1)s, so an async/streamed write would never
+// flush. appendFileSync guarantees the crash line hits disk before we exit.
+//
+// Default path sits next to the dev DB under <repo>/kb/. Override with
+// LLMIDE_LOG_FILE=<path>, or LLMIDE_LOG_FILE='' / 'none' to disable.
+const MAX_LOG_BYTES = 2 * 1024 * 1024; // rotate (single .old) past 2 MB
+const FILE_MIN_LEVEL = LEVELS.warn;    // only persist warn + error
+const logFilePath = resolveLogFile();
+let _fileBytes = initialLogSize(logFilePath);
+
+function resolveLogFile() {
+  const env = process.env.LLMIDE_LOG_FILE;
+  if (env !== undefined) {
+    const t = env.trim();
+    return (t === '' || t.toLowerCase() === 'none') ? null : t;
+  }
+  // core/logger.mjs → repo root is one dir up from core/.
+  try {
+    const root = dirname(dirname(fileURLToPath(import.meta.url)));
+    return join(root, 'kb', 'server.log');
+  } catch {
+    return null;
+  }
+}
+
+function initialLogSize(file) {
+  if (!file) return 0;
+  try { return statSync(file).size; } catch { return 0; }
+}
+
+// Append one already-formatted line to the log file, rotating once past the
+// cap. Fully best-effort — a logging failure must never break the server, so
+// every fs op is guarded and a failure just disables the sink for this line.
+function writeToFile(line) {
+  if (!logFilePath) return;
+  try {
+    if (_fileBytes > MAX_LOG_BYTES) {
+      try { renameSync(logFilePath, `${logFilePath}.old`); } catch { /* ignore */ }
+      _fileBytes = 0;
+    }
+    if (_fileBytes === 0) {
+      try { mkdirSync(dirname(logFilePath), { recursive: true }); } catch { /* ignore */ }
+    }
+    appendFileSync(logFilePath, line);
+    _fileBytes += Buffer.byteLength(line);
+  } catch { /* sink disabled for this line — never throw from logging */ }
+}
 
 const COLORS = {
   trace: '\x1b[90m',
@@ -43,8 +101,15 @@ function format(level, msg, fields) {
 }
 
 function log(level, msg, fields) {
-  if (LEVELS[level] < minLevel) return;
-  const stream = LEVELS[level] >= LEVELS.warn ? process.stderr : process.stdout;
+  const lvl = LEVELS[level];
+  // Persist warn+ to the on-disk crash log ALWAYS — independent of the console
+  // minLevel — so a crash line survives even if the console is quieted, and is
+  // readable after the supervising app exits. Always JSON so it stays greppable.
+  if (lvl >= FILE_MIN_LEVEL) {
+    writeToFile(JSON.stringify({ ts: new Date().toISOString(), level, msg, ...(fields || {}) }) + '\n');
+  }
+  if (lvl < minLevel) return;
+  const stream = lvl >= LEVELS.warn ? process.stderr : process.stdout;
   stream.write(format(level, msg, fields));
 }
 
