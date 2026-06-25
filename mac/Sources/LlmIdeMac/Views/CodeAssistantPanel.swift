@@ -196,15 +196,18 @@ struct CodeAssistantPanel: View {
             if let cur = UUID(uuidString: currentSessionIDString),
                let session = sessions.first(where: { $0.id == cur }) {
                 history = session.history
+                rebuildSentPrompts(from: session.history)
             } else if let mid = migrated, let session = sessions.first(where: { $0.id == mid }) {
                 currentSessionIDString = mid.uuidString
                 history = session.history
+                rebuildSentPrompts(from: session.history)
             } else {
                 let fresh = ChatSession()
                 ChatSessionStore.save(fresh)
                 currentSessionIDString = fresh.id.uuidString
                 sessions = ChatSessionStore.listSessions()
                 history = []
+                sentPrompts = []; historyIndex = nil; draftStash = ""
             }
             if let url = initialURL, !didAttachInitial {
                 didAttachInitial = true
@@ -1749,6 +1752,24 @@ struct CodeAssistantPanel: View {
     /// ↑ in the composer: walk back through previously-sent prompts. Returns
     /// `.ignored` (so the cursor moves normally) unless the field is empty or
     /// we're already browsing history.
+    /// Seed ↑/↓ recall from a loaded/switched session's turns. Without this,
+    /// `sentPrompts` only tracks prompts submitted in the CURRENT app run, so
+    /// after a relaunch or session switch the chat shows prior turns but ↑
+    /// recalls nothing. Synthetic turns (tool acks like "(applied update…)",
+    /// "(continue)") are skipped so they don't pollute recall.
+    private func rebuildSentPrompts(from turns: [LlmIdeAPIClient.CodeAssistTurn]) {
+        var prompts: [String] = []
+        for t in turns where t.role == .user {
+            let c = t.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !c.isEmpty, !c.hasPrefix("(") else { continue }
+            if prompts.last != c { prompts.append(c) }
+        }
+        if prompts.count > 100 { prompts.removeFirst(prompts.count - 100) }
+        sentPrompts = prompts
+        historyIndex = nil
+        draftStash = ""
+    }
+
     private func historyUp() -> KeyPress.Result {
         guard !sentPrompts.isEmpty, draft.isEmpty || historyIndex != nil else { return .ignored }
         if let i = historyIndex {
@@ -2154,6 +2175,7 @@ struct CodeAssistantPanel: View {
         currentSessionIDString = fresh.id.uuidString
         sessions = ChatSessionStore.listSessions()
         history = []
+        sentPrompts = []; historyIndex = nil; draftStash = ""
         draft = ""
         attachments.removeAll()
         autoAttachedPath = nil
@@ -2173,6 +2195,7 @@ struct CodeAssistantPanel: View {
         resetActiveTurnState()
         currentSessionIDString = id.uuidString
         history = session.history
+        rebuildSentPrompts(from: session.history)
         draft = ""
         attachments.removeAll()
         autoAttachedPath = nil
@@ -2193,6 +2216,7 @@ struct CodeAssistantPanel: View {
             if let next = sessions.first {
                 currentSessionIDString = next.id.uuidString
                 history = next.history
+                rebuildSentPrompts(from: next.history)
             } else {
                 createNewSession()
             }
