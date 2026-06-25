@@ -41,6 +41,11 @@ struct LibraryView: View {
     @State private var showingGitInstallSheet = false
     @State private var showingClaudeImportSheet = false
     @State private var pluginInstallMessage: String?
+    /// Held when an install hits "already installed" (409): re-runs the same
+    /// install with replace=true if the user confirms. Replaces the old
+    /// "go to Settings → Plugins to overwrite" punt now that management is
+    /// wholly in Library.
+    @State private var pendingReplaceInstall: ((Bool) async throws -> PluginInstallResponse)?
     /// Persisted set of COLLAPSED section ids (comma-joined). Absence ⇒
     /// expanded. One uniform mechanism drives every section's chevron.
     /// Every section is seeded collapsed so the library opens in a clean,
@@ -215,9 +220,10 @@ struct LibraryView: View {
             skillsSection
 
             // ── Plugins section ───────────────────────────────────────
-            // User-scoped — shown regardless of active project. Empty
-            // state is suppressed (no installed plugins → no header
-            // clutter; user discovers install via Settings → Plugins).
+            // User-scoped — shown regardless of active project. Install /
+            // import / reload live in this section's header menu (the ⊕);
+            // uninstall in each row's context menu. (Plugin management is
+            // wholly here now — there is no Settings → Plugins.)
             pluginsSection
         }
         .listStyle(.inset)
@@ -907,6 +913,15 @@ struct LibraryView: View {
         } message: {
             Text(pluginInstallMessage ?? "")
         }
+        .alert("Plugin already installed", isPresented: Binding(
+            get: { pendingReplaceInstall != nil },
+            set: { if !$0 { pendingReplaceInstall = nil } }
+        )) {
+            Button("Replace", role: .destructive) { Task { await replaceInstall() } }
+            Button("Cancel", role: .cancel) { pendingReplaceInstall = nil }
+        } message: {
+            Text("A plugin with this name is already installed. Replace it with this version?")
+        }
     }
 
     /// One-shot load for agents, plugins, and the skill catalog.
@@ -952,27 +967,40 @@ struct LibraryView: View {
         panel.message = "Choose a plugin .zip"
         panel.prompt = "Install"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        await performInstall { try await api.installPlugin(zipURL: url) }
+        await performInstall { replace in try await api.installPlugin(zipURL: url, replace: replace) }
     }
 
     private func installFromGit(url: String, ref: String?) async {
-        await performInstall {
-            try await api.installPluginFromGit(url: url, ref: ref)
+        await performInstall { replace in
+            try await api.installPluginFromGit(url: url, ref: ref, replace: replace)
         }
     }
 
     /// Common install plumbing: run the install closure, surface
-    /// success/failure via the alert, and refresh the sidebar list.
-    /// Uses 409 (already installed) as a prompt to retry with
-    /// replace=true since that's the common case for "reinstall
-    /// the same plugin from a newer commit".
-    private func performInstall(_ op: () async throws -> PluginInstallResponse) async {
+    /// success/failure via the alert, and refresh the sidebar list. On 409
+    /// (already installed) it holds the op so the "Plugin already installed"
+    /// alert can re-run it with replace=true — the in-Library replacement for
+    /// the old "overwrite from Settings → Plugins" flow.
+    private func performInstall(_ op: @escaping (_ replace: Bool) async throws -> PluginInstallResponse) async {
         do {
-            let resp = try await op()
+            let resp = try await op(false)
             pluginInstallMessage = "Installed \(resp.plugin.displayName.isEmpty ? resp.plugin.name : resp.plugin.displayName) v\(resp.plugin.version)."
             await refreshPlugins()
         } catch let APIError.http(_, code, message, _) where code == "HTTP_ERROR" && message.contains("already installed") {
-            pluginInstallMessage = "\(message)\n\nReinstall (replace) from Settings → Plugins if you want to overwrite."
+            pendingReplaceInstall = op
+        } catch {
+            pluginInstallMessage = error.localizedDescription
+        }
+    }
+
+    /// Re-run the held install with replace=true after the user confirms.
+    private func replaceInstall() async {
+        guard let op = pendingReplaceInstall else { return }
+        pendingReplaceInstall = nil
+        do {
+            let resp = try await op(true)
+            pluginInstallMessage = "Replaced \(resp.plugin.displayName.isEmpty ? resp.plugin.name : resp.plugin.displayName) — now v\(resp.plugin.version)."
+            await refreshPlugins()
         } catch {
             pluginInstallMessage = error.localizedDescription
         }

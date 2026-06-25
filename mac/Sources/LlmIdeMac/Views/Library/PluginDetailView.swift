@@ -1,15 +1,14 @@
 import SwiftUI
 
-/// Read-only summary for an installed plugin — listing its skills,
-/// slash commands and subagents. Enable/install/uninstall live in
-/// Settings → Plugins; the "Configure in Settings" button jumps the
-/// user there. Toggle is inline here so the most common action
-/// (flip enabled) doesn't require navigating away.
+/// Summary for an installed plugin — listing its skills, slash commands
+/// and subagents, with an inline enable toggle. Install lives in the
+/// Library Plugins-section header menu; uninstall in that section's row
+/// context menu. (Plugin management is wholly in Library now — there is no
+/// Settings → Plugins.)
 struct PluginDetailView: View {
     @EnvironmentObject private var theme: ThemeStore
     let api: LlmIdeAPIClient
     let pluginName: String
-    @Environment(ShellState.self) private var shell
 
     @State private var plugin: PluginInfo?
     @State private var loaded = false
@@ -80,11 +79,6 @@ struct PluginDetailView: View {
                 ))
                 .toggleStyle(.switch)
                 .disabled(togglePending)
-            }
-            Button {
-                openSettings()
-            } label: {
-                Label("Manage in Settings", systemImage: "gearshape")
             }
         }
     }
@@ -179,10 +173,6 @@ struct PluginDetailView: View {
         }
     }
 
-    private func openSettings() {
-        shell.section = .settings
-        NotificationCenter.default.post(name: .scrollSettingsToCard, object: "plugins")
-    }
 }
 
 private extension String {

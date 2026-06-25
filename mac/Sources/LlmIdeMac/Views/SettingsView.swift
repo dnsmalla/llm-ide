@@ -6,10 +6,10 @@ struct SettingsView: View {
     @EnvironmentObject var projectStore: ProjectStore
 
     var body: some View {
-        // ScrollViewReader so Library's "Manage in Settings" deep-link
-        // can jump to a specific card. Anchor id matches the string posted
-        // with `.scrollSettingsToCard` ("plugins" today; agent moved
-        // entirely to Library → Agents).
+        // ScrollViewReader so Library's "Open in Settings" deep-link can
+        // jump to a specific card. Anchor id matches the string posted with
+        // `.scrollSettingsToCard` ("connections" today; agents and plugins
+        // moved entirely to Library).
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.lg) {
@@ -53,15 +53,13 @@ struct SettingsView: View {
                                 PreferencesSettingsSection(api: api)
                             }
                             Group {
-                                // AgentSettingsSection used to live here.
-                                // Removed — agent CRUD now happens in
-                                // Library → Agents detail view, since
-                                // the agent runs server-side (and
-                                // primarily off Chrome-extension capture)
-                                // and "browse personas" already lives in
-                                // Library.
+                                // Agent CRUD and Plugin management both live
+                                // in Library now (Agents detail view; the
+                                // Plugins section + PluginDetailView) — removed
+                                // from Settings to keep one source of truth.
+                                // The agent/plugin runtime is server-side and
+                                // "browse" already lived in Library.
                                 AutoCodeSettingsSection()
-                                PluginsSettingsSection(api: api).id("plugins")
                             }
                         }
                         .id(activeId)
