@@ -156,7 +156,11 @@ final class CompletionController: ObservableObject {
             closeInternal(); return
         case .command:
             let pool = commandItems + skillItems
-            items = Self.rank(pool, query: q, keys: { [$0.label, $0.detail] }, limit: maxItems)
+            // Match against the label without its leading "/" so typing "sum"
+            // prefix-matches "/summary" (the query never includes the slash).
+            items = Self.rank(pool, query: q, keys: {
+                [$0.label.hasPrefix("/") ? String($0.label.dropFirst()) : $0.label, $0.detail]
+            }, limit: maxItems)
         case .file:
             items = Self.rank(fileItems, query: q, keys: { [$0.label, $0.detail] }, limit: maxItems)
         }
