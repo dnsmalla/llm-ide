@@ -72,3 +72,6 @@ graphify-out/
 system/
 .code-notes/
 .understand-anything/
+
+# Personal scratch / design notes kept locally, not part of the repo.
+flag-semantics-flow-zero.md
