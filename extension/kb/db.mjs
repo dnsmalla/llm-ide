@@ -132,6 +132,7 @@ export {
   getMeeting,
   listMeetings,
   listEntities,
+  listEntitiesForMeetings,
   getEntity,
   stats,
   statsAdmin,

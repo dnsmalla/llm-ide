@@ -38,13 +38,22 @@ export async function* iterateUserMeetings({ userId, cursor, limit, _db = defaul
   // the wrapper used to handle batches uniformly — keep the shape.
   const result = _db.listMeetings(userId, cursor, limit);
   const rows = Array.isArray(result) ? result : (result?.items || []);
+  // Bulk-fetch entities for the whole page in ONE query instead of one
+  // SELECT per meeting (N+1), so a large export doesn't hammer the single
+  // SQLite connection and stall foreground requests. Falls back to the
+  // per-meeting read below if the batch fetch isn't available/fails.
+  let entitiesByMeeting = {};
+  try {
+    entitiesByMeeting = _db.listEntitiesForMeetings?.(userId, rows.map((m) => m.id)) || {};
+  } catch { entitiesByMeeting = {}; }
   for (const m of rows) {
     // Per-row try/catch: one corrupt meta blob or unencodable Date
     // should not truncate the entire NDJSON stream. We yield a
     // sentinel `_error` record so the client can flag the row and
     // keep ingesting the rest of the batch.
     try {
-      const entities = _db.listEntities(userId, m.id).map(toLegacyEntity);
+      const raw = entitiesByMeeting[m.id] ?? _db.listEntities(userId, m.id);
+      const entities = raw.map(toLegacyEntity);
       yield { meeting: toLegacyMeeting(m), entities };
     } catch (err) {
       yield {

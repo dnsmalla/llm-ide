@@ -190,6 +190,28 @@ export function listEntities(userId, meetingId) {
   }));
 }
 
+// Bulk variant: fetch entities for many meetings in ONE query, grouped by
+// meeting id. Used by the exporter to avoid an N+1 (one SELECT per meeting)
+// that monopolized the single SQLite connection on large accounts. The
+// placeholder list is built from the (validated) id count, never user text.
+export function listEntitiesForMeetings(userId, meetingIds) {
+  requireUser(userId);
+  const ids = (meetingIds || []).map(String);
+  const out = {};
+  if (ids.length === 0) return out;
+  const db = getDb();
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = db.prepare(
+    `SELECT id, meeting_id, kind, text, meta, quote FROM entities
+     WHERE user_id = ? AND meeting_id IN (${placeholders}) ORDER BY meeting_id, rowid`,
+  ).all(userId, ...ids);
+  for (const e of rows) {
+    const row = { ...e, meta: safeParseMeta(e.meta) || {} };
+    (out[e.meeting_id] ||= []).push(row);
+  }
+  return out;
+}
+
 export function getEntity(userId, entityId) {
   requireUser(userId);
   const db = getDb();
