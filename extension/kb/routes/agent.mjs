@@ -362,15 +362,20 @@ export async function handleAgentRoutes(req, res, ctx) {
     return true;
   }
 
-  // GET /kb/agent/project-memory?repo=<homeRelativePath>
-  //   The auto-captured chat-memory facts for one repo, for the in-app viewer.
-  //   Gated by the user's repo allow-list (the SAME boundary as the reader) —
-  //   a non-allow-listed path returns an empty list rather than reading disk.
-  //   { facts: string[], repo: <absolute root | null> }
+  // GET /kb/agent/project-memory?repo=<path>[&repo=<path>…]
+  //   The auto-captured chat-memory facts for the viewer. The client sends its
+  //   indexedRepos candidate paths; we resolve the FIRST allow-listed one —
+  //   exactly what memory-persist writes to — so the viewer always reads the
+  //   same file the agent captures into (not blindly indexedRepos[0], which may
+  //   not be allow-listed). Returns the resolved absolute root for the viewer
+  //   to target subsequent DELETEs. { facts: string[], repo: <root | null> }
   if (req.method === 'GET' && new URL(url, 'http://127.0.0.1').pathname === '/kb/agent/project-memory') {
-    const repoParam = new URL(url, 'http://127.0.0.1').searchParams.get('repo') || '';
+    const candidates = new URL(url, 'http://127.0.0.1').searchParams.getAll('repo');
     const allowed = buildAllowedRoots(userId);
-    const root = allowed ? resolveAllowedRepoRoot(repoParam, allowed) : null;
+    let root = null;
+    if (allowed) {
+      for (const c of candidates) { root = resolveAllowedRepoRoot(c, allowed); if (root) break; }
+    }
     if (!root) { sendJSON(res, 200, { facts: [], repo: null }); return true; }
     sendJSON(res, 200, { facts: readChatMemoryFacts(root), repo: root });
     return true;

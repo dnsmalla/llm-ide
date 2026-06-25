@@ -5,14 +5,16 @@ import SwiftUI
 /// Read + delete only — facts are written by the agent, not added by hand.
 struct ProjectMemoryView: View {
     let api: LlmIdeAPIClient
-    /// Home-relative ("~/…") repo path — the same value sent in
-    /// agentContext.indexedRepos. Empty when no repo is active.
-    let repo: String
+    /// Candidate repo paths (the client's indexedRepos, "~/…"). The server
+    /// resolves the first allow-listed one — the same file the agent captures
+    /// into — and returns it as `resolvedRepo` for deletes. Empty = no project.
+    let repos: [String]
 
     @EnvironmentObject var theme: ThemeStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var facts: [String] = []
+    @State private var resolvedRepo: String?
     @State private var loading = true
     @State private var error: String?
     @State private var busy = false
@@ -68,7 +70,7 @@ struct ProjectMemoryView: View {
                     .foregroundStyle(theme.current.textMuted)
                     .multilineTextAlignment(.center)
             }
-        } else if repo.isEmpty {
+        } else if repos.isEmpty || resolvedRepo == nil {
             centered { emptyState("Open a project with an indexed repo to capture memory.") }
         } else if facts.isEmpty {
             centered { emptyState("Nothing remembered yet. The assistant will capture durable facts as you chat about this project.") }
@@ -124,22 +126,25 @@ struct ProjectMemoryView: View {
     // MARK: Data
 
     private func load() async {
-        guard !repo.isEmpty else { loading = false; return }
+        guard !repos.isEmpty else { loading = false; return }
         loading = true; error = nil
-        do { facts = try await api.projectMemory(repo: repo) }
-        catch { self.error = "Couldn't load project memory." }
+        do {
+            let r = try await api.projectMemory(repos: repos)
+            facts = r.facts
+            resolvedRepo = r.repo
+        } catch { self.error = "Couldn't load project memory." }
         loading = false
     }
 
     private func remove(_ fact: String) async {
-        guard !busy else { return }
+        guard !busy, let repo = resolvedRepo else { return }
         busy = true; defer { busy = false }
         do { facts = try await api.deleteProjectMemoryFact(repo: repo, fact: fact) }
         catch { self.error = "Couldn't update project memory." }
     }
 
     private func clearAll() async {
-        guard !busy else { return }
+        guard !busy, let repo = resolvedRepo else { return }
         busy = true; defer { busy = false }
         do { facts = try await api.clearProjectMemory(repo: repo) }
         catch { self.error = "Couldn't clear project memory." }

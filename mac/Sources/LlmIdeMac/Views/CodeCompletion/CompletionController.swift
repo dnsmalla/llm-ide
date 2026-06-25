@@ -67,16 +67,21 @@ final class CompletionController: ObservableObject {
     /// Load the "/" command + skill catalog once. Best-effort.
     func loadMetaIfNeeded() async {
         guard !metaLoaded, let api else { return }
-        metaLoaded = true   // set first so a failure doesn't hammer the endpoint
         async let cmds = try? api.listAgentCommands()
         async let cat = try? api.listAgentSkillCatalog()
-        let commands = await cmds ?? []
-        commandItems = commands.map { c in
+        let commands = await cmds
+        let catalog = await cat
+        // Only latch as loaded once a fetch actually succeeds — otherwise a
+        // cold-start failure (server not up yet) would permanently disable the
+        // "/" menu; leaving metaLoaded false lets a later .task retry.
+        guard commands != nil || catalog != nil else { return }
+        metaLoaded = true
+        commandItems = (commands ?? []).map { c in
             Item(id: "cmd:\(c.trigger)", kind: .command,
                  label: "/\(c.trigger)", detail: c.description,
                  insert: Self.commandInsert(c), fileURL: nil)
         }
-        if let catalog = await cat {
+        if let catalog {
             var skills: [Item] = []
             let groups = catalog.skills.global + catalog.skills.internal
             for s in groups {

@@ -174,7 +174,7 @@ struct CodeAssistantPanel: View {
         }
         .onChange(of: draft) { _, newValue in completion.update(draft: newValue) }
         .sheet(isPresented: $showProjectMemory) {
-            ProjectMemoryView(api: api, repo: activeMemoryRepo)
+            ProjectMemoryView(api: api, repos: activeMemoryRepos)
                 .environmentObject(theme)
         }
         .task { await refreshRecentIssuesLoop() }
@@ -945,11 +945,11 @@ struct CodeAssistantPanel: View {
         return "none"
     }
 
-    /// Home-relative ("~/…") path of the repo whose chat-memory the assistant
-    /// reads/writes — the first indexed repo, matching the backend's write
-    /// target so the viewer shows exactly what gets recalled. "" if none.
-    private var activeMemoryRepo: String {
-        buildAgentContext().indexedRepos.first?.path ?? ""
+    /// Candidate repo paths ("~/…") for the project-memory viewer. The server
+    /// resolves the first allow-listed one (the agent's actual write target),
+    /// so we hand it the full indexedRepos list rather than guessing first.
+    private var activeMemoryRepos: [String] {
+        buildAgentContext().indexedRepos.compactMap { $0.path }
     }
 
     // MARK: - Autocomplete actions

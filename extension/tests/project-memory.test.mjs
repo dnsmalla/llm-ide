@@ -212,6 +212,23 @@ test('GET /kb/agent/project-memory is gated and returns facts for an allow-liste
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('GET project-memory resolves the FIRST allow-listed candidate (not blindly the first)', async () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'http-multi');           // allow-listed
+  writer.appendChatMemory({ root, facts: ['Resolved from the allow-listed repo'] });
+  // First candidate is NOT allow-listed; the second is — mirrors the agent's
+  // write target so the viewer reads the same file (regression for the
+  // viewer/backend mismatch).
+  const multiUrl = `/kb/agent/project-memory?repo=${encodeURIComponent('/tmp/not-listed')}&repo=${encodeURIComponent(root)}`;
+  const res = mkRes();
+  await handleAgentRoutes(mkReq('GET', multiUrl), res, { userId: u, url: multiUrl });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.facts, ['Resolved from the allow-listed repo']);
+  assert.equal(res.body.repo, root);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('DELETE /kb/agent/project-memory removes one fact and clears all', async () => {
   reset();
   const u = provision();

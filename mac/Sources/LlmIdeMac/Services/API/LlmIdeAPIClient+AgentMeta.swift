@@ -39,13 +39,15 @@ extension LlmIdeAPIClient {
         return repo.addingPercentEncoding(withAllowedCharacters: allowed) ?? repo
     }
 
-    /// Auto-captured chat-memory facts for one repo (home-relative `~/…` path,
-    /// the same value sent in `agentContext.indexedRepos`). Returns [] when the
-    /// repo isn't in the user's allow-list.
-    func projectMemory(repo: String) async throws -> [String] {
+    /// Auto-captured chat-memory facts for the active project. Sends the
+    /// client's indexedRepos candidate paths; the server resolves the first
+    /// allow-listed one (matching the agent's write target) and returns its
+    /// facts plus the resolved absolute root to target subsequent deletes.
+    func projectMemory(repos: [String]) async throws -> (facts: [String], repo: String?) {
+        let query = repos.map { "repo=\(encodeRepo($0))" }.joined(separator: "&")
         let resp: ProjectMemoryResponse = try await get(
-            "/kb/agent/project-memory?repo=\(encodeRepo(repo))", authenticated: true)
-        return resp.facts
+            "/kb/agent/project-memory?\(query)", authenticated: true)
+        return (resp.facts, resp.repo)
     }
 
     /// Remove one captured fact; returns the remaining facts.
