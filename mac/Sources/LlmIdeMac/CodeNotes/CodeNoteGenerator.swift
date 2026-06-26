@@ -61,7 +61,40 @@ public enum CodeNoteGenerator {
         pruneOrphanNotes(notesRoot: notesRoot, validPaths: Set(codeFiles.map(\.path)))
         writeIndex(scan: scan, usedBy: usedBy, repoRoot: repoRoot)
         writeGraphJSON(scan: scan, usedBy: usedBy, repoRoot: repoRoot)
+        mirrorGraphToProjectRoot(repoRoot: repoRoot)
         return written
+    }
+
+    /// Discoverability mirror. The graph is canonically written under the code
+    /// repo's `system/graph/`, but for a project laid out as `<project>/code/<repo>`
+    /// users open the PROJECT root and find its `system/graph/` empty. So when a
+    /// repo sits under a project's `code/` dir, copy the two summary artifacts
+    /// (`index.md` + `graph.json`) to `<project>/system/graph/<repo>/`. Additive
+    /// and best-effort: the canonical per-repo copy and the agent's
+    /// `graphify-out/memory` are untouched, so nothing that reads the graph
+    /// changes — this only makes it findable where users look. Namespaced by
+    /// repo so multiple repos under one project don't collide.
+    static func mirrorGraphToProjectRoot(repoRoot: URL) {
+        let codeParent = repoRoot.deletingLastPathComponent()
+        guard codeParent.lastPathComponent == "code" else { return } // only the code/<repo> layout
+        let projectRoot = codeParent.deletingLastPathComponent()
+        guard projectRoot.path != repoRoot.path else { return }
+        let src = ProjectLayout(root: repoRoot).graphDir
+        let dst = ProjectLayout(root: projectRoot).graphDir
+            .appendingPathComponent(repoRoot.lastPathComponent, isDirectory: true)
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: dst, withIntermediateDirectories: true)
+            for name in ["index.md", "graph.json"] {
+                let s = src.appendingPathComponent(name)
+                guard fm.fileExists(atPath: s.path) else { continue }
+                let d = dst.appendingPathComponent(name)
+                if fm.fileExists(atPath: d.path) { try? fm.removeItem(at: d) }
+                try fm.copyItem(at: s, to: d)
+            }
+        } catch {
+            log.error("graph mirror to project root failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     // MARK: - Per-file note
