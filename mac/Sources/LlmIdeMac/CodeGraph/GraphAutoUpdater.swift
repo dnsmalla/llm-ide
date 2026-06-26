@@ -7,11 +7,12 @@ import os
 /// a periodic timer — so the graph + memory stay current without the manual
 /// "Generate" button.
 ///
-/// "Update only on the existing data": the auto-run is GATED to repos that
-/// already have a generated graph (`system/graph/index.md`). First-generation
-/// stays a manual action; automation only *maintains* what exists. Combined
-/// with the incremental code scan-cache and the doc-set fingerprint, a periodic
-/// tick that finds no change is near-free.
+/// Fully autonomous: `runIfEligible` resolves the repo via `repoToGraph` and
+/// generates on open whether or not a graph exists yet — first-generation is
+/// automatic too (the product's purpose is knowledge the user only reviews,
+/// never hand-triggers). It no-ops only for an empty project with nothing to
+/// graph. Combined with the incremental code scan-cache and the doc-set
+/// fingerprint, a periodic tick that finds no change is near-free.
 @MainActor
 final class GraphAutoUpdater: ObservableObject {
     /// Exposed so the UI can observe the generated graphs.

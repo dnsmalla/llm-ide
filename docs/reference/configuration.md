@@ -56,6 +56,8 @@ All entries use `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`.
 | `autoCodeRunReviewCode` | UserDefaults | `true` | Include review-code tasks. |
 | `autoCodeRunReviewDoc` | UserDefaults | `true` | Include review-doc tasks. |
 | `autoCodeRunReviewConflicts` | UserDefaults | `false` | Include resolve-conflicts tasks. |
+| `autoCodeRunRegression` | UserDefaults | `false` | Include the regression sweep (structural — no prompt template). |
+| `autoCodeRunGenerateKnowledge` | UserDefaults | `true` | Include the read-only **Knowledge** review row (reports the auto-generated code graph + agent memory state; structural — no prompt template). |
 | `autoTaskTemplateReviewCode` | UserDefaults | see `defaultTemplateReviewCode` | Prompt template. |
 | `autoTaskTemplateReviewDoc` | UserDefaults | see `defaultTemplateReviewDoc` | Prompt template. |
 | `autoTaskTemplateReviewConflicts` | UserDefaults | see `defaultTemplateReviewConflicts` | Prompt template. |

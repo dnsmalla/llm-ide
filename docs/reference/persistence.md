@@ -80,7 +80,7 @@ Every key currently in use:
 
 | Key | Owner | Purpose |
 |---|---|---|
-| `serverURL`, `themeID`, `autoCaptureOnMeeting`, `pollIntervalMs`, `activeCLI`, `defaultModelId`, `gitLabBaseURL`, `gitLabLastProjectId`, `gitLabSavedProjects`, `autoCodeUpdateEnabled`, `autoCodeUpdateLookbackCount`, `autoCodeRunReviewCode`, `autoCodeRunReviewDoc`, `autoCodeRunReviewConflicts`, `autoTaskTemplateReviewCode`, `autoTaskTemplateReviewDoc`, `autoTaskTemplateReviewConflicts`, `backendNodePath`, `backendWorkingDir`, `backendAutoStart` | `AppConfig` | See `configuration.md`. |
+| `serverURL`, `themeID`, `autoCaptureOnMeeting`, `pollIntervalMs`, `activeCLI`, `defaultModelId`, `gitLabBaseURL`, `gitLabLastProjectId`, `gitLabSavedProjects`, `autoCodeUpdateEnabled`, `autoCodeUpdateLookbackCount`, `autoCodeRunReviewCode`, `autoCodeRunReviewDoc`, `autoCodeRunReviewConflicts`, `autoCodeRunRegression`, `autoCodeRunGenerateKnowledge`, `autoTaskTemplateReviewCode`, `autoTaskTemplateReviewDoc`, `autoTaskTemplateReviewConflicts`, `backendNodePath`, `backendWorkingDir`, `backendAutoStart` | `AppConfig` | See `configuration.md`. |
 | `LLMIDE_CURRENT_CHAT_SESSION_ID` | `CodeAssistantPanel` | Last-opened chat. |
 | `LLMIDE_CHAT_PANEL_WIDTH` | `ReviewView` | Splitter width. |
 | `LLMIDE_LEGACY_PROMPT_SUPPRESSED` | `AppShell` | Dismissed flag. |
