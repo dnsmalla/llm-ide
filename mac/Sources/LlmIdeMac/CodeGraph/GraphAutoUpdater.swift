@@ -116,14 +116,16 @@ final class GraphAutoUpdater: ObservableObject {
         }
     }
 
-    /// Resolve the active project's repo + doc roots and, if a graph already
-    /// exists for the repo, run an incremental update. No-op otherwise.
+    /// Resolve the active project's repo + doc roots and run a generation
+    /// (first-time OR incremental — see repoToGraph). The whole point of the
+    /// product is autonomous knowledge: the user reviews, never hand-triggers.
+    /// First-gen used to be manual; now the auto-updater does it on open too.
     private func runIfEligible() {
         guard let ap = projectStore?.activeProject else { ensureWatcher(nil); return }
         let projectRoot = URL(fileURLWithPath: ap.localPath)
-        guard let repoRoot = Self.existingGraphRepo(projectRoot: projectRoot) else {
-            // No graph generated yet — first generation stays manual; stop any
-            // watcher left over from a previous (graphed) project.
+        guard let repoRoot = Self.repoToGraph(projectRoot: projectRoot) else {
+            // No code repo to graph (e.g. an empty/new project) — stop any
+            // watcher left over from a previous project.
             ensureWatcher(nil)
             return
         }
@@ -205,5 +207,26 @@ final class GraphAutoUpdater: ObservableObject {
             if isDir, hasGraph(child) { return child }
         }
         return nil
+    }
+
+    /// The repo to (re)generate for, whether or not a graph exists yet. Prefers
+    /// an already-graphed repo (keeps incremental refresh stable), else the code
+    /// repo to graph for the FIRST time: a child of `code/` (the clone-into-code
+    /// layout — the common single-repo case picks that one repo), else the
+    /// project root itself when it directly holds source. nil only when there's
+    /// nothing to graph (empty project). This is what makes first-gen automatic.
+    static func repoToGraph(projectRoot: URL) -> URL? {
+        if let existing = existingGraphRepo(projectRoot: projectRoot) { return existing }
+        let fm = FileManager.default
+        let codeDir = ProjectLayout(root: projectRoot).codeDir
+        let children = (try? fm.contentsOfDirectory(at: codeDir, includingPropertiesForKeys: [.isDirectoryKey],
+                                                    options: [.skipsHiddenFiles])) ?? []
+        let dirs = children.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        if let firstRepo = dirs.first { return firstRepo }   // a code/<repo> to graph
+        // No code/ children: graph the project root iff it actually holds files.
+        let hasFiles = ((try? fm.contentsOfDirectory(at: projectRoot, includingPropertiesForKeys: nil,
+                                                     options: [.skipsHiddenFiles]))?.isEmpty == false)
+        return hasFiles ? projectRoot : nil
     }
 }
