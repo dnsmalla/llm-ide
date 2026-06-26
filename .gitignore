@@ -21,6 +21,7 @@ extension/node_modules/
 extension/bot-worker/node_modules/
 *.log
 npm-debug.log*
+*.out
 
 # Build outputs
 extension/dist/
