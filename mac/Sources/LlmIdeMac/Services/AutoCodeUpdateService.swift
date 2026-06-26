@@ -493,6 +493,13 @@ final class AutoCodeUpdateService: ObservableObject {
                                      gitRoot: resolved.gitRoot)
         }
 
+        // 8. Knowledge — read-only review of the auto-generated graph + memory
+        // (generation itself is automatic: GraphAutoUpdater on open/edit + the
+        // code index). This row just surfaces "what's there" for the user.
+        if !Task.isCancelled, config.autoCodeRunGenerateKnowledge {
+            reportKnowledge(projectRoot: resolved.projectRoot)
+        }
+
         // A user-initiated stop wins over the normal summary.
         if Task.isCancelled {
             statusMessage = parts.isEmpty ? "Cancelled" : "Cancelled · " + parts.joined(separator: " · ")
@@ -500,6 +507,34 @@ final class AutoCodeUpdateService: ObservableObject {
             statusMessage = parts.isEmpty ? "Done — nothing to do" : parts.joined(separator: " · ")
         }
         allEntries = registry.allEntries()
+    }
+
+    /// Read-only review row for the Auto Tasks panel: report the current state
+    /// of the auto-generated knowledge (code-graph file count + agent-memory
+    /// files) for the active project. Generation is automatic (GraphAutoUpdater
+    /// + the code index); this only surfaces "what's there" so the user can
+    /// review it. Reads disk only — never generates, never blocks.
+    private func reportKnowledge(projectRoot: String) {
+        let key = AutoTask.generateKnowledge.rawValue
+        guard let repo = GraphAutoUpdater.repoToGraph(projectRoot: URL(fileURLWithPath: projectRoot)) else {
+            taskOutputs[key] = "No code to graph in this project yet."
+            return
+        }
+        var lines: [String] = ["Repo: \(repo.lastPathComponent)"]
+        let graphJSON = ProjectLayout(root: repo).graphDir.appendingPathComponent("graph.json")
+        if let data = try? Data(contentsOf: graphJSON),
+           let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            let files = (obj["files"] as? [Any])?.count ?? 0
+            lines.append("Graph: \(files) files (system/graph/graph.json)")
+        } else {
+            lines.append("Graph: not generated yet — auto-generates on open.")
+        }
+        let memDir = repo.appendingPathComponent("graphify-out/memory")
+        let mem = ((try? FileManager.default.contentsOfDirectory(atPath: memDir.path)) ?? [])
+            .filter { $0.hasSuffix(".md") }.sorted()
+        lines.append(mem.isEmpty ? "Memory: none yet." : "Memory: \(mem.joined(separator: ", "))")
+        taskOutputs[key] = lines.joined(separator: "\n")
+        taskErrors.removeValue(forKey: key)
     }
 
     /// Drives RegressionRunner once against the active repo. Failure

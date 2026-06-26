@@ -64,6 +64,8 @@ struct AutoCodeView: View {
                         enabled: $config.autoCodeRunReviewConflicts)
                 taskRow(.regression,      label: "Regression",       icon: "arrow.uturn.backward.circle",
                         enabled: $config.autoCodeRunRegression)
+                taskRow(.generateKnowledge, label: "Knowledge",       icon: "brain",
+                        enabled: $config.autoCodeRunGenerateKnowledge)
             }
             .padding(.vertical, 4)
 
@@ -394,30 +396,37 @@ enum AutoTask: String, CaseIterable, Identifiable {
     /// ones back to `status: open`. Has no editable prompt template
     /// because the prompts come from the saved fault reports themselves.
     case regression
+    /// Knowledge generation (code graph + agent memory + search index). The
+    /// generation itself is automatic (GraphAutoUpdater on open/edit + the
+    /// auto code-index); this task surfaces the current state for the user to
+    /// REVIEW. Structural — no editable prompt template.
+    case generateKnowledge
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .reviewCode:      return "Review Code"
-        case .reviewDoc:       return "Review Doc"
-        case .reviewConflicts: return "Review Conflicts"
-        case .regression:      return "Regression"
+        case .reviewCode:        return "Review Code"
+        case .reviewDoc:         return "Review Doc"
+        case .reviewConflicts:   return "Review Conflicts"
+        case .regression:        return "Regression"
+        case .generateKnowledge: return "Knowledge"
         }
     }
 
     var icon: String {
         switch self {
-        case .reviewCode:      return "checkmark.shield"
-        case .reviewDoc:       return "doc.text.magnifyingglass"
-        case .reviewConflicts: return "exclamationmark.triangle"
-        case .regression:      return "arrow.uturn.backward.circle"
+        case .reviewCode:        return "checkmark.shield"
+        case .reviewDoc:         return "doc.text.magnifyingglass"
+        case .reviewConflicts:   return "exclamationmark.triangle"
+        case .regression:        return "arrow.uturn.backward.circle"
+        case .generateKnowledge: return "brain"
         }
     }
 
-    /// Structural tasks (regression) don't have a user-editable
-    /// prompt template — the prompt comes from saved fault reports.
-    /// Callers should hide the template editor when this returns nil.
+    /// Structural tasks (regression, generateKnowledge) don't have a user-
+    /// editable prompt template. Callers should hide the template editor when
+    /// this returns nil.
     func templateBinding(config: AppConfig) -> Binding<String>? {
         switch self {
         case .reviewCode:      return Binding(get: { config.autoTaskTemplateReviewCode },
@@ -426,7 +435,7 @@ enum AutoTask: String, CaseIterable, Identifiable {
                                               set: { config.autoTaskTemplateReviewDoc = $0 })
         case .reviewConflicts: return Binding(get: { config.autoTaskTemplateReviewConflicts },
                                               set: { config.autoTaskTemplateReviewConflicts = $0 })
-        case .regression:      return nil
+        case .regression, .generateKnowledge: return nil
         }
     }
 
@@ -435,7 +444,7 @@ enum AutoTask: String, CaseIterable, Identifiable {
         case .reviewCode:      config.autoTaskTemplateReviewCode = AppConfig.defaultTemplateReviewCode
         case .reviewDoc:       config.autoTaskTemplateReviewDoc = AppConfig.defaultTemplateReviewDoc
         case .reviewConflicts: config.autoTaskTemplateReviewConflicts = AppConfig.defaultTemplateReviewConflicts
-        case .regression:      break       // no template to reset
+        case .regression, .generateKnowledge: break       // no template to reset
         }
     }
 }

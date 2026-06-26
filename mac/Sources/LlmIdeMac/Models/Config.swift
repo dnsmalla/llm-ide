@@ -366,6 +366,12 @@ final class AppConfig: ObservableObject {
     @Published var autoCodeRunRegression: Bool {
         didSet { defaults.set(autoCodeRunRegression, forKey: "autoCodeRunRegression") }
     }
+    /// Surface the auto-generated knowledge (code graph + memory + index) as a
+    /// reviewable Auto Tasks row. Default ON — knowledge generation is core to
+    /// the product's autonomous purpose; the row is read-only status, cheap.
+    @Published var autoCodeRunGenerateKnowledge: Bool {
+        didSet { defaults.set(autoCodeRunGenerateKnowledge, forKey: "autoCodeRunGenerateKnowledge") }
+    }
 
     // Default prompt templates for each auto task type. Review tasks are
     // READ-ONLY: they must not modify the repo (the loop reverts any stray
@@ -528,6 +534,7 @@ final class AppConfig: ObservableObject {
         self.autoCodeRunReviewDoc = defaults.object(forKey: "autoCodeRunReviewDoc") as? Bool ?? true
         self.autoCodeRunReviewConflicts = defaults.object(forKey: "autoCodeRunReviewConflicts") as? Bool ?? false
         self.autoCodeRunRegression = defaults.object(forKey: "autoCodeRunRegression") as? Bool ?? false
+        self.autoCodeRunGenerateKnowledge = defaults.object(forKey: "autoCodeRunGenerateKnowledge") as? Bool ?? true
         self.autoTaskTemplateReviewCode = defaults.string(forKey: "autoTaskTemplateReviewCode") ?? Self.defaultTemplateReviewCode
         self.autoTaskTemplateReviewDoc = defaults.string(forKey: "autoTaskTemplateReviewDoc") ?? Self.defaultTemplateReviewDoc
         self.autoTaskTemplateReviewConflicts = defaults.string(forKey: "autoTaskTemplateReviewConflicts") ?? Self.defaultTemplateReviewConflicts
