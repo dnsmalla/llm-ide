@@ -37,6 +37,11 @@ struct ExplorerView: View {
     /// Persisted chat-panel width (HSplitView has no width binding — read it
     /// back via GeometryReader, same pattern as ReviewView).
     @AppStorage("EXPLORER_CHAT_PANEL_WIDTH") private var chatPanelWidth: Double = 180
+    /// One-time first-launch flag. On the very first app launch we auto-open
+    /// the Code Assistant panel at a wider width so it reads as the main
+    /// surface (see firstLaunchOpenChat); flips true forever after, so every
+    /// later launch leaves the panel however the user last set it.
+    @AppStorage("DID_AUTO_OPEN_EXPLORE_CHAT_V1") private var didAutoOpenChat = false
 
     /// The Explorer is the code-browsing pane, so it roots at the active
     /// project's `code/` folder (where repos clone to) — not the whole project
@@ -106,7 +111,20 @@ struct ExplorerView: View {
         .onChange(of: controlActiveState) { _, state in
             if state == .key { Task { await decorations.refresh(root: root) } }
         }
+        .onAppear(perform: firstLaunchOpenChat)
         }
+    }
+
+    /// First-ever launch: reveal the Code Assistant panel and widen it so the
+    /// chat is the primary surface (image-2 layout). Guarded by didAutoOpenChat
+    /// so it runs exactly once per machine; afterward the panel's open-state and
+    /// width are entirely user-controlled. We only widen if the user hasn't
+    /// already chosen a larger width, so a re-run can never shrink their layout.
+    private func firstLaunchOpenChat() {
+        guard !didAutoOpenChat else { return }
+        didAutoOpenChat = true
+        if chatPanelWidth < 460 { chatPanelWidth = 460 }
+        withAnimation(.easeInOut(duration: 0.25)) { shell.exploreChatVisible = true }
     }
 
     // MARK: - Inline panel toggles (tree · chat)
