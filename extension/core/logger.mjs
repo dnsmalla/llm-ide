@@ -33,6 +33,18 @@ const FILE_MIN_LEVEL = LEVELS.warn;    // only persist warn + error
 const logFilePath = resolveLogFile();
 let _fileBytes = initialLogSize(logFilePath);
 
+// Reset on each start: every backend launch begins with a fresh server.log so
+// the live log never carries stale lines across restarts. The immediately
+// prior run is preserved as `${logFilePath}.old` (the same single-backup scheme
+// as the size cap below), so a crash from the last run stays diagnosable.
+// Best-effort — a failure here must never block startup.
+function rotateOnStartup() {
+  if (!logFilePath || _fileBytes === 0) return; // nothing to roll over
+  try { renameSync(logFilePath, `${logFilePath}.old`); } catch { /* ignore */ }
+  _fileBytes = 0;
+}
+rotateOnStartup();
+
 function resolveLogFile() {
   const env = process.env.LLMIDE_LOG_FILE;
   if (env !== undefined) {
