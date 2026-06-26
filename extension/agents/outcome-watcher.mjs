@@ -85,9 +85,6 @@ function recordCbFailure(provider, userId) {
   circuitBreakers.set(k, cb);
 }
 
-// Test/utility hook — used by the test suite.
-export function _resetCircuitBreakersForTests() { circuitBreakers.clear(); }
-
 // Provider APIs sometimes echo the offending credential back into the
 // error body (e.g. "Bad credentials for ghp_abc...").  Strip the most
 // common token shapes before bubbling the message back to the client so
