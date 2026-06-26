@@ -59,6 +59,33 @@ extension LlmIdeAPIClient {
         return r.repos
     }
 
+    /// Register a local repo path on the user's allow-list. Required before
+    /// `connectGit` (which 403s otherwise). Idempotent server-side. Returns the
+    /// canonical absolute path the server stored.
+    @discardableResult
+    func addUserRepo(path: String, label: String? = nil) async throws -> String {
+        struct Req: Encodable { let path: String; let label: String? }
+        struct Resp: Decodable { let ok: Bool; let path: String }
+        let r: Resp = try await post("/auth/me/repos", body: Req(path: path, label: label), authenticated: true)
+        return r.path
+    }
+
+    struct ConnectGitResult: Decodable {
+        let ok: Bool
+        let filesScanned: Int?
+        let filesIndexed: Int?
+        let chunks: Int?
+    }
+
+    /// Ingest a local repo's code into the KB `sources` corpus (local FTS,
+    /// no network/LLM) so the agent can search it via search-kb / findContext.
+    /// The path must already be allow-listed (see `addUserRepo`).
+    @discardableResult
+    func connectGit(path: String, replace: Bool = true) async throws -> ConnectGitResult {
+        struct Req: Encodable { let path: String; let replace: Bool }
+        return try await post("/kb/connect-git", body: Req(path: path, replace: replace), authenticated: true)
+    }
+
     func listSecretKeys() async throws -> SecretsListResponse {
         try await get("/auth/me/secrets", authenticated: true)
     }

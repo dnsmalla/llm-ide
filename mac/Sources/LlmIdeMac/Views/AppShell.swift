@@ -248,6 +248,10 @@ struct AppShell: View {
             // close). bindProject runs the one-time legacy migration and a
             // fresh scan, so the index follows the active project.
             bindLibraryStore()
+            // Ingest the open project's code into the KB so the agent can
+            // SEARCH it (search-kb / findContext), not just read files. Without
+            // this the corpus stays empty — the app never indexed local code.
+            indexActiveProjectCode()
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             shell.section = .settings
@@ -643,6 +647,26 @@ struct AppShell: View {
     /// folder the store adds (legacy migration, future "+ folder") persists
     /// back into config.  Idempotent — safe to call on every appear and
     /// project change.
+    /// Ingest the open project's code into the KB `sources` corpus so the agent
+    /// can SEARCH it (search-kb / findContext) — `read-file`/`list-files` only
+    /// navigate by path. Fire-and-forget + best-effort: registers the workspace
+    /// root on the allow-list, then runs the local FTS indexer (connect-git,
+    /// ~local, no network/LLM, fast). Skips on project close (no root). If it
+    /// fails, code search just stays empty — never blocks the UI.
+    private func indexActiveProjectCode() {
+        guard let root = WorkspaceRoot.resolve(config: config, projectStore: projectStore) else { return }
+        let path = root.path
+        let api = self.api
+        Task.detached(priority: .utility) {
+            do {
+                try await api.addUserRepo(path: path)   // allow-list (idempotent)
+                _ = try await api.connectGit(path: path) // ingest → KB sources
+            } catch {
+                // best-effort — leave code search empty rather than surfacing
+            }
+        }
+    }
+
     private func bindLibraryStore() {
         // Persist store-originated external-folder mutations back into the
         // durable config list.  AppShell mediates config ↔ store so the
