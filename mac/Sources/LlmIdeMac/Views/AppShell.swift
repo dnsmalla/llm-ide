@@ -248,9 +248,13 @@ struct AppShell: View {
             // close). bindProject runs the one-time legacy migration and a
             // fresh scan, so the index follows the active project.
             bindLibraryStore()
-            // Ingest the open project's code into the KB so the agent can
-            // SEARCH it (search-kb / findContext), not just read files. Without
-            // this the corpus stays empty — the app never indexed local code.
+        }
+        // Ingest the open project's code into the KB so the agent can SEARCH it
+        // (search-kb / findContext), not just read files. Keyed on the active
+        // project's path so it fires on BOTH launch-restore (which sets
+        // activeProject WITHOUT posting .activeProjectChanged — see ProjectStore
+        // rehydrate) AND explicit open/switch. .onReceive alone missed restore.
+        .task(id: projectStore.activeProject?.localPath) {
             indexActiveProjectCode()
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
