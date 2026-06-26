@@ -7,6 +7,10 @@ struct AgentContext: Codable, Equatable {
     var activeProject: Project?
     var indexedRepos: [IndexedRepo]
     var recentIssues: [RecentIssue]?
+    /// Absolute or "~/"-relative path of the folder open in the Explorer. The
+    /// server scopes the read-only file tools (list-files / read-file) to this
+    /// root plus the indexed repos. Optional for back-compat.
+    var workspaceRoot: String?
 
     struct Project: Codable, Equatable {
         var name: String

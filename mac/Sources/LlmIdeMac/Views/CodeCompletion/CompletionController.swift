@@ -20,12 +20,27 @@ final class CompletionController: ObservableObject {
         let detail: String     // description / repo-relative path
         let insert: String?    // command/skill: text the draft becomes
         let fileURL: URL?      // file: attach this
+        let skillId: String?   // librarySkill: "<family>/<dir>" sent to the server
+
+        init(id: String, kind: Kind, label: String, detail: String,
+             insert: String?, fileURL: URL?, skillId: String? = nil) {
+            self.id = id; self.kind = kind; self.label = label; self.detail = detail
+            self.insert = insert; self.fileURL = fileURL; self.skillId = skillId
+        }
     }
 
     /// What the caller should do when the user accepts the selection.
     enum Accept: Equatable {
         case replaceDraft(String)
         case attachFile(url: URL, newDraft: String)
+        /// Invoke a central-library skill: send its id to the server (which reads
+        /// the SKILL.md and frames it as instructions to FOLLOW). `newDraft`
+        /// strips the in-progress "/query".
+        case useSkill(id: String, name: String, newDraft: String)
+        /// Invoke an in-built skill/subagent the agent runs by name → becomes a
+        /// chip whose `directive` ("Use the X skill:") is prepended to the
+        /// message on send, so the composer stays clean (same UX as useSkill).
+        case useDirective(id: String, name: String, directive: String, newDraft: String)
     }
 
     private enum Mode { case none, command, file }
@@ -87,12 +102,14 @@ final class CompletionController: ObservableObject {
         guard commands != nil || catalog != nil || library != nil else { return }
         metaLoaded = true
         // Central skills-repo catalog (the skills the IDE agent can't itself
-        // run): discovery entries whose SKILL.md is attached as context on
-        // select. fileURL = the SKILL.md path so accept reuses the file-attach.
+        // run): selecting one invokes it via the server's skill channel — we
+        // carry the skill id and the server reads its SKILL.md and frames it as
+        // instructions to FOLLOW (NOT a file attachment, which the assistant
+        // would treat as data to edit).
         libraryItems = (library ?? []).map { s in
             Item(id: "lib:\(s.id)", kind: .librarySkill,
                  label: s.name, detail: "\(s.family) · \(s.description)",
-                 insert: nil, fileURL: URL(fileURLWithPath: s.path))
+                 insert: nil, fileURL: nil, skillId: s.id)
         }
         commandItems = (commands ?? []).map { c in
             Item(id: "cmd:\(c.trigger)", kind: .command,
@@ -179,12 +196,25 @@ final class CompletionController: ObservableObject {
         guard isOpen, items.indices.contains(selected) else { return nil }
         let item = items[selected]
         switch item.kind {
-        case .command, .skill, .subagent:
+        case .command:
+            // Slash command: replace the draft so the user can fill in args.
             return .replaceDraft(item.insert ?? item.label)
-        case .librarySkill, .file:
-            // A library skill attaches its SKILL.md (fileURL) as context so the
-            // agent can follow it; a file attaches itself. Both strip the
-            // in-progress "/query" or "@token" from the draft.
+        case .skill, .subagent:
+            // In-built skill/subagent the agent runs by name → a chip whose
+            // directive ("Use the X skill:") is prepended to the message on send,
+            // keeping the composer clean (consistent with library-skill chips).
+            let directive = (item.insert ?? item.label).trimmingCharacters(in: .whitespacesAndNewlines)
+            return .useDirective(id: item.id, name: item.label, directive: directive,
+                                 newDraft: Self.draftRemovingLastToken(currentDraft))
+        case .librarySkill:
+            // Invoke the skill via the server channel — do NOT attach its
+            // SKILL.md as a file (the assistant would edit it instead of
+            // following it). Strip the in-progress "/query" from the draft.
+            guard let id = item.skillId else { return nil }
+            return .useSkill(id: id, name: item.label,
+                             newDraft: Self.draftRemovingLastToken(currentDraft))
+        case .file:
+            // A file attaches itself; strip the in-progress "@token".
             guard let url = item.fileURL else { return nil }
             let newDraft = Self.draftRemovingLastToken(currentDraft)
             return .attachFile(url: url, newDraft: newDraft)

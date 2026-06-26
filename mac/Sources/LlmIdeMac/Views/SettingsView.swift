@@ -60,6 +60,7 @@ struct SettingsView: View {
                                 // The agent/plugin runtime is server-side and
                                 // "browse" already lived in Library.
                                 AutoCodeSettingsSection()
+                                GraphMemorySettingsSection()
                             }
                         }
                         .id(activeId)

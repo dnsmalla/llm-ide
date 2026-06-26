@@ -9,6 +9,9 @@ struct ProjectMemoryView: View {
     /// resolves the first allow-listed one — the same file the agent captures
     /// into — and returns it as `resolvedRepo` for deletes. Empty = no project.
     let repos: [String]
+    /// The open Explorer folder ("~/…"), if any. Lets memory resolve to the
+    /// open project even when it isn't a formally-indexed repo.
+    var workspaceRoot: String? = nil
 
     @EnvironmentObject var theme: ThemeStore
     @Environment(\.dismiss) private var dismiss
@@ -70,8 +73,8 @@ struct ProjectMemoryView: View {
                     .foregroundStyle(theme.current.textMuted)
                     .multilineTextAlignment(.center)
             }
-        } else if repos.isEmpty || resolvedRepo == nil {
-            centered { emptyState("Open a project with an indexed repo to capture memory.") }
+        } else if resolvedRepo == nil {
+            centered { emptyState("Open a project folder (or index a repo) to capture memory.") }
         } else if facts.isEmpty {
             centered { emptyState("Nothing remembered yet. The assistant will capture durable facts as you chat about this project.") }
         } else {
@@ -126,10 +129,10 @@ struct ProjectMemoryView: View {
     // MARK: Data
 
     private func load() async {
-        guard !repos.isEmpty else { loading = false; return }
+        guard !repos.isEmpty || (workspaceRoot?.isEmpty == false) else { loading = false; return }
         loading = true; error = nil
         do {
-            let r = try await api.projectMemory(repos: repos)
+            let r = try await api.projectMemory(repos: repos, workspaceRoot: workspaceRoot)
             facts = r.facts
             resolvedRepo = r.repo
         } catch { self.error = "Couldn't load project memory." }
@@ -139,14 +142,14 @@ struct ProjectMemoryView: View {
     private func remove(_ fact: String) async {
         guard !busy, let repo = resolvedRepo else { return }
         busy = true; defer { busy = false }
-        do { facts = try await api.deleteProjectMemoryFact(repo: repo, fact: fact) }
+        do { facts = try await api.deleteProjectMemoryFact(repo: repo, fact: fact, workspaceRoot: workspaceRoot) }
         catch { self.error = "Couldn't update project memory." }
     }
 
     private func clearAll() async {
         guard !busy, let repo = resolvedRepo else { return }
         busy = true; defer { busy = false }
-        do { facts = try await api.clearProjectMemory(repo: repo) }
+        do { facts = try await api.clearProjectMemory(repo: repo, workspaceRoot: workspaceRoot) }
         catch { self.error = "Couldn't clear project memory." }
     }
 }

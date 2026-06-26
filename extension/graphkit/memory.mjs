@@ -146,23 +146,45 @@ export function resolveAllowedRepoRoot(repoPath, allowedRoots) {
   return root;
 }
 
+// A client-supplied workspace root is trusted for memory ONLY if it's a sane
+// project root: absolute, no `..`, and not over-broad ('/' or $HOME). Same
+// posture as repo-files.mjs — the user explicitly opened it, but reads/writes
+// still stay rooted under it (resolveAllowedRepoRoot collapses `..`).
+function isSafeWorkspaceRoot(p) {
+  if (typeof p !== 'string' || !p) return false;
+  const expanded = expandTilde(p);
+  if (expanded.split(/[/\\]/).includes('..')) return false;
+  if (!isAbsolute(expanded)) return false;
+  const real = resolve(normalize(expanded));
+  if (real === '/' || real === resolve(normalize(homedir()))) return false;
+  if (real.split(/[/\\]/).filter(Boolean).length <= 1) return false;
+  return true;
+}
+
 // Build the per-user allow-set, normalised the same way resolveAllowedRepoRoot
-// normalises candidate paths, so the .has() comparison is symmetric. A user
-// with no registered repos gets an empty set → every repo fails the gate.
-// Returns null on a DB error so callers can fail closed.
-export function buildAllowedRoots(userId) {
+// normalises candidate paths, so the .has() comparison is symmetric. Includes
+// the DB repo allow-list (trusted) plus the open workspace folder when given
+// (client-supplied but validated by isSafeWorkspaceRoot) so project memory
+// works for the folder the user has open even when it isn't formally indexed.
+// A user with no registered repos and no workspace gets an empty set → every
+// repo fails the gate. Returns null on a DB error with no usable workspace
+// fallback, so callers can fail closed.
+export function buildAllowedRoots(userId, workspaceRoot) {
   if (!userId) return null;
+  const set = new Set();
   try {
-    return new Set(
-      userRepoAllowlist(userId)
-        .filter((p) => typeof p === 'string' && p)
-        // Expand tilde defensively in case a legacy allow-list entry is
-        // home-relative.
-        .map((p) => normalizeForCompare(resolve(normalize(expandTilde(p))))),
-    );
+    for (const p of userRepoAllowlist(userId)) {
+      // Expand tilde defensively in case a legacy allow-list entry is home-relative.
+      if (typeof p === 'string' && p) set.add(normalizeForCompare(resolve(normalize(expandTilde(p)))));
+    }
   } catch {
-    return null;
+    // DB hiccup — a valid workspace root can still seed the set; otherwise fail closed.
+    if (!isSafeWorkspaceRoot(workspaceRoot)) return null;
   }
+  if (isSafeWorkspaceRoot(workspaceRoot)) {
+    set.add(normalizeForCompare(resolve(normalize(expandTilde(workspaceRoot)))));
+  }
+  return set;
 }
 
 function repoMemoryBlock(repo, budget, allowedRoots) {
@@ -227,17 +249,34 @@ function repoMemoryBlock(repo, budget, allowedRoots) {
 }
 
 export function renderGraphifyMemory(agentContext, userId) {
-  const repos = agentContext?.indexedRepos;
-  if (!Array.isArray(repos) || repos.length === 0) return '';
   if (!userId) return '';   // no anonymous reads
+  const indexed = Array.isArray(agentContext?.indexedRepos) ? agentContext.indexedRepos : [];
+  const wsRoot = agentContext?.workspaceRoot;
 
-  // Build the allow-set once (shared helper; see buildAllowedRoots). A user
-  // with no registered repos gets an empty set → every repo silently fails the
-  // gate; a DB hiccup returns null → fail closed.
-  const allowedRoots = buildAllowedRoots(userId);
+  // Candidates: the indexed repos plus the open workspace folder, so a project
+  // that isn't formally indexed still gets project memory. Workspace goes last
+  // so an indexed repo wins when both resolve to memory.
+  const rawCandidates = [...indexed];
+  if (typeof wsRoot === 'string' && wsRoot) rawCandidates.push({ name: 'Workspace', path: wsRoot });
+  if (rawCandidates.length === 0) return '';
+
+  // Build the allow-set once (shared helper; see buildAllowedRoots). DB allow-
+  // list plus the validated workspace root. Empty set / null → fail closed.
+  const allowedRoots = buildAllowedRoots(userId, wsRoot);
   if (!allowedRoots || allowedRoots.size === 0) return '';
 
-  const candidates = repos.slice(0, MAX_REPOS);
+  // Dedup by resolved path so the workspace folder doesn't double-render when
+  // it's also an indexed repo.
+  const seen = new Set();
+  const candidates = [];
+  for (const c of rawCandidates) {
+    if (!c?.path) continue;
+    const key = normalizeForCompare(resolve(normalize(expandTilde(c.path))));
+    if (seen.has(key)) continue;
+    seen.add(key);
+    candidates.push(c);
+    if (candidates.length >= MAX_REPOS) break;
+  }
   const blocks = [];
   let totalUsed = 0;
   for (const repo of candidates) {

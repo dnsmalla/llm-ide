@@ -380,8 +380,12 @@ export async function handleAgentRoutes(req, res, ctx) {
   //   not be allow-listed). Returns the resolved absolute root for the viewer
   //   to target subsequent DELETEs. { facts: string[], repo: <root | null> }
   if (req.method === 'GET' && new URL(url, 'http://127.0.0.1').pathname === '/kb/agent/project-memory') {
-    const candidates = new URL(url, 'http://127.0.0.1').searchParams.getAll('repo');
-    const allowed = buildAllowedRoots(userId);
+    const params = new URL(url, 'http://127.0.0.1').searchParams;
+    const workspaceRoot = params.get('workspaceRoot') || undefined;
+    // Try indexed-repo candidates then the open workspace folder (so the viewer
+    // resolves the same target memory-persist/renderGraphifyMemory now use).
+    const candidates = [...params.getAll('repo'), ...(workspaceRoot ? [workspaceRoot] : [])];
+    const allowed = buildAllowedRoots(userId, workspaceRoot);
     let root = null;
     if (allowed) {
       for (const c of candidates) { root = resolveAllowedRepoRoot(c, allowed); if (root) break; }
@@ -396,7 +400,9 @@ export async function handleAgentRoutes(req, res, ctx) {
   //   { facts: string[] }  (the remaining facts)
   if (req.method === 'DELETE' && new URL(url, 'http://127.0.0.1').pathname === '/kb/agent/project-memory') {
     const body = parseJSON(await readBody(req, 8 * 1024)) || {};
-    const allowed = buildAllowedRoots(userId);
+    // Allow the resolved workspace root too — the GET may have resolved memory
+    // to the open folder, so its DELETEs target that same (validated) root.
+    const allowed = buildAllowedRoots(userId, typeof body.workspaceRoot === 'string' ? body.workspaceRoot : undefined);
     const root = allowed ? resolveAllowedRepoRoot(body.repo, allowed) : null;
     if (!root) {
       sendJSON(res, 404, { error: { code: 'REPO_NOT_ALLOWED', message: 'repo not in allow-list' } });

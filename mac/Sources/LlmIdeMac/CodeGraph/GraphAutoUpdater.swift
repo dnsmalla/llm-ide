@@ -40,6 +40,12 @@ final class GraphAutoUpdater: ObservableObject {
     // than waiting for the interval timer. nil until a graphed project is active.
     private var watcher: RepoFileWatcher?
     private var watchedRoot: String?   // standardized path the watcher is on, or nil
+    // Signature of the last graph we reported a "knowledge updated" notification
+    // for (per repo). The auto-updater regenerates on every timer tick AND every
+    // file edit (FSEvents), and most of those produce an IDENTICAL graph — so
+    // without this we'd post the same "N code · M doc" notification repeatedly.
+    // We only notify when this signature actually changes.
+    private var lastReportedSignature: String?
 
     nonisolated private static let log = Logger(subsystem: "com.llmide.macapp",
                                                 category: "GraphAutoUpdater")
@@ -159,6 +165,19 @@ final class GraphAutoUpdater: ObservableObject {
         store.store(repo: repoRoot, mode: "all", graph: graph.mergedGraph,
                     chunks: graph.docChunks, docCount: graph.docCount, laidOut: false, docFingerprint: fp)
         Self.log.info("published auto-graph to session store: code=\(self.graph.codeGraph.nodes.count, privacy: .public) doc=\(self.graph.docGraph.nodes.count, privacy: .public) all=\(self.graph.mergedGraph.nodes.count, privacy: .public) for \(repoRoot.lastPathComponent, privacy: .public)")
+        // Dedup the notification: only report when the graph actually changed
+        // since the last report for THIS repo. The view still gets the fresh
+        // (re-stored) graphs above; this just stops identical "knowledge updated"
+        // spam on every unchanged auto-tick / file-edit.
+        let signature = [
+            repoRoot.standardizedFileURL.path,
+            String(graph.codeGraph.nodes.count),
+            String(graph.docGraph.nodes.count),
+            String(graph.mergedGraph.nodes.count),
+            graph.docFingerprint ?? "",
+        ].joined(separator: "|")
+        guard signature != lastReportedSignature else { return }
+        lastReportedSignature = signature
         activity?.report(
             kind: .knowledgeUpdated,
             title: "Project knowledge updated — \(graph.codeGraph.nodes.count) code · \(graph.docGraph.nodes.count) doc nodes",

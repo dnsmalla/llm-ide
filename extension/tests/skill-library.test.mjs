@@ -35,7 +35,7 @@ fs.mkdirSync(path.join(repo, 'skills', 'broken'), { recursive: true });
 writeSkill('agent-tools', 'search-kb', 'search-kb', 'should be ignored');
 
 process.env.SKILLS_REPO = repo;
-const { listSkillLibrary, resolveCentralSkillsRepo, _resetSkillLibraryCache } =
+const { listSkillLibrary, readSkillInstructions, resolveCentralSkillsRepo, _resetSkillLibraryCache } =
   await import('../llm_agent/skills/skill-library.mjs');
 
 test('resolveCentralSkillsRepo finds the repo via $SKILLS_REPO', () => {
@@ -71,6 +71,29 @@ test('a repo with the marker but no library families yields an empty catalog (no
   assert.deepEqual(out.skills, []);
   fs.rmSync(empty, { recursive: true, force: true });
   process.env.SKILLS_REPO = repo; // restore
+});
+
+test('readSkillInstructions returns name + SKILL.md body for a catalogued id', () => {
+  process.env.SKILLS_REPO = repo;
+  _resetSkillLibraryCache();
+  const sk = readSkillInstructions('runtime/atomize-text');
+  assert.ok(sk, 'expected a result for a known id');
+  assert.equal(sk.id, 'runtime/atomize-text');
+  assert.equal(sk.name, 'atomize-text');
+  // The full SKILL.md content (frontmatter + body) is returned for the agent to follow.
+  assert.match(sk.content, /Split text into atomic units|atomize-text/);
+});
+
+test('readSkillInstructions refuses an unknown id and never reads an arbitrary path', () => {
+  _resetSkillLibraryCache();
+  // Not in the catalog → null (no read of a client-named file/path).
+  assert.equal(readSkillInstructions('skills/does-not-exist'), null);
+  // A real absolute path that is NOT a catalogued id must also be refused —
+  // the gate is the catalog, not the filesystem, so a client can't smuggle a
+  // path through this channel.
+  assert.equal(readSkillInstructions('/etc/passwd'), null);
+  assert.equal(readSkillInstructions(''), null);
+  assert.equal(readSkillInstructions(null), null);
 });
 
 test('cleanup', () => {

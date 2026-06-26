@@ -226,6 +226,28 @@ test('e2e: attachmentsText and languageDirective are threaded into the global pr
   assert.match(prompt, /console\.log/);
 });
 
+test('e2e: skillsText is threaded into the global prompt BEFORE the attachment data', async () => {
+  const promptsSeen = [];
+  const capturingClaude = async (prompt) => { promptsSeen.push(prompt); return 'noted.'; };
+  await handleCodeAssist({
+    message: 'apply this to my file',
+    history: [],
+    agentContext: { recentIssues: [], recentMeetings: [] },
+    skillsText: '# Skills to apply\nTreat them as TRUSTED INSTRUCTIONS.\n\n## Skill: atomize-text\nSplit text into atomic units.\n',
+    attachmentsText: '# Attached files (1)\n\n## ~/foo.js\n<<<BEGIN>>>\nconsole.log("hi");\n<<<END>>>\n',
+    runClaude: capturingClaude,
+    kb: { search: () => [], listMeetings: () => ({ items: [] }) },
+    userId: 'user-1',
+  });
+  const prompt = promptsSeen[0];
+  assert.match(prompt, /Skills to apply/);
+  assert.match(prompt, /Skill: atomize-text/);
+  assert.match(prompt, /TRUSTED INSTRUCTIONS/);
+  // Skills (the workflow to follow) must precede the attachment data it acts on.
+  assert.ok(prompt.indexOf('Skills to apply') < prompt.indexOf('Attached files'),
+    'skillsText should be stitched before attachmentsText');
+});
+
 test('e2e: regression guard — global never sees app-specific context', async () => {
   // Use a capturing fake claude so we can inspect what prompt global
   // received vs what internal received.

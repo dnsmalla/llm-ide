@@ -88,5 +88,32 @@ export function listSkillLibrary() {
   return _cache;
 }
 
+// Max SKILL.md chars sent as followable instructions. Generous — a skill is a
+// workflow, not a data dump — but bounded so a pathological file can't blow the
+// prompt budget.
+const MAX_SKILL_CHARS = 24_000;
+
+// Resolve a library skill id ("<family>/<dir>") to its followable instructions
+// by reading the SKILL.md from the LOCAL central repo. Returns
+// { id, name, content } or null for an unknown id.
+//
+// SECURITY: the id MUST be one listSkillLibrary() catalogs — we look the path
+// up in the catalog and never read a client-supplied path. This is what lets
+// the caller frame the content as TRUSTED, followable instructions: it comes
+// from the user's own on-disk skills repo, not the wire, so a client can't
+// smuggle arbitrary "follow me" text through this channel.
+export function readSkillInstructions(id) {
+  if (typeof id !== 'string' || !id) return null;
+  const { skills } = listSkillLibrary();
+  const entry = skills.find((s) => s.id === id);
+  if (!entry) return null;
+  try {
+    const raw = readFileSync(entry.path, 'utf8');
+    return { id: entry.id, name: entry.name, content: raw.slice(0, MAX_SKILL_CHARS) };
+  } catch {
+    return null;
+  }
+}
+
 // Test hook — drop the cache so a test can point at a different repo via env.
 export function _resetSkillLibraryCache() { _cache = null; }

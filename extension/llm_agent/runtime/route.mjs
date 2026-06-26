@@ -18,7 +18,9 @@ import { globalSkills, internalSkills, buildPerUserSkillSet } from '../skills/in
 import { sanitizePersonaSuffix } from '../../agents/prompt-utils.mjs';
 import { renderGraphifyMemory } from '../../graphkit/index.mjs';
 import { persistTurnMemory } from './memory-persist.mjs';
+import { buildReadableRoots, handleListFiles, handleReadFile } from './handlers/repo-files.mjs';
 import { redactFence } from './redaction.mjs';
+import { logger } from '../../core/logger.mjs';
 
 // Re-exported for the HTTP routes that historically imported these
 // from here (server/auth-routes.mjs, kb/routes/agent.mjs import the
@@ -46,6 +48,7 @@ export async function handleCodeAssist({
   history,
   agentContext,             // arrives from the client; ONLY internal consumes it
   attachmentsText,          // sanitized attachment block (optional)
+  skillsText,               // trusted, followable skill-instruction block (optional)
   languageDirective,        // "Respond in <lang>" style line (optional)
   runClaude,
   kb,
@@ -79,8 +82,12 @@ export async function handleCodeAssist({
   // attachment block + language directive that the legacy non-agent
   // path embedded. Restitch them in front of the user message so the
   // global agent sees the same context the user provided.
+  // skillsText goes BEFORE attachmentsText: skills are instructions to follow,
+  // attachments are data to act on — the agent should read the workflow first,
+  // then the material it applies to.
   const composedUserMessage = [
     languageDirective || '',
+    skillsText || '',
     attachmentsText || '',
     effectiveMessage || '',
   ].filter((s) => typeof s === 'string' && s.length > 0).join('\n\n');
@@ -130,9 +137,25 @@ export async function handleCodeAssist({
   // global agent is the primary tool-emitter, so a stray `<<<TOOL_CALL>>>` in
   // repo content must not be able to prime a forged tool call from the system
   // prompt. (Same defense the loop applies to user messages / tool results.)
+  // Per-request memory overhead, surfaced both in the log and the response
+  // `usage` so the cost of the always-on memory block is visible in the app.
+  let memoryChars = 0;
+  let memoryHasChat = false;
   try {
     const memBlock = renderGraphifyMemory(agentContext, userId);
-    if (memBlock) personaBase += `\n\n${redactFence(memBlock)}`;
+    if (memBlock) {
+      personaBase += `\n\n${redactFence(memBlock)}`;
+      memoryChars = memBlock.length;
+      memoryHasChat = memBlock.indexOf('chat-memory.md') !== -1;
+    }
+    // ~4 chars/token is a rough English estimate. hasChatMemory is the share
+    // from the chat-capture pipeline (vs graph-derived repo.md/graph-notes/
+    // doc-notes), so you can see how much the LLM-extracted half adds.
+    logger.info('memory_context', {
+      chars: memoryChars,
+      approxTokens: Math.round(memoryChars / 4),
+      hasChatMemory: memoryHasChat,
+    });
   } catch { /* memory is best-effort — keep the base without it */ }
 
   // Global handler set: ask-internal (for app-state-aware questions)
@@ -141,6 +164,12 @@ export async function handleCodeAssist({
   // plugin defines a subagent the user's subagent Map is empty and
   // any invocation gets a helpful "unknown subagent" error rather
   // than a tool-not-found.
+  // Roots the file tools may read within: the DB-registered (indexed) repos
+  // plus the open workspace folder the client sent. Built per request so a
+  // project switch / new index is reflected immediately, and so the gate reads
+  // the allow-list fresh from the DB rather than trusting the client.
+  const readableRoots = buildReadableRoots({ userId, workspaceRoot: agentContext?.workspaceRoot });
+
   const handlers = {
     'ask-internal': (args, loopCtx) => askInternal(args, {
       agentContext,
@@ -178,6 +207,12 @@ export async function handleCodeAssist({
     // per-user Anthropic/SerpAPI key.
     'web-search': (args) => handleWebSearch(args, { userId }),
     'fetch-url': (args) => handleFetchUrl(args, { userId }),
+    // Read-only repo file access, scoped to the open workspace + the user's
+    // indexed repos (built fresh per request from the DB allow-list + the
+    // client's workspaceRoot; see buildReadableRoots for the security gate).
+    // This is what lets "find the README and review it" work without an attach.
+    'list-files': (args) => handleListFiles(args, { roots: readableRoots }),
+    'read-file': (args) => handleReadFile(args, { roots: readableRoots }),
   };
 
   const out = await runAgentLoop({
@@ -225,5 +260,8 @@ export async function handleCodeAssist({
     }).catch(() => {});
   }
 
-  return expandedFrom ? { ...out, expandedFrom } : out;
+  // Surface the per-request memory overhead so the client can show it (and the
+  // user can judge whether the always-on memory block is worth its tokens).
+  const memoryUsage = { chars: memoryChars, approxTokens: Math.round(memoryChars / 4), hasChatMemory: memoryHasChat };
+  return { ...out, memoryUsage, ...(expandedFrom ? { expandedFrom } : {}) };
 }

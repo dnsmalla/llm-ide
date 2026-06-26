@@ -140,6 +140,51 @@ test('resolveAllowedRepoRoot gate: accepts allow-listed, rejects traversal/relat
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+// ── workspace-root path (open folder that isn't an indexed repo) ─────
+test('buildAllowedRoots trusts a validated workspace root, rejects over-broad ones', () => {
+  reset();
+  const u = provision(); // user has NO indexed repos
+  const ws = path.join(__dirname, `_pm-ws-${process.pid}`);
+  fs.mkdirSync(path.join(ws, 'graphify-out', 'memory'), { recursive: true });
+  // A real, deep, project-shaped folder is accepted…
+  const ok = memory.buildAllowedRoots(u, ws);
+  assert.equal(ok.size, 1);
+  assert.ok(memory.resolveAllowedRepoRoot(ws, ok)); // resolvable
+  // …but over-broad roots are refused (would mean "read most of the disk").
+  assert.equal(memory.buildAllowedRoots(u, '/').size, 0);
+  if (process.env.HOME) assert.equal(memory.buildAllowedRoots(u, process.env.HOME).size, 0);
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
+test('renderGraphifyMemory inlines chat-memory.md from the workspace root (no indexed repo)', () => {
+  reset();
+  const u = provision(); // no addUserRepo — the folder is NOT indexed
+  const ws = path.join(__dirname, `_pm-ws2-${process.pid}`);
+  fs.mkdirSync(path.join(ws, 'graphify-out', 'memory'), { recursive: true });
+  fs.writeFileSync(path.join(ws, 'graphify-out', 'memory', 'chat-memory.md'),
+    '# Chat memory\n- Uses the open-workspace memory path\n');
+  // indexedRepos empty, but workspaceRoot is provided → still recalled.
+  const out = memory.renderGraphifyMemory({ indexedRepos: [], workspaceRoot: ws }, u);
+  assert.match(out, /open-workspace memory path/);
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
+test('persistTurnMemory captures into the workspace root when no repo is indexed', async () => {
+  reset();
+  const u = provision();
+  const ws = path.join(__dirname, `_pm-ws3-${process.pid}`);
+  fs.mkdirSync(path.join(ws, 'graphify-out', 'memory'), { recursive: true });
+  const runClaude = async () => '["Deploys via build.sh offline"]';
+  const result = await persist.persistTurnMemory({
+    agentContext: { indexedRepos: [], workspaceRoot: ws },
+    userId: u, userMessage: 'q', reply: 'a', runClaude,
+  });
+  assert.ok(Array.isArray(result) && result.some((f) => /build\.sh/.test(f)));
+  const onDisk = fs.readFileSync(path.join(ws, 'graphify-out', 'memory', 'chat-memory.md'), 'utf8');
+  assert.match(onDisk, /build\.sh/);
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
 // ── persistTurnMemory (end-to-end) ───────────────────────────────────
 test('persistTurnMemory writes extracted facts into the allow-listed repo', async () => {
   reset();

@@ -47,6 +47,11 @@ extension LlmIdeAPIClient {
         let tier: String?
         let history: [CodeAssistTurn]
         let attachments: [CodeAttachment]
+        /// Library-skill ids ("<family>/<dir>") the user invoked from the "/"
+        /// menu. The server reads each SKILL.md from the local central repo and
+        /// frames it as a TRUSTED instruction to follow — we send only ids, never
+        /// content, so this channel can't be used to smuggle followable text.
+        let skills: [String]
         let agentContext: AgentContext?     // NEW — optional for back-compat
     }
     struct CodeAssistResponse: Codable {
@@ -57,6 +62,12 @@ extension LlmIdeAPIClient {
             let attachmentCount: Int
             let attachmentChars: Int
             let paths: [String]
+            /// Per-request project-memory overhead (the always-on memory block
+            /// inlined into the prompt). Optional for back-compat with servers
+            /// that don't report it.
+            let memoryApproxTokens: Int?
+            let memoryChars: Int?
+            let memoryHasChatMemory: Bool?
         }
     }
 
@@ -72,6 +83,7 @@ extension LlmIdeAPIClient {
         tier: String? = nil,
         history: [CodeAssistTurn],
         attachments: [CodeAttachment],
+        skills: [String] = [],
         agentContext: AgentContext? = nil,
     ) async throws -> CodeAssistResponse {
         try await post(
@@ -84,6 +96,7 @@ extension LlmIdeAPIClient {
                 tier: tier,
                 history: history,
                 attachments: attachments,
+                skills: skills,
                 agentContext: agentContext,
             ),
             authenticated: true,
@@ -133,6 +146,7 @@ extension LlmIdeAPIClient {
         tier: String? = nil,
         history: [CodeAssistTurn],
         attachments: [CodeAttachment],
+        skills: [String] = [],
         agentContext: AgentContext? = nil,
         onProgress: @escaping @MainActor (String) -> Void,
     ) async throws -> CodeAssistResponse {
@@ -146,7 +160,8 @@ extension LlmIdeAPIClient {
         }
         req.httpBody = try JSONEncoder().encode(CodeAssistRequest(
             message: message, language: language, model: model, provider: provider,
-            tier: tier, history: history, attachments: attachments, agentContext: agentContext))
+            tier: tier, history: history, attachments: attachments, skills: skills,
+            agentContext: agentContext))
 
         let (bytes, response) = try await session(for: "/code-assist").bytes(for: req)
         guard let http = response as? HTTPURLResponse else {

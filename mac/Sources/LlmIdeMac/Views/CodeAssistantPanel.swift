@@ -46,6 +46,25 @@ struct CodeAssistantPanel: View {
     @AppStorage("MEETNOTES_CURRENT_CHAT_SESSION_ID") private var currentSessionIDString: String = ""
 
     @State private var attachments: [LlmIdeAPIClient.CodeAttachment] = []
+    /// Skills/subagents the user invoked from the "/" menu, shown as removable
+    /// chips so the composer stays clean. Two flavours, consumed one-shot on the
+    /// next send:
+    ///   - `.library(id)`   — central-repo skill the agent can't run; the id is
+    ///     sent and the server injects its SKILL.md as instructions to follow.
+    ///   - `.directive(text)` — in-built skill/subagent the agent runs by name;
+    ///     the text ("Use the X skill:") is prepended to the outgoing message.
+    private struct InvokedSkill: Identifiable, Equatable {
+        let id: String
+        let name: String
+        enum Action: Equatable { case library(String); case directive(String) }
+        let action: Action
+        var iconName: String { if case .library = action { return "books.vertical" } else { return "sparkles" } }
+    }
+    @State private var selectedSkills: [InvokedSkill] = []
+    /// Per-request project-memory overhead from the last turn, surfaced on the
+    /// 🧠 button so the always-on memory block's token cost is visible.
+    @State private var lastMemoryTokens: Int?
+    @State private var lastMemoryHasChat = false
     @State private var showLibraryPicker = false
     @State private var history: [LlmIdeAPIClient.CodeAssistTurn] = []
     @State private var sessions: [ChatSession] = []
@@ -70,7 +89,7 @@ struct CodeAssistantPanel: View {
     /// FIFO of messages queued while a turn runs. Identifiable so a cancel
     /// button removes the RIGHT entry even after the queue shifts (drain pops
     /// the head between render and tap) — index-keyed rows deleted the wrong one.
-    private struct QueuedMessage: Identifiable { let id = UUID(); let text: String }
+    private struct QueuedMessage: Identifiable { let id = UUID(); let text: String; let skillIds: [String] }
     @State private var queued: [QueuedMessage] = []
     @State private var error: String?
     /// Measured render height per assistant turn, keyed by turn id, so each
@@ -106,6 +125,12 @@ struct CodeAssistantPanel: View {
     @State private var showingReviewCodeSheet: Bool = false
     @State private var showingUpdateFileSheet: Bool = false
     @State private var showingGitOpSheet: Bool = false
+    /// Git ops auto-run (no confirm card) so far within the current user turn —
+    /// counting BOTH the primary turn and follow-ups, so "commit and push" can
+    /// complete hands-free in Auto mode. Bounded by maxAutoGitOpsPerTurn so a
+    /// looping agent can't fire endless write ops. Reset at each user turn start.
+    @State private var autoGitOpsThisTurn = 0
+    private static let maxAutoGitOpsPerTurn = 10
     /// Assistant turns the user has explicitly expanded. Combined with the
     /// "latest is always open" rule (see isAssistantExpanded), this collapses
     /// older replies to a lightweight text preview so a long chat stays short.
@@ -151,6 +176,7 @@ struct CodeAssistantPanel: View {
             Divider().background(theme.current.border)
             chatScroll
             Divider().background(theme.current.border)
+            if !selectedSkills.isEmpty { skillBar }
             if !attachments.isEmpty { attachmentBar }
             if let attachNotice { attachNoticeBar(attachNotice) }
             if let prompt = nudgePrompt, activeRepoRoot != nil {
@@ -190,7 +216,7 @@ struct CodeAssistantPanel: View {
             }
         }
         .sheet(isPresented: $showProjectMemory) {
-            ProjectMemoryView(api: api, repos: activeMemoryRepos)
+            ProjectMemoryView(api: api, repos: activeMemoryRepos, workspaceRoot: activeMemoryWorkspaceRoot)
                 .environmentObject(theme)
         }
         .task { await refreshRecentIssuesLoop() }
@@ -971,6 +997,13 @@ struct CodeAssistantPanel: View {
         buildAgentContext().indexedRepos.compactMap { $0.path }
     }
 
+    /// The open Explorer folder ("~/…") for the project-memory viewer, so memory
+    /// resolves to the open project even when it isn't a formally-indexed repo.
+    private var activeMemoryWorkspaceRoot: String? {
+        WorkspaceRoot.resolve(config: config, projectStore: projectStore)
+            .map { homeRelativePath($0.path) }
+    }
+
     // MARK: - Autocomplete actions
 
     /// ↑ moves the autocomplete selection when the menu is open, otherwise walks
@@ -1000,8 +1033,24 @@ struct CodeAssistantPanel: View {
             case .unreadable: attachNotice = "Couldn't read that file."
             }
             draft = newDraft
+        case .useSkill(let id, let name, let newDraft):
+            // Library skill → chip carrying the id sent via the skill channel.
+            addInvokedSkill(.init(id: id, name: name, action: .library(id)))
+            draft = newDraft
+        case .useDirective(let id, let name, let directive, let newDraft):
+            // In-built skill/subagent → chip carrying the directive text that's
+            // prepended to the message on send (composer stays clean).
+            addInvokedSkill(.init(id: id, name: name, action: .directive(directive)))
+            draft = newDraft
         }
         completion.close()
+    }
+
+    /// Append an invoked-skill chip, deduped by id.
+    private func addInvokedSkill(_ skill: InvokedSkill) {
+        if !selectedSkills.contains(where: { $0.id == skill.id }) {
+            selectedSkills.append(skill)
+        }
     }
 
     @ViewBuilder
@@ -1147,6 +1196,40 @@ struct CodeAssistantPanel: View {
                     AttachmentChip(path: a.path, charCount: a.content.count) {
                         attachments.removeAll { $0.path == a.path }
                     }
+                }
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, 6)
+        }
+        .background(theme.current.surface.opacity(0.6))
+    }
+
+    /// Chips for library skills the user invoked — distinct from attachments so
+    /// it's clear these are followed, not edited. Each is individually removable.
+    private var skillBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(selectedSkills) { s in
+                    HStack(spacing: 4) {
+                        Image(systemName: s.iconName)
+                            .font(.system(size: 10))
+                        Text(s.name)
+                            .font(.system(size: 11, weight: .medium))
+                            .lineLimit(1)
+                        Button {
+                            selectedSkills.removeAll { $0.id == s.id }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 11))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove \(s.name) skill")
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .foregroundStyle(theme.current.accent)
+                    .background(theme.current.accent.opacity(0.12))
+                    .clipShape(Capsule())
                 }
             }
             .padding(.horizontal, Spacing.md)
@@ -1325,16 +1408,40 @@ struct CodeAssistantPanel: View {
     }
 
     /// Opens the project-memory viewer (auto-captured facts about this repo).
+    /// Shows the last turn's memory token cost so the always-on memory block's
+    /// overhead is visible — 0 means no project memory was injected.
     private var memoryButton: some View {
         Button { showProjectMemory = true } label: {
-            Image(systemName: "brain")
-                .font(.system(size: 11))
-                .frame(width: 22, height: 22)
+            HStack(spacing: 3) {
+                Image(systemName: "brain").font(.system(size: 11))
+                if let t = lastMemoryTokens {
+                    Text(t > 0 ? "~\(formatTokens(t))" : "0")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                }
+            }
+            .frame(height: 22)
+            .padding(.horizontal, lastMemoryTokens == nil ? 0 : 3)
         }
         .buttonStyle(.plain)
         .foregroundStyle(theme.current.textMuted)
-        .help("Project memory — what the assistant has learned about this repo")
+        .help(memoryButtonHelp)
         .accessibilityLabel("Project memory")
+    }
+
+    private var memoryButtonHelp: String {
+        guard let t = lastMemoryTokens else {
+            return "Project memory — what the assistant has learned about this repo"
+        }
+        if t == 0 {
+            return "Project memory — no memory injected last turn (0 tokens). None generated for this project yet."
+        }
+        let chat = lastMemoryHasChat ? " (incl. chat-captured facts)" : " (graph-derived only)"
+        return "Project memory — added ~\(t) tokens to the last request\(chat). Click to view/prune."
+    }
+
+    /// "1.2k" / "850" style compact token count.
+    private func formatTokens(_ t: Int) -> String {
+        t >= 1000 ? String(format: "%.1fk", Double(t) / 1000.0) : "\(t)"
     }
 
     private var keyHint: some View {
@@ -1670,10 +1777,16 @@ struct CodeAssistantPanel: View {
         // (activeProject, recentIssues) pair. Acceptable for Phase 1 because
         // most users will run the migrator and end up consistent; rewiring
         // the polling sites is tracked as a Phase 2 follow-up.
+        // The folder open in the Explorer — the server scopes its read-only
+        // file tools (list-files / read-file) to this root + the indexed repos,
+        // so "find the README and review it" can resolve a real file.
+        let workspaceRoot = WorkspaceRoot.resolve(config: config, projectStore: projectStore)
+            .map { homeRelativePath($0.path) }
         return AgentContext(
             activeProject: activeProject,
             indexedRepos: indexedRepos,
-            recentIssues: recentIssues.isEmpty ? nil : recentIssues
+            recentIssues: recentIssues.isEmpty ? nil : recentIssues,
+            workspaceRoot: workspaceRoot
         )
     }
 
@@ -1756,17 +1869,29 @@ struct CodeAssistantPanel: View {
         let msg = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !msg.isEmpty else { return }
         draft = ""
-        // Record for ↑ recall (skip consecutive duplicates; cap to 100).
+        // Record the PLAIN text for ↑ recall (not the skill-decorated message).
         if sentPrompts.last != msg {
             sentPrompts.append(msg)
             if sentPrompts.count > 100 { sentPrompts.removeFirst(sentPrompts.count - 100) }
         }
         historyIndex = nil
         draftStash = ""
+        // Consume the invoked-skill chips one-shot for THIS message: in-built
+        // directives are prepended to the text; library ids ride alongside it
+        // (sent via the skill channel). Cleared so a skill applies to exactly the
+        // message it was invoked for, not silently to every later turn.
+        let directives = selectedSkills.compactMap { s -> String? in
+            if case .directive(let d) = s.action { return d } else { return nil }
+        }
+        let skillIds = selectedSkills.compactMap { s -> String? in
+            if case .library(let id) = s.action { return id } else { return nil }
+        }
+        selectedSkills = []
+        let outgoing = directives.isEmpty ? msg : directives.joined(separator: "\n") + "\n\n" + msg
         if busy {
-            queued.append(.init(text: msg))
+            queued.append(.init(text: outgoing, skillIds: skillIds))
         } else {
-            startTurn(msg)
+            startTurn(outgoing, skillIds: skillIds)
         }
     }
 
@@ -1818,8 +1943,8 @@ struct CodeAssistantPanel: View {
     }
 
     /// Launch a turn as an unstructured Task whose handle Stop can cancel.
-    private func startTurn(_ message: String) {
-        runTask = Task { await runTurn(message) }
+    private func startTurn(_ message: String, skillIds: [String] = []) {
+        runTask = Task { await runTurn(message, skillIds: skillIds) }
     }
 
     /// Cancel the in-flight turn. URLSession.data(for:) throws on cancellation,
@@ -1832,7 +1957,7 @@ struct CodeAssistantPanel: View {
     /// Run one user turn end-to-end. On completion it drains `queued` (if any)
     /// as a FRESH task — an unstructured `Task {}` does NOT inherit the current
     /// task's cancellation, so a stopped turn still lets the queued message run.
-    private func runTurn(_ message: String) async {
+    private func runTurn(_ message: String, skillIds: [String] = []) async {
         _ = session.record(prompt: message)
         if session.shouldNudge(for: message) {
             nudgePrompt = message
@@ -1846,6 +1971,8 @@ struct CodeAssistantPanel: View {
         // Clear any stale pending-tool card from a prior turn the user ignored —
         // otherwise it stays interactive against the old args while a new turn runs.
         pendingTool = nil
+        // Fresh budget of auto-run git ops for this user turn (commit→push→… ).
+        autoGitOpsThisTurn = 0
         do {
             // Send the most recent ~8 turns as history — server caps too
             // but we'd rather not push a huge payload over the wire.
@@ -1858,11 +1985,16 @@ struct CodeAssistantPanel: View {
                 message: message,
                 history: Array(recent.dropLast()),  // exclude the just-pushed user turn — server appends it
                 attachments: attachments,
+                skills: skillIds,
             )
             // If Stop fired during the await, don't append the (now-unwanted) reply.
             try Task.checkCancellation()
             history.append(.init(role: .assistant, content: resp.reply))
             self.pendingTool = resp.pendingTool
+            if let u = resp.usage {
+                lastMemoryTokens = u.memoryApproxTokens
+                lastMemoryHasChat = u.memoryHasChatMemory ?? false
+            }
             // Fast path: in Auto mode, apply a proposed file edit immediately
             // instead of surfacing the card + popup. Scoped to `update-file`
             // (confirmUpdateFile enforces the attached-files-only guard, and
@@ -1873,9 +2005,10 @@ struct CodeAssistantPanel: View {
             if editMode == .auto, let pt = resp.pendingTool, let args = pt.updateFileArgs {
                 _ = await confirmUpdateFile(args, finalContent: args.content)
             }
-            // Auto-run read-tier git ops (status, log, diff, branch) immediately;
-            // write/destructive ops surface the GitOpSheet for user confirmation.
-            if let pt = resp.pendingTool, let g = pt.gitOpArgs, g.op.tier == .read {
+            // Auto-run the proposed git op when allowed (see shouldAutoRunGitOp);
+            // otherwise it stays as a pending card for the user to confirm.
+            if let pt = resp.pendingTool, let g = pt.gitOpArgs, shouldAutoRunGitOp(g) {
+                autoGitOpsThisTurn += 1
                 await runGitOpFlow(g)
             }
         } catch is CancellationError {
@@ -1887,7 +2020,8 @@ struct CodeAssistantPanel: View {
         }
         // Drain the next queued message (FIFO) as a fresh, un-cancelled turn.
         if !queued.isEmpty {
-            startTurn(queued.removeFirst().text)
+            let next = queued.removeFirst()
+            startTurn(next.text, skillIds: next.skillIds)
         } else {
             busy = false
             runTask = nil
@@ -1997,12 +2131,14 @@ struct CodeAssistantPanel: View {
         } catch {
             return .failure("Couldn't write \(absolute): \(error.localizedDescription)")
         }
-        // Refresh the in-memory attachment so the next turn's prompt
-        // contains the new content. We keep the original chip path
-        // verbatim so the user's display stays stable.
-        if let idx = attachments.firstIndex(where: { $0.path == match.path }) {
-            attachments[idx] = .init(path: match.path, content: finalContent)
-        }
+        // Deselect the file now that the update is applied. The user attached it
+        // to edit it — that's done — and leaving the (now-written) chip in place
+        // just re-sends the whole file on every later turn. Remove only THIS
+        // file's chip (other attachments stay), and clear the auto-attach
+        // bookkeeping if it was the auto-attached file. `match` is a value copy,
+        // so the line-delta math below still sees the pre-write content.
+        attachments.removeAll { $0.path == match.path }
+        if autoAttachedPath == match.path { autoAttachedPath = nil }
         self.pendingTool = nil
 
         // Synthetic acknowledgement turn so the agent can react.
@@ -2048,6 +2184,24 @@ struct CodeAssistantPanel: View {
             return .success(args.iid)
         } catch {
             return .failure(error.localizedDescription)
+        }
+    }
+
+    /// Whether a proposed git op may run WITHOUT the confirm card:
+    ///   - read-tier (status/log/diff/branch): always — never mutates anything.
+    ///   - write-tier (add, commit, create_branch, checkout, pull_ff, push): only
+    ///     in Auto mode. The user opted into automation and these are recoverable
+    ///     (commits/branches are local; push targets the auto-created agent/
+    ///     branch, never main).
+    ///   - destructive (merge, revert, reset, stash, clean, merge_to_main): NEVER
+    ///     — they can lose work or rewrite main, so they always confirm.
+    /// The per-turn count bound stops a looping agent from chaining write ops.
+    private func shouldAutoRunGitOp(_ args: GitOpArgs) -> Bool {
+        guard autoGitOpsThisTurn < Self.maxAutoGitOpsPerTurn else { return false }
+        switch args.op.tier {
+        case .read:        return true
+        case .write:       return editMode == .auto
+        case .destructive: return false
         }
     }
 
@@ -2102,6 +2256,7 @@ struct CodeAssistantPanel: View {
         message: String,
         history: [LlmIdeAPIClient.CodeAssistTurn],
         attachments: [LlmIdeAPIClient.CodeAttachment],
+        skills: [String] = [],
     ) async throws -> LlmIdeAPIClient.CodeAssistResponse {
         let provider = (AICliTool(rawValue: config.activeCLI) ?? .claudeCode).provider
         let model = selectedModel.isEmpty ? nil : selectedModel
@@ -2109,7 +2264,7 @@ struct CodeAssistantPanel: View {
         do {
             return try await api.codeAssistStream(
                 message: message, language: prefLanguage, model: model, provider: provider,
-                history: history, attachments: attachments, agentContext: ctx,
+                history: history, attachments: attachments, skills: skills, agentContext: ctx,
                 onProgress: { statusText = $0 })
         } catch let e as APIError {
             // APIError == a server/stream/format failure (cancellations surface
@@ -2118,7 +2273,7 @@ struct CodeAssistantPanel: View {
             if case .http = e {
                 return try await api.codeAssist(
                     message: message, language: prefLanguage, model: model, provider: provider,
-                    history: history, attachments: attachments, agentContext: ctx)
+                    history: history, attachments: attachments, skills: skills, agentContext: ctx)
             }
             throw e
         }
@@ -2147,6 +2302,17 @@ struct CodeAssistantPanel: View {
             self.pendingTool = resp.pendingTool
         } catch {
             self.error = error.localizedDescription
+        }
+        // Chain the NEXT git op hands-free when allowed — this is what lets
+        // "commit and push" finish without a card: commit auto-runs on the
+        // primary turn, the agent then proposes push on this follow-up, and we
+        // auto-run it too. runGitOpFlow resets `busy = false` itself before its
+        // own sendFollowup, so the re-entry isn't blocked by the `guard !busy`
+        // even though our `busy` is still true here. The recursion (and so any
+        // looping agent) is bounded by autoGitOpsThisTurn.
+        if let g = pendingTool?.gitOpArgs, shouldAutoRunGitOp(g) {
+            autoGitOpsThisTurn += 1
+            await runGitOpFlow(g)
         }
     }
 
@@ -2202,6 +2368,7 @@ struct CodeAssistantPanel: View {
         sentPrompts = []; historyIndex = nil; draftStash = ""
         draft = ""
         attachments.removeAll()
+        selectedSkills.removeAll()
         autoAttachedPath = nil
         attachNotice = nil
         pendingTool = nil
@@ -2222,6 +2389,7 @@ struct CodeAssistantPanel: View {
         rebuildSentPrompts(from: session.history)
         draft = ""
         attachments.removeAll()
+        selectedSkills.removeAll()
         autoAttachedPath = nil
         attachNotice = nil
         pendingTool = nil
