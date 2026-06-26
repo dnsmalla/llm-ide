@@ -525,7 +525,7 @@ final class AutoCodeUpdateService: ObservableObject {
         if let data = try? Data(contentsOf: graphJSON),
            let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
             let files = (obj["files"] as? [Any])?.count ?? 0
-            lines.append("Graph: \(files) files (system/graph/graph.json)")
+            lines.append("Graph: \(files) files (\(repo.lastPathComponent)/system/graph/graph.json)")
         } else {
             lines.append("Graph: not generated yet — auto-generates on open.")
         }
