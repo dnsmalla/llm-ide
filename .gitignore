@@ -20,6 +20,7 @@ node_modules/
 extension/node_modules/
 extension/bot-worker/node_modules/
 *.log
+*.log.old
 npm-debug.log*
 *.out
 

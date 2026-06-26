@@ -21,6 +21,22 @@ clean:
 
 .PHONY: test-mac regression
 
+# Pin the Xcode toolchain for every Swift build/test below. git invokes the
+# pre-push hook with an environment that can resolve the CommandLineTools swift
+# + SDK — a DIFFERENT Swift (6.3.2) than Xcode's (6.2.1). That mismatch fails to
+# compile the macOS-26 SDK's WebKit interface and to load swift-testing, which
+# is why pushes used to need --no-verify even though build.sh and the app build
+# fine. Forcing DEVELOPER_DIR to the system-selected Xcode (ignoring any value
+# inherited from the hook env) makes the gate use the same toolchain as
+# build.sh. `swift` is the /usr/bin shim, which honours DEVELOPER_DIR.
+export DEVELOPER_DIR := $(shell env -u DEVELOPER_DIR xcode-select -p)
+# …and pin the matching SDK. Bare `swift build` otherwise resolves the SDK via
+# `xcrun --show-sdk-path`, which returns the CommandLineTools macOS SDK even when
+# the compiler is Xcode's — and an Xcode-6.2.1 compiler against the CLT-6.3.2 SDK
+# fails to verify the macOS-26 WebKit interface. `--sdk macosx` picks the SDK
+# from the (now Xcode) DEVELOPER_DIR, keeping compiler and SDK from one install.
+export SDKROOT := $(shell DEVELOPER_DIR='$(shell env -u DEVELOPER_DIR xcode-select -p)' xcrun --sdk macosx --show-sdk-path)
+
 # Full Swift test suite for the desktop app (faults model, MemoryStore,
 # RegressionRunner, CSV export, on-disk migration, etc.).
 test-mac:

@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 import PackageDescription
 
 let package = Package(
@@ -42,21 +42,20 @@ let package = Package(
             name: "LlmIdeMacTests",
             dependencies: ["LlmIdeMac"],
             path: "Tests/LlmIdeMacTests",
-            exclude: ["README-skipped-tests.md"],
-            swiftSettings: [
-                .unsafeFlags([
-                    "-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
-                    "-Xfrontend", "-disable-cross-import-overlays"
-                ])
-            ],
-            linkerSettings: [
-                .unsafeFlags([
-                    "-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
-                    "-framework", "Testing",
-                    "-Xlinker", "-rpath",
-                    "-Xlinker", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"
-                ])
-            ]
+            exclude: ["README-skipped-tests.md"]
         )
-    ]
+        // swift-testing is linked natively by SwiftPM (tools-version 6.0+) from
+        // the ACTIVE toolchain — no hardcoded -framework Testing / framework
+        // search path. The old workaround pointed at CommandLineTools, whose
+        // Testing.framework could be built with a different Swift than the
+        // selected compiler ("failed to build module 'Testing' … the SDK is
+        // built with X while this compiler is Y"); deriving it from the
+        // toolchain makes that skew impossible.
+    ],
+    // Stay on the Swift 5 language mode. tools-version 6.0 is only here for
+    // native swift-testing integration; it would otherwise default targets to
+    // the Swift 6 language mode (strict concurrency), which the app isn't ready
+    // for yet (a separate Sendable-conformance effort). This keeps the build
+    // identical to the previous tools-version 5.9 behaviour.
+    swiftLanguageModes: [.v5]
 )

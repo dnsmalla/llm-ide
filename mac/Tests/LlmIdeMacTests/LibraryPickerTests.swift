@@ -6,8 +6,11 @@ import XCTest
 /// Library content.
 final class LibraryPickerTests: XCTestCase {
 
-    private func item(_ name: String, _ cat: LibraryItem.Category) -> LibraryItem {
-        LibraryItem(name: name, path: "/p/\(name)", category: cat)
+    // Module-qualify: the macOS SDK's DeveloperToolsSupport (pulled in
+    // transitively via SwiftUI) also exports a `LibraryItem`, so the bare name
+    // is ambiguous in the test module. Pin it to the app's own type.
+    private func item(_ name: String, _ cat: LlmIdeMac.LibraryItem.Category) -> LlmIdeMac.LibraryItem {
+        LlmIdeMac.LibraryItem(name: name, path: "/p/\(name)", category: cat)
     }
 
     func testFilterKeepsOnlyAllowedCategories() {
