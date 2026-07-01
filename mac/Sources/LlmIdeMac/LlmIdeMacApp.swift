@@ -51,10 +51,6 @@ struct LlmIdeMacApp: App {
     @State private var activityStore: ActivityStore
     private let api: LlmIdeAPIClient
     private let autoCapture: AutoCaptureService
-    /// Cross-machine sync of non-secret repo config (projects/provider). Tokens
-    /// stay in the Keychain and never travel through this. Built lazily in the
-    /// main-actor `.task` (its `@MainActor` init can't run from `App.init`).
-    @State private var settingsSync: SettingsSync?
 
     init() {
         installCrashHandlers()
@@ -224,12 +220,6 @@ struct LlmIdeMacApp: App {
                     }
                     // Restore persisted session on launch, if any.
                     await session.bootstrap(api: api)
-                    // With a live session, pull cross-machine repo config so a
-                    // fresh PC opens on the same Issues/Gantt view. Non-blocking:
-                    // seeds the server on first run, no-ops on failure.
-                    let sync = settingsSync ?? SettingsSync(api: api, config: config)
-                    settingsSync = sync
-                    if session.isAuthenticated { await sync.bootstrap() }
                     autoCapture.start()
                     if config.autoCodeUpdateEnabled { autoCodeUpdate.start() }
                 }
@@ -238,16 +228,7 @@ struct LlmIdeMacApp: App {
                 // would just 401 in a loop; when signed in, we want
                 // immediate visibility of any active extension session.
                 .onChange(of: session.isAuthenticated) { _, authed in
-                    if authed {
-                        liveMirror.start()
-                        // Sign-in after launch (or after a re-login): pull the
-                        // account's synced repo config now that we have a token.
-                        let sync = settingsSync ?? SettingsSync(api: api, config: config)
-                        settingsSync = sync
-                        Task { await sync.bootstrap() }
-                    } else {
-                        liveMirror.stop()
-                    }
+                    if authed { liveMirror.start() } else { liveMirror.stop() }
                 }
                 // Stop the supervised backend on Cmd-Q so we don't
                 // leak an orphan node process every time the user

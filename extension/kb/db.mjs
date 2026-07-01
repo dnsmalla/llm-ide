@@ -773,30 +773,6 @@ export function markSlackSeen(userId, tsList) {
  *
  * Returns counts of rows touched per table for the audit log.
  */
-// ── Per-user settings blob (cross-machine sync) ──────────────────────
-// Opaque JSON string of NON-SECRET client config (saved repos, provider
-// choice, active project). Tokens are never stored here. Read on a new machine
-// to restore the same Issues/Gantt view.
-export function getUserSettings(userId) {
-  requireUser(userId);
-  const db = getDb();
-  const row = lazyPrepare(db,
-    'SELECT json FROM user_settings WHERE user_id = ?',
-  ).get(userId);
-  return row?.json ?? '{}';
-}
-
-export function setUserSettings(userId, json) {
-  requireUser(userId);
-  const db = getDb();
-  const s = typeof json === 'string' ? json : safeJSONStringify(json);
-  lazyPrepare(db, `
-    INSERT INTO user_settings (user_id, json, updated_at)
-    VALUES (?, ?, datetime('now','localtime'))
-    ON CONFLICT(user_id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at
-  `).run(userId, s);
-}
-
 export function deleteUserCascade(userId) {
   requireUser(userId);
   const db = getDb();

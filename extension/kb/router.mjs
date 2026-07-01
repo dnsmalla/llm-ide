@@ -20,7 +20,6 @@ import { handlePlanningRoutes } from './routes/planning.mjs';
 import { handleIssueScheduleRoutes } from './routes/issue-schedule.mjs';
 import { handleLiveRoutes } from './routes/live.mjs';
 import { handleReviewRoutes } from './routes/review.mjs';
-import { handleSettingsRoutes } from './routes/settings.mjs';
 // runGuardrails moved into routes/review.mjs.
 import { summarizeTranscript } from '../agents/summarize.mjs';
 import { runClaude } from '../agents/runtime.mjs';
@@ -720,9 +719,6 @@ export async function handleKB(req, res) {
     // when the handler matched; we fall through on false so a route
     // typo here still hits the 404 at the bottom of the function.
     if (await handleAgentRoutes(req, res, { userId, url })) return true;
-
-    // Cross-machine settings sync (/kb/settings). Non-secret client config only.
-    if (await handleSettingsRoutes(req, res, { userId, url })) return true;
 
     // (Old inline agent block removed — extracted to routes/agent.mjs)
 

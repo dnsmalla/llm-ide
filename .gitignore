@@ -14,6 +14,9 @@ kb/backups/
 # Test-created SQLite files (per-test temp DBs).
 extension/tests/_*.db
 extension/tests/_*.db-*
+# Stray default-path DB when a script/test imports db.mjs without LLMIDE_DB_PATH.
+extension/kb/data.db
+extension/kb/data.db-*
 
 # Node
 node_modules/
@@ -78,3 +81,4 @@ system/
 # Personal scratch / design notes kept locally, not part of the repo.
 flag-semantics-flow-zero.md
 mac/MeetNotesMac.app/
+import-repo-settings.sh
