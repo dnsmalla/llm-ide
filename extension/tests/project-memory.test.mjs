@@ -249,6 +249,40 @@ test('extractMemories reports approx extraction token cost via meta', async () =
   assert.ok(meta.approxTokens > 0, 'reports a positive token estimate');
 });
 
+test('isWorthExtracting skips pure acknowledgments / contentless turns', async () => {
+  const { isWorthExtracting } = await import('../llm_agent/runtime/memory-extract.mjs');
+  // Pure acks / pleasantries — no durable fact possible, must skip.
+  assert.equal(isWorthExtracting({ userMessage: 'thanks', reply: "You're welcome!" }), false);
+  assert.equal(isWorthExtracting({ userMessage: 'ok great, that works!', reply: 'Glad it works.' }), false);
+  assert.equal(isWorthExtracting({ userMessage: 'perfect thank you', reply: 'Anytime.' }), false);
+  assert.equal(isWorthExtracting({ userMessage: '  OK  ', reply: 'done' }), false);
+  // Empty / missing reply → nothing to extract from.
+  assert.equal(isWorthExtracting({ userMessage: 'we use pnpm workspaces', reply: '' }), false);
+});
+
+test('isWorthExtracting keeps substantive turns (low false-negative)', async () => {
+  const { isWorthExtracting } = await import('../llm_agent/runtime/memory-extract.mjs');
+  // A short but substantive user statement carrying a durable fact must NOT be skipped.
+  assert.equal(isWorthExtracting({ userMessage: 'we deploy via GitHub Actions to Fly.io', reply: 'Got it.' }), true);
+  // Normal Q&A.
+  assert.equal(isWorthExtracting({ userMessage: 'how does auth work here?', reply: 'It uses JWT access + refresh tokens signed with LLMIDE_JWT_SECRET.' }), true);
+});
+
+test('extractMemories short-circuits (no model call) on a contentless turn', async () => {
+  const { extractMemories } = await import('../llm_agent/runtime/memory-extract.mjs');
+  let called = false;
+  const spyRun = async () => { called = true; return '[]'; };
+  const facts = await extractMemories({
+    userMessage: 'thanks!',
+    reply: 'No problem.',
+    existingFacts: [],
+    runClaude: spyRun,
+    userId: 'u',
+  });
+  assert.deepEqual(facts, []);
+  assert.equal(called, false, 'the summarize-tier model must not be called on a pure-ack turn');
+});
+
 test('sanitizeFacts tags {category, fact} objects and keeps legacy strings', async () => {
   const { sanitizeFacts } = await import('../llm_agent/runtime/memory-extract.mjs');
   const out = sanitizeFacts([
@@ -270,6 +304,31 @@ test('sanitizeFacts dedups by fact text, ignoring category and case', async () =
     { category: 'command', fact: 'Deploy via release.sh' },
   ]);
   assert.equal(out.length, 1);
+});
+
+test('writeChatMemoryFacts round-trips and leaves no temp file behind', async () => {
+  const { writeChatMemoryFacts, readChatMemoryFacts } = await import('../graphkit/index.mjs');
+  const root = path.join(__dirname, `_pm-atomic-${process.pid}`);
+  const memDir = path.join(root, 'graphify-out', 'memory');
+  fs.mkdirSync(memDir, { recursive: true });
+  writeChatMemoryFacts(root, ['deploy via release.sh', 'uses pnpm workspaces']);
+  // Content correct.
+  const facts = readChatMemoryFacts(root);
+  assert.ok(facts.includes('deploy via release.sh') && facts.includes('uses pnpm workspaces'));
+  // The atomic writer must clean up after itself — no stray temp files may
+  // remain in the memory dir, only chat-memory.md.
+  const leftovers = fs.readdirSync(memDir).filter((f) => f !== 'chat-memory.md');
+  assert.deepEqual(leftovers, [], `no temp/stray files should remain, found: ${leftovers.join(', ')}`);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('writeChatMemoryFacts creates the memory dir if missing', async () => {
+  const { writeChatMemoryFacts, readChatMemoryFacts } = await import('../graphkit/index.mjs');
+  const root = path.join(__dirname, `_pm-atomic-mkdir-${process.pid}`);
+  fs.mkdirSync(root, { recursive: true });   // root exists, memory subdir does NOT
+  writeChatMemoryFacts(root, ['a durable fact worth keeping']);
+  assert.deepEqual(readChatMemoryFacts(root), ['a durable fact worth keeping']);
+  fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('appendChatMemory does not re-add an existing fact under a new category', async () => {

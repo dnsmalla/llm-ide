@@ -66,6 +66,46 @@ export function sanitizeFacts(parsed) {
   return out;
 }
 
+// Acknowledgment / pleasantry phrases the user sends to close a turn — these
+// never carry a durable project fact. Ordered longest-first so multi-word
+// phrases match before their single-word prefixes when stripped from the front.
+const ACK_PHRASES = [
+  'thank you', 'that works', 'sounds good', 'makes sense', 'looks good',
+  'got it', 'will do', 'thanks', 'thank', 'thx', 'ty', 'okay', 'ok',
+  'great', 'perfect', 'nice', 'cool', 'awesome', 'lgtm', 'yep', 'yes',
+  'nope', 'no', 'done', 'works', 'understood', 'good', 'fine', 'sure', 'k',
+];
+// `^(phrase)\b[\s!.,]*` — a leading ack phrase plus trailing separators.
+const ACK_LEAD_RE = new RegExp(`^(?:${ACK_PHRASES.join('|')})\\b[\\s!.,]*`, 'i');
+
+// True when the whole (short) message is nothing but chained ack phrases —
+// "thanks", "ok great, that works!", "perfect thank you". Strips leading acks
+// repeatedly; if nothing but separators remain, it was pure acknowledgment.
+function isPureAck(msg) {
+  if (msg.length === 0 || msg.length > 40) return false;   // length cap guards pathological input
+  let rest = msg;
+  for (let i = 0; i < 6; i++) {                             // bounded: at most a few chained acks
+    const next = rest.replace(ACK_LEAD_RE, '');
+    if (next === rest) break;                              // nothing stripped this round
+    rest = next;
+  }
+  return /^[\s!.,]*$/.test(rest);                          // only separators left → pure ack
+}
+
+// Cheap, local pre-filter run BEFORE the extraction model call. Returns false
+// when a turn cannot plausibly contain a new durable fact, so the caller can
+// skip the (paid, every-turn) LLM call. Conservative by design — when unsure,
+// return true and let the model decide. A substantive short statement like
+// "we use pnpm workspaces" is NOT an ack and still goes through.
+export function isWorthExtracting({ userMessage, reply }) {
+  // No assistant reply → nothing was produced to extract from (mirrors the
+  // existing guard, folded in so the gate is the single decision point).
+  if (!reply || typeof reply !== 'string' || !reply.trim()) return false;
+  const um = typeof userMessage === 'string' ? userMessage.trim() : '';
+  if (isPureAck(um.toLowerCase())) return false;
+  return true;
+}
+
 function buildPrompt({ userMessage, reply, existingFacts }) {
   const existing = (Array.isArray(existingFacts) ? existingFacts : [])
     .slice(0, MAX_EXISTING_LISTED)
@@ -107,7 +147,13 @@ function buildPrompt({ userMessage, reply, existingFacts }) {
 // deduped against existing on disk — appendChatMemory does the final dedup).
 export async function extractMemories({ userMessage, reply, existingFacts, runClaude, userId, meta }) {
   if (typeof runClaude !== 'function') return [];
-  if (!reply || typeof reply !== 'string' || !reply.trim()) return [];
+  // Local pre-filter: skip the paid summarize-tier call on turns that can't
+  // carry a durable fact (empty reply, pure acknowledgments). This runs on
+  // EVERY turn, so gating the no-value ones is the single biggest token win.
+  if (!isWorthExtracting({ userMessage, reply })) {
+    if (meta && typeof meta === 'object') { meta.approxTokens = 0; meta.skipped = true; }
+    return [];
+  }
   try {
     const prompt = buildPrompt({ userMessage, reply, existingFacts });
     const raw = await runClaude(prompt, {

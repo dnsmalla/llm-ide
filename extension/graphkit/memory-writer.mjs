@@ -9,7 +9,7 @@
 // All disk I/O is best-effort: a read/write error collapses to a safe value
 // (empty list / no-op), never throws into the caller.
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { config } from '../core/config.mjs';
 
@@ -109,10 +109,26 @@ export function readChatMemoryFacts(root) {
 // intended list even if the write fails (caller treats as advisory).
 export function writeChatMemoryFacts(root, facts) {
   const content = renderChatMemoryFile(facts);
+  const target = memFilePath(root);
   try {
     mkdirSync(join(root, 'graphify-out', 'memory'), { recursive: true });
-    writeFileSync(memFilePath(root), content, 'utf8');
-  } catch { /* best-effort */ }
+    // Atomic write: write to a temp file in the SAME directory (so the rename
+    // stays on one filesystem and is atomic), then rename over the target. A
+    // crash mid-write can only leave the temp file — never a half-written
+    // chat-memory.md that the reader would then parse as truncated facts. The
+    // temp name carries the pid so a second server process writing the same
+    // repo can't clobber our temp; writes within one process are synchronous
+    // and sequential, so a fixed pid suffix can't collide with itself.
+    const tmp = `${target}.tmp-${process.pid}`;
+    try {
+      writeFileSync(tmp, content, 'utf8');
+      renameSync(tmp, target);
+    } catch (err) {
+      // Best-effort cleanup so a failed write doesn't leak the temp file.
+      try { unlinkSync(tmp); } catch { /* already gone */ }
+      throw err;
+    }
+  } catch { /* best-effort — a failed write leaves the previous file intact */ }
   return parseChatMemoryFacts(content);
 }
 

@@ -61,7 +61,15 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
     });
     const extractTokens = extractMeta.approxTokens ?? 0;
     if (!facts.length) {
-      logger.info('project_memory', { outcome: 'no_facts', reason: 'extractor found nothing durable', extractTokens, root });
+      // Distinguish a GATED turn (pre-filter skipped the paid model call — the
+      // token win) from one where the extractor ran and found nothing durable.
+      const reason = extractMeta.skipped
+        ? 'gated: contentless turn, extraction skipped (no model call)'
+        : 'extractor found nothing durable';
+      logger.info('project_memory', {
+        outcome: extractMeta.skipped ? 'skipped_extraction' : 'no_facts',
+        reason, extractTokens, root,
+      });
       return null;
     }
     const meta = {};
