@@ -73,11 +73,20 @@ final class SettingsSync {
         do {
             let env: Envelope = try await api.get("/kb/settings", authenticated: true)
             if let remote = env.settings, !remote.isEmpty {
-                apply(remote)
-                // Record what the world already agrees on so the write our own
-                // `apply` triggers doesn't bounce straight back as a push.
-                lastPushed = strippedForPush(currentSnapshot())
+                let recovered = apply(remote)
+                // Record what the SERVER already has (not our post-merge local
+                // state) so the write our own `apply` triggers doesn't bounce
+                // straight back as a no-op push. When `apply` recovered
+                // local-only entries the server never saw, `lastPushed` must
+                // stay at the server's (smaller) snapshot so the recovery
+                // push below is recognized as a real, portable change and
+                // actually goes out instead of short-circuiting as a match.
+                lastPushed = strippedForPush(remote)
                 log.info("Applied remote settings: \(remote.gitLabSavedProjects.count, privacy: .public) GitLab, \(remote.gitHubSavedRepos.count, privacy: .public) GitHub")
+                if recovered {
+                    log.info("Recovered local-only saved repo(s) missing from remote — re-pushing")
+                    await push(force: false)
+                }
             } else {
                 await push(force: true)   // server is empty — seed it from here
                 log.info("Seeded server settings from local state")
@@ -147,31 +156,57 @@ final class SettingsSync {
 
     /// Apply a remote snapshot, preserving THIS machine's local checkout paths
     /// (matched by id, then url). Everything else — order, active flag, resolved
-    /// id, provider — takes the server's value.
-    private func apply(_ remote: Snapshot) {
+    /// id, provider — takes the server's value for entries the server already
+    /// knows about.
+    ///
+    /// Local entries the server has NEVER seen (e.g. a repo added right
+    /// before quit, inside the 1.5s push debounce, so the push never fired)
+    /// are appended rather than dropped — see `mergeLocalPaths`. Without
+    /// this, wholesale-replacing with the remote list would silently delete
+    /// a saved repo the user just added, purely because of unlucky timing at
+    /// quit. Returns whether any such local-only entries were recovered, so
+    /// the caller (`bootstrap`) knows to push the recovered state back.
+    @discardableResult
+    private func apply(_ remote: Snapshot) -> Bool {
         applyingRemote = true
         defer { applyingRemote = false }
 
         if let provider = remote.repoProvider, !provider.isEmpty {
             defaults.set(provider, forKey: "repoProvider")
         }
-        config.gitLabSavedProjects = mergeLocalPaths(remote.gitLabSavedProjects,
-                                                     into: config.gitLabSavedProjects)
-        config.gitHubSavedRepos = mergeLocalPaths(remote.gitHubSavedRepos,
-                                                  into: config.gitHubSavedRepos)
+        let (gitLab, recoveredGitLab) = mergeLocalPaths(remote.gitLabSavedProjects,
+                                                        into: config.gitLabSavedProjects)
+        let (gitHub, recoveredGitHub) = mergeLocalPaths(remote.gitHubSavedRepos,
+                                                        into: config.gitHubSavedRepos)
+        config.gitLabSavedProjects = gitLab
+        config.gitHubSavedRepos = gitHub
         if let last = remote.gitLabLastProjectId, !last.isEmpty {
             config.gitLabLastProjectId = last
         }
+        return recoveredGitLab || recoveredGitHub
     }
 
-    private func mergeLocalPaths<T: LocalPathCarrying>(_ remote: [T], into local: [T]) -> [T] {
+    /// Merges local `localPath` values into the remote list (matched by id,
+    /// then url), AND appends any local entries absent from `remote`
+    /// entirely — i.e. ones the server has never been told about. Returns
+    /// the merged list plus whether any such local-only entries were found.
+    private func mergeLocalPaths<T: LocalPathCarrying>(_ remote: [T], into local: [T]) -> (merged: [T], recovered: Bool) {
         let byId = Dictionary(local.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let byUrl = Dictionary(local.map { ($0.url.lowercased(), $0) }, uniquingKeysWith: { first, _ in first })
-        return remote.map { r in
+        let merged = remote.map { r in
             var out = r
             out.localPath = (byId[r.id] ?? byUrl[r.url.lowercased()])?.localPath
             return out
         }
+        // Local entries the remote snapshot has never seen at all (matched by
+        // neither id nor url) — e.g. added right before quit, inside the
+        // 1.5s push debounce window, so the push never fired. Append rather
+        // than drop; each already carries its own correct localPath since it
+        // never left this machine.
+        let remoteIds = Set(remote.map { $0.id })
+        let remoteUrls = Set(remote.map { $0.url.lowercased() })
+        let localOnly = local.filter { !remoteIds.contains($0.id) && !remoteUrls.contains($0.url.lowercased()) }
+        return (merged + localOnly, recovered: !localOnly.isEmpty)
     }
 }
 
