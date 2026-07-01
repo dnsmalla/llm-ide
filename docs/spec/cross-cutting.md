@@ -80,7 +80,7 @@ Source: `extension/core/config.mjs:65–84`.
 
 ### Dev auto-generated secrets
 
-When `NODE_ENV` is not `production` and either `LLMIDE_JWT_SECRET` or `LLMIDE_VAULT_KEY` is absent, the server auto-generates both and persists them to `kb/.dev-secrets.json` (`config.mjs:49–63`). This path is ignored by `.gitignore` and must **never** be used in production.
+When `NODE_ENV` is not `production` and either `LLMIDE_JWT_SECRET` or `LLMIDE_VAULT_KEY` is absent, the server auto-generates both and persists them to a `.dev-secrets.json` file under the runtime `kb/` data directory (path built in `config.mjs:49–63`). That file is created lazily at first boot, so it does not exist in a fresh checkout; it is also listed in `.gitignore` and must **never** be used in production.
 
 ### Loopback override
 
@@ -188,7 +188,7 @@ Detail: [`api-server.md` §2](api-server.md#2-request-pipeline) (API version and
 
 ### Append-only migrations
 
-Migrations are numbered files applied exactly once and recorded in the `schema_migrations` table. The head migration is `0020` (`0020_issue_schedule.sql`). Migrations are never edited after they land; schema changes always add a new migration file.
+Migrations are numbered files applied exactly once and recorded in the `schema_migrations` table. The head migration is `0021` (`0021_user_settings.sql`). Migrations are never edited after they land; schema changes always add a new migration file.
 
 Source: `extension/kb/migrations.mjs:8`, `migrations.mjs:43`.
 
