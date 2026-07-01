@@ -86,9 +86,9 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <key>CFBundleIdentifier</key>
     <string>com.llmide.macapp</string>
     <key>CFBundleName</key>
-    <string>LLM IDE</string>
+    <string>llm-ide</string>
     <key>CFBundleDisplayName</key>
-    <string>LLM IDE</string>
+    <string>llm-ide</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

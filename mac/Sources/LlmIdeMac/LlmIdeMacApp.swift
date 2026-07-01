@@ -170,6 +170,16 @@ struct LlmIdeMacApp: App {
                 // shrink the sidebar to icon-only mode for more space.
                 .frame(minWidth: 1000, minHeight: 600)
                 .task {
+                    // Repair saved GitHub/GitLab repos whose localPath is nil
+                    // even though a matching clone already exists on disk —
+                    // e.g. cloned manually outside the app, or the app quit
+                    // between `git clone` finishing and the config write
+                    // persisting. Without this, `isCloned` stays false
+                    // forever and ReviewView/CodeWorkflowTarget report no
+                    // linked repo despite the code being right there. Runs
+                    // BEFORE the migrator below so a healed localPath is
+                    // visible to it in the same launch.
+                    await Self.reconcileSavedRepoPaths(config: config, projectStore: projectStore)
                     // One-shot import of legacy SavedGitLab/HubRepo entries
                     // with localPath. No-op on every launch after the first
                     // successful run (ProjectMigrator records completion in
@@ -339,6 +349,44 @@ struct LlmIdeMacApp: App {
         while Date() < deadline {
             if await BackendManager.probeHealth() { return }
             try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+    }
+
+    /// See `SavedRepoPathReconciler` — repairs `localPath` for any saved
+    /// GitHub/GitLab repo whose expected clone location (active project's
+    /// code/ dir, then the global Clones dir) already contains a checkout
+    /// with a matching origin remote. Best-effort and silent on no match —
+    /// a repo that's genuinely never been cloned is untouched.
+    private static func reconcileSavedRepoPaths(config: AppConfig, projectStore: ProjectStore) async {
+        let repoManager = RepoManager()
+        let candidateDirs = [projectStore.activeProjectCodeDir, config.effectiveClonesURL].compactMap { $0 }
+        let log = Logger(subsystem: "com.llmide.macapp", category: "SavedRepoPathReconciler")
+        let remoteURL: (URL) async throws -> String = { try await repoManager.runGit(["remote", "get-url", "origin"], at: $0) }
+
+        for i in config.gitHubSavedRepos.indices where config.gitHubSavedRepos[i].localPath == nil {
+            let repo = config.gitHubSavedRepos[i]
+            guard let name = GitHubClient.ownerAndName(from: repo.url)?.1 else { continue }
+            if let found = await SavedRepoPathReconciler.findExistingClone(
+                name: name, url: repo.url, candidateDirs: candidateDirs, remoteURL: remoteURL
+            ) {
+                config.gitHubSavedRepos[i].localPath = found
+                log.info("healed GitHub repo localPath: \(repo.displayName, privacy: .public)")
+            }
+        }
+        for i in config.gitLabSavedProjects.indices where config.gitLabSavedProjects[i].localPath == nil {
+            let proj = config.gitLabSavedProjects[i]
+            let name = proj.url
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                .components(separatedBy: "/")
+                .last?
+                .replacingOccurrences(of: ".git", with: "") ?? ""
+            guard !name.isEmpty else { continue }
+            if let found = await SavedRepoPathReconciler.findExistingClone(
+                name: name, url: proj.url, candidateDirs: candidateDirs, remoteURL: remoteURL
+            ) {
+                config.gitLabSavedProjects[i].localPath = found
+                log.info("healed GitLab project localPath: \(proj.displayName, privacy: .public)")
+            }
         }
     }
 }
