@@ -162,3 +162,75 @@ test('codegen-apply — GitHub PAT with embedded U+200D is blocked (AGT-5)', () 
     tests: [],
   }, 'codegen.secret');
 });
+
+// The guardrail SECRET_PATTERNS list previously had no rule for Anthropic
+// ("sk-ant-") or generic OpenAI-style ("sk-") keys, even though the
+// separate core/redact-secrets.mjs pattern set (used for log/error
+// redaction) already recognized both shapes — a divergent, narrower
+// guardrail list let these keys slip past dispatch/codegen review
+// undetected. These two tests pin that the guardrail list now also
+// catches them.
+test('dispatch — Anthropic sk-ant- key in body blocks via secret rule', () => {
+  blocking('dispatch', {
+    target: 'github',
+    config: { repo: 'a/b', token: 'x' },
+    items: [{ title: 'ok', body: 'key is sk-ant-api03-abcdefghijklmnopqrstuvwxyz012345-abc' }],
+  }, 'dispatch.secret');
+});
+
+test('codegen-apply — generic sk- key in file content blocks via secret rule', () => {
+  blocking('codegen-apply', {
+    repoPath: '/tmp/repo',
+    allowedRepos: ['/tmp/repo'],
+    files: [{ path: 'a.ts', content: 'const KEY = "sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";' }],
+    tests: [],
+  }, 'codegen.secret');
+});
+
+// A guardrail secret finding must never persist/return the raw matched
+// value — the review_items row (and the API response that echoes it back)
+// is not a secure sink. findMatches() used to put the literal matched
+// token straight into `finding.details[].snippet`; a reviewer's browser
+// devtools, the KB DB row, or any log of the API response would then
+// contain the live credential the guardrail was supposed to catch.
+test('dispatch — secret finding snippet does not contain the raw matched secret (redaction)', () => {
+  const rawKey = 'ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const r = runGuardrails('dispatch', {
+    target: 'github',
+    config: { repo: 'a/b', token: 'x' },
+    items: [{ title: 'ok', body: `please rotate ${rawKey} today` }],
+  });
+  const secretFinding = r.blocking.find((f) => f.ruleId === 'dispatch.secret');
+  assert.ok(secretFinding, 'expected a dispatch.secret finding');
+  const serialized = JSON.stringify(secretFinding.details);
+  assert.ok(!serialized.includes(rawKey), `raw secret leaked into finding.details: ${serialized}`);
+  assert.ok(serialized.includes('[REDACTED]'), `expected a redaction marker: ${serialized}`);
+});
+
+test('codegen-apply — secret finding snippet does not contain the raw matched secret (redaction)', () => {
+  const rawKey = 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz012345-abc';
+  const r = runGuardrails('codegen-apply', {
+    repoPath: '/tmp/repo',
+    allowedRepos: ['/tmp/repo'],
+    files: [{ path: 'a.ts', content: `const KEY = "${rawKey}";` }],
+    tests: [],
+  });
+  const secretFinding = r.blocking.find((f) => f.ruleId === 'codegen.secret');
+  assert.ok(secretFinding, 'expected a codegen.secret finding');
+  const serialized = JSON.stringify(secretFinding.details);
+  assert.ok(!serialized.includes(rawKey), `raw secret leaked into finding.details: ${serialized}`);
+});
+
+// PII findings are informational for the reviewer, not a "secret" — the
+// redaction added for SECRET_PATTERNS must not accidentally scrub the
+// email address itself out of a PII finding, or the reviewer can no
+// longer judge the finding.
+test('dispatch — PII finding snippet still shows the matched email (not redacted)', () => {
+  const r = runGuardrails('dispatch', {
+    target: 'github',
+    config: { repo: 'a/b', token: 'x' },
+    items: [{ title: 'Contact jane.doe@example.com about this', body: 'b' }],
+  });
+  const piiFinding = r.warnings.find((f) => f.ruleId === 'dispatch.pii');
+  assert.ok(piiFinding, 'expected a dispatch.pii finding');
+});
