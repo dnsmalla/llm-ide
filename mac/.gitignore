@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Build artifacts
+.build/
+LlmIdeMac.app/
+*.dmg
+dmg_temp/
+
+# Local-only / runtime
+*.log
+
+# Editors
+.vscode/
+.idea/
+*.xcworkspace
+xcuserdata/
+.understand-anything/
+.code-notes/

@@ -1,0 +1,7265 @@
+{
+  "files" : [
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "markdown",
+      "loc" : 22,
+      "name" : "README.md",
+      "path" : "README.md",
+      "role" : "Module",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 54,
+          "name" : "draftQuestion"
+        },
+        {
+          "line" : 75,
+          "name" : "recent"
+        },
+        {
+          "line" : 170,
+          "name" : "sanitizeSpeaker"
+        },
+        {
+          "line" : 181,
+          "name" : "formatTranscript"
+        },
+        {
+          "line" : 194,
+          "name" : "formatPlan"
+        },
+        {
+          "line" : 197,
+          "name" : "lines"
+        },
+        {
+          "line" : 207,
+          "name" : "extractLastJSONLine"
+        },
+        {
+          "line" : 220,
+          "name" : "clamp01"
+        }
+      ],
+      "imports" : [
+        "agents\/prompt-utils.mjs",
+        "agents\/runtime.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 197,
+      "name" : "agent-prompt.mjs",
+      "path" : "agents\/agent-prompt.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "agents\/meeting-agent.mjs",
+        "tests\/agent-prompt.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 11,
+          "name" : "dedupeRefs"
+        },
+        {
+          "line" : 35,
+          "name" : "searchForTask"
+        },
+        {
+          "line" : 42,
+          "name" : "codeSync"
+        },
+        {
+          "line" : 44,
+          "name" : "tasks"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 44,
+      "name" : "code-sync.mjs",
+      "path" : "agents\/code-sync.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/routes\/planning.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 12,
+          "name" : "isWithinAllowlist"
+        },
+        {
+          "line" : 20,
+          "name" : "safeJoin"
+        },
+        {
+          "line" : 46,
+          "name" : "assertNoSymlinkEscape"
+        },
+        {
+          "line" : 69,
+          "name" : "applyCodegen"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 115,
+      "name" : "codegen-apply.mjs",
+      "path" : "agents\/codegen-apply.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/routes\/review.mjs",
+        "tests\/security-fixes.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 17,
+          "name" : "sanitizePath"
+        },
+        {
+          "line" : 27,
+          "name" : "sanitizeContent"
+        },
+        {
+          "line" : 32,
+          "name" : "readFileSafely"
+        },
+        {
+          "line" : 46,
+          "name" : "buildPrompt"
+        },
+        {
+          "line" : 93,
+          "name" : "validate"
+        },
+        {
+          "line" : 95,
+          "name" : "cleanArr"
+        },
+        {
+          "line" : 121,
+          "name" : "generateCodeForTask"
+        },
+        {
+          "line" : 138,
+          "name" : "rel"
+        }
+      ],
+      "imports" : [
+        "agents\/runtime.mjs",
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 153,
+      "name" : "codegen.mjs",
+      "path" : "agents\/codegen.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/routes\/planning.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 20,
+          "name" : "redactErrorBody"
+        },
+        {
+          "line" : 37,
+          "name" : "assertBacklogSpace"
+        },
+        {
+          "line" : 43,
+          "name" : "buildBody"
+        },
+        {
+          "line" : 65,
+          "name" : "shouldSkip"
+        },
+        {
+          "line" : 71,
+          "name" : "dispatchGithub"
+        },
+        {
+          "line" : 121,
+          "name" : "dispatchBacklog"
+        },
+        {
+          "line" : 175,
+          "name" : "dispatchLinear"
+        },
+        {
+          "line" : 241,
+          "name" : "dispatchPreview"
+        },
+        {
+          "line" : 280,
+          "name" : "jitteredMs"
+        },
+        {
+          "line" : 287,
+          "name" : "without"
+        },
+        {
+          "line" : 288,
+          "name" : "recordDispatchRetry"
+        },
+        {
+          "line" : 312,
+          "name" : "clearDispatchRetry"
+        },
+        {
+          "line" : 318,
+          "name" : "withRetryTracking"
+        },
+        {
+          "line" : 331,
+          "name" : "retryFailedDispatches"
+        },
+        {
+          "line" : 335,
+          "name" : "due"
+        },
+        {
+          "line" : 345,
+          "name" : "retryOne"
+        },
+        {
+          "line" : 350,
+          "name" : "task"
+        },
+        {
+          "line" : 385,
+          "name" : "dispatchPlan"
+        }
+      ],
+      "imports" : [
+        "core\/p-map.mjs",
+        "guardrails\/rules.mjs",
+        "kb\/db.mjs",
+        "kb\/outcomes.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 384,
+      "name" : "dispatcher.mjs",
+      "path" : "agents\/dispatcher.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/router.mjs",
+        "kb\/routes\/planning.mjs",
+        "kb\/routes\/review.mjs",
+        "tests\/security-fixes.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 25,
+          "name" : "execGit"
+        },
+        {
+          "line" : 65,
+          "name" : "inferDefaultBranch"
+        },
+        {
+          "line" : 94,
+          "name" : "scanForSecrets"
+        },
+        {
+          "line" : 107,
+          "name" : "safeBranchName"
+        },
+        {
+          "line" : 118,
+          "name" : "openPullRequest"
+        }
+      ],
+      "imports" : [
+        "core\/utils.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 218,
+      "name" : "github-pr.mjs",
+      "path" : "agents\/github-pr.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/routes\/review.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 66,
+          "name" : "key"
+        },
+        {
+          "line" : 68,
+          "name" : "evictOld"
+        },
+        {
+          "line" : 75,
+          "name" : "getOrCreate"
+        },
+        {
+          "line" : 92,
+          "name" : "sanitize"
+        },
+        {
+          "line" : 106,
+          "name" : "appendCaptions"
+        },
+        {
+          "line" : 171,
+          "name" : "getCaptionsSince"
+        },
+        {
+          "line" : 175,
+          "name" : "captions"
+        },
+        {
+          "line" : 186,
+          "name" : "listActiveSessions"
+        },
+        {
+          "line" : 207,
+          "name" : "finalizeSession"
+        },
+        {
+          "line" : 242,
+          "name" : "persistCapturedMeeting"
+        },
+        {
+          "line" : 249,
+          "name" : "lines"
+        },
+        {
+          "line" : 308,
+          "name" : "_resetForTests"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 283,
+      "name" : "live-sessions.mjs",
+      "path" : "agents\/live-sessions.mjs",
+      "role" : "Web",
+      "types" : [
+        {
+          "line" : 53,
+          "name" : "Session"
+        }
+      ],
+      "usedBy" : [
+        "agents\/meeting-agent.mjs",
+        "kb\/router.mjs",
+        "server.mjs",
+        "tests\/kb-router.test.mjs",
+        "tests\/meeting-agent.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 67,
+          "name" : "pickI18N"
+        },
+        {
+          "line" : 75,
+          "name" : "localizeAttach"
+        },
+        {
+          "line" : 93,
+          "name" : "setLastDispatch"
+        },
+        {
+          "line" : 106,
+          "name" : "getRunBySessionId"
+        },
+        {
+          "line" : 110,
+          "name" : "getDiagnostics"
+        },
+        {
+          "line" : 157,
+          "name" : "recordDecision"
+        },
+        {
+          "line" : 174,
+          "name" : "dispatchAgent"
+        },
+        {
+          "line" : 280,
+          "name" : "buildBriefing"
+        },
+        {
+          "line" : 305,
+          "name" : "stopAgent"
+        },
+        {
+          "line" : 328,
+          "name" : "listRuns"
+        },
+        {
+          "line" : 348,
+          "name" : "startQuestionLoop"
+        },
+        {
+          "line" : 367,
+          "name" : "stopQuestionLoop"
+        },
+        {
+          "line" : 374,
+          "name" : "tickRun"
+        },
+        {
+          "line" : 429,
+          "name" : "wasNamed"
+        },
+        {
+          "line" : 540,
+          "name" : "logCandidate"
+        },
+        {
+          "line" : 556,
+          "name" : "stopAllAgents"
+        },
+        {
+          "line" : 566,
+          "name" : "_resetForTests"
+        }
+      ],
+      "imports" : [
+        "agents\/agent-prompt.mjs",
+        "agents\/live-sessions.mjs",
+        "core\/logger.mjs",
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 515,
+      "name" : "meeting-agent.mjs",
+      "path" : "agents\/meeting-agent.mjs",
+      "role" : "Web",
+      "types" : [
+        {
+          "line" : 117,
+          "name" : "Run"
+        }
+      ],
+      "usedBy" : [
+        "kb\/router.mjs",
+        "kb\/routes\/agent.mjs",
+        "server.mjs",
+        "tests\/meeting-agent.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 1,
+          "name" : "takes"
+        },
+        {
+          "line" : 14,
+          "name" : "redactUrlsFromError"
+        },
+        {
+          "line" : 20,
+          "name" : "safe"
+        },
+        {
+          "line" : 27,
+          "name" : "parseGithubUrl"
+        },
+        {
+          "line" : 34,
+          "name" : "pollGithub"
+        },
+        {
+          "line" : 79,
+          "name" : "parseBacklogUrl"
+        },
+        {
+          "line" : 86,
+          "name" : "pollBacklog"
+        },
+        {
+          "line" : 125,
+          "name" : "pollLinear"
+        },
+        {
+          "line" : 172,
+          "name" : "pollOne"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 166,
+      "name" : "outcome-providers.mjs",
+      "path" : "agents\/outcome-providers.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "agents\/outcome-watcher.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 43,
+          "name" : "cbKey"
+        },
+        {
+          "line" : 45,
+          "name" : "isCircuitOpen"
+        },
+        {
+          "line" : 55,
+          "name" : "recordCbSuccess"
+        },
+        {
+          "line" : 64,
+          "name" : "recordCbFailure"
+        },
+        {
+          "line" : 82,
+          "name" : "_resetCircuitBreakersForTests"
+        },
+        {
+          "line" : 97,
+          "name" : "redactTokens"
+        },
+        {
+          "line" : 103,
+          "name" : "refreshAllOutcomes"
+        },
+        {
+          "line" : 111,
+          "name" : "polled"
+        },
+        {
+          "line" : 124,
+          "name" : "counts"
+        },
+        {
+          "line" : 138,
+          "name" : "pollTask"
+        },
+        {
+          "line" : 204,
+          "name" : "OUTCOME_POLL_INTERVAL_MS"
+        },
+        {
+          "line" : 211,
+          "name" : "runBackgroundPoll"
+        },
+        {
+          "line" : 252,
+          "name" : "startBackgroundOutcomePoller"
+        },
+        {
+          "line" : 260,
+          "name" : "stopBackgroundOutcomePoller"
+        }
+      ],
+      "imports" : [
+        "agents\/outcome-providers.mjs",
+        "core\/logger.mjs",
+        "core\/p-map.mjs",
+        "kb\/db.mjs",
+        "server\/vault.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 233,
+      "name" : "outcome-watcher.mjs",
+      "path" : "agents\/outcome-watcher.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/router.mjs",
+        "server.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 13,
+          "name" : "buildContextQuery"
+        },
+        {
+          "line" : 21,
+          "name" : "buildPrompt"
+        },
+        {
+          "line" : 30,
+          "name" : "entityBlock"
+        },
+        {
+          "line" : 82,
+          "name" : "validatePlan"
+        },
+        {
+          "line" : 128,
+          "name" : "generatePlan"
+        }
+      ],
+      "imports" : [
+        "agents\/runtime.mjs",
+        "core\/utils.mjs",
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 132,
+      "name" : "planner.mjs",
+      "path" : "agents\/planner.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/routes\/planning.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 33,
+          "name" : "sanitizePersonaSuffix"
+        },
+        {
+          "line" : 72,
+          "name" : "personaConfigBlock"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 73,
+      "name" : "prompt-utils.mjs",
+      "path" : "agents\/prompt-utils.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "agents\/agent-prompt.mjs",
+        "kb\/routes\/agent.mjs",
+        "llm_agent\/runtime\/route.mjs",
+        "server\/ai-routes.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 12,
+          "name" : "deterministicSignals"
+        },
+        {
+          "line" : 36,
+          "name" : "sanitizeTaskField"
+        },
+        {
+          "line" : 47,
+          "name" : "buildPrompt"
+        },
+        {
+          "line" : 48,
+          "name" : "tasks"
+        },
+        {
+          "line" : 84,
+          "name" : "validate"
+        },
+        {
+          "line" : 102,
+          "name" : "analyzeRisks"
+        },
+        {
+          "line" : 106,
+          "name" : "taskById"
+        },
+        {
+          "line" : 133,
+          "name" : "tasks"
+        }
+      ],
+      "imports" : [
+        "agents\/runtime.mjs",
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 130,
+      "name" : "risk.mjs",
+      "path" : "agents\/risk.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/routes\/planning.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 28,
+          "name" : "jittered"
+        },
+        {
+          "line" : 34,
+          "name" : "isCliOverloaded"
+        },
+        {
+          "line" : 45,
+          "name" : "redactKey"
+        },
+        {
+          "line" : 52,
+          "name" : "sleep"
+        },
+        {
+          "line" : 68,
+          "name" : "runClaude"
+        },
+        {
+          "line" : 261,
+          "name" : "runClaudeStream"
+        },
+        {
+          "line" : 275,
+          "name" : "fallbackBuffered"
+        },
+        {
+          "line" : 352,
+          "name" : "_readAnthropicStream"
+        },
+        {
+          "line" : 360,
+          "name" : "onAbort"
+        },
+        {
+          "line" : 374,
+          "name" : "dataLine"
+        },
+        {
+          "line" : 407,
+          "name" : "safeLookupApiKey"
+        },
+        {
+          "line" : 415,
+          "name" : "tryParseJSON"
+        },
+        {
+          "line" : 445,
+          "name" : "languageDirective"
+        },
+        {
+          "line" : 459,
+          "name" : "resolveLanguage"
+        },
+        {
+          "line" : 475,
+          "name" : "formatContext"
+        },
+        {
+          "line" : 477,
+          "name" : "trimmed"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs",
+        "server\/vault.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 446,
+      "name" : "runtime.mjs",
+      "path" : "agents\/runtime.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "agents\/agent-prompt.mjs",
+        "agents\/codegen.mjs",
+        "agents\/planner.mjs",
+        "agents\/risk.mjs",
+        "agents\/summarize.mjs",
+        "kb\/router.mjs",
+        "kb\/routes\/agent.mjs",
+        "server.mjs",
+        "server\/ai-routes.mjs",
+        "server\/export-routes.mjs",
+        "tests\/agents-runtime.test.mjs",
+        "tests\/security-fixes.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 13,
+          "name" : "asMrkdwn"
+        },
+        {
+          "line" : 28,
+          "name" : "isWebhookUrl"
+        },
+        {
+          "line" : 41,
+          "name" : "postWebhook"
+        },
+        {
+          "line" : 73,
+          "name" : "renderPlanSummary"
+        },
+        {
+          "line" : 74,
+          "name" : "counts"
+        },
+        {
+          "line" : 98,
+          "name" : "renderDispatchResult"
+        },
+        {
+          "line" : 99,
+          "name" : "ok"
+        },
+        {
+          "line" : 100,
+          "name" : "errored"
+        },
+        {
+          "line" : 101,
+          "name" : "skipped"
+        },
+        {
+          "line" : 116,
+          "name" : "renderReviewDecided"
+        },
+        {
+          "line" : 128,
+          "name" : "notifySlack"
+        }
+      ],
+      "imports" : [
+        "guardrails\/scan.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 137,
+      "name" : "slack.mjs",
+      "path" : "agents\/slack.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/router.mjs",
+        "tests\/slack.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 13,
+          "name" : "buildPrompt"
+        },
+        {
+          "line" : 41,
+          "name" : "summarizeTranscript"
+        }
+      ],
+      "imports" : [
+        "agents\/runtime.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 60,
+      "name" : "summarize.mjs",
+      "path" : "agents\/summarize.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/router.mjs",
+        "tests\/summarize.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 34,
+          "name" : "isProbablyBinary"
+        },
+        {
+          "line" : 82,
+          "name" : "chunkLines"
+        },
+        {
+          "line" : 95,
+          "name" : "indexLocalRepo"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 141,
+      "name" : "git.mjs",
+      "path" : "connectors\/git.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/router.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 14,
+          "name" : "authHeaders"
+        },
+        {
+          "line" : 24,
+          "name" : "fetchPage"
+        },
+        {
+          "line" : 55,
+          "name" : "repoSlug"
+        },
+        {
+          "line" : 65,
+          "name" : "indexGithubIssues"
+        },
+        {
+          "line" : 122,
+          "name" : "indexTicketsJson"
+        },
+        {
+          "line" : 124,
+          "name" : "items"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 124,
+      "name" : "issues.mjs",
+      "path" : "connectors\/issues.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/router.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 21,
+          "name" : "parseAttrs"
+        },
+        {
+          "line" : 29,
+          "name" : "decodeXml"
+        },
+        {
+          "line" : 39,
+          "name" : "parseJUnit"
+        },
+        {
+          "line" : 41,
+          "name" : "pushCase"
+        },
+        {
+          "line" : 80,
+          "name" : "indexJUnit"
+        },
+        {
+          "line" : 98,
+          "name" : "items"
+        },
+        {
+          "line" : 127,
+          "name" : "failed"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 118,
+      "name" : "qa.mjs",
+      "path" : "connectors\/qa.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/router.mjs"
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "markdown",
+      "loc" : 34,
+      "name" : "README.md",
+      "path" : "core\/README.md",
+      "role" : "Module",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 19,
+          "name" : "envStr"
+        },
+        {
+          "line" : 24,
+          "name" : "envInt"
+        },
+        {
+          "line" : 31,
+          "name" : "envBool"
+        },
+        {
+          "line" : 49,
+          "name" : "persistedDevSecrets"
+        },
+        {
+          "line" : 163,
+          "name" : "configSummary"
+        },
+        {
+          "line" : 164,
+          "name" : "digest"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 152,
+      "name" : "config.mjs",
+      "path" : "core\/config.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "core\/utils.mjs",
+        "kb\/db.mjs",
+        "scripts\/backup.mjs",
+        "server.mjs",
+        "server\/auth-routes.mjs",
+        "server\/jwt.mjs",
+        "server\/users.mjs",
+        "server\/vault.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 30,
+          "name" : "errAuth"
+        },
+        {
+          "line" : 33,
+          "name" : "errForbidden"
+        },
+        {
+          "line" : 36,
+          "name" : "errNotFound"
+        },
+        {
+          "line" : 43,
+          "name" : "errValidation"
+        },
+        {
+          "line" : 46,
+          "name" : "errConflict"
+        },
+        {
+          "line" : 49,
+          "name" : "errRateLimit"
+        },
+        {
+          "line" : 55,
+          "name" : "errInternal"
+        },
+        {
+          "line" : 60,
+          "name" : "sendError"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 72,
+      "name" : "errors.mjs",
+      "path" : "core\/errors.mjs",
+      "role" : "Web",
+      "types" : [
+        {
+          "line" : 17,
+          "name" : "AppError"
+        }
+      ],
+      "usedBy" : [
+        "core\/utils.mjs",
+        "server.mjs",
+        "server\/auth-routes.mjs",
+        "server\/auth.mjs",
+        "server\/users.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 26,
+          "name" : "format"
+        },
+        {
+          "line" : 45,
+          "name" : "log"
+        },
+        {
+          "line" : 66,
+          "name" : "newRequestId"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 64,
+      "name" : "logger.mjs",
+      "path" : "core\/logger.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "agents\/meeting-agent.mjs",
+        "agents\/outcome-watcher.mjs",
+        "kb\/outcomes.mjs",
+        "server.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 19,
+          "name" : "pMap"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 36,
+      "name" : "p-map.mjs",
+      "path" : "core\/p-map.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "agents\/dispatcher.mjs",
+        "agents\/outcome-watcher.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 14,
+          "name" : "readBody"
+        },
+        {
+          "line" : 24,
+          "name" : "finish"
+        },
+        {
+          "line" : 25,
+          "name" : "timer"
+        },
+        {
+          "line" : 55,
+          "name" : "parseJSON"
+        },
+        {
+          "line" : 72,
+          "name" : "sanitizeForPrompt"
+        },
+        {
+          "line" : 83,
+          "name" : "pattern"
+        },
+        {
+          "line" : 89,
+          "name" : "sanitizeLine"
+        },
+        {
+          "line" : 98,
+          "name" : "sendJSON"
+        }
+      ],
+      "imports" : [
+        "core\/config.mjs",
+        "core\/errors.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 94,
+      "name" : "utils.mjs",
+      "path" : "core\/utils.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "agents\/github-pr.mjs",
+        "agents\/planner.mjs",
+        "kb\/router.mjs",
+        "kb\/routes\/agent.mjs",
+        "kb\/routes\/live.mjs",
+        "kb\/routes\/planning.mjs",
+        "kb\/routes\/review.mjs",
+        "server.mjs",
+        "server\/ai-routes.mjs",
+        "server\/export-routes.mjs",
+        "tests\/sanitize.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "markdown",
+      "loc" : 1,
+      "name" : "ARCHITECTURE.md",
+      "path" : "docs\/ARCHITECTURE.md",
+      "role" : "Module",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "markdown",
+      "loc" : 1,
+      "name" : "meeting-agent-plan.md",
+      "path" : "docs\/meeting-agent-plan.md",
+      "role" : "Module",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 29,
+      "name" : "eslint.config.mjs",
+      "path" : "eslint.config.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 57,
+          "name" : "findMatches"
+        },
+        {
+          "line" : 86,
+          "name" : "check"
+        },
+        {
+          "line" : 92,
+          "name" : "checkDispatch"
+        },
+        {
+          "line" : 153,
+          "name" : "checkCodegenApply"
+        },
+        {
+          "line" : 163,
+          "name" : "ok"
+        },
+        {
+          "line" : 225,
+          "name" : "runGuardrails"
+        },
+        {
+          "line" : 231,
+          "name" : "blocking"
+        },
+        {
+          "line" : 232,
+          "name" : "warnings"
+        },
+        {
+          "line" : 233,
+          "name" : "info"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 219,
+      "name" : "rules.mjs",
+      "path" : "guardrails\/rules.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "agents\/dispatcher.mjs",
+        "guardrails\/scan.mjs",
+        "kb\/routes\/review.mjs",
+        "tests\/guardrails.test.mjs",
+        "tests\/security-fixes.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 14,
+          "name" : "SECRET_PATTERNS"
+        },
+        {
+          "line" : 23,
+          "name" : "scanForSecrets"
+        }
+      ],
+      "imports" : [
+        "guardrails\/rules.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 30,
+      "name" : "scan.mjs",
+      "path" : "guardrails\/scan.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "agents\/slack.mjs",
+        "server\/ai-routes.mjs",
+        "tests\/scan.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 27,
+          "name" : "lazyPrepare"
+        },
+        {
+          "line" : 35,
+          "name" : "below"
+        },
+        {
+          "line" : 40,
+          "name" : "requireUser"
+        },
+        {
+          "line" : 71,
+          "name" : "getDb"
+        },
+        {
+          "line" : 83,
+          "name" : "closeDb"
+        },
+        {
+          "line" : 102,
+          "name" : "safeJSONStringify"
+        },
+        {
+          "line" : 112,
+          "name" : "buildMatchExpr"
+        },
+        {
+          "line" : 148,
+          "name" : "search"
+        },
+        {
+          "line" : 265,
+          "name" : "meetingRows"
+        },
+        {
+          "line" : 266,
+          "name" : "sourceRows"
+        },
+        {
+          "line" : 267,
+          "name" : "planRows"
+        },
+        {
+          "line" : 268,
+          "name" : "taskRows"
+        },
+        {
+          "line" : 269,
+          "name" : "outcomeRows"
+        },
+        {
+          "line" : 274,
+          "name" : "meetingIds"
+        },
+        {
+          "line" : 276,
+          "name" : "placeholders"
+        },
+        {
+          "line" : 285,
+          "name" : "sourceIds"
+        },
+        {
+          "line" : 287,
+          "name" : "placeholders"
+        },
+        {
+          "line" : 295,
+          "name" : "buildIdSet"
+        },
+        {
+          "line" : 297,
+          "name" : "ids"
+        },
+        {
+          "line" : 299,
+          "name" : "placeholders"
+        },
+        {
+          "line" : 379,
+          "name" : "safeParseMeta"
+        },
+        {
+          "line" : 410,
+          "name" : "genId"
+        },
+        {
+          "line" : 508,
+          "name" : "findContext"
+        },
+        {
+          "line" : 518,
+          "name" : "sliceMeetings"
+        },
+        {
+          "line" : 525,
+          "name" : "ids"
+        },
+        {
+          "line" : 526,
+          "name" : "ph"
+        },
+        {
+          "line" : 534,
+          "name" : "sliceEntities"
+        },
+        {
+          "line" : 541,
+          "name" : "ids"
+        },
+        {
+          "line" : 542,
+          "name" : "ph"
+        },
+        {
+          "line" : 550,
+          "name" : "sliceTasks"
+        },
+        {
+          "line" : 557,
+          "name" : "ids"
+        },
+        {
+          "line" : 558,
+          "name" : "ph"
+        },
+        {
+          "line" : 566,
+          "name" : "sliceCode"
+        },
+        {
+          "line" : 573,
+          "name" : "ids"
+        },
+        {
+          "line" : 575,
+          "name" : "ph"
+        },
+        {
+          "line" : 586,
+          "name" : "sliceTickets"
+        },
+        {
+          "line" : 593,
+          "name" : "ids"
+        },
+        {
+          "line" : 595,
+          "name" : "ph"
+        },
+        {
+          "line" : 632,
+          "name" : "deleteUserCascade"
+        },
+        {
+          "line" : 635,
+          "name" : "tx"
+        },
+        {
+          "line" : 637,
+          "name" : "del"
+        }
+      ],
+      "imports" : [
+        "core\/config.mjs",
+        "kb\/migrations.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 629,
+      "name" : "db.mjs",
+      "path" : "kb\/db.mjs",
+      "role" : "Web",
+      "types" : [
+        {
+          "line" : 415,
+          "name" : "of"
+        }
+      ],
+      "usedBy" : [
+        "agents\/code-sync.mjs",
+        "agents\/codegen.mjs",
+        "agents\/dispatcher.mjs",
+        "agents\/live-sessions.mjs",
+        "agents\/meeting-agent.mjs",
+        "agents\/outcome-watcher.mjs",
+        "agents\/planner.mjs",
+        "agents\/risk.mjs",
+        "agents\/runtime.mjs",
+        "connectors\/git.mjs",
+        "connectors\/issues.mjs",
+        "connectors\/qa.mjs",
+        "kb\/exporter.mjs",
+        "kb\/feedback.mjs",
+        "kb\/personas.mjs",
+        "kb\/plans.mjs",
+        "kb\/project-export.mjs",
+        "kb\/reviews.mjs",
+        "kb\/router.mjs",
+        "kb\/routes\/agent.mjs",
+        "kb\/routes\/planning.mjs",
+        "kb\/routes\/review.mjs",
+        "kb\/sources.mjs",
+        "kb\/user.mjs",
+        "llm_agent\/internal\/context\/render-graphify-memory.mjs",
+        "server.mjs",
+        "server\/ai-routes.mjs",
+        "server\/auth-routes.mjs",
+        "server\/auth.mjs",
+        "server\/export-routes.mjs",
+        "tests\/agent-ask-history.test.mjs",
+        "tests\/agent-personas.test.mjs",
+        "tests\/agents-runtime.test.mjs",
+        "tests\/kb-router-path-traversal.test.mjs",
+        "tests\/kb-router.test.mjs",
+        "tests\/password-reset.test.mjs",
+        "tests\/security-fixes.test.mjs",
+        "tests\/tenancy.test.mjs",
+        "tests\/user-delete-cascade.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 7,
+          "name" : "toLegacyMeeting"
+        },
+        {
+          "line" : 24,
+          "name" : "toLegacyEntity"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 53,
+      "name" : "exporter.mjs",
+      "path" : "kb\/exporter.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/router.mjs",
+        "tests\/exporter.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 8,
+          "name" : "so"
+        },
+        {
+          "line" : 18,
+          "name" : "recordAgentFeedback"
+        },
+        {
+          "line" : 39,
+          "name" : "getAgentFeedback"
+        },
+        {
+          "line" : 54,
+          "name" : "agentFeedbackByTask"
+        },
+        {
+          "line" : 94,
+          "name" : "agentFeedbackStats"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 118,
+      "name" : "feedback.mjs",
+      "path" : "kb\/feedback.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 21,
+          "name" : "ingestMeeting"
+        },
+        {
+          "line" : 49,
+          "name" : "tx"
+        },
+        {
+          "line" : 93,
+          "name" : "deleteMeeting"
+        },
+        {
+          "line" : 102,
+          "name" : "getMeetingTranscript"
+        },
+        {
+          "line" : 111,
+          "name" : "getMeeting"
+        },
+        {
+          "line" : 141,
+          "name" : "listMeetings"
+        },
+        {
+          "line" : 169,
+          "name" : "listEntities"
+        },
+        {
+          "line" : 180,
+          "name" : "getEntity"
+        },
+        {
+          "line" : 203,
+          "name" : "stats"
+        },
+        {
+          "line" : 229,
+          "name" : "statsAdmin"
+        }
+      ],
+      "imports" : [
+        "kb\/outcomes.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 222,
+      "name" : "meetings.mjs",
+      "path" : "kb\/meetings.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 28,
+          "name" : "isSingleAddColumn"
+        },
+        {
+          "line" : 41,
+          "name" : "ensureMigrationsTable"
+        },
+        {
+          "line" : 52,
+          "name" : "listMigrationFiles"
+        },
+        {
+          "line" : 64,
+          "name" : "checksum"
+        },
+        {
+          "line" : 77,
+          "name" : "applyMigrations"
+        },
+        {
+          "line" : 108,
+          "name" : "tx"
+        },
+        {
+          "line" : 146,
+          "name" : "migrationStatus"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 146,
+      "name" : "migrations.mjs",
+      "path" : "kb\/migrations.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/db.mjs",
+        "server.mjs",
+        "tests\/migrations.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 40,
+          "name" : "autoSyncTaskStatus"
+        },
+        {
+          "line" : 82,
+          "name" : "placeholders"
+        },
+        {
+          "line" : 86,
+          "name" : "depStatus"
+        },
+        {
+          "line" : 89,
+          "name" : "allResolved"
+        },
+        {
+          "line" : 111,
+          "name" : "listUsersWithDispatchedTasks"
+        },
+        {
+          "line" : 127,
+          "name" : "recordOutcome"
+        },
+        {
+          "line" : 203,
+          "name" : "listOutcomesForTask"
+        },
+        {
+          "line" : 232,
+          "name" : "listDispatchedTasks"
+        },
+        {
+          "line" : 253,
+          "name" : "outcomeStats"
+        },
+        {
+          "line" : 267,
+          "name" : "listDispatchedTasksForRetry"
+        }
+      ],
+      "imports" : [
+        "core\/logger.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 258,
+      "name" : "outcomes.mjs",
+      "path" : "kb\/outcomes.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "agents\/dispatcher.mjs",
+        "kb\/meetings.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 20,
+          "name" : "so"
+        },
+        {
+          "line" : 32,
+          "name" : "genPersonaId"
+        },
+        {
+          "line" : 41,
+          "name" : "readPersonaBlob"
+        },
+        {
+          "line" : 83,
+          "name" : "writePersonaBlob"
+        },
+        {
+          "line" : 105,
+          "name" : "getAgentPersona"
+        },
+        {
+          "line" : 110,
+          "name" : "p"
+        },
+        {
+          "line" : 124,
+          "name" : "setAgentPersona"
+        },
+        {
+          "line" : 166,
+          "name" : "listAgentPersonas"
+        },
+        {
+          "line" : 176,
+          "name" : "createAgentPersona"
+        },
+        {
+          "line" : 201,
+          "name" : "updateAgentPersona"
+        },
+        {
+          "line" : 207,
+          "name" : "idx"
+        },
+        {
+          "line" : 231,
+          "name" : "deleteAgentPersona"
+        },
+        {
+          "line" : 240,
+          "name" : "idx"
+        },
+        {
+          "line" : 256,
+          "name" : "setActiveAgentPersona"
+        },
+        {
+          "line" : 277,
+          "name" : "appendAgentAskMessage"
+        },
+        {
+          "line" : 295,
+          "name" : "tx"
+        },
+        {
+          "line" : 322,
+          "name" : "listAgentAskMessages"
+        },
+        {
+          "line" : 342,
+          "name" : "clearAgentAskMessages"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 327,
+      "name" : "personas.mjs",
+      "path" : "kb\/personas.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 7,
+          "name" : "so"
+        },
+        {
+          "line" : 18,
+          "name" : "savePlan"
+        },
+        {
+          "line" : 64,
+          "name" : "tx"
+        },
+        {
+          "line" : 121,
+          "name" : "getPlan"
+        },
+        {
+          "line" : 160,
+          "name" : "listPlans"
+        },
+        {
+          "line" : 184,
+          "name" : "deletePlan"
+        },
+        {
+          "line" : 193,
+          "name" : "updateTask"
+        },
+        {
+          "line" : 246,
+          "name" : "mergeTaskMeta"
+        },
+        {
+          "line" : 262,
+          "name" : "getTaskById"
+        },
+        {
+          "line" : 290,
+          "name" : "getPlanSnapshots"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 278,
+      "name" : "plans.mjs",
+      "path" : "kb\/plans.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 29,
+          "name" : "exportProject"
+        },
+        {
+          "line" : 50,
+          "name" : "meetingIds"
+        },
+        {
+          "line" : 51,
+          "name" : "ph"
+        },
+        {
+          "line" : 73,
+          "name" : "meetings"
+        },
+        {
+          "line" : 90,
+          "name" : "meetingIds"
+        },
+        {
+          "line" : 93,
+          "name" : "ph"
+        },
+        {
+          "line" : 118,
+          "name" : "planIds"
+        },
+        {
+          "line" : 119,
+          "name" : "ph"
+        },
+        {
+          "line" : 152,
+          "name" : "plans"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 159,
+      "name" : "project-export.mjs",
+      "path" : "kb\/project-export.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 12,
+          "name" : "submitReview"
+        },
+        {
+          "line" : 50,
+          "name" : "listReviews"
+        },
+        {
+          "line" : 80,
+          "name" : "getReview"
+        },
+        {
+          "line" : 103,
+          "name" : "setReviewStatus"
+        },
+        {
+          "line" : 136,
+          "name" : "deleteReview"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 134,
+      "name" : "reviews.mjs",
+      "path" : "kb\/reviews.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 40,
+          "name" : "handleKB"
+        },
+        {
+          "line" : 275,
+          "name" : "timeoutPromise"
+        }
+      ],
+      "imports" : [
+        "agents\/dispatcher.mjs",
+        "agents\/live-sessions.mjs",
+        "agents\/meeting-agent.mjs",
+        "agents\/outcome-watcher.mjs",
+        "agents\/runtime.mjs",
+        "agents\/slack.mjs",
+        "agents\/summarize.mjs",
+        "connectors\/git.mjs",
+        "connectors\/issues.mjs",
+        "connectors\/qa.mjs",
+        "core\/utils.mjs",
+        "kb\/db.mjs",
+        "kb\/exporter.mjs",
+        "kb\/routes\/agent.mjs",
+        "kb\/routes\/live.mjs",
+        "kb\/routes\/planning.mjs",
+        "kb\/routes\/review.mjs",
+        "server\/vault.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 526,
+      "name" : "router.mjs",
+      "path" : "kb\/router.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "server.mjs",
+        "tests\/kb-router-path-traversal.test.mjs",
+        "tests\/kb-router.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 18,
+          "name" : "handleAgentRoutes"
+        }
+      ],
+      "imports" : [
+        "agents\/meeting-agent.mjs",
+        "agents\/prompt-utils.mjs",
+        "agents\/runtime.mjs",
+        "core\/utils.mjs",
+        "kb\/db.mjs",
+        "llm_agent\/runtime\/route.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 274,
+      "name" : "agent.mjs",
+      "path" : "kb\/routes\/agent.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/router.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 30,
+          "name" : "handleLiveRoutes"
+        },
+        {
+          "line" : 128,
+          "name" : "cleanup"
+        },
+        {
+          "line" : 141,
+          "name" : "endStream"
+        },
+        {
+          "line" : 147,
+          "name" : "resetIdle"
+        },
+        {
+          "line" : 163,
+          "name" : "onUpdate"
+        }
+      ],
+      "imports" : [
+        "core\/utils.mjs",
+        "server\/rate-limit.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 181,
+      "name" : "live.mjs",
+      "path" : "kb\/routes\/live.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/router.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 21,
+          "name" : "handlePlanningRoutes"
+        }
+      ],
+      "imports" : [
+        "agents\/code-sync.mjs",
+        "agents\/codegen.mjs",
+        "agents\/dispatcher.mjs",
+        "agents\/planner.mjs",
+        "agents\/risk.mjs",
+        "core\/utils.mjs",
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 259,
+      "name" : "planning.mjs",
+      "path" : "kb\/routes\/planning.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/router.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 20,
+          "name" : "handleReviewRoutes"
+        }
+      ],
+      "imports" : [
+        "agents\/codegen-apply.mjs",
+        "agents\/dispatcher.mjs",
+        "agents\/github-pr.mjs",
+        "core\/utils.mjs",
+        "guardrails\/rules.mjs",
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 235,
+      "name" : "review.mjs",
+      "path" : "kb\/routes\/review.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/router.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 23,
+          "name" : "ingestSources"
+        },
+        {
+          "line" : 40,
+          "name" : "tx"
+        },
+        {
+          "line" : 80,
+          "name" : "deleteSourcesByPrefix"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 83,
+      "name" : "sources.mjs",
+      "path" : "kb\/sources.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 15,
+          "name" : "normalizeRepoPath"
+        },
+        {
+          "line" : 25,
+          "name" : "listUserRepos"
+        },
+        {
+          "line" : 33,
+          "name" : "addUserRepo"
+        },
+        {
+          "line" : 45,
+          "name" : "removeUserRepo"
+        },
+        {
+          "line" : 55,
+          "name" : "userRepoAllowlist"
+        },
+        {
+          "line" : 85,
+          "name" : "coerceUiPref"
+        },
+        {
+          "line" : 99,
+          "name" : "getUserPrefs"
+        },
+        {
+          "line" : 118,
+          "name" : "setUserPrefs"
+        },
+        {
+          "line" : 154,
+          "name" : "revokeJti"
+        },
+        {
+          "line" : 164,
+          "name" : "isJtiRevoked"
+        },
+        {
+          "line" : 181,
+          "name" : "purgeExpiredJti"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 169,
+      "name" : "user.mjs",
+      "path" : "kb\/user.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "markdown",
+      "loc" : 18,
+      "name" : "README.md",
+      "path" : "llm_agent\/README.md",
+      "role" : "Module",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "markdown",
+      "loc" : 24,
+      "name" : "ask-internal.md",
+      "path" : "llm_agent\/global\/ask-internal.md",
+      "role" : "Module",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "markdown",
+      "loc" : 51,
+      "name" : "ask-subagent.md",
+      "path" : "llm_agent\/global\/ask-subagent.md",
+      "role" : "Module",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 16,
+          "name" : "composeGlobalPrompt"
+        },
+        {
+          "line" : 17,
+          "name" : "skillBodies"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 19,
+      "name" : "compose-prompt.mjs",
+      "path" : "llm_agent\/global\/compose-prompt.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "llm_agent\/runtime\/route.mjs",
+        "tests\/agent-global.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "markdown",
+      "loc" : 57,
+      "name" : "prompt.md",
+      "path" : "llm_agent\/global\/prompt.md",
+      "role" : "Module",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "markdown",
+      "loc" : 49,
+      "name" : "update-file.md",
+      "path" : "llm_agent\/global\/update-file.md",
+      "role" : "Module",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "markdown",
+      "loc" : 10,
+      "name" : "app-capabilities.md",
+      "path" : "llm_agent\/internal\/context\/app-capabilities.md",
+      "role" : "Module",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 21,
+          "name" : "composeSystemContext"
+        }
+      ],
+      "imports" : [
+        "llm_agent\/internal\/context\/render-active-project.mjs",
+        "llm_agent\/internal\/context\/render-graphify-memory.mjs",
+        "llm_agent\/internal\/context\/render-indexed-repos.mjs",
+        "llm_agent\/internal\/context\/render-recent-issues.mjs",
+        "llm_agent\/internal\/context\/render-recent-meetings.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 34,
+      "name" : "compose.mjs",
+      "path" : "llm_agent\/internal\/context\/compose.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "llm_agent\/runtime\/loop.mjs",
+        "tests\/agent-context-renderers.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 5,
+          "name" : "renderActiveProject"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 15,
+      "name" : "render-active-project.mjs",
+      "path" : "llm_agent\/internal\/context\/render-active-project.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "llm_agent\/internal\/context\/compose.mjs",
+        "tests\/agent-context-renderers.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 31,
+          "name" : "safeRead"
+        },
+        {
+          "line" : 46,
+          "name" : "listMdFiles"
+        },
+        {
+          "line" : 67,
+          "name" : "normalizeForCompare"
+        },
+        {
+          "line" : 71,
+          "name" : "repoMemoryBlock"
+        },
+        {
+          "line" : 88,
+          "name" : "tryAdd"
+        },
+        {
+          "line" : 124,
+          "name" : "renderGraphifyMemory"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 147,
+      "name" : "render-graphify-memory.mjs",
+      "path" : "llm_agent\/internal\/context\/render-graphify-memory.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "llm_agent\/internal\/context\/compose.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 3,
+          "name" : "renderIndexedRepos"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 14,
+      "name" : "render-indexed-repos.mjs",
+      "path" : "llm_agent\/internal\/context\/render-indexed-repos.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "llm_agent\/internal\/context\/compose.mjs",
+        "tests\/agent-context-renderers.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 5,
+          "name" : "renderRecentIssues"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 21,
+      "name" : "render-recent-issues.mjs",
+      "path" : "llm_agent\/internal\/context\/render-recent-issues.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "llm_agent\/internal\/context\/compose.mjs",
+        "tests\/agent-context-renderers.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 3,
+          "name" : "renderRecentMeetings"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 14,
+      "name" : "render-recent-meetings.mjs",
+      "path" : "llm_agent\/internal\/context\/render-recent-meetings.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "llm_agent\/internal\/context\/compose.mjs",
+        "tests\/agent-context-renderers.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "markdown",
+      "loc" : 41,
+      "name" : "prompt.md",
+      "path" : "llm_agent\/internal\/prompt.md",
+      "role" : "Module",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "markdown",
+      "loc" : 12,
+      "name" : "_base.md",
+      "path" : "llm_agent\/internal\/skills\/_base.md",
+      "role" : "Module",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "markdown",
+      "loc" : 43,
+      "name" : "comment-gitlab-issue.md",
+      "path" : "llm_agent\/internal\/skills\/comment-gitlab-issue.md",
+      "role" : "Module",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "markdown",
+      "loc" : 52,
+      "name" : "create-gitlab-issue.md",
+      "path" : "llm_agent\/internal\/skills\/create-gitlab-issue.md",
+      "role" : "Module",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "markdown",
+      "loc" : 40,
+      "name" : "search-kb.md",
+      "path" : "llm_agent\/internal\/skills\/search-kb.md",
+      "role" : "Module",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "markdown",
+      "loc" : 51,
+      "name" : "trigger-review-code.md",
+      "path" : "llm_agent\/internal\/skills\/trigger-review-code.md",
+      "role" : "Module",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 8,
+          "name" : "parseFence"
+        },
+        {
+          "line" : 44,
+          "name" : "validateArgs"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 82,
+      "name" : "fence.mjs",
+      "path" : "llm_agent\/runtime\/fence.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "llm_agent\/runtime\/loop.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 19,
+          "name" : "askInternal"
+        }
+      ],
+      "imports" : [
+        "llm_agent\/runtime\/handlers\/search-kb.mjs",
+        "llm_agent\/runtime\/loop.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 53,
+      "name" : "ask-internal.mjs",
+      "path" : "llm_agent\/runtime\/handlers\/ask-internal.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "llm_agent\/runtime\/route.mjs",
+        "tests\/agent-global.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 40,
+          "name" : "askSubagent"
+        }
+      ],
+      "imports" : [
+        "llm_agent\/runtime\/handlers\/search-kb.mjs",
+        "llm_agent\/runtime\/loop.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 99,
+      "name" : "ask-subagent.mjs",
+      "path" : "llm_agent\/runtime\/handlers\/ask-subagent.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "llm_agent\/runtime\/route.mjs",
+        "tests\/agent-ask-subagent.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 14,
+          "name" : "redactFence"
+        },
+        {
+          "line" : 19,
+          "name" : "searchKb"
+        },
+        {
+          "line" : 26,
+          "name" : "hits"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 31,
+      "name" : "search-kb.mjs",
+      "path" : "llm_agent\/runtime\/handlers\/search-kb.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "llm_agent\/runtime\/handlers\/ask-internal.mjs",
+        "llm_agent\/runtime\/handlers\/ask-subagent.mjs",
+        "llm_agent\/runtime\/loop.mjs",
+        "tests\/agent-code-assist.test.mjs",
+        "tests\/agent-search-kb.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 14,
+          "name" : "redactDeep"
+        },
+        {
+          "line" : 25,
+          "name" : "runReadHandler"
+        },
+        {
+          "line" : 49,
+          "name" : "buildSystemPrompt"
+        },
+        {
+          "line" : 50,
+          "name" : "skillBodies"
+        },
+        {
+          "line" : 59,
+          "name" : "renderHistoryBlock"
+        },
+        {
+          "line" : 73,
+          "name" : "buildIterationPrompt"
+        },
+        {
+          "line" : 100,
+          "name" : "runAgentLoop"
+        }
+      ],
+      "imports" : [
+        "llm_agent\/internal\/context\/compose.mjs",
+        "llm_agent\/runtime\/fence.mjs",
+        "llm_agent\/runtime\/handlers\/search-kb.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 202,
+      "name" : "loop.mjs",
+      "path" : "llm_agent\/runtime\/loop.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "llm_agent\/runtime\/handlers\/ask-internal.mjs",
+        "llm_agent\/runtime\/handlers\/ask-subagent.mjs",
+        "llm_agent\/runtime\/route.mjs",
+        "tests\/agent-code-assist.test.mjs",
+        "tests\/agent-loop-deadline.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 51,
+          "name" : "reloadPlugins"
+        },
+        {
+          "line" : 90,
+          "name" : "listAllSkills"
+        },
+        {
+          "line" : 93,
+          "name" : "toEntry"
+        },
+        {
+          "line" : 134,
+          "name" : "listInstalledPlugins"
+        },
+        {
+          "line" : 174,
+          "name" : "loadPluginSkillsCached"
+        },
+        {
+          "line" : 183,
+          "name" : "buildPerUserSkillSet"
+        },
+        {
+          "line" : 229,
+          "name" : "handleCodeAssist"
+        }
+      ],
+      "imports" : [
+        "agents\/prompt-utils.mjs",
+        "llm_agent\/global\/compose-prompt.mjs",
+        "llm_agent\/runtime\/handlers\/ask-internal.mjs",
+        "llm_agent\/runtime\/handlers\/ask-subagent.mjs",
+        "llm_agent\/runtime\/loop.mjs",
+        "llm_agent\/runtime\/skill-loader.mjs",
+        "plugins\/loader.mjs",
+        "plugins\/state.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 335,
+      "name" : "route.mjs",
+      "path" : "llm_agent\/runtime\/route.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/routes\/agent.mjs",
+        "server\/ai-routes.mjs",
+        "server\/auth-routes.mjs",
+        "tests\/agent-global-internal.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 21,
+          "name" : "stripInjectionFences"
+        },
+        {
+          "line" : 25,
+          "name" : "parseSkillFile"
+        },
+        {
+          "line" : 52,
+          "name" : "validateSchema"
+        },
+        {
+          "line" : 75,
+          "name" : "loadSkills"
+        },
+        {
+          "line" : 84,
+          "name" : "entries"
+        },
+        {
+          "line" : 150,
+          "name" : "extractBodyDescription"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 146,
+      "name" : "skill-loader.mjs",
+      "path" : "llm_agent\/runtime\/skill-loader.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "llm_agent\/runtime\/route.mjs",
+        "tests\/agent-code-assist.test.mjs",
+        "tests\/agent-global.test.mjs",
+        "tests\/agent-skills.test.mjs",
+        "tests\/claude-adapter.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 17,
+          "name" : "semverNewer"
+        },
+        {
+          "line" : 20,
+          "name" : "parse"
+        },
+        {
+          "line" : 33,
+          "name" : "claudePluginsRoot"
+        },
+        {
+          "line" : 43,
+          "name" : "countSkills"
+        },
+        {
+          "line" : 64,
+          "name" : "countCommands"
+        },
+        {
+          "line" : 81,
+          "name" : "scanInstalled"
+        },
+        {
+          "line" : 125,
+          "name" : "scanMarketplace"
+        },
+        {
+          "line" : 154,
+          "name" : "lines"
+        },
+        {
+          "line" : 180,
+          "name" : "importPlugin"
+        },
+        {
+          "line" : 262,
+          "name" : "findClaudePlugin"
+        },
+        {
+          "line" : 300,
+          "name" : "findMarketplaceName"
+        },
+        {
+          "line" : 315,
+          "name" : "injects"
+        },
+        {
+          "line" : 321,
+          "name" : "copySkills"
+        },
+        {
+          "line" : 364,
+          "name" : "adaptSkillFrontmatter"
+        },
+        {
+          "line" : 400,
+          "name" : "copyCmds"
+        },
+        {
+          "line" : 422,
+          "name" : "listImportedNames"
+        },
+        {
+          "line" : 446,
+          "name" : "getImportedVersion"
+        },
+        {
+          "line" : 463,
+          "name" : "checkForUpdates"
+        }
+      ],
+      "imports" : [
+        "plugins\/loader.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 459,
+      "name" : "claude-adapter.mjs",
+      "path" : "plugins\/claude-adapter.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "server\/auth-routes.mjs",
+        "tests\/claude-adapter.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 46,
+          "name" : "runCmd"
+        },
+        {
+          "line" : 52,
+          "name" : "timer"
+        },
+        {
+          "line" : 73,
+          "name" : "isUnsafePath"
+        },
+        {
+          "line" : 84,
+          "name" : "listZipEntries"
+        },
+        {
+          "line" : 92,
+          "name" : "entries"
+        },
+        {
+          "line" : 96,
+          "name" : "findManifest"
+        },
+        {
+          "line" : 105,
+          "name" : "dirs"
+        },
+        {
+          "line" : 118,
+          "name" : "hasSymlinks"
+        },
+        {
+          "line" : 142,
+          "name" : "installFromZip"
+        },
+        {
+          "line" : 271,
+          "name" : "uninstall"
+        }
+      ],
+      "imports" : [
+        "plugins\/loader.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 273,
+      "name" : "installer.mjs",
+      "path" : "plugins\/installer.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "server\/auth-routes.mjs",
+        "tests\/plugins-installer.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 43,
+          "name" : "stripInjectionFences"
+        },
+        {
+          "line" : 60,
+          "name" : "scanForSuspiciousContent"
+        },
+        {
+          "line" : 75,
+          "name" : "defaultPluginDir"
+        },
+        {
+          "line" : 87,
+          "name" : "parseFrontmatter"
+        },
+        {
+          "line" : 99,
+          "name" : "validateManifest"
+        },
+        {
+          "line" : 125,
+          "name" : "parseSubagentFile"
+        },
+        {
+          "line" : 160,
+          "name" : "parseCommandFile"
+        },
+        {
+          "line" : 199,
+          "name" : "loadOnePlugin"
+        },
+        {
+          "line" : 218,
+          "name" : "rejectSymlink"
+        },
+        {
+          "line" : 349,
+          "name" : "loadPlugins"
+        },
+        {
+          "line" : 399,
+          "name" : "expandSlashCommand"
+        },
+        {
+          "line" : 436,
+          "name" : "expanded"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 411,
+      "name" : "loader.mjs",
+      "path" : "plugins\/loader.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "llm_agent\/runtime\/route.mjs",
+        "plugins\/claude-adapter.mjs",
+        "plugins\/installer.mjs",
+        "plugins\/state.mjs",
+        "tests\/claude-adapter.test.mjs",
+        "tests\/plugins-loader.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 18,
+          "name" : "stateFilePath"
+        },
+        {
+          "line" : 22,
+          "name" : "readAll"
+        },
+        {
+          "line" : 35,
+          "name" : "writeAll"
+        },
+        {
+          "line" : 47,
+          "name" : "listEnabled"
+        },
+        {
+          "line" : 57,
+          "name" : "setEnabled"
+        },
+        {
+          "line" : 77,
+          "name" : "pruneOrphans"
+        },
+        {
+          "line" : 83,
+          "name" : "filtered"
+        }
+      ],
+      "imports" : [
+        "plugins\/loader.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 88,
+      "name" : "state.mjs",
+      "path" : "plugins\/state.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "llm_agent\/runtime\/route.mjs",
+        "server\/auth-routes.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 10,
+          "name" : "isoStamp"
+        },
+        {
+          "line" : 14,
+          "name" : "defaultBackupPath"
+        },
+        {
+          "line" : 18,
+          "name" : "parseArgs"
+        },
+        {
+          "line" : 51,
+          "name" : "sha256File"
+        },
+        {
+          "line" : 62,
+          "name" : "runBackup"
+        },
+        {
+          "line" : 104,
+          "name" : "printHelp"
+        }
+      ],
+      "imports" : [
+        "core\/config.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 113,
+      "name" : "backup.mjs",
+      "path" : "scripts\/backup.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "tests\/scripts-backup.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 103,
+          "name" : "rateLimitProfile"
+        },
+        {
+          "line" : 137,
+          "name" : "setCORS"
+        },
+        {
+          "line" : 165,
+          "name" : "server"
+        },
+        {
+          "line" : 521,
+          "name" : "probeClaude"
+        },
+        {
+          "line" : 538,
+          "name" : "claudeProbeResult"
+        },
+        {
+          "line" : 574,
+          "name" : "shutdown"
+        },
+        {
+          "line" : 584,
+          "name" : "hardTimeout"
+        },
+        {
+          "line" : 628,
+          "name" : "runAuthGc"
+        },
+        {
+          "line" : 655,
+          "name" : "BACKUP_INTERVAL_HOURS"
+        },
+        {
+          "line" : 659,
+          "name" : "BACKUP_RETAIN"
+        },
+        {
+          "line" : 665,
+          "name" : "runAutoBackup"
+        }
+      ],
+      "imports" : [
+        "agents\/live-sessions.mjs",
+        "agents\/meeting-agent.mjs",
+        "agents\/outcome-watcher.mjs",
+        "agents\/runtime.mjs",
+        "core\/config.mjs",
+        "core\/errors.mjs",
+        "core\/logger.mjs",
+        "core\/utils.mjs",
+        "kb\/db.mjs",
+        "kb\/migrations.mjs",
+        "kb\/router.mjs",
+        "server\/ai-routes.mjs",
+        "server\/audit.mjs",
+        "server\/auth-routes.mjs",
+        "server\/auth.mjs",
+        "server\/control-plane.mjs",
+        "server\/export-routes.mjs",
+        "server\/metrics.mjs",
+        "server\/rate-limit.mjs",
+        "server\/users.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 724,
+      "name" : "server.mjs",
+      "path" : "server.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 22,
+          "name" : "safeTruncate"
+        },
+        {
+          "line" : 41,
+          "name" : "personaPrefix"
+        },
+        {
+          "line" : 63,
+          "name" : "ingestGeneratedDoc"
+        },
+        {
+          "line" : 93,
+          "name" : "handleAIRoutes"
+        },
+        {
+          "line" : 406,
+          "name" : "participants"
+        },
+        {
+          "line" : 408,
+          "name" : "types"
+        },
+        {
+          "line" : 424,
+          "name" : "typeSection"
+        },
+        {
+          "line" : 438,
+          "name" : "headingList"
+        },
+        {
+          "line" : 476,
+          "name" : "buildPrompt"
+        },
+        {
+          "line" : 478,
+          "name" : "tryParse"
+        },
+        {
+          "line" : 489,
+          "name" : "validate"
+        },
+        {
+          "line" : 491,
+          "name" : "cleanQuote"
+        },
+        {
+          "line" : 492,
+          "name" : "cleanText"
+        },
+        {
+          "line" : 493,
+          "name" : "cleanOwner"
+        },
+        {
+          "line" : 494,
+          "name" : "cleanDue"
+        },
+        {
+          "line" : 495,
+          "name" : "arr"
+        }
+      ],
+      "imports" : [
+        "agents\/prompt-utils.mjs",
+        "agents\/runtime.mjs",
+        "core\/utils.mjs",
+        "guardrails\/scan.mjs",
+        "kb\/db.mjs",
+        "llm_agent\/runtime\/route.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 467,
+      "name" : "ai-routes.mjs",
+      "path" : "server\/ai-routes.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "server.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 33,
+          "name" : "isRedactableKey"
+        },
+        {
+          "line" : 39,
+          "name" : "redact"
+        },
+        {
+          "line" : 54,
+          "name" : "recordAudit"
+        },
+        {
+          "line" : 78,
+          "name" : "listAuditForUser"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 105,
+      "name" : "audit.mjs",
+      "path" : "server\/audit.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "server.mjs",
+        "server\/auth-routes.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 20,
+          "name" : "publicMessageFor"
+        },
+        {
+          "line" : 27,
+          "name" : "send"
+        },
+        {
+          "line" : 33,
+          "name" : "readJson"
+        },
+        {
+          "line" : 59,
+          "name" : "readRawBody"
+        },
+        {
+          "line" : 80,
+          "name" : "clientIp"
+        },
+        {
+          "line" : 95,
+          "name" : "parts"
+        },
+        {
+          "line" : 105,
+          "name" : "safeAudit"
+        },
+        {
+          "line" : 116,
+          "name" : "isAuthRoute"
+        },
+        {
+          "line" : 144,
+          "name" : "handleAuth"
+        },
+        {
+          "line" : 408,
+          "name" : "keys"
+        },
+        {
+          "line" : 562,
+          "name" : "found"
+        },
+        {
+          "line" : 691,
+          "name" : "installedNames"
+        }
+      ],
+      "imports" : [
+        "core\/config.mjs",
+        "core\/errors.mjs",
+        "kb\/db.mjs",
+        "llm_agent\/runtime\/route.mjs",
+        "plugins\/claude-adapter.mjs",
+        "plugins\/installer.mjs",
+        "plugins\/state.mjs",
+        "server\/audit.mjs",
+        "server\/auth.mjs",
+        "server\/rate-limit.mjs",
+        "server\/users.mjs",
+        "server\/vault.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 715,
+      "name" : "auth-routes.mjs",
+      "path" : "server\/auth-routes.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "server.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 34,
+          "name" : "isPublicPath"
+        },
+        {
+          "line" : 50,
+          "name" : "authenticate"
+        },
+        {
+          "line" : 63,
+          "name" : "requireAdmin"
+        }
+      ],
+      "imports" : [
+        "core\/errors.mjs",
+        "kb\/db.mjs",
+        "server\/jwt.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 61,
+      "name" : "auth.mjs",
+      "path" : "server\/auth.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "server.mjs",
+        "server\/auth-routes.mjs",
+        "tests\/auth.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 1,
+          "name" : "buildHealthPayload"
+        },
+        {
+          "line" : 23,
+          "name" : "buildNotFoundDetails"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 27,
+      "name" : "control-plane.mjs",
+      "path" : "server\/control-plane.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "server.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 17,
+          "name" : "safeTruncate"
+        },
+        {
+          "line" : 25,
+          "name" : "ingestGeneratedDoc"
+        },
+        {
+          "line" : 46,
+          "name" : "safeStr"
+        },
+        {
+          "line" : 56,
+          "name" : "buildMeetingDocx"
+        },
+        {
+          "line" : 104,
+          "name" : "handleExportRoutes"
+        },
+        {
+          "line" : 204,
+          "name" : "sections"
+        },
+        {
+          "line" : 213,
+          "name" : "sectionList"
+        },
+        {
+          "line" : 222,
+          "name" : "sourceNames"
+        }
+      ],
+      "imports" : [
+        "agents\/runtime.mjs",
+        "core\/utils.mjs",
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 211,
+      "name" : "export-routes.mjs",
+      "path" : "server\/export-routes.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "server.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 16,
+          "name" : "b64encode"
+        },
+        {
+          "line" : 20,
+          "name" : "sign"
+        },
+        {
+          "line" : 28,
+          "name" : "safeEqual"
+        },
+        {
+          "line" : 37,
+          "name" : "verifySignature"
+        },
+        {
+          "line" : 43,
+          "name" : "verifyAndDecode"
+        },
+        {
+          "line" : 84,
+          "name" : "signAccessToken"
+        },
+        {
+          "line" : 97,
+          "name" : "verifyAccessToken"
+        },
+        {
+          "line" : 106,
+          "name" : "newRefreshToken"
+        },
+        {
+          "line" : 110,
+          "name" : "hashRefreshToken"
+        },
+        {
+          "line" : 114,
+          "name" : "extractBearer"
+        }
+      ],
+      "imports" : [
+        "core\/config.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 102,
+      "name" : "jwt.mjs",
+      "path" : "server\/jwt.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "server\/auth.mjs",
+        "server\/users.mjs",
+        "tests\/auth.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 63,
+          "name" : "labelKey"
+        },
+        {
+          "line" : 68,
+          "name" : "parseLabelKey"
+        },
+        {
+          "line" : 79,
+          "name" : "escapeLabel"
+        },
+        {
+          "line" : 83,
+          "name" : "fmtLabels"
+        },
+        {
+          "line" : 100,
+          "name" : "recordHttpRequest"
+        },
+        {
+          "line" : 106,
+          "name" : "recordRateLimitDeny"
+        },
+        {
+          "line" : 110,
+          "name" : "setKbGauge"
+        },
+        {
+          "line" : 126,
+          "name" : "isKnownRoute"
+        },
+        {
+          "line" : 134,
+          "name" : "normalizeRoute"
+        },
+        {
+          "line" : 160,
+          "name" : "renderPrometheus"
+        },
+        {
+          "line" : 208,
+          "name" : "_resetForTests"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 190,
+      "name" : "metrics.mjs",
+      "path" : "server\/metrics.mjs",
+      "role" : "Web",
+      "types" : [
+        {
+          "line" : 19,
+          "name" : "Counter"
+        },
+        {
+          "line" : 30,
+          "name" : "Gauge"
+        },
+        {
+          "line" : 38,
+          "name" : "Histogram"
+        }
+      ],
+      "usedBy" : [
+        "server.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 26,
+          "name" : "getBucket"
+        },
+        {
+          "line" : 96,
+          "name" : "tryConsume"
+        },
+        {
+          "line" : 133,
+          "name" : "_resetForTests"
+        },
+        {
+          "line" : 151,
+          "name" : "saveBuckets"
+        },
+        {
+          "line" : 164,
+          "name" : "tx"
+        },
+        {
+          "line" : 179,
+          "name" : "loadBuckets"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 192,
+      "name" : "rate-limit.mjs",
+      "path" : "server\/rate-limit.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "kb\/routes\/live.mjs",
+        "server.mjs",
+        "server\/auth-routes.mjs",
+        "tests\/rate-limit.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 41,
+          "name" : "userId"
+        },
+        {
+          "line" : 45,
+          "name" : "refreshId"
+        },
+        {
+          "line" : 49,
+          "name" : "normalizeEmail"
+        },
+        {
+          "line" : 53,
+          "name" : "validatePassword"
+        },
+        {
+          "line" : 59,
+          "name" : "validateEmail"
+        },
+        {
+          "line" : 65,
+          "name" : "registerUser"
+        },
+        {
+          "line" : 82,
+          "name" : "provisioned"
+        },
+        {
+          "line" : 97,
+          "name" : "findUserById"
+        },
+        {
+          "line" : 113,
+          "name" : "findUserByEmail"
+        },
+        {
+          "line" : 120,
+          "name" : "login"
+        },
+        {
+          "line" : 145,
+          "name" : "storeRefreshToken"
+        },
+        {
+          "line" : 153,
+          "name" : "refreshSession"
+        },
+        {
+          "line" : 187,
+          "name" : "tx"
+        },
+        {
+          "line" : 209,
+          "name" : "logout"
+        },
+        {
+          "line" : 217,
+          "name" : "logoutAll"
+        },
+        {
+          "line" : 225,
+          "name" : "purgeExpiredRefreshTokens"
+        },
+        {
+          "line" : 232,
+          "name" : "changePassword"
+        },
+        {
+          "line" : 270,
+          "name" : "hashResetToken"
+        },
+        {
+          "line" : 274,
+          "name" : "resetId"
+        },
+        {
+          "line" : 286,
+          "name" : "createPasswordResetToken"
+        },
+        {
+          "line" : 324,
+          "name" : "consumePasswordResetToken"
+        },
+        {
+          "line" : 357,
+          "name" : "purgeExpiredResetTokens"
+        },
+        {
+          "line" : 370,
+          "name" : "verifyPassword"
+        }
+      ],
+      "imports" : [
+        "core\/config.mjs",
+        "core\/errors.mjs",
+        "server\/jwt.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 335,
+      "name" : "users.mjs",
+      "path" : "server\/users.mjs",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "server.mjs",
+        "server\/auth-routes.mjs",
+        "tests\/agent-ask-history.test.mjs",
+        "tests\/agent-personas.test.mjs",
+        "tests\/agents-runtime.test.mjs",
+        "tests\/kb-router-path-traversal.test.mjs",
+        "tests\/kb-router.test.mjs",
+        "tests\/password-reset.test.mjs",
+        "tests\/tenancy.test.mjs",
+        "tests\/user-delete-cascade.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 45,
+          "name" : "isVaultError"
+        },
+        {
+          "line" : 49,
+          "name" : "deriveDataKey"
+        },
+        {
+          "line" : 54,
+          "name" : "encrypt"
+        },
+        {
+          "line" : 70,
+          "name" : "decrypt"
+        },
+        {
+          "line" : 88,
+          "name" : "attempt"
+        },
+        {
+          "line" : 121,
+          "name" : "ensureAllowed"
+        },
+        {
+          "line" : 129,
+          "name" : "setSecret"
+        },
+        {
+          "line" : 146,
+          "name" : "getSecret"
+        },
+        {
+          "line" : 155,
+          "name" : "listSecretKeys"
+        },
+        {
+          "line" : 164,
+          "name" : "getSecrets"
+        },
+        {
+          "line" : 165,
+          "name" : "allowed"
+        },
+        {
+          "line" : 167,
+          "name" : "ph"
+        }
+      ],
+      "imports" : [
+        "core\/config.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 164,
+      "name" : "vault.mjs",
+      "path" : "server\/vault.mjs",
+      "role" : "Web",
+      "types" : [
+        {
+          "line" : 33,
+          "name" : "VaultError"
+        }
+      ],
+      "usedBy" : [
+        "agents\/outcome-watcher.mjs",
+        "agents\/runtime.mjs",
+        "kb\/router.mjs",
+        "server\/auth-routes.mjs",
+        "tests\/agents-runtime.test.mjs",
+        "tests\/vault.test.mjs"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 15,
+          "name" : "openMacAppDeepLink"
+        },
+        {
+          "line" : 27,
+          "name" : "ensureContentScriptInjected"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts",
+        "src\/lib\/messages.ts",
+        "src\/lib\/platforms.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 178,
+      "name" : "service-worker.ts",
+      "path" : "src\/background\/service-worker.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 61,
+          "name" : "detectPlatform"
+        },
+        {
+          "line" : 81,
+          "name" : "isActiveMeetingPage"
+        },
+        {
+          "line" : 105,
+          "name" : "readMeetCaptionsByClass"
+        },
+        {
+          "line" : 133,
+          "name" : "readMeetCaptionsByHeuristic"
+        },
+        {
+          "line" : 166,
+          "name" : "hasSmallerCaptionChild"
+        },
+        {
+          "line" : 190,
+          "name" : "readMeetCaptionsByAria"
+        },
+        {
+          "line" : 200,
+          "name" : "panels"
+        },
+        {
+          "line" : 244,
+          "name" : "childMatchesSelf"
+        },
+        {
+          "line" : 266,
+          "name" : "readMeetCaptions"
+        },
+        {
+          "line" : 294,
+          "name" : "readTeamsCaptions"
+        },
+        {
+          "line" : 312,
+          "name" : "readZoomCaptions"
+        },
+        {
+          "line" : 327,
+          "name" : "lines"
+        },
+        {
+          "line" : 345,
+          "name" : "lines"
+        },
+        {
+          "line" : 387,
+          "name" : "sanitizeSpeaker"
+        },
+        {
+          "line" : 398,
+          "name" : "isValidCaption"
+        },
+        {
+          "line" : 441,
+          "name" : "CAPTION_READERS"
+        },
+        {
+          "line" : 447,
+          "name" : "CC_ENABLERS"
+        },
+        {
+          "line" : 465,
+          "name" : "handleSendError"
+        },
+        {
+          "line" : 508,
+          "name" : "sendUpdate"
+        },
+        {
+          "line" : 526,
+          "name" : "scrape"
+        },
+        {
+          "line" : 573,
+          "name" : "enableMeetCC"
+        },
+        {
+          "line" : 596,
+          "name" : "enableTeamsCC"
+        },
+        {
+          "line" : 610,
+          "name" : "enableZoomCC"
+        },
+        {
+          "line" : 624,
+          "name" : "enableCC"
+        },
+        {
+          "line" : 639,
+          "name" : "hideMeetCCOverlay"
+        },
+        {
+          "line" : 654,
+          "name" : "showMeetCCOverlay"
+        },
+        {
+          "line" : 660,
+          "name" : "injectMeetChat"
+        },
+        {
+          "line" : 744,
+          "name" : "scheduleScrape"
+        },
+        {
+          "line" : 753,
+          "name" : "startScraping"
+        },
+        {
+          "line" : 760,
+          "name" : "stopScraping"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts",
+        "src\/lib\/messages.ts",
+        "src\/lib\/platforms.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 761,
+      "name" : "caption-scraper.ts",
+      "path" : "src\/content\/caption-scraper.ts",
+      "role" : "Web",
+      "types" : [
+        {
+          "line" : 107,
+          "name" : "nMcdL"
+        },
+        {
+          "line" : 183,
+          "name" : "names"
+        },
+        {
+          "line" : 184,
+          "name" : "identifiers"
+        },
+        {
+          "line" : 269,
+          "name" : "names"
+        }
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 28,
+          "name" : "buildBar"
+        },
+        {
+          "line" : 124,
+          "name" : "showBar"
+        },
+        {
+          "line" : 130,
+          "name" : "hideBar"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/messages.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 128,
+      "name" : "floating-overlay.ts",
+      "path" : "src\/content\/floating-overlay.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 26,
+          "name" : "detectPlatform"
+        },
+        {
+          "line" : 30,
+          "name" : "sendActiveSpeaker"
+        },
+        {
+          "line" : 35,
+          "name" : "sendParticipants"
+        },
+        {
+          "line" : 42,
+          "name" : "getMeetActiveSpeaker"
+        },
+        {
+          "line" : 75,
+          "name" : "getMeetParticipants"
+        },
+        {
+          "line" : 86,
+          "name" : "getTeamsActiveSpeaker"
+        },
+        {
+          "line" : 125,
+          "name" : "getTeamsParticipants"
+        },
+        {
+          "line" : 136,
+          "name" : "getZoomActiveSpeaker"
+        },
+        {
+          "line" : 156,
+          "name" : "getZoomParticipants"
+        },
+        {
+          "line" : 168,
+          "name" : "speakerDetectors"
+        },
+        {
+          "line" : 174,
+          "name" : "participantDetectors"
+        },
+        {
+          "line" : 180,
+          "name" : "cleanup"
+        },
+        {
+          "line" : 189,
+          "name" : "startDetection"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts",
+        "src\/lib\/messages.ts",
+        "src\/lib\/platforms.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 193,
+      "name" : "speaker-detector.ts",
+      "path" : "src\/content\/speaker-detector.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 9,
+          "name" : "generateMeetingNotesStream"
+        },
+        {
+          "line" : 19,
+          "name" : "timeout"
+        },
+        {
+          "line" : 21,
+          "name" : "onExternalAbort"
+        },
+        {
+          "line" : 36,
+          "name" : "error"
+        },
+        {
+          "line" : 60,
+          "name" : "dataLine"
+        },
+        {
+          "line" : 119,
+          "name" : "generateMeetingNotes"
+        },
+        {
+          "line" : 128,
+          "name" : "timeout"
+        },
+        {
+          "line" : 130,
+          "name" : "onExternalAbort"
+        },
+        {
+          "line" : 142,
+          "name" : "error"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 142,
+      "name" : "anthropic.ts",
+      "path" : "src\/lib\/anthropic.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/hooks\/useNotes.ts"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 16,
+          "name" : "isSafeServerUrl"
+        },
+        {
+          "line" : 32,
+          "name" : "getServerUrl"
+        },
+        {
+          "line" : 82,
+          "name" : "onSessionChange"
+        },
+        {
+          "line" : 87,
+          "name" : "emitSessionChange"
+        },
+        {
+          "line" : 94,
+          "name" : "getSession"
+        },
+        {
+          "line" : 98,
+          "name" : "loadStoredSession"
+        },
+        {
+          "line" : 113,
+          "name" : "setSession"
+        },
+        {
+          "line" : 131,
+          "name" : "clearSession"
+        },
+        {
+          "line" : 152,
+          "name" : "refreshAccessToken"
+        },
+        {
+          "line" : 161,
+          "name" : "timer"
+        },
+        {
+          "line" : 223,
+          "name" : "attach"
+        },
+        {
+          "line" : 248,
+          "name" : "withTimeout"
+        },
+        {
+          "line" : 257,
+          "name" : "timer"
+        },
+        {
+          "line" : 280,
+          "name" : "breakerRecordSuccess"
+        },
+        {
+          "line" : 285,
+          "name" : "breakerRecordFailure"
+        },
+        {
+          "line" : 292,
+          "name" : "breakerIsOpen"
+        },
+        {
+          "line" : 296,
+          "name" : "authFetch"
+        },
+        {
+          "line" : 348,
+          "name" : "apiLogin"
+        },
+        {
+          "line" : 351,
+          "name" : "timer"
+        },
+        {
+          "line" : 365,
+          "name" : "apiRegister"
+        },
+        {
+          "line" : 368,
+          "name" : "timer"
+        },
+        {
+          "line" : 382,
+          "name" : "apiLogout"
+        },
+        {
+          "line" : 395,
+          "name" : "apiWellKnown"
+        },
+        {
+          "line" : 403,
+          "name" : "parseJsonResponse"
+        },
+        {
+          "line" : 419,
+          "name" : "DEBUG"
+        },
+        {
+          "line" : 427,
+          "name" : "debug"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "typescript",
+      "loc" : 403,
+      "name" : "config.ts",
+      "path" : "src\/lib\/config.ts",
+      "role" : "Web",
+      "types" : [
+        {
+          "line" : 210,
+          "name" : "ServerError"
+        }
+      ],
+      "usedBy" : [
+        "src\/background\/service-worker.ts",
+        "src\/content\/caption-scraper.ts",
+        "src\/content\/speaker-detector.ts",
+        "src\/lib\/anthropic.ts",
+        "src\/lib\/kb.ts",
+        "src\/sidepanel\/App.tsx",
+        "src\/sidepanel\/components\/AgentPersonaSettings.tsx",
+        "src\/sidepanel\/components\/AgentStatsBadge.tsx",
+        "src\/sidepanel\/components\/ExportMenu.tsx",
+        "src\/sidepanel\/components\/UserAccountSettings.tsx",
+        "src\/sidepanel\/hooks\/useAgent.ts",
+        "src\/sidepanel\/hooks\/useAgentMirror.ts",
+        "src\/sidepanel\/hooks\/useChat.ts",
+        "src\/sidepanel\/hooks\/useLiveSync.ts",
+        "src\/sidepanel\/hooks\/useQuestions.ts",
+        "src\/sidepanel\/hooks\/useRemoteSessions.ts",
+        "src\/sidepanel\/hooks\/useRemoteTranscript.ts",
+        "src\/sidepanel\/hooks\/useTranscript.ts"
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "typescript",
+      "loc" : 30,
+      "name" : "entities.ts",
+      "path" : "src\/lib\/entities.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/lib\/kb.ts"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 48,
+          "name" : "subtitleTimestamp"
+        },
+        {
+          "line" : 62,
+          "name" : "buildSubtitleContent"
+        },
+        {
+          "line" : 160,
+          "name" : "getAvailableFormats"
+        }
+      ],
+      "imports" : [
+        "src\/sidepanel\/hooks\/useTranscript.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 157,
+      "name" : "export-formats.ts",
+      "path" : "src\/lib\/export-formats.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/components\/ExportMenu.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 36,
+          "name" : "postJSON"
+        },
+        {
+          "line" : 39,
+          "name" : "timeout"
+        },
+        {
+          "line" : 58,
+          "name" : "connectGitRepo"
+        },
+        {
+          "line" : 62,
+          "name" : "connectGithubIssues"
+        },
+        {
+          "line" : 70,
+          "name" : "connectQA"
+        },
+        {
+          "line" : 78,
+          "name" : "generatePlan"
+        },
+        {
+          "line" : 89,
+          "name" : "analyzeRisks"
+        },
+        {
+          "line" : 93,
+          "name" : "codeSyncPlan"
+        },
+        {
+          "line" : 97,
+          "name" : "getPlan"
+        },
+        {
+          "line" : 104,
+          "name" : "updateTask"
+        },
+        {
+          "line" : 118,
+          "name" : "savePlan"
+        },
+        {
+          "line" : 145,
+          "name" : "ingestToKB"
+        },
+        {
+          "line" : 162,
+          "name" : "timeout"
+        },
+        {
+          "line" : 184,
+          "name" : "searchKB"
+        },
+        {
+          "line" : 195,
+          "name" : "timeout"
+        },
+        {
+          "line" : 213,
+          "name" : "conflictQuestions"
+        },
+        {
+          "line" : 227,
+          "name" : "getKBStats"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts",
+        "src\/lib\/entities.ts",
+        "src\/lib\/plan.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 214,
+      "name" : "kb.ts",
+      "path" : "src\/lib\/kb.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/components\/Settings.tsx",
+        "src\/sidepanel\/hooks\/useQuestions.ts"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 33,
+          "name" : "isMessage"
+        },
+        {
+          "line" : 37,
+          "name" : "only"
+        },
+        {
+          "line" : 43,
+          "name" : "s"
+        },
+        {
+          "line" : 44,
+          "name" : "n"
+        },
+        {
+          "line" : 45,
+          "name" : "b"
+        },
+        {
+          "line" : 46,
+          "name" : "a"
+        },
+        {
+          "line" : 51,
+          "name" : "sOrNull"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "typescript",
+      "loc" : 73,
+      "name" : "messages.ts",
+      "path" : "src\/lib\/messages.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/background\/service-worker.ts",
+        "src\/content\/caption-scraper.ts",
+        "src\/content\/floating-overlay.ts",
+        "src\/content\/speaker-detector.ts",
+        "src\/sidepanel\/hooks\/useQuestions.ts",
+        "src\/sidepanel\/hooks\/useTranscript.ts"
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "typescript",
+      "loc" : 47,
+      "name" : "plan.ts",
+      "path" : "src\/lib\/plan.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/lib\/kb.ts",
+        "src\/sidepanel\/hooks\/usePlan.ts"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 62,
+          "name" : "detectPlatformFromUrl"
+        },
+        {
+          "line" : 79,
+          "name" : "isSupportedUrl"
+        },
+        {
+          "line" : 88,
+          "name" : "stripPlatformSuffix"
+        },
+        {
+          "line" : 89,
+          "name" : "suffixes"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "typescript",
+      "loc" : 85,
+      "name" : "platforms.ts",
+      "path" : "src\/lib\/platforms.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/background\/service-worker.ts",
+        "src\/content\/caption-scraper.ts",
+        "src\/content\/speaker-detector.ts",
+        "src\/sidepanel\/hooks\/useAgent.ts",
+        "src\/sidepanel\/hooks\/useTranscript.ts"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 25,
+          "name" : "generateId"
+        },
+        {
+          "line" : 27,
+          "name" : "rand"
+        },
+        {
+          "line" : 40,
+          "name" : "saveTranscript"
+        }
+      ],
+      "imports" : [
+        "src\/sidepanel\/hooks\/useTranscript.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 67,
+      "name" : "storage.ts",
+      "path" : "src\/lib\/storage.ts",
+      "role" : "Web",
+      "types" : [
+        {
+          "line" : 31,
+          "name" : "StorageQuotaError"
+        }
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/hooks\/useTranscript.ts"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 47,
+          "name" : "formatDuration"
+        },
+        {
+          "line" : 80,
+          "name" : "App"
+        },
+        {
+          "line" : 93,
+          "name" : "handler"
+        },
+        {
+          "line" : 113,
+          "name" : "rand"
+        },
+        {
+          "line" : 127,
+          "name" : "dismissHint"
+        },
+        {
+          "line" : 218,
+          "name" : "handleJoin"
+        },
+        {
+          "line" : 225,
+          "name" : "handleStopMirroring"
+        },
+        {
+          "line" : 232,
+          "name" : "checkServer"
+        },
+        {
+          "line" : 236,
+          "name" : "timeout"
+        },
+        {
+          "line" : 248,
+          "name" : "missing"
+        },
+        {
+          "line" : 266,
+          "name" : "handleStart"
+        },
+        {
+          "line" : 272,
+          "name" : "rand"
+        },
+        {
+          "line" : 281,
+          "name" : "saveTranscript"
+        },
+        {
+          "line" : 337,
+          "name" : "popOut"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts",
+        "src\/sidepanel\/components\/ChatView.tsx",
+        "src\/sidepanel\/components\/ExportMenu.tsx",
+        "src\/sidepanel\/components\/HelpPanel.tsx",
+        "src\/sidepanel\/components\/LanguageSelector.tsx",
+        "src\/sidepanel\/components\/LoginView.tsx",
+        "src\/sidepanel\/components\/NotesView.tsx",
+        "src\/sidepanel\/components\/QuestionsView.tsx",
+        "src\/sidepanel\/components\/RecordingControls.tsx",
+        "src\/sidepanel\/components\/RemoteSessionBanner.tsx",
+        "src\/sidepanel\/components\/Settings.tsx",
+        "src\/sidepanel\/components\/TranscriptView.tsx",
+        "src\/sidepanel\/hooks\/useAgent.ts",
+        "src\/sidepanel\/hooks\/useAgentMirror.ts",
+        "src\/sidepanel\/hooks\/useAudioDevices.ts",
+        "src\/sidepanel\/hooks\/useChat.ts",
+        "src\/sidepanel\/hooks\/useLiveSync.ts",
+        "src\/sidepanel\/hooks\/useNotes.ts",
+        "src\/sidepanel\/hooks\/usePlan.ts",
+        "src\/sidepanel\/hooks\/useQuestions.ts",
+        "src\/sidepanel\/hooks\/useRemoteSessions.ts",
+        "src\/sidepanel\/hooks\/useRemoteTranscript.ts",
+        "src\/sidepanel\/hooks\/useSession.ts",
+        "src\/sidepanel\/hooks\/useTranscript.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 616,
+      "name" : "App.tsx",
+      "path" : "src\/sidepanel\/App.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/main.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 17,
+          "name" : "AgentPersonaSettings"
+        },
+        {
+          "line" : 45,
+          "name" : "save"
+        },
+        {
+          "line" : 69,
+          "name" : "reset"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts",
+        "src\/sidepanel\/components\/AgentStatsBadge.tsx"
+      ],
+      "language" : "typescript",
+      "loc" : 128,
+      "name" : "AgentPersonaSettings.tsx",
+      "path" : "src\/sidepanel\/components\/AgentPersonaSettings.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/components\/Settings.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 23,
+          "name" : "AgentStatsBadge"
+        },
+        {
+          "line" : 29,
+          "name" : "tick"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 57,
+      "name" : "AgentStatsBadge.tsx",
+      "path" : "src\/sidepanel\/components\/AgentStatsBadge.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/components\/AgentPersonaSettings.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 24,
+          "name" : "ChatView"
+        },
+        {
+          "line" : 39,
+          "name" : "handleSend"
+        },
+        {
+          "line" : 47,
+          "name" : "handleKeyDown"
+        }
+      ],
+      "imports" : [
+        "src\/sidepanel\/hooks\/useChat.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 157,
+      "name" : "ChatView.tsx",
+      "path" : "src\/sidepanel\/components\/ChatView.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 24,
+          "name" : "useStored"
+        },
+        {
+          "line" : 32,
+          "name" : "update"
+        },
+        {
+          "line" : 39,
+          "name" : "summarize"
+        },
+        {
+          "line" : 49,
+          "name" : "ConnectorsSettings"
+        },
+        {
+          "line" : 63,
+          "name" : "refreshStats"
+        },
+        {
+          "line" : 66,
+          "name" : "runGit"
+        },
+        {
+          "line" : 78,
+          "name" : "runGithub"
+        },
+        {
+          "line" : 94,
+          "name" : "runQA"
+        },
+        {
+          "line" : 228,
+          "name" : "StatusLine"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "typescript",
+      "loc" : 219,
+      "name" : "ConnectorsSettings.tsx",
+      "path" : "src\/sidepanel\/components\/ConnectorsSettings.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/components\/Settings.tsx"
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "typescript",
+      "loc" : 31,
+      "name" : "ErrorBoundary.tsx",
+      "path" : "src\/sidepanel\/components\/ErrorBoundary.tsx",
+      "role" : "Web",
+      "types" : [
+        {
+          "line" : 6,
+          "name" : "ErrorBoundary"
+        }
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/main.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 15,
+          "name" : "todayStr"
+        },
+        {
+          "line" : 19,
+          "name" : "triggerDownload"
+        },
+        {
+          "line" : 28,
+          "name" : "ExportMenu"
+        },
+        {
+          "line" : 47,
+          "name" : "formats"
+        },
+        {
+          "line" : 51,
+          "name" : "copyToClipboard"
+        },
+        {
+          "line" : 61,
+          "name" : "downloadFormat"
+        },
+        {
+          "line" : 62,
+          "name" : "fmt"
+        },
+        {
+          "line" : 74,
+          "name" : "downloadDocx"
+        },
+        {
+          "line" : 80,
+          "name" : "timeout"
+        },
+        {
+          "line" : 93,
+          "name" : "err"
+        },
+        {
+          "line" : 120,
+          "name" : "noteFormats"
+        },
+        {
+          "line" : 121,
+          "name" : "transcriptFormats"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts",
+        "src\/lib\/export-formats.ts",
+        "src\/sidepanel\/hooks\/useTranscript.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 165,
+      "name" : "ExportMenu.tsx",
+      "path" : "src\/sidepanel\/components\/ExportMenu.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 39,
+          "name" : "HelpPanel"
+        },
+        {
+          "line" : 43,
+          "name" : "handler"
+        },
+        {
+          "line" : 109,
+          "name" : "OverviewSection"
+        },
+        {
+          "line" : 225,
+          "name" : "GettingStartedSection"
+        },
+        {
+          "line" : 352,
+          "name" : "TranscriptPageSection"
+        },
+        {
+          "line" : 505,
+          "name" : "NotesPageSection"
+        },
+        {
+          "line" : 646,
+          "name" : "QuestionsPageSection"
+        },
+        {
+          "line" : 794,
+          "name" : "ChatPageSection"
+        },
+        {
+          "line" : 935,
+          "name" : "SettingsPageSection"
+        },
+        {
+          "line" : 1124,
+          "name" : "PlatformsSection"
+        },
+        {
+          "line" : 1218,
+          "name" : "ShortcutsSection"
+        },
+        {
+          "line" : 1280,
+          "name" : "TroubleshootingSection"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "typescript",
+      "loc" : 1359,
+      "name" : "HelpPanel.tsx",
+      "path" : "src\/sidepanel\/components\/HelpPanel.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx",
+        "src\/sidepanel\/components\/LoginView.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 13,
+          "name" : "LanguageSelector"
+        }
+      ],
+      "imports" : [
+        "src\/sidepanel\/hooks\/useTranscript.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 55,
+      "name" : "LanguageSelector.tsx",
+      "path" : "src\/sidepanel\/components\/LanguageSelector.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 12,
+          "name" : "LoginView"
+        },
+        {
+          "line" : 21,
+          "name" : "submit"
+        }
+      ],
+      "imports" : [
+        "src\/sidepanel\/components\/HelpPanel.tsx"
+      ],
+      "language" : "typescript",
+      "loc" : 112,
+      "name" : "LoginView.tsx",
+      "path" : "src\/sidepanel\/components\/LoginView.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 13,
+          "name" : "NotesView"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "typescript",
+      "loc" : 56,
+      "name" : "NotesView.tsx",
+      "path" : "src\/sidepanel\/components\/NotesView.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 58,
+          "name" : "loadPrefs"
+        },
+        {
+          "line" : 75,
+          "name" : "savePrefs"
+        },
+        {
+          "line" : 80,
+          "name" : "QuestionsView"
+        },
+        {
+          "line" : 107,
+          "name" : "startRename"
+        },
+        {
+          "line" : 111,
+          "name" : "commitRename"
+        },
+        {
+          "line" : 119,
+          "name" : "availableParticipants"
+        },
+        {
+          "line" : 150,
+          "name" : "openEditor"
+        },
+        {
+          "line" : 156,
+          "name" : "cancelEditor"
+        },
+        {
+          "line" : 157,
+          "name" : "saveEditor"
+        },
+        {
+          "line" : 178,
+          "name" : "resetEditor"
+        },
+        {
+          "line" : 185,
+          "name" : "toggleDraftParticipant"
+        },
+        {
+          "line" : 187,
+          "name" : "toggleDraftType"
+        },
+        {
+          "line" : 198,
+          "name" : "typeLabel"
+        },
+        {
+          "line" : 200,
+          "name" : "summaryLine"
+        },
+        {
+          "line" : 211,
+          "name" : "parsedQuestions"
+        }
+      ],
+      "imports" : [
+        "src\/sidepanel\/hooks\/useQuestions.ts",
+        "src\/sidepanel\/hooks\/useTranscript.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 467,
+      "name" : "QuestionsView.tsx",
+      "path" : "src\/sidepanel\/components\/QuestionsView.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 11,
+          "name" : "formatTime"
+        },
+        {
+          "line" : 17,
+          "name" : "RecordingControls"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "typescript",
+      "loc" : 48,
+      "name" : "RecordingControls.tsx",
+      "path" : "src\/sidepanel\/components\/RecordingControls.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 10,
+          "name" : "RemoteSessionBanner"
+        }
+      ],
+      "imports" : [
+        "src\/sidepanel\/hooks\/useRemoteSessions.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 39,
+      "name" : "RemoteSessionBanner.tsx",
+      "path" : "src\/sidepanel\/components\/RemoteSessionBanner.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 21,
+          "name" : "formatAgo"
+        },
+        {
+          "line" : 31,
+          "name" : "Settings"
+        },
+        {
+          "line" : 149,
+          "name" : "KBSearchPanel"
+        },
+        {
+          "line" : 159,
+          "name" : "run"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/kb.ts",
+        "src\/sidepanel\/components\/AgentPersonaSettings.tsx",
+        "src\/sidepanel\/components\/ConnectorsSettings.tsx",
+        "src\/sidepanel\/components\/UserAccountSettings.tsx",
+        "src\/sidepanel\/hooks\/useAudioDevices.ts",
+        "src\/sidepanel\/hooks\/useTranscript.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 241,
+      "name" : "Settings.tsx",
+      "path" : "src\/sidepanel\/components\/Settings.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 13,
+          "name" : "formatTimestamp"
+        },
+        {
+          "line" : 20,
+          "name" : "highlight"
+        },
+        {
+          "line" : 42,
+          "name" : "TranscriptView"
+        },
+        {
+          "line" : 51,
+          "name" : "filteredSegments"
+        },
+        {
+          "line" : 66,
+          "name" : "handleSpeakerClick"
+        },
+        {
+          "line" : 71,
+          "name" : "handleRename"
+        }
+      ],
+      "imports" : [
+        "src\/sidepanel\/hooks\/useTranscript.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 176,
+      "name" : "TranscriptView.tsx",
+      "path" : "src\/sidepanel\/components\/TranscriptView.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 25,
+          "name" : "fmtDate"
+        },
+        {
+          "line" : 30,
+          "name" : "UserAccountSettings"
+        },
+        {
+          "line" : 59,
+          "name" : "changePassword"
+        },
+        {
+          "line" : 73,
+          "name" : "body"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts",
+        "src\/sidepanel\/hooks\/useSession.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 177,
+      "name" : "UserAccountSettings.tsx",
+      "path" : "src\/sidepanel\/components\/UserAccountSettings.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/components\/Settings.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 37,
+          "name" : "useAgent"
+        },
+        {
+          "line" : 57,
+          "name" : "refresh"
+        },
+        {
+          "line" : 68,
+          "name" : "debouncedRefresh"
+        },
+        {
+          "line" : 88,
+          "name" : "tick"
+        },
+        {
+          "line" : 146,
+          "name" : "text"
+        },
+        {
+          "line" : 171,
+          "name" : "stop"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts",
+        "src\/lib\/platforms.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 189,
+      "name" : "useAgent.ts",
+      "path" : "src\/sidepanel\/hooks\/useAgent.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 35,
+          "name" : "useAgentMirror"
+        },
+        {
+          "line" : 61,
+          "name" : "tick"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 114,
+      "name" : "useAgentMirror.ts",
+      "path" : "src\/sidepanel\/hooks\/useAgentMirror.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx",
+        "src\/sidepanel\/hooks\/useRemoteTranscript.ts"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 8,
+          "name" : "useAudioDevices"
+        },
+        {
+          "line" : 13,
+          "name" : "loadDevices"
+        },
+        {
+          "line" : 43,
+          "name" : "handler"
+        },
+        {
+          "line" : 48,
+          "name" : "selectDevice"
+        },
+        {
+          "line" : 53,
+          "name" : "changeVolume"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "typescript",
+      "loc" : 58,
+      "name" : "useAudioDevices.ts",
+      "path" : "src\/sidepanel\/hooks\/useAudioDevices.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx",
+        "src\/sidepanel\/components\/Settings.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 23,
+          "name" : "useChat"
+        },
+        {
+          "line" : 83,
+          "name" : "timeout"
+        },
+        {
+          "line" : 95,
+          "name" : "err"
+        },
+        {
+          "line" : 119,
+          "name" : "clearChat"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 114,
+      "name" : "useChat.ts",
+      "path" : "src\/sidepanel\/hooks\/useChat.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx",
+        "src\/sidepanel\/components\/ChatView.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 25,
+          "name" : "useLiveSync"
+        },
+        {
+          "line" : 46,
+          "name" : "clearRetry"
+        },
+        {
+          "line" : 53,
+          "name" : "markSuccess"
+        },
+        {
+          "line" : 60,
+          "name" : "markFailure"
+        },
+        {
+          "line" : 68,
+          "name" : "scheduleRetry"
+        },
+        {
+          "line" : 86,
+          "name" : "resetSyncError"
+        },
+        {
+          "line" : 172,
+          "name" : "pushPendingSegments"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts",
+        "src\/sidepanel\/hooks\/useTranscript.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 202,
+      "name" : "useLiveSync.ts",
+      "path" : "src\/sidepanel\/hooks\/useLiveSync.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 4,
+          "name" : "useNotes"
+        },
+        {
+          "line" : 46,
+          "name" : "flush"
+        },
+        {
+          "line" : 85,
+          "name" : "clearNotes"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/anthropic.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 95,
+      "name" : "useNotes.ts",
+      "path" : "src\/sidepanel\/hooks\/useNotes.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 15,
+          "name" : "defaultStubTitle"
+        },
+        {
+          "line" : 17,
+          "name" : "pad"
+        },
+        {
+          "line" : 21,
+          "name" : "usePlan"
+        },
+        {
+          "line" : 47,
+          "name" : "reanalyzeRisks"
+        },
+        {
+          "line" : 61,
+          "name" : "refreshCodeSync"
+        },
+        {
+          "line" : 75,
+          "name" : "setTaskStatus"
+        },
+        {
+          "line" : 79,
+          "name" : "task"
+        },
+        {
+          "line" : 95,
+          "name" : "setTaskRisk"
+        },
+        {
+          "line" : 99,
+          "name" : "task"
+        },
+        {
+          "line" : 115,
+          "name" : "clearPlan"
+        },
+        {
+          "line" : 122,
+          "name" : "loadPlan"
+        },
+        {
+          "line" : 130,
+          "name" : "refresh"
+        },
+        {
+          "line" : 141,
+          "name" : "createStub"
+        },
+        {
+          "line" : 160,
+          "name" : "rename"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/plan.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 187,
+      "name" : "usePlan.ts",
+      "path" : "src\/sidepanel\/hooks\/usePlan.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 8,
+          "name" : "useQuestions"
+        },
+        {
+          "line" : 35,
+          "name" : "timeout"
+        },
+        {
+          "line" : 47,
+          "name" : "err"
+        },
+        {
+          "line" : 96,
+          "name" : "clearQuestions"
+        },
+        {
+          "line" : 101,
+          "name" : "postToChat"
+        },
+        {
+          "line" : 118,
+          "name" : "timeoutPromise"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts",
+        "src\/lib\/kb.ts",
+        "src\/lib\/messages.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 127,
+      "name" : "useQuestions.ts",
+      "path" : "src\/sidepanel\/hooks\/useQuestions.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx",
+        "src\/sidepanel\/components\/QuestionsView.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 13,
+          "name" : "useRemoteSessions"
+        },
+        {
+          "line" : 17,
+          "name" : "refresh"
+        },
+        {
+          "line" : 37,
+          "name" : "connect"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 75,
+      "name" : "useRemoteSessions.ts",
+      "path" : "src\/sidepanel\/hooks\/useRemoteSessions.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx",
+        "src\/sidepanel\/components\/RemoteSessionBanner.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 10,
+          "name" : "useRemoteTranscript"
+        },
+        {
+          "line" : 35,
+          "name" : "tick"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts",
+        "src\/sidepanel\/hooks\/useAgentMirror.ts",
+        "src\/sidepanel\/hooks\/useTranscript.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 97,
+      "name" : "useRemoteTranscript.ts",
+      "path" : "src\/sidepanel\/hooks\/useRemoteTranscript.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 15,
+          "name" : "useSession"
+        },
+        {
+          "line" : 26,
+          "name" : "off"
+        },
+        {
+          "line" : 39,
+          "name" : "meta"
+        },
+        {
+          "line" : 49,
+          "name" : "login"
+        },
+        {
+          "line" : 72,
+          "name" : "register"
+        },
+        {
+          "line" : 90,
+          "name" : "logout"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "typescript",
+      "loc" : 88,
+      "name" : "useSession.ts",
+      "path" : "src\/sidepanel\/hooks\/useSession.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/sidepanel\/App.tsx",
+        "src\/sidepanel\/components\/UserAccountSettings.tsx"
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 57,
+          "name" : "extractMeetingTitle"
+        },
+        {
+          "line" : 67,
+          "name" : "useTranscript"
+        },
+        {
+          "line" : 123,
+          "name" : "setRecordingSync"
+        },
+        {
+          "line" : 153,
+          "name" : "listener"
+        },
+        {
+          "line" : 244,
+          "name" : "changePrimaryLang"
+        },
+        {
+          "line" : 249,
+          "name" : "changeSecondaryLang"
+        },
+        {
+          "line" : 254,
+          "name" : "toggleBilingual"
+        },
+        {
+          "line" : 259,
+          "name" : "renameSpeaker"
+        },
+        {
+          "line" : 273,
+          "name" : "interval"
+        },
+        {
+          "line" : 281,
+          "name" : "setupMic"
+        },
+        {
+          "line" : 317,
+          "name" : "cleanupMic"
+        },
+        {
+          "line" : 326,
+          "name" : "getSpeaker"
+        },
+        {
+          "line" : 337,
+          "name" : "addSegment"
+        },
+        {
+          "line" : 352,
+          "name" : "stopAllRecognition"
+        },
+        {
+          "line" : 399,
+          "name" : "restart"
+        },
+        {
+          "line" : 412,
+          "name" : "scheduleRestart"
+        },
+        {
+          "line" : 413,
+          "name" : "t"
+        },
+        {
+          "line" : 446,
+          "name" : "startBilingualRecognition"
+        },
+        {
+          "line" : 449,
+          "name" : "handleFinal"
+        },
+        {
+          "line" : 469,
+          "name" : "pickBest"
+        },
+        {
+          "line" : 476,
+          "name" : "primary"
+        },
+        {
+          "line" : 477,
+          "name" : "secondary"
+        },
+        {
+          "line" : 485,
+          "name" : "handleInterim"
+        },
+        {
+          "line" : 491,
+          "name" : "startSingleRecognition"
+        },
+        {
+          "line" : 501,
+          "name" : "startRecording"
+        },
+        {
+          "line" : 525,
+          "name" : "sendStart"
+        },
+        {
+          "line" : 559,
+          "name" : "stopRecording"
+        },
+        {
+          "line" : 591,
+          "name" : "clearTranscript"
+        }
+      ],
+      "imports" : [
+        "src\/lib\/config.ts",
+        "src\/lib\/messages.ts",
+        "src\/lib\/platforms.ts",
+        "src\/lib\/storage.ts"
+      ],
+      "language" : "typescript",
+      "loc" : 577,
+      "name" : "useTranscript.ts",
+      "path" : "src\/sidepanel\/hooks\/useTranscript.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+        "src\/lib\/export-formats.ts",
+        "src\/lib\/storage.ts",
+        "src\/sidepanel\/App.tsx",
+        "src\/sidepanel\/components\/ExportMenu.tsx",
+        "src\/sidepanel\/components\/LanguageSelector.tsx",
+        "src\/sidepanel\/components\/QuestionsView.tsx",
+        "src\/sidepanel\/components\/Settings.tsx",
+        "src\/sidepanel\/components\/TranscriptView.tsx",
+        "src\/sidepanel\/hooks\/useLiveSync.ts",
+        "src\/sidepanel\/hooks\/useRemoteTranscript.ts"
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+        "src\/sidepanel\/App.tsx",
+        "src\/sidepanel\/components\/ErrorBoundary.tsx"
+      ],
+      "language" : "typescript",
+      "loc" : 12,
+      "name" : "main.tsx",
+      "path" : "src\/sidepanel\/main.tsx",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "typescript",
+      "loc" : 23,
+      "name" : "vite-env.d.ts",
+      "path" : "src\/vite-env.d.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 27,
+          "name" : "reset"
+        },
+        {
+          "line" : 35,
+          "name" : "provision"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs",
+        "server\/users.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 101,
+      "name" : "agent-ask-history.test.mjs",
+      "path" : "tests\/agent-ask-history.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 13,
+          "name" : "makeStubClaude"
+        },
+        {
+          "line" : 16,
+          "name" : "fn"
+        },
+        {
+          "line" : 26,
+          "name" : "makeCtx"
+        }
+      ],
+      "imports" : [
+        "llm_agent\/runtime\/handlers\/ask-subagent.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 182,
+      "name" : "agent-ask-subagent.test.mjs",
+      "path" : "tests\/agent-ask-subagent.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 17,
+          "name" : "fakeClaude"
+        },
+        {
+          "line" : 44,
+          "name" : "fakeClaude"
+        },
+        {
+          "line" : 45,
+          "name" : "fakeKb"
+        },
+        {
+          "line" : 68,
+          "name" : "fakeClaude"
+        }
+      ],
+      "imports" : [
+        "llm_agent\/runtime\/handlers\/search-kb.mjs",
+        "llm_agent\/runtime\/loop.mjs",
+        "llm_agent\/runtime\/skill-loader.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 76,
+      "name" : "agent-code-assist.test.mjs",
+      "path" : "tests\/agent-code-assist.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+        "llm_agent\/internal\/context\/compose.mjs",
+        "llm_agent\/internal\/context\/render-active-project.mjs",
+        "llm_agent\/internal\/context\/render-indexed-repos.mjs",
+        "llm_agent\/internal\/context\/render-recent-issues.mjs",
+        "llm_agent\/internal\/context\/render-recent-meetings.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 75,
+      "name" : "agent-context-renderers.test.mjs",
+      "path" : "tests\/agent-context-renderers.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 9,
+          "name" : "scriptedClaude"
+        },
+        {
+          "line" : 184,
+          "name" : "capturingClaude"
+        },
+        {
+          "line" : 208,
+          "name" : "capturingClaude"
+        },
+        {
+          "line" : 235,
+          "name" : "in"
+        },
+        {
+          "line" : 241,
+          "name" : "capturingClaude"
+        }
+      ],
+      "imports" : [
+        "llm_agent\/runtime\/route.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 264,
+      "name" : "agent-global-internal.test.mjs",
+      "path" : "tests\/agent-global-internal.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 29,
+          "name" : "fakeClaude"
+        },
+        {
+          "line" : 49,
+          "name" : "fakeClaude"
+        },
+        {
+          "line" : 76,
+          "name" : "fakeClaude"
+        },
+        {
+          "line" : 77,
+          "name" : "fakeKb"
+        }
+      ],
+      "imports" : [
+        "llm_agent\/global\/compose-prompt.mjs",
+        "llm_agent\/runtime\/handlers\/ask-internal.mjs",
+        "llm_agent\/runtime\/skill-loader.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 84,
+      "name" : "agent-global.test.mjs",
+      "path" : "tests\/agent-global.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 9,
+          "name" : "sleep"
+        },
+        {
+          "line" : 19,
+          "name" : "runClaude"
+        },
+        {
+          "line" : 46,
+          "name" : "runClaude"
+        }
+      ],
+      "imports" : [
+        "llm_agent\/runtime\/loop.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 56,
+      "name" : "agent-loop-deadline.test.mjs",
+      "path" : "tests\/agent-loop-deadline.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 24,
+          "name" : "reset"
+        },
+        {
+          "line" : 32,
+          "name" : "provision"
+        },
+        {
+          "line" : 97,
+          "name" : "updated"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs",
+        "server\/users.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 153,
+      "name" : "agent-personas.test.mjs",
+      "path" : "tests\/agent-personas.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 36,
+          "name" : "stub"
+        },
+        {
+          "line" : 185,
+          "name" : "llm"
+        },
+        {
+          "line" : 196,
+          "name" : "llm"
+        },
+        {
+          "line" : 209,
+          "name" : "llm"
+        },
+        {
+          "line" : 220,
+          "name" : "llm"
+        },
+        {
+          "line" : 233,
+          "name" : "llm"
+        },
+        {
+          "line" : 252,
+          "name" : "llm"
+        },
+        {
+          "line" : 266,
+          "name" : "llm"
+        }
+      ],
+      "imports" : [
+        "agents\/agent-prompt.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 244,
+      "name" : "agent-prompt.test.mjs",
+      "path" : "tests\/agent-prompt.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+        "llm_agent\/runtime\/handlers\/search-kb.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 32,
+      "name" : "agent-search-kb.test.mjs",
+      "path" : "tests\/agent-search-kb.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 12,
+          "name" : "writeFixture"
+        },
+        {
+          "line" : 16,
+          "name" : "newDir"
+        }
+      ],
+      "imports" : [
+        "llm_agent\/runtime\/skill-loader.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 106,
+      "name" : "agent-skills.test.mjs",
+      "path" : "tests\/agent-skills.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 9,
+          "name" : "mockFetchSequence"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 61,
+      "name" : "agents-runtime-backoff.test.mjs",
+      "path" : "tests\/agents-runtime-backoff.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 29,
+          "name" : "resetDb"
+        },
+        {
+          "line" : 57,
+          "name" : "execSpy"
+        }
+      ],
+      "imports" : [
+        "agents\/runtime.mjs",
+        "kb\/db.mjs",
+        "server\/users.mjs",
+        "server\/vault.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 66,
+      "name" : "agents-runtime.test.mjs",
+      "path" : "tests\/agents-runtime.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 29,
+          "name" : "fakeReq"
+        }
+      ],
+      "imports" : [
+        "server\/auth.mjs",
+        "server\/jwt.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 143,
+      "name" : "auth.test.mjs",
+      "path" : "tests\/auth.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 16,
+          "name" : "makeFakeClaudeDir"
+        },
+        {
+          "line" : 60,
+          "name" : "makeFakeMarketplace"
+        },
+        {
+          "line" : 79,
+          "name" : "fe"
+        },
+        {
+          "line" : 83,
+          "name" : "cc"
+        },
+        {
+          "line" : 97,
+          "name" : "makeFakeClaudeWithSkills"
+        },
+        {
+          "line" : 324,
+          "name" : "kindWarnings"
+        }
+      ],
+      "imports" : [
+        "llm_agent\/runtime\/skill-loader.mjs",
+        "plugins\/claude-adapter.mjs",
+        "plugins\/loader.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 314,
+      "name" : "claude-adapter.test.mjs",
+      "path" : "tests\/claude-adapter.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+        "kb\/exporter.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 36,
+      "name" : "exporter.test.mjs",
+      "path" : "tests\/exporter.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 9,
+          "name" : "ok"
+        },
+        {
+          "line" : 10,
+          "name" : "blocking"
+        },
+        {
+          "line" : 125,
+          "name" : "login"
+        }
+      ],
+      "imports" : [
+        "guardrails\/rules.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 125,
+      "name" : "guardrails.test.mjs",
+      "path" : "tests\/guardrails.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 31,
+          "name" : "resetDb"
+        },
+        {
+          "line" : 39,
+          "name" : "makeReq"
+        },
+        {
+          "line" : 54,
+          "name" : "makeRes"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs",
+        "kb\/router.mjs",
+        "server\/users.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 133,
+      "name" : "kb-router-path-traversal.test.mjs",
+      "path" : "tests\/kb-router-path-traversal.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 27,
+          "name" : "resetDb"
+        },
+        {
+          "line" : 36,
+          "name" : "makeReq"
+        },
+        {
+          "line" : 53,
+          "name" : "makeRes"
+        }
+      ],
+      "imports" : [
+        "agents\/live-sessions.mjs",
+        "kb\/db.mjs",
+        "kb\/router.mjs",
+        "server\/users.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 129,
+      "name" : "kb-router.test.mjs",
+      "path" : "tests\/kb-router.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 28,
+          "name" : "reset"
+        },
+        {
+          "line" : 102,
+          "name" : "attachLine"
+        },
+        {
+          "line" : 116,
+          "name" : "attachLine"
+        },
+        {
+          "line" : 132,
+          "name" : "attach"
+        },
+        {
+          "line" : 137,
+          "name" : "detach"
+        },
+        {
+          "line" : 150,
+          "name" : "attach"
+        }
+      ],
+      "imports" : [
+        "agents\/live-sessions.mjs",
+        "agents\/meeting-agent.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 185,
+      "name" : "meeting-agent.test.mjs",
+      "path" : "tests\/meeting-agent.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 10,
+          "name" : "fresh"
+        },
+        {
+          "line" : 59,
+          "name" : "cols"
+        }
+      ],
+      "imports" : [
+        "kb\/migrations.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 83,
+      "name" : "migrations.test.mjs",
+      "path" : "tests\/migrations.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 29,
+          "name" : "getHandle"
+        },
+        {
+          "line" : 31,
+          "name" : "reset"
+        },
+        {
+          "line" : 39,
+          "name" : "provision"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs",
+        "server\/users.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 190,
+      "name" : "password-reset.test.mjs",
+      "path" : "tests\/password-reset.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 19,
+          "name" : "hasZip"
+        },
+        {
+          "line" : 24,
+          "name" : "newTempRoot"
+        },
+        {
+          "line" : 26,
+          "name" : "writeManifest"
+        },
+        {
+          "line" : 31,
+          "name" : "zipDirectory"
+        }
+      ],
+      "imports" : [
+        "plugins\/installer.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 252,
+      "name" : "plugins-installer.test.mjs",
+      "path" : "tests\/plugins-installer.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 12,
+          "name" : "newRoot"
+        },
+        {
+          "line" : 16,
+          "name" : "plugin"
+        }
+      ],
+      "imports" : [
+        "plugins\/loader.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 203,
+      "name" : "plugins-loader.test.mjs",
+      "path" : "tests\/plugins-loader.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+        "server\/rate-limit.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 60,
+      "name" : "rate-limit.test.mjs",
+      "path" : "tests\/rate-limit.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+        "core\/utils.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 66,
+      "name" : "sanitize.test.mjs",
+      "path" : "tests\/sanitize.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 2,
+          "name" : "used"
+        }
+      ],
+      "imports" : [
+        "guardrails\/scan.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 54,
+      "name" : "scan.test.mjs",
+      "path" : "tests\/scan.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 10,
+          "name" : "makeDbFixture"
+        },
+        {
+          "line" : 22,
+          "name" : "cleanupFixture"
+        }
+      ],
+      "imports" : [
+        "scripts\/backup.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 66,
+      "name" : "scripts-backup.test.mjs",
+      "path" : "tests\/scripts-backup.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 141,
+          "name" : "hit"
+        },
+        {
+          "line" : 155,
+          "name" : "checks"
+        },
+        {
+          "line" : 184,
+          "name" : "big"
+        }
+      ],
+      "imports" : [
+        "agents\/codegen-apply.mjs",
+        "agents\/dispatcher.mjs",
+        "agents\/runtime.mjs",
+        "guardrails\/rules.mjs",
+        "kb\/db.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 165,
+      "name" : "security-fixes.test.mjs",
+      "path" : "tests\/security-fixes.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "javascript",
+      "loc" : 44,
+      "name" : "server-control-plane.test.mjs",
+      "path" : "tests\/server-control-plane.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+        "agents\/slack.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 50,
+      "name" : "slack.test.mjs",
+      "path" : "tests\/slack.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 11,
+          "name" : "stub"
+        },
+        {
+          "line" : 33,
+          "name" : "stub"
+        },
+        {
+          "line" : 49,
+          "name" : "stub"
+        },
+        {
+          "line" : 58,
+          "name" : "stub"
+        }
+      ],
+      "imports" : [
+        "agents\/summarize.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 64,
+      "name" : "summarize.test.mjs",
+      "path" : "tests\/summarize.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 33,
+          "name" : "reset"
+        },
+        {
+          "line" : 43,
+          "name" : "provision"
+        },
+        {
+          "line" : 52,
+          "name" : "setup"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs",
+        "server\/users.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 228,
+      "name" : "tenancy.test.mjs",
+      "path" : "tests\/tenancy.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+        {
+          "line" : 31,
+          "name" : "reset"
+        },
+        {
+          "line" : 39,
+          "name" : "provision"
+        }
+      ],
+      "imports" : [
+        "kb\/db.mjs",
+        "server\/users.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 174,
+      "name" : "user-delete-cascade.test.mjs",
+      "path" : "tests\/user-delete-cascade.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+        "server\/vault.mjs"
+      ],
+      "language" : "javascript",
+      "loc" : 38,
+      "name" : "vault.test.mjs",
+      "path" : "tests\/vault.test.mjs",
+      "role" : "Test",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    },
+    {
+      "functions" : [
+
+      ],
+      "imports" : [
+
+      ],
+      "language" : "typescript",
+      "loc" : 41,
+      "name" : "vite.config.ts",
+      "path" : "vite.config.ts",
+      "role" : "Web",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    }
+  ],
+  "summary" : {
+    "totalEdges" : 304,
+    "totalFiles" : 171
+  },
+  "version" : "1.0"
+}

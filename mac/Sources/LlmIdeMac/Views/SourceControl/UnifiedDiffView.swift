@@ -1,0 +1,177 @@
+import SwiftUI
+
+/// Read-only unified diff renderer backed by a `WKWebView` + vendored
+/// highlight.js — the same offline highlighter scaffold `CodeWebView`
+/// uses (Resources/highlight.min.js + atom-one-dark/light CSS). Each
+/// `DiffRow` becomes a table row with old/new line gutters, a +/−/space
+/// sign cell, and a syntax-highlighted code cell. Insert rows get a green
+/// background, delete rows red, context none; only the code cell is run
+/// through hljs so the row backgrounds survive highlighting. No wrap +
+/// horizontal scroll (the VSCode/Cursor pattern). Empty hunks render a
+/// "No changes to show" state for parity with the old SwiftUI view.
+struct UnifiedDiffView: View {
+    let hunks: [DiffHunk]
+    let fileExtension: String
+    @EnvironmentObject var theme: ThemeStore
+
+    init(hunks: [DiffHunk], fileExtension: String = "") {
+        self.hunks = hunks
+        self.fileExtension = fileExtension
+    }
+
+    var body: some View {
+        if hunks.isEmpty {
+            VStack {
+                Text("No changes to show")
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            DiffWebView(hunks: hunks,
+                        language: fileExtension,
+                        isDark: theme.current.isDark)
+        }
+    }
+}
+
+// MARK: - WKWebView diff renderer
+
+/// Renders a parsed unified diff as a highlighted HTML table. Mirrors
+/// `CodeWebView`'s vendored highlight.js loading: the JS + theme CSS are
+/// inlined from `Bundle.main` Resources (no remote CDN — offline + no MITM).
+private struct DiffWebView: View {
+    let hunks: [DiffHunk]
+    let language: String
+    let isDark: Bool
+
+    var body: some View {
+        HljsWebView(html: html())
+    }
+
+    // MARK: extension → highlight.js language id
+
+    private var hljsLanguage: String {
+        HljsLanguage.id(for: language)
+    }
+
+    private func html() -> String {
+        // Inlined theme + highlighter from the shared single-load `Hljs` cache.
+        let themeCSS = Hljs.themeCSS(isDark: isDark)
+        let hljsJS   = Hljs.js
+        let p        = Hljs.Palette(isDark: isDark)
+
+        let bg      = p.bg
+        let fg      = p.fg
+        let gutBg   = p.gutterBg
+        let gutFg   = p.gutterFg
+        let border  = p.border
+        let hdrBg   = isDark ? "#2c313a" : "#eef1f5"
+        let hdrFg   = isDark ? "#7f8694" : "#8a9099"
+        // Row backgrounds — translucent so the hljs token colors still read.
+        let addBg   = isDark ? "rgba(63,185,80,0.16)"  : "rgba(46,160,67,0.13)"
+        let delBg   = isDark ? "rgba(248,81,73,0.16)"  : "rgba(207,34,46,0.12)"
+
+        let langClass = hljsLanguage.isEmpty ? "" : " language-\(hljsLanguage)"
+
+        // Build the table rows from the parsed hunks.
+        var rowsHTML = ""
+        for hunk in hunks {
+            rowsHTML += """
+            <tr class="hdr"><td class="num"></td><td class="num"></td><td class="sign"></td><td class="code">\(Hljs.escape(hunk.header))</td></tr>
+            """
+            for row in hunk.rows {
+                let cls: String
+                let sign: String
+                switch row.kind {
+                case .insert: cls = "add"; sign = "+"
+                case .delete: cls = "del"; sign = "−"
+                case .context: cls = "ctx"; sign = " "
+                }
+                let oldN = row.oldLine.map(String.init) ?? ""
+                let newN = row.newLine.map(String.init) ?? ""
+                // Keep at least one char so empty lines render with height.
+                let text = row.text.isEmpty ? " " : row.text
+                rowsHTML += """
+                <tr class="\(cls)"><td class="num">\(oldN)</td><td class="num">\(newN)</td><td class="sign">\(sign)</td><td class="code"><code class="hljs\(langClass)">\(Hljs.escape(text))</code></td></tr>
+                """
+            }
+        }
+
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta charset="utf-8">
+        <style>\(themeCSS)</style>
+        <style>
+          * { margin:0; padding:0; box-sizing:border-box; }
+          html, body { height:100%; background:\(bg); }
+          body {
+            font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.55;
+            color: \(fg);
+          }
+          table { border-collapse: collapse; width: 100%; }
+          tr.add { background: \(addBg); }
+          tr.del { background: \(delBg); }
+          tr.hdr td { background: \(hdrBg); color: \(hdrFg); }
+          td { vertical-align: top; padding: 0; }
+          /* Gutter cells: sticky line numbers, no select. */
+          td.num {
+            white-space: pre;
+            text-align: right;
+            color: \(gutFg);
+            background: \(gutBg);
+            border-right: 1px solid \(border);
+            user-select: none;
+            -webkit-user-select: none;
+            padding: 0 8px;
+            min-width: 44px;
+            width: 1%;
+          }
+          td.sign {
+            white-space: pre;
+            text-align: center;
+            color: \(gutFg);
+            padding: 0 4px;
+            width: 1%;
+            user-select: none;
+            -webkit-user-select: none;
+          }
+          td.code { white-space: pre; padding: 0 16px 0 8px; }
+          /* hljs adds .hljs to <code>; clear its own background so the
+             row's add/del tint shows through. */
+          td.code code, td.code code.hljs {
+            background: transparent !important;
+            padding: 0;
+            display: inline;
+            font: inherit;
+            white-space: pre;
+          }
+          tr.hdr td.code { white-space: pre; }
+        </style>
+        </head>
+        <body>
+        <table>\(rowsHTML)</table>
+        <script>\(hljsJS)</script>
+        <script>
+          (function() {
+            try {
+              if (!window.hljs) return;
+              // Highlight ONLY the code cells (not the hunk-header rows) so
+              // the green/red row backgrounds survive.
+              var codes = document.querySelectorAll('tr.add td.code code, tr.del td.code code, tr.ctx td.code code');
+              for (var i = 0; i < codes.length; i++) {
+                try { window.hljs.highlightElement(codes[i]); }
+                catch (e) { /* leave plain text on failure */ }
+              }
+            } catch (e) { /* no-op */ }
+          })();
+        </script>
+        </body>
+        </html>
+        """
+    }
+}

@@ -1,0 +1,37 @@
+name: skills-drift
+
+# Fail if the synced agent-loop tool definitions (extension/llm_agent/internal/skills
+# and the managed .md defs in extension/llm_agent/global) have drifted from the
+# central dnsmalla/skills repo at the commit pinned in extension/.skills-lock.
+# App-local files (prompt.md, compose-prompt.mjs) and read-tool handlers are not
+# managed by the sync and are not checked. Author tool defs in central, then run
+# `npm run sync:skills` and commit.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v7
+      - name: Re-sync from central @ .skills-lock and check for drift
+        run: |
+          set -euo pipefail
+          ref="$(cat .skills-lock 2>/dev/null || echo main)"
+          git clone --quiet https://github.com/dnsmalla/skills.git "$RUNNER_TEMP/central"
+          git -C "$RUNNER_TEMP/central" checkout --quiet "$ref"
+          SKILLS_REPO="$RUNNER_TEMP/central" bash scripts/sync-skills.sh
+          if ! git -C "$GITHUB_WORKSPACE" diff --exit-code -- \
+                 extension/llm_agent/internal/skills \
+                 extension/llm_agent/global/ask-internal.md \
+                 extension/llm_agent/global/ask-subagent.md \
+                 extension/llm_agent/global/update-file.md; then
+            echo "::error::Synced agent-tool/global defs differ from central@${ref}. Run 'npm run sync:skills' and commit."
+            exit 1
+          fi
+          echo "✓ agent-tool/global defs match central@${ref}"

@@ -1,0 +1,330 @@
+import Foundation
+import GraphKit
+import CryptoKit
+import os
+
+/// Stage 1 of the unified knowledge graph
+/// (docs/superpowers/plans/2026-06-22-unified-knowledge-graph-automation.md):
+/// run BOTH generators for a project and expose both `CGData` outputs —
+///
+///   • code track → `CodeNoteService` (StructureScanner; filters code extensions
+///     internally, incremental via scan-cache, also writes `system/graph/`)
+///   • doc  track → `GraphKit.MemoryGenerator` over the project's doc folders
+///
+/// Merging the two into one graph (Stage 2), incremental doc caching (Stage 3),
+/// agent-facing memory output (Stage 4), and automatic triggering (Stage 5) build
+/// on this. Kept free of any view/selection state so the later automation can
+/// drive it headlessly.
+@MainActor
+final class KnowledgeGraphService: ObservableObject {
+    enum Phase: Equatable {
+        case idle
+        case running
+        case complete(codeNodes: Int, docNodes: Int)
+        case failed(String)
+    }
+
+    @Published private(set) var phase: Phase = .idle
+    /// The structural code graph (file + symbol nodes).
+    @Published private(set) var codeGraph: CGData = .empty
+    /// The InfiniteBrain doc/memory graph (doc + chunk nodes).
+    @Published private(set) var docGraph: CGData = .empty
+    /// Code + doc unified into one graph, with doc→code cross-links (Stage 2).
+    @Published private(set) var mergedGraph: CGData = .empty
+    /// Doc-track chunks behind `docGraph`/`mergedGraph` — exposed so the
+    /// `GraphAutoUpdater` can hand them to the Code Graph view's session store
+    /// (the view needs them to render doc/chunk detail in `.data`/`.all` modes).
+    @Published private(set) var docChunks: [MemoryChunk] = []
+    /// Number of source docs ingested for the doc track (matches the view's
+    /// `memoryDocCount`, sourced from `MemoryGenerator`).
+    @Published private(set) var docCount: Int = 0
+    /// Stat-fingerprint of the doc set behind the current `docGraph` — published
+    /// so the auto-updater can hand it to the session store, letting the view's
+    /// manual InfiniteBrain re-generate be skipped when docs are unchanged.
+    @Published private(set) var docFingerprint: String?
+
+    private let codeNotes: CodeNoteService
+    /// Re-entrancy guard — the auto-updater (Stage 5) and a manual run must not
+    /// overlap. `CodeNoteService` has its own guard too; this covers the doc
+    /// track and the orchestration as a whole.
+    private var isRunning = false
+    /// Latest request received while a run was in flight — replayed once on
+    /// completion so a project switch mid-run isn't dropped (coalescing).
+    private var pending: (code: URL?, docs: [URL], memory: URL?)?
+
+    // Stage 3 — doc-track change detection. The doc graph is recomputed only
+    // when the doc set's fingerprint changes; otherwise the cached result is
+    // reused. (The code track is incremental per-file via CodeNoteService's
+    // own scan-cache.) Per-instance/in-session; the Stage 5 auto-updater holds
+    // a long-lived instance, so a periodic refresh that finds no doc change is
+    // near-free. Reset on project switch.
+    private var lastDocFingerprint: String?
+    private var cachedDocGraph: CGData = .empty
+    private var cachedChunks: [MemoryChunk] = []
+    private var cachedDocCount: Int = 0
+
+    nonisolated private static let log = Logger(subsystem: "com.llmide.macapp",
+                                                category: "KnowledgeGraphService")
+
+    // No default-arg `CodeNoteService()` — a default argument is evaluated in a
+    // nonisolated context, but CodeNoteService's init is @MainActor-isolated.
+    // Construct it inside this @MainActor init instead.
+    init() {
+        self.codeNotes = CodeNoteService()
+    }
+
+    /// Run both tracks for a project.
+    /// - Parameters:
+    ///   - codeRepoRoot: the git repo to scan for code (nil skips the code track).
+    ///   - docRoots: folders whose docs feed InfiniteBrain (typically the
+    ///     project's `notes/` and `data/` dirs). Missing folders are skipped.
+    ///   - memoryRoot: when set, write the agent-facing memory artifact under
+    ///     `<memoryRoot>/graphify-out/memory/` (the path the extension reads).
+    ///     Pass the repo the user has indexed in the extension.
+    func generate(codeRepoRoot: URL?, docRoots: [URL], memoryRoot: URL? = nil) async {
+        // Coalesce: if a run is in flight, stash the latest request and replay
+        // it once when the current run finishes — so a project switch (or any
+        // newer request) mid-run isn't silently dropped until the next tick.
+        if isRunning {
+            pending = (codeRepoRoot, docRoots, memoryRoot)
+            return
+        }
+        isRunning = true
+        await runOnce(codeRepoRoot: codeRepoRoot, docRoots: docRoots, memoryRoot: memoryRoot)
+        isRunning = false
+        if let p = pending {
+            pending = nil
+            await generate(codeRepoRoot: p.code, docRoots: p.docs, memoryRoot: p.memory)
+        }
+    }
+
+    private func runOnce(codeRepoRoot: URL?, docRoots: [URL], memoryRoot: URL?) async {
+        phase = .running
+
+        // Code track — StructureScanner filters to code extensions internally
+        // and is incremental (scan-cache), so this is cheap on re-runs.
+        if let codeRepoRoot {
+            _ = await codeNotes.generate(repoRoot: codeRepoRoot)
+            // "md is doc": the scanner emits markdown as code `.docPage` nodes;
+            // strip them so markdown lives only in the doc track and isn't
+            // double-counted when merged below.
+            codeGraph = FileClassifier.strippingDocNodes(from: codeNotes.graph)
+        }
+
+        // Doc track — MemoryGenerator walks each root (bounded) and filters to
+        // doc extensions. Pure text chunking (no LLM), run off the main actor.
+        let roots = docRoots
+        // Recompute the doc graph only when the doc set changed (stat-only
+        // fingerprint); otherwise reuse the cached result.
+        let fingerprint = await Task.detached(priority: .utility) { Self.docSetFingerprint(roots: roots) }.value
+        docFingerprint = fingerprint
+        let doc: (graph: CGData, chunks: [MemoryChunk], docCount: Int)
+        if let last = lastDocFingerprint, last == fingerprint {
+            doc = (cachedDocGraph, cachedChunks, cachedDocCount)
+        } else {
+            doc = await Task.detached(priority: .userInitiated) { () -> (graph: CGData, chunks: [MemoryChunk], docCount: Int) in
+                var nodes: [CGNode] = []
+                var edges: [CGEdge] = []
+                var chunks: [MemoryChunk] = []
+                var docCount = 0
+                var seenNode = Set<String>()
+                let fm = FileManager.default
+                for root in roots {
+                    var isDir: ObjCBool = false
+                    guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { continue }
+                    let mem = MemoryGenerator.generate(from: root)
+                    for n in mem.graph.nodes where seenNode.insert(n.id).inserted { nodes.append(n) }
+                    // CGEdge has no id; doc graphs from distinct roots have disjoint
+                    // (path-hashed) node ids, so their edges can't collide — append.
+                    edges.append(contentsOf: mem.graph.edges)
+                    chunks.append(contentsOf: mem.chunks)
+                    docCount += mem.docCount
+                }
+                return (CGData(nodes: nodes, edges: edges), chunks, docCount)
+            }.value
+            lastDocFingerprint = fingerprint
+            cachedDocGraph = doc.graph
+            cachedChunks = doc.chunks
+            cachedDocCount = doc.docCount
+        }
+        docGraph = doc.graph
+        docChunks = doc.chunks
+        docCount = doc.docCount
+
+        // Stage 2 — unify code + doc into one graph, with doc→code cross-links.
+        mergedGraph = Self.merge(code: codeGraph, doc: doc.graph, chunks: doc.chunks)
+
+        // Stage 4 — write the agent-facing memory artifact where the extension
+        // reads it (graphify-out/memory/), fixing the previously-empty memory.
+        if let memoryRoot {
+            let code = codeGraph, docData = docGraph, mg = mergedGraph
+            let chunks = doc.chunks, dCount = doc.docCount
+            await Task.detached(priority: .utility) {
+                Self.writeMemoryArtifact(to: memoryRoot, code: code, doc: docData, merged: mg,
+                                         docCount: dCount, chunks: chunks)
+            }.value
+        }
+
+        Self.log.info("knowledge graph: code=\(self.codeGraph.nodes.count, privacy: .public) doc=\(self.docGraph.nodes.count, privacy: .public) merged=\(self.mergedGraph.nodes.count, privacy: .public) nodes / \(self.mergedGraph.edges.count, privacy: .public) edges")
+        phase = .complete(codeNodes: codeGraph.nodes.count, docNodes: docGraph.nodes.count)
+    }
+
+    /// Stage 4 — render the merged graph to the memory artifact the extension
+    /// agent reads (`<root>/graphify-out/memory/`): `repo.md` (reusing the code
+    /// graph's impact-ranked `system/graph/index.md` when present) and
+    /// `graph-notes.md` (a rendering of the merged graph). Writing these files
+    /// is what finally makes the agent's "Repository memory" block non-empty —
+    /// no extension change needed since the reader already targets this path.
+    nonisolated static func writeMemoryArtifact(to repoRoot: URL, code: CGData, doc: CGData, merged: CGData,
+                                                docCount: Int, chunks: [MemoryChunk]) {
+        let memDir = repoRoot.appendingPathComponent("graphify-out", isDirectory: true)
+            .appendingPathComponent("memory", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: memDir, withIntermediateDirectories: true)
+        } catch {
+            log.error("memory artifact: mkdir failed at \(memDir.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        // repo.md — reuse the code graph's index.md (impact-ranked summary) if
+        // it exists; otherwise a minimal generated summary.
+        let indexMD = ProjectLayout(root: repoRoot).graphDir.appendingPathComponent("index.md")
+        let repoBody: String
+        if let idx = try? String(contentsOf: indexMD, encoding: .utf8), !idx.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            repoBody = idx
+        } else {
+            repoBody = "# Repository knowledge graph\n\n\(code.nodes.count) code nodes · \(doc.nodes.count) doc nodes · \(merged.edges.count) edges.\n"
+        }
+        do {
+            try repoBody.write(to: memDir.appendingPathComponent("repo.md"), atomically: true, encoding: .utf8)
+            try renderGraphNotes(code: code, doc: doc, merged: merged)
+                .write(to: memDir.appendingPathComponent("graph-notes.md"), atomically: true, encoding: .utf8)
+            try renderDocNotes(docCount: docCount, chunks: chunks)
+                .write(to: memDir.appendingPathComponent("doc-notes.md"), atomically: true, encoding: .utf8)
+        } catch {
+            // Don't fail silently — a write error means the agent keeps reading
+            // stale/empty memory with no signal otherwise.
+            log.error("memory artifact: write failed at \(memDir.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Render `graph-notes.md`: counts plus the doc→code cross-links (the
+    /// cross-domain edges Stage 2 adds), which are the most useful thing the
+    /// agent can't get from the code or docs alone.
+    nonisolated static func renderGraphNotes(code: CGData, doc: CGData, merged: CGData) -> String {
+        var out = "# Graph notes\n\n"
+        out += "- Code nodes: \(code.nodes.count)\n- Doc nodes: \(doc.nodes.count)\n- Edges: \(merged.edges.count)\n\n"
+        let codeIds = Set(code.nodes.map(\.id))
+        let docTitle = Dictionary(doc.nodes.map { ($0.id, $0.title) }, uniquingKeysWith: { a, _ in a })
+        let codeTitle = Dictionary(code.nodes.map { ($0.id, $0.title) }, uniquingKeysWith: { a, _ in a })
+        let crossLinks = merged.edges.filter {
+            $0.kind == .references && docTitle[$0.fromId] != nil && codeIds.contains($0.toId)
+        }
+        if !crossLinks.isEmpty {
+            out += "## Doc → code references\n"
+            for e in crossLinks.prefix(50) {
+                out += "- \(docTitle[e.fromId] ?? e.fromId) → \(codeTitle[e.toId] ?? e.toId)\n"
+            }
+            out += "\n"
+        }
+        return out
+    }
+
+    /// Render `doc-notes.md`: the doc/InfiniteBrain content for the combined
+    /// memory the agent reads — docs grouped by title, each listing its chunk
+    /// headings. This is the doc half that the memory artifact previously omitted.
+    nonisolated static func renderDocNotes(docCount: Int, chunks: [MemoryChunk]) -> String {
+        var out = "# Documentation memory\n\n"
+        out += "\(docCount) document\(docCount == 1 ? "" : "s") · "
+        out += "\(chunks.count) section\(chunks.count == 1 ? "" : "s").\n\n"
+        let byDoc = Dictionary(grouping: chunks, by: \.docTitle)
+        for (docTitle, docChunks) in byDoc.sorted(by: { $0.key < $1.key }) {
+            out += "## \(docTitle)\n"
+            for chunk in docChunks {
+                out += "- \(chunk.displayHeading)\n"
+            }
+            out += "\n"
+        }
+        return out
+    }
+
+    /// Merge the code and doc graphs into one and add doc→code cross-links:
+    /// a doc chunk that EXPLICITLY references a code symbol via a `[[wikilink]]`
+    /// gets a `references` edge to that code node. Only explicit wikilinks are
+    /// used — a chunk's (heading-derived) title is NOT matched, because generic
+    /// headings like "Config"/"Setup"/"main" collide with code symbol names and
+    /// would manufacture false edges. Node ids are namespaced (code paths/symbols
+    /// vs `doc:`/chunk hashes) so the union can't collide; chunk graph-node ids
+    /// equal `MemoryChunk.id`, so the cross-link `fromId` resolves to a real node.
+    nonisolated static func merge(code: CGData, doc: CGData, chunks: [MemoryChunk]) -> CGData {
+        var nodes: [CGNode] = []
+        var seen = Set<String>()
+        for n in code.nodes + doc.nodes where seen.insert(n.id).inserted { nodes.append(n) }
+        var edges = code.edges + doc.edges
+
+        // Index code nodes by lowercased title for name matching.
+        var codeIdsByTitle: [String: [String]] = [:]
+        for n in code.nodes { codeIdsByTitle[n.title.lowercased(), default: []].append(n.id) }
+        guard !codeIdsByTitle.isEmpty else { return CGData(nodes: nodes, edges: edges) }
+
+        var crossSeen = Set<String>()
+        for chunk in chunks {
+            for name in chunk.wikiLinks.map({ $0.lowercased() }) {
+                guard let targets = codeIdsByTitle[name] else { continue }
+                for codeId in targets {
+                    let key = "\(chunk.id)->\(codeId)"
+                    guard crossSeen.insert(key).inserted else { continue }
+                    edges.append(CGEdge(fromId: chunk.id, toId: codeId,
+                                        kind: .references, confidence: .inferred))
+                }
+            }
+        }
+        return CGData(nodes: nodes, edges: edges)
+    }
+
+    /// Clear the doc-track cache — call on project switch so a new project
+    /// doesn't reuse the previous project's doc graph.
+    func resetCache() {
+        lastDocFingerprint = nil
+        cachedDocGraph = .empty
+        cachedChunks = []
+        cachedDocCount = 0
+        docFingerprint = nil
+    }
+
+    /// Cheap change signal for the doc set: sorted `path|size|mtime` over every
+    /// doc-extension file under the roots, hashed. Stat-only (no file reads),
+    /// so re-running when nothing changed is near-free; the doc track recomputes
+    /// only when a doc is added, removed, or edited.
+    nonisolated static func docSetFingerprint(roots: [URL]) -> String {
+        // Bound the walk to the same window MemoryGenerator actually ingests
+        // (maxFiles 500 / 2 MB per file) so the fingerprint covers exactly the
+        // set that affects output — avoids unbounded stat walks and false-
+        // positive recomputes from files the generator never reads.
+        let maxFiles = 500
+        let maxFileBytes = 2_000_000
+        let fm = FileManager.default
+        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]
+        var entries: [String] = []
+        outer: for root in roots {
+            // Mirror MemoryGenerator.collectDocs options so the fingerprint
+            // covers exactly the set the generator ingests (it skips package
+            // descendants too — otherwise a doc inside a .bundle would flip the
+            // fingerprint without ever changing output).
+            guard let en = fm.enumerator(at: root, includingPropertiesForKeys: keys,
+                                         options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
+            for case let url as URL in en {
+                guard FileClassifier.docExtensions.contains(url.pathExtension.lowercased()) else { continue }
+                let vals = try? url.resourceValues(forKeys: Set(keys))
+                guard vals?.isRegularFile == true else { continue }
+                let size = vals?.fileSize ?? 0
+                guard size <= maxFileBytes else { continue }
+                let mtime = vals?.contentModificationDate?.timeIntervalSince1970 ?? 0
+                entries.append("\(url.path)|\(size)|\(mtime)")
+                if entries.count >= maxFiles { break outer }
+            }
+        }
+        entries.sort()
+        let digest = SHA256.hash(data: Data(entries.joined(separator: "\n").utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+}

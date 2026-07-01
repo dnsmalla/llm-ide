@@ -1,0 +1,695 @@
+// Shared runtime for Phase-4 agents — Claude CLI wrapper, JSON
+// extraction, and language directive.  Kept in its own module so
+// planner/risk/code-sync don't each grow their own subtle copy.
+
+import { getSecret } from '../server/vault.mjs';
+import { getDb } from '../kb/db.mjs';
+import { logger } from '../core/logger.mjs';
+import { redactWithKey } from '../core/redact-secrets.mjs';
+import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS, spawnCli, minimalCliEnv } from './providers.mjs';
+import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
+import { recordUsage, flagQuota, resolveModel as resolveUsageModel, recordRateLimits } from '../kb/usage.mjs';
+
+// Best-effort metering wrappers — a ledger write or quota flag must NEVER throw
+// into a live model call. Used across the Anthropic HTTP, CLI, and provider
+// paths so all model usage lands in usage_ledger (the dashboard's source).
+function meterUsage(fields) {
+  try { recordUsage(getDb(), fields); } catch { /* never break a model call */ }
+}
+function meterQuota(userId, provider, model) {
+  try { if (userId) flagQuota(getDb(), userId, provider, model); } catch { /* ignore */ }
+}
+
+const log = logger.child({ component: 'claude-runtime' });
+
+const CLAUDE_TIMEOUT_MS = 90_000;        // 90 s per CLI attempt.  Planning
+                                         // prompts are large but two retries
+                                         // (270 s worst-case) still fit inside
+                                         // the 3-minute /kb/summarize ceiling
+                                         // and the Mac client's 5-minute task
+                                         // group limit.  Previously 180 s meant
+                                         // two calls could hit 6 min, outlasting
+                                         // both the URLSession (240 s) and the
+                                         // route timeout before the fix.
+const DEFAULT_MODEL = process.env.LLMIDE_MODEL || 'claude-sonnet-4-6';
+// Floor for the context-overflow retry: halving the output budget below
+// this produces summaries/answers too truncated to be useful, so we
+// stop retrying and surface the error instead.
+const MIN_OVERFLOW_TOKENS = 256;
+// Anthropic API version header.  2023-06-01 is the current stable
+// version; overridable so a future version bump is a config change,
+// not a deploy.  Prompt caching is GA on this version — the old
+// `anthropic-beta: prompt-caching-2024-07-31` header is no longer
+// needed and has been dropped.
+const ANTHROPIC_VERSION = process.env.LLMIDE_ANTHROPIC_VERSION || '2023-06-01';
+
+// Caller-supplied model ids reach us straight from the client's picker,
+// which can also offer non-Anthropic options (Cursor/Copilot/Gemini) that
+// would 404 against the Anthropic API. Accept only well-formed Claude ids;
+// anything else (empty, stale, or a foreign provider) falls back to the
+// default rather than failing the request. A regex (not a fixed list)
+// keeps new Claude models working without a code change here.
+const CLAUDE_MODEL_RE = /^claude-[a-z0-9.-]+$/;
+function resolveModel(model) {
+  return (typeof model === 'string' && CLAUDE_MODEL_RE.test(model)) ? model : DEFAULT_MODEL;
+}
+
+// Anthropic 529 "overloaded" responses usually clear within 5-30s. Retry
+// transient capacity errors (529, 503) with the shared jittered backoff
+// (agents/backoff.mjs) before bubbling up. Other errors (auth, 4xx, malformed
+// JSON) throw on first attempt — masking those would hide real bugs.
+// `jittered` is re-exported so the dispatcher keeps importing it from here.
+export { jittered };
+
+function isCliOverloaded(stderr) {
+  if (typeof stderr !== 'string') return false;
+  return /\b529\b|\boverloaded\b|\b503\b|\bservice unavailable\b/i.test(stderr);
+}
+
+// Redact the in-flight API key from any text before it is surfaced in an
+// error message or written to stderr/logs. The Claude CLI and the
+// Anthropic HTTP API can echo the key (e.g. "invalid x-api-key: sk-ant-…")
+// in their diagnostics; without this a user-scoped key could leak into the
+// server logs or be returned to a client in an error envelope. Also masks
+// any other sk-ant-* token that happens to appear.
+// Key-aware redaction for surfaced Anthropic error bodies. Delegates to the
+// single shared implementation so this control can't drift per call site.
+const redactKey = redactWithKey;
+
+// Hard cap on prompt length passed to either the HTTP API or the
+// CLI.  Server-level /generate-* routes also cap their inputs at
+// ~500 k chars, but agent modules (planner, risk, meeting-agent,
+// codegen) build their own prompts from KB context + transcript and
+// previously had no cap — a hostile transcript could feed an
+// unbounded prompt to execFile('claude', ['-p', prompt]) and exhaust
+// the ARG_MAX / pipe buffer.  Keep the cap aligned with the server.
+const MAX_PROMPT_CHARS = 500_000;
+
+// Run Claude CLI with the caller's prompt.  The `userId` argument is
+// optional — when provided we look up the user's stored
+// `claude.apiKey` from the vault and inject it as ANTHROPIC_API_KEY,
+// so multi-user deployments charge each user's own Anthropic account
+// rather than the operator's CLI login.  When userId is omitted (or
+// the user has no stored key) we fall back to the operator's CLI auth.
+export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, autoFallback = true } = {}) {
+  if (typeof prompt !== 'string') {
+    throw new Error('runClaude: prompt must be a string');
+  }
+  if (prompt.length > MAX_PROMPT_CHARS) {
+    throw new Error(`runClaude: prompt too long (${prompt.length} > ${MAX_PROMPT_CHARS} chars)`);
+  }
+  // Optional vision input: an array of { mediaType, data(base64) }. Only the
+  // Anthropic HTTP path below can carry image content blocks; the CLI and
+  // other providers are text-only, so we fail loudly rather than drop them.
+  const hasImages = Array.isArray(images) && images.length > 0;
+  // Allow callers to pass a tighter max_tokens budget.
+  // Meeting-agent question drafts only need ~512 tokens; using 8192
+  // for every call over-spends on short structured outputs.
+  // Default: 8192 (safe for planning, long-form agent replies).
+  const resolvedMaxTokens = (Number.isFinite(maxTokens) && maxTokens > 0) ? maxTokens : 8192;
+
+  // Proactive auto-fallback (opt-in). Before resolving the call, ask the usage
+  // ledger which model in this provider's same-provider chain still has budget.
+  // A `paused` chain (everything exhausted) stops here with a clear error; a
+  // healthy/degraded chain swaps `model` to the resolved one. Off by default so
+  // existing callers are unaffected; a resolver/db error never blocks the call.
+  if (autoFallback && userId) {
+    let decision = null;
+    try {
+      const prov = explicitProvider || resolveProvider(model);
+      // preferModel = the caller's requested model — resolveUsageModel keeps it
+      // when healthy and only steps down when it's over threshold / exhausted,
+      // so a model the user picked in the composer isn't silently swapped unless
+      // it's actually constrained.
+      decision = resolveUsageModel(getDb(), userId, prov, new Date(), { preferModel: model });
+    } catch { decision = null; }
+    if (decision) {
+      if (decision.status === 'paused') {
+        const e = new Error(
+          `All ${decision.provider} models have reached their usage limit.` +
+          (decision.resetAt ? ` Resets ${decision.resetAt}.` : '')
+        );
+        e.usagePaused = true;
+        throw e;
+      }
+      // Only override the caller's model when the chain is actually engaged
+      // (a cap is set or a quota flag fired) — an inert chain leaves the choice
+      // to the caller.
+      if (decision.model && decision.engaged) model = decision.model;
+    }
+  }
+
+  // Metering context threaded into the provider HTTP path.
+  const meter = userId ? { userId, endpoint } : undefined;
+
+  // Multi-provider routing. An explicit provider (from the client picker)
+  // wins — required for `custom`, whose model ids aren't prefix-routable;
+  // otherwise infer from the model id. Anthropic keeps the hardened path
+  // below (prompt caching, context-overflow retry, operator CLI fallback).
+  const { provider, userScopedKey, apiKey, resolvedModel } = resolveClaudeCall({ userId, model, provider: explicitProvider });
+  if (hasImages && (provider !== 'anthropic' || !apiKey)) {
+    throw new Error('Image input requires an Anthropic API key configured for this account (Settings → Model Providers).');
+  }
+  if (provider !== 'anthropic') {
+    const key = providerApiKey(userId, provider);
+    if (key) {
+      if (provider === 'custom') {
+        const baseUrl = customBaseUrl(userId);
+        if (!baseUrl) throw new Error('No base URL configured for the custom provider. Add one in Settings → Model Providers.');
+        return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl, signal, meter });
+      }
+      return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, signal, meter });
+    }
+    // custom has no CLI subscription mode; other providers fall back to their
+    // logged-in CLI.
+    if (provider === 'custom') {
+      throw new Error('No API key configured for the custom provider. Add one in Settings → Model Providers.');
+    }
+    const cliText = await runViaCli(provider, prompt);
+    // Use the request's own model id, NOT resolvedModel — the local resolveModel
+    // normalizes any non-Claude id to the Anthropic default, which would mislabel
+    // this (openai/google/custom) provider's usage. `model` is already
+    // same-provider-correct (and reassigned by autoFallback above when on).
+    meterUsage({ userId, provider, model, source: 'cli', endpoint });
+    return cliText;
+  }
+
+  // A user-scoped key is one stored against this specific userId in the
+  // vault.  When such a key is in play, the caller's intent is "bill
+  // and quota against THIS user's Anthropic account" — silently
+  // falling back to the operator CLI on HTTP failure would (a) charge
+  // the wrong account and (b) sidestep the user's own quota/rate
+  // limits.  Per-process ANTHROPIC_API_KEY is treated as operator
+  // default and is allowed to fall back to the CLI like before.
+  // (userScopedKey, apiKey, resolvedModel are set by resolveClaudeCall above.)
+
+  if (apiKey) {
+    // Build the messages array. When cacheTranscript is true, use
+    // Anthropic's prompt caching: mark the large transcript block
+    // with cache_control so repeated calls (notes → chat → re-generate)
+    // reuse the cached tokenization. This cuts input token cost by
+    // ~90% and reduces TTFT by 1-3s on long transcripts.
+    // Prompt caching requires the content to be structured as an array
+    // of content blocks (not a plain string).
+    let messages;
+    if (hasImages) {
+      // Vision: text first, then each image as a base64 content block.
+      messages = [{ role: 'user', content: [
+        { type: 'text', text: prompt },
+        ...images.map((img) => ({
+          type: 'image',
+          source: { type: 'base64', media_type: img.mediaType, data: img.data },
+        })),
+      ]}];
+    } else if (cacheTranscript && prompt.includes('<<<BEGIN>>>')) {
+      const splitIdx = prompt.indexOf('<<<BEGIN>>>');
+      const systemPart = prompt.slice(0, splitIdx);
+      const transcriptPart = prompt.slice(splitIdx);
+      messages = [{ role: 'user', content: [
+        { type: 'text', text: systemPart },
+        { type: 'text', text: transcriptPart, cache_control: { type: 'ephemeral' } },
+      ]}];
+    } else {
+      messages = [{ role: 'user', content: prompt }];
+    }
+
+    // HTTP path with backoff on transient 529/503.
+    // attemptMaxTokens can be lowered mid-flight: a 400 caused by
+    // input + max_tokens exceeding the context window is retried once
+    // with a halved output budget (see overflow handling below).
+    let attemptMaxTokens = resolvedMaxTokens;
+    let overflowRetried = false;
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+      try {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'x-api-key': apiKey,
+            'anthropic-version': ANTHROPIC_VERSION,
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: resolvedModel,
+            max_tokens: attemptMaxTokens,
+            messages,
+          }),
+          // Hard ceiling on a single HTTP attempt — without this the
+          // fetch can hang indefinitely if Anthropic's edge stalls,
+          // leaking the request socket and blocking the agent loop.
+          // AbortError surfaces in the catch below and is funnelled
+          // through the same retry path as a transient 529/503. When the
+          // caller passes a deadline `signal`, combine it so the fetch also
+          // aborts the moment the agent-loop deadline fires (see the catch:
+          // a caller-signal abort is propagated, not retried).
+          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000)
+        });
+
+        // Capture Anthropic's API rate-limit headers for the live headroom gauge
+        // (API-key mode only — absent on the CLI/subscription path). Best-effort.
+        if (userId) {
+          try { recordRateLimits(userId, { provider: 'anthropic', model: resolvedModel, headers: response.headers }); }
+          catch { /* never break a model call */ }
+        }
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.content && data.content.length > 0) {
+            // Structured usage line so operators can track token spend
+            // and spot prompts creeping toward the context window.
+            if (data.usage) {
+              log.info('runClaude usage', {
+                model: resolvedModel,
+                inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens,
+                cacheReadTokens: data.usage.cache_read_input_tokens ?? 0,
+              });
+            }
+            meterUsage({
+              userId, provider: 'anthropic', model: resolvedModel, source: 'api', endpoint,
+              inputTokens: data.usage?.input_tokens, outputTokens: data.usage?.output_tokens,
+            });
+            return data.content[0].text;
+          }
+          if (userScopedKey) {
+            throw new Error('Anthropic API returned empty content for user-scoped key');
+          }
+          // Empty content on HTTP 200 is abnormal (stop_reason quirk or
+          // extreme context pressure) — log loudly before the CLI
+          // fallback so the condition is visible, not silent.
+          log.warn('runClaude HTTP 200 with empty content, falling back to CLI', { model: resolvedModel, stopReason: data.stop_reason ?? null });
+          break; // fall through to CLI for operator default
+        }
+
+        // Reactive fallback: a 429 on the Anthropic HTTP path flags this model
+        // exhausted for its window so the next autoFallback resolve routes
+        // around it. (Anthropic 429s aren't retried inline — they fall to CLI.)
+        if (response.status === 429) meterQuota(userId, 'anthropic', resolvedModel);
+
+        const transient = response.status === 529 || response.status === 503;
+        if (transient && attempt < RETRY_DELAYS_MS.length) {
+          const delay = jittered(RETRY_DELAYS_MS[attempt]);
+          log.warn('runClaude retry', { attempt: attempt + 1, status: response.status, delayMs: delay });
+          await sleep(delay);
+          continue;
+        }
+
+        // 400s carry an explanation in the body. Two cases deserve
+        // dedicated handling instead of a generic failure:
+        //   - context overflow where max_tokens + input exceeds the
+        //     window → retry once with a halved output budget;
+        //   - model not found (retired/typo'd model id) → name the
+        //     configured model in the error so the operator can fix
+        //     LLMIDE_MODEL instead of chasing a generic 400.
+        if (response.status === 400 || response.status === 404) {
+          let bodyText = '';
+          try { bodyText = (await response.text()).slice(0, 500); } catch { /* ignore */ }
+          const overflow = /max_tokens|too long|context/i.test(bodyText);
+          if (overflow && !overflowRetried && attemptMaxTokens > MIN_OVERFLOW_TOKENS) {
+            overflowRetried = true;
+            attemptMaxTokens = Math.max(MIN_OVERFLOW_TOKENS, Math.floor(attemptMaxTokens / 2));
+            log.warn('runClaude context overflow, retrying with reduced max_tokens', { maxTokens: attemptMaxTokens });
+            continue;
+          }
+          const modelRejected = /model/i.test(bodyText) && /not found|invalid|unknown|deprecat/i.test(bodyText);
+          if (userScopedKey) {
+            throw new Error(modelRejected
+              ? `Anthropic API rejected model '${resolvedModel}' (${response.status}): ${redactKey(bodyText.slice(0, 200), apiKey)} — check LLMIDE_MODEL`
+              : `Anthropic API failed (${response.status}) for user-scoped key: ${redactKey(bodyText.slice(0, 200), apiKey)}`);
+          }
+          const logFields = { status: response.status, detail: redactKey(bodyText.slice(0, 200), apiKey) };
+          if (modelRejected) {
+            log.error(`runClaude model '${resolvedModel}' rejected by API — check LLMIDE_MODEL; falling back to CLI`, logFields);
+          } else {
+            log.warn('runClaude HTTP API failed, falling back to CLI', logFields);
+          }
+          break;
+        }
+
+        if (userScopedKey) {
+          let detail = '';
+          try { detail = redactKey((await response.text()).slice(0, 200), apiKey); } catch { /* ignore */ }
+          throw new Error(`Anthropic API failed (${response.status}) for user-scoped key${detail ? `: ${detail}` : ''}`);
+        }
+        log.warn('runClaude HTTP API failed, falling back to CLI', { status: response.status });
+        break;
+      } catch (err) {
+        // Caller's deadline fired mid-flight — propagate immediately.
+        // Retrying with backoff or falling through to the CLI would
+        // overrun the very loop deadline the signal exists to enforce.
+        if (signal?.aborted) throw err;
+        // AbortSignal.timeout fires a DOMException named 'TimeoutError'
+        // (also surfaced as AbortError in some runtimes). Treat the
+        // 60 s ceiling as a transient failure and retry with backoff,
+        // matching the 529/503 path above.
+        const isAbort = err && (err.name === 'TimeoutError' || err.name === 'AbortError');
+        if (isAbort && attempt < RETRY_DELAYS_MS.length) {
+          const delay = jittered(RETRY_DELAYS_MS[attempt]);
+          log.warn('runClaude retry', { attempt: attempt + 1, reason: 'abort', delayMs: delay });
+          await sleep(delay);
+          continue;
+        }
+        if (userScopedKey) {
+          throw err;
+        }
+        log.warn('runClaude HTTP API threw error, falling back to CLI', { error: redactKey(err.message, apiKey) });
+        break;
+      }
+    }
+  }
+
+  // CLI path with backoff on stderr-detected overload.
+  // Don't start (or continue) the CLI fallback once the caller's deadline
+  // has passed — a fresh `claude` spawn would overrun it.
+  if (signal?.aborted) throw new Error('runClaude: deadline reached before CLI fallback');
+  let lastError;
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      // Pass a minimal allowlist rather than spreading all of process.env.
+      // Spreading the full env exposes every secret the server was started
+      // with (JWT_SECRET, LLMIDE_VAULT_KEY, DB path, etc.) to the Claude CLI
+      // subprocess and any logging it performs. minimalCliEnv() owns that
+      // allowlist (shared with the provider CLI paths); here we add the two
+      // Anthropic-specific extras (base URL + the resolved key, when present).
+      // Empty values are stripped by minimalCliEnv.
+      const env = minimalCliEnv({
+        ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL || '',
+        ...(apiKey ? { ANTHROPIC_API_KEY: apiKey } : {}),
+      });
+      // spawnCli is the single source of truth for HOW `claude` is invoked:
+      // `--strict-mcp-config` (no --mcp-config) loads zero MCP servers so a
+      // cold spawn skips booting every configured MCP server (the dominant
+      // per-call cost), and `--tools ''` disables built-in tools so `claude -p`
+      // behaves as a single text completion instead of a full autonomous agent
+      // (which on a heavy prompt would read files / web-fetch / shell out to
+      // `gh` — work that blew past CLAUDE_TIMEOUT_MS and surfaced as a 502).
+      // This server runs its own tool loop, so the CLI must answer, not act.
+      // spawnCli also closes the child's stdin (else the CLI blocks ~3s on
+      // piped input and warns on stderr) and forwards `signal` so an in-flight
+      // call is killed when the caller's deadline fires.
+      const { stdout } = await spawnCli('anthropic', prompt, {
+        env,
+        timeoutMs: CLAUDE_TIMEOUT_MS,
+        signal,
+      });
+      // Subscription/CLI mode can't report tokens — record one run so it still
+      // counts toward run-based limits and the dashboard.
+      meterUsage({ userId, provider: 'anthropic', model: resolvedModel, source: 'cli', endpoint });
+      return stdout;
+    } catch (err) {
+      if (err.code === 'ENOENT') {
+        throw new Error('Claude CLI not found. Install: npm install -g @anthropic-ai/claude-code');
+      }
+      const e = new Error(`Claude error: ${redactKey(err.stderr?.slice(0, 200) || err.message, apiKey)}`);
+      e.overloaded = isCliOverloaded(err.stderr) || isCliOverloaded(err.stdout);
+      lastError = e;
+      if (e.overloaded && attempt < RETRY_DELAYS_MS.length) {
+        const delay = jittered(RETRY_DELAYS_MS[attempt]);
+        log.warn('runClaude CLI retry', { attempt: attempt + 1, reason: 'overloaded', delayMs: delay });
+        await sleep(delay);
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Streaming variant of runClaude. Calls `onChunk(text)` for each text
+ * delta as it arrives from the Anthropic API. Returns the full
+ * concatenated text when done.
+ *
+ * Falls back gracefully:
+ *   - No API key → CLI (buffered, single onChunk at end)
+ *   - Transient 529/503 → one retry, then CLI fallback
+ *   - Non-transient API error → CLI fallback (operator key only)
+ *   - `signal` aborted → reader cancelled, partial text returned
+ */
+export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheTranscript, onChunk, signal, provider: explicitProvider } = {}) {
+  if (typeof onChunk !== 'function') {
+    return runClaude(prompt, { userId, model, maxTokens, cacheTranscript, provider: explicitProvider });
+  }
+  if (typeof prompt !== 'string') throw new Error('runClaudeStream: prompt must be a string');
+  if (prompt.length > MAX_PROMPT_CHARS) throw new Error(`runClaudeStream: prompt too long`);
+
+  const resolvedMaxTokens = (Number.isFinite(maxTokens) && maxTokens > 0) ? maxTokens : 8192;
+
+  // Shared key-lookup + provider-routing (same order as runClaude).
+  const { provider: streamProvider, userScopedKey, apiKey, resolvedModel } = resolveClaudeCall({ userId, model, provider: explicitProvider });
+
+  // Helper: buffered fallback via runClaude. Delivers the entire result
+  // as a single chunk so the caller still gets onChunk() called.
+  const fallbackBuffered = async () => {
+    const result = await runClaude(prompt, { userId, model, maxTokens, cacheTranscript, provider: explicitProvider });
+    onChunk(result);
+    return result;
+  };
+
+  // Non-Anthropic models have no streaming adapter yet — route them
+  // through the buffered path (runClaude → provider HTTP), delivered as a
+  // single chunk. An explicit non-anthropic provider (e.g. "custom", which
+  // isn't prefix-routable) also takes this path. Without this, the streaming
+  // code below would send a foreign id to the Anthropic API.
+  if (streamProvider !== 'anthropic') return fallbackBuffered();
+
+  if (!apiKey) return fallbackBuffered();
+
+  // Build messages (same caching logic as runClaude).
+  let messages;
+  if (cacheTranscript && prompt.includes('<<<BEGIN>>>')) {
+    const splitIdx = prompt.indexOf('<<<BEGIN>>>');
+    const systemPart = prompt.slice(0, splitIdx);
+    const transcriptPart = prompt.slice(splitIdx);
+    messages = [{ role: 'user', content: [
+      { type: 'text', text: systemPart },
+      { type: 'text', text: transcriptPart, cache_control: { type: 'ephemeral' } },
+    ]}];
+  } else {
+    messages = [{ role: 'user', content: prompt }];
+  }
+
+  // Retry once on transient 529/503, then fall back to buffered.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let response;
+    try {
+      response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': ANTHROPIC_VERSION,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: resolvedModel,
+          max_tokens: resolvedMaxTokens,
+          stream: true,
+          messages,
+        }),
+        signal: signal || AbortSignal.timeout(90_000),
+      });
+    } catch (err) {
+      // Network error or abort — fall back to buffered.
+      if (userScopedKey) throw err;
+      log.warn('runClaudeStream fetch threw, falling back to buffered', { error: err?.message });
+      return fallbackBuffered();
+    }
+
+    if (response.ok) {
+      // Success — read the SSE stream.
+      return _readAnthropicStream(response, onChunk, signal);
+    }
+
+    const transient = response.status === 529 || response.status === 503;
+    if (transient && attempt === 0) {
+      const delay = jittered(2_000);
+      log.warn('runClaudeStream retry', { status: response.status, delayMs: delay });
+      await sleep(delay);
+      continue;
+    }
+
+    // Non-transient or second failure.
+    let detail = '';
+    try { detail = redactKey((await response.text()).slice(0, 300), apiKey); } catch { /* */ }
+    // Context overflow: the buffered path can recover (runClaude retries
+    // with a halved output budget), so route BOTH key types through it
+    // instead of failing the stream. The user key stays in play —
+    // fallbackBuffered passes the same userId through to runClaude.
+    if (response.status === 400 && /max_tokens|too long|context/i.test(detail)) {
+      log.warn('runClaudeStream context overflow, retrying via buffered path', { status: response.status });
+      return fallbackBuffered();
+    }
+    if (userScopedKey) {
+      throw new Error(`Anthropic streaming failed (${response.status})${detail ? `: ${detail}` : ''}`);
+    }
+    log.warn('runClaudeStream API failed, falling back to buffered', { status: response.status });
+    return fallbackBuffered();
+  }
+
+  // Should not reach here, but just in case.
+  return fallbackBuffered();
+}
+
+/** Parse an Anthropic SSE stream and call onChunk for each text delta. */
+async function _readAnthropicStream(response, onChunk, signal) {
+  let fullText = '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  // If the caller's signal fires, cancel the reader so we stop
+  // consuming tokens from the Anthropic API.
+  const onAbort = () => {
+    reader.cancel().catch((err) => {
+      // A failed cancel can leak the socket — surface it instead of
+      // swallowing so FD-exhaustion shows up in logs.
+      log.warn('runClaudeStream reader cancel failed', { error: err?.message });
+    });
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const events = buffer.split('\n\n');
+      buffer = events.pop() || '';
+
+      for (const event of events) {
+        if (!event.trim()) continue;
+        const dataLine = event.split('\n').find(l => l.startsWith('data: '));
+        if (!dataLine) continue;
+        const jsonStr = dataLine.slice(6);
+        if (jsonStr === '[DONE]') continue;
+
+        try {
+          const parsed = JSON.parse(jsonStr);
+          if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+            fullText += parsed.delta.text;
+            onChunk(parsed.delta.text);
+          }
+          // Anthropic sends an error event when something goes wrong
+          // mid-stream (e.g. context window exceeded).
+          if (parsed.type === 'error') {
+            throw new Error(`Anthropic stream error: ${parsed.error?.message || JSON.stringify(parsed.error)}`);
+          }
+        } catch (e) {
+          // Propagate real errors; skip JSON parse failures.
+          if (e instanceof SyntaxError) continue;
+          throw e;
+        }
+      }
+    }
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+  }
+
+  if (!fullText) {
+    throw new Error('Anthropic streaming returned no content');
+  }
+  return fullText;
+}
+
+function safeLookupApiKey(userId) {
+  try {
+    return getSecret(getDb(), userId, 'claude.apiKey');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the provider, API key, and model for a Claude call.  Shared by
+ * runClaude and runClaudeStream so the lookup + fallback order is defined
+ * in exactly one place.
+ *
+ * Returns:
+ *   { provider, userScopedKey, apiKey, resolvedModel }
+ *
+ * `provider`      — the effective provider id ('anthropic', 'openai', …)
+ * `userScopedKey` — the key stored in the vault for this userId, or null.
+ *                   When non-null the caller MUST NOT silently fall back to
+ *                   the operator CLI — the user's own Anthropic account is
+ *                   in play.
+ * `apiKey`        — userScopedKey ?? process.env.ANTHROPIC_API_KEY, or null.
+ * `resolvedModel` — validated model id (falls back to DEFAULT_MODEL).
+ */
+function resolveClaudeCall({ userId, model, provider: explicitProvider }) {
+  const provider = (typeof explicitProvider === 'string' && PROVIDER_IDS.includes(explicitProvider))
+    ? explicitProvider
+    : resolveProvider(model);
+  const userScopedKey = userId ? safeLookupApiKey(userId) : null;
+  const apiKey = userScopedKey || process.env.ANTHROPIC_API_KEY;
+  const resolvedModel = resolveModel(model);
+  return { provider, userScopedKey, apiKey, resolvedModel };
+}
+
+export function tryParseJSON(raw) {
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) s = fence[1].trim();
+  const first = s.indexOf('{');
+  const lastBrace = s.lastIndexOf('}');
+  const firstBracket = s.indexOf('[');
+  const lastBracket = s.lastIndexOf(']');
+  // Pick whichever delimiter pair encloses more content — handles both
+  // top-level objects and arrays without a separate code path.
+  const objSpan = first !== -1 && lastBrace > first ? lastBrace - first : -1;
+  const arrSpan = firstBracket !== -1 && lastBracket > firstBracket ? lastBracket - firstBracket : -1;
+  if (objSpan < 0 && arrSpan < 0) return null;
+  const slice = arrSpan > objSpan
+    ? s.slice(firstBracket, lastBracket + 1)
+    : s.slice(first, lastBrace + 1);
+  try { return JSON.parse(slice); } catch { return null; }
+}
+
+const LANGUAGE_NAMES = {
+  ja: 'Japanese', en: 'English', 'en-US': 'English', 'en-GB': 'English',
+  'zh-CN': 'Simplified Chinese', 'zh-TW': 'Traditional Chinese',
+  ko: 'Korean', hi: 'Hindi', 'ne-NP': 'Nepali',
+  es: 'Spanish', fr: 'French', de: 'German',
+  'pt-BR': 'Brazilian Portuguese', it: 'Italian', ru: 'Russian',
+  ar: 'Arabic', th: 'Thai', vi: 'Vietnamese', id: 'Indonesian',
+  ms: 'Malay', tl: 'Filipino',
+};
+
+export function languageDirective(code) {
+  if (typeof code !== 'string') return { name: null, line: '' };
+  const name = LANGUAGE_NAMES[code] || LANGUAGE_NAMES[code.split('-')[0]] || null;
+  if (!name) return { name: null, line: '' };
+  return {
+    name,
+    line: `Write all string VALUES (titles, descriptions, owner, riskReason, etc.) in ${name}. JSON KEYS stay exactly as shown. Do not translate code identifiers, file paths, or quotes from the transcript.`,
+  };
+}
+
+/// Prose-shaped variant of `languageDirective` for endpoints whose
+/// LLM output is markdown / freeform text instead of JSON.  Same
+/// LANGUAGE_NAMES table; the directive sentence is what differs.
+/// Used by /generate-notes, /chat, /generate-questions, etc.
+export function resolveLanguage(raw) {
+  if (typeof raw !== 'string') return { name: null, directive: '' };
+  const code = raw.trim();
+  if (!code) return { name: null, directive: '' };
+  const name = LANGUAGE_NAMES[code] || LANGUAGE_NAMES[code.split('-')[0]] || null;
+  if (!name) return { name: null, directive: '' };
+  return {
+    name,
+    directive: `Write your entire response in ${name}. All headings, bullet points, proper names transliterated as needed, and examples must be in ${name}. Do not translate the transcript itself; quote it verbatim where quoting.`,
+  };
+}
+
+// Compact a KB context block down to a budget so the prompt stays under
+// Claude's effective context.  Each row contributes its title + the
+// first ~200 chars of body.  Rows are presented as a markdown bullet
+// list with a kind tag — the LLM can reference them by index.
+export function formatContext(label, rows, perRow = 200, max = 8) {
+  if (!Array.isArray(rows) || rows.length === 0) return '';
+  const trimmed = rows.slice(0, max).map((r, i) => {
+    const body = (r.body || '').replace(/\s+/g, ' ').slice(0, perRow);
+    const title = (r.title || '').replace(/\s+/g, ' ').slice(0, 200);
+    return `  ${i + 1}. [${r.kind}] ${title}${body ? ` — ${body}` : ''}`;
+  });
+  return `### ${label}\n${trimmed.join('\n')}\n`;
+}

@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Pre-push regression gate.
+#
+# Runs the relevant test suite before a push, scoped to what changed:
+#   - changes under mac/        → `make regression` (Swift build + tests)
+#   - changes under extension/  → `make test`       (backend node --test)
+# so a broken build or a regressed test never reaches the remote. A push
+# that touches neither tree skips the gate and returns immediately.
+#
+# Enable once per clone:  make hooks
+# Bypass for one push:    git push --no-verify
+set -uo pipefail
+
+# True when a SwiftPM build/test is already using this repo's mac/.build.
+# Starting a second one would block on the .build lock indefinitely — the
+# deadlock that has wedged pushes (and the stale hung-test-bundle case). We
+# detect it precisely (scoped to THIS repo's .build, so an unrelated Swift
+# project building elsewhere doesn't trip the guard) and fail fast instead.
+mac_build_busy() {
+    local build_dir="$1"
+    # A process holding mac/.build's SwiftPM lock (the actual contention point).
+    if command -v lsof >/dev/null 2>&1 && lsof "$build_dir/.lock" >/dev/null 2>&1; then
+        return 0
+    fi
+    # …or any process whose args reference this repo's .build — e.g. a hung
+    # swiftpm-testing-helper, which carries its --test-bundle-path under .build.
+    if pgrep -f "$build_dir" >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
+zero=0000000000000000000000000000000000000000
+mac_changed=0
+ext_changed=0
+
+# stdin: <local_ref> <local_sha> <remote_ref> <remote_sha> per pushed ref.
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ "$local_sha" = "$zero" ] && continue   # branch deletion — nothing to test
+    if [ "$remote_sha" = "$zero" ]; then
+        # New branch on the remote: diff against origin/main when available,
+        # otherwise be safe and run the gate.
+        if git rev-parse --verify --quiet origin/main >/dev/null; then
+            files=$(git diff --name-only "origin/main...$local_sha" 2>/dev/null || echo mac/)
+        else
+            files="mac/"
+        fi
+    else
+        files=$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || echo mac/)
+    fi
+    if printf '%s\n' "$files" | grep -q '^mac/'; then
+        mac_changed=1
+    fi
+    if printf '%s\n' "$files" | grep -q '^extension/'; then
+        ext_changed=1
+    fi
+done
+
+if [ "$mac_changed" -eq 1 ]; then
+    mac_build_dir="$(git rev-parse --show-toplevel)/mac/.build"
+    if mac_build_busy "$mac_build_dir"; then
+        echo "pre-push: a SwiftPM build/test is already using mac/.build — not starting" >&2
+        echo "          a second (it would block on the .build lock and wedge the push)." >&2
+        echo "          Wait for it to finish (or kill a stuck build/test), then re-push." >&2
+        echo "          Bypass with: git push --no-verify" >&2
+        exit 1
+    fi
+    echo "pre-push: mac/ changed — running regression gate (make regression)…"
+    # tee the gate output so progress still streams live, while we keep a copy
+    # to classify the failure. pipefail (set above) makes the pipe carry make's
+    # exit status, not tee's.
+    gate_log="$(mktemp -t prepush-regression)"
+    if ! make regression 2>&1 | tee "$gate_log"; then
+        # An Xcode/CommandLineTools Swift-version skew makes `swift test` pull a
+        # Testing.framework built with a different compiler than the active one
+        # ("failed to build module 'Testing' … select a toolchain which matches
+        # the SDK"). That's a toolchain problem, not a code problem — surface the
+        # fix instead of leaving the contributor to decode the swift-testing dump.
+        if grep -q "failed to build module 'Testing'" "$gate_log" 2>/dev/null; then
+            xcode_swift=$(swift --version 2>/dev/null | grep -oE 'Apple Swift version [0-9.]+' | head -1)
+            clt_swift=$(/Library/Developer/CommandLineTools/usr/bin/swift --version 2>/dev/null | grep -oE 'version [0-9.]+' | head -1)
+            echo "" >&2
+            echo "pre-push: this is an Xcode / CommandLineTools Swift toolchain mismatch, NOT a" >&2
+            echo "          code failure — swift test loaded a Testing.framework built with a" >&2
+            echo "          different Swift than the active compiler (active: ${xcode_swift:-unknown};" >&2
+            echo "          CommandLineTools: ${clt_swift:-unknown})." >&2
+            echo "          Fix one of, then re-push:" >&2
+            echo "            • sudo xcode-select -s /Applications/Xcode.app/Contents/Developer && sudo xcodebuild -runFirstLaunch" >&2
+            echo "            • update Xcode so its Swift matches CommandLineTools" >&2
+            echo "          'swift build' + the node suite still gate this branch, so to ship now:" >&2
+            echo "            git push --no-verify" >&2
+        fi
+        rm -f "$gate_log"
+        echo "pre-push: regression gate FAILED — push aborted." >&2
+        echo "          Fix the failure, or bypass with: git push --no-verify" >&2
+        exit 1
+    fi
+    rm -f "$gate_log"
+fi
+
+if [ "$ext_changed" -eq 1 ]; then
+    echo "pre-push: extension/ changed — running backend tests (make test)…"
+    if ! make test; then
+        echo "pre-push: backend test gate FAILED — push aborted." >&2
+        echo "          Fix the failure, or bypass with: git push --no-verify" >&2
+        exit 1
+    fi
+fi
+exit 0

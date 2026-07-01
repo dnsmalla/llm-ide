@@ -1,0 +1,49 @@
+name: codeql
+
+# Static security analysis (CodeQL) for the extension's JavaScript/TypeScript
+# — the side panel (src/) and the Node backend (server, agents, kb, …), which
+# is the real attack surface. Results appear under the repo's Security tab.
+# Free on this public repo. Swift (mac/) is not scanned here (it needs a build
+# step and is a desktop client, not an exposed service).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'extension/**'
+      - '.github/workflows/codeql.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'extension/**'
+      - '.github/workflows/codeql.yml'
+  schedule:
+    - cron: '0 6 * * 1'   # weekly, Mondays 06:00 UTC — catches newly-disclosed patterns
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze JavaScript/TypeScript
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          # 'security-extended' adds higher-recall security queries beyond the
+          # default set; drop to 'security-and-quality' or remove for less noise.
+          queries: security-extended
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:javascript-typescript"

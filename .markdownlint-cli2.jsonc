@@ -1,0 +1,19 @@
+{
+  "config": {
+    "default": true,
+    "MD013": false,
+    "MD033": false,
+    "MD041": false,
+    "MD024": { "siblings_only": true },
+    // mkdocs pages carry a frontmatter `title:` AND an H1 — don't count both.
+    "MD025": { "front_matter_title": "" },
+    // table pipe-alignment is cosmetic; mkdocs renders either style fine.
+    "MD060": false
+  },
+  "ignores": [
+    "docs/superpowers/**",
+    "docs/_templates/**",
+    "node_modules/**",
+    ".venv-docs/**"
+  ]
+}

@@ -1,0 +1,14 @@
+# MkDocs Material — pin majors, allow patch updates
+mkdocs-material[imaging]==9.5.*
+neoteroi-mkdocs==1.0.*
+mkdocs-mermaid2-plugin==1.1.*
+mkdocs-glightbox==0.4.*
+mkdocs-git-revision-date-localized-plugin==1.2.*
+mkdocs-awesome-pages-plugin==2.9.*
+
+# Dev tools for the docs scripts (frontmatter checker, extractors)
+PyYAML==6.0.*
+pytest==8.*
+
+# Transitive — neoteroi-mkdocs needs httpx with the socks extra
+httpx[socks]>=0.27
