@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 
 import { handleCodeAssist } from '../llm_agent/runtime/route.mjs';
 import { GLOBAL_HANDLER_NAMES } from '../llm_agent/runtime/global-handlers.mjs';
-import { globalSkills } from '../llm_agent/skills/index.mjs';
+import { globalSkills, assertReadSkillsWired } from '../llm_agent/skills/index.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -75,6 +75,38 @@ test('every global read skill file has a name present in GLOBAL_HANDLER_NAMES', 
     }
   }
   assert.deepEqual(unhandled, [], `global read skill(s) with no handler in GLOBAL_HANDLER_NAMES: ${unhandled.join(', ')}`);
+});
+
+test('assertReadSkillsWired throws on an internal read skill with no handler', () => {
+  // The F4 gap: a read skill synced from the central repo into internal/skills/
+  // with no matching INTERNAL_HANDLERS entry used to only console.error at boot
+  // — reachable-looking but dead. assertReadSkillsWired must throw loudly so a
+  // broken build fails to start instead of serving a skill whose calls fail
+  // mid-session.
+  const internalSkills = new Map([
+    ['search-kb', { kind: 'read' }],       // wired
+    ['new-central-skill', { kind: 'read' }], // synced in, NO handler
+    ['create-issue', { kind: 'write' }],    // write skills need no read handler
+  ]);
+  assert.throws(
+    () => assertReadSkillsWired({
+      globalSkills: new Map(),
+      internalSkills,
+      globalHandlerNames: [],
+      internalHandlers: { 'search-kb': () => {} },
+    }),
+    /new-central-skill/,
+    'must name the unwired internal read skill',
+  );
+});
+
+test('assertReadSkillsWired is silent when every read skill has a handler', () => {
+  assert.doesNotThrow(() => assertReadSkillsWired({
+    globalSkills: new Map([['read-file', { kind: 'read' }], ['update-file', { kind: 'write' }]]),
+    internalSkills: new Map([['search-kb', { kind: 'read' }]]),
+    globalHandlerNames: ['read-file'],
+    internalHandlers: { 'search-kb': () => {} },
+  }));
 });
 
 test('drift guard throws when the handlers map omits a declared global handler', async () => {

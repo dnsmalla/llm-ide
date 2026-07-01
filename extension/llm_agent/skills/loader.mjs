@@ -81,17 +81,28 @@ function validateSchema(schema) {
   return { schema: out };
 }
 
-export function loadSkills(dir) {
+// Options:
+//   requireBase — warn when _base.md is absent (default true). The global
+//     skill dir composes its base separately (composeGlobalPrompt) and has no
+//     _base.md by design, so it passes false to avoid a spurious warning.
+//   ignore — filenames to skip entirely (not load, not warn on). The global
+//     dir keeps a non-skill role file (prompt.md) alongside its skills;
+//     scanning it as a skill would warn "missing frontmatter", noise that's
+//     indistinguishable from a genuinely malformed skill.
+export function loadSkills(dir, { requireBase = true, ignore = [] } = {}) {
   const warnings = [];
   const skills = new Map();
   let base = '';
+  const ignoreSet = new Set(ignore);
 
   if (!existsSync(dir)) {
     return { skills, base, warnings: [`skills directory not found: ${dir}`] };
   }
 
-  const entries = readdirSync(dir).filter((f) => f.endsWith('.md'));
-  if (!entries.includes('_base.md')) {
+  const entries = readdirSync(dir)
+    .filter((f) => f.endsWith('.md'))
+    .filter((f) => !ignoreSet.has(f));
+  if (requireBase && !entries.includes('_base.md')) {
     warnings.push("_base.md is missing from skills directory; system prompt will lack base instructions");
   }
 

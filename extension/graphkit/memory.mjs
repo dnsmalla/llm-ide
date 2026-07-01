@@ -20,6 +20,7 @@ import { join, isAbsolute, normalize, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { userRepoAllowlist } from '../kb/db.mjs';
 import { config } from '../core/config.mjs';
+import { parseChatMemoryFacts } from './memory-writer.mjs';
 
 // Expand a leading `~`/`~/` to the home directory. The Mac client sends
 // home-relative repo paths (homeRelativePath → "~/Developer/foo"), but the
@@ -207,7 +208,57 @@ export function clipToBoundary(text, room) {
   return `${body.trimEnd()}\n…(truncated)`;
 }
 
-function repoMemoryBlock(repo, budget, allowedRoots, stats) {
+// Tiny stopword set so query tokens like "how"/"the"/"does" don't create
+// spurious overlap with every fact. Not exhaustive — just the high-frequency
+// English glue words that would otherwise dominate the score.
+const STOPWORDS = new Set([
+  'the', 'and', 'for', 'this', 'that', 'with', 'how', 'does', 'what', 'are',
+  'you', 'can', 'why', 'when', 'where', 'which', 'was', 'were', 'has', 'have',
+  'our', 'use', 'used', 'using', 'from', 'into', 'about', 'they', 'them',
+]);
+
+function queryTokens(userMessage) {
+  if (typeof userMessage !== 'string') return new Set();
+  const toks = userMessage.toLowerCase().match(/[a-z0-9][a-z0-9-]{2,}/g) || [];
+  return new Set(toks.filter((t) => !STOPWORDS.has(t)));
+}
+
+// Rank chat-memory facts by relevance to the current question and greedily pack
+// the ones that fit `room`, most-relevant first. Score = number of distinct
+// query tokens the fact (text + [category] tag) contains; ties break toward the
+// NEWER fact (facts arrive oldest->newest, so a higher index is newer). With no
+// query tokens, this degrades to pure newest-first — which already fixes the
+// old raw-clip that kept the OLDEST facts and dropped the newest. Pure +
+// exported for unit tests. Returns a `- fact` bullet body (no header), or ''.
+export function selectChatMemoryFacts(content, { userMessage = '', room = 0 } = {}) {
+  const facts = parseChatMemoryFacts(content);
+  if (facts.length === 0 || room <= 0) return '';
+  const q = queryTokens(userMessage);
+  const scored = facts.map((fact, i) => {
+    let score = 0;
+    if (q.size > 0) {
+      const factToks = new Set((fact.toLowerCase().match(/[a-z0-9][a-z0-9-]{2,}/g) || []));
+      for (const t of q) if (factToks.has(t)) score += 1;
+    }
+    return { fact, score, index: i };
+  });
+  // Most relevant first; newer wins ties (higher original index).
+  scored.sort((a, b) => (b.score - a.score) || (b.index - a.index));
+  const chosen = [];
+  let used = 0;
+  for (const { fact } of scored) {
+    const line = `- ${fact}`;
+    const cost = line.length + (chosen.length > 0 ? 1 : 0); // +1 for the joining newline
+    if (used + cost > room) continue;   // skip; a later shorter fact may still fit
+    chosen.push(line);
+    used += cost;
+  }
+  // `chosen` is already in relevance order (scored is sorted), so the agent
+  // sees the most relevant facts first.
+  return chosen.join('\n');
+}
+
+function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) {
   if (!repo) return null;
   const root = resolveAllowedRepoRoot(repo.path, allowedRoots);
   if (!root) return null;
@@ -216,11 +267,13 @@ function repoMemoryBlock(repo, budget, allowedRoots, stats) {
 
   const parts = [];
   let used = 0;
-  const tryAdd = (label, body) => {
+  // `maxRoom` optionally caps how much of the remaining budget one file may
+  // take, so a fat earlier file can't starve a reserved-floor file added later.
+  const tryAdd = (label, body, maxRoom = Infinity) => {
     if (!body) return;
     const trimmed = body.trim();
     if (!trimmed) return;
-    const room = budget - used;
+    const room = Math.min(budget - used, maxRoom);
     if (room <= 200) return; // not worth a header for a tiny remainder
     const clipped = clipToBoundary(trimmed, room);
     parts.push(`### ${label}\n${clipped}`);
@@ -233,17 +286,26 @@ function repoMemoryBlock(repo, budget, allowedRoots, stats) {
     }
   };
 
+  // chat-memory.md is the LLM-CURATED half (conventions/decisions the assistant
+  // learned) — the highest-signal, hardest-to-regenerate content. Select the
+  // facts most relevant to THIS question and reserve a budget FLOOR for them so
+  // a fat repo.md can't crowd them out (the old order added repo.md first with
+  // the full budget, starving chat-memory within — and across — repos).
+  const chatBody = selectChatMemoryFacts(
+    safeRead(join(memDir, 'chat-memory.md'), CHAT_MEMORY_CHARS),
+    { userMessage, room: Math.min(budget, CHAT_MEMORY_CHARS) },
+  );
+  const chatFloor = Math.min(Math.floor(budget * 0.5), chatBody.length);
+
   // Order = priority: the memory budget is fixed, so add the highest-signal,
-  // most token-efficient content FIRST — it must survive when the budget is
-  // tight. repo.md is the impact-ranked repo overview; chat-memory.md is the
-  // curated durable facts (conventions/decisions) the assistant learned. The
-  // bulkier graph/doc prose comes after, so it's what gets clipped, not the
-  // overview or the facts.
-  tryAdd('repo.md', safeRead(join(memDir, 'repo.md'), PER_FILE_CHARS));
+  // most token-efficient content FIRST. repo.md is the impact-ranked repo
+  // overview — added first, but capped so it leaves `chatFloor` for the curated
+  // facts. The bulkier graph/doc prose comes after, so it's what gets clipped.
+  tryAdd('repo.md', safeRead(join(memDir, 'repo.md'), PER_FILE_CHARS), budget - chatFloor);
   // Auto-captured facts the Code Assistant learned in prior chats about this
   // project (written by memory-writer.mjs after each turn). Same dir, same
   // gate — recall is free because this reader already runs every request.
-  tryAdd('chat-memory.md', safeRead(join(memDir, 'chat-memory.md'), CHAT_MEMORY_CHARS));
+  tryAdd('chat-memory.md', chatBody);
   tryAdd('graph-notes.md', safeRead(join(memDir, 'graph-notes.md'), PER_FILE_CHARS));
   tryAdd('doc-notes.md', safeRead(join(memDir, 'doc-notes.md'), PER_FILE_CHARS));
 
@@ -281,7 +343,7 @@ function repoMemoryBlock(repo, budget, allowedRoots, stats) {
   return `## ${name} — memory${ageClause}\n_(from \`${root}/graphify-out/memory/\`)_\n\n${parts.join('\n\n')}`;
 }
 
-export function renderGraphifyMemory(agentContext, userId, stats) {
+export function renderGraphifyMemory(agentContext, userId, stats, userMessage = '') {
   if (!userId) return '';   // no anonymous reads
   const indexed = Array.isArray(agentContext?.indexedRepos) ? agentContext.indexedRepos : [];
   const wsRoot = agentContext?.workspaceRoot;
@@ -315,7 +377,7 @@ export function renderGraphifyMemory(agentContext, userId, stats) {
   for (const repo of candidates) {
     const remaining = TOTAL_CHARS - totalUsed;
     if (remaining <= 500) break;
-    const block = repoMemoryBlock(repo, remaining, allowedRoots, stats);
+    const block = repoMemoryBlock(repo, remaining, allowedRoots, stats, userMessage);
     if (block) {
       blocks.push(block);
       totalUsed += block.length;

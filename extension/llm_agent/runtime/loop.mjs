@@ -5,6 +5,7 @@
 import { parseFence, validateArgs } from './fence.mjs';
 import { composeSystemContext } from '../internal/context/compose.mjs';
 import { redactFence } from './redaction.mjs';
+import { logger } from '../../core/logger.mjs';
 
 // Recursively redact fence sentinels from any value that will be
 // JSON-embedded into the next-iteration prompt.  Without this, a KB
@@ -256,6 +257,13 @@ export async function runAgentLoop({
       toolError = validation.error;
       continue;
     }
+
+    // Skill-invocation telemetry (single dispatch point, covers read + write).
+    // Selection is entirely model/description-driven with no ranking, so this
+    // persistent record is the only way to measure offline which skills
+    // actually trigger, how often, and for whom — the data needed to spot a
+    // skill that mis-triggers or never fires. One line per dispatch.
+    logger.info('skill_invoked', { skill: skill.name, kind: skill.kind, userId, iteration: i + 1 });
 
     if (skill.kind === 'write') {
       return {

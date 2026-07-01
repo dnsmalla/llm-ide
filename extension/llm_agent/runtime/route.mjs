@@ -144,7 +144,7 @@ export async function handleCodeAssist({
   let memoryHasChat = false;
   try {
     const memStats = [];
-    const memBlock = renderGraphifyMemory(agentContext, userId, memStats);
+    const memBlock = renderGraphifyMemory(agentContext, userId, memStats, message);
     if (memBlock) {
       personaBase += `\n\n${redactFence(memBlock)}`;
       memoryChars = memBlock.length;

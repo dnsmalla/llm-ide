@@ -20,7 +20,11 @@ const INTERNAL_SKILLS_DIR = join(__dirname, '..', 'internal', 'skills');
 
 // Load skills + base once per process (same lifecycle as the old
 // skillsCache).
-export const globalSkills = loadSkills(GLOBAL_DIR);
+// The global dir composes its base via composeGlobalPrompt (no _base.md) and
+// keeps a non-skill role file (prompt.md) alongside the skills — tell the
+// loader so neither produces a spurious startup warning that would mask a real
+// malformed-skill warning.
+export const globalSkills = loadSkills(GLOBAL_DIR, { requireBase: false, ignore: ['prompt.md'] });
 export const internalSkills = loadSkills(INTERNAL_SKILLS_DIR);
 
 if (globalSkills.warnings.length > 0) {
@@ -30,30 +34,42 @@ if (internalSkills.warnings.length > 0) {
   console.warn('[llm_agent] internal warnings:', internalSkills.warnings);
 }
 
-// Startup wiring check: every core 'read' skill must have an execution
-// handler. Global read skills are wired in route.mjs's handlers map;
-// GLOBAL_HANDLER_NAMES (imported above from runtime/global-handlers.mjs) is
-// the SAME array route.mjs uses to build that map and to self-check its keys
-// at request time — so this check and route.mjs's dispatch table can no
-// longer drift apart via two hand-maintained literals (see
-// global-handlers.mjs for the history of that footgun, and
-// tests/global-handlers-sync.test.mjs for the regression test that pins it).
-// Internal read skills resolve from INTERNAL_HANDLERS. A skill file without a
-// handler would otherwise only fail at runtime, mid-session, as "no read
-// handler for 'X'".
-{
-  const GLOBAL_HANDLED = new Set(GLOBAL_HANDLER_NAMES);
-  for (const [name, skill] of globalSkills.skills) {
-    if (skill.kind === 'read' && !GLOBAL_HANDLED.has(name)) {
-      console.error(`[llm_agent] STARTUP: global read skill '${name}' has no registered handler — calls to it will fail`);
-    }
+// Every core 'read' skill MUST have an execution handler, or a call to it
+// fails mid-session as "no read handler for 'X'". Global read skills are wired
+// in route.mjs's handlers map, keyed by GLOBAL_HANDLER_NAMES (the same array
+// route.mjs self-checks — see global-handlers.mjs / global-handlers-sync.test.mjs).
+// Internal read skills resolve from INTERNAL_HANDLERS. The internal side is the
+// live footgun: sync-skills.sh mirrors the central repo's agent-family wholesale
+// into internal/skills/, so a newly-added central READ skill lands here with no
+// local handler and used to only console.error at boot — reachable-looking but
+// dead. Pure + exported so it's unit-testable with synthetic inputs.
+export function assertReadSkillsWired({ globalSkills, internalSkills, globalHandlerNames, internalHandlers }) {
+  const globalSet = new Set(globalHandlerNames);
+  const unwired = [];
+  for (const [name, skill] of globalSkills) {
+    if (skill.kind === 'read' && !globalSet.has(name)) unwired.push(`global:${name}`);
   }
-  for (const [name, skill] of internalSkills.skills) {
-    if (skill.kind === 'read' && !(name in INTERNAL_HANDLERS)) {
-      console.error(`[llm_agent] STARTUP: internal read skill '${name}' has no registered handler — calls to it will fail`);
-    }
+  for (const [name, skill] of internalSkills) {
+    if (skill.kind === 'read' && !(name in internalHandlers)) unwired.push(`internal:${name}`);
+  }
+  if (unwired.length > 0) {
+    throw new Error(
+      `[llm_agent] read skill(s) with no registered handler — calls to them fail mid-session: ${unwired.join(', ')}. ` +
+      `Wire a handler: global → route.mjs handlers + global-handlers.mjs; internal → INTERNAL_HANDLERS in handlers/ask-internal.mjs.`,
+    );
   }
 }
+
+// Fail boot loudly on a broken shipped/synced skill set rather than serving a
+// dead skill. Only covers CORE skills (global + internal), which the build
+// controls — per-user plugin skills are validated separately and must not be
+// able to crash boot.
+assertReadSkillsWired({
+  globalSkills: globalSkills.skills,
+  internalSkills: internalSkills.skills,
+  globalHandlerNames: GLOBAL_HANDLER_NAMES,
+  internalHandlers: INTERNAL_HANDLERS,
+});
 
 // Plugin discovery is also done once at module init. Discovery is
 // cheap (one readdir + N JSON parses); we don't watch the directory

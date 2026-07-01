@@ -116,3 +116,28 @@ test('loader returns empty base when _base.md is missing', () => {
   assert.equal(result.base, '');
   assert.ok(result.warnings.some(w => w.includes('_base.md')));
 });
+
+test('loader with requireBase:false does not warn about a missing _base.md', () => {
+  const d = newDir();
+  writeFixture(d, 'search-kb.md',
+    '---\nname: search-kb\nkind: read\nschema:\n  query:\n    type: string\n---\n# search-kb');
+  const result = loadSkills(d, { requireBase: false });
+  assert.equal(result.base, '');
+  assert.ok(!result.warnings.some(w => w.includes('_base.md')),
+    'a directory that intentionally has no _base.md must not warn');
+});
+
+test('loader ignores listed non-skill files instead of warning on them', () => {
+  const d = newDir();
+  // prompt.md is a role file (no frontmatter) that lives in the global dir but
+  // is NOT a skill — scanning it as one produces a spurious "missing
+  // frontmatter" warning indistinguishable from a real malformed skill.
+  writeFixture(d, 'prompt.md', '# Role\nYou are an agent. No frontmatter here.');
+  writeFixture(d, 'read-file.md',
+    '---\nname: read-file\nkind: read\nschema:\n  path:\n    type: string\n---\n# read-file');
+  const result = loadSkills(d, { requireBase: false, ignore: ['prompt.md'] });
+  assert.ok(result.skills.has('read-file'));
+  assert.ok(!result.skills.has('prompt'), 'ignored file must not become a skill');
+  assert.ok(!result.warnings.some(w => w.includes('prompt.md')),
+    'an explicitly-ignored file must not produce a warning');
+});
