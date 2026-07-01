@@ -21,6 +21,7 @@ import { persistTurnMemory } from './memory-persist.mjs';
 import { buildReadableRoots, handleListFiles, handleReadFile } from './handlers/repo-files.mjs';
 import { redactFence } from './redaction.mjs';
 import { logger } from '../../core/logger.mjs';
+import { GLOBAL_HANDLER_NAMES } from './global-handlers.mjs';
 
 // Re-exported for the HTTP routes that historically imported these
 // from here (server/auth-routes.mjs, kb/routes/agent.mjs import the
@@ -220,6 +221,25 @@ export async function handleCodeAssist({
     'list-files': (args) => handleListFiles(args, { roots: readableRoots }),
     'read-file': (args) => handleReadFile(args, { roots: readableRoots }),
   };
+
+  // Drift guard: this handlers map and GLOBAL_HANDLER_NAMES (imported from
+  // global-handlers.mjs, the single source of truth also used by
+  // skills/registry.mjs's startup wiring check) must name exactly the same
+  // handlers. Without this, adding a branch here without updating
+  // global-handlers.mjs — or vice versa — would ship silently: the startup
+  // check only validates skill-files-have-a-handler-NAME, it never
+  // cross-checks against what's actually wired up here. Throwing at request
+  // time (cheap Set/array comparison, not a perf concern) turns that class
+  // of bug into an immediate, loud failure instead of a runtime
+  // "no handler for X" surprise deep in a user session.
+  const wiredNames = Object.keys(handlers);
+  const expectedNames = GLOBAL_HANDLER_NAMES;
+  if (wiredNames.length !== expectedNames.length || !expectedNames.every((n) => wiredNames.includes(n))) {
+    throw new Error(
+      `[llm_agent] global handler drift: route.mjs wires [${wiredNames.sort().join(', ')}] but ` +
+      `global-handlers.mjs declares [${[...expectedNames].sort().join(', ')}] — keep both in sync.`,
+    );
+  }
 
   const out = await runAgentLoop({
     skills: globalSkills.skills,

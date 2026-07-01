@@ -12,6 +12,7 @@ import { loadSkills } from './loader.mjs';
 import { loadPlugins } from '../../plugins/loader.mjs';
 import { listEnabled as listEnabledPlugins, pruneOrphans as prunePluginOrphans } from '../../plugins/state.mjs';
 import { INTERNAL_HANDLERS } from '../runtime/handlers/ask-internal.mjs';
+import { GLOBAL_HANDLER_NAMES } from '../runtime/global-handlers.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GLOBAL_DIR = join(__dirname, '..', 'global');
@@ -30,15 +31,18 @@ if (internalSkills.warnings.length > 0) {
 }
 
 // Startup wiring check: every core 'read' skill must have an execution
-// handler. Global read skills are wired in route.mjs's handlers map
-// (ask-internal, ask-subagent, web-search, fetch-url, list-files, read-file);
-// internal read skills resolve from INTERNAL_HANDLERS. A skill file without a
+// handler. Global read skills are wired in route.mjs's handlers map;
+// GLOBAL_HANDLER_NAMES (imported above from runtime/global-handlers.mjs) is
+// the SAME array route.mjs uses to build that map and to self-check its keys
+// at request time — so this check and route.mjs's dispatch table can no
+// longer drift apart via two hand-maintained literals (see
+// global-handlers.mjs for the history of that footgun, and
+// tests/global-handlers-sync.test.mjs for the regression test that pins it).
+// Internal read skills resolve from INTERNAL_HANDLERS. A skill file without a
 // handler would otherwise only fail at runtime, mid-session, as "no read
 // handler for 'X'".
 {
-  const GLOBAL_HANDLED = new Set([
-    'ask-internal', 'ask-subagent', 'web-search', 'fetch-url', 'list-files', 'read-file',
-  ]);
+  const GLOBAL_HANDLED = new Set(GLOBAL_HANDLER_NAMES);
   for (const [name, skill] of globalSkills.skills) {
     if (skill.kind === 'read' && !GLOBAL_HANDLED.has(name)) {
       console.error(`[llm_agent] STARTUP: global read skill '${name}' has no registered handler — calls to it will fail`);
