@@ -791,7 +791,17 @@ function stopScraping(): void {
 
 platform = detectPlatform();
 
-chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+  // Only trust messages from our own extension's contexts (side panel,
+  // popup, service worker).  chrome.runtime.onMessage fires for ANY
+  // extension's runtime.sendMessage that reaches this page (Chrome routes
+  // by content-script world, not by extension id) — without this check a
+  // second installed extension could send START_CAPTION_SCRAPING/POST_CHAT
+  // and have it treated as trusted.  Mirrors the same guard in
+  // service-worker.ts.  (No externally_connectable in manifest.json, so
+  // web pages can't reach onMessage at all — this guards extension-to-
+  // extension only.)
+  if (sender.id !== chrome.runtime.id) return false;
   if (!isMessage(message)) return false;
   const type = message.type;
 

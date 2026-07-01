@@ -228,7 +228,10 @@ window.addEventListener('beforeunload', cleanup);
 // Gate detection on recording state — only start polling after
 // START_CAPTION_SCRAPING and stop on STOP_CAPTION_SCRAPING.
 // This mirrors how caption-scraper.ts gates on isCapturing.
-chrome.runtime.onMessage.addListener((message: unknown) => {
+chrome.runtime.onMessage.addListener((message: unknown, sender) => {
+  // Only trust messages from our own extension's contexts — see the
+  // matching guard/comment in caption-scraper.ts and service-worker.ts.
+  if (sender.id !== chrome.runtime.id) return false;
   if (!isMessage(message)) return false;
   if (message.type === MsgType.START_CAPTION_SCRAPING) {
     if (!isActive) {

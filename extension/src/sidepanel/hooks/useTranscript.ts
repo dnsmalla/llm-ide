@@ -172,7 +172,13 @@ export function useTranscript() {
 
   // Listen for messages from content scripts
   useEffect(() => {
-    const listener = (message: unknown) => {
+    const listener = (message: unknown, sender: chrome.runtime.MessageSender) => {
+      // Only trust messages from our own extension's contexts (content
+      // scripts, service worker) — see the matching guard in
+      // service-worker.ts / caption-scraper.ts / speaker-detector.ts.
+      // Without this, another installed extension could forge
+      // CAPTION_FINAL/CAPTION_STATUS messages into this side panel.
+      if (sender.id !== chrome.runtime.id) return;
       if (!isMessage(message)) return;
 
       if (message.type === MsgType.ACTIVE_SPEAKER) {
