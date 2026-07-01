@@ -109,13 +109,24 @@ function autoSyncTaskStatus(db, userId, taskId, outcomeState) {
 // through all users over successive runs.
 const MAX_POLLED_USERS = 500;
 
+// The dispatcher claims a task by writing this sentinel into
+// `meta.dispatched.url` before the real network call, then overwrites it
+// with the real ticket URL on success (or releases the claim on failure —
+// see claimTaskForDispatch / releaseTaskDispatchClaim in kb/plans.mjs). It
+// is a non-null string, so a naive "IS NOT NULL" filter also matches an
+// in-flight claim — every dispatched-task query here must explicitly
+// exclude it, or the outcome watcher will poll a task mid-dispatch (before
+// it has a real ticket URL) and record a spurious "unknown" outcome.
+const DISPATCH_SENTINEL = '__dispatching__';
+
 export function listUsersWithDispatchedTasks() {
   const db = getDb();
   return lazyPrepare(db, `
     SELECT DISTINCT user_id FROM plan_tasks
     WHERE json_extract(meta, '$.dispatched.url') IS NOT NULL
+      AND json_extract(meta, '$.dispatched.url') != ?
     LIMIT ?
-  `).all(MAX_POLLED_USERS).map((r) => r.user_id);
+  `).all(DISPATCH_SENTINEL, MAX_POLLED_USERS).map((r) => r.user_id);
 }
 
 const TERMINAL_STATES = new Set(['closed', 'merged', 'cancelled', 'reverted']);
@@ -249,9 +260,11 @@ export function listDispatchedTasks(userId) {
   const db = getDb();
   const rows = lazyPrepare(db, `
     SELECT id, plan_id, title, meta FROM plan_tasks
-    WHERE user_id = ? AND json_extract(meta, '$.dispatched.url') IS NOT NULL
+    WHERE user_id = ?
+      AND json_extract(meta, '$.dispatched.url') IS NOT NULL
+      AND json_extract(meta, '$.dispatched.url') != ?
     LIMIT ?
-  `).all(userId, MAX_DISPATCHED_ROWS);
+  `).all(userId, DISPATCH_SENTINEL, MAX_DISPATCHED_ROWS);
   return rows.map((r) => {
     const meta = safeParseMeta(r.meta) || {};
     return {

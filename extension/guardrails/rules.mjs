@@ -10,6 +10,12 @@
 // We keep this module pure (no DB, no network) so it can be unit-tested
 // and reused by the LLM eval suite later.
 
+// redactSecrets is pure (string in, string out — no DB/network), so it
+// doesn't violate the constraint above. It's used to scrub the raw matched
+// value out of secret findings before they're persisted/returned — see
+// findMatches(..., { redact: true }) below.
+import { redactSecrets } from '../core/redact-secrets.mjs';
+
 // Exported so scan.mjs can import the same list instead of maintaining
 // a parallel copy that could silently drift out of sync.
 export const SECRET_PATTERNS = [
@@ -18,6 +24,14 @@ export const SECRET_PATTERNS = [
   { name: 'AWS access key', re: /\bAKIA[0-9A-Z]{16}\b/ },
   { name: 'Slack token',   re: /\bxox[abp]-[A-Za-z0-9-]{10,}/ },
   { name: 'Google API key', re: /\bAIza[0-9A-Za-z\-_]{35}\b/ },
+  // Anthropic API key — checked BEFORE the generic OpenAI-style "sk-" rule
+  // below so an sk-ant- key is reported under its own name rather than
+  // matching the more general pattern first.
+  { name: 'Anthropic API key', re: /\bsk-ant-[A-Za-z0-9-]{10,}\b/ },
+  // Generic "sk-" secret key (OpenAI classic / other providers using the
+  // same shape). Excludes sk-ant- via negative lookahead so it doesn't
+  // double-report a key already caught by the rule above.
+  { name: 'Generic sk- API key', re: /\bsk-(?!ant-)[A-Za-z0-9]{20,}\b/ },
   // Separator limited to 1-3 chars to prevent catastrophic backtracking
   // on inputs like 'api_key:::::::::::::::::' (unbounded '+' was exploitable).
   { name: 'Generic API key', re: /\b(api[_-]?key|secret[_-]?key|access[_-]?token)["'\s:=]{1,3}[A-Za-z0-9_\-]{16,}\b/i },
@@ -54,7 +68,15 @@ const DESTRUCTIVE_PATTERNS = [
   { name: 'shell exec',     re: /\beval\s*\(|new\s+Function\s*\(|child_process\.exec\b/i },
 ];
 
-function findMatches(text, patterns) {
+// `redact`: when true (secret patterns only — never PII/destructive, where
+// the reviewer needs to see the actual matched text to judge the finding),
+// the matched token itself is scrubbed out of the returned snippet before
+// it's returned. Findings from this function get persisted verbatim into
+// the review_items.guardrails column and echoed back in API responses
+// (kb/routes/review.mjs submit/approve), so a raw secret value here would
+// leak into the DB, logs, and any client that reads the review item —
+// exactly the credential-exposure the guardrail is supposed to prevent.
+function findMatches(text, patterns, { redact = false } = {}) {
   if (typeof text !== 'string' || !text) return [];
   // Attacker can split a secret across two lines (intentionally or via
   // hand-wrapped LLM output) so that `\b` boundaries fail to bridge the
@@ -77,7 +99,7 @@ function findMatches(text, patterns) {
   //                 U+200D for fence redaction, making this evasion realistic.
   //
   // The snippet we surface is always drawn from the raw text so the reviewer
-  // sees the real shape.
+  // sees the real shape (modulo redaction, when requested).
   const wsCollapsed = text.replace(/\s+/g, '');
   const zwCollapsed = text.replace(/[​‌‍⁠﻿]+/g, '');
   const hits = [];
@@ -89,15 +111,41 @@ function findMatches(text, patterns) {
         // No precise index into the raw text — surface the first 60
         // chars of the raw text after the match position in `collapsed`
         // as best-effort context.
-        hits.push({ name, snippet: `(line-wrapped) ${text.slice(0, 60).replace(/\s+/g, ' ')}…` });
+        let snippet = `(line-wrapped) ${text.slice(0, 60).replace(/\s+/g, ' ')}…`;
+        if (redact) snippet = redactSnippet(snippet, re);
+        hits.push({ name, snippet });
       }
       continue;
     }
     const start = Math.max(0, (m.index || 0) - 20);
     const end   = Math.min(text.length, (m.index || 0) + m[0].length + 20);
-    hits.push({ name, snippet: text.slice(start, end).replace(/\s+/g, ' ') });
+    let snippet = text.slice(start, end).replace(/\s+/g, ' ');
+    if (redact) snippet = redactSnippet(snippet, re);
+    hits.push({ name, snippet });
   }
   return hits;
+}
+
+// Redact a snippet that is about to be persisted/returned as a secret
+// finding. Two passes:
+//   1. Re-run the SAME rule regex that produced this finding against the
+//      snippet and blank out its own match — this guarantees the exact
+//      token that triggered the finding never survives, even for patterns
+//      (e.g. "Generic API key": `api_key["'\s:=]{1,3}[A-Za-z0-9_-]{16,}`)
+//      that redactSecrets()'s separate, differently-scoped pattern set
+//      doesn't recognize.
+//   2. Run redactSecrets() as a second pass to catch any *other*
+//      recognizable credential shape sitting in the 20-char context window
+//      around the primary match (e.g. a Bearer token adjacent to a
+//      generic-API-key hit).
+function redactSnippet(snippet, re) {
+  // Rebuild a global version of the rule's own regex so `.replace` swaps
+  // every occurrence, not just the first — a 'g' flag on the shared rule
+  // objects would mutate `.lastIndex` across calls (they're reused per
+  // findMatches invocation), so we construct a fresh RegExp here instead.
+  const globalRe = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
+  const scrubbed = snippet.replace(globalRe, '[REDACTED]');
+  return redactSecrets(scrubbed);
 }
 
 function check(severity, ruleId, message, details) {
@@ -124,8 +172,8 @@ function checkDispatch(payload) {
   }
 
   for (const it of items) {
-    const titleSecrets = findMatches(it?.title || '', SECRET_PATTERNS);
-    const bodySecrets  = findMatches(it?.body  || '', SECRET_PATTERNS);
+    const titleSecrets = findMatches(it?.title || '', SECRET_PATTERNS, { redact: true });
+    const bodySecrets  = findMatches(it?.body  || '', SECRET_PATTERNS, { redact: true });
     if (titleSecrets.length || bodySecrets.length) {
       findings.push(check('blocking', 'dispatch.secret',
         `Possible secret in task "${it?.title?.slice(0, 60) || '(untitled)'}".`,
@@ -213,7 +261,7 @@ function checkCodegenApply(payload) {
       findings.push(check('warning', 'codegen.path-ext',
         `Path "${path}" has an unfamiliar extension; double-check before approving.`));
     }
-    const secrets = findMatches(f?.content || '', SECRET_PATTERNS);
+    const secrets = findMatches(f?.content || '', SECRET_PATTERNS, { redact: true });
     if (secrets.length) {
       findings.push(check('blocking', 'codegen.secret',
         `Possible secret in "${path}": ${secrets.map((h) => h.name).join(', ')}.`,
