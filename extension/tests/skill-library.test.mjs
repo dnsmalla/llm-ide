@@ -57,6 +57,24 @@ test('listSkillLibrary reads skills/ + runtime/ SKILL.md, skips junk and non-lib
   assert.ok(!ids.some((i) => i.startsWith('agent-tools/')));
 });
 
+test('listSkillLibrary parses a folded (block-scalar) description like the loader does', () => {
+  // A YAML folded description spanning multiple lines — the hand-rolled regex
+  // reader captured just ">" (the block indicator) instead of the folded text;
+  // js-yaml (what the loader uses) folds it correctly. This pins catalog/library
+  // parse consistency.
+  const dir = path.join(repo, 'skills', 'folded-desc');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'SKILL.md'),
+    '---\nname: folded-desc\ndescription: >\n  A multi-line description\n  that folds onto one line.\n---\n\n# folded-desc\nbody\n');
+  _resetSkillLibraryCache();
+  const { skills } = listSkillLibrary();
+  const s = skills.find((x) => x.id === 'skills/folded-desc');
+  assert.ok(s, 'folded-desc skill must be catalogued');
+  assert.match(s.description, /multi-line description that folds onto one line/);
+  assert.ok(!s.description.startsWith('>'), 'must not capture the YAML block indicator');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('a repo with the marker but no library families yields an empty catalog (no throw)', () => {
   // (Can't test the truly-no-repo path here: the resolver correctly falls back
   // to ~/skills, which exists on dev machines. Instead point at a marker-only

@@ -15,4 +15,5 @@ export {
   writeChatMemoryFacts,
   appendChatMemory,
   parseChatMemoryFacts,
+  factKey,
 } from './memory-writer.mjs';

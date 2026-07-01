@@ -13,6 +13,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import yaml from 'js-yaml';
 
 // Families NOT already surfaced via /kb/agent/catalog (which covers
 // agent-globals + agent-tools). These are the "all the other skills".
@@ -37,20 +38,25 @@ export function resolveCentralSkillsRepo() {
   return null;
 }
 
-// Pull just name + description from a SKILL.md frontmatter block. Deliberately
-// a tiny scalar reader (not a full YAML parse) — we only need two single-line
-// fields and want zero parser deps in this path.
+// Pull name + description from a SKILL.md frontmatter block. Parses the YAML
+// with js-yaml — the SAME parser the skill loader uses — so a quoted or folded
+// (block-scalar) description reads identically in this catalog and in the
+// loader's Library view, instead of the old hand-rolled regex that captured
+// just ">" for a folded value. Uses the loader's closing-`---`-on-its-own-line
+// regex too, so a `---` inside a value can't prematurely end the block.
 function readNameDesc(file) {
   try {
     const raw = readFileSync(file, 'utf8');
-    const m = raw.match(/^---\n([\s\S]*?)\n---/);
+    const m = raw.match(/^---\n([\s\S]*?)\n^---\s*$/m);
     if (!m) return null;
-    const block = m[1];
-    const name = (block.match(/^name:\s*(.+?)\s*$/m) || [])[1];
+    const fm = yaml.load(m[1]);
+    if (!fm || typeof fm !== 'object') return null;
+    const name = typeof fm.name === 'string' ? fm.name.trim() : '';
     if (!name) return null;
-    let desc = (block.match(/^description:\s*(.+?)\s*$/m) || [])[1] || '';
-    desc = desc.replace(/^["']|["']$/g, '').trim().slice(0, MAX_DESC);
-    return { name: name.replace(/^["']|["']$/g, '').trim(), description: desc };
+    const description = typeof fm.description === 'string'
+      ? fm.description.trim().slice(0, MAX_DESC)
+      : '';
+    return { name, description };
   } catch {
     return null;
   }

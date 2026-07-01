@@ -82,3 +82,4 @@ system/
 flag-semantics-flow-zero.md
 mac/MeetNotesMac.app/
 import-repo-settings.sh
+extension/tests/_skill-library-repo-*/

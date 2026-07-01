@@ -306,6 +306,30 @@ test('sanitizeFacts dedups by fact text, ignoring category and case', async () =
   assert.equal(out.length, 1);
 });
 
+test('factKey collapses leading-filler paraphrases so they dedupe', async () => {
+  const { factKey } = await import('../graphkit/index.mjs');
+  // The audit's cited case: same fact, one with a "the project" lead-in.
+  assert.equal(factKey('The project uses pnpm workspaces'), factKey('uses pnpm workspaces'));
+  assert.equal(factKey('The API is REST'), factKey('API is REST'));
+  assert.equal(factKey('[architecture] this repo deploys via Fly.io'), factKey('deploys via Fly.io'));
+});
+
+test('factKey does NOT merge genuinely distinct facts', async () => {
+  const { factKey } = await import('../graphkit/index.mjs');
+  assert.notEqual(factKey('deploy to staging'), factKey('deploy to prod'));
+  assert.notEqual(factKey('the API uses REST'), factKey('the API uses GraphQL'));
+});
+
+test('appendChatMemory dedupes a leading-filler paraphrase against an existing fact', async () => {
+  const { appendChatMemory } = await import('../graphkit/index.mjs');
+  const root = path.join(__dirname, `_pm-paraphrase-${process.pid}`);
+  fs.mkdirSync(path.join(root, 'graphify-out', 'memory'), { recursive: true });
+  appendChatMemory({ root, facts: ['uses pnpm workspaces'] });
+  const saved = appendChatMemory({ root, facts: ['The project uses pnpm workspaces'] });
+  assert.equal(saved.length, 1, 'a leading-filler paraphrase must not create a second entry');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('writeChatMemoryFacts round-trips and leaves no temp file behind', async () => {
   const { writeChatMemoryFacts, readChatMemoryFacts } = await import('../graphkit/index.mjs');
   const root = path.join(__dirname, `_pm-atomic-${process.pid}`);
@@ -339,6 +363,22 @@ test('appendChatMemory does not re-add an existing fact under a new category', a
   const meta = {};
   const saved = appendChatMemory({ root, facts: ['[architecture] the API uses cursor pagination'], meta });
   assert.equal(saved.length, 1, 'same fact tagged with a category is not duplicated');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('repoMemoryBlock never exceeds its char budget (header + joins counted)', () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'budget');
+  // An oversized repo.md that would fill the whole budget on its own.
+  fs.writeFileSync(path.join(root, 'graphify-out', 'memory', 'repo.md'),
+    'x'.repeat(50_000), 'utf8');
+  const allowed = memory.buildAllowedRoots(u);
+  const budget = 2000;
+  const block = memory.repoMemoryBlock({ name: 'R', path: root }, budget, allowed, null, '');
+  assert.ok(block, 'a block is produced');
+  assert.ok(block.length <= budget,
+    `block (${block.length}) must not exceed budget (${budget}) once the header + joins are counted`);
   fs.rmSync(root, { recursive: true, force: true });
 });
 

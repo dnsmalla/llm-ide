@@ -77,15 +77,22 @@ function newestMtimeMs(paths) {
   return newest;
 }
 
-function safeRead(path, maxChars) {
+// Strip a single trailing U+FFFD. The bounded fd read below decodes the first N
+// bytes; if byte N lands inside a multibyte character, toString('utf8') appends
+// one replacement char. Only the tail is affected, so drop exactly that.
+// Exported for unit testing. An interior U+FFFD (genuinely in the content) is
+// left alone.
+export function trimReplacementTail(s) {
+  return typeof s === 'string' && s.endsWith('�') ? s.slice(0, -1) : s;
+}
+
+export function safeRead(path, maxChars) {
   try {
     const st = statSync(path);
     if (!st.isFile()) return null;
     // Small file: read it whole and slice. Large file: read only the
     // first maxChars bytes via a bounded fd read rather than loading a
     // multi-MB memory file into RAM just to slice the head off it.
-    // (At a UTF-8 byte boundary the tail char may be clipped — fine for
-    // a prompt excerpt; result is always ≤ maxChars chars.)
     if (st.size <= maxChars * 4) {
       return readFileSync(path, 'utf8').slice(0, maxChars);
     }
@@ -93,7 +100,9 @@ function safeRead(path, maxChars) {
     try {
       const buf = Buffer.alloc(maxChars);
       const n = readSync(fd, buf, 0, maxChars, 0);
-      return buf.toString('utf8', 0, n);
+      // A multibyte char clipped at the byte boundary would otherwise leave a
+      // U+FFFD glyph at the tail — strip it so no garbage reaches the prompt.
+      return trimReplacementTail(buf.toString('utf8', 0, n));
     } finally {
       closeSync(fd);
     }
@@ -200,12 +209,17 @@ export function buildAllowedRoots(userId, workspaceRoot) {
 // up to the last newline — but only if that boundary keeps a reasonable amount
 // (>60% of room); otherwise the content is one long line and a hard cut is the
 // best we can do. Pure + exported for unit tests.
+const TRUNC_MARKER = '\n…(truncated)';
 export function clipToBoundary(text, room) {
   if (text.length <= room) return text;
-  const head = text.slice(0, room);
+  // Reserve space for the marker so the RESULT (body + marker) is always
+  // ≤ room — otherwise the appended marker pushed the output ~13 chars past
+  // the caller's budget, so a block could overshoot its char cap.
+  const bodyRoom = Math.max(0, room - TRUNC_MARKER.length);
+  const head = text.slice(0, bodyRoom);
   const nl = head.lastIndexOf('\n');
-  const body = nl > room * 0.6 ? head.slice(0, nl) : head;
-  return `${body.trimEnd()}\n…(truncated)`;
+  const body = nl > bodyRoom * 0.6 ? head.slice(0, nl) : head;
+  return `${body.trimEnd()}${TRUNC_MARKER}`;
 }
 
 // Tiny stopword set so query tokens like "how"/"the"/"does" don't create
@@ -258,15 +272,29 @@ export function selectChatMemoryFacts(content, { userMessage = '', room = 0 } = 
   return chosen.join('\n');
 }
 
-function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) {
+export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) {
   if (!repo) return null;
   const root = resolveAllowedRepoRoot(repo.path, allowedRoots);
   if (!root) return null;
   const memDir = join(root, 'graphify-out', 'memory');
   const repoName = repo.name || 'Repository';
 
+  // Compute the block header up front so its length counts against `budget` —
+  // otherwise the header + inter-part joins were unbudgeted and a block could
+  // overshoot `budget` by ~header size. mtime is a cheap stat read; doing it
+  // here (vs at the end) lets `used` reflect the real rendered size.
+  const mtime = newestMtimeMs([
+    join(memDir, 'repo.md'),
+    join(memDir, 'graph-notes.md'),
+    join(memDir, 'doc-notes.md'),
+  ]);
+  const ageClause = mtime != null ? ` (updated ${relativeAge(mtime)})` : '';
+  const header = `## ${repoName} — memory${ageClause}\n_(from \`${root}/graphify-out/memory/\`)_`;
+
   const parts = [];
-  let used = 0;
+  // Seed with the header + the `\n\n` that will join it to the first part, so
+  // `used` tracks the ACTUAL rendered length, not just the part bodies.
+  let used = header.length + 2;
   // `maxRoom` optionally caps how much of the remaining budget one file may
   // take, so a fat earlier file can't starve a reserved-floor file added later.
   const tryAdd = (label, body, maxRoom = Infinity) => {
@@ -275,9 +303,14 @@ function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) {
     if (!trimmed) return;
     const room = Math.min(budget - used, maxRoom);
     if (room <= 200) return; // not worth a header for a tiny remainder
-    const clipped = clipToBoundary(trimmed, room);
-    parts.push(`### ${label}\n${clipped}`);
-    used += clipped.length + label.length + 6;
+    // Clip the BODY to leave room for its `### label\n` prefix (label.length +
+    // "### " + "\n" = label.length + 5), so the whole part fits within `room`.
+    const clipped = clipToBoundary(trimmed, room - (label.length + 5));
+    const part = `### ${label}\n${clipped}`;
+    parts.push(part);
+    // Actual rendered cost: the part plus the `\n\n` join before it (every part
+    // after the first is preceded by a join).
+    used += part.length + (parts.length > 1 ? 2 : 0);
     // Observability: record what actually reached the agent (file, injected
     // size, and whether it was truncated to fit the budget). Optional — only
     // populated when the caller passes a `stats` sink.
@@ -327,20 +360,14 @@ function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) {
     tryAdd(`q&a/ (${qa.length})`, qaBodies);
   }
 
-  const name = repo.name || 'Repository';
   if (parts.length === 0) {
     // Allow-gate passed but no readable memory: tell the agent explicitly
     // instead of contributing nothing. (The path/tenancy guards above still
     // return null and stay silent — this is NOT one of those cases.)
-    return `## ${name} — memory\n_No code-graph memory generated for this repo yet._`;
+    return `## ${repoName} — memory\n_No code-graph memory generated for this repo yet._`;
   }
-  const mtime = newestMtimeMs([
-    join(memDir, 'repo.md'),
-    join(memDir, 'graph-notes.md'),
-    join(memDir, 'doc-notes.md'),
-  ]);
-  const ageClause = mtime != null ? ` (updated ${relativeAge(mtime)})` : '';
-  return `## ${name} — memory${ageClause}\n_(from \`${root}/graphify-out/memory/\`)_\n\n${parts.join('\n\n')}`;
+  // `header` was computed up front (and its length budgeted); reuse it.
+  return `${header}\n\n${parts.join('\n\n')}`;
 }
 
 export function renderGraphifyMemory(agentContext, userId, stats, userMessage = '') {
