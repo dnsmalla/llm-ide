@@ -35,7 +35,7 @@ This spec governs the following files:
 | File | Role |
 |---|---|
 | `extension/kb/migrations.mjs` | `applyMigrations()`, `migrationStatus()`, checksum logic |
-| `extension/kb/migrations/0001_initial.sql` through `0020_issue_schedule.sql` | DDL deltas (20 files as of this writing). Recent: `0017_slack_state.sql` adds the `slack_seen` and `slack_state` tables (Slack sync de-dup + cursor state); `0018_activity.sql` adds the `activity` and `activity_seen` tables (see below); `0019_usage_limits.sql` adds `usage_ledger`, `model_limits`, and `quota_state` (model usage metering + auto-fallback — see below); `0020_issue_schedule.sql` adds the `issue_schedule` table (per-user gantt scheduling overlay for repo issues — see below). |
+| `extension/kb/migrations/0001_initial.sql` through `0021_user_settings.sql` | DDL deltas (21 files as of this writing). Recent: `0018_activity.sql` adds the `activity` and `activity_seen` tables (see below); `0019_usage_limits.sql` adds `usage_ledger`, `model_limits`, and `quota_state` (model usage metering + auto-fallback — see below); `0020_issue_schedule.sql` adds the `issue_schedule` table (per-user gantt scheduling overlay for repo issues — see below); `0021_user_settings.sql` adds the `user_settings` table (per-user, cross-machine app settings blob — non-secret client config only, so opening the app on another machine restores the same Issues/Gantt view; access tokens stay in Keychain). |
 
 Notable tables added in recent migrations:
 
