@@ -42,6 +42,8 @@ struct GanttView: View {
 
     @State private var zoom: GanttZoom = .week
     @State private var hoverIssueId: String?
+    /// Issue whose detail/schedule sheet is open (tap a bar/row to reschedule).
+    @State private var detailIssue: RepoIssue?
     /// Repo labels (with hex colors), loaded alongside the VM so bars can be
     /// tinted by the issue's first color-bearing label. Kept local to the view
     /// (rather than on GanttViewModel) since it's presentation-only.
@@ -141,6 +143,22 @@ struct GanttView: View {
         .task(id: project.id) {
             await vm.load(backend: backend, project: project, api: api)
             labels = (try? await backend.listLabels(projectId: project.id)) ?? []
+        }
+        // Tap a bar/row to reschedule: the shared detail sheet routes due-date
+        // editing to the schedule-overlay editor (GitHub) or a native date
+        // picker (GitLab). Reload on change so bars/dependencies redraw.
+        .sheet(item: $detailIssue) { issue in
+            RepoIssueDetailSheet(
+                issue: issue,
+                client: backend,
+                projectId: project.id,
+                projectFullName: project.fullName,
+                api: api,
+                onIssueChanged: { _ in
+                    Task { await vm.load(backend: backend, project: project, api: api) }
+                },
+                onDismiss: { detailIssue = nil }
+            )
         }
     }
 
@@ -403,9 +421,7 @@ struct GanttView: View {
         .background(index.isMultiple(of: 2) ? t.rowAlt : .clear)
         .contentShape(Rectangle())
         .onHover { h in hoverIssueId = h ? issue.id : nil }
-        .onTapGesture {
-            if let url = URL(string: issue.webUrl) { NSWorkspace.shared.open(url) }
-        }
+        .onTapGesture { detailIssue = issue }
     }
 
     // MARK: - Timeline header
