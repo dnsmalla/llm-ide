@@ -614,7 +614,7 @@ function shutdown(signal) {
   stopBackgroundOutcomePoller();
   // Stop per-meeting agent tick loops so they don't fire (or publish a
   // late question) while we drain in-flight requests.
-  try { stopAllAgents(); } catch { /* best-effort */ }
+  try { stopAllAgents(); } catch (err) { logger.warn('shutdown_stop_agents_failed', { error: err.message }); }
   const hardTimeout = setTimeout(() => {
     logger.warn('shutdown_hard_timeout');
     process.exit(1);
@@ -623,7 +623,7 @@ function shutdown(signal) {
   server.close(() => {
     // Save rate-limit state before closing the DB so the next startup
     // inherits current bucket levels.
-    try { saveBuckets(getDb({ logger })); } catch { /* best-effort */ }
+    try { saveBuckets(getDb({ logger })); } catch (err) { logger.warn('shutdown_save_buckets_failed', { error: err.message }); }
     closeDb({ logger });
     logger.info('shutdown_complete');
     process.exit(0);
