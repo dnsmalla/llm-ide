@@ -252,6 +252,11 @@ export function selectChatMemoryFacts(content, { userMessage = '', room = 0 } = 
   // IDF weighting: a query token carried by few facts is far more
   // discriminating than one carried by most ("pnpm" vs "uses"). With ~100
   // facts max this is a trivial in-process computation — no index needed.
+  // This assumes maxFacts (config.memory.maxFacts, default 100, clamped to
+  // [1, 2000]) stays in the low hundreds; O(facts × query_tokens) work runs
+  // on every agent request, so if the 2000 ceiling is ever approached in
+  // practice, revisit this approach (e.g. an actual index) rather than
+  // assuming it's still "trivial."
   const factTokenSets = facts.map(
     (fact) => new Set(fact.toLowerCase().match(/[a-z0-9][a-z0-9-]{2,}/g) || []),
   );
