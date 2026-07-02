@@ -196,7 +196,7 @@ final class KnowledgeGraphService: ObservableObject {
         }
         do {
             try repoBody.write(to: memDir.appendingPathComponent("repo.md"), atomically: true, encoding: .utf8)
-            try renderGraphNotes(code: code, doc: doc, merged: merged)
+            try renderGraphNotes(code: code, doc: doc, merged: merged, chunks: chunks)
                 .write(to: memDir.appendingPathComponent("graph-notes.md"), atomically: true, encoding: .utf8)
             try renderDocNotes(docCount: docCount, chunks: chunks)
                 .write(to: memDir.appendingPathComponent("doc-notes.md"), atomically: true, encoding: .utf8)
@@ -209,12 +209,24 @@ final class KnowledgeGraphService: ObservableObject {
 
     /// Render `graph-notes.md`: counts plus the doc→code cross-links (the
     /// cross-domain edges Stage 2 adds), which are the most useful thing the
-    /// agent can't get from the code or docs alone.
-    nonisolated static func renderGraphNotes(code: CGData, doc: CGData, merged: CGData) -> String {
+    /// agent can't get from the code or docs alone. Routing: like
+    /// `renderDocNotes`, chunks marked `graph-only: true` or classified
+    /// `.noteEvent` are excluded here too — `graph-notes.md` lives in the
+    /// same agent-facing memory artifact directory as `doc-notes.md`, so the
+    /// same exclusion contract must hold for both files, not just one of
+    /// them. (The interactive GRAPH itself, via `merge()`, still contains
+    /// these edges — only the memory-artifact rendering excludes them.)
+    nonisolated static func renderGraphNotes(code: CGData, doc: CGData, merged: CGData,
+                                             chunks: [MemoryChunk]) -> String {
+        // Chunk graph-node ids equal MemoryChunk.id (see merge()'s doc
+        // comment) — exclude graph-only/meeting chunk ids from both the doc
+        // title lookup and the cross-link rendering below.
+        let excludedIds = Set(chunks.filter { $0.graphOnly || $0.kind == .noteEvent }.map(\.id))
         var out = "# Graph notes\n\n"
         out += "- Code nodes: \(code.nodes.count)\n- Doc nodes: \(doc.nodes.count)\n- Edges: \(merged.edges.count)\n\n"
         let codeIds = Set(code.nodes.map(\.id))
-        let docTitle = Dictionary(doc.nodes.map { ($0.id, $0.title) }, uniquingKeysWith: { a, _ in a })
+        let docTitle = Dictionary(doc.nodes.filter { !excludedIds.contains($0.id) }.map { ($0.id, $0.title) },
+                                  uniquingKeysWith: { a, _ in a })
         let codeTitle = Dictionary(code.nodes.map { ($0.id, $0.title) }, uniquingKeysWith: { a, _ in a })
         let crossLinks = merged.edges.filter {
             $0.kind == .references && docTitle[$0.fromId] != nil && codeIds.contains($0.toId)

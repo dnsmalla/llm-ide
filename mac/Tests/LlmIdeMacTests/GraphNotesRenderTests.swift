@@ -62,13 +62,35 @@ final class GraphNotesRenderTests: XCTestCase {
         ]
         let code = CGData(nodes: nodes, edges: edges)
         let out = KnowledgeGraphService.renderGraphNotes(
-            code: code, doc: CGData(nodes: [], edges: []), merged: code)
+            code: code, doc: CGData(nodes: [], edges: []), merged: code, chunks: [])
         XCTAssertTrue(out.contains("## Dependency hubs"), "hubs section present")
         XCTAssertTrue(out.contains("core/utils.mjs — imported by 2"), "top hub with count")
         // Ordering: the 2-importer hub must appear before the 1-importer hub.
         let a = out.range(of: "core/utils.mjs — imported by 2")!.lowerBound
         let b = out.range(of: "kb/router.mjs — imported by 1")!.lowerBound
         XCTAssertLessThan(a, b)
+    }
+
+    func testGraphNotesExcludesGraphOnlyChunkMentions() {
+        let code = CGData(nodes: [CGNode(id: "file:kb/secret.mjs", title: "kb/secret.mjs",
+                                         kind: .file, metadata: [:])],
+                          edges: [])
+        // A graph-only chunk mentions a code file via backtick — this edge
+        // exists in `merged` (DocCodeLinker adds it unconditionally), but
+        // graph-notes.md must not surface it, matching doc-notes.md's own
+        // graph-only exclusion.
+        let secretChunk = chunk(id: "doc:secret::0", body: "See `kb/secret.mjs` for internals.",
+                                graphOnly: true)
+        let visibleChunk = chunk(id: "doc:visible::0", body: "no code mention here")
+        let doc = CGData(nodes: [
+            CGNode(id: "doc:secret::0", title: "Internal Notes", kind: .memoryChunk, metadata: [:]),
+            CGNode(id: "doc:visible::0", title: "Public Notes", kind: .memoryChunk, metadata: [:]),
+        ], edges: [])
+        let merged = KnowledgeGraphService.merge(code: code, doc: doc, chunks: [secretChunk, visibleChunk])
+        let out = KnowledgeGraphService.renderGraphNotes(code: code, doc: doc, merged: merged,
+                                                         chunks: [secretChunk, visibleChunk])
+        XCTAssertFalse(out.contains("Internal Notes"), "graph-only chunk's title must not appear in graph-notes.md")
+        XCTAssertFalse(out.contains("kb/secret.mjs"), "graph-only chunk's code mention must not leak")
     }
 
     func testDocNotesExcludesGraphOnlyAndMeetingChunks() {
