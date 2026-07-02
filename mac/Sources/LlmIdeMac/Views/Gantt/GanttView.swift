@@ -593,6 +593,10 @@ struct GanttView: View {
                 style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
         }
 
+        // Bar rects keyed by issue number, so dependency connectors (drawn
+        // after all bars) can look up both endpoints regardless of row order.
+        var barRects: [Int: CGRect] = [:]
+
         // Gantt bars
         for (idx, issue) in issues.enumerated() {
             let s  = vm.startDate(for: issue)
@@ -617,6 +621,7 @@ struct GanttView: View {
             let barColor: Color = labelColor ?? (issue.state == "closed" ? t.accent3
                                 : (over ? t.danger : t.accent2))
             let barRect = CGRect(x: x + 1, y: y, width: max(2, w), height: h)
+            barRects[issue.number] = barRect
             let capsuleRadius = h / 2
             let bar = RoundedRectangle(cornerRadius: capsuleRadius)
                 .path(in: barRect)
@@ -657,6 +662,37 @@ struct GanttView: View {
                 }
                 ctx.fill(diamond, with: .color(t.warning))
                 ctx.stroke(diamond, with: .color(t.isDark ? .black.opacity(0.4) : .white.opacity(0.6)), lineWidth: 0.5)
+            }
+        }
+
+        // Dependency connectors (blocked-by): an elbow line from each blocker's
+        // END to the dependent's START, with a small arrowhead at the dependent.
+        // Both bars must be visible/dated (present in barRects); drawn last so
+        // the lines sit above the bars. dependsOn comes from the schedule
+        // overlay, so this is populated for GitHub (native GitLab has no links).
+        let depColor = t.textMuted.opacity(0.55)
+        for issue in issues {
+            guard let toRect = barRects[issue.number] else { continue }
+            for depNumber in vm.dependencies(of: issue) {
+                guard let fromRect = barRects[depNumber] else { continue }
+                let start = CGPoint(x: fromRect.maxX, y: fromRect.midY)
+                let end = CGPoint(x: toRect.minX, y: toRect.midY)
+                let midX = end.x >= start.x ? (start.x + end.x) / 2 : start.x + 12
+                let elbow = Path { p in
+                    p.move(to: start)
+                    p.addLine(to: CGPoint(x: midX, y: start.y))   // out from blocker
+                    p.addLine(to: CGPoint(x: midX, y: end.y))     // vertical
+                    p.addLine(to: end)                            // into dependent
+                }
+                ctx.stroke(elbow, with: .color(depColor), lineWidth: 1)
+                // Arrowhead pointing right into the dependent's start edge.
+                let ah: CGFloat = 4
+                let arrow = Path { p in
+                    p.move(to: CGPoint(x: end.x - ah, y: end.y - ah))
+                    p.addLine(to: CGPoint(x: end.x, y: end.y))
+                    p.addLine(to: CGPoint(x: end.x - ah, y: end.y + ah))
+                }
+                ctx.stroke(arrow, with: .color(depColor), lineWidth: 1)
             }
         }
     }
