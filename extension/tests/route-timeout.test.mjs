@@ -27,6 +27,12 @@ test('routeTimeoutMs returns a budget for listed POST routes (query stripped)', 
   assert.equal(routeTimeoutMs('/kb/summarize?x=1', 'POST'), 240_000);
 });
 
+test('routeTimeoutMs applies the /kb/delete budget on both DELETE and POST (the router accepts both verbs)', () => {
+  assert.equal(routeTimeoutMs('/kb/delete', 'POST'), 30_000);
+  assert.equal(routeTimeoutMs('/kb/delete', 'DELETE'), 30_000);
+  assert.equal(routeTimeoutMs('/kb/ingest', 'DELETE'), null, 'other routes remain POST-only');
+});
+
 test('routeTimeoutMs returns null for GETs, unlisted and streaming routes', () => {
   assert.equal(routeTimeoutMs('/kb/ingest', 'GET'), null);
   assert.equal(routeTimeoutMs('/kb/live/abc/stream', 'GET'), null);

@@ -13,7 +13,6 @@ import { AppError, sendError } from '../core/errors.mjs';
 
 const BUDGETS_POST = new Map([
   ['/kb/ingest',              60_000],
-  ['/kb/search',              30_000],
   ['/kb/delete',              30_000],
   ['/kb/dispatch',            60_000],
   ['/kb/providers/verify',    30_000],
@@ -26,8 +25,13 @@ const BUDGETS_POST = new Map([
 ]);
 
 export function routeTimeoutMs(url, method) {
-  if (method !== 'POST') return null;
   const path = String(url || '').split('?')[0];
+  // /kb/delete is the one route the router accepts on both DELETE and POST;
+  // every other budgeted route below is POST-only.
+  if (path === '/kb/delete' && (method === 'DELETE' || method === 'POST')) {
+    return BUDGETS_POST.get(path) ?? null;
+  }
+  if (method !== 'POST') return null;
   return BUDGETS_POST.get(path) ?? null;
 }
 
