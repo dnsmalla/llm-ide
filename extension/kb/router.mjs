@@ -382,7 +382,11 @@ export async function handleKB(req, res) {
               title: `Fetched ${fetchCount} new email${fetchCount === 1 ? '' : 's'}`,
               detail: { count: fetchCount },
             });
-          } catch {}
+          } catch (activityErr) {
+            // Non-fatal — the response was already sent above; only the
+            // activity-feed entry is lost.
+            logger.warn('email_activity_record_failed', { userId, error: activityErr?.message });
+          }
         }
       } catch (e) {
         logger.error('email_fetch_failed', { userId, host, reason: e.message });
@@ -456,7 +460,11 @@ export async function handleKB(req, res) {
               title: `Fetched ${slackCount} new Slack message${slackCount === 1 ? '' : 's'}${channelId ? ` (#${channelId})` : ''}`,
               detail: { channelId, count: slackCount },
             });
-          } catch {}
+          } catch (activityErr) {
+            // Non-fatal — the response was already sent above; only the
+            // activity-feed entry is lost.
+            logger.warn('slack_activity_record_failed', { userId, channelId, error: activityErr?.message });
+          }
         }
       } catch (e) {
         logger.error('slack_fetch_failed', { userId, channelId, reason: e.message });

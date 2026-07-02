@@ -217,7 +217,11 @@ export function recordOutcome(userId, { taskId, provider, ref, state, meta = {} 
           title: `${ref} ${state}`,
           detail: { resource: ref, fromState, toState: state },
         });
-      } catch {}
+      } catch (activityErr) {
+        // Non-fatal — the outcome row and meta are already recorded atomically
+        // above; only the activity-feed entry is lost.
+        logger.warn('outcome_activity_record_failed', { resource: ref, error: activityErr?.message });
+      }
     }
 
     return { id: info.lastInsertRowid, state, isTerminal: Boolean(isTerminal) };
