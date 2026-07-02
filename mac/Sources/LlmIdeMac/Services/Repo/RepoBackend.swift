@@ -3,7 +3,7 @@
 // History: the app started GitLab-only with GitLabClient wired directly
 // into provider-specific views. A shared protocol (this file) now routes
 // every issue-related call so both GitLab and GitHub use the same UI
-// layer (RepoIssuesView, RepoGanttView) without duplication.
+// layer (RepoIssuesView, GanttContainerView) without duplication.
 //
 // Both READ and WRITE paths are covered for GitLab and GitHub.
 // MR/PR creation remains GitLab-only; `canCreateMergeRequests` gates

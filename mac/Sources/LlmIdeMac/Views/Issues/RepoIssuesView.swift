@@ -1,15 +1,12 @@
-// Backend-agnostic issue BOARD. Picks a RepoBackend (GitLab or GitHub) from
-// the user's saved projects and renders a kanban (RepoKanbanPanel) whose
-// columns are derived from labels — the most common label namespace becomes
-// the columns, falling back to Open / Closed. This gives GitHub the same board
-// experience as the GitLab-only IssueBoardView. Drag a card to move it
-// (rewrites the status label or toggles state); tap to open the detail sheet.
+// Backend-agnostic issue LIST. Picks a RepoBackend (GitLab or GitHub) from
+// the user's saved projects and renders a GitLab-classic row list
+// (RepoIssueListView) — one two-line row per issue. Tapping a row opens the
+// detail sheet where state/labels are edited.
 //
 // Scope: read + write for BOTH backends — search, state filter, New Issue
-// (compose sheet), and drag-to-move, all gated on `canWriteIssues`. GitLab-
-// only affordances (weight, MR creation UI) are gated via capability flags.
-// AppShell routes all providers here; the provider switch lets dual-configured
-// users choose.
+// (compose sheet), all gated on `canWriteIssues`. GitLab-only affordances
+// (weight, MR creation UI) are gated via capability flags. AppShell routes all
+// providers here; the provider switch lets dual-configured users choose.
 
 import SwiftUI
 
@@ -472,11 +469,11 @@ struct RepoIssuesView: View {
                            title: "No issues",
                            message: "Nothing matches the current filter.")
         } else {
-            // Kanban board — columns derived from labels (status namespace),
-            // falling back to Open / Closed. Same experience for GitLab and
-            // GitHub; drag a card to move it (rewrites the status label or
-            // toggles state). Tapping a card opens the detail sheet.
-            RepoKanbanPanel(
+            // GitLab-classic issue list: one two-line row per issue, same for
+            // GitLab and GitHub. Tapping a row opens the detail sheet; state
+            // changes happen there (no drag-to-recolumn — GitLab's Issues page
+            // is a list, not a board).
+            RepoIssueListView(
                 issues: issues,
                 labels: labels,
                 backend: activeBackend,

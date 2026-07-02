@@ -128,9 +128,9 @@ enum AppDateFormatter {
     }
 
     /// Long relative form for detail panels: "5m ago", "3h ago", "2d ago", "Apr 3, 2024"
-    static func relativeVerbose(_ iso: String) -> String {
+    static func relativeVerbose(_ iso: String, now: Date = Date()) -> String {
         guard let date = parseISO(iso) else { return "" }
-        let secs = Date().timeIntervalSince(date)
+        let secs = now.timeIntervalSince(date)
         if secs < 60 { return "just now" }
         if secs < 3600 { return "\(Int(secs / 60))m ago" }
         if secs < 86400 { return "\(Int(secs / 3600))h ago" }

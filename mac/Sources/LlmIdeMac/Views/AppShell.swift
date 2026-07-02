@@ -13,9 +13,6 @@ struct AppShell: View {
     @EnvironmentObject var graphAutoUpdater: GraphAutoUpdater
     @EnvironmentObject var graphSessionStore: GraphSessionStore
     @State private var shell = ShellState()
-    // Persisted Issues/Gantt provider choice when both GitLab + GitHub are
-    // configured (RepoBackendKind raw value: "gitlab" | "github").
-    @AppStorage("repoProvider") private var repoProviderRaw = RepoBackendKind.gitlab.rawValue
     @State private var itemStore = LibraryItemStore()
     @State private var catalogStore = AgentCatalogStore()
     @State private var appEnv: AppEnvironment?
@@ -455,66 +452,25 @@ struct AppShell: View {
         }
     }
 
-    // ── Issues / Gantt provider selection ───────────────────────
-    // Routing used to be GitLab-first by token presence, which hid the
-    // GitHub board/gantt from anyone who also had a GitLab token. Now a
-    // persisted preference picks the provider, and when BOTH are configured a
-    // segmented switch lets the user choose. GitLab keeps its rich views;
-    // GitHub flows into the backend-agnostic shared views.
-    private var hasGitLab: Bool { !config.gitLabToken.isEmpty }
-    private var hasGitHub: Bool { !config.gitHubToken.isEmpty }
-    private var bothRepoProviders: Bool { hasGitLab && hasGitHub }
-
-    /// The provider actually shown: the saved preference when both are
-    /// configured, otherwise whichever one is connected (GitLab default).
-    private var effectiveRepoProvider: RepoBackendKind {
-        if bothRepoProviders { return RepoBackendKind(rawValue: repoProviderRaw) ?? .gitlab }
-        if hasGitHub && !hasGitLab { return .github }
-        return .gitlab
-    }
-
-    @ViewBuilder
-    private func repoProviderSwitch() -> some View {
-        if bothRepoProviders {
-            HStack {
-                Picker("Provider", selection: $repoProviderRaw) {
-                    Text("GitLab").tag(RepoBackendKind.gitlab.rawValue)
-                    Text("GitHub").tag(RepoBackendKind.github.rawValue)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 220)
-                Spacer()
-            }
-            .padding(.horizontal, Spacing.lg)
-            .padding(.vertical, 8)
-            .background(theme.current.surface)
-            Divider().background(theme.current.border)
-        }
-    }
-
+    // ── Issues / Gantt routes ───────────────────────────────────
+    // Both surfaces are backend-agnostic and serve GitHub + GitLab through the
+    // RepoBackend abstraction. Each view owns its own provider picker (shown
+    // only when both are configured), so AppShell just mounts them directly.
     /// Issues — unified RepoIssuesView for both providers (GitHub + GitLab).
-    /// A provider switch sits on top when both are configured.
+    /// The view owns its own provider picker (shown when both are configured),
+    /// so no separate top-level switch is needed here.
     @ViewBuilder
     private var issuesRoute: some View {
-        VStack(spacing: 0) {
-            repoProviderSwitch()
-            RepoIssuesView(api: api)
-        }
+        RepoIssuesView(api: api)
     }
 
-    /// Gantt. GitLab → the rich GanttContainerView (per-issue rows, day/week/
-    /// month zoom, today marker, full filter bar — restored by request). GitHub
-    /// → RepoGanttView, backed by the scheduling overlay. Provider switch on top
-    /// when both are configured.
+    /// Gantt. Unified RepoBackend-typed GanttContainerView serves both
+    /// providers: GitLab uses native dates, GitHub uses the scheduling overlay
+    /// (LlmIdeAPIClient issue-schedule). Like Issues, the view owns its own
+    /// provider picker, so no separate top-level switch is needed.
     @ViewBuilder
     private var ganttRoute: some View {
-        VStack(spacing: 0) {
-            repoProviderSwitch()
-            switch effectiveRepoProvider {
-            case .github where hasGitHub: RepoGanttView(api: api)
-            default:                      GanttContainerView()
-            }
-        }
+        GanttContainerView(api: api)
     }
 
     private func initEnv() {

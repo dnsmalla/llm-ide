@@ -1,5 +1,5 @@
 // Shared project picker for backend-agnostic views (RepoIssuesView,
-// RepoGanttView, future ones). Replaces the near-identical
+// GanttContainerView, future ones). Replaces the near-identical
 // `projectDropdown` blocks that previously lived in each view.
 
 import SwiftUI
