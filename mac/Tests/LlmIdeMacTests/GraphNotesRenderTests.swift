@@ -23,15 +23,19 @@ final class GraphNotesRenderTests: XCTestCase {
     }
 
     func testMergeAddsMentionLinkViaSourceFileMetadataWhenTitleDiffers() {
-        // Title is a symbol name, NOT the file path — so the mention can only
-        // resolve via the metadata["source_file"] inventory augmentation, not
-        // codeIdsByTitle. This is the regression test for the metadata-key bug.
-        let code = CGData(nodes: [CGNode(id: "file:kb/db.mjs", title: "DbModule",
-                                         kind: .file, metadata: ["source_file": "kb/db.mjs"])],
+        // Title is a symbol name ("backupTo"), NOT the file path — matching how
+        // StructureGraphBuilder actually titles symbol/function nodes (title =
+        // sym.name), unlike .file nodes whose title is always the path's
+        // basename and therefore always matches metadata["source_file"]. So the
+        // mention can only resolve via the metadata["source_file"] inventory
+        // augmentation, not codeIdsByTitle. Regression test for the metadata-key
+        // bug, using a fixture shape that actually occurs in the real pipeline.
+        let code = CGData(nodes: [CGNode(id: "function:kb/db.mjs:backupTo", title: "backupTo",
+                                         kind: .function, metadata: ["source_file": "kb/db.mjs"])],
                           edges: [])
         let c = chunk(id: "c1", body: "See `kb/db.mjs` for the schema.")
         let merged = KnowledgeGraphService.merge(code: code, doc: CGData(nodes: [], edges: []), chunks: [c])
-        let cross = merged.edges.filter { $0.kind == .references && $0.toId == "file:kb/db.mjs" }
+        let cross = merged.edges.filter { $0.kind == .references && $0.toId == "function:kb/db.mjs:backupTo" }
         XCTAssertEqual(cross.count, 1, "mention must resolve via metadata[\"source_file\"] since title doesn't match")
     }
 
