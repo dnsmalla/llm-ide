@@ -49,6 +49,17 @@ struct GanttViewModelTests {
         #expect(!vm.hasUsefulDates(vm.issues[0]))
     }
 
+    // A GitHub issue with no native dueDate but an overlay schedule whose due
+    // date is in the past must categorize as "overdue" — category() reads the
+    // overlay-aware span, not the native dueDate (which is nil here).
+    @Test func overlayOnlyPastDueIsOverdue() {
+        let vm = GanttViewModel()
+        let past = LlmIdeAPIClient.IssueSchedule(provider: "github", repo: "o/r",
+                                                 issueNumber: 5, dueDate: "2020-01-01")
+        vm.applyIssues([Self.issue(number: 5, dueDate: nil)], schedules: [5: past])
+        #expect(vm.category(of: vm.issues[0]) == "overdue")
+    }
+
     // An overlay with a present-but-unparseable date string (and no other date)
     // must NOT crash on a force-unwrap — it falls through to "not useful".
     @Test func malformedOverlayDateDoesNotCrash() {

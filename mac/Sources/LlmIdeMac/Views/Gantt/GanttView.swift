@@ -669,7 +669,9 @@ struct GanttView: View {
 
     private func isOverdue(_ issue: RepoIssue) -> Bool {
         guard issue.state == "opened" else { return false }
-        return vm.parseDate(issue.dueDate) .map { $0 < Date() } ?? false
+        // Overlay-aware bar end, not the native dueDate — matches the bar the
+        // user sees and correctly flags GitHub overlay-scheduled issues.
+        return vm.endDate(for: issue).map { $0 < Date() } ?? false
     }
 
     private func dayLabel(_ d: Date) -> String {

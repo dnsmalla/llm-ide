@@ -124,7 +124,10 @@ final class GanttViewModel: ObservableObject {
 
     func category(of issue: RepoIssue) -> String {
         if issue.state == "closed" { return "closed" }
-        if let due = parseDate(issue.dueDate), due < Date() { return "overdue" }
+        // Use the overlay-aware bar end (span), not the native dueDate — a
+        // GitHub issue scheduled via the overlay has no native dueDate, so
+        // reading issue.dueDate directly would never flag it overdue.
+        if let due = endDate(for: issue), due < Date() { return "overdue" }
         return "open"
     }
 

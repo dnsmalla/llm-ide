@@ -50,6 +50,11 @@ struct RepoIssueListView: View {
                     ForEach(issue.labels.prefix(4), id: \.self) { name in
                         LabelChip(name: name, color: color(for: name), small: true)
                     }
+                    if issue.labels.count > 4 {
+                        Text("+\(issue.labels.count - 4)")
+                            .font(Typography.caption).foregroundStyle(t.textMuted)
+                            .help(issue.labels.dropFirst(4).joined(separator: ", "))
+                    }
                     if client.supportsWeight, let w = issue.weight {
                         Text("\(w)").font(Typography.mono)
                             .padding(.horizontal, 5).padding(.vertical, 1)
@@ -70,9 +75,11 @@ struct RepoIssueListView: View {
             if let shown = overflow.shown {
                 UserAvatar(name: shown.displayName, id: abs(shown.id.hashValue),
                            avatarUrl: shown.avatarUrl, size: 22)
+                    .help(shown.displayName)
             }
             if overflow.extra > 0 {
                 Text("+\(overflow.extra)").font(Typography.caption).foregroundStyle(t.textMuted)
+                    .help(issue.assignees.dropFirst().map(\.displayName).joined(separator: ", "))
             }
         }
         .padding(.horizontal, Spacing.lg)
@@ -80,13 +87,13 @@ struct RepoIssueListView: View {
         .background(zebra ? t.rowAlt : Color.clear)
     }
 
-    /// `#N · opened Nd ago[ · milestone]`. Milestone segment omitted when absent.
+    /// `#N · opened <relative>[ · milestone]`. Uses the app's shared relative
+    /// formatter (minutes/hours/days/absolute) — same granularity as the detail
+    /// sheet — instead of hand-rolled day math. Milestone omitted when absent.
     static func metaLine(for issue: RepoIssue, now: Date) -> String {
         var parts = ["#\(issue.number)"]
-        if let created = ISO8601DateFormatter().date(from: issue.createdAt) {
-            let days = max(0, Int(now.timeIntervalSince(created) / 86_400))
-            parts.append(days == 0 ? "opened today" : "opened \(days)d ago")
-        }
+        let rel = AppDateFormatter.relativeVerbose(issue.createdAt, now: now)
+        if !rel.isEmpty { parts.append("opened \(rel)") }
         if let ms = issue.milestone { parts.append(ms.title) }
         return parts.joined(separator: " · ")
     }
