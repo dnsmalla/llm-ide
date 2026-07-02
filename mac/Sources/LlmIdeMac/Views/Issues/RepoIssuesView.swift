@@ -1,15 +1,17 @@
-// Backend-agnostic issue LIST. Picks a RepoBackend (GitLab or GitHub) from
-// the user's saved projects and renders a GitLab-classic row list
-// (RepoIssueListView) — one two-line row per issue. Tapping a row opens the
-// detail sheet where state/labels are edited.
+// Backend-agnostic issue BOARD. Picks a RepoBackend (GitLab or GitHub) from
+// the user's saved projects and renders a kanban (RepoKanbanPanel) whose
+// columns are derived from labels — the most common label namespace becomes
+// the columns, falling back to Open / Closed. This gives GitHub the same board
+// experience as the GitLab-only IssueBoardView. Drag a card to move it
+// (rewrites the status label or toggles state); tap to open the detail sheet.
 //
 // Scope: read + write for BOTH backends — search, state filter, New Issue
-// (compose sheet), all gated on `canWriteIssues`. GitLab-only affordances
-// (weight, MR creation UI) are gated via capability flags. AppShell routes all
-// providers here; the provider switch lets dual-configured users choose.
+// (compose sheet), and drag-to-move, all gated on `canWriteIssues`. GitLab-
+// only affordances (weight, MR creation UI) are gated via capability flags.
+// AppShell routes all providers here; the provider switch lets dual-configured
+// users choose.
 
 import SwiftUI
-import RepoKit
 
 struct RepoIssuesView: View {
     @EnvironmentObject var theme: ThemeStore
@@ -47,20 +49,6 @@ struct RepoIssuesView: View {
     @State private var composeBusy = false
     @State private var composeError: String?
     @State private var detailIssue: RepoIssue?
-
-    // ── Multi-select / bulk actions
-    @State private var selectedIssueIDs: Set<String> = []
-    @State private var bulkBusy = false
-
-    // ── Sort (client-side, sticky across launches). Default: newest-created first.
-    @AppStorage("repoIssueSortField") private var sortFieldRaw = RepoIssueSort.created.rawValue
-    @AppStorage("repoIssueSortAscending") private var sortAscending = false
-    private var sortField: RepoIssueSort { RepoIssueSort(rawValue: sortFieldRaw) ?? .created }
-
-    /// The issues actually shown, ordered by the current sort selection.
-    private var sortedIssues: [RepoIssue] {
-        RepoIssueSort.sorted(issues, by: sortField, ascending: sortAscending)
-    }
 
     private var availableBackends: [RepoBackendKind] {
         var out: [RepoBackendKind] = []
@@ -194,62 +182,9 @@ struct RepoIssuesView: View {
             Divider().background(theme.current.border)
             filterBar
             Divider().background(theme.current.border)
-            if !selectedIssueIDs.isEmpty { bulkActionBar }
             issuesList
         }
         .background(theme.current.body)
-    }
-
-    /// Bulk-action bar — appears when one or more issues are selected. Close /
-    /// Reopen apply a state change to every selected issue; Clear deselects.
-    private var bulkActionBar: some View {
-        let t = theme.current
-        return HStack(spacing: Spacing.md) {
-            Text("\(selectedIssueIDs.count) selected")
-                .font(Typography.captionStrong).foregroundStyle(t.text)
-            Button("Close")  { Task { await bulkSetState(.close) } }
-                .buttonStyle(.plain).foregroundStyle(t.accent)
-                .disabled(bulkBusy)
-            Button("Reopen") { Task { await bulkSetState(.reopen) } }
-                .buttonStyle(.plain).foregroundStyle(t.accent)
-                .disabled(bulkBusy)
-            if bulkBusy { ProgressView().controlSize(.small).scaleEffect(0.7) }
-            Spacer()
-            Button("Clear") { selectedIssueIDs.removeAll() }
-                .buttonStyle(.plain).foregroundStyle(t.textMuted)
-        }
-        .padding(.horizontal, Spacing.lg).padding(.vertical, Spacing.sm)
-        .background(t.accent.opacity(0.08))
-        .overlay(Rectangle().fill(t.border).frame(height: 1), alignment: .bottom)
-    }
-
-    /// Apply a state change to every selected issue via the backend, updating
-    /// the local list (dropping issues that no longer fit the state filter) and
-    /// clearing the selection. Best-effort per issue: one failure is surfaced,
-    /// the rest still apply.
-    private func bulkSetState(_ change: RepoIssuePayload.StateChange) async {
-        guard let project = selectedProject else { return }
-        bulkBusy = true; defer { bulkBusy = false }
-        let targets = issues.filter { selectedIssueIDs.contains($0.id) }
-        var lastError: String?
-        for issue in targets {
-            do {
-                let updated = try await currentClient.updateIssue(
-                    projectId: project.id, number: issue.number,
-                    payload: RepoIssuePayload(stateChange: change))
-                if let i = issues.firstIndex(where: { $0.id == updated.id }) {
-                    if RepoIssueListView.stillFits(updated, filterState: filter.state) {
-                        issues[i] = updated
-                    } else {
-                        issues.remove(at: i)
-                    }
-                }
-            } catch {
-                lastError = error.localizedDescription
-            }
-        }
-        selectedIssueIDs.removeAll()
-        if let lastError { issuesError = lastError }
     }
 
     @ViewBuilder
@@ -387,45 +322,10 @@ struct RepoIssuesView: View {
             }
 
             Spacer()
-
-            sortMenu(t: t)
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.sm)
         .background(t.surface.opacity(0.6))
-    }
-
-    /// Sort selector + direction toggle (client-side, sticky). Weight is offered
-    /// only when the backend supports it (GitLab), mirroring the weight badge.
-    @ViewBuilder
-    private func sortMenu(t: Theme) -> some View {
-        let fields = RepoIssueSort.allCases.filter { $0 != .weight || currentClient.supportsWeight }
-        Menu {
-            ForEach(fields) { f in
-                Button {
-                    sortFieldRaw = f.rawValue
-                } label: {
-                    Label(f.label, systemImage: sortField == f ? "checkmark" : "")
-                }
-            }
-        } label: {
-            filterPillLabel(icon: "arrow.up.arrow.down", text: sortField.label, isActive: true, t: t)
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-
-        // Direction toggle — up = ascending, down = descending.
-        Button {
-            sortAscending.toggle()
-        } label: {
-            Image(systemName: sortAscending ? "arrow.up" : "arrow.down")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(t.textMuted)
-                .frame(width: 26, height: 26)
-                .background(RoundedRectangle(cornerRadius: 6).stroke(t.border.opacity(0.7), lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .help(sortAscending ? "Ascending" : "Descending")
     }
 
     @ViewBuilder
@@ -572,12 +472,12 @@ struct RepoIssuesView: View {
                            title: "No issues",
                            message: "Nothing matches the current filter.")
         } else {
-            // GitLab-classic issue list: one two-line row per issue, same for
-            // GitLab and GitHub. Tapping a row opens the detail sheet; state
-            // changes happen there (no drag-to-recolumn — GitLab's Issues page
-            // is a list, not a board).
-            RepoIssueListView(
-                issues: sortedIssues,
+            // Kanban board — columns derived from labels (status namespace),
+            // falling back to Open / Closed. Same experience for GitLab and
+            // GitHub; drag a card to move it (rewrites the status label or
+            // toggles state). Tapping a card opens the detail sheet.
+            RepoKanbanPanel(
+                issues: issues,
                 labels: labels,
                 backend: activeBackend,
                 client: currentClient,
@@ -585,18 +485,16 @@ struct RepoIssuesView: View {
                 onSelect: { detailIssue = $0 },
                 onIssueUpdate: { updated in
                     if let i = issues.firstIndex(where: { $0.id == updated.id }) {
-                        // Drop the row if its new state no longer matches the filter.
-                        if RepoIssueListView.stillFits(updated, filterState: filter.state) {
-                            issues[i] = updated
-                        } else {
-                            issues.remove(at: i)
-                        }
+                        // Drop the card if its new state no longer matches the filter.
+                        let stillFits: Bool = {
+                            switch filter.state {
+                            case .all:    return true
+                            case .opened: return updated.isOpen
+                            case .closed: return !updated.isOpen
+                            }
+                        }()
+                        if stillFits { issues[i] = updated } else { issues.remove(at: i) }
                     }
-                },
-                selectedIDs: selectedIssueIDs,
-                onToggleSelect: { issue in
-                    if selectedIssueIDs.contains(issue.id) { selectedIssueIDs.remove(issue.id) }
-                    else { selectedIssueIDs.insert(issue.id) }
                 }
             )
         }
@@ -618,7 +516,6 @@ struct RepoIssuesView: View {
         projects = []
         issues = []
         selectedProject = nil
-        selectedIssueIDs.removeAll()   // selections don't carry across projects/providers
         await loadProjects()
     }
 
@@ -644,7 +541,6 @@ struct RepoIssuesView: View {
         guard let project = selectedProject else { return }
         issuesLoading = true
         issuesError = nil
-        selectedIssueIDs.removeAll()   // stale ids won't match the refreshed set
         defer { issuesLoading = false }
         // Refresh labels for the board's column colors and milestones for the
         // milestone filter (best-effort — failures only affect the filter UI).

@@ -1,5 +1,4 @@
 import Foundation
-import RepoKit
 
 /// Backend-neutral descriptor the Code-change sheets (`CodeWorkflowSheet`,
 /// `QuickFixSheet`) need to drive `CodeWorkflowService` against either GitLab

@@ -1,5 +1,4 @@
 import SwiftUI
-import RepoKit
 
 /// Multi-step sheet for the code-change workflow (GitLab or GitHub).
 /// Steps: Create Issue → Create Branch → Generate Changes → Review & Commit → Push & MR/PR → Done
