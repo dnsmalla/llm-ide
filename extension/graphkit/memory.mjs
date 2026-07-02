@@ -238,21 +238,36 @@ function queryTokens(userMessage) {
 }
 
 // Rank chat-memory facts by relevance to the current question and greedily pack
-// the ones that fit `room`, most-relevant first. Score = number of distinct
-// query tokens the fact (text + [category] tag) contains; ties break toward the
-// NEWER fact (facts arrive oldest->newest, so a higher index is newer). With no
-// query tokens, this degrades to pure newest-first — which already fixes the
-// old raw-clip that kept the OLDEST facts and dropped the newest. Pure +
-// exported for unit tests. Returns a `- fact` bullet body (no header), or ''.
+// the ones that fit `room`, most-relevant first. Score = sum of IDF weights
+// (log(1 + N/df)) of the distinct query tokens the fact contains — rare tokens
+// dominate ubiquitous ones. Ties break toward the NEWER fact (facts arrive
+// oldest->newest, so a higher index is newer). With no query tokens, this
+// degrades to pure newest-first — which already fixes the old raw-clip that
+// kept the OLDEST facts and dropped the newest. Pure + exported for unit
+// tests. Returns a `- fact` bullet body (no header), or ''.
 export function selectChatMemoryFacts(content, { userMessage = '', room = 0 } = {}) {
   const facts = parseChatMemoryFacts(content);
   if (facts.length === 0 || room <= 0) return '';
   const q = queryTokens(userMessage);
+  // IDF weighting: a query token carried by few facts is far more
+  // discriminating than one carried by most ("pnpm" vs "uses"). With ~100
+  // facts max this is a trivial in-process computation — no index needed.
+  const factTokenSets = facts.map(
+    (fact) => new Set(fact.toLowerCase().match(/[a-z0-9][a-z0-9-]{2,}/g) || []),
+  );
+  const idf = new Map();
+  if (q.size > 0) {
+    for (const t of q) {
+      let df = 0;
+      for (const toks of factTokenSets) if (toks.has(t)) df += 1;
+      if (df > 0) idf.set(t, Math.log(1 + facts.length / df));
+    }
+  }
   const scored = facts.map((fact, i) => {
     let score = 0;
     if (q.size > 0) {
-      const factToks = new Set((fact.toLowerCase().match(/[a-z0-9][a-z0-9-]{2,}/g) || []));
-      for (const t of q) if (factToks.has(t)) score += 1;
+      const factToks = factTokenSets[i];
+      for (const [t, w] of idf) if (factToks.has(t)) score += w;
     }
     return { fact, score, index: i };
   });

@@ -54,3 +54,36 @@ test('category tag counts toward relevance and is preserved in output', () => {
   const out = selectChatMemoryFacts(content, { userMessage: 'what tooling do we use?', room });
   assert.ok(out.includes('[tooling] vite'), 'category-matched fact wins and keeps its tag');
 });
+
+test('IDF: query-relevant fact still wins with mixed common/rare tokens', () => {
+  // "uses" appears in all 3 facts (low IDF); "pnpm" in 1 (high IDF).
+  // "uses pnpm" matches fact 3 on both tokens, facts 1-2 on "uses" only —
+  // fact 3 wins under both scorings; this pins the invariant during the change.
+  const content = [
+    '# Chat memory', '',
+    '- uses jest for unit tests',
+    '- uses eslint with max-warnings 0',
+    '- uses pnpm workspaces for the monorepo',
+  ].join('\n');
+  const out = selectChatMemoryFacts(content, { userMessage: 'uses pnpm', room: 40 });
+  // room=40 fits only one bullet — must be the pnpm fact.
+  assert.match(out, /pnpm workspaces/);
+});
+
+test('IDF: one rare-token match outranks two ubiquitous-token matches', () => {
+  // "runs"/"node" appear in 4 of 5 facts (df=4, low IDF each: log(1+5/4)≈0.81,
+  // two matches ≈1.62); "vault" appears in 1 (df=1, IDF log(6)≈1.79).
+  // OLD count-scoring: the node facts score 2 vs vault's 1 and rank first —
+  // this test FAILS pre-change, proving the behavior difference.
+  const content = [
+    '# Chat memory', '',
+    '- the api runs on node behind nginx',
+    '- the worker runs on node with pm2',
+    '- the cron jobs runs on node hourly',
+    '- local dev runs on node via nvm',
+    '- vault rotation happens weekly',
+  ].join('\n');
+  const out = selectChatMemoryFacts(content, { userMessage: 'runs node vault', room: 200 });
+  // Output is in relevance order — the rare-token fact must rank FIRST.
+  assert.match(out.split('\n')[0], /vault rotation/, 'rare token ranks first');
+});
