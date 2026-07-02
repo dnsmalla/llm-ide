@@ -47,6 +47,16 @@ struct RepoIssuesView: View {
     @State private var composeError: String?
     @State private var detailIssue: RepoIssue?
 
+    // ── Sort (client-side, sticky across launches). Default: newest-created first.
+    @AppStorage("repoIssueSortField") private var sortFieldRaw = RepoIssueSort.created.rawValue
+    @AppStorage("repoIssueSortAscending") private var sortAscending = false
+    private var sortField: RepoIssueSort { RepoIssueSort(rawValue: sortFieldRaw) ?? .created }
+
+    /// The issues actually shown, ordered by the current sort selection.
+    private var sortedIssues: [RepoIssue] {
+        RepoIssueSort.sorted(issues, by: sortField, ascending: sortAscending)
+    }
+
     private var availableBackends: [RepoBackendKind] {
         var out: [RepoBackendKind] = []
         if !config.gitLabToken.isEmpty { out.append(.gitlab) }
@@ -319,10 +329,45 @@ struct RepoIssuesView: View {
             }
 
             Spacer()
+
+            sortMenu(t: t)
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.sm)
         .background(t.surface.opacity(0.6))
+    }
+
+    /// Sort selector + direction toggle (client-side, sticky). Weight is offered
+    /// only when the backend supports it (GitLab), mirroring the weight badge.
+    @ViewBuilder
+    private func sortMenu(t: Theme) -> some View {
+        let fields = RepoIssueSort.allCases.filter { $0 != .weight || currentClient.supportsWeight }
+        Menu {
+            ForEach(fields) { f in
+                Button {
+                    sortFieldRaw = f.rawValue
+                } label: {
+                    Label(f.label, systemImage: sortField == f ? "checkmark" : "")
+                }
+            }
+        } label: {
+            filterPillLabel(icon: "arrow.up.arrow.down", text: sortField.label, isActive: true, t: t)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+
+        // Direction toggle — up = ascending, down = descending.
+        Button {
+            sortAscending.toggle()
+        } label: {
+            Image(systemName: sortAscending ? "arrow.up" : "arrow.down")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(t.textMuted)
+                .frame(width: 26, height: 26)
+                .background(RoundedRectangle(cornerRadius: 6).stroke(t.border.opacity(0.7), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .help(sortAscending ? "Ascending" : "Descending")
     }
 
     @ViewBuilder
@@ -474,7 +519,7 @@ struct RepoIssuesView: View {
             // changes happen there (no drag-to-recolumn — GitLab's Issues page
             // is a list, not a board).
             RepoIssueListView(
-                issues: issues,
+                issues: sortedIssues,
                 labels: labels,
                 backend: activeBackend,
                 client: currentClient,
