@@ -25,4 +25,5 @@ export const GLOBAL_HANDLER_NAMES = Object.freeze([
   'fetch-url',
   'list-files',
   'read-file',
+  'search-kb',
 ]);

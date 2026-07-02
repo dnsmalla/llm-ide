@@ -19,6 +19,7 @@ import { sanitizePersonaSuffix } from '../../agents/prompt-utils.mjs';
 import { renderGraphifyMemory } from '../../graphkit/index.mjs';
 import { persistTurnMemory } from './memory-persist.mjs';
 import { buildReadableRoots, handleListFiles, handleReadFile } from './handlers/repo-files.mjs';
+import { searchKb } from './handlers/search-kb.mjs';
 import { redactFence } from './redaction.mjs';
 import { logger } from '../../core/logger.mjs';
 import { GLOBAL_HANDLER_NAMES } from './global-handlers.mjs';
@@ -220,6 +221,10 @@ export async function handleCodeAssist({
     // This is what lets "find the README and review it" work without an attach.
     'list-files': (args) => handleListFiles(args, { roots: readableRoots }),
     'read-file': (args) => handleReadFile(args, { roots: readableRoots }),
+    // KB search: meetings, decisions, action items, sources — the same FTS
+    // the internal agent uses, now first-class so "what did we decide about
+    // X?" doesn't need an ask-internal round-trip.
+    'search-kb': (args) => searchKb(args, { kb, userId }),
   };
 
   // Drift guard: this handlers map and GLOBAL_HANDLER_NAMES (imported from
