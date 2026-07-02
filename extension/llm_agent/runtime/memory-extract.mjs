@@ -12,6 +12,7 @@
 //    chatter ("fix this typo", "what does foo do").
 
 import { tryParseJSON } from '../../agents/runtime.mjs';
+import { factKey } from '../../graphkit/memory-writer.mjs';
 
 const EXTRACT_MODEL = process.env.LLMIDE_SUMMARIZE_MODEL || process.env.LLMIDE_MODEL || undefined;
 const MAX_NEW_FACTS = 5;
@@ -62,6 +63,27 @@ export function sanitizeFacts(parsed) {
     const cat = normalizeCategory(rawCat);
     out.push(cat ? `[${cat}] ${fact}` : fact);
     if (out.length >= MAX_NEW_FACTS) break;
+  }
+  return out;
+}
+
+// Superseded entries are only trusted when they match an existing fact by
+// factKey (the writer's own normalization) — the model may only retire facts
+// it was SHOWN, never invent one. Returns the canonical stored text so the
+// writer's removal matches exactly. Exported for unit testing.
+export function sanitizeSuperseded(parsed, existingFacts) {
+  if (!Array.isArray(parsed)) return [];
+  const byKey = new Map((Array.isArray(existingFacts) ? existingFacts : [])
+    .map((f) => [factKey(f), f]));
+  const out = [];
+  const seen = new Set();
+  for (const item of parsed) {
+    if (typeof item !== 'string') continue;
+    const key = factKey(item);
+    const canonical = byKey.get(key);
+    if (!canonical || seen.has(key)) continue;
+    seen.add(key);
+    out.push(canonical);
   }
   return out;
 }
@@ -127,8 +149,13 @@ function buildPrompt({ userMessage, reply, existingFacts }) {
     '- Each fact: one concise sentence, self-contained.',
     '- Classify each fact with a category, exactly one of:',
     '  convention | architecture | tooling | command | preference.',
-    '- Output ONLY a JSON array of objects, each {"category": "<one of the above>",',
-    '  "fact": "<one concise sentence>"}. Empty array [] if nothing qualifies.',
+    '- If the exchange shows an ALREADY KNOWN fact is now WRONG or outdated',
+    '  (replaced tool, changed convention, reversed decision), list that fact',
+    '  VERBATIM (exactly as written above) in "superseded" — and put the',
+    '  replacement, if any, in "facts".',
+    '- Output ONLY JSON: {"facts": [{"category": "<category>", "fact":',
+    '  "<one concise sentence>"}], "superseded": ["<verbatim known fact>"]}.',
+    '  Use empty arrays when nothing qualifies.',
     '',
     'ALREADY KNOWN:',
     existing,
@@ -143,16 +170,18 @@ function buildPrompt({ userMessage, reply, existingFacts }) {
   ].join('\n');
 }
 
-// Returns string[] of NEW facts (already sanitised + capped, but NOT yet
-// deduped against existing on disk — appendChatMemory does the final dedup).
+// Returns { facts, superseded }: facts are NEW facts (sanitised + capped, NOT
+// yet deduped against disk — appendChatMemory does that); superseded are
+// EXISTING facts the model marked outdated, canonicalised via factKey.
 export async function extractMemories({ userMessage, reply, existingFacts, runClaude, userId, meta }) {
-  if (typeof runClaude !== 'function') return [];
+  const empty = { facts: [], superseded: [] };
+  if (typeof runClaude !== 'function') return empty;
   // Local pre-filter: skip the paid summarize-tier call on turns that can't
   // carry a durable fact (empty reply, pure acknowledgments). This runs on
   // EVERY turn, so gating the no-value ones is the single biggest token win.
   if (!isWorthExtracting({ userMessage, reply })) {
     if (meta && typeof meta === 'object') { meta.approxTokens = 0; meta.skipped = true; }
-    return [];
+    return empty;
   }
   try {
     const prompt = buildPrompt({ userMessage, reply, existingFacts });
@@ -167,8 +196,18 @@ export async function extractMemories({ userMessage, reply, existingFacts, runCl
     if (meta && typeof meta === 'object') {
       meta.approxTokens = Math.round((prompt.length + (typeof raw === 'string' ? raw.length : 0)) / 4);
     }
-    return sanitizeFacts(tryParseJSON(raw));
+    const parsed = tryParseJSON(raw);
+    // New shape: {facts: [...], superseded: [...]}. Legacy shape (bare array
+    // of facts) still parses — models occasionally regress to it.
+    const factsArr = Array.isArray(parsed) ? parsed
+      : (parsed && Array.isArray(parsed.facts) ? parsed.facts : []);
+    const supersededArr = (!Array.isArray(parsed) && parsed && Array.isArray(parsed.superseded))
+      ? parsed.superseded : [];
+    return {
+      facts: sanitizeFacts(factsArr),
+      superseded: sanitizeSuperseded(supersededArr, existingFacts),
+    };
   } catch {
-    return [];
+    return empty;
   }
 }

@@ -51,7 +51,7 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
     // call — spent whether or not it yields facts, so it's logged on both the
     // no_facts and captured outcomes.
     const extractMeta = {};
-    const facts = await extractMemories({
+    const { facts, superseded } = await extractMemories({
       userMessage,
       reply,
       existingFacts: existing,
@@ -60,9 +60,7 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
       meta: extractMeta,
     });
     const extractTokens = extractMeta.approxTokens ?? 0;
-    if (!facts.length) {
-      // Distinguish a GATED turn (pre-filter skipped the paid model call — the
-      // token win) from one where the extractor ran and found nothing durable.
+    if (!facts.length && !superseded.length) {
       const reason = extractMeta.skipped
         ? 'gated: contentless turn, extraction skipped (no model call)'
         : 'extractor found nothing durable';
@@ -73,12 +71,11 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
       return null;
     }
     const meta = {};
-    const saved = appendChatMemory({ root, facts, meta });
+    const saved = appendChatMemory({ root, facts, remove: superseded, meta });
     const added = meta.added ?? Math.max(0, (Array.isArray(saved) ? saved.length : 0) - existing.length);
-    // `evicted` > 0 means the store hit its cap (MAX_FACTS / MAX_FILE_CHARS) and
-    // dropped the oldest facts to make room — surfaced so it isn't silent.
     logger.info('project_memory', {
-      outcome: 'captured', extracted: facts.length, added, evicted: meta.evicted ?? 0,
+      outcome: 'captured', extracted: facts.length, added,
+      removed: meta.removed ?? 0, evicted: meta.evicted ?? 0,
       extractTokens, total: saved.length, root,
     });
     return saved;

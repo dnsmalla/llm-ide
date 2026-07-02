@@ -129,20 +129,56 @@ test('sanitizeFacts on non-array → []', () => {
 test('extractMemories parses a JSON array from the model', async () => {
   const runClaude = async () => '["Project uses Swift 6", "Tests run via npm test"]';
   const out = await extract.extractMemories({ userMessage: 'q', reply: 'a', existingFacts: [], runClaude, userId: 'u' });
-  assert.deepEqual(out, ['Project uses Swift 6', 'Tests run via npm test']);
+  assert.deepEqual(out.facts, ['Project uses Swift 6', 'Tests run via npm test']);
+  assert.deepEqual(out.superseded, []);
 });
 
 test('extractMemories tolerates fenced JSON and ignores prose around it', async () => {
   const runClaude = async () => 'Sure!\n```json\n["Only durable fact"]\n```\nDone.';
   const out = await extract.extractMemories({ userMessage: 'q', reply: 'a', existingFacts: [], runClaude, userId: 'u' });
-  assert.deepEqual(out, ['Only durable fact']);
+  assert.deepEqual(out.facts, ['Only durable fact']);
 });
 
 test('extractMemories returns [] on garbage, throw, or empty reply', async () => {
-  assert.deepEqual(await extract.extractMemories({ reply: 'a', runClaude: async () => 'not json at all' }), []);
-  assert.deepEqual(await extract.extractMemories({ reply: 'a', runClaude: async () => { throw new Error('boom'); } }), []);
-  assert.deepEqual(await extract.extractMemories({ reply: '', runClaude: async () => '["x"]' }), []);
-  assert.deepEqual(await extract.extractMemories({ reply: 'a', runClaude: 'not a fn' }), []);
+  assert.deepEqual((await extract.extractMemories({ reply: 'a', runClaude: async () => 'not json at all' })).facts, []);
+  assert.deepEqual((await extract.extractMemories({ reply: 'a', runClaude: async () => { throw new Error('boom'); } })).facts, []);
+  assert.deepEqual((await extract.extractMemories({ reply: '', runClaude: async () => '["x"]' })).facts, []);
+  assert.deepEqual((await extract.extractMemories({ reply: 'a', runClaude: 'not a fn' })).facts, []);
+});
+
+test('extractMemories parses {facts, superseded} object shape', async () => {
+  const fake = async () => JSON.stringify({
+    facts: [{ category: 'tooling', fact: 'uses pnpm for installs' }],
+    superseded: ['uses npm for installs'],
+  });
+  const out = await extract.extractMemories({
+    userMessage: 'we switched from npm to pnpm',
+    reply: 'Noted — updated the build docs for pnpm.',
+    existingFacts: ['uses npm for installs', 'deploys via fly.io'],
+    runClaude: fake,
+    userId: 'u1',
+  });
+  assert.deepEqual(out.facts, ['[tooling] uses pnpm for installs']);
+  assert.deepEqual(out.superseded, ['uses npm for installs']);
+});
+
+test('extractMemories legacy bare-array shape still works, superseded empty', async () => {
+  const fake = async () => JSON.stringify([{ category: 'tooling', fact: 'uses jest' }]);
+  const out = await extract.extractMemories({
+    userMessage: 'we test with jest', reply: 'ok noted', existingFacts: [],
+    runClaude: fake, userId: 'u1',
+  });
+  assert.deepEqual(out.facts, ['[tooling] uses jest']);
+  assert.deepEqual(out.superseded, []);
+});
+
+test('extractMemories drops superseded entries that match no existing fact', async () => {
+  const fake = async () => JSON.stringify({ facts: [], superseded: ['hallucinated fact'] });
+  const out = await extract.extractMemories({
+    userMessage: 'real question', reply: 'real reply',
+    existingFacts: ['uses pnpm'], runClaude: fake, userId: 'u1',
+  });
+  assert.deepEqual(out.superseded, [], 'only verbatim-known facts may be superseded');
 });
 
 // ── reader: chat-memory.md recall + gate ─────────────────────────────
@@ -265,7 +301,7 @@ test('extractMemories reports approx extraction token cost via meta', async () =
   const { extractMemories } = await import('../llm_agent/runtime/memory-extract.mjs');
   const fakeRun = async () => JSON.stringify(['the build runs offline via build.sh']);
   const meta = {};
-  const facts = await extractMemories({
+  const { facts } = await extractMemories({
     userMessage: 'how does the build work?',
     reply: 'It runs offline via build.sh with no network access.',
     existingFacts: [],
@@ -301,7 +337,7 @@ test('extractMemories short-circuits (no model call) on a contentless turn', asy
   const { extractMemories } = await import('../llm_agent/runtime/memory-extract.mjs');
   let called = false;
   const spyRun = async () => { called = true; return '[]'; };
-  const facts = await extractMemories({
+  const { facts } = await extractMemories({
     userMessage: 'thanks!',
     reply: 'No problem.',
     existingFacts: [],
