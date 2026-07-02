@@ -3,6 +3,7 @@
 // `projectDropdown` blocks that previously lived in each view.
 
 import SwiftUI
+import RepoKit
 
 struct RepoProjectDropdown: View {
     let projects: [RepoProject]

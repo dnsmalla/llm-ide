@@ -1,4 +1,5 @@
 import SwiftUI
+import RepoKit
 
 /// GitLab-classic issue list: one two-line row per issue. No drag-to-recolumn —
 /// GitLab's Issues page is a list, and status changes happen in the detail sheet.

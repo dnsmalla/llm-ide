@@ -1,4 +1,5 @@
 import Foundation
+import RepoKit
 
 /// Client-side sort for the issue list. The list pages every issue into memory,
 /// so sorting in-memory is uniform across GitLab + GitHub with no per-provider

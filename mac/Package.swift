@@ -16,9 +16,17 @@ let package = Package(
         .package(url: "https://github.com/dnsmalla/graph-kit.git", from: "1.5.4"),
     ],
     targets: [
+        // Provider-neutral data contract (RepoBackend protocol + value types).
+        // Zero app dependencies — the compiler-enforced boundary the app's
+        // Issues/Gantt views + GitLab/GitHub clients build on.
+        .target(
+            name: "RepoKit",
+            path: "Sources/RepoKit"
+        ),
         .executableTarget(
             name: "LlmIdeMac",
             dependencies: [
+                "RepoKit",
                 "Yams",
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
@@ -40,7 +48,7 @@ let package = Package(
         ),
         .testTarget(
             name: "LlmIdeMacTests",
-            dependencies: ["LlmIdeMac"],
+            dependencies: ["LlmIdeMac", "RepoKit"],
             path: "Tests/LlmIdeMacTests",
             exclude: ["README-skipped-tests.md"]
         )

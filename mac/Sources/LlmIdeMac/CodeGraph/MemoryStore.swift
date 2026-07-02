@@ -12,6 +12,7 @@
 // same type but are added in their respective plans.
 
 import Foundation
+import RepoKit
 
 public struct MemoryStore: Sendable {
     /// Container subdir under the repo where memory files live; the

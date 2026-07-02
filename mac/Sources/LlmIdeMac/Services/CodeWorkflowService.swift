@@ -1,4 +1,5 @@
 import Foundation
+import RepoKit
 import os.log
 
 /// Orchestrates the full GitLab code-change workflow:

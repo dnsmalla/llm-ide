@@ -9,6 +9,7 @@
 // providers here; the provider switch lets dual-configured users choose.
 
 import SwiftUI
+import RepoKit
 
 struct RepoIssuesView: View {
     @EnvironmentObject var theme: ThemeStore

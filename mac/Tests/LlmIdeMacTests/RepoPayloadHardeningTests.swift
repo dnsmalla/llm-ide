@@ -1,4 +1,5 @@
 import Testing
+import RepoKit
 import Foundation
 @testable import LlmIdeMac
 
