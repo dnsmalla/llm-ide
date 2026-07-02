@@ -181,6 +181,23 @@ test('extractMemories drops superseded entries that match no existing fact', asy
   assert.deepEqual(out.superseded, [], 'only verbatim-known facts may be superseded');
 });
 
+test('extractMemories rejects a superseded claim matching a fact past MAX_EXISTING_LISTED (60)', async () => {
+  // buildPrompt only shows the model the first 60 existingFacts; sanitizeSuperseded
+  // must validate against that same slice, not the full on-disk list — otherwise a
+  // claim could exactly factKey-match a fact the model never saw (index 60, 0-based,
+  // i.e. the 61st fact, which falls just past the 60-fact slice).
+  const unseenFact = 'fact number 60 the project uses an unseen legacy tool';
+  const existingFacts = Array.from({ length: 61 }, (_, i) => (
+    i === 60 ? unseenFact : `fact number ${i} distinct project convention`
+  ));
+  const fake = async () => JSON.stringify({ facts: [], superseded: [unseenFact] });
+  const out = await extract.extractMemories({
+    userMessage: 'real question', reply: 'real reply',
+    existingFacts, runClaude: fake, userId: 'u1',
+  });
+  assert.deepEqual(out.superseded, [], 'a fact outside the shown slice must never be accepted as superseded');
+});
+
 // ── reader: chat-memory.md recall + gate ─────────────────────────────
 test('renderGraphifyMemory inlines chat-memory.md for an allow-listed repo', () => {
   reset();

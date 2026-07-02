@@ -75,7 +75,8 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
     const added = meta.added ?? Math.max(0, (Array.isArray(saved) ? saved.length : 0) - existing.length);
     logger.info('project_memory', {
       outcome: 'captured', extracted: facts.length, added,
-      removed: meta.removed ?? 0, evicted: meta.evicted ?? 0,
+      removedCount: meta.removed ?? 0, removedFacts: superseded,
+      evicted: meta.evicted ?? 0,
       extractTokens, total: saved.length, root,
     });
     return saved;

@@ -67,9 +67,12 @@ export function sanitizeFacts(parsed) {
   return out;
 }
 
-// Superseded entries are only trusted when they match an existing fact by
-// factKey (the writer's own normalization) — the model may only retire facts
-// it was SHOWN, never invent one. Returns the canonical stored text so the
+// Superseded entries are only trusted when they match a fact in the list
+// PASSED IN by factKey (the writer's own normalization) — the model may only
+// retire facts it was SHOWN, never invent one. Callers MUST pass the same
+// slice of facts that was actually rendered into the prompt (buildPrompt caps
+// at MAX_EXISTING_LISTED), not the full on-disk list, or a claim could match
+// a fact the model never saw. Returns the canonical stored text so the
 // writer's removal matches exactly. Exported for unit testing.
 export function sanitizeSuperseded(parsed, existingFacts) {
   if (!Array.isArray(parsed)) return [];
@@ -183,6 +186,13 @@ export async function extractMemories({ userMessage, reply, existingFacts, runCl
     if (meta && typeof meta === 'object') { meta.approxTokens = 0; meta.skipped = true; }
     return empty;
   }
+  // Only validate "superseded" claims against facts the model actually SAW —
+  // buildPrompt slices to MAX_EXISTING_LISTED, and sanitizeSuperseded must use
+  // the identical slice, or a claim could exactly factKey-match a fact that
+  // was never shown in this prompt (still requires an exact match, so not a
+  // blind-guess hole, but the "only retire what it was shown" guarantee must
+  // hold against what was ACTUALLY shown, not the full on-disk list).
+  const shownFacts = (Array.isArray(existingFacts) ? existingFacts : []).slice(0, MAX_EXISTING_LISTED);
   try {
     const prompt = buildPrompt({ userMessage, reply, existingFacts });
     const raw = await runClaude(prompt, {
@@ -205,7 +215,7 @@ export async function extractMemories({ userMessage, reply, existingFacts, runCl
       ? parsed.superseded : [];
     return {
       facts: sanitizeFacts(factsArr),
-      superseded: sanitizeSuperseded(supersededArr, existingFacts),
+      superseded: sanitizeSuperseded(supersededArr, shownFacts),
     };
   } catch {
     return empty;
