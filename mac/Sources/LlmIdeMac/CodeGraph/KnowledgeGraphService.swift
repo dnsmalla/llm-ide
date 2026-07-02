@@ -248,16 +248,37 @@ final class KnowledgeGraphService: ObservableObject {
 
     /// Render `doc-notes.md`: the doc/InfiniteBrain content for the combined
     /// memory the agent reads — docs grouped by title, each listing its chunk
-    /// headings. This is the doc half that the memory artifact previously omitted.
+    /// headings. Routing: chunks marked `graph-only: true` (frontmatter) and
+    /// meeting-style chunks (`.noteEvent` — standups/retros are transient noise
+    /// for a coding agent) stay in the GRAPH but are excluded from the agent's
+    /// memory artifact. Declared `related-modules` affinities get their own
+    /// section so the agent knows which docs govern which code.
     nonisolated static func renderDocNotes(docCount: Int, chunks: [MemoryChunk]) -> String {
+        let memoryChunks = chunks.filter { !$0.graphOnly && $0.kind != .noteEvent }
         var out = "# Documentation memory\n\n"
         out += "\(docCount) document\(docCount == 1 ? "" : "s") · "
-        out += "\(chunks.count) section\(chunks.count == 1 ? "" : "s").\n\n"
-        let byDoc = Dictionary(grouping: chunks, by: \.docTitle)
+        out += "\(memoryChunks.count) section\(memoryChunks.count == 1 ? "" : "s").\n\n"
+        let byDoc = Dictionary(grouping: memoryChunks, by: \.docTitle)
         for (docTitle, docChunks) in byDoc.sorted(by: { $0.key < $1.key }) {
             out += "## \(docTitle)\n"
             for chunk in docChunks {
                 out += "- \(chunk.displayHeading)\n"
+            }
+            out += "\n"
+        }
+        // Module affinity: docTitle → declared modules, deduped, sorted.
+        var affinities: [(doc: String, module: String)] = []
+        var seen = Set<String>()
+        for chunk in memoryChunks {
+            for m in chunk.relatedModules {
+                let key = "\(chunk.docTitle)→\(m)"
+                if seen.insert(key).inserted { affinities.append((chunk.docTitle, m)) }
+            }
+        }
+        if !affinities.isEmpty {
+            out += "## Doc ↔ module affinity\n"
+            for a in affinities.sorted(by: { ($0.doc, $0.module) < ($1.doc, $1.module) }) {
+                out += "- \(a.doc) → \(a.module)\n"
             }
             out += "\n"
         }

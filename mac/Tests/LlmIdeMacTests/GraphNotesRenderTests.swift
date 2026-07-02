@@ -66,4 +66,24 @@ final class GraphNotesRenderTests: XCTestCase {
         let b = out.range(of: "kb/router.mjs — imported by 1")!.lowerBound
         XCTAssertLessThan(a, b)
     }
+
+    func testDocNotesExcludesGraphOnlyAndMeetingChunks() {
+        let keep = chunk(id: "c1", body: "arch")
+        let graphOnly = chunk(id: "c2", body: "spec detail", graphOnly: true)
+        let meeting = chunk(id: "c3", body: "standup", kind: .noteEvent)
+        let out = KnowledgeGraphService.renderDocNotes(docCount: 1,
+                                                       chunks: [keep, graphOnly, meeting])
+        XCTAssertTrue(out.contains("1 section"), "only the memory-eligible chunk is counted")
+        XCTAssertFalse(out.contains("2 sections") || out.contains("3 sections"))
+    }
+
+    func testDocNotesRendersModuleAffinity() {
+        let c = MemoryChunk(id: "c1", docURL: URL(fileURLWithPath: "/tmp/adr.md"),
+                            docTitle: "adr-0003-auth", headingPath: ["Decision"],
+                            body: "b", kind: .noteDecision, tags: [], wikiLinks: [],
+                            graphOnly: false, relatedModules: ["server/auth.mjs"])
+        let out = KnowledgeGraphService.renderDocNotes(docCount: 1, chunks: [c])
+        XCTAssertTrue(out.contains("## Doc ↔ module affinity"))
+        XCTAssertTrue(out.contains("adr-0003-auth → server/auth.mjs"))
+    }
 }
