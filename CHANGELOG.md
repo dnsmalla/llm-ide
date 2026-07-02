@@ -36,6 +36,13 @@ yet have published releases so dates are commit-day-of-merge.
   + idle-timer slots.
 - Rate limit profiles, per-user JTI revocation, refresh-token rotation,
   audit log.
+- Opt-in per-route handler timeout budgets for bounded `/kb` POST routes —
+  a stuck handler now returns a clean 504 envelope instead of holding its
+  slot until the 300 s socket cap.
+- HTTP-level test coverage for `/auth/*` routes: register/login,
+  refresh-token rotation-on-use, logout JTI + refresh revocation, password
+  change, vault secret roundtrip, prefs allow-list, per-IP register rate
+  limit.
 
 ### Changed
 
@@ -98,6 +105,8 @@ yet have published releases so dates are commit-day-of-merge.
   a stale token.
 - `setSession` / `clearSession` now reset `_refreshFailedAt` so a post-
   login 401 within 30s isn't gated by a pre-login refresh failure.
+- Shutdown cleanup failures (agent stop, rate-limit bucket save) are now
+  logged instead of silently swallowed.
 - Plugin `agents/*.md` discovery, validation, sandboxed tool whitelist
   (default empty), and `maxIterations` server-side cap of 5.
 - Orphan entries in `plugin-state.json` are pruned automatically on
@@ -118,6 +127,12 @@ yet have published releases so dates are commit-day-of-merge.
 - Plugin install zip pipeline: path-traversal entries rejected
   pre-extraction; staging dir outside plugin root; atomic rename only
   after manifest re-validation; rollback to backup on rename failure.
+- Backup SQL (`VACUUM INTO`) now binds the target path as a parameter
+  instead of interpolating an escaped string (admin endpoint +
+  auto-backup).
+- Shared `AuthRedirectGuard` replaces the duplicated GitHub/GitLab
+  redirect delegates; both clients strip credential headers on
+  cross-host redirects through one audited code path.
 
 ## How to read this file
 
