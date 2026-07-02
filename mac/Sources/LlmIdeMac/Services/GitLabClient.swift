@@ -40,34 +40,7 @@ final class GitLabClient {
 
     private let config: AppConfig
 
-    /// Delegate that strips the `PRIVATE-TOKEN` header on cross-host
-    /// redirects. Prevents a malicious or compromised GitLab instance
-    /// from bouncing us to an attacker-controlled host with our PAT
-    /// still attached.
-    final class RedirectGuardDelegate: NSObject, URLSessionTaskDelegate {
-        func urlSession(_ session: URLSession,
-                        task: URLSessionTask,
-                        willPerformHTTPRedirection response: HTTPURLResponse,
-                        newRequest request: URLRequest,
-                        completionHandler: @escaping (URLRequest?) -> Void) {
-            let originalHost = task.originalRequest?.url?.host?.lowercased()
-            let newHost = request.url?.host?.lowercased()
-            if originalHost != newHost {
-                // Cross-host redirect → drop our auth header before
-                // following. We still allow the redirect (some self-hosted
-                // GitLabs front their API with a CDN that bounces hosts),
-                // we just don't leak the PAT.
-                var stripped = request
-                stripped.setValue(nil, forHTTPHeaderField: "PRIVATE-TOKEN")
-                stripped.setValue(nil, forHTTPHeaderField: "Authorization")
-                completionHandler(stripped)
-            } else {
-                completionHandler(request)
-            }
-        }
-    }
-
-    private static let redirectDelegate = RedirectGuardDelegate()
+    private static let redirectDelegate = AuthRedirectGuard(headersToStrip: ["PRIVATE-TOKEN", "Authorization"])
 
     /// Shared hardened session: redirect-guarded, up to 10 parallel
     /// connections to the same GitLab host (enables concurrent page

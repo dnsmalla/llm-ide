@@ -41,36 +41,11 @@ final class GitHubClient {
         }
     }
 
-    /// Strips the `Authorization` header on cross-host redirects so a
-    /// 3xx bounce from api.github.com can't leak the PAT to a third
-    /// party. Mirrors GitLabClient.RedirectGuardDelegate.
-    final class RedirectGuardDelegate: NSObject, URLSessionTaskDelegate {
-        func urlSession(_ session: URLSession,
-                        task: URLSessionTask,
-                        willPerformHTTPRedirection response: HTTPURLResponse,
-                        newRequest request: URLRequest,
-                        completionHandler: @escaping (URLRequest?) -> Void) {
-            let originalHost = task.originalRequest?.url?.host?.lowercased()
-            let newHost = request.url?.host?.lowercased()
-            // Same host → follow the redirect with auth intact. GitHub
-            // legitimately bounces /user → /users/<login> and similar.
-            if originalHost == newHost {
-                completionHandler(request)
-                return
-            }
-            // Cross-host redirect: strip Authorization so the PAT can't
-            // leak off api.github.com, then let the redirect proceed.
-            var redirected = request
-            redirected.setValue(nil, forHTTPHeaderField: "Authorization")
-            completionHandler(redirected)
-        }
-    }
-
     static let session: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
         return URLSession(configuration: config,
-                          delegate: RedirectGuardDelegate(),
+                          delegate: AuthRedirectGuard(headersToStrip: ["Authorization"]),
                           delegateQueue: nil)
     }()
 
