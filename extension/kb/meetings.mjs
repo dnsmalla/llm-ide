@@ -14,6 +14,7 @@ import {
 } from './db.mjs';
 import { outcomeStats as outcomeStatsImpl } from './outcomes.mjs';
 import { recordActivity } from './activity.mjs';
+import { logger } from '../core/logger.mjs';
 
 const ALLOWED_KINDS = new Set(['action', 'decision', 'blocker']);
 
@@ -98,7 +99,11 @@ export function ingestMeeting(userId, input) {
       title: `Meeting added — ${title}${participantCount ? ` (${participantCount} participants)` : ''}`,
       detail: { title, participantCount, date },
     });
-  } catch {}
+  } catch (activityErr) {
+    // Non-fatal — the meeting and its entities are already committed in the
+    // transaction above; only the activity-feed entry is lost.
+    logger.warn('meeting_activity_record_failed', { meetingId: meeting.id, error: activityErr?.message });
+  }
 
   return { meetingId: meeting.id, entityCount: entityList.length };
 }

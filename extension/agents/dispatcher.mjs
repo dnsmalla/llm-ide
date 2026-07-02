@@ -129,7 +129,11 @@ async function dispatchGithub(userId, { plan, tasks, repo, token, labels = [] })
           detail: { provider: dispatched.provider, url: dispatched.url, number: dispatched.number },
           link: dispatched.url,
         });
-      } catch {}
+      } catch (activityErr) {
+        // Non-fatal — the issue was already created and mergeTaskMeta above
+        // already persisted the dispatch; only the activity-feed entry is lost.
+        log.warn('dispatch_activity_record_failed', { taskId: task.id, error: activityErr?.message });
+      }
       return { taskId: task.id, status: 'ok', ...dispatched };
     } catch (err) {
       // Network error / timeout — free the claim so a retry can re-dispatch.
@@ -201,7 +205,11 @@ async function dispatchBacklog(userId, { plan, tasks, space, projectId, apiKey, 
           detail: { provider: dispatched.provider, url: dispatched.url, number: dispatched.number },
           link: dispatched.url,
         });
-      } catch {}
+      } catch (activityErr) {
+        // Non-fatal — the issue was already created and mergeTaskMeta above
+        // already persisted the dispatch; only the activity-feed entry is lost.
+        log.warn('dispatch_activity_record_failed', { taskId: task.id, error: activityErr?.message });
+      }
       return { taskId: task.id, status: 'ok', ...dispatched };
     } catch (err) {
       releaseTaskDispatchClaim(userId, task.id, DISPATCH_SENTINEL);
@@ -289,7 +297,11 @@ async function dispatchLinear(userId, { plan, tasks, teamId, apiKey, projectId }
           detail: { provider: dispatched.provider, url: dispatched.url, number: dispatched.number },
           link: dispatched.url,
         });
-      } catch {}
+      } catch (activityErr) {
+        // Non-fatal — the issue was already created and mergeTaskMeta above
+        // already persisted the dispatch; only the activity-feed entry is lost.
+        log.warn('dispatch_activity_record_failed', { taskId: task.id, error: activityErr?.message });
+      }
       return { taskId: task.id, status: 'ok', ...dispatched };
     } catch (err) {
       releaseTaskDispatchClaim(userId, task.id, DISPATCH_SENTINEL);
