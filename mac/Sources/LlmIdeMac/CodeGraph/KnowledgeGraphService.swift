@@ -248,11 +248,21 @@ final class KnowledgeGraphService: ObservableObject {
 
     /// Render `doc-notes.md`: the doc/InfiniteBrain content for the combined
     /// memory the agent reads — docs grouped by title, each listing its chunk
-    /// headings. Routing: chunks marked `graph-only: true` (frontmatter) and
-    /// meeting-style chunks (`.noteEvent` — standups/retros are transient noise
-    /// for a coding agent) stay in the GRAPH but are excluded from the agent's
+    /// headings. Routing: chunks marked `graph-only: true` (frontmatter — an
+    /// explicit, author-controlled opt-out) and meeting-style chunks
+    /// (`.noteEvent`) stay in the GRAPH but are excluded from the agent's
     /// memory artifact. Declared `related-modules` affinities get their own
     /// section so the agent knows which docs govern which code.
+    ///
+    /// `.noteEvent` is NOT author-controlled the way `graph-only` is — it's
+    /// graph-kit's automatic per-heading keyword classification
+    /// (`classify(heading:body:)`, matching "meeting"/"standup"/"retro" in a
+    /// heading), and that heading match overrides even an explicit
+    /// frontmatter `type:` for that one chunk. Known limitation: a heading
+    /// like "Meeting: Q3 Architecture Review" gets classified `.noteEvent`
+    /// and dropped from memory even if its body holds durable architectural
+    /// content — authors should avoid "meeting"/"standup"/"retro" in headings
+    /// for content meant to stay in agent memory.
     nonisolated static func renderDocNotes(docCount: Int, chunks: [MemoryChunk]) -> String {
         let memoryChunks = chunks.filter { !$0.graphOnly && $0.kind != .noteEvent }
         var out = "# Documentation memory\n\n"
@@ -328,7 +338,9 @@ final class KnowledgeGraphService: ObservableObject {
         // `backupTo`) resolved against the code inventory — the deterministic
         // replacement for wikilink-only linking (which real docs never use).
         // Inventory keys: node title (symbols, file titles) plus any explicit
-        // relative-path metadata, all lowercased.
+        // relative-path metadata, all lowercased. No separate basename key —
+        // relies on StructureGraphBuilder always titling .file nodes with the
+        // path's basename, so basename mentions already hit codeIdsByTitle.
         var inventory: [String: [String]] = codeIdsByTitle
         for n in code.nodes {
             if let p = n.metadata["source_file"]?.lowercased(), inventory[p] == nil {
