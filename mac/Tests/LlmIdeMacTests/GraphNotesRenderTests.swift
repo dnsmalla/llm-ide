@@ -22,6 +22,19 @@ final class GraphNotesRenderTests: XCTestCase {
         XCTAssertEqual(cross.first?.fromId, "c1")
     }
 
+    func testMergeAddsMentionLinkViaSourceFileMetadataWhenTitleDiffers() {
+        // Title is a symbol name, NOT the file path — so the mention can only
+        // resolve via the metadata["source_file"] inventory augmentation, not
+        // codeIdsByTitle. This is the regression test for the metadata-key bug.
+        let code = CGData(nodes: [CGNode(id: "file:kb/db.mjs", title: "DbModule",
+                                         kind: .file, metadata: ["source_file": "kb/db.mjs"])],
+                          edges: [])
+        let c = chunk(id: "c1", body: "See `kb/db.mjs` for the schema.")
+        let merged = KnowledgeGraphService.merge(code: code, doc: CGData(nodes: [], edges: []), chunks: [c])
+        let cross = merged.edges.filter { $0.kind == .references && $0.toId == "file:kb/db.mjs" }
+        XCTAssertEqual(cross.count, 1, "mention must resolve via metadata[\"source_file\"] since title doesn't match")
+    }
+
     func testMergeStillIgnoresPlainProseWords() {
         let code = CGData(nodes: [CGNode(id: "file:server.mjs", title: "server",
                                          kind: .file, metadata: [:])],

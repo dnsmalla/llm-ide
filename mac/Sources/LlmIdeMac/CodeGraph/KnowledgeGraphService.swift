@@ -264,14 +264,21 @@ final class KnowledgeGraphService: ObservableObject {
         return out
     }
 
-    /// Merge the code and doc graphs into one and add doc→code cross-links:
-    /// a doc chunk that EXPLICITLY references a code symbol via a `[[wikilink]]`
-    /// gets a `references` edge to that code node. Only explicit wikilinks are
-    /// used — a chunk's (heading-derived) title is NOT matched, because generic
-    /// headings like "Config"/"Setup"/"main" collide with code symbol names and
-    /// would manufacture false edges. Node ids are namespaced (code paths/symbols
-    /// vs `doc:`/chunk hashes) so the union can't collide; chunk graph-node ids
-    /// equal `MemoryChunk.id`, so the cross-link `fromId` resolves to a real node.
+    /// Merge the code and doc graphs into one and add doc→code cross-links via
+    /// two mechanisms:
+    ///   1. Wikilinks — a doc chunk that EXPLICITLY references a code symbol
+    ///      via a `[[wikilink]]` gets a `references` edge to that code node.
+    ///      A chunk's (heading-derived) title is NOT matched here, because
+    ///      generic headings like "Config"/"Setup"/"main" collide with code
+    ///      symbol names and would manufacture false edges.
+    ///   2. Mentions — inline backtick spans (`` `kb/db.mjs` ``, `` `backupTo` ``)
+    ///      resolved against a code-entity inventory (title + source-file path)
+    ///      via `DocCodeLinker`. Real-world docs almost never use wikilinks, so
+    ///      this is the mechanism that actually produces cross-links in
+    ///      practice; wikilinks are kept for the rare doc that does use them.
+    /// Node ids are namespaced (code paths/symbols vs `doc:`/chunk hashes) so
+    /// the union can't collide; chunk graph-node ids equal `MemoryChunk.id`,
+    /// so the cross-link `fromId` resolves to a real node.
     nonisolated static func merge(code: CGData, doc: CGData, chunks: [MemoryChunk]) -> CGData {
         var nodes: [CGNode] = []
         var seen = Set<String>()
@@ -303,13 +310,20 @@ final class KnowledgeGraphService: ObservableObject {
         // relative-path metadata, all lowercased.
         var inventory: [String: [String]] = codeIdsByTitle
         for n in code.nodes {
-            if let p = n.metadata["path"]?.lowercased(), inventory[p] == nil {
+            if let p = n.metadata["source_file"]?.lowercased(), inventory[p] == nil {
                 inventory[p, default: []].append(n.id)
             }
         }
         for link in DocCodeLinker.links(chunks: chunks, inventory: inventory) {
             let key = "\(link.chunkID)->\(link.codeNodeID)"
             guard crossSeen.insert(key).inserted else { continue }
+            // NOTE: mention links carry a graduated confidence score
+            // (link.confidence: 0.9 path-shaped / 0.7 symbol-shaped) that
+            // we currently collapse into the same .inferred tier used for
+            // 100%-certain wikilinks, losing that distinction downstream.
+            // Deliberate deferral: CGEdgeConfidence has no tier that maps
+            // cleanly to "heuristically scored, not author-asserted" —
+            // revisit if confidence-sensitive consumers need it.
             edges.append(CGEdge(fromId: link.chunkID, toId: link.codeNodeID,
                                 kind: .references, confidence: .inferred))
         }
