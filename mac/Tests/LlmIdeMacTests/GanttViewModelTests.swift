@@ -49,6 +49,18 @@ struct GanttViewModelTests {
         #expect(!vm.hasUsefulDates(vm.issues[0]))
     }
 
+    // dependencies(of:) surfaces the overlay dependsOn edges (GitHub); empty
+    // when there's no overlay schedule (e.g. GitLab, native dates).
+    @Test func dependenciesComeFromOverlaySchedule() {
+        let vm = GanttViewModel()
+        let sched = LlmIdeAPIClient.IssueSchedule(provider: "github", repo: "o/r",
+                                                  issueNumber: 10, startDate: "2026-07-05",
+                                                  dependsOn: [3, 7])
+        vm.applyIssues([Self.issue(number: 10), Self.issue(number: 20)], schedules: [10: sched])
+        #expect(vm.dependencies(of: vm.issues[0]) == [3, 7])
+        #expect(vm.dependencies(of: vm.issues[1]).isEmpty)   // no schedule → no deps
+    }
+
     // A GitHub issue with no native dueDate but an overlay schedule whose due
     // date is in the past must categorize as "overdue" — category() reads the
     // overlay-aware span, not the native dueDate (which is nil here).

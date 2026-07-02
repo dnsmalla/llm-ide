@@ -120,6 +120,13 @@ final class GanttViewModel: ObservableObject {
 
     func endDate(for issue: RepoIssue) -> Date? { span(for: issue)?.1 }
 
+    /// Issue numbers this issue is blocked by, from the schedule overlay
+    /// (`dependsOn`). Empty for native/GitLab issues (no overlay). Drives the
+    /// Gantt's dependency connector lines.
+    func dependencies(of issue: RepoIssue) -> [Int] {
+        schedules[issue.number]?.dependsOn ?? []
+    }
+
     // MARK: - Category
 
     func category(of issue: RepoIssue) -> String {
