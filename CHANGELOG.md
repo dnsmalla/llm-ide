@@ -43,9 +43,33 @@ yet have published releases so dates are commit-day-of-merge.
   refresh-token rotation-on-use, logout JTI + refresh revocation, password
   change, vault secret roundtrip, prefs allow-list, per-IP register rate
   limit.
+- Doc→code mention links: backticked paths/symbols in project docs now resolve
+  against the code graph's symbol inventory (graph-kit 1.6.0 `DocCodeLinker`) —
+  `graph-notes.md` carries real cross-references instead of an always-empty
+  section, plus a "Dependency hubs" summary of the most-imported code files.
+- Doc routing: `graph-only: true` frontmatter and meeting-style chunks are kept
+  in the interactive code graph but excluded from the agent's memory artifact;
+  `related-modules:` frontmatter renders a "Doc ↔ module affinity" section so
+  the agent knows which docs govern which code.
+- `search-kb` is now a first-class Code Assistant tool (previously
+  implemented and tested, but never wired into the global agent) — the agent
+  can search meetings/decisions/action items directly instead of a costlier
+  `ask-internal` round-trip; the base role prompt now states a clear
+  preference for it on overlapping trigger phrasing.
+- IDF-weighted chat-memory ranking: a query token carried by few stored facts
+  now outweighs one carried by most, instead of raw match-count scoring.
+- Write-time memory supersede: the fact extractor can identify an outdated
+  stored fact (e.g. an npm → pnpm switch) and retire it instead of letting
+  both accumulate until FIFO eviction — validated against only the facts the
+  model actually saw in its prompt, so it can't invent a removal.
 
 ### Changed
 
+- graph-kit bumped to 1.6.0: re-export import edges (including multi-line and
+  `export type` re-exports), fence-aware doc parsing (headings/tags/wikilinks
+  no longer misread fenced code), multi-word-only title matching and generic-
+  tag noise cuts in the doc graph, `graph-only`/`related-modules` routing
+  metadata, and the new `DocCodeLinker` API.
 - `AutoCodeUpdateService` refactored to use `RepoBackend` so GitHub repos
   participate in the hourly auto-issue → branch → PR flow. GitLab default
   page size set to `per_page=100` to avoid premature pagination cutoff.
@@ -112,6 +136,9 @@ yet have published releases so dates are commit-day-of-merge.
 - Orphan entries in `plugin-state.json` are pruned automatically on
   plugin reload — removed plugins no longer leave dead enable rows.
 - Slack webhook URL validated against `hooks.slack.com` host (SSRF gate).
+- `project_memory` log line now includes the actual removed-fact text
+  (`removedFacts`) alongside a count, not just a bare number — a capture that
+  supersedes a stored fact is now forensically debuggable.
 
 ### Security
 
