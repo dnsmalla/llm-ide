@@ -41,4 +41,12 @@ final class AuthRedirectGuardTests: XCTestCase {
             originalHost: nil, newRequest: new, strippingHeaders: ["Authorization"])
         XCTAssertNil(out.value(forHTTPHeaderField: "Authorization"))
     }
+
+    func testEmptyHeaderListStripsNothing() {
+        let new = request(host: "evil.example.com", headers: ["Authorization": "Bearer x"])
+        let out = AuthRedirectGuard.redirectRequest(
+            originalHost: "trusted.example.com", newRequest: new, strippingHeaders: [])
+        XCTAssertEqual(out.value(forHTTPHeaderField: "Authorization"), "Bearer x",
+                       "an empty strip list should be a no-op even on a cross-host redirect")
+    }
 }

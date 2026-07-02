@@ -9,6 +9,12 @@ import Foundation
 /// legitimately bounces /user → /users/<login>; self-hosted GitLabs
 /// bounce through CDNs). Cross-host redirects are still followed —
 /// just without the credential headers.
+///
+/// The host check keys off the task's *original* request host (fixed
+/// for the task's lifetime), not the current hop's host — so a
+/// multi-hop chain that eventually returns to the original host stays
+/// stripped, since each hop's request is built from the previous,
+/// already-stripped one.
 final class AuthRedirectGuard: NSObject, URLSessionTaskDelegate {
     private let headersToStrip: [String]
 
