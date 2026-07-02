@@ -9,7 +9,6 @@
 //   • MR/PR creation (gated on client.canCreateMergeRequests)
 
 import SwiftUI
-import RepoKit
 
 struct RepoIssueDetailSheet: View {
     let issue: RepoIssue

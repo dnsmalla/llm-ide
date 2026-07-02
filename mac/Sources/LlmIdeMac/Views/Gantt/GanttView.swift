@@ -1,5 +1,4 @@
 import SwiftUI
-import RepoKit
 import AppKit
 
 private extension Calendar {
@@ -33,22 +32,15 @@ enum GanttZoom: String, CaseIterable, Identifiable {
 
 struct GanttView: View {
     @ObservedObject var vm: GanttViewModel
-    let backend: RepoBackend
-    let project: RepoProject
-    var projects: [RepoProject] = []
-    var onProjectChange: (RepoProject) -> Void = { _ in }
-    var api: LlmIdeAPIClient? = nil
+    let gitlab: GitLabClient
+    let project: GitLabProject
+    var projects: [GitLabProject] = []
+    var onProjectChange: (GitLabProject) -> Void = { _ in }
 
     @EnvironmentObject var theme: ThemeStore
 
     @State private var zoom: GanttZoom = .week
-    @State private var hoverIssueId: String?
-    /// Issue whose detail/schedule sheet is open (tap a bar/row to reschedule).
-    @State private var detailIssue: RepoIssue?
-    /// Repo labels (with hex colors), loaded alongside the VM so bars can be
-    /// tinted by the issue's first color-bearing label. Kept local to the view
-    /// (rather than on GanttViewModel) since it's presentation-only.
-    @State private var labels: [RepoLabel] = []
+    @State private var hoverIssueId: Int?
 
     private let rowHeight: CGFloat = 32
     private let labelWidth: CGFloat = 320
@@ -70,7 +62,6 @@ struct GanttView: View {
     var body: some View {
         let t = theme.current
         let issues = vm.filteredIssues
-        let rows = vm.rows                 // milestone-swimlane rows (headers + issues)
         let (start, end) = vm.timelineBounds
         let cal = vm.layoutCalendar
         let days = max(1, cal.dateComponents([.day],
@@ -95,13 +86,13 @@ struct GanttView: View {
                 )
             } else {
                 HStack(alignment: .top, spacing: 0) {
-                    leftColumn(rows: rows, t: t)
+                    leftColumn(issues: issues, t: t)
                     Divider().background(t.border)
                     GeometryReader { geo in
                         let viewportDays = max(1, Int(ceil(geo.size.width / dayWidth)))
                         let displayDays  = max(days, viewportDays)
                         let displayWidth = CGFloat(displayDays) * dayWidth
-                        let chartHeight  = max(CGFloat(rows.count) * rowHeight,
+                        let chartHeight  = max(CGFloat(issues.count) * rowHeight,
                                                geo.size.height - headerHeight)
                         let todayOffset  = cal.dateComponents([.day],
                             from: cal.startOfDay(for: start),
@@ -113,7 +104,7 @@ struct GanttView: View {
                                         timelineHeader(start: start, days: displayDays,
                                                        dayWidth: dayWidth, totalWidth: displayWidth, t: t, cal: cal)
                                         Canvas { ctx, size in
-                                            drawChart(ctx: ctx, size: size, rows: rows,
+                                            drawChart(ctx: ctx, size: size, issues: issues,
                                                       start: start, days: displayDays,
                                                       dayWidth: dayWidth, cal: cal, t: t)
                                         }
@@ -141,26 +132,7 @@ struct GanttView: View {
             }
         }
         .background(theme.current.body)
-        .task(id: project.id) {
-            await vm.load(backend: backend, project: project, api: api)
-            labels = (try? await backend.listLabels(projectId: project.id)) ?? []
-        }
-        // Tap a bar/row to reschedule: the shared detail sheet routes due-date
-        // editing to the schedule-overlay editor (GitHub) or a native date
-        // picker (GitLab). Reload on change so bars/dependencies redraw.
-        .sheet(item: $detailIssue) { issue in
-            RepoIssueDetailSheet(
-                issue: issue,
-                client: backend,
-                projectId: project.id,
-                projectFullName: project.fullName,
-                api: api,
-                onIssueChanged: { _ in
-                    Task { await vm.load(backend: backend, project: project, api: api) }
-                },
-                onDismiss: { detailIssue = nil }
-            )
-        }
+        .task(id: project.id) { await vm.load(gitlab: gitlab, projectId: project.id) }
     }
 
     private func scrollToToday(proxy: ScrollViewProxy, offset: Int, displayDays: Int) {
@@ -191,7 +163,7 @@ struct GanttView: View {
                 .foregroundStyle(t.danger.opacity(0.7))
             Text(msg).font(Typography.caption).foregroundStyle(t.danger)
                 .multilineTextAlignment(.center).frame(maxWidth: 360)
-            Button("Retry") { Task { await vm.load(backend: backend, project: project, api: api) } }
+            Button("Retry") { Task { await vm.load(gitlab: gitlab, projectId: project.id) } }
                 .buttonStyle(.borderedProminent).controlSize(.small)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -316,7 +288,7 @@ struct GanttView: View {
 
     // MARK: - Left column
 
-    private func leftColumn(rows: [GanttViewModel.GanttRow], t: Theme) -> some View {
+    private func leftColumn(issues: [GitLabIssue], t: Theme) -> some View {
         VStack(spacing: 0) {
             HStack {
                 SectionLabel("ISSUES", size: 11, tracking: 1.2)
@@ -331,13 +303,8 @@ struct GanttView: View {
 
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 0) {
-                    ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
-                        switch row {
-                        case let .header(ms, count):
-                            laneHeaderRow(milestone: ms, count: count, t: t)
-                        case let .issue(issue):
-                            issueRow(issue: issue, index: idx, t: t)
-                        }
+                    ForEach(Array(issues.enumerated()), id: \.element.id) { idx, issue in
+                        issueRow(issue: issue, index: idx, t: t)
                     }
                 }
             }
@@ -346,29 +313,7 @@ struct GanttView: View {
         .background(t.body)
     }
 
-    /// Milestone lane header in the left column: title, due date, issue count.
-    /// "No milestone" lane uses a neutral label.
-    private func laneHeaderRow(milestone: RepoMilestone?, count: Int, t: Theme) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "flag.fill").font(.system(size: 10)).foregroundStyle(t.accent2)
-            Text(milestone?.title ?? "No milestone")
-                .font(.system(size: 11, weight: .semibold)).foregroundStyle(t.text).lineLimit(1)
-            if let due = milestone?.dueDate {
-                Text(due).font(.system(size: 9, design: .monospaced)).foregroundStyle(t.textMuted)
-            }
-            Spacer(minLength: 4)
-            Text("\(count)").font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(t.textMuted)
-                .padding(.horizontal, 5).padding(.vertical, 1)
-                .background(Capsule().fill(t.surface2))
-        }
-        .padding(.horizontal, Spacing.md)
-        .frame(height: rowHeight, alignment: .center)
-        .background(t.surface.opacity(0.9))
-        .overlay(Rectangle().fill(t.border.opacity(0.6)).frame(height: 1), alignment: .bottom)
-    }
-
-    private func issueRow(issue: RepoIssue, index: Int, t: Theme) -> some View {
+    private func issueRow(issue: GitLabIssue, index: Int, t: Theme) -> some View {
         let overdue = isOverdue(issue)
         return HStack(spacing: 10) {
             Image(systemName: issue.state == "closed"
@@ -378,7 +323,7 @@ struct GanttView: View {
                 .foregroundStyle(issue.state == "closed" ? t.accent3 : (overdue ? t.danger : t.accent2))
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text("#\(issue.number)")
+                    Text("#\(issue.iid)")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(t.textMuted)
                     if let ms = issue.milestone {
@@ -396,17 +341,15 @@ struct GanttView: View {
             // of looking empty.
             HStack(spacing: -6) {
                 if issue.assignees.isEmpty {
-                    UserAvatar(name: issue.author.displayName, id: abs(issue.author.id.hashValue),
-                               avatarUrl: issue.author.avatarUrl, size: 20)
+                    UserAvatar(user: issue.author, size: 20)
                         .opacity(0.45)
                         .overlay(Circle().stroke(t.body, lineWidth: 1.5))
-                        .help("\(issue.author.displayName) (author) — unassigned")
+                        .help("\(issue.author.name) (author) — unassigned")
                 } else {
                     ForEach(issue.assignees.prefix(3)) { a in
-                        UserAvatar(name: a.displayName, id: abs(a.id.hashValue),
-                                   avatarUrl: a.avatarUrl, size: 20)
+                        UserAvatar(user: a, size: 20)
                             .overlay(Circle().stroke(t.body, lineWidth: 1.5))
-                            .help(a.displayName)
+                            .help(a.name)
                     }
                     if issue.assignees.count > 3 {
                         Text("+\(issue.assignees.count - 3)")
@@ -422,7 +365,9 @@ struct GanttView: View {
         .background(index.isMultiple(of: 2) ? t.rowAlt : .clear)
         .contentShape(Rectangle())
         .onHover { h in hoverIssueId = h ? issue.id : nil }
-        .onTapGesture { detailIssue = issue }
+        .onTapGesture {
+            if let url = URL(string: issue.webUrl) { NSWorkspace.shared.open(url) }
+        }
     }
 
     // MARK: - Timeline header
@@ -466,7 +411,7 @@ struct GanttView: View {
     }
 
     private struct MilestoneMarker: Identifiable {
-        let id: String; let dayOffset: Int; let title: String; let tooltip: String
+        let id: Int; let dayOffset: Int; let title: String; let tooltip: String
     }
 
     private func milestoneMarkers(start: Date, days: Int, cal: Calendar) -> [MilestoneMarker] {
@@ -590,36 +535,26 @@ struct GanttView: View {
 
     // MARK: - Canvas chart drawing
 
-    private func drawChart(ctx: GraphicsContext, size: CGSize, rows: [GanttViewModel.GanttRow],
+    private func drawChart(ctx: GraphicsContext, size: CGSize, issues: [GitLabIssue],
                             start: Date, days: Int, dayWidth: CGFloat, cal: Calendar, t: Theme) {
-        // Row backgrounds: lane-header rows get a surface band; issue rows
-        // alternate (zebra), matching the left column.
-        for (i, row) in rows.enumerated() {
+        // Alternating row backgrounds
+        for i in 0..<issues.count {
             let y = CGFloat(i) * rowHeight
-            switch row {
-            case .header:
+            if i.isMultiple(of: 2) {
                 ctx.fill(Path(CGRect(x: 0, y: y, width: size.width, height: rowHeight)),
-                         with: .color(t.surface.opacity(0.9)))
-            case .issue:
-                if i.isMultiple(of: 2) {
-                    ctx.fill(Path(CGRect(x: 0, y: y, width: size.width, height: rowHeight)),
-                             with: .color(t.rowAlt))
-                }
+                         with: .color(t.rowAlt))
             }
         }
 
-        // Weekend tints + grid lines. The tint itself is only meaningful at
-        // .day/.week zoom — at .month zoom each column spans many days so
-        // shading individual weekends would just produce visual noise.
+        // Weekend tints + grid lines
         let meta = vm.dayMeta(start: start, days: days)
-        let showWeekendTint = zoom == .day || zoom == .week
         for i in 0..<days {
             let m = meta[i]
             let date = m.date
             let x = CGFloat(i) * dayWidth
-            if showWeekendTint && m.isWeekend {
+            if m.isWeekend {
                 ctx.fill(Path(CGRect(x: x, y: 0, width: dayWidth, height: size.height)),
-                         with: .color(t.gridLine.opacity(0.35)))
+                         with: .color(t.isDark ? Color.white.opacity(0.025) : Color.black.opacity(0.025)))
             }
             if cal.component(.day, from: date) == 1 {
                 ctx.stroke(
@@ -645,13 +580,8 @@ struct GanttView: View {
                 style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
         }
 
-        // Bar rects keyed by issue number, so dependency connectors (drawn
-        // after all bars) can look up both endpoints regardless of row order.
-        var barRects: [Int: CGRect] = [:]
-
-        // Gantt bars (issue rows only; header rows are lane bands drawn above)
-        for (idx, row) in rows.enumerated() {
-            guard case let .issue(issue) = row else { continue }
+        // Gantt bars
+        for (idx, issue) in issues.enumerated() {
             let s  = vm.startDate(for: issue)
             let e  = vm.endDate(for: issue) ?? cal.dayOffset(1, from: s)
             let offD = max(0, cal.dateComponents([.day],
@@ -664,88 +594,29 @@ struct GanttView: View {
             let h = rowHeight - 12
 
             let over = isOverdue(issue)
-            // Prefer the issue's first color-bearing label (matches the
-            // label chips shown elsewhere); fall back to state-based accent
-            // when the issue has no label or the label name doesn't resolve
-            // to a known repo label.
-            let labelColor = issue.labels.first.flatMap { name in
-                labels.first(where: { $0.name == name }).flatMap { Color(hex: $0.color) }
-            }
-            let barColor: Color = labelColor ?? (issue.state == "closed" ? t.accent3
-                                : (over ? t.danger : t.accent2))
-            let barRect = CGRect(x: x + 1, y: y, width: max(2, w), height: h)
-            barRects[issue.number] = barRect
-            let capsuleRadius = h / 2
-            let bar = RoundedRectangle(cornerRadius: capsuleRadius)
-                .path(in: barRect)
+            let barColor: Color = issue.state == "closed" ? t.accent3
+                                : (over ? t.danger : t.accent2)
+            let bar = RoundedRectangle(cornerRadius: 4)
+                .path(in: CGRect(x: x + 1, y: y, width: max(2, w), height: h))
 
-            // Soft drop shadow: a slightly larger, downward-offset capsule
-            // drawn first so it reads as depth rather than a hard outline.
-            let shadowRect = barRect.offsetBy(dx: 0, dy: 1.5)
-            let shadow = RoundedRectangle(cornerRadius: capsuleRadius).path(in: shadowRect)
-            ctx.fill(shadow, with: .color(t.isDark ? .black.opacity(0.35) : .black.opacity(0.14)))
-
+            ctx.fill(bar, with: .color(.black.opacity(t.isDark ? 0.3 : 0.08)))
             ctx.fill(bar, with: .linearGradient(
                 Gradient(colors: [barColor.opacity(0.95), barColor.opacity(0.70)]),
                 startPoint: .init(x: x, y: y), endPoint: .init(x: x, y: y + h)))
 
+            if issue.milestone != nil {
+                ctx.fill(Path(CGRect(x: x + 1, y: y, width: 3, height: h)), with: .color(t.accent4))
+            }
             ctx.stroke(bar, with: .color(t.isDark ? .white.opacity(0.18) : .black.opacity(0.18)), lineWidth: 0.5)
 
             if w > 60 {
-                let label = Text("#\(issue.number) \(issue.title)")
+                let label = Text("#\(issue.iid) \(issue.title)")
                     .font(.system(size: 10, weight: .medium)).foregroundColor(.white)
                 ctx.draw(ctx.resolve(label), at: CGPoint(x: x + 8, y: y + h / 2), anchor: .leading)
             }
 
             if hoverIssueId == issue.id {
                 ctx.stroke(bar, with: .color(t.text.opacity(0.6)), lineWidth: 1.5)
-            }
-
-            // Milestone diamond at the bar's end x-position, layered on top.
-            if let dStr = issue.milestone?.dueDate, vm.parseDate(dStr) != nil {
-                let cx = barRect.maxX
-                let cy = y + h / 2
-                let half: CGFloat = 4
-                let diamond = Path { p in
-                    p.move(to: CGPoint(x: cx, y: cy - half))
-                    p.addLine(to: CGPoint(x: cx + half, y: cy))
-                    p.addLine(to: CGPoint(x: cx, y: cy + half))
-                    p.addLine(to: CGPoint(x: cx - half, y: cy))
-                    p.closeSubpath()
-                }
-                ctx.fill(diamond, with: .color(t.warning))
-                ctx.stroke(diamond, with: .color(t.isDark ? .black.opacity(0.4) : .white.opacity(0.6)), lineWidth: 0.5)
-            }
-        }
-
-        // Dependency connectors (blocked-by): an elbow line from each blocker's
-        // END to the dependent's START, with a small arrowhead at the dependent.
-        // Both bars must be visible/dated (present in barRects); drawn last so
-        // the lines sit above the bars. dependsOn comes from the schedule
-        // overlay, so this is populated for GitHub (native GitLab has no links).
-        let depColor = t.textMuted.opacity(0.55)
-        for case let .issue(issue) in rows {
-            guard let toRect = barRects[issue.number] else { continue }
-            for depNumber in vm.dependencies(of: issue) {
-                guard let fromRect = barRects[depNumber] else { continue }
-                let start = CGPoint(x: fromRect.maxX, y: fromRect.midY)
-                let end = CGPoint(x: toRect.minX, y: toRect.midY)
-                let midX = end.x >= start.x ? (start.x + end.x) / 2 : start.x + 12
-                let elbow = Path { p in
-                    p.move(to: start)
-                    p.addLine(to: CGPoint(x: midX, y: start.y))   // out from blocker
-                    p.addLine(to: CGPoint(x: midX, y: end.y))     // vertical
-                    p.addLine(to: end)                            // into dependent
-                }
-                ctx.stroke(elbow, with: .color(depColor), lineWidth: 1)
-                // Arrowhead pointing right into the dependent's start edge.
-                let ah: CGFloat = 4
-                let arrow = Path { p in
-                    p.move(to: CGPoint(x: end.x - ah, y: end.y - ah))
-                    p.addLine(to: CGPoint(x: end.x, y: end.y))
-                    p.addLine(to: CGPoint(x: end.x - ah, y: end.y + ah))
-                }
-                ctx.stroke(arrow, with: .color(depColor), lineWidth: 1)
             }
         }
     }
@@ -756,11 +627,9 @@ struct GanttView: View {
         let w = cal.component(.weekday, from: d); return w == 1 || w == 7
     }
 
-    private func isOverdue(_ issue: RepoIssue) -> Bool {
+    private func isOverdue(_ issue: GitLabIssue) -> Bool {
         guard issue.state == "opened" else { return false }
-        // Overlay-aware bar end, not the native dueDate — matches the bar the
-        // user sees and correctly flags GitHub overlay-scheduled issues.
-        return vm.endDate(for: issue).map { $0 < Date() } ?? false
+        return vm.parseDate(issue.dueDate) .map { $0 < Date() } ?? false
     }
 
     private func dayLabel(_ d: Date) -> String {

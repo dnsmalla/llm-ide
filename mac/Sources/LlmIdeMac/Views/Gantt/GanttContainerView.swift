@@ -1,76 +1,38 @@
 import SwiftUI
-import RepoKit
 
-/// Coordinator that owns the backend/project picker, then renders the full
-/// Gantt chart once a project is selected. Mirrors RepoIssuesView's
-/// provider/project handling so both GitLab (native dates) and GitHub
-/// (scheduling overlay) render through the same rich chart.
+/// Coordinator that owns the project picker, then renders the full Gantt chart
+/// once a project is selected.  Mirrors the project-selection flow in IssueBoardView
+/// so the UX is consistent across the Issues and Gantt sections.
 struct GanttContainerView: View {
-    var api: LlmIdeAPIClient? = nil
-
     @EnvironmentObject var theme: ThemeStore
-    @EnvironmentObject var config: AppConfig
     @StateObject private var vm = GanttViewModel()
 
-    // ── Backend selection
-    @State private var activeBackend: RepoBackendKind = .gitlab
+    private let gitlab = GitLabClient()
+    private let config  = AppConfig.shared
 
-    // ── Project state (per backend)
-    @State private var projects: [RepoProject] = []
-    @State private var selectedProject: RepoProject?
-    @State private var projectsLoading = false
-    @State private var projectsError: String?
+    @State private var projects: [GitLabProject] = []
+    @State private var selectedProject: GitLabProject?
+    @State private var isLoadingProjects = false
+    @State private var projectError: String?
     @State private var searchText = ""
 
-    private var availableBackends: [RepoBackendKind] {
-        var out: [RepoBackendKind] = []
-        if !config.gitLabToken.isEmpty { out.append(.gitlab) }
-        if !config.gitHubToken.isEmpty { out.append(.github) }
-        return out
-    }
-
-    private var currentClient: RepoBackend {
-        switch activeBackend {
-        case .gitlab: return GitLabClient(config: config)
-        case .github: return GitHubClient(config: config)
-        }
-    }
-
     var body: some View {
-        mainContent
-    }
-
-    @ViewBuilder
-    private var mainContent: some View {
-        Group {
-            if availableBackends.isEmpty {
-                notConfigured
-            } else if let project = selectedProject {
-                GanttView(
-                    vm: vm,
-                    backend: currentClient,
-                    project: project,
-                    projects: projects,
-                    onProjectChange: { p in selectedProject = p },
-                    api: api
-                )
-            } else {
-                projectPickerView(t: theme.current)
-            }
+        let t = theme.current
+        if let project = selectedProject {
+            GanttView(
+                vm: vm,
+                gitlab: gitlab,
+                project: project,
+                projects: projects,
+                onProjectChange: { p in
+                    selectedProject = p
+                    config.gitLabLastProjectId = "\(p.id)"
+                }
+            )
+        } else {
+            projectPickerView(t: t)
+                .task { await loadProjects() }
         }
-        .task { await initialLoad() }
-        .onChange(of: activeBackend) { _, _ in Task { await switchBackend() } }
-    }
-
-    @ViewBuilder
-    private var notConfigured: some View {
-        EmptyStateView(
-            icon: "lock.shield",
-            title: "No repository connected",
-            message: "Add a GitLab or GitHub Personal Access Token in Settings to start a timeline.",
-            actionLabel: "Open Settings",
-            action: { NotificationCenter.default.post(name: .openSettings, object: nil) }
-        )
     }
 
     // MARK: - Project picker
@@ -91,17 +53,28 @@ struct GanttContainerView: View {
                         .foregroundStyle(t.textMuted)
                 }
                 Spacer()
-                if availableBackends.count > 1 {
-                    backendPicker
-                }
             }
             .padding(.horizontal, 32)
             .padding(.top, 32)
             .padding(.bottom, 20)
 
-            if projectsLoading {
+            if config.gitLabToken.isEmpty {
+                let hasGitHub = !config.gitHubToken.isEmpty
+                EmptyStateView(
+                    icon: hasGitHub ? "rectangle.connected.to.line.below" : "key.slash",
+                    title: hasGitHub ? "Gantt requires GitLab" : "GitLab not configured",
+                    message: hasGitHub
+                        ? "You have GitHub configured, but Gantt currently only supports GitLab projects.\n\nGitHub support is planned (it needs a shared backend across both providers). Add a GitLab PAT in Settings → GitLab to use this view."
+                        : "Add your Personal Access Token in Settings → GitLab to connect.",
+                    actionLabel: "Open Settings",
+                    action: { NotificationCenter.default.post(name: .openSettings, object: nil) }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if isLoadingProjects {
                 EmptyStateView(icon: "arrow.clockwise", title: "Loading projects…")
-            } else if let err = projectsError, projects.isEmpty {
+            } else if let err = projectError, projects.isEmpty {
+                // Total failure (nothing resolved) — nothing useful to show
+                // underneath, so this replaces the whole pane.
                 EmptyStateView(
                     icon: "exclamationmark.triangle",
                     title: "Failed to load projects",
@@ -110,15 +83,12 @@ struct GanttContainerView: View {
                     action: { Task { await loadProjects() } },
                     iconColor: t.danger
                 )
-            } else if projects.isEmpty {
-                EmptyStateView(
-                    icon: "calendar.badge.exclamationmark",
-                    title: "No projects found",
-                    message: "No \(activeBackend.displayName) projects are available for this account."
-                )
             } else {
+                // Search + project list. A partial-load error (some saved
+                // projects resolved, others didn't) surfaces as a banner here
+                // rather than hiding the projects that DID load.
                 VStack(spacing: 0) {
-                    if let err = projectsError {
+                    if let err = projectError {
                         HStack(spacing: 6) {
                             Image(systemName: "exclamationmark.triangle")
                                 .foregroundStyle(t.danger)
@@ -144,11 +114,12 @@ struct GanttContainerView: View {
                     List(filteredProjects) { p in
                         Button {
                             selectedProject = p
+                            config.gitLabLastProjectId = "\(p.id)"
                         } label: {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(p.name)
                                     .font(.body.weight(.medium))
-                                Text(p.fullName)
+                                Text(p.nameWithNamespace)
                                     .font(.caption)
                                     .foregroundStyle(t.textMuted)
                             }
@@ -165,67 +136,77 @@ struct GanttContainerView: View {
         .background(t.body)
     }
 
-    private var backendPicker: some View {
-        let t = theme.current
-        return HStack(spacing: 4) {
-            ForEach(availableBackends, id: \.self) { backend in
-                let active = (backend == activeBackend)
-                Button {
-                    if activeBackend != backend { activeBackend = backend }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: backend.sfSymbol).font(.system(size: 10))
-                        Text(backend.displayName).font(Typography.captionStrong)
-                    }
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 7)
-                        .fill(active ? t.surface2.opacity(0.7) : Color.clear))
-                    .foregroundStyle(active ? t.text : t.textMuted)
-                    .opacity(active ? 1 : 0.7)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private var filteredProjects: [RepoProject] {
+    private var filteredProjects: [GitLabProject] {
         guard !searchText.isEmpty else { return projects }
         let q = searchText.lowercased()
-        return projects.filter { $0.fullName.lowercased().contains(q) }
+        return projects.filter { $0.nameWithNamespace.lowercased().contains(q) }
     }
 
     // MARK: - Load
 
-    private func initialLoad() async {
-        // Pick the most useful default: if only GitHub is set up, jump
-        // straight to it; otherwise prefer GitLab (legacy default).
-        if availableBackends == [.github] { activeBackend = .github }
-        else if !availableBackends.contains(activeBackend) {
-            activeBackend = availableBackends.first ?? .gitlab
-        }
-        await switchBackend()
-    }
-
-    private func switchBackend() async {
-        projects = []
-        selectedProject = nil
-        await loadProjects()
-    }
-
     private func loadProjects() async {
-        guard availableBackends.contains(activeBackend) else { return }
+        guard !config.gitLabToken.isEmpty else { return }
         guard projects.isEmpty else { return }  // already loaded — skip on tab re-visit
-        projectsLoading = true
-        projectsError = nil
-        defer { projectsLoading = false }
+        isLoadingProjects = true
+        projectError = nil
+        defer { isLoadingProjects = false }
         do {
-            let fetched = try await currentClient.listProjects()
-            projects = fetched.sorted {
-                $0.fullName.localizedCaseInsensitiveCompare($1.fullName) == .orderedAscending
+            let allSaved = config.gitLabSavedProjects
+            if !allSaved.isEmpty {
+                // Resolve any saved projects that don't have an ID yet
+                for sp in allSaved where sp.resolvedId == nil && !sp.url.isEmpty {
+                    if let project = try? await gitlab.resolveProject(rawURL: sp.url),
+                       let idx = config.gitLabSavedProjects.firstIndex(where: { $0.id == sp.id }) {
+                        config.gitLabSavedProjects[idx].resolvedId = project.id
+                        if config.gitLabSavedProjects[idx].displayName.isEmpty {
+                            config.gitLabSavedProjects[idx].displayName = project.name
+                        }
+                        if sp.url.hasPrefix("http"), let u = URL(string: sp.url),
+                           let scheme = u.scheme, let host = u.host {
+                            config.gitLabBaseURL = "\(scheme)://\(host)"
+                        }
+                    }
+                }
+
+                let resolved = config.gitLabSavedProjects.filter { $0.resolvedId != nil }
+                guard !resolved.isEmpty else {
+                    projectError = "Could not resolve saved projects. Check the URLs in Settings → GitLab."
+                    return
+                }
+
+                let loaded: [GitLabProject] = try await withThrowingTaskGroup(of: GitLabProject?.self) { group in
+                    for sp in resolved {
+                        group.addTask { try? await self.gitlab.getProject(id: sp.resolvedId!) }
+                    }
+                    var result: [GitLabProject] = []
+                    for try await p in group { if let p { result.append(p) } }
+                    return result
+                }
+                projects = resolved.compactMap { sp in loaded.first { $0.id == sp.resolvedId } }
+                // Each getProject() failure is swallowed above (`try?`) so a
+                // single 404/network blip doesn't blank the whole list — but
+                // surface the gap instead of letting a saved project vanish
+                // with no explanation.
+                if projects.count < resolved.count {
+                    let missing = resolved.count - projects.count
+                    projectError = "Loaded \(projects.count) of \(resolved.count) saved projects — \(missing) failed to load."
+                }
+                let activeId = config.gitLabActiveProjectId
+                if let activeId, let match = projects.first(where: { $0.id == activeId }) {
+                    selectedProject = match
+                } else {
+                    selectedProject = projects.first
+                }
+            } else {
+                // No saved projects configured — list all
+                projects = try await gitlab.listProjects()
+                if selectedProject == nil, let lastId = Int(config.gitLabLastProjectId),
+                   let match = projects.first(where: { $0.id == lastId }) {
+                    selectedProject = match
+                }
             }
-            if selectedProject == nil { selectedProject = projects.first }
         } catch {
-            projectsError = error.localizedDescription
+            projectError = error.localizedDescription
         }
     }
 }

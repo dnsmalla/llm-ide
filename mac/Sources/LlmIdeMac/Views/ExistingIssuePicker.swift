@@ -1,5 +1,4 @@
 import SwiftUI
-import RepoKit
 
 /// Picker shown from `CodeWorkflowSheet` / `QuickFixSheet` so users can run
 /// the Review Code workflow against an already-open issue instead of creating

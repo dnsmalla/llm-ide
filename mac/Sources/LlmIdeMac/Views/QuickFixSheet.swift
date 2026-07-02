@@ -1,5 +1,4 @@
 import SwiftUI
-import RepoKit
 import AppKit
 
 /// Single-screen end-to-end Code workflow for small fixes.

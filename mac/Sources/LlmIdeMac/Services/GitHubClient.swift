@@ -1,5 +1,4 @@
 import Foundation
-import RepoKit
 
 /// Thin async/await wrapper around GitHub's REST API (api.github.com).
 /// All calls authenticate via Bearer token (PAT or fine-grained token).

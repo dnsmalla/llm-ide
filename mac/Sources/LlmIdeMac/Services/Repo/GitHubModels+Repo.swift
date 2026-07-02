@@ -9,7 +9,6 @@
 // for GitHub, same as GitLab.
 
 import Foundation
-import RepoKit
 
 // MARK: - Wire types
 
