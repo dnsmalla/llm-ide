@@ -48,4 +48,14 @@ struct GanttViewModelTests {
         vm.applyIssues([Self.issue(number: 3, dueDate: nil)], schedules: [:])
         #expect(!vm.hasUsefulDates(vm.issues[0]))
     }
+
+    // An overlay with a present-but-unparseable date string (and no other date)
+    // must NOT crash on a force-unwrap — it falls through to "not useful".
+    @Test func malformedOverlayDateDoesNotCrash() {
+        let vm = GanttViewModel()
+        let bad = LlmIdeAPIClient.IssueSchedule(provider: "github", repo: "o/r",
+                                                issueNumber: 4, startDate: "not-a-date")
+        vm.applyIssues([Self.issue(number: 4, dueDate: nil)], schedules: [4: bad])
+        #expect(!vm.hasUsefulDates(vm.issues[0]))   // must return, not trap
+    }
 }

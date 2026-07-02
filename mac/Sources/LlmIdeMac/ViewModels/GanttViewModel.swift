@@ -61,12 +61,17 @@ final class GanttViewModel: ObservableObject {
 
     /// (start, end) for an issue, or nil when it has no usable dates.
     private func span(for issue: RepoIssue) -> (Date, Date)? {
-        if let sched = schedules[issue.number], sched.startDate != nil || sched.dueDate != nil {
-            let width = (sched.estimateDays ?? 7) * 86_400
+        if let sched = schedules[issue.number] {
+            // Guard on the PARSED dates, not the raw strings: a present-but-
+            // unparseable overlay date (bad format) would otherwise pass a
+            // string-nil check and then crash on the d0!/s0! force-unwrap.
             let s0 = ymd(sched.startDate), d0 = ymd(sched.dueDate)
-            let s = s0 ?? d0!.addingTimeInterval(-width)
-            let e = d0 ?? s0!.addingTimeInterval(width)
-            return (s, e)
+            if s0 != nil || d0 != nil {
+                let width = (sched.estimateDays ?? 7) * 86_400
+                let s = s0 ?? d0!.addingTimeInterval(-width)   // safe: d0 non-nil when s0 is nil
+                let e = d0 ?? s0!.addingTimeInterval(width)    // safe: s0 non-nil when d0 is nil
+                return (s, e)
+            }
         }
         // Native (GitLab): due from issue.dueDate or milestone.dueDate.
         if let due = ymd(issue.dueDate) ?? ymd(issue.milestone?.dueDate) {
