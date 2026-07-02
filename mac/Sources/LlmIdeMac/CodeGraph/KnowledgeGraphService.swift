@@ -226,6 +226,23 @@ final class KnowledgeGraphService: ObservableObject {
             }
             out += "\n"
         }
+
+        // Dependency hubs: the most-imported code nodes. The import graph is
+        // the one thing the graph knows that neither repo.md prose nor doc
+        // notes carry — surfacing the top of it lets the agent see cross-module
+        // structure without a graph query.
+        var inDegree: [String: Int] = [:]
+        for e in code.edges where e.kind == .imports {
+            inDegree[e.toId, default: 0] += 1
+        }
+        let hubs = inDegree.sorted { ($0.value, $1.key) > ($1.value, $0.key) }.prefix(10)
+        if !hubs.isEmpty {
+            out += "## Dependency hubs\n"
+            for (id, count) in hubs {
+                out += "- \(codeTitle[id] ?? id) — imported by \(count)\n"
+            }
+            out += "\n"
+        }
         return out
     }
 
@@ -277,6 +294,24 @@ final class KnowledgeGraphService: ObservableObject {
                                         kind: .references, confidence: .inferred))
                 }
             }
+        }
+
+        // Mention links: shape-qualified backtick mentions (`kb/db.mjs`,
+        // `backupTo`) resolved against the code inventory — the deterministic
+        // replacement for wikilink-only linking (which real docs never use).
+        // Inventory keys: node title (symbols, file titles) plus any explicit
+        // relative-path metadata, all lowercased.
+        var inventory: [String: [String]] = codeIdsByTitle
+        for n in code.nodes {
+            if let p = n.metadata["path"]?.lowercased(), inventory[p] == nil {
+                inventory[p, default: []].append(n.id)
+            }
+        }
+        for link in DocCodeLinker.links(chunks: chunks, inventory: inventory) {
+            let key = "\(link.chunkID)->\(link.codeNodeID)"
+            guard crossSeen.insert(key).inserted else { continue }
+            edges.append(CGEdge(fromId: link.chunkID, toId: link.codeNodeID,
+                                kind: .references, confidence: .inferred))
         }
         return CGData(nodes: nodes, edges: edges)
     }
