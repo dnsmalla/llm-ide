@@ -148,6 +148,58 @@ final class GanttViewModel: ObservableObject {
 
     // MARK: - Filtering
 
+    /// A single vertical slot in the Gantt: either a milestone lane header or
+    /// an issue row. Both sides (left column + canvas) iterate the same
+    /// sequence at a uniform row height so they align.
+    enum GanttRow: Identifiable {
+        case header(RepoMilestone?, count: Int)
+        case issue(RepoIssue)
+        var id: String {
+            switch self {
+            case .header(let ms, _): return "hdr-\(ms?.id ?? "none")"
+            case .issue(let i):      return "iss-\(i.id)"
+            }
+        }
+    }
+
+    /// `filteredIssues` grouped into milestone swimlanes: each lane is a header
+    /// row followed by its issue rows. Lanes are ordered by milestone due date
+    /// (undated milestones after dated ones); the "no milestone" lane is always
+    /// last. Issue order within a lane preserves `filteredIssues` order.
+    var rows: [GanttRow] {
+        let issues = filteredIssues
+        // Preserve first-seen order of milestones while grouping.
+        var order: [String] = []                 // milestone id, "" == none
+        var byMilestone: [String: [RepoIssue]] = [:]
+        var milestoneById: [String: RepoMilestone] = [:]
+        for issue in issues {
+            let key = issue.milestone?.id ?? ""
+            if byMilestone[key] == nil { order.append(key); byMilestone[key] = [] }
+            byMilestone[key]?.append(issue)
+            if let ms = issue.milestone { milestoneById[key] = ms }
+        }
+        // Sort lanes: dated milestones by due date asc, then undated milestones,
+        // then the no-milestone lane ("") always last.
+        let sortedKeys = order.sorted { a, b in
+            if a == "" { return false }          // none last
+            if b == "" { return true }
+            let da = milestoneById[a]?.dueDate, db = milestoneById[b]?.dueDate
+            switch (da, db) {
+            case let (x?, y?): return x < y      // "yyyy-MM-dd" lexical = chronological
+            case (nil, _?):    return false      // undated after dated
+            case (_?, nil):    return true
+            case (nil, nil):   return a < b      // stable
+            }
+        }
+        var out: [GanttRow] = []
+        for key in sortedKeys {
+            let laneIssues = byMilestone[key] ?? []
+            out.append(.header(milestoneById[key], count: laneIssues.count))
+            out.append(contentsOf: laneIssues.map { .issue($0) })
+        }
+        return out
+    }
+
     var filteredIssues: [RepoIssue] {
         issues.filter { issue in
             if hideBlankRows && !hasUsefulDates(issue) { return false }

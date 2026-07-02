@@ -67,6 +67,7 @@ struct GanttView: View {
     var body: some View {
         let t = theme.current
         let issues = vm.filteredIssues
+        let rows = vm.rows                 // milestone-swimlane rows (headers + issues)
         let (start, end) = vm.timelineBounds
         let cal = vm.layoutCalendar
         let days = max(1, cal.dateComponents([.day],
@@ -91,13 +92,13 @@ struct GanttView: View {
                 )
             } else {
                 HStack(alignment: .top, spacing: 0) {
-                    leftColumn(issues: issues, t: t)
+                    leftColumn(rows: rows, t: t)
                     Divider().background(t.border)
                     GeometryReader { geo in
                         let viewportDays = max(1, Int(ceil(geo.size.width / dayWidth)))
                         let displayDays  = max(days, viewportDays)
                         let displayWidth = CGFloat(displayDays) * dayWidth
-                        let chartHeight  = max(CGFloat(issues.count) * rowHeight,
+                        let chartHeight  = max(CGFloat(rows.count) * rowHeight,
                                                geo.size.height - headerHeight)
                         let todayOffset  = cal.dateComponents([.day],
                             from: cal.startOfDay(for: start),
@@ -109,7 +110,7 @@ struct GanttView: View {
                                         timelineHeader(start: start, days: displayDays,
                                                        dayWidth: dayWidth, totalWidth: displayWidth, t: t, cal: cal)
                                         Canvas { ctx, size in
-                                            drawChart(ctx: ctx, size: size, issues: issues,
+                                            drawChart(ctx: ctx, size: size, rows: rows,
                                                       start: start, days: displayDays,
                                                       dayWidth: dayWidth, cal: cal, t: t)
                                         }
@@ -296,7 +297,7 @@ struct GanttView: View {
 
     // MARK: - Left column
 
-    private func leftColumn(issues: [RepoIssue], t: Theme) -> some View {
+    private func leftColumn(rows: [GanttViewModel.GanttRow], t: Theme) -> some View {
         VStack(spacing: 0) {
             HStack {
                 SectionLabel("ISSUES", size: 11, tracking: 1.2)
@@ -311,14 +312,41 @@ struct GanttView: View {
 
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 0) {
-                    ForEach(Array(issues.enumerated()), id: \.element.id) { idx, issue in
-                        issueRow(issue: issue, index: idx, t: t)
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
+                        switch row {
+                        case let .header(ms, count):
+                            laneHeaderRow(milestone: ms, count: count, t: t)
+                        case let .issue(issue):
+                            issueRow(issue: issue, index: idx, t: t)
+                        }
                     }
                 }
             }
         }
         .frame(width: labelWidth)
         .background(t.body)
+    }
+
+    /// Milestone lane header in the left column: title, due date, issue count.
+    /// "No milestone" lane uses a neutral label.
+    private func laneHeaderRow(milestone: RepoMilestone?, count: Int, t: Theme) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "flag.fill").font(.system(size: 10)).foregroundStyle(t.accent2)
+            Text(milestone?.title ?? "No milestone")
+                .font(.system(size: 11, weight: .semibold)).foregroundStyle(t.text).lineLimit(1)
+            if let due = milestone?.dueDate {
+                Text(due).font(.system(size: 9, design: .monospaced)).foregroundStyle(t.textMuted)
+            }
+            Spacer(minLength: 4)
+            Text("\(count)").font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(t.textMuted)
+                .padding(.horizontal, 5).padding(.vertical, 1)
+                .background(Capsule().fill(t.surface2))
+        }
+        .padding(.horizontal, Spacing.md)
+        .frame(height: rowHeight, alignment: .center)
+        .background(t.surface.opacity(0.9))
+        .overlay(Rectangle().fill(t.border.opacity(0.6)).frame(height: 1), alignment: .bottom)
     }
 
     private func issueRow(issue: RepoIssue, index: Int, t: Theme) -> some View {
@@ -545,14 +573,21 @@ struct GanttView: View {
 
     // MARK: - Canvas chart drawing
 
-    private func drawChart(ctx: GraphicsContext, size: CGSize, issues: [RepoIssue],
+    private func drawChart(ctx: GraphicsContext, size: CGSize, rows: [GanttViewModel.GanttRow],
                             start: Date, days: Int, dayWidth: CGFloat, cal: Calendar, t: Theme) {
-        // Alternating row backgrounds
-        for i in 0..<issues.count {
+        // Row backgrounds: lane-header rows get a surface band; issue rows
+        // alternate (zebra), matching the left column.
+        for (i, row) in rows.enumerated() {
             let y = CGFloat(i) * rowHeight
-            if i.isMultiple(of: 2) {
+            switch row {
+            case .header:
                 ctx.fill(Path(CGRect(x: 0, y: y, width: size.width, height: rowHeight)),
-                         with: .color(t.rowAlt))
+                         with: .color(t.surface.opacity(0.9)))
+            case .issue:
+                if i.isMultiple(of: 2) {
+                    ctx.fill(Path(CGRect(x: 0, y: y, width: size.width, height: rowHeight)),
+                             with: .color(t.rowAlt))
+                }
             }
         }
 
@@ -597,8 +632,9 @@ struct GanttView: View {
         // after all bars) can look up both endpoints regardless of row order.
         var barRects: [Int: CGRect] = [:]
 
-        // Gantt bars
-        for (idx, issue) in issues.enumerated() {
+        // Gantt bars (issue rows only; header rows are lane bands drawn above)
+        for (idx, row) in rows.enumerated() {
+            guard case let .issue(issue) = row else { continue }
             let s  = vm.startDate(for: issue)
             let e  = vm.endDate(for: issue) ?? cal.dayOffset(1, from: s)
             let offD = max(0, cal.dateComponents([.day],
@@ -671,7 +707,7 @@ struct GanttView: View {
         // the lines sit above the bars. dependsOn comes from the schedule
         // overlay, so this is populated for GitHub (native GitLab has no links).
         let depColor = t.textMuted.opacity(0.55)
-        for issue in issues {
+        for case let .issue(issue) in rows {
             guard let toRect = barRects[issue.number] else { continue }
             for depNumber in vm.dependencies(of: issue) {
                 guard let fromRect = barRects[depNumber] else { continue }
