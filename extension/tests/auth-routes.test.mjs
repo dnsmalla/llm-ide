@@ -192,3 +192,111 @@ test('POST /auth/register is rate-limited per IP (429 + Retry-After)', async () 
   assert.ok(got429, 'expected a 429 within 5 attempts from one IP');
   assert.ok(Number(got429.headers['Retry-After']) > 0, 'Retry-After header present');
 });
+
+// ---- authenticated routes ------------------------------------------------
+// handleAuth expects req.user pre-set by the authenticate middleware;
+// we set it directly (unit boundary is the route handler, not the JWT).
+
+test('authed routes reject requests without req.user (401 guard)', async () => {
+  const res = await callAuth({ method: 'GET', url: '/auth/me' });
+  assert.equal(res.statusCode, 401);
+  assert.equal(res.json().error.code, 'AUTH_REQUIRED');
+});
+
+test('GET /auth/me returns the profile; unknown id → 404', async () => {
+  const { user } = await registerAndLogin();
+  const ok = await callAuth({ method: 'GET', url: '/auth/me', user: { id: user.id } });
+  assert.equal(ok.statusCode, 200);
+  assert.equal(ok.json().email, user.email);
+
+  const gone = await callAuth({ method: 'GET', url: '/auth/me', user: { id: 'u_does_not_exist' } });
+  assert.equal(gone.statusCode, 404);
+});
+
+test('POST /auth/logout revokes the access-token jti and all refresh tokens', async () => {
+  const { user, refreshToken, accessToken } = await registerAndLogin();
+  // Extract jti + exp from the real access token payload.
+  const payload = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url').toString());
+  assert.ok(payload.jti, 'access token carries a jti');
+
+  const res = await callAuth({
+    method: 'POST', url: '/auth/logout',
+    user: { id: user.id, jti: payload.jti, tokenExp: payload.exp },
+    body: {},
+  });
+  assert.equal(res.statusCode, 200, res._body);
+
+  assert.equal(kb.isJtiRevoked(payload.jti), true, 'jti revoked');
+
+  const refresh = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken } });
+  assert.equal(refresh.statusCode, 401, 'bearer-only logout revokes ALL refresh tokens (fail-safe)');
+});
+
+test('POST /auth/me/password changes the password and old creds stop working', async () => {
+  const { user, email } = await registerAndLogin();
+  const newPassword = 'EvenMoreCorrectStaple';
+  const res = await callAuth({
+    method: 'POST', url: '/auth/me/password',
+    user: { id: user.id },
+    body: { currentPassword: PASSWORD, newPassword },
+  });
+  assert.equal(res.statusCode, 200, res._body);
+
+  const oldLogin = await callAuth({ method: 'POST', url: '/auth/login', body: { email, password: PASSWORD } });
+  assert.equal(oldLogin.statusCode, 401);
+  const newLogin = await callAuth({ method: 'POST', url: '/auth/login', body: { email, password: newPassword } });
+  assert.equal(newLogin.statusCode, 200);
+});
+
+test('POST /auth/me/password with wrong current password → 401, audit-safe', async () => {
+  const { user } = await registerAndLogin();
+  const res = await callAuth({
+    method: 'POST', url: '/auth/me/password',
+    user: { id: user.id },
+    body: { currentPassword: 'nope', newPassword: 'WhateverItWontApply1' },
+  });
+  assert.equal(res.statusCode, 401);
+});
+
+test('vault secrets: set → list → delete roundtrip; unknown key refused', async () => {
+  const { user } = await registerAndLogin();
+  const u = { id: user.id };
+
+  const set = await callAuth({ method: 'POST', url: '/auth/me/secrets', user: u, body: { key: 'github.token', value: 'ghp_test_value' } });
+  assert.equal(set.statusCode, 200, set._body);
+
+  let list = await callAuth({ method: 'GET', url: '/auth/me/secrets', user: u });
+  assert.equal(list.statusCode, 200);
+  assert.ok(list.json().secrets.some((s) => s.key === 'github.token'));
+
+  const bad = await callAuth({ method: 'POST', url: '/auth/me/secrets', user: u, body: { key: 'evil.key', value: 'x' } });
+  assert.equal(bad.statusCode, 400);
+
+  // Empty value deletes.
+  const del = await callAuth({ method: 'POST', url: '/auth/me/secrets', user: u, body: { key: 'github.token', value: null } });
+  assert.equal(del.statusCode, 200);
+  list = await callAuth({ method: 'GET', url: '/auth/me/secrets', user: u });
+  assert.equal(list.json().secrets.length, 0);
+});
+
+test('prefs: PUT stores only allow-listed keys, GET returns them', async () => {
+  const { user } = await registerAndLogin();
+  const u = { id: user.id };
+  // Allow-list is {language, bilingual} (kb/user.mjs ALLOWED_UI_PREF_KEYS).
+  const put = await callAuth({ method: 'PUT', url: '/auth/me/prefs', user: u, body: { language: 'ja', bilingual: true, evil: 'dropped' } });
+  assert.equal(put.statusCode, 200, put._body);
+  const prefs = put.json().prefs;
+  assert.equal(prefs.language, 'ja');
+  assert.equal(prefs.bilingual, true);
+  assert.equal(prefs.evil, undefined, 'unknown pref keys are silently dropped');
+
+  const get = await callAuth({ method: 'GET', url: '/auth/me/prefs', user: u });
+  assert.equal(get.json().prefs.language, 'ja');
+});
+
+test('unknown authed auth-route → 404 envelope', async () => {
+  const { user } = await registerAndLogin();
+  const res = await callAuth({ method: 'POST', url: '/auth/definitely-not-a-route', user: { id: user.id } });
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.json().error.code, 'NOT_FOUND');
+});
