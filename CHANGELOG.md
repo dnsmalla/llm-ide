@@ -1,10 +1,11 @@
 # Changelog
 
 All notable changes to LLM IDE are tracked here. Format loosely follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project does not
-yet have published releases so dates are commit-day-of-merge.
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-07-02
 
 ### Added
 
