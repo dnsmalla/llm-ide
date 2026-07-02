@@ -42,6 +42,10 @@ struct GanttView: View {
 
     @State private var zoom: GanttZoom = .week
     @State private var hoverIssueId: String?
+    /// Repo labels (with hex colors), loaded alongside the VM so bars can be
+    /// tinted by the issue's first color-bearing label. Kept local to the view
+    /// (rather than on GanttViewModel) since it's presentation-only.
+    @State private var labels: [RepoLabel] = []
 
     private let rowHeight: CGFloat = 32
     private let labelWidth: CGFloat = 320
@@ -133,7 +137,10 @@ struct GanttView: View {
             }
         }
         .background(theme.current.body)
-        .task(id: project.id) { await vm.load(backend: backend, project: project, api: api) }
+        .task(id: project.id) {
+            await vm.load(backend: backend, project: project, api: api)
+            labels = (try? await backend.listLabels(projectId: project.id)) ?? []
+        }
     }
 
     private func scrollToToday(proxy: ScrollViewProxy, offset: Int, displayDays: Int) {
@@ -549,15 +556,18 @@ struct GanttView: View {
             }
         }
 
-        // Weekend tints + grid lines
+        // Weekend tints + grid lines. The tint itself is only meaningful at
+        // .day/.week zoom — at .month zoom each column spans many days so
+        // shading individual weekends would just produce visual noise.
         let meta = vm.dayMeta(start: start, days: days)
+        let showWeekendTint = zoom == .day || zoom == .week
         for i in 0..<days {
             let m = meta[i]
             let date = m.date
             let x = CGFloat(i) * dayWidth
-            if m.isWeekend {
+            if showWeekendTint && m.isWeekend {
                 ctx.fill(Path(CGRect(x: x, y: 0, width: dayWidth, height: size.height)),
-                         with: .color(t.isDark ? Color.white.opacity(0.025) : Color.black.opacity(0.025)))
+                         with: .color(t.gridLine.opacity(0.35)))
             }
             if cal.component(.day, from: date) == 1 {
                 ctx.stroke(
@@ -597,19 +607,30 @@ struct GanttView: View {
             let h = rowHeight - 12
 
             let over = isOverdue(issue)
-            let barColor: Color = issue.state == "closed" ? t.accent3
-                                : (over ? t.danger : t.accent2)
-            let bar = RoundedRectangle(cornerRadius: 4)
-                .path(in: CGRect(x: x + 1, y: y, width: max(2, w), height: h))
+            // Prefer the issue's first color-bearing label (matches the
+            // label chips shown elsewhere); fall back to state-based accent
+            // when the issue has no label or the label name doesn't resolve
+            // to a known repo label.
+            let labelColor = issue.labels.first.flatMap { name in
+                labels.first(where: { $0.name == name }).flatMap { Color(hex: $0.color) }
+            }
+            let barColor: Color = labelColor ?? (issue.state == "closed" ? t.accent3
+                                : (over ? t.danger : t.accent2))
+            let barRect = CGRect(x: x + 1, y: y, width: max(2, w), height: h)
+            let capsuleRadius = h / 2
+            let bar = RoundedRectangle(cornerRadius: capsuleRadius)
+                .path(in: barRect)
 
-            ctx.fill(bar, with: .color(.black.opacity(t.isDark ? 0.3 : 0.08)))
+            // Soft drop shadow: a slightly larger, downward-offset capsule
+            // drawn first so it reads as depth rather than a hard outline.
+            let shadowRect = barRect.offsetBy(dx: 0, dy: 1.5)
+            let shadow = RoundedRectangle(cornerRadius: capsuleRadius).path(in: shadowRect)
+            ctx.fill(shadow, with: .color(t.isDark ? .black.opacity(0.35) : .black.opacity(0.14)))
+
             ctx.fill(bar, with: .linearGradient(
                 Gradient(colors: [barColor.opacity(0.95), barColor.opacity(0.70)]),
                 startPoint: .init(x: x, y: y), endPoint: .init(x: x, y: y + h)))
 
-            if issue.milestone != nil {
-                ctx.fill(Path(CGRect(x: x + 1, y: y, width: 3, height: h)), with: .color(t.accent4))
-            }
             ctx.stroke(bar, with: .color(t.isDark ? .white.opacity(0.18) : .black.opacity(0.18)), lineWidth: 0.5)
 
             if w > 60 {
@@ -620,6 +641,22 @@ struct GanttView: View {
 
             if hoverIssueId == issue.id {
                 ctx.stroke(bar, with: .color(t.text.opacity(0.6)), lineWidth: 1.5)
+            }
+
+            // Milestone diamond at the bar's end x-position, layered on top.
+            if let dStr = issue.milestone?.dueDate, vm.parseDate(dStr) != nil {
+                let cx = barRect.maxX
+                let cy = y + h / 2
+                let half: CGFloat = 4
+                let diamond = Path { p in
+                    p.move(to: CGPoint(x: cx, y: cy - half))
+                    p.addLine(to: CGPoint(x: cx + half, y: cy))
+                    p.addLine(to: CGPoint(x: cx, y: cy + half))
+                    p.addLine(to: CGPoint(x: cx - half, y: cy))
+                    p.closeSubpath()
+                }
+                ctx.fill(diamond, with: .color(t.warning))
+                ctx.stroke(diamond, with: .color(t.isDark ? .black.opacity(0.4) : .white.opacity(0.6)), lineWidth: 0.5)
             }
         }
     }
