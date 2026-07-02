@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// GitLab-classic issue list: one two-line row per issue. Drop-in replacement
-/// for RepoKanbanPanel (same stored props + callbacks); no drag-to-recolumn —
+/// GitLab-classic issue list: one two-line row per issue. No drag-to-recolumn —
 /// GitLab's Issues page is a list, and status changes happen in the detail sheet.
 struct RepoIssueListView: View {
     @EnvironmentObject var theme: ThemeStore
