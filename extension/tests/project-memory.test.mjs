@@ -83,6 +83,35 @@ test('appendChatMemory merges only genuinely-new facts, write/read round-trips',
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('appendChatMemory removes superseded facts by factKey', () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'supersede');
+  writer.appendChatMemory({ root, facts: ['uses npm for installs', 'deploys via fly.io'] });
+  const meta = {};
+  const saved = writer.appendChatMemory({
+    root,
+    facts: ['uses pnpm for installs'],
+    remove: ['the project uses npm for installs'], // paraphrase — factKey folds the lead-in
+    meta,
+  });
+  assert.equal(meta.removed, 1);
+  assert.ok(saved.some((f) => f.includes('pnpm')));
+  assert.ok(!saved.some((f) => /uses npm for installs/.test(f)), 'superseded fact gone');
+  assert.ok(saved.some((f) => f.includes('fly.io')), 'unrelated fact untouched');
+});
+
+test('appendChatMemory with only removals still persists the removal', () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'supersede-only');
+  writer.appendChatMemory({ root, facts: ['uses npm for installs'] });
+  const meta = {};
+  const saved = writer.appendChatMemory({ root, facts: [], remove: ['uses npm for installs'], meta });
+  assert.equal(meta.removed, 1);
+  assert.equal(saved.length, 0);
+});
+
 // ── memory-extract ───────────────────────────────────────────────────
 test('sanitizeFacts filters non-strings, junk, dups, and caps at 5', () => {
   const out = extract.sanitizeFacts(

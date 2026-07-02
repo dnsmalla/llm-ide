@@ -150,25 +150,36 @@ export function writeChatMemoryFacts(root, facts) {
 }
 
 // Merge new facts into the existing file (dedup against what's there, newest
-// kept on overflow). Returns the resulting persisted fact list. No-op (returns
-// existing) when there's nothing new to add.
-export function appendChatMemory({ root, facts, meta }) {
+// kept on overflow) and drop superseded facts. `remove` entries are matched
+// by factKey — the same normalization dedup uses, so a paraphrase of a stored
+// fact still removes it. Returns the resulting persisted fact list. No-op
+// (returns existing) when there's nothing to add AND nothing to remove.
+export function appendChatMemory({ root, facts, remove, meta }) {
   const incoming = (Array.isArray(facts) ? facts : [])
     .map((f) => String(f).trim())
     .filter(Boolean);
-  const existing = readChatMemoryFacts(root);
-  if (incoming.length === 0) return existing;
+  const removeKeys = new Set((Array.isArray(remove) ? remove : [])
+    .map((f) => factKey(f))
+    .filter(Boolean));
+  let existing = readChatMemoryFacts(root);
+  let removedCount = 0;
+  if (removeKeys.size > 0) {
+    const before = existing.length;
+    existing = existing.filter((f) => !removeKeys.has(factKey(f)));
+    removedCount = before - existing.length;
+  }
   const have = new Set(existing.map(factKey));
   const fresh = incoming.filter((f) => !have.has(factKey(f)));
-  if (fresh.length === 0) return existing; // nothing genuinely new
+  if (fresh.length === 0 && removedCount === 0) {
+    if (meta && typeof meta === 'object') { meta.evicted = 0; meta.added = 0; meta.removed = 0; }
+    return existing; // nothing genuinely new, nothing superseded
+  }
   const candidates = [...existing, ...fresh];
   const saved = writeChatMemoryFacts(root, candidates);
-  // Optional observability sink: how many facts the caps (MAX_FACTS /
-  // MAX_FILE_CHARS) dropped on this write, and the net added — so silent
-  // eviction becomes visible to the caller instead of happening invisibly.
   if (meta && typeof meta === 'object') {
     meta.evicted = Math.max(0, candidates.length - saved.length);
     meta.added = Math.max(0, saved.length - existing.length);
+    meta.removed = removedCount;
   }
   return saved;
 }
