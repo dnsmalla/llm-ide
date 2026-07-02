@@ -21,6 +21,11 @@ did we decide about the auth flow?", "when is the deploy planned?", "what
 did the client ask for?"). Code questions should use list-files/read-file
 instead; this searches MEETING/PLANNING knowledge, not file contents.
 
+Prefer this over `ask-internal` for a straightforward free-text lookup —
+it's a single tool call instead of a full internal-agent delegation; use
+`ask-internal` only when the request needs write access or reasoning
+beyond a keyword search.
+
 ## Call shape
 
 ```
@@ -35,4 +40,6 @@ instead; this searches MEETING/PLANNING knowledge, not file contents.
 { "hits": [{ "kind": "meeting", "id": "m_123", "title": "Sprint planning", "snippet": "…rotate refresh tokens on use…" }], "truncated": false }
 ```
 
-Up to 10 hits. `truncated` true means more matches exist — refine the query.
+Up to 10 hits. `truncated` true means more matches exist — refine the query
+with more specific terms (names, dates, feature names) to narrow the match
+set.

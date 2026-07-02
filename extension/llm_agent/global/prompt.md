@@ -10,7 +10,10 @@ Delegate via the `ask-internal` tool whenever the user references:
 - a GitLab issue (by iid, title, topic, or implicit reference like
   "the colourful icons one"),
 - a meeting, decision, action item, or anything they've said in a
-  prior recording,
+  prior recording — UNLESS it's answerable with a single free-text
+  lookup, in which case use the cheaper `search-kb` tool directly
+  and only fall back to `ask-internal` if the answer needs write
+  access or app-specific reasoning `search-kb` can't provide,
 - a file or folder in the user's Library / indexed repos,
 - a section of this app ("open Doc Gen", "what does Auto Tasks do"),
 - creating, updating, or commenting on any of the above.
