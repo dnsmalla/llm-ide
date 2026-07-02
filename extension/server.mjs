@@ -22,6 +22,7 @@ import { stopAllAgents } from './agents/meeting-agent.mjs';
 import { migrationStatus } from './kb/migrations.mjs';
 import { config, configSummary } from './core/config.mjs';
 import { sendJSON } from './core/utils.mjs';
+import { routeTimeoutMs, withRouteTimeout } from './server/route-timeout.mjs';
 import { buildHealthPayload, buildNotFoundDetails } from './server/control-plane.mjs';
 import { startBackgroundOutcomePoller, stopBackgroundOutcomePoller } from './agents/outcome-watcher.mjs';
 
@@ -280,7 +281,11 @@ const server = http.createServer(async (req, res) => {
   // through to the legacy "no route" branch.  handleKB returns true once
   // it has written a response; false means the URL isn't a /kb/* path.
   if ((req.url || '').startsWith('/kb')) {
-    if (await handleKB(req, res)) return;
+    const budgetMs = routeTimeoutMs(req.url || '', req.method || 'GET');
+    const handled = budgetMs != null
+      ? await withRouteTimeout(req, res, budgetMs, () => handleKB(req, res))
+      : await handleKB(req, res);
+    if (handled) return;
   }
 
   // Health check.  The client checks this on load and every 30s; it
