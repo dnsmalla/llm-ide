@@ -1,4 +1,5 @@
 import SwiftUI
+import RepoKit
 
 /// Coordinator that owns the backend/project picker, then renders the full
 /// Gantt chart once a project is selected. Mirrors RepoIssuesView's

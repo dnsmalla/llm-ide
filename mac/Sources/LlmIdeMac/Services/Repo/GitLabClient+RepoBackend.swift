@@ -3,6 +3,7 @@
 // translates the responses into the neutral RepoBackend models.
 
 import Foundation
+import RepoKit
 
 extension GitLabClient: RepoBackend {
     var kind: RepoBackendKind { .gitlab }

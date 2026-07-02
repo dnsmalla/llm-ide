@@ -6,6 +6,7 @@
 // pass `owner/name` through wherever GitLab would pass "123".
 
 import Foundation
+import RepoKit
 
 extension GitHubClient: RepoBackend {
     var kind: RepoBackendKind { .github }

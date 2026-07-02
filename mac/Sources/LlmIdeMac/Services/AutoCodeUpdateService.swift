@@ -1,4 +1,5 @@
 import Foundation
+import RepoKit
 import SwiftUI
 import AppKit
 import Combine

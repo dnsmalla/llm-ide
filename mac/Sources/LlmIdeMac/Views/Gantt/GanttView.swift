@@ -1,4 +1,5 @@
 import SwiftUI
+import RepoKit
 import AppKit
 
 private extension Calendar {

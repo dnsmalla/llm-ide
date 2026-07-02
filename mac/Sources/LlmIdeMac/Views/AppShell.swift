@@ -1,4 +1,5 @@
 import SwiftUI
+import RepoKit
 
 private struct RecoveryTimeoutError: Error {}
 

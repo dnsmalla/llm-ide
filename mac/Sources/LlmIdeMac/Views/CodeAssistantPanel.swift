@@ -1,4 +1,5 @@
 import SwiftUI
+import RepoKit
 import AppKit
 
 /// Claude-Code-style chat panel embedded inside ReviewView.  The user
