@@ -502,18 +502,15 @@ struct AppShell: View {
         }
     }
 
-    /// Gantt. GitLab → the rich GanttContainerView (per-issue rows, day/week/
-    /// month zoom, today marker, full filter bar — restored by request). GitHub
-    /// → RepoGanttView, backed by the scheduling overlay. Provider switch on top
+    /// Gantt. Unified RepoBackend-typed GanttContainerView serves both
+    /// providers: GitLab uses native dates, GitHub uses the scheduling
+    /// overlay (LlmIdeAPIClient issue-schedule). Provider switch on top
     /// when both are configured.
     @ViewBuilder
     private var ganttRoute: some View {
         VStack(spacing: 0) {
             repoProviderSwitch()
-            switch effectiveRepoProvider {
-            case .github where hasGitHub: RepoGanttView(api: api)
-            default:                      GanttContainerView()
-            }
+            GanttContainerView(api: api)
         }
     }
 

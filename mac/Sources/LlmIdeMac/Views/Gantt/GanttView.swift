@@ -32,15 +32,16 @@ enum GanttZoom: String, CaseIterable, Identifiable {
 
 struct GanttView: View {
     @ObservedObject var vm: GanttViewModel
-    let gitlab: GitLabClient
-    let project: GitLabProject
-    var projects: [GitLabProject] = []
-    var onProjectChange: (GitLabProject) -> Void = { _ in }
+    let backend: RepoBackend
+    let project: RepoProject
+    var projects: [RepoProject] = []
+    var onProjectChange: (RepoProject) -> Void = { _ in }
+    var api: LlmIdeAPIClient? = nil
 
     @EnvironmentObject var theme: ThemeStore
 
     @State private var zoom: GanttZoom = .week
-    @State private var hoverIssueId: Int?
+    @State private var hoverIssueId: String?
 
     private let rowHeight: CGFloat = 32
     private let labelWidth: CGFloat = 320
@@ -132,7 +133,7 @@ struct GanttView: View {
             }
         }
         .background(theme.current.body)
-        .task(id: project.id) { await vm.load(gitlab: gitlab, projectId: project.id) }
+        .task(id: project.id) { await vm.load(backend: backend, project: project, api: api) }
     }
 
     private func scrollToToday(proxy: ScrollViewProxy, offset: Int, displayDays: Int) {
@@ -163,7 +164,7 @@ struct GanttView: View {
                 .foregroundStyle(t.danger.opacity(0.7))
             Text(msg).font(Typography.caption).foregroundStyle(t.danger)
                 .multilineTextAlignment(.center).frame(maxWidth: 360)
-            Button("Retry") { Task { await vm.load(gitlab: gitlab, projectId: project.id) } }
+            Button("Retry") { Task { await vm.load(backend: backend, project: project, api: api) } }
                 .buttonStyle(.borderedProminent).controlSize(.small)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -288,7 +289,7 @@ struct GanttView: View {
 
     // MARK: - Left column
 
-    private func leftColumn(issues: [GitLabIssue], t: Theme) -> some View {
+    private func leftColumn(issues: [RepoIssue], t: Theme) -> some View {
         VStack(spacing: 0) {
             HStack {
                 SectionLabel("ISSUES", size: 11, tracking: 1.2)
@@ -313,7 +314,7 @@ struct GanttView: View {
         .background(t.body)
     }
 
-    private func issueRow(issue: GitLabIssue, index: Int, t: Theme) -> some View {
+    private func issueRow(issue: RepoIssue, index: Int, t: Theme) -> some View {
         let overdue = isOverdue(issue)
         return HStack(spacing: 10) {
             Image(systemName: issue.state == "closed"
@@ -323,7 +324,7 @@ struct GanttView: View {
                 .foregroundStyle(issue.state == "closed" ? t.accent3 : (overdue ? t.danger : t.accent2))
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text("#\(issue.iid)")
+                    Text("#\(issue.number)")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(t.textMuted)
                     if let ms = issue.milestone {
@@ -341,15 +342,17 @@ struct GanttView: View {
             // of looking empty.
             HStack(spacing: -6) {
                 if issue.assignees.isEmpty {
-                    UserAvatar(user: issue.author, size: 20)
+                    UserAvatar(name: issue.author.displayName, id: abs(issue.author.id.hashValue),
+                               avatarUrl: issue.author.avatarUrl, size: 20)
                         .opacity(0.45)
                         .overlay(Circle().stroke(t.body, lineWidth: 1.5))
-                        .help("\(issue.author.name) (author) — unassigned")
+                        .help("\(issue.author.displayName) (author) — unassigned")
                 } else {
                     ForEach(issue.assignees.prefix(3)) { a in
-                        UserAvatar(user: a, size: 20)
+                        UserAvatar(name: a.displayName, id: abs(a.id.hashValue),
+                                   avatarUrl: a.avatarUrl, size: 20)
                             .overlay(Circle().stroke(t.body, lineWidth: 1.5))
-                            .help(a.name)
+                            .help(a.displayName)
                     }
                     if issue.assignees.count > 3 {
                         Text("+\(issue.assignees.count - 3)")
@@ -411,7 +414,7 @@ struct GanttView: View {
     }
 
     private struct MilestoneMarker: Identifiable {
-        let id: Int; let dayOffset: Int; let title: String; let tooltip: String
+        let id: String; let dayOffset: Int; let title: String; let tooltip: String
     }
 
     private func milestoneMarkers(start: Date, days: Int, cal: Calendar) -> [MilestoneMarker] {
@@ -535,7 +538,7 @@ struct GanttView: View {
 
     // MARK: - Canvas chart drawing
 
-    private func drawChart(ctx: GraphicsContext, size: CGSize, issues: [GitLabIssue],
+    private func drawChart(ctx: GraphicsContext, size: CGSize, issues: [RepoIssue],
                             start: Date, days: Int, dayWidth: CGFloat, cal: Calendar, t: Theme) {
         // Alternating row backgrounds
         for i in 0..<issues.count {
@@ -610,7 +613,7 @@ struct GanttView: View {
             ctx.stroke(bar, with: .color(t.isDark ? .white.opacity(0.18) : .black.opacity(0.18)), lineWidth: 0.5)
 
             if w > 60 {
-                let label = Text("#\(issue.iid) \(issue.title)")
+                let label = Text("#\(issue.number) \(issue.title)")
                     .font(.system(size: 10, weight: .medium)).foregroundColor(.white)
                 ctx.draw(ctx.resolve(label), at: CGPoint(x: x + 8, y: y + h / 2), anchor: .leading)
             }
@@ -627,7 +630,7 @@ struct GanttView: View {
         let w = cal.component(.weekday, from: d); return w == 1 || w == 7
     }
 
-    private func isOverdue(_ issue: GitLabIssue) -> Bool {
+    private func isOverdue(_ issue: RepoIssue) -> Bool {
         guard issue.state == "opened" else { return false }
         return vm.parseDate(issue.dueDate) .map { $0 < Date() } ?? false
     }

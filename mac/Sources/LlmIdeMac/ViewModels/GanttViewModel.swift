@@ -3,17 +3,17 @@ import SwiftUI
 
 @MainActor
 final class GanttViewModel: ObservableObject {
-    @Published var issues: [GitLabIssue] = []
-    @Published var milestones: [GitLabMilestone] = []
-    @Published var members: [GitLabUser] = []
+    @Published var issues: [RepoIssue] = []
+    @Published var milestones: [RepoMilestone] = []
+    @Published var members: [RepoUser] = []
 
     @Published var isLoading = false
     @Published var errorMessage: String?
 
     // Filters
     @Published var stateFilter: String = "all"
-    @Published var selectedMilestoneIds: Set<Int> = []
-    @Published var selectedAssigneeIds: Set<Int> = []
+    @Published var selectedMilestoneIds: Set<String> = []
+    @Published var selectedAssigneeIds: Set<String> = []
     @Published var selectedLabels: Set<String> = []
     @Published var rangeStart: Date?
     @Published var rangeEnd: Date?
@@ -34,6 +34,16 @@ final class GanttViewModel: ObservableObject {
         return c
     }()
 
+    /// Overlay schedules by issue number (GitHub). Empty for GitLab (native dates).
+    private(set) var schedules: [Int: LlmIdeAPIClient.IssueSchedule] = [:]
+
+    /// Test/`load` seam: set the issue set + overlay in one place so date logic
+    /// is unit-testable without a live backend.
+    func applyIssues(_ issues: [RepoIssue], schedules: [Int: LlmIdeAPIClient.IssueSchedule]) {
+        self.schedules = schedules
+        self.issues = issues
+    }
+
     // MARK: - Date parsing
 
     func parseDate(_ s: String?) -> Date? {
@@ -41,20 +51,55 @@ final class GanttViewModel: ObservableObject {
         return AppDateFormatter.parseISO(s) ?? AppDateFormatter.parseDateOnly(s)
     }
 
+    private static let sevenDays: TimeInterval = 7 * 86_400
+
+    private func ymd(_ s: String?) -> Date? {
+        guard let s else { return nil }
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone(identifier: "UTC")
+        return f.date(from: s) ?? ISO8601DateFormatter().date(from: s)
+    }
+
+    /// (start, end) for an issue, or nil when it has no usable dates.
+    private func span(for issue: RepoIssue) -> (Date, Date)? {
+        if let sched = schedules[issue.number], sched.startDate != nil || sched.dueDate != nil {
+            let width = (sched.estimateDays ?? 7) * 86_400
+            let s0 = ymd(sched.startDate), d0 = ymd(sched.dueDate)
+            let s = s0 ?? d0!.addingTimeInterval(-width)
+            let e = d0 ?? s0!.addingTimeInterval(width)
+            return (s, e)
+        }
+        // Native (GitLab): due from issue.dueDate or milestone.dueDate.
+        if let due = ymd(issue.dueDate) ?? ymd(issue.milestone?.dueDate) {
+            let s = ymd(issue.milestone?.startDate) ?? due.addingTimeInterval(-Self.sevenDays)
+            return (s, due)
+        }
+        return nil
+    }
+
     // MARK: - Load
 
-    func load(gitlab: GitLabClient, projectId: Int) async {
-        isLoading = true
-        errorMessage = nil
+    func load(backend: RepoBackend, project: RepoProject, api: LlmIdeAPIClient?) async {
+        isLoading = true; errorMessage = nil
         defer { isLoading = false }
         do {
-            async let issuesTask     = gitlab.fetchAllIssues(projectId: projectId)
-            async let milestonesTask = gitlab.listMilestones(projectId: projectId)
-            async let membersTask    = gitlab.listMembers(projectId: projectId)
-            let (i, m, mem) = try await (issuesTask, milestonesTask, membersTask)
-            self.issues     = i
-            self.milestones = m
-            self.members    = mem
+            var all: [RepoIssue] = []; var seen = Set<String>()
+            for page in 1...20 {
+                // `.all` so the Gantt has both open + closed issues; the VM's own
+                // stateFilter does the client-side narrowing (default "all").
+                let batch = try await backend.listIssues(
+                    projectId: project.id, filter: RepoIssueFilter(state: .all), page: page)
+                let fresh = batch.filter { seen.insert($0.id).inserted }
+                if fresh.isEmpty { break }
+                all.append(contentsOf: fresh)
+            }
+            let ms = (try? await backend.listMilestones(projectId: project.id)) ?? []
+            let mem = (try? await backend.listMembers(projectId: project.id)) ?? []
+            var sched: [Int: LlmIdeAPIClient.IssueSchedule] = [:]
+            if backend.usesScheduleOverlay, let api {
+                sched = (try? await api.listIssueSchedules(provider: "github", repo: project.fullName)) ?? [:]
+            }
+            self.milestones = ms; self.members = mem
+            applyIssues(all, schedules: sched)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -62,27 +107,17 @@ final class GanttViewModel: ObservableObject {
 
     // MARK: - Date helpers
 
-    func startDate(for issue: GitLabIssue) -> Date {
-        if let ms = issue.milestone, let sd = parseDate(ms.startDate) { return sd }
-        return parseDate(issue.createdAt) ?? Date()
+    func hasUsefulDates(_ issue: RepoIssue) -> Bool { span(for: issue) != nil }
+
+    func startDate(for issue: RepoIssue) -> Date {
+        span(for: issue)?.0 ?? ymd(issue.createdAt) ?? Date(timeIntervalSince1970: 0)
     }
 
-    func endDate(for issue: GitLabIssue) -> Date? {
-        if let d = parseDate(issue.dueDate) { return d }
-        if let ms = issue.milestone, let dd = parseDate(ms.dueDate) { return dd }
-        return nil
-    }
-
-    func hasUsefulDates(_ issue: GitLabIssue) -> Bool {
-        if issue.dueDate != nil { return true }
-        if let ms = issue.milestone,
-           ms.startDate != nil || ms.dueDate != nil { return true }
-        return false
-    }
+    func endDate(for issue: RepoIssue) -> Date? { span(for: issue)?.1 }
 
     // MARK: - Category
 
-    func category(of issue: GitLabIssue) -> String {
+    func category(of issue: RepoIssue) -> String {
         if issue.state == "closed" { return "closed" }
         if let due = parseDate(issue.dueDate), due < Date() { return "overdue" }
         return "open"
@@ -98,7 +133,7 @@ final class GanttViewModel: ObservableObject {
 
     // MARK: - Filtering
 
-    var filteredIssues: [GitLabIssue] {
+    var filteredIssues: [RepoIssue] {
         issues.filter { issue in
             if hideBlankRows && !hasUsefulDates(issue) { return false }
             if !visibleCategories.contains(category(of: issue)) { return false }
@@ -116,7 +151,7 @@ final class GanttViewModel: ObservableObject {
             }
             if !searchText.isEmpty {
                 let q = searchText.lowercased()
-                let hay = "\(issue.iid) \(issue.title) \(issue.labels.joined(separator: " "))".lowercased()
+                let hay = "\(issue.number) \(issue.title) \(issue.labels.joined(separator: " "))".lowercased()
                 if !hay.contains(q) { return false }
             }
             let s = startDate(for: issue)
@@ -128,7 +163,7 @@ final class GanttViewModel: ObservableObject {
     }
 
     // Pre-category filtered — for counting visible categories accurately
-    private var preCategoryFiltered: [GitLabIssue] {
+    private var preCategoryFiltered: [RepoIssue] {
         issues.filter { issue in
             if hideBlankRows && !hasUsefulDates(issue) { return false }
             if stateFilter != "all" && issue.state != stateFilter { return false }
@@ -145,7 +180,7 @@ final class GanttViewModel: ObservableObject {
             }
             if !searchText.isEmpty {
                 let q = searchText.lowercased()
-                let hay = "\(issue.iid) \(issue.title) \(issue.labels.joined(separator: " "))".lowercased()
+                let hay = "\(issue.number) \(issue.title) \(issue.labels.joined(separator: " "))".lowercased()
                 if !hay.contains(q) { return false }
             }
             let s = startDate(for: issue)
@@ -171,21 +206,21 @@ final class GanttViewModel: ObservableObject {
 
     // MARK: - Active filter data
 
-    var activeAssignees: [GitLabUser] {
-        var seen: Set<Int> = []
-        var out: [GitLabUser] = []
+    var activeAssignees: [RepoUser] {
+        var seen: Set<String> = []
+        var out: [RepoUser] = []
         for issue in issues {
             for a in issue.assignees where !seen.contains(a.id) {
                 seen.insert(a.id)
                 out.append(a)
             }
         }
-        return out.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return out.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
-    var activeMilestones: [GitLabMilestone] {
-        var seen: Set<Int> = []
-        var out: [GitLabMilestone] = []
+    var activeMilestones: [RepoMilestone] {
+        var seen: Set<String> = []
+        var out: [RepoMilestone] = []
         for issue in issues {
             if let m = issue.milestone, !seen.contains(m.id) {
                 seen.insert(m.id)
