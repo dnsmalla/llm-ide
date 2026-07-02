@@ -49,6 +49,25 @@ struct GanttViewModelTests {
         #expect(!vm.hasUsefulDates(vm.issues[0]))
     }
 
+    // rows groups issues into milestone swimlanes: lanes ordered by due date,
+    // no-milestone lane last, each lane a header followed by its issues.
+    @Test func rowsGroupIntoMilestoneSwimlanesOrderedByDue() {
+        let vm = GanttViewModel()
+        // milestone "Late" due 2026-09, "Early" due 2026-07; plus a no-milestone issue.
+        let early = RepoMilestone(id: "e", title: "Early", state: "active", dueDate: "2026-07-15", startDate: nil, description: nil)
+        let late = RepoMilestone(id: "l", title: "Late", state: "active", dueDate: "2026-09-15", startDate: nil, description: nil)
+        func withMs(_ n: Int, _ ms: RepoMilestone?) -> RepoIssue {
+            RepoIssue(id: "i\(n)", number: n, title: "T", body: nil, state: "opened", labels: [],
+                      milestone: ms, assignees: [], author: .ghost, createdAt: "2026-06-01T00:00:00Z",
+                      updatedAt: "2026-06-01T00:00:00Z", closedAt: nil, webUrl: "", commentCount: 0,
+                      dueDate: nil, weight: nil)
+        }
+        vm.applyIssues([withMs(1, late), withMs(2, nil), withMs(3, early)], schedules: [:])
+        let ids = vm.rows.map(\.id)
+        // Early lane first (earlier due), then Late, then no-milestone lane last.
+        #expect(ids == ["hdr-e", "iss-i3", "hdr-l", "iss-i1", "hdr-none", "iss-i2"])
+    }
+
     // dependencies(of:) surfaces the overlay dependsOn edges (GitHub); empty
     // when there's no overlay schedule (e.g. GitLab, native dates).
     @Test func dependenciesComeFromOverlaySchedule() {
