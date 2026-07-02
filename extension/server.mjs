@@ -16,7 +16,7 @@ import { purgeOldAuditRows } from './server/audit.mjs';
 import { AppError, sendError, errInternal, errNotFound, errValidation, errRateLimit } from './core/errors.mjs';
 import { tryConsume, saveBuckets, loadBuckets } from './server/rate-limit.mjs';
 import { recordHttpRequest, recordRateLimitDeny, setKbGauge, renderPrometheus } from './server/metrics.mjs';
-import { getDb, closeDb, statsAdmin, purgeExpiredJti } from './kb/db.mjs';
+import { getDb, closeDb, statsAdmin, purgeExpiredJti, backupTo } from './kb/db.mjs';
 import { stopAllAgents } from './agents/meeting-agent.mjs';
 
 import { migrationStatus } from './kb/migrations.mjs';
@@ -428,10 +428,7 @@ const server = http.createServer(async (req, res) => {
       const stamp = Math.floor(Date.now() / 1000);
       const filename = `data-${stamp}.db`;
       const target = path.join(targetDir, filename);
-      // Escape single-quotes in the literal path for SQLite's syntax.
-      const safeTarget = target.replace(/'/g, "''");
-      const db = getDb({ logger });
-      db.exec(`VACUUM INTO '${safeTarget}'`);
+      backupTo(target);
       const stat = fs.statSync(target);
       reqLog.info('db_backup_created', { path: target, bytes: stat.size });
       sendJSON(res, 200, { ok: true, path: target, bytes: stat.size });
@@ -710,8 +707,7 @@ function runAutoBackup() {
     fs.mkdirSync(backupDir, { recursive: true });
     const stamp  = Math.floor(Date.now() / 1000);
     const target = path.join(backupDir, `data-${stamp}.db`);
-    const safeTarget = target.replace(/'/g, "''");
-    getDb({ logger }).exec(`VACUUM INTO '${safeTarget}'`);
+    backupTo(target);
     const stat = fs.statSync(target);
     logger.info('auto_backup_created', { path: target, bytes: stat.size });
 

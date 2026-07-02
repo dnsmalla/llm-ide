@@ -850,3 +850,10 @@ export function deleteUserCascade(userId) {
   });
   return tx();
 }
+
+// Self-consistent hot backup (works on a live DB without locking it).
+// The filename is a BOUND PARAMETER — SQLite handles quoting, so no
+// string interpolation / manual `'` escaping in SQL (2026-07 hardening).
+export function backupTo(targetPath) {
+  getDb().prepare('VACUUM INTO ?').run(String(targetPath));
+}
