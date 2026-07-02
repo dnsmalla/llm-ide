@@ -43,4 +43,16 @@ struct RepoIssueListViewTests {
         let many = RepoIssueListView.assigneeOverflow([u1, u2])
         #expect(many.shown?.id == "1" && many.extra == 1)
     }
+
+    @Test func stillFitsRespectsStateFilter() {
+        let open = issue(number: 1, state: "opened")
+        let closed = issue(number: 2, state: "closed")
+        // .all keeps both; .opened keeps only open; .closed keeps only closed.
+        #expect(RepoIssueListView.stillFits(open, filterState: .all))
+        #expect(RepoIssueListView.stillFits(closed, filterState: .all))
+        #expect(RepoIssueListView.stillFits(open, filterState: .opened))
+        #expect(!RepoIssueListView.stillFits(closed, filterState: .opened))
+        #expect(RepoIssueListView.stillFits(closed, filterState: .closed))
+        #expect(!RepoIssueListView.stillFits(open, filterState: .closed))
+    }
 }

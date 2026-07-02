@@ -12,6 +12,21 @@ struct RepoIssueListView: View {
     let projectId: String
     let onSelect: (RepoIssue) -> Void
     let onIssueUpdate: (RepoIssue) -> Void
+    /// When non-nil, each row shows a selection checkbox; tapping it toggles
+    /// membership in `selectedIDs` (bulk-action mode). Nil → no checkboxes.
+    var selectedIDs: Set<String> = []
+    var onToggleSelect: ((RepoIssue) -> Void)? = nil
+
+    /// Whether an issue still belongs in the list under the active state filter.
+    /// Shared by the single-issue and bulk-action update paths so a closed issue
+    /// disappears from an "Open" list (and vice versa) consistently.
+    static func stillFits(_ issue: RepoIssue, filterState: RepoIssueFilter.IssueState) -> Bool {
+        switch filterState {
+        case .all:    return true
+        case .opened: return issue.isOpen
+        case .closed: return !issue.isOpen
+        }
+    }
 
     // Label color lookup by name (issues carry label names; RepoLabel carries a
     // "#rrggbb" hex). Returns nil when the label isn't in the loaded set, letting
@@ -39,6 +54,15 @@ struct RepoIssueListView: View {
     private func row(_ issue: RepoIssue, zebra: Bool, t: Theme) -> some View {
         let overflow = Self.assigneeOverflow(issue.assignees)
         HStack(alignment: .top, spacing: Spacing.sm) {
+            if let onToggleSelect {
+                let checked = selectedIDs.contains(issue.id)
+                Image(systemName: checked ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 13))
+                    .foregroundStyle(checked ? t.accent : t.textMuted)
+                    .padding(.top, 2)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onToggleSelect(issue) }
+            }
             Circle()
                 .fill(issue.isOpen ? t.success : t.textMuted)
                 .frame(width: 9, height: 9)
