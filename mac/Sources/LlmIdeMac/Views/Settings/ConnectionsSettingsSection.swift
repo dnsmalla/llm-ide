@@ -26,6 +26,7 @@ struct ConnectionsSettingsSection: View {
 
     @State private var showingEmailSheet = false
     @State private var showSlackSheet = false
+    @State private var showBoxSheet = false
     @State private var fetching = false
     /// Short human-readable line shown under the Email card after a fetch.
     @State private var lastEmailResult: String?
@@ -36,12 +37,18 @@ struct ConnectionsSettingsSection: View {
     /// True when `lastSlackResult` describes an error (drives the colour).
     @State private var lastSlackWasError = false
     @State private var fetchingSlack = false
+    /// Short human-readable line shown under the Box card after a re-sync.
+    @State private var lastBoxResult: String?
+    /// True when `lastBoxResult` describes an error (drives the colour).
+    @State private var lastBoxWasError = false
+    @State private var syncingBox = false
     /// Meetings "Advanced" (poll interval) disclosure, collapsed by default.
     @State private var showMeetingAdvanced = false
     /// Handle for a manual "Fetch now" import so we can cancel it if the view
     /// disappears mid-import (the `.task` auto-fetch already auto-cancels).
     @State private var importTask: Task<Void, Never>?
     @State private var slackImportTask: Task<Void, Never>?
+    @State private var boxSyncTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -52,6 +59,7 @@ struct ConnectionsSettingsSection: View {
                     meetingsCard
                     emailCard
                     slackCard
+                    boxCard
 
                     Text("More inputs")
                         .font(Typography.section)
@@ -76,6 +84,11 @@ struct ConnectionsSettingsSection: View {
                         .environmentObject(theme)
                         .environmentObject(config)
                 }
+                .sheet(isPresented: $showBoxSheet) {
+                    BoxSourceSheet(api: api)
+                        .environmentObject(theme)
+                        .environmentObject(config)
+                }
                 // Light auto-fetch when the section is opened (no global timer).
                 // Only runs when a source is configured + enabled. `.task`
                 // auto-cancels when the view disappears.
@@ -86,6 +99,7 @@ struct ConnectionsSettingsSection: View {
                 .onDisappear {
                     importTask?.cancel()
                     slackImportTask?.cancel()
+                    boxSyncTask?.cancel()
                 }
             }
         }
@@ -264,6 +278,54 @@ struct ConnectionsSettingsSection: View {
         }
     }
 
+    // MARK: - Box add-on
+
+    private var boxCard: some View {
+        let configured = config.boxSource != nil
+        let enabled = config.boxSource?.enabled == true
+        return InputSourceCard(
+            icon: "doc.text",
+            title: "Box",
+            subtitle: "Index documents from a Box folder",
+            badgeText: !configured ? "Not set up" : (enabled ? "Connected" : "Paused"),
+            badgeTone: !configured ? .accent : (enabled ? .positive : .neutral)
+        ) {
+            if let s = config.boxSource {
+                Text(s.displayName.isEmpty ? (s.folderName.isEmpty ? "Configured" : s.folderName) : s.displayName)
+                    .font(Typography.body)
+                    .foregroundStyle(theme.current.text)
+            }
+
+            HStack(spacing: Spacing.sm) {
+                Button(configured ? "Edit…" : "Configure…") {
+                    showBoxSheet = true
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+
+                if enabled {
+                    Button(syncingBox ? "Syncing…" : "Re-sync") {
+                        boxSyncTask = Task { await runBoxSync() }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(syncingBox)
+                    if syncingBox {
+                        ProgressView().controlSize(.mini).scaleEffect(0.8)
+                    }
+                }
+            }
+            .padding(.top, Spacing.xs)
+
+            if let line = lastBoxResult {
+                Text(line)
+                    .font(Typography.caption)
+                    .foregroundStyle(lastBoxWasError ? theme.current.danger : theme.current.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     /// Run the email import flow and reflect the outcome on the card.
@@ -322,6 +384,22 @@ struct ConnectionsSettingsSection: View {
         case .failure(let msg, _):
             lastSlackWasError = true
             lastSlackResult = "Fetch failed: \(msg)"
+        }
+    }
+
+    /// Run a wholesale Box re-index and reflect the outcome on the card.
+    private func runBoxSync() async {
+        guard !syncingBox, let s = config.boxSource else { return }
+        syncingBox = true
+        defer { syncingBox = false }
+        do {
+            let r = try await api.connectBox(clientId: s.clientId, subjectType: s.subjectType, subjectId: s.subjectId, folderId: s.folderId)
+            lastBoxWasError = false
+            lastBoxResult = "Indexed \(r.indexed) file\(r.indexed == 1 ? "" : "s")."
+                + (r.skipped > 0 ? " \(r.skipped) skipped." : "")
+        } catch {
+            lastBoxWasError = true
+            lastBoxResult = "Sync failed: \(error.localizedDescription)"
         }
     }
 }

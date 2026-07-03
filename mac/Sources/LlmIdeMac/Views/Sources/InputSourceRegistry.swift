@@ -22,7 +22,5 @@ enum InputSourceRegistry {
     static let planned: [PlannedInputSource] = [
         .init(id: "calendar", icon: "calendar",
               title: "Calendar", subtitle: "Pull events and agendas"),
-        .init(id: "documents", icon: "doc.text",
-              title: "Documents", subtitle: "Drop in PDFs and docs to ask about"),
     ]
 }
