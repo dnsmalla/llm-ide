@@ -52,4 +52,21 @@ struct RepoOperationAllowlistTests {
         #expect(cfg.isAllowed(.merge, provider: .github))
         #expect(cfg.isAllowed(.createIssue, provider: .github) == false)
     }
+
+    @MainActor
+    @Test func automationStepsRespectAllowList() {
+        let defaults = UserDefaults(suiteName: "allowlist-auto-\(UUID().uuidString)")!
+        let cfg = AppConfig(userDefaults: defaults)
+        cfg.setAllowed(.createIssue, provider: .github, false)
+        cfg.setAllowed(.autoCommit, provider: .github, false)
+
+        let steps = AutoCodeUpdateService.allowedAutoSteps(config: cfg, provider: .github)
+        #expect(steps.createIssue == false)
+        #expect(steps.createBranch == true)   // still enabled
+        #expect(steps.autoCommit == false)
+
+        // GitLab side untouched.
+        let gl = AutoCodeUpdateService.allowedAutoSteps(config: cfg, provider: .gitlab)
+        #expect(gl.createIssue == true)
+    }
 }

@@ -59,6 +59,17 @@ final class AutoCodeUpdateService: ObservableObject {
     /// main actor around each subprocess.
     private var activeProcess: Process?
 
+    /// Which automated steps are permitted for a provider. Pure + static so the
+    /// gating decision is unit-testable without running the full pipeline.
+    static func allowedAutoSteps(config: AppConfig, provider: RepoBackendKind)
+        -> (createIssue: Bool, createBranch: Bool, autoCommit: Bool) {
+        (
+            createIssue:  config.isAllowed(.createIssue,  provider: provider),
+            createBranch: config.isAllowed(.createBranch, provider: provider),
+            autoCommit:   config.isAllowed(.autoCommit,   provider: provider)
+        )
+    }
+
     // MARK: - Init
 
     init(config: AppConfig, backend: RepoBackend? = nil, registry: ProcessedActionsRegistry,
@@ -207,6 +218,7 @@ final class AutoCodeUpdateService: ObservableObject {
             return
         }
         let client = resolved.client
+        let autoSteps = Self.allowedAutoSteps(config: config, provider: client.kind)
         let projectId = resolved.projectId
         // Git ops + agent cwd run in the working tree; faults/index live at
         // the project root. These differ in the clone-into-code model.
@@ -301,8 +313,8 @@ final class AutoCodeUpdateService: ObservableObject {
 
         let normalizedExistingTitles = Set(existingIssues.map { NoteActionExtractor.normalize($0.title) })
 
-        // 3. Create issues for genuinely new actions
-        for action in newActions {
+        // 3. Create issues for genuinely new actions (allow-list gated)
+        for action in newActions where autoSteps.createIssue {
             if Task.isCancelled { break }
             let normalized = NoteActionExtractor.normalize(action.text)
             if normalizedExistingTitles.contains(normalized) {
@@ -330,7 +342,16 @@ final class AutoCodeUpdateService: ObservableObject {
             }
         }
 
-        // 4. Implement pending entries via CLI subprocess
+        // 4. Implement pending entries via CLI subprocess (branch + commit).
+        // Skip entirely if either the branch or the commit step is disallowed —
+        // implementing without committing would leave dirty state.
+        guard autoSteps.createBranch, autoSteps.autoCommit else {
+            log.info("auto_code_skip_implement reason=allowlist provider=\(client.kind.rawValue, privacy: .public) branch=\(autoSteps.createBranch) commit=\(autoSteps.autoCommit)")
+            statusMessage = createdCount > 0 ? "\(createdCount) created · implement skipped (allow-list)" : "Implement skipped (allow-list)"
+            allEntries = registry.allEntries()
+            return
+        }
+
         let pending = registry.pendingEntries()
         // Capture the base branch once. Each issue is cut from base so the
         // fix branches don't chain (issue B branching off issue A's fix/…).
