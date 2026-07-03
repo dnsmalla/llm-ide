@@ -59,6 +59,17 @@ final class AutoCodeUpdateService: ObservableObject {
     /// main actor around each subprocess.
     private var activeProcess: Process?
 
+    /// Which automated steps are permitted for a provider. Pure + static so the
+    /// gating decision is unit-testable without running the full pipeline.
+    static func allowedAutoSteps(config: AppConfig, provider: RepoBackendKind)
+        -> (createIssue: Bool, createBranch: Bool, autoCommit: Bool) {
+        (
+            createIssue:  config.isAllowed(.createIssue,  provider: provider),
+            createBranch: config.isAllowed(.createBranch, provider: provider),
+            autoCommit:   config.isAllowed(.autoCommit,   provider: provider)
+        )
+    }
+
     // MARK: - Init
 
     init(config: AppConfig, backend: RepoBackend? = nil, registry: ProcessedActionsRegistry,
@@ -207,6 +218,7 @@ final class AutoCodeUpdateService: ObservableObject {
             return
         }
         let client = resolved.client
+        let autoSteps = Self.allowedAutoSteps(config: config, provider: client.kind)
         let projectId = resolved.projectId
         // Git ops + agent cwd run in the working tree; faults/index live at
         // the project root. These differ in the clone-into-code model.
@@ -301,8 +313,8 @@ final class AutoCodeUpdateService: ObservableObject {
 
         let normalizedExistingTitles = Set(existingIssues.map { NoteActionExtractor.normalize($0.title) })
 
-        // 3. Create issues for genuinely new actions
-        for action in newActions {
+        // 3. Create issues for genuinely new actions (allow-list gated)
+        for action in newActions where autoSteps.createIssue {
             if Task.isCancelled { break }
             let normalized = NoteActionExtractor.normalize(action.text)
             if normalizedExistingTitles.contains(normalized) {
@@ -330,8 +342,18 @@ final class AutoCodeUpdateService: ObservableObject {
             }
         }
 
-        // 4. Implement pending entries via CLI subprocess
-        let pending = registry.pendingEntries()
+        // 4. Implement pending entries via CLI subprocess (branch + commit),
+        // but only when both branch-cut and auto-commit are allowed. Steps 5–8
+        // (status, regression sweep, knowledge review) are independent and must
+        // still run when only the write steps are disallowed.
+        let pending: [ProcessedActionsRegistry.RegistryEntry]
+        if autoSteps.createBranch, autoSteps.autoCommit {
+            pending = registry.pendingEntries()
+        } else {
+            log.info("auto_code_skip_implement reason=allowlist provider=\(client.kind.rawValue, privacy: .public) branch=\(autoSteps.createBranch, privacy: .public) commit=\(autoSteps.autoCommit, privacy: .public)")
+            pending = []
+        }
+
         // Capture the base branch once. Each issue is cut from base so the
         // fix branches don't chain (issue B branching off issue A's fix/…).
         let baseBranch = await Task.detached { Self.currentBranch(at: capturedGitRoot) }.value

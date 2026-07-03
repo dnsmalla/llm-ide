@@ -241,8 +241,10 @@ struct RepoIssuesView: View {
                     .background(RoundedRectangle(cornerRadius: 8).fill(t.accent))
                 }
                 .buttonStyle(.plain)
-                .disabled(selectedProject == nil)
-                .help("Create issue  ⌘⇧N")
+                .disabled(selectedProject == nil || !config.isAllowed(.createIssue, provider: activeBackend))
+                .help(config.isAllowed(.createIssue, provider: activeBackend)
+                      ? "Create issue  ⌘⇧N"
+                      : "Enable Create issue in Settings → \(activeBackend.displayName) → Automation & Actions")
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .padding(.leading, 10)
             }

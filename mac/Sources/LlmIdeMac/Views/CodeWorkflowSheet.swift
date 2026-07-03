@@ -516,11 +516,19 @@ struct CodeWorkflowSheet: View {
         case .issue:
             Button("Create Issue") { Task { await svc.createIssue() } }
                 .buttonStyle(.borderedProminent)
-                .disabled(svc.busy || svc.issueTitle.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(svc.busy || svc.issueTitle.trimmingCharacters(in: .whitespaces).isEmpty ||
+                          !appConfig.isAllowed(.createIssue, provider: kind))
+                .help(appConfig.isAllowed(.createIssue, provider: kind)
+                      ? ""
+                      : "Enable Create issue in Settings → \(kind.displayName) → Automation & Actions")
         case .branch:
             Button("Create Branch") { Task { await svc.createBranch() } }
                 .buttonStyle(.borderedProminent)
-                .disabled(svc.busy || svc.branchName.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(svc.busy || svc.branchName.trimmingCharacters(in: .whitespaces).isEmpty ||
+                          !appConfig.isAllowed(.createBranch, provider: kind))
+                .help(appConfig.isAllowed(.createBranch, provider: kind)
+                      ? ""
+                      : "Enable Create branch in Settings → \(kind.displayName) → Automation & Actions")
         case .generate:
             if svc.diffFiles.isEmpty {
                 Button("Generate Changes") { Task { await svc.generateChanges(activeCLI: appConfig.activeCLI) } }
@@ -534,7 +542,11 @@ struct CodeWorkflowSheet: View {
         case .review:
             Button(svc.busy ? "Committing…" : "Commit Changes") { Task { await svc.commitChanges() } }
                 .buttonStyle(.borderedProminent)
-                .disabled(svc.busy || svc.commitMessage.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(svc.busy || svc.commitMessage.trimmingCharacters(in: .whitespaces).isEmpty ||
+                          !appConfig.isAllowed(.autoCommit, provider: kind))
+                .help(appConfig.isAllowed(.autoCommit, provider: kind)
+                      ? ""
+                      : "Enable Auto-commit in Settings → \(kind.displayName) → Automation & Actions")
         case .push:
             HStack(spacing: 8) {
                 // Surface a "Retry MR only" path when the previous
@@ -548,7 +560,11 @@ struct CodeWorkflowSheet: View {
                 }
                 Button(svc.busy ? "Pushing…" : "Push & Create \(kind.changeRequestAbbrev)") { Task { await svc.pushAndCreateMR() } }
                     .buttonStyle(.borderedProminent)
-                    .disabled(svc.busy || svc.mrTitle.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(svc.busy || svc.mrTitle.trimmingCharacters(in: .whitespaces).isEmpty ||
+                              !(appConfig.isAllowed(.push, provider: kind) && appConfig.isAllowed(.createPR, provider: kind)))
+                    .help((appConfig.isAllowed(.push, provider: kind) && appConfig.isAllowed(.createPR, provider: kind))
+                          ? ""
+                          : "Enable Push and Create PR / MR in Settings → \(kind.displayName) → Automation & Actions")
             }
         case .done:
             EmptyView()

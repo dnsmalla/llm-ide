@@ -23,6 +23,7 @@ struct RepoIssueDetailSheet: View {
     var onDismiss: () -> Void
 
     @EnvironmentObject var theme: ThemeStore
+    @EnvironmentObject var config: AppConfig
     @Environment(ActivityStore.self) private var activity
 
     @State private var current: RepoIssue
@@ -205,7 +206,10 @@ struct RepoIssueDetailSheet: View {
                 .foregroundStyle(t.text)
             }
             .buttonStyle(.plain)
-            .disabled(stateBusy)
+            .disabled(stateBusy || !config.isAllowed(.merge, provider: client.kind))
+            .help(config.isAllowed(.merge, provider: client.kind)
+                  ? ""
+                  : "Enable Close / reopen in Settings → \(client.kind.displayName) → Automation & Actions")
         }
         // MR / PR creation — shown when the backend supports it
         if client.canCreateMergeRequests {
@@ -225,8 +229,10 @@ struct RepoIssueDetailSheet: View {
                 .foregroundStyle(t.text)
             }
             .buttonStyle(.plain)
-            .disabled(mrBusy)
-            .help("Create \(client.kind.changeRequestNoun)")
+            .disabled(mrBusy || !config.isAllowed(.createPR, provider: client.kind))
+            .help(config.isAllowed(.createPR, provider: client.kind)
+                  ? "Create \(client.kind.changeRequestNoun)"
+                  : "Enable Create PR / MR in Settings → \(client.kind.displayName) → Automation & Actions")
         }
         Button {
             if let url = URL(string: current.webUrl) { NSWorkspace.shared.open(url) }
@@ -580,7 +586,11 @@ struct RepoIssueDetailSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(commentBusy ||
-                          newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                          newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                          !config.isAllowed(.commentIssue, provider: client.kind))
+                .help(config.isAllowed(.commentIssue, provider: client.kind)
+                      ? ""
+                      : "Enable Comment on issue in Settings → \(client.kind.displayName) → Automation & Actions")
                 .keyboardShortcut(.return, modifiers: .command)
             }
         }

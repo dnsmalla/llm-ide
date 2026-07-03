@@ -19,6 +19,10 @@ struct CommentIssueSheet: View {
     /// Display title for the issue (from recentIssues if known) — read-only.
     let issueTitle: String?
     let iid: Int
+    /// Whether the allow-list permits Comment on issue for the resolved
+    /// provider. When false, submission is disabled and the tooltip
+    /// points at the Settings toggle.
+    let isAllowed: Bool
     let onConfirm: (Args) async -> ConfirmResult
 
     @State private var commentBody: String
@@ -35,12 +39,14 @@ struct CommentIssueSheet: View {
          projectURL: String,
          provider: String,
          issueTitle: String?,
+         isAllowed: Bool = true,
          onConfirm: @escaping (Args) async -> ConfirmResult) {
         self.projectName = projectName
         self.projectURL = projectURL
         self.provider = provider
         self.issueTitle = issueTitle
         self.iid = args.iid
+        self.isAllowed = isAllowed
         self.onConfirm = onConfirm
         _commentBody = State(initialValue: args.body)
     }
@@ -90,7 +96,10 @@ struct CommentIssueSheet: View {
                 Button("Post comment") { submit() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
-                    .disabled(submitting || commentBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(submitting || commentBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !isAllowed)
+                    .help(isAllowed
+                          ? ""
+                          : "Enable Comment on issue in Settings → \(provider) → Automation & Actions")
             }
         }
         .padding(20)
