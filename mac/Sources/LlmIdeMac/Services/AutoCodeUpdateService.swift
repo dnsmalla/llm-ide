@@ -342,17 +342,18 @@ final class AutoCodeUpdateService: ObservableObject {
             }
         }
 
-        // 4. Implement pending entries via CLI subprocess (branch + commit).
-        // Skip entirely if either the branch or the commit step is disallowed —
-        // implementing without committing would leave dirty state.
-        guard autoSteps.createBranch, autoSteps.autoCommit else {
-            log.info("auto_code_skip_implement reason=allowlist provider=\(client.kind.rawValue, privacy: .public) branch=\(autoSteps.createBranch) commit=\(autoSteps.autoCommit)")
-            statusMessage = createdCount > 0 ? "\(createdCount) created · implement skipped (allow-list)" : "Implement skipped (allow-list)"
-            allEntries = registry.allEntries()
-            return
+        // 4. Implement pending entries via CLI subprocess (branch + commit),
+        // but only when both branch-cut and auto-commit are allowed. Steps 5–8
+        // (status, regression sweep, knowledge review) are independent and must
+        // still run when only the write steps are disallowed.
+        let pending: [ProcessedActionsRegistry.RegistryEntry]
+        if autoSteps.createBranch, autoSteps.autoCommit {
+            pending = registry.pendingEntries()
+        } else {
+            log.info("auto_code_skip_implement reason=allowlist provider=\(client.kind.rawValue, privacy: .public) branch=\(autoSteps.createBranch, privacy: .public) commit=\(autoSteps.autoCommit, privacy: .public)")
+            pending = []
         }
 
-        let pending = registry.pendingEntries()
         // Capture the base branch once. Each issue is cut from base so the
         // fix branches don't chain (issue B branching off issue A's fix/…).
         let baseBranch = await Task.detached { Self.currentBranch(at: capturedGitRoot) }.value
