@@ -58,6 +58,8 @@ const ENDPOINTS = [
   '/kb/slack/test',
   '/kb/slack/fetch',
   '/kb/slack/seen',
+  '/kb/box/test',
+  '/kb/connect-box',
   '/kb/activity',
   '/kb/activity/seen',
   '/kb/usage/limits',
@@ -164,6 +166,10 @@ function rateLimitProfile(url, method) {
   // seen is a cheap local write (kbWrite bucket).
   if (url === '/kb/slack/test' || url === '/kb/slack/fetch') return 'dispatch';
   if (url === '/kb/slack/seen') return 'kbWrite';
+  // Box test hits the Box API directly (token exchange + folder read), same
+  // cost profile as slack/email test — dispatch bucket. /kb/connect-box is
+  // covered by the '/kb/connect-' startsWith rule above (kbWrite).
+  if (url === '/kb/box/test') return 'dispatch';
   if (url === '/kb/activity' || url === '/kb/activity/seen') return 'kbWrite';
   return null;
 }

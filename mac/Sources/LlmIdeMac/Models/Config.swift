@@ -116,6 +116,30 @@ struct SavedSlackSource: Codable, Equatable {
     }
 }
 
+struct SavedBoxSource: Codable, Equatable {
+    var displayName: String = ""
+    var clientId: String = ""
+    var subjectType: String = "enterprise"   // "enterprise" | "user"
+    var subjectId: String = ""
+    var folderId: String = ""
+    var folderName: String = ""
+    var enabled: Bool = true
+
+    init() {}
+
+    /// Tolerant decoder — every field falls back to its default when absent.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        displayName = try c.decodeIfPresent(String.self, forKey: .displayName) ?? ""
+        clientId    = try c.decodeIfPresent(String.self, forKey: .clientId) ?? ""
+        subjectType = try c.decodeIfPresent(String.self, forKey: .subjectType) ?? "enterprise"
+        subjectId   = try c.decodeIfPresent(String.self, forKey: .subjectId) ?? ""
+        folderId    = try c.decodeIfPresent(String.self, forKey: .folderId) ?? ""
+        folderName  = try c.decodeIfPresent(String.self, forKey: .folderName) ?? ""
+        enabled     = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+    }
+}
+
 /// User-tunable settings persisted to UserDefaults.
 final class AppConfig: ObservableObject {
     static let shared = AppConfig()
@@ -283,6 +307,16 @@ final class AppConfig: ObservableObject {
                 defaults.set(data, forKey: "slackSource")
             } else {
                 defaults.removeObject(forKey: "slackSource")
+            }
+        }
+    }
+
+    @Published var boxSource: SavedBoxSource? {
+        didSet {
+            if let s = boxSource, let data = try? AppJSON.encoder.encode(s) {
+                defaults.set(data, forKey: "boxSource")
+            } else {
+                defaults.removeObject(forKey: "boxSource")
             }
         }
     }
@@ -574,6 +608,12 @@ final class AppConfig: ObservableObject {
             self.slackSource = decoded
         } else {
             self.slackSource = nil
+        }
+        if let data = defaults.data(forKey: "boxSource"),
+           let decoded = decodeConfigOrStash(SavedBoxSource.self, key: "boxSource", data: data, defaults: defaults) {
+            self.boxSource = decoded
+        } else {
+            self.boxSource = nil
         }
         self.autoCodeUpdateEnabled = defaults.object(forKey: "autoCodeUpdateEnabled") as? Bool ?? false
         self.autoCodeUpdateLookbackCount = defaults.object(forKey: "autoCodeUpdateLookbackCount") as? Int ?? 5
