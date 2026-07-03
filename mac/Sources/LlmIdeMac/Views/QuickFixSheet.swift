@@ -15,6 +15,20 @@ struct QuickFixSheet: View {
     private let target: CodeWorkflowTarget
     private var kind: RepoBackendKind { target.kind }
 
+    /// Every write op `CodeWorkflowService.runEndToEnd` can perform, in
+    /// order: createBranch (branch step) → push + createPR + commentIssue
+    /// (pushAndCreateMR posts the summary note) → closeIssue
+    /// (pushAndCreateMR's post-MR close, and the terminal closeIssueIfNeeded).
+    /// Gate "Run" on all of them so a partial allow-list can't let the
+    /// pipeline start only to throw partway through.
+    private var runEndToEndOpsAllowed: Bool {
+        appConfig.isAllowed(.createBranch, provider: kind)
+            && appConfig.isAllowed(.push, provider: kind)
+            && appConfig.isAllowed(.createPR, provider: kind)
+            && appConfig.isAllowed(.commentIssue, provider: kind)
+            && appConfig.isAllowed(.closeIssue, provider: kind)
+    }
+
     @State private var bootstrapped = false
     @State private var switchToGuided = false
     @State private var showIssuePicker = false
@@ -234,10 +248,10 @@ struct QuickFixSheet: View {
                 .disabled(svc.busy
                           || svc.createdIssue == nil
                           || svc.aiPrompt.trimmingCharacters(in: .whitespaces).isEmpty
-                          || !(appConfig.isAllowed(.push, provider: kind) && appConfig.isAllowed(.createPR, provider: kind)))
-                .help((appConfig.isAllowed(.push, provider: kind) && appConfig.isAllowed(.createPR, provider: kind))
+                          || !runEndToEndOpsAllowed)
+                .help(runEndToEndOpsAllowed
                       ? ""
-                      : "Enable Push and Create PR / MR in Settings → \(kind.displayName) → Automation & Actions")
+                      : "Enable Create branch, Push, Create PR / MR, Comment on issue, and Close / reopen issue in Settings → \(kind.displayName) → Automation & Actions")
             }
         }
         .padding(.horizontal, 20)
