@@ -342,3 +342,13 @@ protocol RepoBackend: Sendable {
     /// source/head branch.
     func listOpenMergeRequests(projectId: String) async throws -> [RepoMergeRequest]
 }
+
+enum RepoBackendError: Error, LocalizedError {
+    case operationNotAllowed(RepoOperation, provider: RepoBackendKind)
+    var errorDescription: String? {
+        switch self {
+        case let .operationNotAllowed(op, provider):
+            return "\(op.label) is disabled for \(provider.displayName). Enable it in Settings → \(provider.displayName) → Automation & Actions."
+        }
+    }
+}

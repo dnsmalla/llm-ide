@@ -206,8 +206,8 @@ struct RepoIssueDetailSheet: View {
                 .foregroundStyle(t.text)
             }
             .buttonStyle(.plain)
-            .disabled(stateBusy || !config.isAllowed(.merge, provider: client.kind))
-            .help(config.isAllowed(.merge, provider: client.kind)
+            .disabled(stateBusy || !config.isAllowed(.closeIssue, provider: client.kind))
+            .help(config.isAllowed(.closeIssue, provider: client.kind)
                   ? ""
                   : "Enable Close / reopen in Settings → \(client.kind.displayName) → Automation & Actions")
         }
@@ -288,7 +288,7 @@ struct RepoIssueDetailSheet: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: Spacing.lg) {
                 // Status (state) — editable: Open ↔ Closed
-                sidebarEditableSection("Status", t: t, hasEdit: client.canWriteIssues && !stateBusy, content: {
+                sidebarEditableSection("Status", t: t, hasEdit: client.canWriteIssues && !stateBusy && config.isAllowed(.closeIssue, provider: client.kind), content: {
                     HStack(spacing: 5) {
                         Circle().fill(current.isOpen ? t.accent2 : t.textMuted).frame(width: 7, height: 7)
                         Text(current.isOpen ? "Open" : "Closed").font(Typography.body).foregroundStyle(t.text)

@@ -49,8 +49,25 @@ struct RepoOperationAllowlistTests {
         defaults.set(["push", "bogus-op", "merge"], forKey: "gitHubAllowedOps")
         let cfg = AppConfig(userDefaults: defaults)
         #expect(cfg.isAllowed(.push, provider: .github))
-        #expect(cfg.isAllowed(.merge, provider: .github))
+        // Legacy "merge" rawValue aliases to .closeIssue, not dropped.
+        #expect(cfg.isAllowed(.closeIssue, provider: .github))
         #expect(cfg.isAllowed(.createIssue, provider: .github) == false)
+    }
+
+    @Test func legacyMergeRawValueDecodesToCloseIssue() {
+        let defaults = UserDefaults(suiteName: "allowlist-migrate-\(UUID().uuidString)")!
+        // A pre-rename custom set that allowed only "merge" (the old close/reopen op).
+        defaults.set(["merge"], forKey: "gitHubAllowedOps")
+        let cfg = AppConfig(userDefaults: defaults)
+        #expect(cfg.isAllowed(.closeIssue, provider: .github))
+    }
+
+    @Test func editIssueIsInDefaultAllEnabledSet() {
+        let name = "allowlist-edit-\(UUID().uuidString)"
+        let d = UserDefaults(suiteName: name)!; d.removePersistentDomain(forName: name)
+        let cfg = AppConfig(userDefaults: d)
+        #expect(cfg.isAllowed(.editIssue, provider: .github))
+        #expect(cfg.isAllowed(.closeIssue, provider: .gitlab))
     }
 
     @MainActor

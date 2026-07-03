@@ -556,7 +556,11 @@ struct CodeWorkflowSheet: View {
                 if svc.stepError != nil {
                     Button("Retry \(kind.changeRequestAbbrev) only") { Task { await svc.retryMROnly() } }
                         .buttonStyle(.bordered)
-                        .disabled(svc.busy)
+                        .disabled(svc.busy ||
+                                  !(appConfig.isAllowed(.push, provider: kind) && appConfig.isAllowed(.createPR, provider: kind)))
+                        .help((appConfig.isAllowed(.push, provider: kind) && appConfig.isAllowed(.createPR, provider: kind))
+                              ? ""
+                              : "Enable Push and Create PR / MR in Settings → \(kind.displayName) → Automation & Actions")
                 }
                 Button(svc.busy ? "Pushing…" : "Push & Create \(kind.changeRequestAbbrev)") { Task { await svc.pushAndCreateMR() } }
                     .buttonStyle(.borderedProminent)

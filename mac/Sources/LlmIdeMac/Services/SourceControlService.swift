@@ -25,6 +25,12 @@ final class SourceControlService {
     private(set) var state = State()
     private let repo: RepoManager
 
+    /// Allow-list source, optional so existing call sites (tests, previews,
+    /// the no-arg `@State` init) keep working ungated. nil = no gating.
+    /// Settable so the view can inject it post-init (e.g. from `.task`),
+    /// since `@State` can't read an `@EnvironmentObject` at init time.
+    var config: AppConfig?
+
     /// Resolves the active repo's auth backend + token. Set by the view
     /// (which owns AppConfig) so this service stays config-agnostic. Returns
     /// nil when the repo has no saved credentials.
@@ -45,6 +51,13 @@ final class SourceControlService {
     /// are @MainActor so this init is also @MainActor-isolated; calling it from
     /// a @MainActor context (SwiftUI view, another @MainActor type) is safe.
     convenience init() { self.init(repo: RepoManager()) }
+
+    /// Allow-list-gated initialiser (tests / call sites that have `config`
+    /// up front). Equivalent to `init()` + assigning `config` afterwards.
+    convenience init(config: AppConfig) {
+        self.init(repo: RepoManager())
+        self.config = config
+    }
 
     var stagedFiles: [FileChange]   { state.files.filter { $0.staged } }
     var unstagedFiles: [FileChange] { state.files.filter { !$0.staged } }
@@ -148,6 +161,7 @@ final class SourceControlService {
     /// Pull (--ff-only) from origin using the repo's saved credentials.
     func pull(root: URL) async {
         state.opError = nil
+        if blocked(.sync, at: root) { return }
         guard let c = resolveCredentials?(root), !c.token.isEmpty else {
             state.opError = "No credentials configured for this repo."; return
         }
@@ -160,6 +174,7 @@ final class SourceControlService {
     /// Push the current branch (with upstream tracking) to origin.
     func push(root: URL) async {
         state.opError = nil
+        if blocked(.push, at: root) { return }
         guard let c = resolveCredentials?(root), !c.token.isEmpty else {
             state.opError = "No credentials configured for this repo."; return
         }
@@ -171,8 +186,12 @@ final class SourceControlService {
     }
 
     /// Fetch from origin (no merge), then refresh status / ahead-behind.
+    /// Gated on BOTH `.sync` and `.push`: a fetch that updates remote-tracking
+    /// refs is a sync, but this repo also treats "Sync" as fetch+push-adjacent
+    /// in the allow-list model, so either disabled op blocks it.
     func sync(root: URL) async {
         state.opError = nil
+        if blocked(.sync, at: root) || blocked(.push, at: root) { return }
         guard let c = resolveCredentials?(root), !c.token.isEmpty else {
             state.opError = "No credentials configured for this repo."; return
         }
@@ -200,6 +219,8 @@ final class SourceControlService {
 
     /// Create a new branch off HEAD and switch to it, then refresh.
     func createBranch(root: URL, name: String) async {
+        state.opError = nil
+        if blocked(.createBranch, at: root) { return }
         await run(["checkout", "-b", name], root)
     }
 
@@ -212,6 +233,7 @@ final class SourceControlService {
     /// Reuses the same credential resolution as `push()`.
     func publish(root: URL) async {
         state.opError = nil
+        if blocked(.push, at: root) { return }
         guard let c = resolveCredentials?(root), !c.token.isEmpty else {
             state.opError = "No credentials configured for this repo."; return
         }
@@ -372,6 +394,27 @@ final class SourceControlService {
     /// Dismiss the sticky op error from the UI (banner ×). `state` is
     /// `private(set)`, so the view can't clear it directly.
     func clearOpError() { state.opError = nil }
+
+    // MARK: - Allow-list gating
+
+    /// Which provider owns the repo at `root` (matched by clone localPath), or
+    /// nil when the root isn't an allow-list-managed repo (then don't gate).
+    private func providerKind(for root: URL) -> RepoBackendKind? {
+        guard let config else { return nil }
+        let path = root.standardizedFileURL.path
+        if config.gitHubSavedRepos.contains(where: { $0.localPath == path }) { return .github }
+        if config.gitLabSavedProjects.contains(where: { $0.localPath == path }) { return .gitlab }
+        return nil
+    }
+
+    /// Returns true (and sets the sticky op error) when `op` is blocked for
+    /// the repo at `root`. Call sites early-return on true.
+    private func blocked(_ op: RepoOperation, at root: URL) -> Bool {
+        guard let config, let kind = providerKind(for: root) else { return false }
+        if config.isAllowed(op, provider: kind) { return false }
+        state.opError = "\(op.label) is disabled for \(kind.displayName). Enable it in Settings → \(kind.displayName) → Automation & Actions."
+        return true
+    }
 
     private func isGitRepo(_ url: URL) -> Bool {
         FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path)

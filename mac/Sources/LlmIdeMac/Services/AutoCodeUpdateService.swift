@@ -101,7 +101,9 @@ final class AutoCodeUpdateService: ObservableObject {
     /// New code should pass a `RepoBackend` (or nil to auto-resolve).
     convenience init(config: AppConfig, gitLabClient: GitLabClient, registry: ProcessedActionsRegistry,
                      projectStore: ProjectStore? = nil, api: LlmIdeAPIClient? = nil) {
-        self.init(config: config, backend: gitLabClient as RepoBackend, registry: registry,
+        self.init(config: config,
+                  backend: RepoBackendFactory.guarded(gitLabClient, config: config),
+                  registry: registry,
                   projectStore: projectStore, api: api)
     }
 
@@ -1162,7 +1164,7 @@ final class AutoCodeUpdateService: ObservableObject {
                     return nil
                 }
                 // Linked model: the project root IS the working tree.
-                return .init(client: backendOverride ?? GitLabClient(config: config),
+                return .init(client: backendOverride ?? RepoBackendFactory.guarded(GitLabClient(config: config), config: config),
                              projectId: linked.remoteId, gitRoot: local, projectRoot: local)
             case .github:
                 guard !config.gitHubToken.isEmpty else {
@@ -1170,7 +1172,7 @@ final class AutoCodeUpdateService: ObservableObject {
                     return nil
                 }
                 // Linked model: the project root IS the working tree.
-                return .init(client: backendOverride ?? GitHubClient(config: config),
+                return .init(client: backendOverride ?? RepoBackendFactory.guarded(GitHubClient(config: config), config: config),
                              projectId: linked.remoteId, gitRoot: local, projectRoot: local)
             }
         }
@@ -1185,7 +1187,7 @@ final class AutoCodeUpdateService: ObservableObject {
            let id = p.resolvedId,
            let local = p.localPath, !local.isEmpty
         {
-            return .init(client: GitLabClient(config: config),
+            return .init(client: RepoBackendFactory.guarded(GitLabClient(config: config), config: config),
                          projectId: String(id),
                          gitRoot: local,
                          projectRoot: projectStore?.activeProject?.localPath ?? local)
@@ -1195,7 +1197,7 @@ final class AutoCodeUpdateService: ObservableObject {
            let (owner, name) = GitHubClient.ownerAndName(from: r.url),
            let local = r.localPath, !local.isEmpty
         {
-            return .init(client: GitHubClient(config: config),
+            return .init(client: RepoBackendFactory.guarded(GitHubClient(config: config), config: config),
                          projectId: "\(owner)/\(name)",
                          gitRoot: local,
                          projectRoot: projectStore?.activeProject?.localPath ?? local)
