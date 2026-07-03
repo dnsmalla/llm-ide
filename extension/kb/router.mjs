@@ -30,7 +30,7 @@ import { getSecret } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails } from '../agents/email-source.mjs';
 import { testConnection as slackTest, fetchChannelHistory } from '../agents/slack-source.mjs';
 import { logger } from '../core/logger.mjs';
-import { redactSecrets } from '../core/redact-secrets.mjs';
+import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { recordActivity, listActivity, unreadCount, markSeen, ACTIVITY_KINDS } from './activity.mjs';
 import { getLimits, setLimits, usageSummary, resolveModel, recordUsage, getRateLimits, PROVIDERS as USAGE_PROVIDERS } from './usage.mjs';
@@ -516,8 +516,12 @@ export async function handleKB(req, res) {
           logger.info('box_test', { userId, folderId });
           sendJSON(res, 200, r);
         } catch (e) {
-          logger.error('box_test_failed', { userId, folderId, reason: e.message });
-          sendJSON(res, 502, { error: { code: 'BOX_CONNECT_FAILED', message: redactSecrets(e.message) } });
+          // redactWithKey masks the exact clientSecret (Box secrets have no
+          // recognizable shape for pattern-based redactSecrets) plus known
+          // token shapes — for BOTH the log sink and the client response.
+          const safe = redactWithKey(e.message, clientSecret);
+          logger.error('box_test_failed', { userId, folderId, reason: safe });
+          sendJSON(res, 502, { error: { code: 'BOX_CONNECT_FAILED', message: safe } });
         }
         return true;
       }
@@ -528,8 +532,9 @@ export async function handleKB(req, res) {
         logger.info('box_index', { userId, folderId, indexed, skipped, durationMs: Date.now() - started });
         sendJSON(res, 200, { ok: true, indexed, skipped });
       } catch (e) {
-        logger.error('box_index_failed', { userId, folderId, reason: e.message });
-        sendJSON(res, 502, { error: { code: 'BOX_INDEX_FAILED', message: redactSecrets(e.message) } });
+        const safe = redactWithKey(e.message, clientSecret);
+        logger.error('box_index_failed', { userId, folderId, reason: safe });
+        sendJSON(res, 502, { error: { code: 'BOX_INDEX_FAILED', message: safe } });
       }
       return true;
     }
