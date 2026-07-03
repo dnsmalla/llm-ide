@@ -400,11 +400,7 @@ final class SourceControlService {
     /// Which provider owns the repo at `root` (matched by clone localPath), or
     /// nil when the root isn't an allow-list-managed repo (then don't gate).
     private func providerKind(for root: URL) -> RepoBackendKind? {
-        guard let config else { return nil }
-        let path = root.standardizedFileURL.path
-        if config.gitHubSavedRepos.contains(where: { $0.localPath == path }) { return .github }
-        if config.gitLabSavedProjects.contains(where: { $0.localPath == path }) { return .gitlab }
-        return nil
+        config?.providerKind(forRepoRoot: root)
     }
 
     /// Returns true (and sets the sticky op error) when `op` is blocked for

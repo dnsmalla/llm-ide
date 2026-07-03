@@ -86,4 +86,23 @@ struct RepoOperationAllowlistTests {
         let gl = AutoCodeUpdateService.allowedAutoSteps(config: cfg, provider: .gitlab)
         #expect(gl.createIssue == true)
     }
+
+    // HT4 fix: providerKind normalizes both the query root and the stored
+    // localPath, so a path that differs only textually (trailing slash here)
+    // still matches — a verbatim compare would fail OPEN (treat a managed repo
+    // as unmanaged and skip the SourceControl allow-list gate).
+    @Test func providerKindNormalizesPathsBeforeMatching() throws {
+        let name = "pk-\(UUID().uuidString)"
+        let d = UserDefaults(suiteName: name)!; d.removePersistentDomain(forName: name)
+        let cfg = AppConfig(userDefaults: d)
+        // A real directory so resolvingSymlinksInPath is deterministic.
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        var r = SavedGitHubRepo(url: "https://github.com/o/r", isActive: true)
+        r.localPath = base.path + "/"   // stored WITH a trailing slash (non-standard)
+        cfg.gitHubSavedRepos = [r]
+        #expect(cfg.providerKind(forRepoRoot: base) == .github, "trailing-slash stored path must still match")
+        #expect(cfg.providerKind(forRepoRoot: base.appendingPathComponent("nope")) == nil)
+    }
 }

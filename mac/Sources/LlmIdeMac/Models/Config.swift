@@ -286,6 +286,23 @@ final class AppConfig: ObservableObject {
         }
     }
 
+    /// Which provider owns the cloned repo at `root`, matched by saved clone
+    /// `localPath`. Both sides are standardized (symlink/`..`/trailing-slash
+    /// normalized) so a stored path that differs only textually from `root`
+    /// still matches — otherwise the SourceControl allow-list gate would fail
+    /// OPEN (treat a managed repo as unmanaged). nil when unmanaged. Single
+    /// source of truth for SourceControlService + SourceControlView.
+    func providerKind(forRepoRoot root: URL) -> RepoBackendKind? {
+        // resolvingSymlinksInPath resolves symlinked mounts (e.g. /tmp →
+        // /private/tmp) for real on-disk repos and also standardizes `..`/`.`
+        // and a trailing slash lexically; apply it to BOTH sides.
+        func norm(_ url: URL) -> String { url.resolvingSymlinksInPath().path }
+        let target = norm(root)
+        if gitHubSavedRepos.contains(where: { $0.localPath.map { norm(URL(fileURLWithPath: $0)) } == target }) { return .github }
+        if gitLabSavedProjects.contains(where: { $0.localPath.map { norm(URL(fileURLWithPath: $0)) } == target }) { return .gitlab }
+        return nil
+    }
+
     // ── External sources: Email ───────────────────────────────────────
     /// The single configured Email source, or nil when not set up. JSON-
     /// persisted exactly like `gitLabSavedProjects` — the IMAP password is
