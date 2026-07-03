@@ -32,6 +32,14 @@ const validManifest = {
   description: 'test',
 };
 
+test('missing plugin directory is the default state, not a warning (clean boot)', () => {
+  const absent = join(newRoot(), 'does-not-exist');
+  const { plugins, warnings, missing } = loadPlugins({ pluginDir: absent });
+  assert.equal(plugins.size, 0);
+  assert.equal(warnings.length, 0, `absence must not warn, got: ${warnings.join(', ')}`);
+  assert.equal(missing, true, 'absence is surfaced via the missing flag');
+});
+
 test('subagent: valid agents/*.md is discovered with parsed metadata', () => {
   const root = newRoot();
   plugin(root, 'example', validManifest, {
