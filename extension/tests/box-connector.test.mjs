@@ -133,3 +133,84 @@ test('indexBoxFolder paginates past a full page even when total_count is absent'
     for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
   }
 });
+
+// #7: a 429 on the folder list is retried (with Retry-After/backoff) rather
+// than aborting the whole index. retryDelayMs:0 keeps the test instant.
+test('indexBoxFolder retries a 429 (rate limit) instead of aborting', async () => {
+  const dbmod = await import('../kb/db.mjs');
+  dbmod.closeDb();
+  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
+  const { getDb } = await import('../kb/db.mjs');
+  const { registerUser } = await import('../server/users.mjs');
+  const db = getDb();
+  const userId = registerUser(db, { email: `box429-${Math.floor(performance.now()*1000)}@ex.com`, password: 'pw-12345678' }).id;
+  const { indexBoxFolder } = await import('../connectors/box.mjs');
+
+  let listCalls = 0;
+  const orig = global.fetch;
+  global.fetch = async (urlStr) => {
+    const url = String(urlStr);
+    const json = (o, ok = true, status = 200) => ({ ok, status, headers: { get: () => null }, json: async () => o, text: async () => '' });
+    if (url === 'https://api.box.com/oauth2/token') return json({ access_token: 'tok' });
+    if (url.includes('/folders/F/items')) {
+      listCalls += 1;
+      if (listCalls === 1) return { ok: false, status: 429, headers: { get: (k) => (k.toLowerCase() === 'retry-after' ? '0' : null) }, json: async () => ({}), text: async () => '' };
+      return json({ entries: [{ type: 'file', id: '1', name: 'a.md', modified_at: 'T' }] });
+    }
+    if (url.includes('/files/1?')) return json({ representations: { entries: [
+      { representation: 'extracted_text', status: { state: 'success' }, content: { url_template: 'https://dl.box.com/1/text{+asset_path}' } },
+    ]}});
+    if (url === 'https://dl.box.com/1/text') return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({}), text: async () => 'hi' };
+    return json({}, false, 500);
+  };
+  try {
+    const r = await indexBoxFolder(userId, { clientId: 'c', clientSecret: 's', subjectType: 'enterprise', subjectId: 'e', folderId: 'F' }, { pollDelayMs: 0, retryDelayMs: 0 });
+    assert.equal(listCalls, 2, 'folder list retried once after the 429');
+    assert.equal(r.indexed, 1, 'indexed the file after the retry succeeded');
+  } finally {
+    global.fetch = orig;
+    dbmod.closeDb();
+    for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
+  }
+});
+
+// #6: a 401 (expired CCG token) triggers a one-time token refresh + retry,
+// instead of the request silently failing (which would mass-skip documents).
+test('indexBoxFolder refreshes the token on a 401 and retries', async () => {
+  const dbmod = await import('../kb/db.mjs');
+  dbmod.closeDb();
+  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
+  const { getDb } = await import('../kb/db.mjs');
+  const { registerUser } = await import('../server/users.mjs');
+  const db = getDb();
+  const userId = registerUser(db, { email: `box401-${Math.floor(performance.now()*1000)}@ex.com`, password: 'pw-12345678' }).id;
+  const { indexBoxFolder } = await import('../connectors/box.mjs');
+
+  let tokenCalls = 0, listCalls = 0;
+  const orig = global.fetch;
+  global.fetch = async (urlStr) => {
+    const url = String(urlStr);
+    const json = (o) => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => o, text: async () => '' });
+    if (url === 'https://api.box.com/oauth2/token') { tokenCalls += 1; return json({ access_token: `tok${tokenCalls}` }); }
+    if (url.includes('/folders/F/items')) {
+      listCalls += 1;
+      if (listCalls === 1) return { ok: false, status: 401, headers: { get: () => null }, json: async () => ({}), text: async () => '' };
+      return json({ entries: [{ type: 'file', id: '1', name: 'a.md', modified_at: 'T' }] });
+    }
+    if (url.includes('/files/1?')) return json({ representations: { entries: [
+      { representation: 'extracted_text', status: { state: 'success' }, content: { url_template: 'https://dl.box.com/1/text{+asset_path}' } },
+    ]}});
+    if (url === 'https://dl.box.com/1/text') return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({}), text: async () => 'hi' };
+    return { ok: false, status: 500, headers: { get: () => null }, json: async () => ({}), text: async () => '' };
+  };
+  try {
+    const r = await indexBoxFolder(userId, { clientId: 'c', clientSecret: 's', subjectType: 'enterprise', subjectId: 'e', folderId: 'F' }, { pollDelayMs: 0, retryDelayMs: 0 });
+    assert.equal(tokenCalls, 2, 'token was refreshed after the 401 (initial + refresh)');
+    assert.equal(listCalls, 2, 'folder list retried after refresh');
+    assert.equal(r.indexed, 1, 'indexed after the refresh');
+  } finally {
+    global.fetch = orig;
+    dbmod.closeDb();
+    for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
+  }
+});
