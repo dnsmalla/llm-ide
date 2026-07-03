@@ -69,6 +69,32 @@ struct SourceControlView: View {
         return scm.resolveCredentials?(root) != nil
     }
 
+    /// Which provider owns `root` (matched by saved clone `localPath`), or nil
+    /// when `root` isn't an allow-list-managed repo. Mirrors
+    /// `SourceControlService.providerKind(for:)` so the button `.disabled`
+    /// state matches what the service itself will enforce.
+    private func providerKind(for root: URL) -> RepoBackendKind? {
+        let path = root.standardizedFileURL.path
+        if config.gitHubSavedRepos.contains(where: { $0.localPath == path }) { return .github }
+        if config.gitLabSavedProjects.contains(where: { $0.localPath == path }) { return .gitlab }
+        return nil
+    }
+
+    /// True when `op` is disallowed for `root`'s provider. Unmanaged roots
+    /// (no matching saved clone) are never disabled here — the service itself
+    /// only gates managed repos.
+    private func isBlocked(_ op: RepoOperation, root: URL) -> Bool {
+        guard let kind = providerKind(for: root) else { return false }
+        return !config.isAllowed(op, provider: kind)
+    }
+
+    /// Tooltip text for a disabled-by-allow-list button. Mirrors the sticky
+    /// `opError` message `SourceControlService` sets on the same condition.
+    private func blockedHelp(_ op: RepoOperation, root: URL) -> String {
+        guard let kind = providerKind(for: root) else { return "" }
+        return "\(op.label) is disabled for \(kind.displayName). Enable it in Settings → \(kind.displayName) → Automation & Actions."
+    }
+
     /// Thin panel header mirroring Explorer's, carrying the Explorer ⇄ Source
     /// Control switcher so you can return to the file tree from here.
     private var scmHeaderBar: some View {
@@ -108,6 +134,7 @@ struct SourceControlView: View {
         }
         .background(theme.current.body)
         .task(id: root?.path) {
+            scm.config = config
             scm.resolveCredentials = { repo in
                 if config.gitLabSavedProjects.contains(where: { $0.localPath == repo.path }),
                    !config.gitLabToken.isEmpty {
@@ -362,18 +389,22 @@ struct SourceControlView: View {
             Button { Task { await scm.pull(root: root) } } label: {
                 Image(systemName: "arrow.down")
             }.buttonStyle(.plain)
-                .disabled(scm.isBusy || !hasCredentials)
-                .help(hasCredentials ? "Pull" : credHelp)
+                .disabled(scm.isBusy || !hasCredentials || isBlocked(.sync, root: root))
+                .help(isBlocked(.sync, root: root) ? blockedHelp(.sync, root: root)
+                      : (hasCredentials ? "Pull" : credHelp))
             Button { Task { await scm.push(root: root) } } label: {
                 Image(systemName: "arrow.up")
             }.buttonStyle(.plain)
-                .disabled(scm.isBusy || !hasCredentials)
-                .help(hasCredentials ? "Push" : credHelp)
+                .disabled(scm.isBusy || !hasCredentials || isBlocked(.push, root: root))
+                .help(isBlocked(.push, root: root) ? blockedHelp(.push, root: root)
+                      : (hasCredentials ? "Push" : credHelp))
             Button { Task { await scm.sync(root: root) } } label: {
                 Image(systemName: "arrow.triangle.2.circlepath")
             }.buttonStyle(.plain)
-                .disabled(scm.isBusy || !hasCredentials)
-                .help(hasCredentials ? "Sync (fetch)" : credHelp)
+                .disabled(scm.isBusy || !hasCredentials || isBlocked(.sync, root: root) || isBlocked(.push, root: root))
+                .help(isBlocked(.sync, root: root) ? blockedHelp(.sync, root: root)
+                      : isBlocked(.push, root: root) ? blockedHelp(.push, root: root)
+                      : (hasCredentials ? "Sync (fetch)" : credHelp))
             Button { Task { await scm.refresh(root: root) } } label: {
                 Image(systemName: "arrow.clockwise")
             }.buttonStyle(.plain).disabled(scm.isBusy).help("Refresh")
@@ -401,10 +432,12 @@ struct SourceControlView: View {
                 newBranchName = ""
                 showCreateBranch = true
             }
+            .disabled(isBlocked(.createBranch, root: root))
             if !scm.state.hasUpstream {
                 Button("Publish Branch") {
                     Task { await scm.publish(root: root) }
                 }
+                .disabled(isBlocked(.push, root: root))
             }
             // Merge / Delete are offered only for non-current branches
             // (you can't merge or delete the branch you're on).
