@@ -104,6 +104,10 @@ struct GitLabSettingsSection: View {
 
                 Divider().padding(.vertical, 4)
 
+                OperationsAllowlistView(provider: .gitlab)
+
+                Divider().padding(.vertical, 4)
+
                 // Projects header
                 HStack {
                     SectionLabel("PROJECTS", size: 10, tracking: 1.2)

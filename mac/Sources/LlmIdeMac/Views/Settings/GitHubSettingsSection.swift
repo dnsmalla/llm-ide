@@ -92,6 +92,10 @@ struct GitHubSettingsSection: View {
 
                 Divider().padding(.vertical, 4)
 
+                OperationsAllowlistView(provider: .github)
+
+                Divider().padding(.vertical, 4)
+
                 HStack {
                     SectionLabel("REPOSITORIES", size: 10, tracking: 1.2)
                     Spacer()
