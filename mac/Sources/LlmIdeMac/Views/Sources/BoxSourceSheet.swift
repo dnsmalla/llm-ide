@@ -127,11 +127,12 @@ struct BoxSourceSheet: View {
                     .help("Remove this source and delete the stored client secret.")
                 }
                 Spacer()
-                Button("Save & verify") {
+                Button(testing ? "Verifying…" : "Save & verify") {
                     Task { await save() }
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
+                .disabled(testing)
             }
             .padding(Spacing.lg)
         }

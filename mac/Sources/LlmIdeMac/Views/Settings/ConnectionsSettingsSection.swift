@@ -395,8 +395,13 @@ struct ConnectionsSettingsSection: View {
         do {
             let r = try await api.connectBox(clientId: s.clientId, subjectType: s.subjectType, subjectId: s.subjectId, folderId: s.folderId)
             lastBoxWasError = false
-            lastBoxResult = "Indexed \(r.indexed) file\(r.indexed == 1 ? "" : "s")."
+            // `indexed` is chunk-rows; `files` is the document count. Report
+            // documents (falling back to the chunk count for older servers)
+            // and flag when a cap truncated the walk.
+            let fileCount = r.files ?? r.indexed
+            lastBoxResult = "Indexed \(fileCount) document\(fileCount == 1 ? "" : "s") (\(r.indexed) chunk\(r.indexed == 1 ? "" : "s"))."
                 + (r.skipped > 0 ? " \(r.skipped) skipped." : "")
+                + ((r.truncated ?? false) ? " Folder was large — some files were not indexed (cap reached)." : "")
         } catch {
             lastBoxWasError = true
             lastBoxResult = "Sync failed: \(error.localizedDescription)"

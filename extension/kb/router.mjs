@@ -528,9 +528,9 @@ export async function handleKB(req, res) {
       // url === '/kb/connect-box'
       const started = Date.now();
       try {
-        const { indexed, skipped } = await indexBoxFolder(userId, creds);
-        logger.info('box_index', { userId, folderId, indexed, skipped, durationMs: Date.now() - started });
-        sendJSON(res, 200, { ok: true, indexed, skipped });
+        const { indexed, files, skipped, truncated } = await indexBoxFolder(userId, creds);
+        logger.info('box_index', { userId, folderId, indexed, files, skipped, truncated, durationMs: Date.now() - started });
+        sendJSON(res, 200, { ok: true, indexed, files, skipped, truncated });
       } catch (e) {
         const safe = redactWithKey(e.message, clientSecret);
         logger.error('box_index_failed', { userId, folderId, reason: safe });

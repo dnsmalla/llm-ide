@@ -11,16 +11,25 @@ const API = 'https://api.box.com/2.0';
 const FETCH_DEADLINE_MS = 30_000;
 const MAX_FILES = 2000;      // safety cap (mirrors git's fence caps)
 const MAX_DEPTH = 10;        // subfolder recursion cap
+const PAGE_LIMIT = 1000;     // Box folder-items page size
 const REP_POLL_ATTEMPTS = 5; // extracted_text may be 'pending' briefly
 const DEFAULT_POLL_MS = 1500;
 
+// Every GET is bounded by its own deadline (B3): a hung Box API call (or a
+// never-responding content URL) can otherwise block the whole request up to
+// the 300s socket cap. Callers may pass their own `signal` to override.
 async function boxFetch(url, { token, headers, signal } = {}) {
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${token}`, ...(headers || {}) },
-    signal,
-  });
-  return res;
+  const ctrl = signal ? null : new AbortController();
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), FETCH_DEADLINE_MS) : null;
+  try {
+    return await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}`, ...(headers || {}) },
+      signal: signal || ctrl?.signal,
+    });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /** Pure: form body for the CCG token request. */
@@ -67,26 +76,36 @@ export function parseFolderItems(json) {
   return { files, folders };
 }
 
-/** List a folder recursively (paginated), returning flat file records with paths. */
-async function listFolderRecursive(token, folderId, { depth = 0, prefix = '', acc = [] } = {}) {
-  if (depth > MAX_DEPTH || acc.length >= MAX_FILES) return acc;
+/**
+ * List a folder recursively (paginated), returning flat file records with
+ * paths. `state.truncated` is set true when a MAX_FILES/MAX_DEPTH cap cut the
+ * walk short (B5), so the caller can tell the user the index is incomplete.
+ */
+async function listFolderRecursive(token, folderId, { depth = 0, prefix = '', acc = [], state } = {}) {
+  const st = state || { truncated: false };
+  if (depth > MAX_DEPTH) { st.truncated = true; return acc; }
+  if (acc.length >= MAX_FILES) { st.truncated = true; return acc; }
   let offset = 0;
   for (;;) {
-    const url = `${API}/folders/${encodeURIComponent(folderId)}/items?fields=id,name,type,modified_at&limit=1000&offset=${offset}`;
+    const url = `${API}/folders/${encodeURIComponent(folderId)}/items?fields=id,name,type,modified_at&limit=${PAGE_LIMIT}&offset=${offset}`;
     const res = await boxFetch(url, { token });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(`Box folder list failed: ${json.message || res.status}`);
+    // Page length is the reliable end-of-list signal (B4): breaking on
+    // `total_count || 0` stops after page 1 whenever Box omits total_count,
+    // silently dropping later pages. A full page means "maybe more".
+    const pageLen = Array.isArray(json?.entries) ? json.entries.length : 0;
     const { files, folders } = parseFolderItems(json);
     for (const f of files) {
-      if (acc.length >= MAX_FILES) return acc;
+      if (acc.length >= MAX_FILES) { st.truncated = true; return acc; }
       acc.push({ ...f, path: prefix ? `${prefix}/${f.name}` : f.name });
     }
     for (const sub of folders) {
-      if (acc.length >= MAX_FILES) return acc;
-      await listFolderRecursive(token, sub.id, { depth: depth + 1, prefix: prefix ? `${prefix}/${sub.name}` : sub.name, acc });
+      if (acc.length >= MAX_FILES) { st.truncated = true; return acc; }
+      await listFolderRecursive(token, sub.id, { depth: depth + 1, prefix: prefix ? `${prefix}/${sub.name}` : sub.name, acc, state: st });
     }
-    offset += 1000;
-    if (offset >= (json.total_count || 0)) break;
+    offset += PAGE_LIMIT;
+    if (pageLen < PAGE_LIMIT) break;
   }
   return acc;
 }
@@ -141,10 +160,17 @@ export async function boxTest(creds) {
   return { ok: true, folderName: json.name || creds.folderId, itemCount: json.item_collection?.total_count ?? 0 };
 }
 
-/** Index a Box folder into the KB (wholesale re-index). */
+/**
+ * Index a Box folder into the KB (wholesale re-index). Returns:
+ *   indexed   — chunk-rows written (ingestSources' count)
+ *   files     — files that produced rows (had extractable text)
+ *   skipped   — files with no text representation
+ *   truncated — true when a MAX_FILES/MAX_DEPTH cap cut the walk short (B5)
+ */
 export async function indexBoxFolder(userId, creds, opts = {}) {
   const { accessToken } = await exchangeCCGToken(creds);
-  const files = await listFolderRecursive(accessToken, creds.folderId);
+  const state = { truncated: false };
+  const files = await listFolderRecursive(accessToken, creds.folderId, { state });
   const items = [];
   let skipped = 0;
   for (const f of files) {
@@ -159,5 +185,5 @@ export async function indexBoxFolder(userId, creds, opts = {}) {
   }
   deleteSourcesByPrefix(userId, 'doc', `box:${creds.folderId}:`);
   const indexed = ingestSources(userId, items);
-  return { indexed, skipped };
+  return { indexed, files: files.length - skipped, skipped, truncated: state.truncated };
 }

@@ -93,3 +93,43 @@ test('indexBoxFolder fetches, chunks, and ingests doc rows (skips no-text files)
     for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
   }
 });
+
+// B4: a full first page followed by a partial page, with NO total_count in the
+// response. The old break-on-`total_count || 0` stopped after page 1 → silent
+// data loss. The page-length break condition must fetch page 2.
+test('indexBoxFolder paginates past a full page even when total_count is absent', async () => {
+  const dbmod = await import('../kb/db.mjs');
+  dbmod.closeDb();
+  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
+  const { getDb } = await import('../kb/db.mjs');
+  const { registerUser } = await import('../server/users.mjs');
+  const db = getDb();
+  const userId = registerUser(db, { email: `boxpage-${Math.floor(performance.now()*1000)}@ex.com`, password: 'pw-12345678' }).id;
+  const { indexBoxFolder } = await import('../connectors/box.mjs');
+
+  const page0 = Array.from({ length: 1000 }, (_, i) => ({ type: 'file', id: `a${i}`, name: `f${i}.md`, modified_at: 'T' }));
+  const page1 = [{ type: 'file', id: 'b0', name: 'last.md', modified_at: 'T' }];
+  const orig = global.fetch;
+  global.fetch = async (urlStr) => {
+    const url = String(urlStr);
+    const json = (o, ok = true) => ({ ok, json: async () => o, text: async () => '' });
+    if (url === 'https://api.box.com/oauth2/token') return json({ access_token: 'tok' });
+    if (url.includes('/folders/F/items') && url.includes('offset=0')) return json({ entries: page0 }); // note: no total_count
+    if (url.includes('/folders/F/items') && url.includes('offset=1000')) return json({ entries: page1 });
+    if (url.includes('/files/') && url.includes('?')) return json({ representations: { entries: [
+      { representation: 'extracted_text', status: { state: 'success' }, content: { url_template: 'https://dl.box.com/rep{+asset_path}' } },
+    ]}});
+    if (url === 'https://dl.box.com/rep') return { ok: true, json: async () => ({}), text: async () => 'x' };
+    return json({}, false);
+  };
+  try {
+    const r = await indexBoxFolder(userId, { clientId: 'c', clientSecret: 's', subjectType: 'enterprise', subjectId: 'e', folderId: 'F' }, { pollDelayMs: 0 });
+    assert.equal(r.files, 1001, 'both pages indexed (1000 + 1), not just page 1');
+    assert.equal(r.indexed, 1001, 'one chunk per single-line file across both pages');
+    assert.equal(r.truncated, false, 'below MAX_FILES cap → not truncated');
+  } finally {
+    global.fetch = orig;
+    dbmod.closeDb();
+    for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
+  }
+});
