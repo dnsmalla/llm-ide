@@ -52,6 +52,30 @@ test('dispatch — AWS access key in body blocks', () => {
   }, 'dispatch.secret');
 });
 
+test('dispatch — GitLab PAT in body blocks (tracker is GitLab-hosted)', () => {
+  blocking('dispatch', {
+    target: 'github',
+    config: { repo: 'a/b', token: 'x' },
+    items: [{ title: 'ok', body: 'token glpat-aaaaaaaaaaaaaaaaaaaa leaked' }],
+  }, 'dispatch.secret');
+});
+
+test('dispatch — non-PAT GitHub token (gho_/ghs_) in body blocks', () => {
+  blocking('dispatch', {
+    target: 'github',
+    config: { repo: 'a/b', token: 'x' },
+    items: [{ title: 'ok', body: 'gho_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa here' }],
+  }, 'dispatch.secret');
+});
+
+test('dispatch — OpenAI project key (sk-proj-) in body blocks', () => {
+  blocking('dispatch', {
+    target: 'github',
+    config: { repo: 'a/b', token: 'x' },
+    items: [{ title: 'ok', body: 'key sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa here' }],
+  }, 'dispatch.secret');
+});
+
 test('dispatch — clean payload passes', () => {
   const r = ok('dispatch', {
     target: 'github',
