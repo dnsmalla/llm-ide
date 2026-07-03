@@ -231,6 +231,30 @@ final class AppConfig: ObservableObject {
         gitHubSavedRepos.first(where: { $0.isActive })?.resolvedId
     }
 
+    // ── Per-provider operation allow-list ─────────────────────────────
+    /// Operations automation may perform / manual buttons may trigger for
+    /// GitHub. Absent key ⇒ all-enabled (see init); explicit empty ⇒ none.
+    @Published var gitHubAllowedOps: Set<RepoOperation> = Set(RepoOperation.allCases) {
+        didSet { defaults.set(gitHubAllowedOps.map(\.rawValue), forKey: "gitHubAllowedOps") }
+    }
+    @Published var gitLabAllowedOps: Set<RepoOperation> = Set(RepoOperation.allCases) {
+        didSet { defaults.set(gitLabAllowedOps.map(\.rawValue), forKey: "gitLabAllowedOps") }
+    }
+
+    /// The one predicate every enforcement site consults.
+    func isAllowed(_ op: RepoOperation, provider: RepoBackendKind) -> Bool {
+        (provider == .github ? gitHubAllowedOps : gitLabAllowedOps).contains(op)
+    }
+
+    /// Toggle one op for one provider (used by the settings checklist).
+    func setAllowed(_ op: RepoOperation, provider: RepoBackendKind, _ on: Bool) {
+        if provider == .github {
+            if on { gitHubAllowedOps.insert(op) } else { gitHubAllowedOps.remove(op) }
+        } else {
+            if on { gitLabAllowedOps.insert(op) } else { gitLabAllowedOps.remove(op) }
+        }
+    }
+
     // ── External sources: Email ───────────────────────────────────────
     /// The single configured Email source, or nil when not set up. JSON-
     /// persisted exactly like `gitLabSavedProjects` — the IMAP password is
@@ -519,6 +543,18 @@ final class AppConfig: ObservableObject {
             self.gitHubSavedRepos = decoded
         } else {
             self.gitHubSavedRepos = []
+        }
+        // Allow-lists: absent key ⇒ default all-enabled; stored array (even
+        // empty) is honored verbatim; unknown raw-strings are dropped.
+        if let raw = defaults.array(forKey: "gitHubAllowedOps") as? [String] {
+            self.gitHubAllowedOps = Set(raw.compactMap(RepoOperation.init(rawValue:)))
+        } else {
+            self.gitHubAllowedOps = Set(RepoOperation.allCases)
+        }
+        if let raw = defaults.array(forKey: "gitLabAllowedOps") as? [String] {
+            self.gitLabAllowedOps = Set(raw.compactMap(RepoOperation.init(rawValue:)))
+        } else {
+            self.gitLabAllowedOps = Set(RepoOperation.allCases)
         }
         if let data = defaults.data(forKey: "emailSource"),
            let decoded = decodeConfigOrStash(SavedEmailSource.self, key: "emailSource", data: data, defaults: defaults) {
