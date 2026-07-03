@@ -131,6 +131,16 @@ export function toSourceRows({ folderId, fileId, name, modifiedAt, path, text })
   }));
 }
 
+/** Verify creds + folder access: exchange a token and read one page. */
+export async function boxTest(creds) {
+  const { accessToken } = await exchangeCCGToken(creds);
+  const url = `${API}/folders/${encodeURIComponent(creds.folderId)}?fields=name,item_collection`;
+  const res = await boxFetch(url, { token: accessToken });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`Box folder access failed: ${json.message || res.status}`);
+  return { ok: true, folderName: json.name || creds.folderId, itemCount: json.item_collection?.total_count ?? 0 };
+}
+
 /** Index a Box folder into the KB (wholesale re-index). */
 export async function indexBoxFolder(userId, creds, opts = {}) {
   const { accessToken } = await exchangeCCGToken(creds);

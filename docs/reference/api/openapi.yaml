@@ -1237,6 +1237,45 @@ paths:
               schema: { type: object, properties: { ok: { type: boolean }, repo: { type: string }, count: { type: integer }, chunks: { type: integer } } }
         '400': { description: Validation or indexing error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
+  /kb/box/test:
+    post:
+      summary: Verify Box credentials and folder access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientId, subjectId, folderId]
+              properties:
+                clientId:    { type: string }
+                subjectType: { type: string, enum: [enterprise, user], default: enterprise }
+                subjectId:   { type: string }
+                folderId:    { type: string }
+      responses:
+        '200': { description: Folder info, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, folderName: { type: string }, itemCount: { type: integer } } } } } }
+        '400': { description: Missing secret or fields, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: Box connect failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /kb/connect-box:
+    post:
+      summary: Index a Box folder's documents into the KB
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientId, subjectId, folderId]
+              properties:
+                clientId:    { type: string }
+                subjectType: { type: string, enum: [enterprise, user], default: enterprise }
+                subjectId:   { type: string }
+                folderId:    { type: string }
+      responses:
+        '200': { description: Indexing summary, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, indexed: { type: integer }, skipped: { type: integer } } } } } }
+        '400': { description: Missing secret or fields, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: Box index failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /kb/connect-tickets-json:
     post:
       summary: Index an inline JSON array of tickets (Backlog, Jira, or generic)
