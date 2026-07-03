@@ -56,18 +56,27 @@ test('withRouteTimeout propagates a false handler result (dispatcher fall-throug
 
 test('withRouteTimeout sends a 504 envelope when the handler exceeds the budget', async () => {
   const res = makeRes();
-  const never = () => new Promise(() => { /* never settles */ });
-  const out = await withRouteTimeout({ url: '/kb/ingest', log: { error() {}, warn() {} } }, res, 50, never);
+  // The budget timer inside withRouteTimeout is unref'd (so it can't keep the
+  // server alive at shutdown), so the handler must hold the loop open with a
+  // ref'd timer that outlives the budget; the timeout then wins the race.
+  // Model the documented behavior: the abandoned handler settles afterwards —
+  // await it so the test leaves nothing pending for node:test to flag.
+  let slow;
+  const handler = () => (slow = new Promise((resolve) => { setTimeout(resolve, 100); }));
+  const out = await withRouteTimeout({ url: '/kb/ingest', log: { error() {}, warn() {} } }, res, 25, handler);
   assert.equal(out, true, 'reported handled');
   assert.equal(res.statusCode, 504);
   assert.match(res._body, /TIMEOUT/);
+  await slow; // abandoned handler runs to completion after the 504
 });
 
 test('withRouteTimeout does not double-write if the handler already responded', async () => {
   const res = makeRes();
-  // Handler writes headers then hangs — the timeout path must no-op.
-  const fn = () => { res.writeHead(200, {}); res.end('{"ok":true}'); return new Promise(() => {}); };
-  const out = await withRouteTimeout({ url: '/kb/ingest', log: { error() {}, warn() {} } }, res, 50, fn);
+  // Handler writes headers then outlives its budget — the timeout path must no-op.
+  let slow;
+  const handler = () => { res.writeHead(200, {}); res.end('{"ok":true}'); return (slow = new Promise((resolve) => { setTimeout(resolve, 100); })); };
+  const out = await withRouteTimeout({ url: '/kb/ingest', log: { error() {}, warn() {} } }, res, 25, handler);
   assert.equal(out, true);
   assert.equal(res.statusCode, 200, 'original status preserved');
+  await slow;
 });
