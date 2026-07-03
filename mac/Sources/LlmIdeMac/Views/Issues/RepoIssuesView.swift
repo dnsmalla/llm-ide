@@ -59,8 +59,8 @@ struct RepoIssuesView: View {
 
     private var currentClient: RepoBackend {
         switch activeBackend {
-        case .gitlab: return GitLabClient(config: config)
-        case .github: return GitHubClient(config: config)
+        case .gitlab: return RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
+        case .github: return RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
         }
     }
 

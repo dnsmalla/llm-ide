@@ -586,8 +586,8 @@ struct CodeAssistantPanel: View {
             labels: labels
         )
         let client: RepoBackend = (target.kind == .gitlab)
-            ? GitLabClient(config: config)
-            : GitHubClient(config: config)
+            ? RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
+            : RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
         let issue = try await client.createIssue(projectId: target.projectId, payload: payload)
         return URL(string: issue.webUrl)
     }
@@ -2083,7 +2083,8 @@ struct CodeAssistantPanel: View {
     private func confirmCreateIssue(_ args: CreateIssueSheet.Args,
                                     target: IssueTarget) async -> CreateIssueSheet.ConfirmResult {
         let client: RepoBackend = target.kind == .gitlab
-            ? GitLabClient(config: config) : GitHubClient(config: config)
+            ? RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
+            : RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
         do {
             let payload = RepoIssuePayload(
                 title: args.title,
@@ -2220,7 +2221,8 @@ struct CodeAssistantPanel: View {
     private func confirmCommentIssue(_ args: CommentIssueSheet.Args,
                                      target: IssueTarget) async -> CommentIssueSheet.ConfirmResult {
         let client: RepoBackend = target.kind == .gitlab
-            ? GitLabClient(config: config) : GitHubClient(config: config)
+            ? RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
+            : RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
         do {
             _ = try await client.createNote(projectId: target.projectId, number: args.iid, body: args.body)
             self.pendingTool = nil

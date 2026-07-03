@@ -26,7 +26,7 @@ struct CodeWorkflowTarget {
     static func gitLab(_ p: SavedGitLabProject, config: AppConfig) -> CodeWorkflowTarget {
         CodeWorkflowTarget(
             kind: .gitlab,
-            backend: GitLabClient(config: config),
+            backend: RepoBackendFactory.guarded(GitLabClient(config: config), config: config),
             projectId: String(p.resolvedId ?? 0),
             isResolved: p.resolvedId != nil,
             localURL: p.localURL ?? URL(fileURLWithPath: "/"),
@@ -46,7 +46,7 @@ struct CodeWorkflowTarget {
         }
         return CodeWorkflowTarget(
             kind: .github,
-            backend: GitHubClient(config: config),
+            backend: RepoBackendFactory.guarded(GitHubClient(config: config), config: config),
             projectId: pid,
             isResolved: !pid.isEmpty,
             localURL: r.localURL ?? URL(fileURLWithPath: "/"),
