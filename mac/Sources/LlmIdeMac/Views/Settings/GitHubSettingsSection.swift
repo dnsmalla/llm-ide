@@ -281,8 +281,10 @@ struct GitHubSettingsSection: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
-                .disabled(isCloning || r.url.isEmpty || config.gitHubToken.isEmpty)
-                .help(config.gitHubToken.isEmpty ? "Add and verify a GitHub access token first." : "")
+                .disabled(isCloning || r.url.isEmpty || config.gitHubToken.isEmpty || !config.isAllowed(.sync, provider: .github))
+                .help(config.gitHubToken.isEmpty
+                      ? "Add and verify a GitHub access token first."
+                      : (config.isAllowed(.sync, provider: .github) ? "" : "Enable Pull / Re-sync in Automation & Actions above"))
             }
 
             if let err = cloneError {

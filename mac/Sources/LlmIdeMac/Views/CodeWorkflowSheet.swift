@@ -548,7 +548,11 @@ struct CodeWorkflowSheet: View {
                 }
                 Button(svc.busy ? "Pushing…" : "Push & Create \(kind.changeRequestAbbrev)") { Task { await svc.pushAndCreateMR() } }
                     .buttonStyle(.borderedProminent)
-                    .disabled(svc.busy || svc.mrTitle.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(svc.busy || svc.mrTitle.trimmingCharacters(in: .whitespaces).isEmpty ||
+                              !(appConfig.isAllowed(.push, provider: kind) && appConfig.isAllowed(.createPR, provider: kind)))
+                    .help((appConfig.isAllowed(.push, provider: kind) && appConfig.isAllowed(.createPR, provider: kind))
+                          ? ""
+                          : "Enable Push and Create PR / MR in Settings → \(kind.displayName) → Automation & Actions")
             }
         case .done:
             EmptyView()

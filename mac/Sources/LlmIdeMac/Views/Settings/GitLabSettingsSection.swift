@@ -310,8 +310,10 @@ struct GitLabSettingsSection: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
-                .disabled(isCloning || p.url.isEmpty || config.gitLabToken.isEmpty)
-                .help(config.gitLabToken.isEmpty ? "Add and verify a GitLab access token first." : "")
+                .disabled(isCloning || p.url.isEmpty || config.gitLabToken.isEmpty || !config.isAllowed(.sync, provider: .gitlab))
+                .help(config.gitLabToken.isEmpty
+                      ? "Add and verify a GitLab access token first."
+                      : (config.isAllowed(.sync, provider: .gitlab) ? "" : "Enable Pull / Re-sync in Automation & Actions above"))
             }
 
             if let err = cloneError {

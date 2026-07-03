@@ -233,7 +233,11 @@ struct QuickFixSheet: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(svc.busy
                           || svc.createdIssue == nil
-                          || svc.aiPrompt.trimmingCharacters(in: .whitespaces).isEmpty)
+                          || svc.aiPrompt.trimmingCharacters(in: .whitespaces).isEmpty
+                          || !(appConfig.isAllowed(.push, provider: kind) && appConfig.isAllowed(.createPR, provider: kind)))
+                .help((appConfig.isAllowed(.push, provider: kind) && appConfig.isAllowed(.createPR, provider: kind))
+                      ? ""
+                      : "Enable Push and Create PR / MR in Settings → \(kind.displayName) → Automation & Actions")
             }
         }
         .padding(.horizontal, 20)

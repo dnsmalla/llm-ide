@@ -23,6 +23,7 @@ struct RepoIssueDetailSheet: View {
     var onDismiss: () -> Void
 
     @EnvironmentObject var theme: ThemeStore
+    @EnvironmentObject var config: AppConfig
     @Environment(ActivityStore.self) private var activity
 
     @State private var current: RepoIssue
@@ -580,7 +581,11 @@ struct RepoIssueDetailSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(commentBusy ||
-                          newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                          newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                          !config.isAllowed(.commentIssue, provider: client.kind))
+                .help(config.isAllowed(.commentIssue, provider: client.kind)
+                      ? ""
+                      : "Enable Comment on issue in Settings → \(client.kind.displayName) → Automation & Actions")
                 .keyboardShortcut(.return, modifiers: .command)
             }
         }
