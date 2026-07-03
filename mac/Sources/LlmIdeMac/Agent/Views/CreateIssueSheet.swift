@@ -20,6 +20,10 @@ struct CreateIssueSheet: View {
     let projectURL: String
     /// Provider display name ("GitLab" / "GitHub") for the settings hint.
     let provider: String
+    /// Whether the allow-list permits Create issue for the resolved
+    /// provider. When false, submission is disabled and the tooltip
+    /// points at the Settings toggle instead of describing the shortcut.
+    let isAllowed: Bool
     let onConfirm: (Args) async -> ConfirmResult   // returns issue number on success
 
     @State private var title: String
@@ -40,10 +44,12 @@ struct CreateIssueSheet: View {
          projectName: String,
          projectURL: String,
          provider: String,
+         isAllowed: Bool = true,
          onConfirm: @escaping (Args) async -> ConfirmResult) {
         self.projectName = projectName
         self.projectURL = projectURL
         self.provider = provider
+        self.isAllowed = isAllowed
         self.onConfirm = onConfirm
         _title = State(initialValue: args.title)
         _description = State(initialValue: args.description)
@@ -100,7 +106,10 @@ struct CreateIssueSheet: View {
                 Button("Create issue") { submit() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
-                    .disabled(submitting || title.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(submitting || title.trimmingCharacters(in: .whitespaces).isEmpty || !isAllowed)
+                    .help(isAllowed
+                          ? ""
+                          : "Enable Create issue in Settings → \(provider) → Automation & Actions")
             }
         }
         .padding(20)

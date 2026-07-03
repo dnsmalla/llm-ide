@@ -329,6 +329,7 @@ struct CodeAssistantPanel: View {
                     projectName: target.label,
                     projectURL: target.projectURL,
                     provider: target.kind == .gitlab ? "GitLab" : "GitHub",
+                    isAllowed: config.isAllowed(.createIssue, provider: target.kind),
                     onConfirm: { editedArgs in
                         await confirmCreateIssue(editedArgs, target: target)
                     }
@@ -440,6 +441,7 @@ struct CodeAssistantPanel: View {
                     projectURL: target.projectURL,
                     provider: target.kind == .gitlab ? "GitLab" : "GitHub",
                     issueTitle: recentIssues.first(where: { $0.iid == args.iid })?.title,
+                    isAllowed: config.isAllowed(.commentIssue, provider: target.kind),
                     onConfirm: { editedArgs in
                         await confirmCommentIssue(editedArgs, target: target)
                     }
