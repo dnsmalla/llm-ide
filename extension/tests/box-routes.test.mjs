@@ -178,3 +178,33 @@ test('POST /kb/box/test surfaces a redacted 502 BOX_CONNECT_FAILED on token exch
     global.fetch = orig;
   }
 });
+
+// B1: a Box client_secret is an opaque string with no recognizable shape, so
+// pattern-based redactSecrets can't catch it — the route must use
+// redactWithKey (masks the exact in-flight secret). This bare secret would
+// leak with the old redactSecrets(e.message) code.
+test('POST /kb/box/test redacts a BARE (shapeless) client_secret echoed in a Box error', async () => {
+  resetDb();
+  const u = makeUser('baresecret');
+  const bare = 'Xy9QpZ2mB7Kv0Lr4Ns8Wt'; // no ghp_/sk-/xox/AKIA prefix — redactSecrets can't match this
+  vault.setSecret(db.getDb(), u.id, 'box.clientSecret', bare);
+
+  const orig = global.fetch;
+  global.fetch = async (urlStr) => {
+    const url = String(urlStr);
+    if (url === 'https://api.box.com/oauth2/token') {
+      return { ok: false, status: 400, json: async () => ({ error: 'invalid_client', error_description: `secret ${bare} rejected` }), text: async () => '' };
+    }
+    return { ok: false, status: 500, json: async () => ({}), text: async () => '' };
+  };
+  try {
+    const req = makeReq({ method: 'POST', url: '/kb/box/test', body: { clientId: 'cid', subjectId: 'sid', folderId: 'F1' }, userId: u.id });
+    const res = makeRes();
+    await handleKB(req, res);
+    assert.equal(res.statusCode, 502);
+    const parsed = JSON.parse(res._body);
+    assert.ok(!parsed.error.message.includes(bare), 'bare client_secret must not leak in the response (redactWithKey)');
+  } finally {
+    global.fetch = orig;
+  }
+});

@@ -16,8 +16,10 @@ extension LlmIdeAPIClient {
 
     struct BoxIndexResult: Decodable {
         let ok: Bool
-        let indexed: Int
-        let skipped: Int
+        let indexed: Int        // chunk-rows written
+        let skipped: Int        // files with no extractable text
+        let files: Int?         // files that produced rows (optional: older servers omit it)
+        let truncated: Bool?    // true when a file/depth cap cut the walk short
     }
 
     private struct BoxReq: Encodable {

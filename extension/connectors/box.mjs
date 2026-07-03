@@ -11,16 +11,67 @@ const API = 'https://api.box.com/2.0';
 const FETCH_DEADLINE_MS = 30_000;
 const MAX_FILES = 2000;      // safety cap (mirrors git's fence caps)
 const MAX_DEPTH = 10;        // subfolder recursion cap
+const PAGE_LIMIT = 1000;     // Box folder-items page size
 const REP_POLL_ATTEMPTS = 5; // extracted_text may be 'pending' briefly
 const DEFAULT_POLL_MS = 1500;
 
+// Every GET is bounded by its own deadline (B3): a hung Box API call (or a
+// never-responding content URL) can otherwise block the whole request up to
+// the 300s socket cap. Callers may pass their own `signal` to override.
 async function boxFetch(url, { token, headers, signal } = {}) {
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${token}`, ...(headers || {}) },
-    signal,
-  });
-  return res;
+  const ctrl = signal ? null : new AbortController();
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), FETCH_DEADLINE_MS) : null;
+  try {
+    return await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}`, ...(headers || {}) },
+      signal: signal || ctrl?.signal,
+    });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+const MAX_HTTP_RETRIES = 3;
+
+function retryAfterMs(res) {
+  const h = res.headers?.get?.('retry-after');
+  if (!h) return null;
+  const secs = Number(h);
+  return Number.isFinite(secs) ? Math.max(0, secs * 1000) : null;
+}
+
+const sleep = (ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
+
+// A Box "session" holds the CCG access token and can refresh it on demand.
+// CCG tokens live ~60min; a large folder index can outlast one, so requests
+// must be able to re-auth mid-run (#6).
+function makeSession(creds) {
+  let token = null;
+  return {
+    async ensure() { if (!token) ({ accessToken: token } = await exchangeCCGToken(creds)); return token; },
+    async refresh() { ({ accessToken: token } = await exchangeCCGToken(creds)); return token; },
+  };
+}
+
+// Authenticated GET with 429/Retry-After backoff (#7) and a one-time 401
+// token refresh (#6). `retryDelayMs` overrides the backoff base (tests pass 0).
+async function boxGet(session, url, { headers, retryDelayMs } = {}) {
+  let refreshed = false;
+  for (let attempt = 0; ; attempt++) {
+    const token = await session.ensure();
+    const res = await boxFetch(url, { token, headers });
+    if (res.status === 429 && attempt < MAX_HTTP_RETRIES) {
+      await sleep(retryDelayMs ?? retryAfterMs(res) ?? 1000 * (attempt + 1));
+      continue;
+    }
+    if (res.status === 401 && !refreshed) {
+      refreshed = true;
+      await session.refresh();
+      continue;
+    }
+    return res;
+  }
 }
 
 /** Pure: form body for the CCG token request. */
@@ -67,35 +118,46 @@ export function parseFolderItems(json) {
   return { files, folders };
 }
 
-/** List a folder recursively (paginated), returning flat file records with paths. */
-async function listFolderRecursive(token, folderId, { depth = 0, prefix = '', acc = [] } = {}) {
-  if (depth > MAX_DEPTH || acc.length >= MAX_FILES) return acc;
+/**
+ * List a folder recursively (paginated), returning flat file records with
+ * paths. `state.truncated` is set true when a MAX_FILES/MAX_DEPTH cap cut the
+ * walk short (B5), so the caller can tell the user the index is incomplete.
+ */
+async function listFolderRecursive(session, folderId, { depth = 0, prefix = '', acc = [], state, retryDelayMs } = {}) {
+  const st = state || { truncated: false };
+  if (depth > MAX_DEPTH) { st.truncated = true; return acc; }
+  if (acc.length >= MAX_FILES) { st.truncated = true; return acc; }
   let offset = 0;
   for (;;) {
-    const url = `${API}/folders/${encodeURIComponent(folderId)}/items?fields=id,name,type,modified_at&limit=1000&offset=${offset}`;
-    const res = await boxFetch(url, { token });
+    const url = `${API}/folders/${encodeURIComponent(folderId)}/items?fields=id,name,type,modified_at&limit=${PAGE_LIMIT}&offset=${offset}`;
+    const res = await boxGet(session, url, { retryDelayMs });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(`Box folder list failed: ${json.message || res.status}`);
+    // Page length is the reliable end-of-list signal (B4): breaking on
+    // `total_count || 0` stops after page 1 whenever Box omits total_count,
+    // silently dropping later pages. A full page means "maybe more".
+    const pageLen = Array.isArray(json?.entries) ? json.entries.length : 0;
     const { files, folders } = parseFolderItems(json);
     for (const f of files) {
-      if (acc.length >= MAX_FILES) return acc;
+      if (acc.length >= MAX_FILES) { st.truncated = true; return acc; }
       acc.push({ ...f, path: prefix ? `${prefix}/${f.name}` : f.name });
     }
     for (const sub of folders) {
-      if (acc.length >= MAX_FILES) return acc;
-      await listFolderRecursive(token, sub.id, { depth: depth + 1, prefix: prefix ? `${prefix}/${sub.name}` : sub.name, acc });
+      if (acc.length >= MAX_FILES) { st.truncated = true; return acc; }
+      await listFolderRecursive(session, sub.id, { depth: depth + 1, prefix: prefix ? `${prefix}/${sub.name}` : sub.name, acc, state: st, retryDelayMs });
     }
-    offset += 1000;
-    if (offset >= (json.total_count || 0)) break;
+    offset += PAGE_LIMIT;
+    if (pageLen < PAGE_LIMIT) break;
   }
   return acc;
 }
 
 /** Fetch a file's extracted text, or null when no text representation exists. */
-export async function fetchExtractedText(token, fileId, opts = {}) {
+export async function fetchExtractedText(session, fileId, opts = {}) {
   const pollMs = opts.pollDelayMs ?? DEFAULT_POLL_MS;
+  const retryDelayMs = opts.retryDelayMs;
   const infoUrl = `${API}/files/${encodeURIComponent(fileId)}?fields=representations`;
-  const res = await boxFetch(infoUrl, { token, headers: { 'X-Rep-Hints': '[extracted_text]' } });
+  const res = await boxGet(session, infoUrl, { headers: { 'X-Rep-Hints': '[extracted_text]' }, retryDelayMs });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) return null;
   const rep = (json?.representations?.entries || []).find(r => r.representation === 'extracted_text');
@@ -106,14 +168,14 @@ export async function fetchExtractedText(token, fileId, opts = {}) {
   for (let attempt = 0; state === 'pending' && attempt < REP_POLL_ATTEMPTS; attempt++) {
     if (pollMs > 0) await new Promise(r => setTimeout(r, pollMs));
     if (!infoTemplate) break;
-    const pr = await boxFetch(infoTemplate, { token });
+    const pr = await boxGet(session, infoTemplate, { retryDelayMs });
     const pj = await pr.json().catch(() => ({}));
     state = pj?.status?.state;
     contentTemplate = pj?.content?.url_template || contentTemplate;
   }
   if (state !== 'success' || !contentTemplate) return null;
   const contentUrl = contentTemplate.replace('{+asset_path}', '');
-  const cr = await boxFetch(contentUrl, { token });
+  const cr = await boxGet(session, contentUrl, { retryDelayMs });
   if (!cr.ok) return null;
   return await cr.text();
 }
@@ -132,25 +194,32 @@ export function toSourceRows({ folderId, fileId, name, modifiedAt, path, text })
 }
 
 /** Verify creds + folder access: exchange a token and read one page. */
-export async function boxTest(creds) {
-  const { accessToken } = await exchangeCCGToken(creds);
+export async function boxTest(creds, opts = {}) {
+  const session = makeSession(creds);
   const url = `${API}/folders/${encodeURIComponent(creds.folderId)}?fields=name,item_collection`;
-  const res = await boxFetch(url, { token: accessToken });
+  const res = await boxGet(session, url, { retryDelayMs: opts.retryDelayMs });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`Box folder access failed: ${json.message || res.status}`);
   return { ok: true, folderName: json.name || creds.folderId, itemCount: json.item_collection?.total_count ?? 0 };
 }
 
-/** Index a Box folder into the KB (wholesale re-index). */
+/**
+ * Index a Box folder into the KB (wholesale re-index). Returns:
+ *   indexed   — chunk-rows written (ingestSources' count)
+ *   files     — files that produced rows (had extractable text)
+ *   skipped   — files with no text representation
+ *   truncated — true when a MAX_FILES/MAX_DEPTH cap cut the walk short (B5)
+ */
 export async function indexBoxFolder(userId, creds, opts = {}) {
-  const { accessToken } = await exchangeCCGToken(creds);
-  const files = await listFolderRecursive(accessToken, creds.folderId);
+  const session = makeSession(creds);
+  const state = { truncated: false };
+  const files = await listFolderRecursive(session, creds.folderId, { state, retryDelayMs: opts.retryDelayMs });
   const items = [];
   let skipped = 0;
   for (const f of files) {
     let text = null;
     try {
-      text = await fetchExtractedText(accessToken, f.id, opts);
+      text = await fetchExtractedText(session, f.id, opts);
     } catch {
       text = null;
     }
@@ -159,5 +228,5 @@ export async function indexBoxFolder(userId, creds, opts = {}) {
   }
   deleteSourcesByPrefix(userId, 'doc', `box:${creds.folderId}:`);
   const indexed = ingestSources(userId, items);
-  return { indexed, skipped };
+  return { indexed, files: files.length - skipped, skipped, truncated: state.truncated };
 }
