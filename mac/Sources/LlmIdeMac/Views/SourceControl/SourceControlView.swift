@@ -74,10 +74,7 @@ struct SourceControlView: View {
     /// `SourceControlService.providerKind(for:)` so the button `.disabled`
     /// state matches what the service itself will enforce.
     private func providerKind(for root: URL) -> RepoBackendKind? {
-        let path = root.standardizedFileURL.path
-        if config.gitHubSavedRepos.contains(where: { $0.localPath == path }) { return .github }
-        if config.gitLabSavedProjects.contains(where: { $0.localPath == path }) { return .gitlab }
-        return nil
+        config.providerKind(forRepoRoot: root)
     }
 
     /// True when `op` is disallowed for `root`'s provider. Unmanaged roots
