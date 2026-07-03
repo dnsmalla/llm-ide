@@ -82,6 +82,19 @@ function intOrNull(v) {
   const n = Number(v);
   return Number.isFinite(n) ? Math.trunc(n) : null;
 }
+// Token counts come off an HTTP body (the Mac CLI self-reports them — the
+// server can't verify a client-side LLM call). Clamp to a sane non-negative
+// range so a buggy or hostile client can't poison this user's own ledger math
+// with negatives (which would mask real usage) or an absurd/overflow value.
+// Returns null (== "not reported") for missing/invalid input; the cap is far
+// above any single request's real token count.
+const MAX_TOKENS_PER_EVENT = 100_000_000; // 1e8 — orders above the largest context window
+function tokenCountOrNull(v) {
+  if (v == null) return null;
+  const n = intOrNull(v);
+  if (n == null || n < 0) return null;
+  return Math.min(n, MAX_TOKENS_PER_EVENT);
+}
 function clampInt(v, lo, hi, dflt) {
   const n = Number(v);
   if (!Number.isFinite(n)) return dflt;
@@ -192,8 +205,8 @@ export function recordUsage(db, {
       userId, String(provider), String(model),
       VALID_SOURCES.has(source) ? source : 'api',
       clampStr(endpoint, 128),
-      intOrNull(inputTokens), intOrNull(outputTokens),
-      Math.max(1, intOrNull(runs) || 1),
+      tokenCountOrNull(inputTokens), tokenCountOrNull(outputTokens),
+      Math.max(1, Math.min(1_000_000, intOrNull(runs) || 1)),
       clampStr(requestId, 128),
     );
     maybePruneLedger(db);
