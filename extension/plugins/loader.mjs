@@ -359,7 +359,11 @@ export function loadPlugins({ pluginDir = defaultPluginDir() } = {}) {
   const plugins = new Map();
   const warnings = [];
   if (!existsSync(pluginDir)) {
-    return { plugins, warnings: [`plugin directory not found: ${pluginDir}`], pluginDir };
+    // No plugin directory is the default state on a fresh install — it's
+    // created lazily on first plugin import. Absence is NOT a warning (it
+    // would print noise on every clean boot); surface it via `missing` for
+    // callers that care, and keep `warnings` for genuine load problems.
+    return { plugins, warnings: [], pluginDir, missing: true };
   }
   let entries;
   try { entries = readdirSync(pluginDir); }

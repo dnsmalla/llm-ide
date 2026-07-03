@@ -143,6 +143,20 @@ test('recordUsage feeds run- and token-based aggregation', async () => {
   assert.equal(usedForModel(db, userId, 'anthropic', 'claude-opus-4-8', 'tokens', 'daily'), 150);
 });
 
+test('recordUsage sanity-clamps self-reported token counts (no ledger poisoning)', async () => {
+  const { db, userId } = await setup();
+  const { recordUsage, usedForModel } = await import('../kb/usage.mjs');
+  // A negative count would mask real usage if summed in — dropped to null (unreported).
+  recordUsage(db, { userId, provider: 'anthropic', model: 'claude-opus-4-8', inputTokens: -500, outputTokens: 40 });
+  // An absurd/overflow value is capped rather than allowed to dominate the window sum.
+  recordUsage(db, { userId, provider: 'anthropic', model: 'claude-opus-4-8', inputTokens: 1e18, outputTokens: 0 });
+  const tokens = usedForModel(db, userId, 'anthropic', 'claude-opus-4-8', 'tokens', 'daily');
+  // 40 (negative→null) + 100_000_000 (capped) + 0 = 100_000_040; never negative, never 1e18.
+  assert.equal(tokens, 100_000_040);
+  // Both events still count as runs regardless of token validity.
+  assert.equal(usedForModel(db, userId, 'anthropic', 'claude-opus-4-8', 'runs', 'daily'), 2);
+});
+
 test('recordUsage isolates users', async () => {
   const { db, userId } = await setup();
   const { registerUser } = await import('../server/users.mjs');

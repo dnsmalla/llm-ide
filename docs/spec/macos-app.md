@@ -26,7 +26,7 @@ The macOS app (`LlmIdeMac`) is the primary IDE client — a single-window SwiftU
 | Yams | `from: "5.1.0"` |
 | Sparkle | `from: "2.6.0"` |
 | SwiftTerm | `from: "1.2.0"` |
-| graph-kit (`GraphKit`) | `from: "1.5.4"` |
+| graph-kit (`GraphKit`) | `from: "1.6.0"` |
 
 **Bundled resources** (lines 28–35): `note_template.docx`, `generate_meeting_note.py`, vendored highlight.js v11.9.0 (`highlight.min.js`), and two highlight.js themes (`atom-one-dark.min.css`, `atom-one-light.min.css`).
 
