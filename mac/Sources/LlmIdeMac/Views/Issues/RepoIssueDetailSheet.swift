@@ -206,8 +206,8 @@ struct RepoIssueDetailSheet: View {
                 .foregroundStyle(t.text)
             }
             .buttonStyle(.plain)
-            .disabled(stateBusy || !config.isAllowed(.merge, provider: client.kind))
-            .help(config.isAllowed(.merge, provider: client.kind)
+            .disabled(stateBusy || !config.isAllowed(.closeIssue, provider: client.kind))
+            .help(config.isAllowed(.closeIssue, provider: client.kind)
                   ? ""
                   : "Enable Close / reopen in Settings → \(client.kind.displayName) → Automation & Actions")
         }

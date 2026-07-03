@@ -9,9 +9,10 @@ enum RepoOperation: String, Codable, CaseIterable {
     case createBranch
     case autoCommit
     case createIssue   // create issue/ticket, incl. tracker dispatch
+    case editIssue     // labels, assignee, milestone, etc.
     case commentIssue
+    case closeIssue    // close / reopen issue
     case createPR      // create PR / MR
-    case merge         // merge / close PR / MR
 
     var label: String {
         switch self {
@@ -20,9 +21,10 @@ enum RepoOperation: String, Codable, CaseIterable {
         case .createBranch: return "Create branch"
         case .autoCommit:   return "Auto-commit AI changes"
         case .createIssue:  return "Create issue"
+        case .editIssue:    return "Edit issue (labels, assignee, milestone…)"
         case .commentIssue: return "Comment on issue"
+        case .closeIssue:   return "Close / reopen issue"
         case .createPR:     return "Create PR / MR"
-        case .merge:        return "Merge / close"
         }
     }
 
@@ -31,8 +33,8 @@ enum RepoOperation: String, Codable, CaseIterable {
         [
             ("Sync",        [.sync]),
             ("Code writes", [.push, .createBranch, .autoCommit]),
-            ("Issues",      [.createIssue, .commentIssue]),
-            ("PR / MR",     [.createPR, .merge]),
+            ("Issues",      [.createIssue, .editIssue, .commentIssue, .closeIssue]),
+            ("PR / MR",     [.createPR]),
         ]
     }
 }

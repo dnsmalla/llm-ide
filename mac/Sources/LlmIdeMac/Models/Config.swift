@@ -28,6 +28,13 @@ private func decodeConfigOrStash<T: Decodable>(
     }
 }
 
+/// Decode a stored allow-op rawValue, mapping the pre-rename "merge" to
+/// its replacement `.closeIssue`. Unknown values still return nil (dropped).
+private func decodeRepoOp(_ raw: String) -> RepoOperation? {
+    if raw == "merge" { return .closeIssue }
+    return RepoOperation(rawValue: raw)
+}
+
 struct SavedGitLabProject: Codable, Identifiable, Equatable {
     var id: String
     var url: String
@@ -547,12 +554,12 @@ final class AppConfig: ObservableObject {
         // Allow-lists: absent key ⇒ default all-enabled; stored array (even
         // empty) is honored verbatim; unknown raw-strings are dropped.
         if let raw = defaults.array(forKey: "gitHubAllowedOps") as? [String] {
-            self.gitHubAllowedOps = Set(raw.compactMap(RepoOperation.init(rawValue:)))
+            self.gitHubAllowedOps = Set(raw.compactMap(decodeRepoOp))
         } else {
             self.gitHubAllowedOps = Set(RepoOperation.allCases)
         }
         if let raw = defaults.array(forKey: "gitLabAllowedOps") as? [String] {
-            self.gitLabAllowedOps = Set(raw.compactMap(RepoOperation.init(rawValue:)))
+            self.gitLabAllowedOps = Set(raw.compactMap(decodeRepoOp))
         } else {
             self.gitLabAllowedOps = Set(RepoOperation.allCases)
         }
