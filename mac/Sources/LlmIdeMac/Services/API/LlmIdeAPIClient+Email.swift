@@ -51,10 +51,14 @@ extension LlmIdeAPIClient {
             let secure: Bool
             let user: String
             let mailbox: String
+            // Tells the server which credential path to use: "google" reads the
+            // stored OAuth refresh token (XOAUTH2), otherwise the vault password.
+            let authMethod: String
         }
         return try await post("/kb/email/test",
                               body: Req(host: s.host, port: s.port, secure: s.secure,
-                                        user: s.user, mailbox: s.mailbox),
+                                        user: s.user, mailbox: s.mailbox,
+                                        authMethod: s.authMethod),
                               authenticated: true)
     }
 
@@ -87,13 +91,17 @@ extension LlmIdeAPIClient {
             let lookbackDays: Int
             let unreadOnly: Bool
             let fromFilter: String
+            // "google" → server uses the stored OAuth token (XOAUTH2);
+            // otherwise the vault app password.
+            let authMethod: String
         }
         return try await post("/kb/email/fetch",
                               body: Req(host: s.host, port: s.port, secure: s.secure,
                                         user: s.user, mailbox: s.mailbox,
                                         lookbackDays: s.lookbackDays,
                                         unreadOnly: s.unreadOnly,
-                                        fromFilter: s.fromFilter),
+                                        fromFilter: s.fromFilter,
+                                        authMethod: s.authMethod),
                               authenticated: true)
     }
 
