@@ -182,6 +182,85 @@ test('full flow: start -> callback (token exchange + userinfo stubbed) -> status
   assert.equal(statusBody.email, email);
 });
 
+test('GET /auth/google/callback rejects a second callback that reuses an already-completed state', async () => {
+  const { user } = await registerAndLogin();
+  const clientId = 'replay-client-id';
+  const clientSecret = 'replay-client-secret';
+  const start = await callAuth({
+    method: 'POST', url: '/auth/google/start', user: { id: user.id },
+    body: { clientId, clientSecret },
+  });
+  assert.equal(start.statusCode, 200, start._body);
+  const { state } = start.json();
+
+  const originalFetch = global.fetch;
+  let tokenExchangeCalls = 0;
+  global.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('oauth2.googleapis.com/token')) {
+      tokenExchangeCalls++;
+      return {
+        ok: true,
+        json: async () => ({ access_token: 'access-tok-replay', refresh_token: 'refresh-tok-replay', expires_in: 3600 }),
+      };
+    }
+    if (u.includes('openidconnect.googleapis.com/v1/userinfo')) {
+      return { ok: true, json: async () => ({ email: 'replay-user@example.com' }) };
+    }
+    throw new Error(`Unexpected fetch to ${u}`);
+  };
+
+  try {
+    // First callback completes normally.
+    const cb1 = await callAuth({ method: 'GET', url: `/auth/google/callback?code=auth-code-first&state=${state}` });
+    assert.equal(cb1.statusCode, 200, cb1._body);
+    assert.match(cb1._body, /Signed in to Google/i);
+    assert.equal(tokenExchangeCalls, 1);
+
+    // Second callback reuses the same (now-complete) state with a fresh code.
+    const cb2 = await callAuth({ method: 'GET', url: `/auth/google/callback?code=auth-code-second&state=${state}` });
+    assert.equal(cb2.statusCode, 200, cb2._body);
+    assert.match(cb2._body, /already been used/i);
+    // exchangeCode must NOT have run a second time.
+    assert.equal(tokenExchangeCalls, 1, 'token exchange must not be re-run for a non-pending state');
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  // The vault refresh token from the first (legitimate) exchange is unchanged.
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.refreshToken'), 'refresh-tok-replay');
+});
+
+test('GET /auth/google/callback escapes HTML in an upstream error message', async () => {
+  const { user } = await registerAndLogin();
+  const clientId = 'xss-client-id';
+  const clientSecret = 'xss-client-secret';
+  const start = await callAuth({
+    method: 'POST', url: '/auth/google/start', user: { id: user.id },
+    body: { clientId, clientSecret },
+  });
+  assert.equal(start.statusCode, 200, start._body);
+  const { state } = start.json();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('oauth2.googleapis.com/token')) {
+      throw new Error('bad request <script>alert(1)</script>');
+    }
+    throw new Error(`Unexpected fetch to ${u}`);
+  };
+
+  try {
+    const cb = await callAuth({ method: 'GET', url: `/auth/google/callback?code=auth-code-xss&state=${state}` });
+    assert.equal(cb.statusCode, 200, cb._body);
+    assert.ok(cb._body.includes('&lt;script&gt;'), 'script tag must be escaped');
+    assert.ok(!cb._body.includes('<script>alert'), 'raw script tag must not survive into the HTML response');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 // ---- GET /auth/google/status (authed) -----------------------------------
 
 test('GET /auth/google/status requires auth', async () => {

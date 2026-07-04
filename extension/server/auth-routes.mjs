@@ -324,11 +324,13 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   //   from the vault rather than trusting anything in the query string.
   if (method === 'GET' && url.split('?')[0] === '/auth/google/callback') {
     const q = new URL(url, 'http://127.0.0.1').searchParams;
-    const html = (msg) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(`<!doctype html><meta charset=utf-8><body style="font-family:system-ui;padding:2rem"><p>${msg}</p><p>You can close this tab and return to LLM IDE.</p><script>setTimeout(()=>window.close(),1500)</script>`); };
+    const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    const html = (msg) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(`<!doctype html><meta charset=utf-8><body style="font-family:system-ui;padding:2rem"><p>${escHtml(msg)}</p><p>You can close this tab and return to LLM IDE.</p><script>setTimeout(()=>window.close(),1500)</script>`); };
     const state = q.get('state') || '';
     const st = getState(state);
     if (q.get('error')) { if (st) completeState(state, { status: 'error', message: 'Sign-in cancelled.' }); html('Sign-in cancelled.'); return; }
     if (!st) { html('This sign-in link has expired — start again from the app.'); return; }
+    if (st.status !== 'pending') { html('This sign-in link has already been used — start again from the app.'); return; }
     const clientId = getSecret(db, st.userId, 'google.email.clientId');
     const clientSecret = getSecret(db, st.userId, 'google.email.clientSecret');
     try {

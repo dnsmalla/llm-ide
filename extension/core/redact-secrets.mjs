@@ -24,6 +24,8 @@ export const SECRET_PATTERNS = [
   /\bsk-[A-Za-z0-9]{32,}\b/g,                 // OpenAI classic secret key (won't match sk-ant-/sk-proj-)
   /Bearer\s+[A-Za-z0-9._-]{20,}/gi,           // Authorization: Bearer <jwt/opaque>
   /apiKey=[A-Za-z0-9_-]+/gi,                  // apiKey=<value> in query strings
+  /\bya29\.[A-Za-z0-9._-]{20,}/g,             // Google OAuth2 access token
+  /\b1\/\/[A-Za-z0-9_-]{20,}/g,               // Google OAuth2 refresh token (1//...)
 ];
 
 const MARKER = '[REDACTED]';
