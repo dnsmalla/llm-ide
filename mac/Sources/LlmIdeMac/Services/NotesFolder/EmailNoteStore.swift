@@ -105,13 +105,17 @@ struct EmailNoteStore {
         encoder.options.sortKeys = false
         let newYAML = try encoder.encode(fm)
 
-        var body = String(contents[split.bodyStart...])
-        let uncheckedPrefix = "- [ ] \(title)"
-        if let prefixRange = body.range(of: uncheckedPrefix) {
-            let lineEnd = body[prefixRange.upperBound...].firstIndex(of: "\n") ?? body.endIndex
-            body.insert(contentsOf: " — \(issueURL)", at: lineEnd)
-            body.replaceSubrange(prefixRange, with: "- [x] \(title)")
+        // Best-effort checkbox flip. Line-anchored + exact-title (the title is
+        // followed by end-of-line or a space) so a to-do whose title is a
+        // prefix of another ("Send Q3" vs "Send Q3 report") can't flip the
+        // wrong line. Frontmatter `issue` remains the authoritative done-flag.
+        var lines = String(contents[split.bodyStart...]).components(separatedBy: "\n")
+        let unchecked = "- [ ] \(title)"
+        for i in lines.indices where lines[i] == unchecked || lines[i].hasPrefix(unchecked + " ") {
+            lines[i] = "- [x]" + lines[i].dropFirst("- [ ]".count) + " — \(issueURL)"
+            break
         }
+        let body = lines.joined(separator: "\n")
 
         let newContents = "---\n\(newYAML)---\n\(body)"
         try newContents.write(to: file, atomically: true, encoding: .utf8)
