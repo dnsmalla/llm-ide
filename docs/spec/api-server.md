@@ -227,7 +227,7 @@ When a bucket is exhausted, `tryConsume()` returns `{ ok: false, retryAfterSec: 
 |---|---|---|---|
 | `llm` | 3 | 1/30 s | `/code-assist`, `/kb/generate-plan`, `/kb/analyze-risks`, `/kb/generate-code`, `/kb/summarize`, `/kb/email/classify`, `/kb/conflict-questions` |
 | `llmFast` | 6 | 1/5 s | `/generate-notes`, `/chat`, `/kb/agent/ask`, `/generate-questions`, `/extract-entities`, `/generate-docx`, `/generate-doc`, `/kb/providers/verify`, `/kb/providers/models` |
-| `dispatch` | 4 | 1/10 s | `/kb/dispatch`, `/kb/notify/slack`, `/kb/email/test`, `/kb/email/fetch`, `/kb/slack/test`, `/kb/slack/fetch`, `/kb/box/test` |
+| `dispatch` | 4 | 1/10 s | `/kb/dispatch`, `/kb/notify/slack`, `/kb/email/test`, `/kb/email/fetch`, `/kb/slack/test`, `/kb/slack/fetch`, `/kb/box/test`, `/kb/connect-box` (full external crawl — special-cased before the generic connect prefix) |
 | `outcomePoll` | 6 | 1/30 s | `/kb/outcomes/refresh` |
 | `kbWrite` | 30 | 5/s | `/kb/ingest`, `/kb/connect-*`, `/kb/review/*`, `/kb/plan-task/*`, `/kb/issue-schedule*`, `/kb/usage/limits`, `/kb/usage/record`, `/kb/email/seen`, `/kb/slack/seen`, `POST /kb/activity`, `POST /kb/activity/seen` |
 | `liveAppend` | 30 | 5/s | `/kb/live/:id/append` (applied inside `kb/routes/live.mjs:62`) |
@@ -235,7 +235,7 @@ When a bucket is exhausted, `tryConsume()` returns `{ ok: false, retryAfterSec: 
 | `authPublic` | 10 | 1/s | `/auth/login`, `/auth/refresh`, password-reset confirm/request |
 | `authRegister` | 3 | 1/60 s | `/auth/register` |
 
-Profile **definitions** (capacity + refill) are in `rate-limit.mjs:59–129`. The **URL→profile mapping** above is authoritative in `rateLimitProfile()` (`server.mjs:107–151`) — `rateLimitProfile()` returns the *first* match, so each URL has exactly one profile. The three `auth*`/`liveAppend` profiles are **not** dispatched by `rateLimitProfile()`; they are applied inside their own handlers (`server/auth-routes.mjs` for `authPublic`/`authRegister`, `kb/routes/live.mjs` for `liveAppend`). This mapping is drift-guarded by `docs/_scripts/check_rate_limit_mapping.py`.
+Profile **definitions** (capacity + refill) are in `rate-limit.mjs:59–129`. The **URL→profile mapping** above is authoritative in `rateLimitProfile()` (`server.mjs:116–180`) — `rateLimitProfile()` returns the *first* match, so each URL has exactly one profile. The three `auth*`/`liveAppend` profiles are **not** dispatched by `rateLimitProfile()`; they are applied inside their own handlers (`server/auth-routes.mjs` for `authPublic`/`authRegister`, `kb/routes/live.mjs` for `liveAppend`). This mapping is drift-guarded by `docs/_scripts/check_rate_limit_mapping.py`.
 
 ### Bucket persistence
 

@@ -151,6 +151,11 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/dispatch')            return 'dispatch';
   if (url === '/kb/notify/slack')        return 'dispatch';
   if (url === '/kb/outcomes/refresh')    return 'outcomePoll';
+  // /kb/connect-box triggers a full external Box crawl (up to ~2000 sequential
+  // API calls), same externally-directed cost profile as /kb/box/test — so it
+  // belongs on the slow dispatch bucket, NOT the cheap kbWrite bucket its
+  // '/kb/connect-' siblings use. Must precede the generic startsWith rule below.
+  if (url === '/kb/connect-box')         return 'dispatch';
   if (url.startsWith('/kb/connect-'))    return 'kbWrite';
   if (url.startsWith('/kb/review/'))     return 'kbWrite';
   if (url.startsWith('/kb/plan-task/'))  return 'kbWrite';
@@ -168,8 +173,8 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/slack/test' || url === '/kb/slack/fetch') return 'dispatch';
   if (url === '/kb/slack/seen') return 'kbWrite';
   // Box test hits the Box API directly (token exchange + folder read), same
-  // cost profile as slack/email test — dispatch bucket. /kb/connect-box is
-  // covered by the '/kb/connect-' startsWith rule above (kbWrite).
+  // cost profile as slack/email test — dispatch bucket. (/kb/connect-box is
+  // special-cased onto dispatch above, before the '/kb/connect-' rule.)
   if (url === '/kb/box/test') return 'dispatch';
   if (url === '/kb/activity' || url === '/kb/activity/seen') return 'kbWrite';
   return null;
