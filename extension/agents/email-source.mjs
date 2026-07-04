@@ -15,6 +15,8 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import dns from 'node:dns/promises';
 import net from 'node:net';
+import { refreshAccessToken } from './google-oauth.mjs';
+import { getSecret } from '../server/vault.mjs';
 
 // Cap on the plaintext body we return per message. A summarizer fed a
 // multi-megabyte newsletter wastes tokens and time; 20k chars is plenty
@@ -149,11 +151,20 @@ async function resolveSafeHost(host) {
   return { connectHost: addrs[0].address, servername: net.isIP(host) ? undefined : host };
 }
 
+// PURE. Build the ImapFlow `auth` option. When an OAuth access token is
+// present we authenticate via XOAUTH2 (Google Sign-In path); otherwise fall
+// back to the classic username/app-password auth. The two are mutually
+// exclusive — an accessToken always wins so a stale/blank password can't
+// accidentally downgrade a Google-authenticated request.
+export function buildAuthConfig({ user, password, accessToken }) {
+  return accessToken ? { user, accessToken } : { user, pass: password };
+}
+
 // Build a fresh ImapFlow client. Validates the port, resolves + SSRF-checks
 // the host, and pins to the resolved IP. Timeouts are tight on purpose: a
 // hung handshake against a bad host should fail fast rather than wedge the
 // request. Async because of the DNS resolution.
-async function makeClient({ host, port, secure, user, password }) {
+async function makeClient({ host, port, secure, user, password, accessToken }) {
   const portNum = Number(port);
   if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
     throw new Error('Invalid IMAP port');
@@ -163,12 +174,25 @@ async function makeClient({ host, port, secure, user, password }) {
     host: connectHost,
     port: portNum,
     secure: !!secure,
-    auth: { user, pass: password },
-    logger: false,          // never log — the auth blob contains the password
+    auth: buildAuthConfig({ user, password, accessToken }),
+    logger: false,          // never log — the auth blob contains the password/token
     socketTimeout: 20000,
     greetingTimeout: 10000,
     tls: servername ? { servername } : undefined,
   });
+}
+
+// Resolve a fresh Google OAuth access token for IMAP XOAUTH2 from the stored
+// refresh token. Access tokens are short-lived (~1hr) so we always refresh
+// rather than caching — the token endpoint call is cheap and this keeps us
+// from ever holding a stale/expired token across requests.
+export async function getGoogleAccessToken(db, userId) {
+  const clientId = getSecret(db, userId, 'google.email.clientId');
+  const clientSecret = getSecret(db, userId, 'google.email.clientSecret');
+  const refreshToken = getSecret(db, userId, 'google.email.refreshToken');
+  if (!refreshToken) throw new Error('Not signed in to Google — use Sign in with Google.');
+  const { accessToken } = await refreshAccessToken({ clientId, clientSecret, refreshToken });
+  return accessToken;
 }
 
 // Map ImapFlow / network failures to a human-readable message.
@@ -205,14 +229,14 @@ export function friendlyError(err) {
 // Connect, open the mailbox, read its size, and disconnect. Used by the
 // client's "Test connection" button before it commits to a full fetch.
 // Returns a small status object; throws a clean Error on any failure.
-export async function testConnection({ host, port, secure, user, password, mailbox }) {
+export async function testConnection({ host, port, secure, user, password, mailbox, accessToken }) {
   const box = mailbox || 'INBOX';
   let client;
   let lock;
   let timedOut = false;
   let killer;
   try {
-    client = await makeClient({ host, port, secure, user, password });
+    client = await makeClient({ host, port, secure, user, password, accessToken });
     killer = setTimeout(() => { timedOut = true; try { client.close(); } catch { /* */ } }, TEST_DEADLINE_MS);
     await client.connect();
     lock = await client.getMailboxLock(box);
@@ -258,7 +282,7 @@ export function resolveSince({ sinceISO, lookbackDays }) {
 // Throws a clean Error on connect/auth fail.
 export async function fetchRecentEmails({
   host, port, secure, user, password, mailbox,
-  lookbackDays, sinceISO, unreadOnly, fromFilter, seenIds,
+  lookbackDays, sinceISO, unreadOnly, fromFilter, seenIds, accessToken,
 }) {
   const box = mailbox || 'INBOX';
   const since = resolveSince({ sinceISO, lookbackDays });
@@ -280,7 +304,7 @@ export async function fetchRecentEmails({
   let timedOut = false;
   let killer;
   try {
-    client = await makeClient({ host, port, secure, user, password });
+    client = await makeClient({ host, port, secure, user, password, accessToken });
     killer = setTimeout(() => { timedOut = true; try { client.close(); } catch { /* */ } }, FETCH_DEADLINE_MS);
     await client.connect();
     lock = await client.getMailboxLock(box);

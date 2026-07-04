@@ -6,7 +6,12 @@ process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
 // Pure helpers only — we never open a real IMAP connection here.
-const { normalizeParsed, stripHtml, resolveSince, isPrivateAddress, friendlyError } = await import('../agents/email-source.mjs');
+const { normalizeParsed, stripHtml, resolveSince, isPrivateAddress, friendlyError, buildAuthConfig } = await import('../agents/email-source.mjs');
+
+test('buildAuthConfig uses XOAUTH2 when an access token is present', () => {
+  assert.deepEqual(buildAuthConfig({ user: 'a@b', accessToken: 'AT' }), { user: 'a@b', accessToken: 'AT' });
+  assert.deepEqual(buildAuthConfig({ user: 'a@b', password: 'p' }), { user: 'a@b', pass: 'p' });
+});
 
 // imapflow throws `new Error('Command failed')` for every failed IMAP command
 // and puts the real reason in err.responseText / responseStatus. friendlyError
