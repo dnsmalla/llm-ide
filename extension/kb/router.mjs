@@ -23,6 +23,7 @@ import { handleLiveRoutes } from './routes/live.mjs';
 import { handleReviewRoutes } from './routes/review.mjs';
 // runGuardrails moved into routes/review.mjs.
 import { summarizeTranscript } from '../agents/summarize.mjs';
+import { classifyEmail } from '../agents/email-classify.mjs';
 import { runClaude } from '../agents/runtime.mjs';
 import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatModels, customBaseUrl } from '../agents/providers.mjs';
 import { iterateUserMeetings } from './exporter.mjs';
@@ -726,6 +727,48 @@ export async function handleKB(req, res) {
           sendJSON(res, 502, { error: { code: 'SUMMARIZE_FAILED', message: err.message } });
         } else {
           sendJSON(res, 500, { error: { code: 'UPSTREAM_ERROR', message: err.message || 'summarize failed' } });
+        }
+      }
+      return true;
+    }
+
+    if (req.method === 'POST' && url === '/kb/email/classify') {
+      const raw = await readBody(req);
+      const body = parseJSON(raw);
+      if (!body || typeof body.body !== 'string' || typeof body.subject !== 'string') {
+        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'subject and body (strings) required' } });
+        return true;
+      }
+      const CLASSIFY_TIMEOUT_MS = 60 * 1000; // classify is a small/fast call
+      let timeoutHandle;
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          const err = new Error('email classify timed out');
+          err.code = 'EMAIL_CLASSIFY_TIMEOUT';
+          reject(err);
+        }, CLASSIFY_TIMEOUT_MS);
+      });
+      try {
+        const out = await Promise.race([
+          classifyEmail({
+            userId,
+            subject: body.subject || '',
+            from: body.from || '',
+            date: body.date || '',
+            body: body.body,
+          }),
+          timeoutPromise,
+        ]);
+        clearTimeout(timeoutHandle);
+        sendJSON(res, 200, out);
+      } catch (err) {
+        clearTimeout(timeoutHandle);
+        if (err.code === 'EMAIL_CLASSIFY_TIMEOUT') {
+          sendJSON(res, 504, { error: { code: 'EMAIL_CLASSIFY_TIMEOUT', message: 'Email classification timed out.' } });
+        } else if (err.code === 'EMAIL_CLASSIFY_FAILED') {
+          sendJSON(res, 502, { error: { code: 'EMAIL_CLASSIFY_FAILED', message: err.message } });
+        } else {
+          sendJSON(res, 500, { error: { code: 'UPSTREAM_ERROR', message: err.message || 'classify failed' } });
         }
       }
       return true;

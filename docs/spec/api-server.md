@@ -191,15 +191,16 @@ The full table with descriptions is in [`../reference/error-codes.md`](../refere
 
 - `GUARDRAIL_FAILED`: No `AppError` factory and no `throw` of this code exists anywhere in the server source (grepped all `.mjs` and `.ts` files excluding `dist/` and `node_modules/`). It appears only in comment lines in `extension/core/errors.mjs:7,10`. **This code is never actually emitted by the server.** The `overview.md` entry is aspirational/stale for this code.
 
-- `UPSTREAM_ERROR`: No factory in `errors.mjs`. The code is emitted in **two places** via raw `sendJSON` (bypassing `AppError`/`sendError`):
+- `UPSTREAM_ERROR`: No factory in `errors.mjs`. The code is emitted in **three places** via raw `sendJSON` (bypassing `AppError`/`sendError`):
   - `extension/kb/router.mjs:571` — catch-all for unexpected errors in the `/kb/summarize` handler
+  - `extension/kb/router.mjs:771` — catch-all for unexpected errors in the `/kb/email/classify` handler
   - `extension/kb/router.mjs:828` — catch-all for unexpected errors in the `/kb/conflict-questions` handler
 
-  In both cases the response is written directly via `sendJSON(res, 500, { error: { code: 'UPSTREAM_ERROR', … } })`, not through `sendError`. This means the `overview.md` description ("Claude CLI, GitHub, or another upstream failed") is partially accurate — these two handlers use it as a generic upstream-failure fallback — but it is not a first-class `AppError` code and has no factory.
+  In all three cases the response is written directly via `sendJSON(res, 500, { error: { code: 'UPSTREAM_ERROR', … } })`, not through `sendError`. This means the `overview.md` description ("Claude CLI, GitHub, or another upstream failed") is partially accurate — these handlers use it as a generic upstream-failure fallback — but it is not a first-class `AppError` code and has no factory.
 
   Additionally, `extension/src/lib/config.ts:439` constructs a client-side `ServerError` with code `'UPSTREAM_ERROR'` for non-OK HTTP responses from the server, but this is client-side only and not emitted by the server.
 
-**Conclusion for implementers:** Clients that switch on error codes will only ever receive `UPSTREAM_ERROR` from `/kb/summarize` and `/kb/conflict-questions` (HTTP 500). `GUARDRAIL_FAILED` is never returned by the current server.
+**Conclusion for implementers:** Clients that switch on error codes will only ever receive `UPSTREAM_ERROR` from `/kb/summarize`, `/kb/email/classify`, and `/kb/conflict-questions` (HTTP 500). `GUARDRAIL_FAILED` is never returned by the current server.
 
 ---
 

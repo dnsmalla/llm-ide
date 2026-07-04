@@ -1507,6 +1507,40 @@ paths:
         '504': { description: Summarize timed out (>3 min), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { description: Rate limited }
 
+  /kb/email/classify:
+    post:
+      summary: Classify a fetched email with LLM and extract to-dos (60 s server timeout)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject, body]
+              properties:
+                subject: { type: string }
+                from:    { type: string }
+                date:    { type: string }
+                body:    { type: string }
+      responses:
+        '200':
+          description: Classification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  category:   { type: string }
+                  noteWorthy: { type: boolean }
+                  summary:    { type: string }
+                  todos:      { type: array, items: { type: object, additionalProperties: true } }
+                  model:      { type: string }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: Unexpected classify error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: Email classify LLM call failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '504': { description: Email classify timed out (>60 s), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Rate limited }
+
   /kb/conflict-questions:
     post:
       summary: Surface cross-meeting conflicts and undecided items from KB history vs current transcript
