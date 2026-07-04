@@ -1,10 +1,10 @@
 import Foundation
 
 /// Ingested email. A fetch source: pulls NEW mail (the server owns the
-/// forward-only high-water mark + seen-ledger), turns each message into a
-/// meeting note via the exact meeting pipeline (`MeetingFileStore` +
-/// `MeetingSummarizationService`), then advances the mark. Moved out of
-/// `SourceIngestService` so the service is a generic driver.
+/// forward-only high-water mark + seen-ledger), classifies each message
+/// (`/kb/email/classify`) and writes a to-do note or a raw skipped stub into
+/// the dedicated `Email/` folder via `EmailFileStore`, then advances the mark.
+/// Moved out of `SourceIngestService` so the service is a generic driver.
 struct EmailSource: InputSource {
     let id = "email"
     let displayName = "Mail"          // Library SOURCES sub-group label
