@@ -34,6 +34,9 @@ struct LibraryDetailView: View {
         case .plugin(let name):
             PluginDetailView(api: api, pluginName: name)
 
+        case .emailTodos:
+            EmailTodosView()
+
         case nil:
             ContentUnavailableView {
                 Label("Select an Item", systemImage: "doc.text")

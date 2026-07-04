@@ -207,6 +207,10 @@ struct LibraryView: View {
             // ── Notes section ─────────────────────────────────────────
             fileTreeSection(.notes)
 
+            // ── Email To-dos ──────────────────────────────────────────
+            // Open to-dos extracted from email notes → review + file as issues.
+            emailTodosSection
+
             // ── Agents section ────────────────────────────────────────
             // Three groups: built-in core agents (locked), user
             // personas (editable, + button to add), plugin subagents
@@ -228,6 +232,15 @@ struct LibraryView: View {
         }
         .listStyle(.inset)
         .animation(.easeInOut(duration: 0.2), value: vm.groupedRows.map(\.group))
+    }
+
+    // MARK: - Email To-dos section
+
+    private var emailTodosSection: some View {
+        Section("Email") {
+            Label("Email To-dos", systemImage: "checklist")
+                .tag(ShellState.LibrarySelection.emailTodos)
+        }
     }
 
     // MARK: - File tree section

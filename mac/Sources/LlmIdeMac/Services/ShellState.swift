@@ -75,6 +75,9 @@ final class ShellState {
         /// A skill row (built-in or plugin-contributed). String is the
         /// skill `name` from its frontmatter.
         case skill(String)
+        /// The Email To-dos review panel (open to-dos extracted from email
+        /// notes → create issues). No associated value — a single panel.
+        case emailTodos
     }
 
     var section: Section = .explorer
