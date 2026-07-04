@@ -5,9 +5,13 @@
 
 import { runClaude as defaultRunClaude, tryParseJSON } from './runtime.mjs';
 
+// Default to the same model summarize uses (proven to work with whatever
+// provider/key the deployment has) — a wrong/inaccessible model surfaces as a
+// 500 from the classify route. Set LLMIDE_EMAIL_CLASSIFY_MODEL to a cheaper
+// model (e.g. a Haiku) where that model is available.
 const MODEL = process.env.LLMIDE_EMAIL_CLASSIFY_MODEL
            || process.env.LLMIDE_MODEL
-           || 'claude-haiku-4-5-20251001';
+           || 'claude-sonnet-4-6';
 
 const CATEGORIES = new Set([
   'personal', 'work', 'action_request', 'meeting',

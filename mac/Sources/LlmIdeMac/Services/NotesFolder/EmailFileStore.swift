@@ -21,6 +21,7 @@ struct EmailFileStore {
         var fm = """
         ---
         source: email
+        platform: email
         from: \(yamlScalar(from))
         date: \(AppDateFormatter.isoString(date))
         category: \(c.category)
@@ -61,6 +62,7 @@ struct EmailFileStore {
         let md = """
         ---
         source: email
+        platform: email
         from: \(yamlScalar(from))
         date: \(AppDateFormatter.isoString(date))
         category: \(category)

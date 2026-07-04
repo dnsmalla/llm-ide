@@ -254,18 +254,26 @@ export async function testConnection({ host, port, secure, user, password, mailb
   }
 }
 
-// Resolve the search lower-bound date. Prefer the client's forward-only
-// high-water mark (`sinceISO`); otherwise fall back to `lookbackDays`.
+// Resolve the search lower-bound date: reach back to the EARLIER of the
+// forward-only high-water mark (`sinceISO`) and the `lookbackDays` window.
+// This makes "Lookback days" actually govern how far a catch-up fetch reaches
+// (the seen-ledger dedups anything already imported, so a wider window never
+// re-imports old mail) — matching the documented UI behavior. When the
+// high-water is older than the lookback window (a long gap between fetches),
+// we reach back to it so no mail in the gap is missed.
 // Exported for unit testing.
 export function resolveSince({ sinceISO, lookbackDays }) {
-  if (sinceISO) {
-    const d = new Date(sinceISO);
-    if (!Number.isNaN(d.getTime())) return d;
-  }
   // Clamp server-side to 1..60 — never trust the client's bound.
   const raw = Number(lookbackDays);
   const days = Number.isFinite(raw) ? Math.min(60, Math.max(1, Math.round(raw))) : 7;
-  return new Date(Date.now() - days * 86400000);
+  const lookbackDate = new Date(Date.now() - days * 86400000);
+  if (sinceISO) {
+    const d = new Date(sinceISO);
+    if (!Number.isNaN(d.getTime())) {
+      return d.getTime() < lookbackDate.getTime() ? d : lookbackDate;
+    }
+  }
+  return lookbackDate;
 }
 
 // Connect and return messages newer than the resolved `since`, optionally
@@ -282,7 +290,7 @@ export function resolveSince({ sinceISO, lookbackDays }) {
 // Throws a clean Error on connect/auth fail.
 export async function fetchRecentEmails({
   host, port, secure, user, password, mailbox,
-  lookbackDays, sinceISO, unreadOnly, fromFilter, seenIds, accessToken,
+  lookbackDays, sinceISO, unreadOnly, fromFilter, seenIds, accessToken, markSeen,
 }) {
   const box = mailbox || 'INBOX';
   const since = resolveSince({ sinceISO, lookbackDays });
@@ -341,6 +349,15 @@ export async function fetchRecentEmails({
       messages.push(normalizeParsed(parsed, msg.uid));
     }
     messages.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // Best-effort: mark the fetched messages as read (\Seen) so the user can
+    // tell in their mail client what's been captured (anything still unread =
+    // not yet fetched). Failure here must NOT fail the fetch — the messages are
+    // already retrieved and will be turned into notes regardless.
+    if (markSeen && uidList) {
+      try { await client.messageFlagsAdd(uidList, ['\\Seen'], { uid: true }); } catch { /* best-effort */ }
+    }
+
     return { messages, skipped };
   } catch (err) {
     throw new Error(timedOut ? 'IMAP fetch timed out' : friendlyError(err));

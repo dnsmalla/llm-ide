@@ -395,6 +395,7 @@ export async function handleKB(req, res) {
           unreadOnly: body.unreadOnly !== false,            // default true
           fromFilter: typeof body.fromFilter === 'string' ? body.fromFilter : '',
           seenIds,
+          markSeen: body.markRead === true,                 // mark fetched mail read (client opt-in)
         });
         const fetchCount = messages.length;
         logger.info('email_fetch', {
@@ -763,6 +764,10 @@ export async function handleKB(req, res) {
         sendJSON(res, 200, out);
       } catch (err) {
         clearTimeout(timeoutHandle);
+        // Log the real cause (redacted) — the response only carries a code,
+        // so without this the upstream failure (model/provider errors) is
+        // invisible in the server log.
+        logger.error('email_classify_failed', { userId, code: err.code || 'UPSTREAM_ERROR', reason: redactSecrets(err.message || 'classify failed') });
         if (err.code === 'EMAIL_CLASSIFY_TIMEOUT') {
           sendJSON(res, 504, { error: { code: 'EMAIL_CLASSIFY_TIMEOUT', message: 'Email classification timed out.' } });
         } else if (err.code === 'EMAIL_CLASSIFY_FAILED') {
