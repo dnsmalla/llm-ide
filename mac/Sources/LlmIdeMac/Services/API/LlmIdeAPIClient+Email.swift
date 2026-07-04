@@ -142,4 +142,29 @@ extension LlmIdeAPIClient {
         let encoded = state.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? state
         return try await get("/auth/google/status?state=\(encoded)", authenticated: true)
     }
+
+    /// One extracted to-do from an email (Phase 2 turns these into issues).
+    struct EmailTodo: Decodable, Equatable {
+        let title: String
+        let detail: String
+        let due: String?      // "YYYY-MM-DD" or nil
+        let priority: String  // "low" | "med" | "high"
+    }
+
+    /// Result of `/kb/email/classify`.
+    struct EmailClassification: Decodable, Equatable {
+        let category: String
+        let noteWorthy: Bool
+        let summary: String
+        let todos: [EmailTodo]
+    }
+
+    /// Classify a fetched email + extract to-dos. `noteWorthy == false` for
+    /// automated/bulk mail (caller writes a raw stub instead of a note).
+    func classifyEmail(subject: String, from: String, date: String, body: String) async throws -> EmailClassification {
+        struct Req: Encodable { let subject: String; let from: String; let date: String; let body: String }
+        return try await post("/kb/email/classify",
+                              body: Req(subject: subject, from: from, date: date, body: body),
+                              authenticated: true)
+    }
 }
