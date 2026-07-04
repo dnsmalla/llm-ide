@@ -6,7 +6,33 @@ process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
 // Pure helpers only — we never open a real IMAP connection here.
-const { normalizeParsed, stripHtml, resolveSince, isPrivateAddress } = await import('../agents/email-source.mjs');
+const { normalizeParsed, stripHtml, resolveSince, isPrivateAddress, friendlyError } = await import('../agents/email-source.mjs');
+
+// imapflow throws `new Error('Command failed')` for every failed IMAP command
+// and puts the real reason in err.responseText / responseStatus. friendlyError
+// must read those, not just err.message (which is always 'Command failed').
+test('friendlyError classifies a Gmail auth failure hidden behind "Command failed"', () => {
+  const err = new Error('Command failed');
+  err.responseStatus = 'NO';
+  err.responseText = '[AUTHENTICATIONFAILED] Invalid credentials (Failure)';
+  const msg = friendlyError(err);
+  assert.match(msg, /app password/i, `expected an app-password hint, got: ${msg}`);
+  assert.doesNotMatch(msg, /^Command failed$/, 'must not surface the raw generic message');
+});
+
+test('friendlyError handles the imapflow authenticationFailed flag', () => {
+  const err = new Error('Command failed');
+  err.authenticationFailed = true;
+  assert.match(friendlyError(err), /login failed/i);
+});
+
+test('friendlyError surfaces the server response text instead of generic "Command failed"', () => {
+  const err = new Error('Command failed');
+  err.responseText = 'Mailbox does not exist';
+  const msg = friendlyError(err);
+  assert.match(msg, /Mailbox does not exist/);
+  assert.notEqual(msg, 'Command failed');
+});
 
 test('normalizeParsed maps a complete message', () => {
   const parsed = {
