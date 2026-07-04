@@ -158,6 +158,7 @@ POST /auth/register
 POST /auth/login
 POST /auth/refresh
 GET  /auth/well-known
+GET  /auth/google/callback   (Google's OAuth redirect; carries no bearer token)
 ```
 
 `OPTIONS` requests are also unconditionally public (`auth.mjs:35`).

@@ -3,6 +3,7 @@
 // posture, and (b) they take a direct DB handle rather than going
 // through the kb facade.
 
+import crypto from 'node:crypto';
 import { config } from '../core/config.mjs';
 import { errAuth, errNotFound, errValidation } from '../core/errors.mjs';
 import { readBody, parseJSON } from '../core/utils.mjs';
@@ -12,7 +13,12 @@ import {
   changePassword, findUserById, login, logout, logoutAll, refreshSession, registerUser,
   createPasswordResetToken, consumePasswordResetToken,
 } from './users.mjs';
-import { listSecretKeys, setSecret, VAULT_KEYS, isVaultError } from './vault.mjs';
+import { listSecretKeys, getSecret, setSecret, VAULT_KEYS, isVaultError } from './vault.mjs';
+import {
+  pkcePair, buildAuthUrl, exchangeCode, fetchEmailAddress,
+  putState, getState, completeState, takeStatus,
+} from '../agents/google-oauth.mjs';
+import { redactWithKey } from '../core/redact-secrets.mjs';
 
 // Map any error (including VaultError) to a client-safe message.
 // VaultError carries a `publicMessage` precisely so its internal
@@ -138,7 +144,10 @@ export function isAuthRoute(url) {
       || path === '/auth/me/claude-plugins/marketplace'
       || path === '/auth/me/claude-plugins/import'
       || path === '/auth/me/claude-plugins/refresh'
-      || path === '/auth/me/claude-plugins/updates';
+      || path === '/auth/me/claude-plugins/updates'
+      || path === '/auth/google/start'
+      || path === '/auth/google/callback'
+      || path === '/auth/google/status';
 }
 
 export async function handleAuth(req, res, { db, logger, requestId }) {
@@ -304,6 +313,39 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     return;
   }
 
+  // ---- Google Sign-In callback (public) -------------------------------
+  //
+  // GET /auth/google/callback?code=...&state=...
+  //   Google redirects the user's browser here after consent — there is
+  //   no Authorization header on this request, so it must stay public
+  //   (also allow-listed in server/auth.mjs PUBLIC_PATHS). The state
+  //   token (minted by POST /auth/google/start) carries the userId and
+  //   PKCE verifier; we look up the user's own clientId/clientSecret
+  //   from the vault rather than trusting anything in the query string.
+  if (method === 'GET' && url.split('?')[0] === '/auth/google/callback') {
+    const q = new URL(url, 'http://127.0.0.1').searchParams;
+    const html = (msg) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(`<!doctype html><meta charset=utf-8><body style="font-family:system-ui;padding:2rem"><p>${msg}</p><p>You can close this tab and return to LLM IDE.</p><script>setTimeout(()=>window.close(),1500)</script>`); };
+    const state = q.get('state') || '';
+    const st = getState(state);
+    if (q.get('error')) { if (st) completeState(state, { status: 'error', message: 'Sign-in cancelled.' }); html('Sign-in cancelled.'); return; }
+    if (!st) { html('This sign-in link has expired — start again from the app.'); return; }
+    const clientId = getSecret(db, st.userId, 'google.email.clientId');
+    const clientSecret = getSecret(db, st.userId, 'google.email.clientSecret');
+    try {
+      const redirectUri = 'http://127.0.0.1:' + config.port + '/auth/google/callback';
+      const tok = await exchangeCode({ clientId, clientSecret, code: q.get('code') || '', verifier: st.verifier, redirectUri });
+      if (!tok.refreshToken) throw new Error('Google did not return a refresh token — remove the app under myaccount.google.com/permissions and try again.');
+      setSecret(db, st.userId, 'google.email.refreshToken', tok.refreshToken);
+      const email = await fetchEmailAddress(tok.accessToken).catch(() => '');
+      completeState(state, { status: 'complete', email });
+      html('Signed in to Google.');
+    } catch (e) {
+      completeState(state, { status: 'error', message: redactWithKey(e.message, clientSecret) });
+      html('Sign-in failed: ' + redactWithKey(e.message, clientSecret));
+    }
+    return;
+  }
+
   // ---- Authenticated -------------------------------------------------
   // Guard placed here — immediately after the last public route block —
   // so every route below this point is guaranteed to have req.user set.
@@ -340,6 +382,40 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     else { logoutAll(db, req.user.id); scope = 'all_no_refresh_token'; }
     safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua, action: 'auth.logout', outcome: 'success', detail: { allDevices: !!body.allDevices, scope } });
     send(res, 200, { ok: true });
+    return;
+  }
+
+  // ---- Google Sign-In: start + status (authed) ------------------------
+  //
+  // POST /auth/google/start { clientId, clientSecret }
+  //   Persists the user's own OAuth client credentials to the vault,
+  //   mints a PKCE pair + one-time state token, and returns the Google
+  //   consent URL for the client to open in a browser.
+  if (method === 'POST' && url === '/auth/google/start') {
+    let body;
+    try { body = await readJson(req, bodyLimit); }
+    catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
+    const clientId = (body.clientId || '').trim();
+    const clientSecret = (body.clientSecret || '').trim();
+    if (!clientId || !clientSecret) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'clientId and clientSecret are required' } }); return; }
+    setSecret(db, req.user.id, 'google.email.clientId', clientId);
+    setSecret(db, req.user.id, 'google.email.clientSecret', clientSecret);
+    const { verifier, challenge } = pkcePair();
+    const state = crypto.randomBytes(24).toString('base64url');
+    putState(state, { userId: req.user.id, verifier });
+    const redirectUri = 'http://127.0.0.1:' + config.port + '/auth/google/callback';
+    send(res, 200, { authUrl: buildAuthUrl({ clientId, redirectUri, state, challenge }), state });
+    return;
+  }
+
+  // GET /auth/google/status?state=...
+  //   Polled by the client while the browser tab is open. Ownership
+  //   check: only the user who initiated the flow may read its status.
+  if (method === 'GET' && url.split('?')[0] === '/auth/google/status') {
+    const state = new URL(url, 'http://127.0.0.1').searchParams.get('state') || '';
+    const s = getState(state);
+    if (s && s.userId !== req.user.id) { send(res, 403, { error: { code: 'FORBIDDEN', message: 'not your sign-in' } }); return; }
+    send(res, 200, takeStatus(state));
     return;
   }
 

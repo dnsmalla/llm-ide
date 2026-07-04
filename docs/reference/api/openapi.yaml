@@ -303,7 +303,7 @@ paths:
               type: object
               required: [key]
               properties:
-                key:   { type: string, enum: [github.token, backlog.apiKey, linear.apiKey, slack.webhookUrl, slack.botToken, email.imapPassword, claude.apiKey, openai.apiKey, google.apiKey, custom.apiKey, custom.baseUrl] }
+                key:   { type: string, enum: [github.token, backlog.apiKey, linear.apiKey, slack.webhookUrl, slack.botToken, box.clientSecret, email.imapPassword, claude.apiKey, openai.apiKey, google.apiKey, custom.apiKey, custom.baseUrl, google.email.clientId, google.email.clientSecret, google.email.refreshToken] }
                 value: { type: string, nullable: true, description: 'null/empty deletes' }
       responses:
         '200': { description: ok }
@@ -328,6 +328,83 @@ paths:
                 properties:
                   items: { type: array, items: { type: object } }
         '500': { description: Audit DB failure, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /auth/google/start:
+    post:
+      summary: Begin Gmail Google Sign-In (OAuth2 PKCE)
+      description: >
+        Persists the caller's own Google OAuth "Desktop app" client
+        credentials to the vault, mints a PKCE pair + one-time state
+        token, and returns the Google consent URL for the client to
+        open in a browser.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientId, clientSecret]
+              properties:
+                clientId:     { type: string }
+                clientSecret: { type: string }
+      responses:
+        '200':
+          description: Consent URL + state token issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authUrl: { type: string }
+                  state:   { type: string }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /auth/google/callback:
+    get:
+      summary: Google's OAuth redirect target (public)
+      security: []
+      description: >
+        Google redirects the user's browser here after consent — there is
+        no Authorization header on this request, so it is public (allow-
+        listed in server/auth.mjs PUBLIC_PATHS). The `state` query param
+        (minted by POST /auth/google/start) carries the userId and PKCE
+        verifier; the handler exchanges `code` for tokens, stores the
+        refresh token in the vault, and always returns an HTML page (never
+        throws) so the tab can close itself.
+      parameters:
+        - in: query
+          name: code
+          schema: { type: string }
+        - in: query
+          name: state
+          schema: { type: string }
+        - in: query
+          name: error
+          schema: { type: string }
+      responses:
+        '200': { description: HTML confirmation or error page, content: { text/html: { schema: { type: string } } } }
+
+  /auth/google/status:
+    get:
+      summary: Poll Gmail Google Sign-In status
+      description: Only the user who initiated the flow (via /auth/google/start) may read its status.
+      parameters:
+        - in: query
+          name: state
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Current status of the sign-in flow
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:  { type: string, enum: [pending, complete, error, unknown] }
+                  email:   { type: string }
+                  message: { type: string }
+        '403': { description: State belongs to a different user, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/ingest:
     post:

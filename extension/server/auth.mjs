@@ -10,6 +10,8 @@
 //   POST /auth/login        — credential exchange (rate-limited per IP)
 //   POST /auth/refresh      — refresh-token rotation
 //   GET  /auth/well-known   — server capabilities + auth metadata
+//   GET  /auth/google/callback — Google's OAuth redirect (no bearer token;
+//                                ownership is enforced via the state token)
 //
 // Anything else returns 401 with a stable `AUTH_REQUIRED` error code.
 
@@ -24,6 +26,7 @@ const PUBLIC_PATHS = new Set([
   '/auth/register',
   '/auth/login',
   '/auth/refresh',
+  '/auth/google/callback',             // Google's OAuth redirect carries no bearer token
   '/launch-app',                       // Cross-client deep link → llmide://
 ]);
 
