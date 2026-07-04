@@ -22,6 +22,7 @@ const BUDGETS_POST = new Map([
   ['/kb/summarize',          240_000],  // runClaude has its own 3-min ceiling; budget sits above it
   ['/kb/conflict-questions', 240_000],
   ['/kb/generate-code',      240_000],
+  ['/kb/connect-box',        240_000],  // Box folder index: bounded by MAX_FILES; budget below the 300s socket cap so a slow folder 504s cleanly
 ]);
 
 export function routeTimeoutMs(url, method) {

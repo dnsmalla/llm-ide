@@ -94,6 +94,50 @@ test('indexBoxFolder fetches, chunks, and ingests doc rows (skips no-text files)
   }
 });
 
+// Perf: extracted_text fetches must run with bounded concurrency, not strictly
+// one-at-a-time. A large folder where each file's text is briefly 'pending'
+// otherwise serializes and blows the route budget. We prove overlap by counting
+// in-flight file fetches: sequential processing never exceeds 1.
+test('indexBoxFolder fetches extracted text with bounded concurrency (overlaps requests)', async () => {
+  const dbmod = await import('../kb/db.mjs');
+  dbmod.closeDb();
+  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
+  const { getDb } = await import('../kb/db.mjs');
+  const { registerUser } = await import('../server/users.mjs');
+  const db = getDb();
+  const userId = registerUser(db, { email: `boxconc-${Math.floor(performance.now()*1000)}@ex.com`, password: 'pw-12345678' }).id;
+  const { indexBoxFolder } = await import('../connectors/box.mjs');
+
+  const files = Array.from({ length: 12 }, (_, i) => ({ type: 'file', id: `f${i}`, name: `f${i}.md`, modified_at: 'T' }));
+  let inFlight = 0, maxInFlight = 0;
+  const orig = global.fetch;
+  global.fetch = async (urlStr) => {
+    const url = String(urlStr);
+    const json = (o, ok = true) => ({ ok, json: async () => o, text: async () => '' });
+    if (url === 'https://api.box.com/oauth2/token') return json({ access_token: 'tok' });
+    if (url.includes('/folders/F/items')) return json({ entries: files });
+    if (url.includes('/files/') && url.includes('?')) {
+      inFlight += 1; maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise(r => setTimeout(r, 5));
+      inFlight -= 1;
+      return json({ representations: { entries: [
+        { representation: 'extracted_text', status: { state: 'success' }, content: { url_template: 'https://dl.box.com/rep{+asset_path}' } },
+      ]}});
+    }
+    if (url === 'https://dl.box.com/rep') return { ok: true, json: async () => ({}), text: async () => 'x' };
+    return json({}, false);
+  };
+  try {
+    const r = await indexBoxFolder(userId, { clientId: 'c', clientSecret: 's', subjectType: 'enterprise', subjectId: 'e', folderId: 'F' }, { pollDelayMs: 0 });
+    assert.equal(r.indexed, 12, 'every file indexed');
+    assert.ok(maxInFlight >= 2, `extract fetches must overlap (saw max ${maxInFlight} in flight; sequential would be 1)`);
+  } finally {
+    global.fetch = orig;
+    dbmod.closeDb();
+    for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
+  }
+});
+
 // B4: a full first page followed by a partial page, with NO total_count in the
 // response. The old break-on-`total_count || 0` stopped after page 1 → silent
 // data loss. The page-length break condition must fetch page 2.

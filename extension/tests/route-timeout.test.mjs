@@ -27,6 +27,12 @@ test('routeTimeoutMs returns a budget for listed POST routes (query stripped)', 
   assert.equal(routeTimeoutMs('/kb/summarize?x=1', 'POST'), 240_000);
 });
 
+test('routeTimeoutMs budgets /kb/connect-box below the 300s socket cap so a slow Box index returns a clean 504', () => {
+  const ms = routeTimeoutMs('/kb/connect-box', 'POST');
+  assert.equal(ms, 240_000);
+  assert.ok(ms < 300_000, 'must sit under server.requestTimeout (300s) to win the race and emit a 504 envelope');
+});
+
 test('routeTimeoutMs applies the /kb/delete budget on both DELETE and POST (the router accepts both verbs)', () => {
   assert.equal(routeTimeoutMs('/kb/delete', 'POST'), 30_000);
   assert.equal(routeTimeoutMs('/kb/delete', 'DELETE'), 30_000);
