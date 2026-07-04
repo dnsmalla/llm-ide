@@ -275,11 +275,17 @@ struct EmailSourceSheet: View {
                 return
             }
         }
-        // Initialize the server-side forward-only high-water mark to "now" on
-        // first connect — and also when an edit switches to a DIFFERENT account
-        // (host/user/mailbox), so the previous account's mark can't suppress
-        // the new one's mail. Best-effort; if it fails the per-run cap still
-        // bounds any catch-up.
+        await initHighWaterMarkIfNeeded()
+        config.emailSource = draft
+        dismiss()
+    }
+
+    /// Initialize the server-side forward-only high-water mark to "now" on
+    /// first connect — and when an edit switches to a DIFFERENT account
+    /// (host/user/mailbox), so the previous account's mark can't suppress
+    /// the new one's mail. Best-effort; if it fails the per-run cap still
+    /// bounds any catch-up.
+    private func initHighWaterMarkIfNeeded() async {
         let prev = config.emailSource
         let identityChanged = prev?.host != draft.host
             || prev?.user != draft.user
@@ -287,8 +293,6 @@ struct EmailSourceSheet: View {
         if !isEditing || identityChanged {
             try? await api.markEmailSeen(messageIds: [], lastFetchedAt: Date())
         }
-        config.emailSource = draft
-        dismiss()
     }
 
     /// Drive the Google OAuth loopback flow: ask the server to stash the
@@ -312,11 +316,12 @@ struct EmailSourceSheet: View {
                 if s.status == "complete" {
                     draft.authMethod = "google"
                     if let e = s.email, !e.isEmpty { draft.user = e }
+                    await initHighWaterMarkIfNeeded()
                     config.emailSource = draft
                     dismiss()
                     return
                 }
-                if s.status == "error" {
+                if s.status != "pending" {   // "error" or "unknown"
                     signInError = s.message ?? "Sign-in failed"
                     return
                 }
