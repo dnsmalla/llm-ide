@@ -69,6 +69,7 @@ struct SavedEmailSource: Codable, Equatable {
     var port: Int = 993
     var secure: Bool = true
     var user: String = ""          // email address / IMAP username
+    var authMethod: String = "password"  // "password" | "google"
     var mailbox: String = "INBOX"
     var lookbackDays: Int = 7      // clamp: never look back further than this
     var enabled: Bool = true
@@ -89,6 +90,7 @@ struct SavedEmailSource: Codable, Equatable {
         port         = try c.decodeIfPresent(Int.self, forKey: .port) ?? 993
         secure       = try c.decodeIfPresent(Bool.self, forKey: .secure) ?? true
         user         = try c.decodeIfPresent(String.self, forKey: .user) ?? ""
+        authMethod   = try c.decodeIfPresent(String.self, forKey: .authMethod) ?? "password"
         mailbox      = try c.decodeIfPresent(String.self, forKey: .mailbox) ?? "INBOX"
         lookbackDays = try c.decodeIfPresent(Int.self, forKey: .lookbackDays) ?? 7
         enabled      = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
