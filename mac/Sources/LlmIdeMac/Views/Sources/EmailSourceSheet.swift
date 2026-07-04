@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Configure / edit the Email source. The IMAP **app password** is written
 /// to the server secrets vault (`email.imapPassword`) — never to AppConfig.
@@ -22,20 +23,31 @@ struct EmailSourceSheet: View {
     @State private var testStatus: String?
     @State private var testWasError = false
 
+    /// "password" | "google" — mirrors `draft.authMethod`, kept in a
+    /// separate @State because `draft` can't be read inside its own
+    /// stored-property initializer.
+    @State private var authMethod: String
+    @State private var clientId: String = ""
+    @State private var clientSecret: String = ""
+    @State private var signingIn = false
+    @State private var signInError: String?
+
     init(api: LlmIdeAPIClient) {
         self.api = api
         let existing = AppConfig.shared.emailSource
         _draft = State(initialValue: existing ?? SavedEmailSource())
         isEditing = existing != nil
+        _authMethod = State(initialValue: existing?.authMethod ?? "password")
     }
 
     /// Test only makes sense once we have somewhere to connect + a password
-    /// to authenticate with.
+    /// to authenticate with. In Google mode "Test" isn't the primary path
+    /// (sign-in itself proves connectivity), so it's gated on host/user only.
     private var canTest: Bool {
-        !draft.host.trimmingCharacters(in: .whitespaces).isEmpty
-            && !draft.user.trimmingCharacters(in: .whitespaces).isEmpty
-            && !password.isEmpty
-            && !testing
+        guard !draft.host.trimmingCharacters(in: .whitespaces).isEmpty,
+              !draft.user.trimmingCharacters(in: .whitespaces).isEmpty,
+              !testing else { return false }
+        return authMethod == "google" || !password.isEmpty
     }
 
     var body: some View {
@@ -72,31 +84,80 @@ struct EmailSourceSheet: View {
                             .textFieldStyle(.roundedBorder)
                             .disableAutocorrection(true)
                     }
-                    field("App password") {
-                        ZStack(alignment: .trailing) {
-                            Group {
-                                if passwordVisible {
-                                    TextField("", text: $password)
-                                } else {
-                                    SecureField("", text: $password)
-                                }
-                            }
-                            .textFieldStyle(.roundedBorder)
-                            .font(Typography.mono)
-                            .disableAutocorrection(true)
-                            Button { passwordVisible.toggle() } label: {
-                                Image(systemName: passwordVisible ? "eye.slash" : "eye")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(theme.current.textMuted)
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.trailing, 8)
-                            .help(passwordVisible ? "Hide password" : "Show password")
-                            .accessibilityLabel(passwordVisible ? "Hide password" : "Show password")
+                    field("Sign-in method") {
+                        Picker("", selection: $authMethod) {
+                            Text("App password").tag("password")
+                            Text("Sign in with Google").tag("google")
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(width: 260)
+                        .onChange(of: authMethod) { _, newValue in
+                            draft.authMethod = newValue
                         }
                     }
-                    if isEditing {
-                        SettingsHint("Leave the password blank to keep the current one.")
+
+                    if authMethod == "password" {
+                        field("App password") {
+                            ZStack(alignment: .trailing) {
+                                Group {
+                                    if passwordVisible {
+                                        TextField("", text: $password)
+                                    } else {
+                                        SecureField("", text: $password)
+                                    }
+                                }
+                                .textFieldStyle(.roundedBorder)
+                                .font(Typography.mono)
+                                .disableAutocorrection(true)
+                                Button { passwordVisible.toggle() } label: {
+                                    Image(systemName: passwordVisible ? "eye.slash" : "eye")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(theme.current.textMuted)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.trailing, 8)
+                                .help(passwordVisible ? "Hide password" : "Show password")
+                                .accessibilityLabel(passwordVisible ? "Hide password" : "Show password")
+                            }
+                        }
+                        if isEditing {
+                            SettingsHint("Leave the password blank to keep the current one.")
+                        }
+                        // Gmail helper — the most common gotcha is using the
+                        // account password instead of an app password.
+                        SettingsHint("Gmail: enable 2-Step Verification, then create an App Password (myaccount.google.com → Security → App passwords).")
+                    } else {
+                        field("Client ID") {
+                            TextField("xxxx.apps.googleusercontent.com", text: $clientId)
+                                .textFieldStyle(.roundedBorder)
+                                .disableAutocorrection(true)
+                        }
+                        field("Client secret") {
+                            SecureField("", text: $clientSecret)
+                                .textFieldStyle(.roundedBorder)
+                                .font(Typography.mono)
+                                .disableAutocorrection(true)
+                        }
+                        field("") {
+                            Button(signingIn ? "Signing in…" : "Sign in with Google") {
+                                Task { await signInWithGoogle() }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(signingIn
+                                      || clientId.trimmingCharacters(in: .whitespaces).isEmpty
+                                      || clientSecret.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                        if let err = signInError {
+                            Text(err)
+                                .font(Typography.caption)
+                                .foregroundStyle(theme.current.danger)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if draft.authMethod == "google" && !draft.user.isEmpty {
+                            SettingsHint("Signed in as \(draft.user).")
+                        }
+                        SettingsHint("One-time setup: Google Cloud console → OAuth consent screen (External, add yourself as a test user) → Credentials → Create OAuth client ID → Desktop app → paste the client ID + secret here. Enable IMAP in Gmail.")
                     }
                     field("Mailbox") {
                         TextField("INBOX", text: $draft.mailbox)
@@ -126,10 +187,6 @@ struct EmailSourceSheet: View {
                             .labelsHidden()
                     }
                     SettingsHint("On connect, Email captures mail from now on (like meeting capture) — it won't import your whole backlog. \"Lookback days\" only caps how far back a catch-up fetch reaches.")
-
-                    // Gmail helper — the most common gotcha is using the
-                    // account password instead of an app password.
-                    SettingsHint("Gmail: enable 2-Step Verification, then create an App Password (myaccount.google.com → Security → App passwords).")
 
                     if let s = testStatus {
                         Text(s)
@@ -232,6 +289,42 @@ struct EmailSourceSheet: View {
         }
         config.emailSource = draft
         dismiss()
+    }
+
+    /// Drive the Google OAuth loopback flow: ask the server to stash the
+    /// bring-your-own client id/secret + start the flow, open the returned
+    /// consent URL in the default browser, then poll `/auth/google/status`
+    /// until it reports complete/error or ~3 minutes elapse. `clientId`/
+    /// `clientSecret` never touch AppConfig — they're only sent to the
+    /// server, which owns persisting them in the vault.
+    private func signInWithGoogle() async {
+        signingIn = true
+        signInError = nil
+        defer { signingIn = false }
+        do {
+            let r = try await api.googleSignInStart(clientId: clientId, clientSecret: clientSecret)
+            if let u = URL(string: r.authUrl) { NSWorkspace.shared.open(u) }
+            // Poll for up to ~3 minutes (90 * 2s) while the user completes
+            // the consent flow in the browser.
+            for _ in 0..<90 {
+                try await Task.sleep(nanoseconds: 2_000_000_000)
+                let s = try await api.googleSignInStatus(state: r.state)
+                if s.status == "complete" {
+                    draft.authMethod = "google"
+                    if let e = s.email, !e.isEmpty { draft.user = e }
+                    config.emailSource = draft
+                    dismiss()
+                    return
+                }
+                if s.status == "error" {
+                    signInError = s.message ?? "Sign-in failed"
+                    return
+                }
+            }
+            signInError = "Sign-in timed out — try again."
+        } catch {
+            signInError = error.localizedDescription
+        }
     }
 
     /// Remove the source and delete the stored app password from the vault
