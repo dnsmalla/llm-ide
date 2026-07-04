@@ -171,13 +171,24 @@ async function makeClient({ host, port, secure, user, password }) {
   });
 }
 
-// Map ImapFlow / network failures to a human-readable message. The raw
-// errors ("Command failed", auth response codes) are useless to an end
-// user, so we translate the common cases and never echo the password.
-function friendlyError(err) {
-  const raw = String(err?.message || err || '');
-  if (/auth|login|credential|AUTHENTICATIONFAILED/i.test(raw)) {
-    return 'IMAP login failed — check the address and app password';
+// Map ImapFlow / network failures to a human-readable message.
+//
+// CRITICAL: ImapFlow throws `new Error('Command failed')` for EVERY failed
+// IMAP command (see imapflow's imap-flow.js) — `err.message` is ALWAYS that
+// generic string. The real reason (auth failure, mailbox error, …) lives in
+// the server's response text: `err.responseText` / `err.response.text`, with
+// the command status in `err.responseStatus` and an `authenticationFailed`
+// flag on connect/login errors. So we MUST inspect those fields, not just
+// `err.message` — otherwise a Gmail "app-specific password required" surfaces
+// to the user as the useless "Command failed". The server response text does
+// not contain the password (imapflow logs the credential blob separately with
+// redaction), so it is safe to surface.
+// Exported for unit testing.
+export function friendlyError(err) {
+  const detail = err?.responseText || err?.response?.text || '';
+  const raw = [err?.message, detail, err?.responseStatus].filter((s) => typeof s === 'string' && s).join(' ') || String(err || '');
+  if (err?.authenticationFailed || /auth|login|credential|AUTHENTICATIONFAILED|app[- ]?specific password|application-specific password/i.test(raw)) {
+    return 'IMAP login failed — check the address and app password (Gmail/Yahoo/iCloud require an app-specific password, and IMAP must be enabled)';
   }
   if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(raw)) {
     return 'Could not reach the IMAP server — check the host name';
@@ -185,7 +196,10 @@ function friendlyError(err) {
   if (/ECONNREFUSED|ETIMEDOUT|timeout|timed out/i.test(raw)) {
     return 'Connection to the IMAP server timed out — check host, port, and TLS';
   }
-  return raw || 'IMAP connection failed';
+  // Prefer the server's own response text over imapflow's generic
+  // "Command failed"; only fall back to that when there's nothing better.
+  if (detail) return `IMAP error: ${detail}`;
+  return err?.message || 'IMAP connection failed';
 }
 
 // Connect, open the mailbox, read its size, and disconnect. Used by the
