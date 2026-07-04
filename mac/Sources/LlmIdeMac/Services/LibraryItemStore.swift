@@ -107,6 +107,11 @@ final class LibraryItemStore {
             .flatMap { String(data: $0, encoding: .utf8) } ?? ""
         guard head.hasPrefix("---") else { return MeetingSource().id }
         // Walk the frontmatter block (between the opening and closing "---").
+        // Prefer `platform:` (meetings/captures); fall back to `source:` for
+        // ingested notes that identify themselves by source id (e.g. email
+        // writes `source: email`) so they classify into the right sub-group
+        // even without a platform line.
+        var fallbackId: String?
         for raw in head.split(separator: "\n").dropFirst() {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line == "---" { break }                 // end of frontmatter
@@ -115,8 +120,13 @@ final class LibraryItemStore {
                     .trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
                 return SourceRegistry.source(forPlatform: value).id
             }
+            if fallbackId == nil, line.hasPrefix("source:") {
+                let value = line.dropFirst("source:".count)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
+                if !value.isEmpty { fallbackId = SourceRegistry.source(forPlatform: value).id }
+            }
         }
-        return MeetingSource().id
+        return fallbackId ?? MeetingSource().id
     }
 
     /// Rebuild `items` from the bound project folder.  Authoritative for
