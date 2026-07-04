@@ -63,54 +63,56 @@ struct EmailSource: InputSource {
                          oversize: result.skipped.oversize)
     }
 
-    /// Create a `.md` transcript via `MeetingFileStore`, finalize it, then run
-    /// `MeetingSummarizationService` for the AI summary + `.docx`. The email
-    /// body plays the role of the transcript. File + summarize work runs off
-    /// the main actor.
+    /// The write action chosen for a fetched email (pure, unit-testable).
+    enum EmailWriteDecision: Equatable {
+        case note(LlmIdeAPIClient.EmailClassification)
+        case skipped(category: String)
+    }
+
+    /// Decide how to persist an email. Bulk senders skip the LLM entirely; a
+    /// classify failure is persisted as a raw stub so nothing is lost.
+    static func routeDecision(from: String,
+                              classification: LlmIdeAPIClient.EmailClassification?,
+                              classifyFailed: Bool = false) -> EmailWriteDecision {
+        if EmailFileStore.isBulkSender(from) { return .skipped(category: "bulk") }
+        if classifyFailed { return .skipped(category: "unclassified") }
+        guard let c = classification else { return .skipped(category: "unclassified") }
+        return c.noteWorthy ? .note(c) : .skipped(category: c.category)
+    }
+
+    /// Classify the email, then write a structured to-do note (note-worthy) or
+    /// a raw stub (skipped/bulk/unclassified) into the dedicated `Email/` folder
+    /// via `EmailFileStore`. Bulk senders skip the LLM call. A classify failure
+    /// is persisted raw so nothing is lost.
     @MainActor
     private func makeNote(from msg: EmailMessage, ctx: SourceContext) async throws {
         let startedAt = AppDateFormatter.parseISO(msg.date) ?? Date()
-        let title = msg.subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "Email" : msg.subject
-        let participants = msg.from.isEmpty ? [] : [msg.from]
-        let speaker = msg.from.isEmpty ? "Email" : msg.from
-        let body = msg.text
-        let transcript = """
-        From: \(msg.from)
-        Subject: \(msg.subject)
-        Date: \(msg.date)
+        let emailRoot = ctx.root.appendingPathComponent("Email", isDirectory: true)
+        let store = EmailFileStore(root: emailRoot)
 
-        \(body)
-        """
-        let id = msg.messageId.isEmpty ? UUID().uuidString : msg.messageId
-        let root = ctx.root
-        let notesOutputFolder = ctx.notesOutputFolder
-        let api = ctx.api
+        // Bulk senders skip the LLM entirely.
+        if EmailFileStore.isBulkSender(msg.from) {
+            _ = try store.writeSkipped(messageId: msg.messageId, from: msg.from, date: startedAt,
+                                       subject: msg.subject, category: "bulk", originalBody: msg.text)
+            return
+        }
 
-        try await Task.detached(priority: .background) {
-            let store = MeetingFileStore(root: root)
-            let handle = try store.createPartial(
-                id: id, startedAt: startedAt, platform: "email", language: "")
-            try handle.appendCaption(timestamp: startedAt, speaker: speaker, text: body)
-            try handle.flush()
-            let url = try store.finalize(
-                handle: handle, title: title, endedAt: startedAt, participants: participants)
+        var classification: LlmIdeAPIClient.EmailClassification?
+        var failed = false
+        do {
+            classification = try await ctx.api.classifyEmail(
+                subject: msg.subject, from: msg.from, date: msg.date, body: msg.text)
+        } catch {
+            failed = true   // classify failed/timed out — persist raw so nothing is lost
+        }
 
-            let dateSlug = AppDateFormatter.dateHourMinuteLocal(startedAt)
-            let idSuffix = id.prefix(8)
-            let docxURL = notesOutputFolder.appendingPathComponent(
-                "\(dateSlug)-\(idSuffix)-email-notes.docx")
-            await MeetingSummarizationService.run(
-                api: api,
-                transcript: transcript,
-                title: title,
-                language: "",
-                startedAt: startedAt,
-                durationSeconds: nil,
-                participants: participants,
-                transcriptFileURL: url,
-                docxOutputURL: docxURL,
-                root: root)
-        }.value
+        switch Self.routeDecision(from: msg.from, classification: classification, classifyFailed: failed) {
+        case .note(let c):
+            _ = try store.writeNote(messageId: msg.messageId, from: msg.from, date: startedAt,
+                                    subject: msg.subject, classification: c, originalBody: msg.text)
+        case .skipped(let category):
+            _ = try store.writeSkipped(messageId: msg.messageId, from: msg.from, date: startedAt,
+                                       subject: msg.subject, category: category, originalBody: msg.text)
+        }
     }
 }
