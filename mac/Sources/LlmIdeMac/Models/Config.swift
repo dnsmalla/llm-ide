@@ -75,6 +75,9 @@ struct SavedEmailSource: Codable, Equatable {
     var enabled: Bool = true
     /// Only import unread messages — the usual case (read mail is noise).
     var unreadOnly: Bool = true
+    /// Mark fetched messages as read (\Seen) in the mailbox, so anything still
+    /// unread = not yet captured. Default on.
+    var markRead: Bool = true
     /// Optional sender substring filter (IMAP FROM search). Empty = all.
     var fromFilter: String = ""
 
@@ -95,6 +98,7 @@ struct SavedEmailSource: Codable, Equatable {
         lookbackDays = try c.decodeIfPresent(Int.self, forKey: .lookbackDays) ?? 7
         enabled      = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         unreadOnly   = try c.decodeIfPresent(Bool.self, forKey: .unreadOnly) ?? true
+        markRead     = try c.decodeIfPresent(Bool.self, forKey: .markRead) ?? true
         fromFilter   = try c.decodeIfPresent(String.self, forKey: .fromFilter) ?? ""
     }
 }

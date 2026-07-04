@@ -176,6 +176,11 @@ struct EmailSourceSheet: View {
                             .toggleStyle(.switch)
                             .labelsHidden()
                     }
+                    field("Mark as read") {
+                        Toggle("", isOn: $draft.markRead)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                    }
                     field("From filter") {
                         TextField("sender@example.com (optional)", text: $draft.fromFilter)
                             .textFieldStyle(.roundedBorder)

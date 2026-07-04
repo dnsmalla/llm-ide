@@ -395,6 +395,7 @@ export async function handleKB(req, res) {
           unreadOnly: body.unreadOnly !== false,            // default true
           fromFilter: typeof body.fromFilter === 'string' ? body.fromFilter : '',
           seenIds,
+          markSeen: body.markRead === true,                 // mark fetched mail read (client opt-in)
         });
         const fetchCount = messages.length;
         logger.info('email_fetch', {

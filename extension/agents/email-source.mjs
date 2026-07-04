@@ -290,7 +290,7 @@ export function resolveSince({ sinceISO, lookbackDays }) {
 // Throws a clean Error on connect/auth fail.
 export async function fetchRecentEmails({
   host, port, secure, user, password, mailbox,
-  lookbackDays, sinceISO, unreadOnly, fromFilter, seenIds, accessToken,
+  lookbackDays, sinceISO, unreadOnly, fromFilter, seenIds, accessToken, markSeen,
 }) {
   const box = mailbox || 'INBOX';
   const since = resolveSince({ sinceISO, lookbackDays });
@@ -349,6 +349,15 @@ export async function fetchRecentEmails({
       messages.push(normalizeParsed(parsed, msg.uid));
     }
     messages.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // Best-effort: mark the fetched messages as read (\Seen) so the user can
+    // tell in their mail client what's been captured (anything still unread =
+    // not yet fetched). Failure here must NOT fail the fetch — the messages are
+    // already retrieved and will be turned into notes regardless.
+    if (markSeen && uidList) {
+      try { await client.messageFlagsAdd(uidList, ['\\Seen'], { uid: true }); } catch { /* best-effort */ }
+    }
+
     return { messages, skipped };
   } catch (err) {
     throw new Error(timedOut ? 'IMAP fetch timed out' : friendlyError(err));

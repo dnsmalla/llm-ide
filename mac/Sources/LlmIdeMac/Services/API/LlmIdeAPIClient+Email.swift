@@ -94,6 +94,8 @@ extension LlmIdeAPIClient {
             // "google" → server uses the stored OAuth token (XOAUTH2);
             // otherwise the vault app password.
             let authMethod: String
+            // Mark fetched messages read (\Seen) in the mailbox.
+            let markRead: Bool
         }
         return try await post("/kb/email/fetch",
                               body: Req(host: s.host, port: s.port, secure: s.secure,
@@ -101,7 +103,8 @@ extension LlmIdeAPIClient {
                                         lookbackDays: s.lookbackDays,
                                         unreadOnly: s.unreadOnly,
                                         fromFilter: s.fromFilter,
-                                        authMethod: s.authMethod),
+                                        authMethod: s.authMethod,
+                                        markRead: s.markRead),
                               authenticated: true)
     }
 
