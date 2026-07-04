@@ -144,6 +144,7 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/analyze-risks')       return 'llm';
   if (url === '/kb/generate-code')       return 'llm';
   if (url === '/kb/summarize')           return 'llm';            // runClaude, 3-min ceiling
+  if (url === '/kb/email/classify')      return 'llm';            // classifyEmail, same cost class as summarize
   if (url === '/kb/conflict-questions')  return 'llm';            // runClaude
   if (url === '/kb/providers/verify')    return 'llmFast';        // tiny live probe / CLI check
   if (url === '/kb/providers/models')    return 'llmFast';        // provider model-list fetch

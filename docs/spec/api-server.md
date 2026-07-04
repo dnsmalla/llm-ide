@@ -225,7 +225,7 @@ When a bucket is exhausted, `tryConsume()` returns `{ ok: false, retryAfterSec: 
 
 | Profile | Capacity | Refill rate | Applied to |
 |---|---|---|---|
-| `llm` | 3 | 1/30 s | `/code-assist`, `/kb/generate-plan`, `/kb/analyze-risks`, `/kb/generate-code`, `/kb/summarize`, `/kb/conflict-questions` |
+| `llm` | 3 | 1/30 s | `/code-assist`, `/kb/generate-plan`, `/kb/analyze-risks`, `/kb/generate-code`, `/kb/summarize`, `/kb/email/classify`, `/kb/conflict-questions` |
 | `llmFast` | 6 | 1/5 s | `/generate-notes`, `/chat`, `/kb/agent/ask`, `/generate-questions`, `/extract-entities`, `/generate-docx`, `/generate-doc`, `/kb/providers/verify`, `/kb/providers/models` |
 | `dispatch` | 4 | 1/10 s | `/kb/dispatch`, `/kb/notify/slack`, `/kb/email/test`, `/kb/email/fetch`, `/kb/slack/test`, `/kb/slack/fetch`, `/kb/box/test` |
 | `outcomePoll` | 6 | 1/30 s | `/kb/outcomes/refresh` |
