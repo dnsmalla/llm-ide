@@ -139,6 +139,13 @@ const ALLOWED_KEYS = new Set([
   // rides the same per-user secrets channel for simplicity).
   'custom.apiKey',
   'custom.baseUrl',
+  // Gmail Google Sign-In (OAuth2 PKCE, agents/google-oauth.mjs). clientId/
+  // clientSecret come from the user's own Google Cloud "Desktop app" OAuth
+  // client; refreshToken is minted by /auth/google/callback after consent
+  // and used to mint short-lived XOAUTH2 access tokens for IMAP.
+  'google.email.clientId',
+  'google.email.clientSecret',
+  'google.email.refreshToken',
 ]);
 
 function ensureAllowed(key) {

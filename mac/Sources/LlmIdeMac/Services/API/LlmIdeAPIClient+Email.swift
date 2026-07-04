@@ -51,10 +51,14 @@ extension LlmIdeAPIClient {
             let secure: Bool
             let user: String
             let mailbox: String
+            // Tells the server which credential path to use: "google" reads the
+            // stored OAuth refresh token (XOAUTH2), otherwise the vault password.
+            let authMethod: String
         }
         return try await post("/kb/email/test",
                               body: Req(host: s.host, port: s.port, secure: s.secure,
-                                        user: s.user, mailbox: s.mailbox),
+                                        user: s.user, mailbox: s.mailbox,
+                                        authMethod: s.authMethod),
                               authenticated: true)
     }
 
@@ -87,13 +91,17 @@ extension LlmIdeAPIClient {
             let lookbackDays: Int
             let unreadOnly: Bool
             let fromFilter: String
+            // "google" → server uses the stored OAuth token (XOAUTH2);
+            // otherwise the vault app password.
+            let authMethod: String
         }
         return try await post("/kb/email/fetch",
                               body: Req(host: s.host, port: s.port, secure: s.secure,
                                         user: s.user, mailbox: s.mailbox,
                                         lookbackDays: s.lookbackDays,
                                         unreadOnly: s.unreadOnly,
-                                        fromFilter: s.fromFilter),
+                                        fromFilter: s.fromFilter,
+                                        authMethod: s.authMethod),
                               authenticated: true)
     }
 
@@ -108,5 +116,30 @@ extension LlmIdeAPIClient {
         let _: Ack = try await post("/kb/email/seen",
                                     body: Req(messageIds: messageIds, lastFetchedAt: iso),
                                     authenticated: true)
+    }
+
+    /// Result of `/auth/google/start` — the browser URL to open plus the
+    /// opaque state token used to poll for completion.
+    struct GoogleStartResult: Decodable { let authUrl: String; let state: String }
+
+    /// Result of `/auth/google/status` — `status` is one of
+    /// pending|complete|error; `email` is populated once complete.
+    struct GoogleStatusResult: Decodable { let status: String; let email: String?; let message: String? }
+
+    /// Kick off the Google OAuth loopback flow: the server stashes the
+    /// bring-your-own client id/secret in the vault and returns a browser
+    /// URL to open plus a state token to poll via `googleSignInStatus`.
+    func googleSignInStart(clientId: String, clientSecret: String) async throws -> GoogleStartResult {
+        struct Req: Encodable { let clientId: String; let clientSecret: String }
+        return try await post("/auth/google/start",
+                              body: Req(clientId: clientId, clientSecret: clientSecret),
+                              authenticated: true)
+    }
+
+    /// Poll the state of an in-flight Google sign-in started via
+    /// `googleSignInStart`.
+    func googleSignInStatus(state: String) async throws -> GoogleStatusResult {
+        let encoded = state.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? state
+        return try await get("/auth/google/status?state=\(encoded)", authenticated: true)
     }
 }

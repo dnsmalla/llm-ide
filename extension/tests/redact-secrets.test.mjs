@@ -39,6 +39,18 @@ test('redactSecrets scrubs every known token shape', () => {
   }
 });
 
+test('redactSecrets scrubs Google OAuth2 access and refresh tokens', () => {
+  const cases = [
+    'ya29.a0AfH-EXAMPLE_ACCESS_TOKEN_abcdefghijklmnop',
+    '1//0gEXAMPLE_REFRESH_TOKEN_abcdefghijklmnop',
+  ];
+  for (const raw of cases) {
+    const out = redactSecrets(`prefix ${raw} suffix`);
+    assert.ok(out.includes('[REDACTED]'), `expected redaction marker for: ${raw}`);
+    assert.ok(!out.includes(raw), `raw secret should not survive: ${raw} -> ${out}`);
+  }
+});
+
 test('redactSecrets leaves ordinary text intact', () => {
   const msg = 'Bad request: the model name is invalid, check LLMIDE_MODEL.';
   assert.equal(redactSecrets(msg), msg);

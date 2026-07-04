@@ -27,7 +27,7 @@ import { runClaude } from '../agents/runtime.mjs';
 import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatModels, customBaseUrl } from '../agents/providers.mjs';
 import { iterateUserMeetings } from './exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
-import { testConnection, fetchRecentEmails } from '../agents/email-source.mjs';
+import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../agents/email-source.mjs';
 import { testConnection as slackTest, fetchChannelHistory } from '../agents/slack-source.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
@@ -334,15 +334,36 @@ export async function handleKB(req, res) {
         sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'host and user are required' } });
         return true;
       }
-      const password = getSecret(kb.getDb(), userId, 'email.imapPassword');
-      if (!password) {
-        sendJSON(res, 400, { error: { code: 'EMAIL_NO_PASSWORD', message: 'No app password saved for email. Save one first.' } });
-        return true;
+
+      // Two auth paths: the classic app-password flow, or Google Sign-In
+      // (XOAUTH2 via a short-lived access token minted from the stored
+      // refresh token). They are mutually exclusive — when authMethod is
+      // 'google' we never touch/require the vault password.
+      const authMethod = body.authMethod === 'google' ? 'google' : 'password';
+      let password;
+      let accessToken;
+      if (authMethod === 'google') {
+        try {
+          accessToken = await getGoogleAccessToken(kb.getDb(), userId);
+        } catch (e) {
+          logger.error('email_google_token_failed', { userId, reason: redactSecrets(e.message) });
+          sendJSON(res, 502, { error: { code: 'EMAIL_GOOGLE_AUTH_FAILED', message: 'Google sign-in expired — sign in again.' } });
+          return true;
+        }
+      } else {
+        password = getSecret(kb.getDb(), userId, 'email.imapPassword');
+        if (!password) {
+          sendJSON(res, 400, { error: { code: 'EMAIL_NO_PASSWORD', message: 'No app password saved for email. Save one first.' } });
+          return true;
+        }
       }
 
       if (url === '/kb/email/test') {
         try {
-          const r = await testConnection({ host, port, secure, user, password, mailbox });
+          const args = authMethod === 'google'
+            ? { host, port, secure, user, mailbox, accessToken }
+            : { host, port, secure, user, mailbox, password };
+          const r = await testConnection(args);
           logger.info('email_test', { userId, mailbox: r.mailbox, total: r.total });
           sendJSON(res, 200, r);
         } catch (e) {
@@ -363,8 +384,11 @@ export async function handleKB(req, res) {
       const highWater = kb.getEmailHighWater(userId);
       const started = Date.now();
       try {
+        const fetchArgs = authMethod === 'google'
+          ? { host, port, secure, user, mailbox, accessToken }
+          : { host, port, secure, user, mailbox, password };
         const { messages, skipped } = await fetchRecentEmails({
-          host, port, secure, user, mailbox, password,
+          ...fetchArgs,
           lookbackDays: body.lookbackDays,
           sinceISO: highWater,                              // server-owned, not body.sinceISO
           unreadOnly: body.unreadOnly !== false,            // default true
