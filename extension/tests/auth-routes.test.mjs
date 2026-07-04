@@ -19,6 +19,7 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 
 const kb = await import('../kb/db.mjs');
 const { handleAuth, isAuthRoute } = await import('../server/auth-routes.mjs');
+const { authenticate, isPublicPath } = await import('../server/auth.mjs');
 
 const noopLogger = { info() {}, warn() {}, error() {}, child() { return this; } };
 
@@ -299,4 +300,85 @@ test('unknown authed auth-route → 404 envelope', async () => {
   const res = await callAuth({ method: 'POST', url: '/auth/definitely-not-a-route', user: { id: user.id } });
   assert.equal(res.statusCode, 404);
   assert.equal(res.json().error.code, 'NOT_FOUND');
+});
+
+// ---- password-reset public-path regression ---------------------------------
+// These routes are public but were missing from auth.mjs PUBLIC_PATHS, so a
+// real unauthenticated client (no Authorization header) got 401 AUTH_REQUIRED
+// from the authenticate() gate in server.mjs BEFORE ever reaching the handler.
+// The tests above call handleAuth directly and so bypass that gate; these run
+// authenticate() first, exactly as server.mjs does on every request.
+
+// Mimics server.mjs: authenticate() runs on EVERY request before dispatch.
+// Returns { authError } if the gate rejected the request (401 before the
+// handler), otherwise runs the real handler and returns { res }.
+async function callThroughGate(reqOpts) {
+  const req = makeReq(reqOpts);
+  const res = makeRes();
+  try {
+    authenticate(req);
+  } catch (err) {
+    return { authError: err };
+  }
+  await handleAuth(req, res, { db: kb.getDb(), logger: noopLogger, requestId: 'test-req' });
+  return { res };
+}
+
+test('reset-request and reset-confirm are registered as public paths', () => {
+  assert.equal(isPublicPath('POST', '/auth/reset-request'), true);
+  assert.equal(isPublicPath('POST', '/auth/reset-confirm'), true);
+});
+
+test('authenticate() gate still rejects a non-public route with no bearer token', () => {
+  // Control: proves the gate is real — a non-public path with no Authorization
+  // header must throw AUTH_REQUIRED, so the passing reset tests below mean the
+  // routes are genuinely exempt (not that the gate is inert).
+  const req = makeReq({ method: 'GET', url: '/auth/me' });
+  assert.throws(
+    () => authenticate(req),
+    (e) => e.code === 'AUTH_REQUIRED' && e.status === 401,
+  );
+});
+
+test('POST /auth/reset-request passes the authenticate() gate with no Authorization header', async () => {
+  const { authError, res } = await callThroughGate({
+    method: 'POST', url: '/auth/reset-request', body: { email: uniqueEmail() },
+  });
+  assert.equal(authError, undefined, 'authenticate() must not reject the public reset-request route');
+  assert.equal(res.statusCode, 200, res._body);
+});
+
+test('POST /auth/reset-confirm passes the authenticate() gate with no Authorization header', async () => {
+  // Even with a bogus token the request must REACH the handler. The gate
+  // never runs the handler when it rejects, so `authError === undefined`
+  // is the signal that the route is exempt. (The handler then legitimately
+  // rejects the bad token itself — that is a handler outcome, not the gate.)
+  const { authError, res } = await callThroughGate({
+    method: 'POST', url: '/auth/reset-confirm', body: { token: 'nope', newPassword: 'NewCorrectHorse1' },
+  });
+  assert.equal(authError, undefined, 'authenticate() must not reject the public reset-confirm route');
+  assert.ok(res.ended, 'the reset-confirm handler must have run and produced a response');
+});
+
+test('password reset flow (request → confirm) works end-to-end through the real gate with no auth', async () => {
+  const { email } = await registerAndLogin();
+
+  const reqRes = await callThroughGate({ method: 'POST', url: '/auth/reset-request', body: { email } });
+  assert.equal(reqRes.authError, undefined);
+  assert.equal(reqRes.res.statusCode, 200, reqRes.res._body);
+  const token = reqRes.res.json().token; // dev/test env returns the raw token
+  assert.ok(token, 'reset-request should return a raw token in the test env');
+
+  const newPassword = 'NewCorrectHorse1';
+  const confirmRes = await callThroughGate({
+    method: 'POST', url: '/auth/reset-confirm', body: { token, newPassword },
+  });
+  assert.equal(confirmRes.authError, undefined, 'authenticate() must not reject the public reset-confirm route');
+  assert.equal(confirmRes.res.statusCode, 200, confirmRes.res._body);
+
+  // The new password is usable; the old one is not.
+  const good = await callAuth({ method: 'POST', url: '/auth/login', body: { email, password: newPassword } });
+  assert.equal(good.statusCode, 200, good._body);
+  const bad = await callAuth({ method: 'POST', url: '/auth/login', body: { email, password: PASSWORD } });
+  assert.equal(bad.statusCode, 401, bad._body);
 });

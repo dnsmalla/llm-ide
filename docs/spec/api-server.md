@@ -148,7 +148,7 @@ Source: `extension/server/jwt.mjs`.
 
 ### Public paths (no auth required)
 
-Defined in `extension/server/auth.mjs:20–28`:
+Defined in `extension/server/auth.mjs` (the `PUBLIC_PATHS` set):
 
 ```
 GET  /
@@ -157,6 +157,8 @@ GET  /launch-app   (and /launch-app?…)
 POST /auth/register
 POST /auth/login
 POST /auth/refresh
+POST /auth/reset-request
+POST /auth/reset-confirm
 GET  /auth/well-known
 ```
 
