@@ -78,9 +78,21 @@ test('stripHtml decodes common entities', () => {
   assert.equal(stripHtml('a &amp; b &lt;c&gt;'), 'a & b <c>');
 });
 
-test('resolveSince prefers a valid sinceISO', () => {
+test('resolveSince uses sinceISO when it is older than the lookback window', () => {
+  // High-water older than the lookback → reach back to it so a long gap
+  // between fetches never drops mail in the gap.
   const d = resolveSince({ sinceISO: '2026-01-02T03:04:05Z', lookbackDays: 7 });
   assert.equal(d.toISOString(), '2026-01-02T03:04:05.000Z');
+});
+
+test('resolveSince reaches back the full lookback when sinceISO (high-water) is recent', () => {
+  // A high-water mark from 2 days ago must NOT cap a 31-day catch-up: the
+  // window is the EARLIER of the high-water and now-lookback, so "Lookback
+  // days" governs how far back a catch-up reaches (seen-ledger dedups).
+  const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString();
+  const d = resolveSince({ sinceISO: twoDaysAgo, lookbackDays: 31 });
+  const lookback = Date.now() - 31 * 86400000;
+  assert.ok(Math.abs(d.getTime() - lookback) < 5000, `expected ~31d back, got ${d.toISOString()}`);
 });
 
 test('resolveSince falls back to lookbackDays on missing/invalid sinceISO', () => {

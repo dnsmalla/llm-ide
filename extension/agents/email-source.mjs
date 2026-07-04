@@ -254,18 +254,26 @@ export async function testConnection({ host, port, secure, user, password, mailb
   }
 }
 
-// Resolve the search lower-bound date. Prefer the client's forward-only
-// high-water mark (`sinceISO`); otherwise fall back to `lookbackDays`.
+// Resolve the search lower-bound date: reach back to the EARLIER of the
+// forward-only high-water mark (`sinceISO`) and the `lookbackDays` window.
+// This makes "Lookback days" actually govern how far a catch-up fetch reaches
+// (the seen-ledger dedups anything already imported, so a wider window never
+// re-imports old mail) — matching the documented UI behavior. When the
+// high-water is older than the lookback window (a long gap between fetches),
+// we reach back to it so no mail in the gap is missed.
 // Exported for unit testing.
 export function resolveSince({ sinceISO, lookbackDays }) {
-  if (sinceISO) {
-    const d = new Date(sinceISO);
-    if (!Number.isNaN(d.getTime())) return d;
-  }
   // Clamp server-side to 1..60 — never trust the client's bound.
   const raw = Number(lookbackDays);
   const days = Number.isFinite(raw) ? Math.min(60, Math.max(1, Math.round(raw))) : 7;
-  return new Date(Date.now() - days * 86400000);
+  const lookbackDate = new Date(Date.now() - days * 86400000);
+  if (sinceISO) {
+    const d = new Date(sinceISO);
+    if (!Number.isNaN(d.getTime())) {
+      return d.getTime() < lookbackDate.getTime() ? d : lookbackDate;
+    }
+  }
+  return lookbackDate;
 }
 
 // Connect and return messages newer than the resolved `since`, optionally
