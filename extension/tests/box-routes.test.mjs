@@ -25,6 +25,7 @@ const db = await import('../kb/db.mjs');
 const { handleKB } = await import('../kb/router.mjs');
 const users = await import('../server/users.mjs');
 const vault = await import('../server/vault.mjs');
+const { logger } = await import('../core/logger.mjs');
 
 function resetDb() {
   db.closeDb();
@@ -206,5 +207,47 @@ test('POST /kb/box/test redacts a BARE (shapeless) client_secret echoed in a Box
     assert.ok(!parsed.error.message.includes(bare), 'bare client_secret must not leak in the response (redactWithKey)');
   } finally {
     global.fetch = orig;
+  }
+});
+
+test('POST /kb/box/test redacts the secret from the logged failure reason', async () => {
+  resetDb();
+  const u = makeUser('logleak');
+  const secret = 'sk-ant-should-not-leak-in-logs-1234567890';
+  vault.setSecret(db.getDb(), u.id, 'box.clientSecret', secret);
+
+  // The provider echoes the credential back into the token-exchange error body,
+  // exactly as the reviewer reproduced. It must not survive into the log line.
+  const origFetch = global.fetch;
+  global.fetch = async (urlStr) => {
+    const url = String(urlStr);
+    if (url === 'https://api.box.com/oauth2/token') {
+      return { ok: false, status: 400, json: async () => ({ error: 'invalid_client', error_description: `bad creds for ${secret}` }), text: async () => '' };
+    }
+    return { ok: false, status: 500, json: async () => ({}), text: async () => '' };
+  };
+
+  // Spy on the shared logger singleton (kb/router.mjs imports the same instance).
+  const captured = [];
+  const origError = logger.error;
+  logger.error = (event, fields) => { captured.push({ event, fields }); };
+
+  try {
+    const req = makeReq({
+      method: 'POST',
+      url: '/kb/box/test',
+      body: { clientId: 'cid', subjectId: 'sid', folderId: 'F1' },
+      userId: u.id,
+    });
+    const res = makeRes();
+    await handleKB(req, res);
+
+    const leaked = JSON.stringify(captured);
+    assert.ok(captured.some((c) => c.event === 'box_test_failed'), 'expected a box_test_failed log line');
+    assert.ok(!leaked.includes(secret), `secret must be redacted from logged fields, got: ${leaked}`);
+    assert.ok(leaked.includes('[REDACTED]'), 'redaction marker should appear in the logged reason');
+  } finally {
+    logger.error = origError;
+    global.fetch = origFetch;
   }
 });

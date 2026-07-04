@@ -240,7 +240,9 @@ async function runBackgroundPoll() {
         });
       }
     } catch (err) {
-      log.error('outcome_bg_poll_user_failed', { userId, error: err.message });
+      // refreshAllOutcomes hits provider APIs with the user's tokens; a provider
+      // error can echo the credential back, so redact before it reaches the log.
+      log.error('outcome_bg_poll_user_failed', { userId, error: redactTokens(err.message) });
     }
   }
   log.info('outcome_bg_poll_done', { users: userIds.length, totalChanged });

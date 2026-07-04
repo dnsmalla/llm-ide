@@ -346,8 +346,9 @@ export async function handleKB(req, res) {
           logger.info('email_test', { userId, mailbox: r.mailbox, total: r.total });
           sendJSON(res, 200, r);
         } catch (e) {
-          // Log host/user only — never the password or raw auth blob.
-          logger.error('email_test_failed', { userId, host, reason: e.message });
+          // Log host/user only — never the password or raw auth blob. Provider
+          // errors can echo a credential back, so redact before it hits the log.
+          logger.error('email_test_failed', { userId, host, reason: redactSecrets(e.message) });
           sendJSON(res, 502, { error: { code: 'EMAIL_CONNECT_FAILED', message: e.message } });
         }
         return true;
@@ -391,7 +392,7 @@ export async function handleKB(req, res) {
           }
         }
       } catch (e) {
-        logger.error('email_fetch_failed', { userId, host, reason: e.message });
+        logger.error('email_fetch_failed', { userId, host, reason: redactSecrets(e.message) });
         sendJSON(res, 502, { error: { code: 'EMAIL_FETCH_FAILED', message: e.message } });
       }
       return true;
@@ -432,7 +433,7 @@ export async function handleKB(req, res) {
           logger.info('slack_test', { userId, team: r.team });
           sendJSON(res, 200, r);
         } catch (e) {
-          logger.error('slack_test_failed', { userId, reason: e.message });
+          logger.error('slack_test_failed', { userId, reason: redactSecrets(e.message) });
           sendJSON(res, 502, { error: { code: 'SLACK_CONNECT_FAILED', message: e.message } });
         }
         return true;
@@ -469,7 +470,7 @@ export async function handleKB(req, res) {
           }
         }
       } catch (e) {
-        logger.error('slack_fetch_failed', { userId, channelId, reason: e.message });
+        logger.error('slack_fetch_failed', { userId, channelId, reason: redactSecrets(e.message) });
         sendJSON(res, 502, { error: { code: 'SLACK_FETCH_FAILED', message: e.message } });
       }
       return true;
