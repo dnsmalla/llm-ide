@@ -67,6 +67,56 @@ struct EmailNoteStore {
         return results
     }
 
+    /// Error thrown by `markTodoCreated` when the request can't be honored.
+    enum MarkTodoError: LocalizedError {
+        case invalidFile(URL)
+        case indexOutOfRange(Int, count: Int)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidFile(let url):
+                return "Could not parse frontmatter for email note at \(url.path)"
+            case .indexOutOfRange(let index, let count):
+                return "todoIndex \(index) out of range (note has \(count) todo(s))"
+            }
+        }
+    }
+
+    /// Marks the to-do at `todoIndex` in `file` as created by writing
+    /// `issueURL` into its frontmatter `issue` field (the authoritative
+    /// done-flag). Best-effort: if the body has a matching
+    /// `- [ ] <title>` checkbox line, flips it to `- [x] <title> — <issueURL>`.
+    /// The rest of the body is preserved verbatim. Writes atomically.
+    func markTodoCreated(file: URL, todoIndex: Int, issueURL: String) throws {
+        let contents = try String(contentsOf: file, encoding: .utf8)
+        guard let split = FrontmatterCoder.split(file: contents) else {
+            throw MarkTodoError.invalidFile(file)
+        }
+
+        var fm = try YAMLDecoder().decode(EmailNoteFrontmatter.self, from: split.yaml)
+        guard todoIndex >= 0 && todoIndex < fm.todos.count else {
+            throw MarkTodoError.indexOutOfRange(todoIndex, count: fm.todos.count)
+        }
+
+        let title = fm.todos[todoIndex].title
+        fm.todos[todoIndex].issue = issueURL
+
+        let encoder = YAMLEncoder()
+        encoder.options.sortKeys = false
+        let newYAML = try encoder.encode(fm)
+
+        var body = String(contents[split.bodyStart...])
+        let uncheckedPrefix = "- [ ] \(title)"
+        if let prefixRange = body.range(of: uncheckedPrefix) {
+            let lineEnd = body[prefixRange.upperBound...].firstIndex(of: "\n") ?? body.endIndex
+            body.insert(contentsOf: " — \(issueURL)", at: lineEnd)
+            body.replaceSubrange(prefixRange, with: "- [x] \(title)")
+        }
+
+        let newContents = "---\n\(newYAML)---\n\(body)"
+        try newContents.write(to: file, atomically: true, encoding: .utf8)
+    }
+
     /// Parses the subject from the first `# <subject>` H1 heading line in
     /// the note body, falling back to "Email" if none is found.
     private static func parseSubject(body: String) -> String {
