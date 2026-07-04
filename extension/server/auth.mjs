@@ -9,6 +9,8 @@
 //   POST /auth/register     — public sign-up (rate-limited per IP)
 //   POST /auth/login        — credential exchange (rate-limited per IP)
 //   POST /auth/refresh      — refresh-token rotation
+//   POST /auth/reset-request — password-reset request (rate-limited per IP)
+//   POST /auth/reset-confirm — password-reset confirmation (rate-limited per IP)
 //   GET  /auth/well-known   — server capabilities + auth metadata
 //
 // Anything else returns 401 with a stable `AUTH_REQUIRED` error code.
@@ -24,6 +26,8 @@ const PUBLIC_PATHS = new Set([
   '/auth/register',
   '/auth/login',
   '/auth/refresh',
+  '/auth/reset-request',               // Password-reset request (rate-limited per IP)
+  '/auth/reset-confirm',               // Password-reset confirm (rate-limited per IP)
   '/launch-app',                       // Cross-client deep link → llmide://
 ]);
 
