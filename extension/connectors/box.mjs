@@ -14,6 +14,7 @@ const MAX_DEPTH = 10;        // subfolder recursion cap
 const PAGE_LIMIT = 1000;     // Box folder-items page size
 const REP_POLL_ATTEMPTS = 5; // extracted_text may be 'pending' briefly
 const DEFAULT_POLL_MS = 1500;
+const EXTRACT_CONCURRENCY = 8; // parallel extracted_text fetches; a folder of pending reps otherwise serializes past the route budget
 
 // Every GET is bounded by its own deadline (B3): a hung Box API call (or a
 // never-responding content URL) can otherwise block the whole request up to
@@ -42,6 +43,24 @@ function retryAfterMs(res) {
 }
 
 const sleep = (ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
+
+// Map `fn` over `items` with at most `limit` concurrent in-flight calls,
+// preserving input order in the results. Errors propagate (the caller's fn
+// swallows per-item failures so one bad file can't sink the whole index).
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const workers = Array.from({ length: Math.min(Math.max(1, limit), items.length) }, worker);
+  await Promise.all(workers);
+  return results;
+}
 
 // A Box "session" holds the CCG access token and can refresh it on demand.
 // CCG tokens live ~60min; a large folder index can outlast one, so requests
@@ -214,15 +233,24 @@ export async function indexBoxFolder(userId, creds, opts = {}) {
   const session = makeSession(creds);
   const state = { truncated: false };
   const files = await listFolderRecursive(session, creds.folderId, { state, retryDelayMs: opts.retryDelayMs });
+  // Fetch each file's extracted text with bounded concurrency. Sequential
+  // fetching serializes REP_POLL_ATTEMPTS×poll waits per pending file and can
+  // outrun the route's 240s budget on a large folder; parallelism keeps it fast
+  // while capping simultaneous Box requests. Ordering is preserved so per-file
+  // chunk output stays deterministic.
+  const limit = opts.concurrency ?? EXTRACT_CONCURRENCY;
+  const texts = await mapWithConcurrency(files, limit, async (f) => {
+    try {
+      return await fetchExtractedText(session, f.id, opts);
+    } catch {
+      return null;
+    }
+  });
   const items = [];
   let skipped = 0;
-  for (const f of files) {
-    let text = null;
-    try {
-      text = await fetchExtractedText(session, f.id, opts);
-    } catch {
-      text = null;
-    }
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    const text = texts[i];
     if (!text) { skipped += 1; continue; }
     items.push(...toSourceRows({ folderId: creds.folderId, fileId: f.id, name: f.name, modifiedAt: f.modifiedAt, path: f.path, text }));
   }
