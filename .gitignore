@@ -52,6 +52,7 @@ mac/LlmIdeMac_*.dmg
 
 # Superpowers — ephemeral process state, not source
 .superpowers/
+.worktrees/
 
 # Local environment files
 .env
