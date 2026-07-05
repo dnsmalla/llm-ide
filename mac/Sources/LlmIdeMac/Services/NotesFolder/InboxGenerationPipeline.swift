@@ -58,8 +58,9 @@ enum InboxGenerationPipeline {
     }
 
     /// Parses the `From:`/`Subject:`/`Date:` header block written by
-    /// `InboxStore.write`. Returns nil (silently skips the file) if the
-    /// headers, the blank-line separator, or the date can't be parsed.
+    /// `InboxStore.write`. Returns nil if the headers, the blank-line
+    /// separator, or the date can't be parsed — the caller records this
+    /// as a failure rather than silently dropping the file.
     private static func parse(file: URL, data: Data, hash: String) -> RawInboxItem? {
         guard let text = String(data: data, encoding: .utf8) else { return nil }
         guard let sep = text.range(of: "\n\n") else { return nil }
