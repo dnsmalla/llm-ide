@@ -1,5 +1,6 @@
 // mac/Sources/LlmIdeMac/Services/NotesFolder/EmailFileStore.swift
 import Foundation
+import Yams
 
 /// File-based email store. One complete `.md` per email under
 /// `root/YYYY/MM/`. Note-worthy emails get a structured to-do note; skipped
@@ -15,9 +16,9 @@ struct EmailFileStore {
     }
 
     @discardableResult
-    func writeNote(messageId: String, from: String, date: Date, subject: String,
+    func writeNote(from: String, date: Date, subject: String,
                    classification c: LlmIdeAPIClient.EmailClassification,
-                   originalBody: String) throws -> URL {
+                   originalBody: String, sourceHash: String) throws -> URL {
         var fm = """
         ---
         source: email
@@ -26,6 +27,7 @@ struct EmailFileStore {
         date: \(AppDateFormatter.isoString(date))
         category: \(c.category)
         noteWorthy: true
+        sourceHash: \(yamlScalar(sourceHash))
         todos:
 
         """
@@ -57,8 +59,8 @@ struct EmailFileStore {
     }
 
     @discardableResult
-    func writeSkipped(messageId: String, from: String, date: Date, subject: String,
-                      category: String, originalBody: String) throws -> URL {
+    func writeSkipped(from: String, date: Date, subject: String,
+                      category: String, originalBody: String, sourceHash: String) throws -> URL {
         let md = """
         ---
         source: email
@@ -67,6 +69,7 @@ struct EmailFileStore {
         date: \(AppDateFormatter.isoString(date))
         category: \(category)
         noteWorthy: false
+        sourceHash: \(yamlScalar(sourceHash))
         skipped: \(category)
         ---
 
@@ -77,6 +80,27 @@ struct EmailFileStore {
         \(originalBody)
         """
         return try write(md, date: date, subject: subject)
+    }
+
+    /// Scans `root` for `.md` notes and collects every non-nil `sourceHash`
+    /// from their frontmatter. Used by `InboxGenerationPipeline` (via
+    /// `EmailSource`) to skip inbox files that already produced a note.
+    /// Files that fail to parse are skipped, never thrown — same tolerance
+    /// as `EmailNoteStore.scanOpenTodos`.
+    func existingSourceHashes() -> Set<String> {
+        guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else {
+            return []
+        }
+        var hashes: Set<String> = []
+        for case let file as URL in enumerator {
+            guard file.pathExtension.lowercased() == "md" else { continue }
+            guard let contents = try? String(contentsOf: file, encoding: .utf8),
+                  let split = FrontmatterCoder.split(file: contents),
+                  let fm = try? YAMLDecoder().decode(EmailNoteFrontmatter.self, from: split.yaml),
+                  let hash = fm.sourceHash else { continue }
+            hashes.insert(hash)
+        }
+        return hashes
     }
 
     // MARK: - internals
