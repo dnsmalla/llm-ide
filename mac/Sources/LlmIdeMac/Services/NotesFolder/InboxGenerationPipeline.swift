@@ -43,7 +43,10 @@ enum InboxGenerationPipeline {
             guard let data = try? Data(contentsOf: file) else { continue }
             let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
             if knownHashes.contains(hash) { continue }
-            guard let item = parse(file: file, data: data, hash: hash) else { continue }
+            guard let item = parse(file: file, data: data, hash: hash) else {
+                failures.append("\(file.lastPathComponent): unparseable (missing headers or invalid date)")
+                continue
+            }
             do {
                 try await generate(item)
                 processed += 1
