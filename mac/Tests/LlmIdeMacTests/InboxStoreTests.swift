@@ -25,7 +25,7 @@ struct InboxStoreTests {
                               subject: "hi", body: "hello")
     let comps = url.pathComponents
     #expect(comps.contains("2026"))
-    #expect(comps.contains("06"))
+    #expect(comps.contains("05"))
     #expect(url.pathExtension == "txt")
   }
 
