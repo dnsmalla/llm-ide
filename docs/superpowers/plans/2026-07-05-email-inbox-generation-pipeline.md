@@ -8,7 +8,9 @@
 
 **Tech Stack:** Swift 5 (SwiftPM, macOS app), swift-testing (`@Suite`/`@Test`/`#expect`), Yams (YAML frontmatter), CryptoKit (SHA-256).
 
-**Important environment note:** On this machine `swift test` compiles but does not execute tests (no local `xctest` runner — see `docs/superpowers/...` mac-build memory). Every "run the test" step below uses `swift test` to verify **compilation** (red: fails to compile because the referenced symbol doesn't exist yet; green: compiles cleanly). Actual pass/fail execution only happens in CI (`make test-mac`) or on a machine with full Xcode — the final task runs that check. All `swift build`/`swift test` invocations must run with the sandbox disabled and, if the build cache is warm, `GIT_CONFIG_GLOBAL=/dev/null` prefixed (per `mac/Scripts/build.sh`'s offline-resolve convention) — do not add `-c release`, use debug (default) for speed during iteration.
+**Important environment note (verified 2026-07-05):** On this machine `swift test` cannot even compile — it fails immediately with `error: no such module 'Testing'` because only Xcode Command Line Tools are installed (no full Xcode), and this project's swift-testing integration deliberately links `Testing.framework` from the active toolchain (see the comment above `.testTarget` in `mac/Package.swift`). This is **not** a signal about your code — it reproduces identically on a clean checkout with no changes at all. Practical consequence: **`swift build` is the only local verification available.** It compiles `mac/Sources/` (production code) but NOT `mac/Tests/` — so every step below that touches a test file has no local compile-check or run-check at all; write it carefully by hand-matching signatures against the production code you just wrote, and move on. Every step that touches a production file under `mac/Sources/` DOES get a real local check via `swift build`. Actual test compilation and pass/fail only happens in CI (`make test-mac`) or on a machine with full Xcode — Task 8 runs that check, and it is required, not optional. All `swift build` invocations must run with the sandbox disabled; use debug (default) for speed during iteration.
+
+**Worktree note:** if you're implementing this plan in a fresh git worktree, do NOT symlink `mac/.build` from another checkout — it causes near-full recompilation on every invocation (SwiftPM's build plan keys off absolute paths). Instead run `GIT_CONFIG_GLOBAL=/dev/null swift package resolve --disable-automatic-resolution` once (pulls from the shared `~/Library/Caches/org.swift.swiftpm`, no network needed with a warm cache) and let `swift build` create the worktree's own independent `.build` (first build ~2 min, incremental after).
 
 ---
 
@@ -59,10 +61,9 @@ struct EmailNoteFrontmatterTests {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails to compile**
+- [ ] **Step 2: Confirm the test can't be locally verified (expected — see environment note)**
 
-Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift test --filter EmailNoteFrontmatterTests`
-Expected: compile error — `value of type 'EmailNoteFrontmatter' has no member 'sourceHash'`
+`mac/Tests/` doesn't compile on this machine (no `swift build` coverage, `swift test` can't load the `Testing` module at all). Read back the test against `EmailNoteFrontmatter`'s current shape (Step 3 below) and confirm by inspection that `fm.sourceHash` doesn't exist yet — that's the "red" state. No command to run here.
 
 - [ ] **Step 3: Implement `sourceHash`**
 
@@ -124,10 +125,10 @@ struct EmailNoteFrontmatter: Codable, Equatable {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it compiles clean**
+- [ ] **Step 4: Build the production code (the only local check available)**
 
-Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift test --filter EmailNoteFrontmatterTests`
-Expected: builds with no errors (execution is a no-op locally, per the environment note above).
+Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift build`
+Expected: exit 0, no errors. This confirms `EmailNoteFrontmatter.swift` itself is correct; the test file's correctness is confirmed later in CI (Task 8, Step 4).
 
 - [ ] **Step 5: Commit**
 
@@ -190,10 +191,9 @@ struct InboxStoreTests {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails to compile**
+- [ ] **Step 2: Confirm the test can't be locally verified (expected — see environment note)**
 
-Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift test --filter InboxStoreTests`
-Expected: compile error — `cannot find 'InboxStore' in scope`
+`InboxStore` doesn't exist yet, so this test file references an undefined type — that's the "red" state, confirmed by inspection (no local command can compile-check `mac/Tests/` on this machine).
 
 - [ ] **Step 3: Implement `InboxStore`**
 
@@ -254,10 +254,10 @@ struct InboxStore {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it compiles clean**
+- [ ] **Step 4: Build the production code (the only local check available)**
 
-Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift test --filter InboxStoreTests`
-Expected: builds with no errors.
+Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift build`
+Expected: exit 0, no errors. Confirms `InboxStore.swift` compiles; the test file's correctness is confirmed later in CI (Task 8, Step 4).
 
 - [ ] **Step 5: Commit**
 
@@ -354,10 +354,9 @@ struct InboxGenerationPipelineTests {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails to compile**
+- [ ] **Step 2: Confirm the test can't be locally verified (expected — see environment note)**
 
-Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift test --filter InboxGenerationPipelineTests`
-Expected: compile error — `cannot find 'InboxGenerationPipeline' in scope`
+`InboxGenerationPipeline` and `RawInboxItem` don't exist yet, so this test file references undefined types — that's the "red" state, confirmed by inspection.
 
 - [ ] **Step 3: Implement `InboxGenerationPipeline`**
 
@@ -441,10 +440,10 @@ enum InboxGenerationPipeline {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it compiles clean**
+- [ ] **Step 4: Build the production code (the only local check available)**
 
-Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift test --filter InboxGenerationPipelineTests`
-Expected: builds with no errors.
+Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift build`
+Expected: exit 0, no errors. Confirms `InboxGenerationPipeline.swift` compiles; the test file's correctness is confirmed later in CI (Task 8, Step 4).
 
 - [ ] **Step 5: Commit**
 
@@ -532,10 +531,9 @@ struct EmailFileStoreTests {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails to compile**
+- [ ] **Step 2: Confirm the test can't be locally verified (expected — see environment note)**
 
-Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift test --filter EmailFileStoreTests`
-Expected: compile errors — `extra argument 'sourceHash' in call` / `missing argument for parameter 'messageId'` / `value of type 'EmailFileStore' has no member 'existingSourceHashes'`
+This test now calls `writeNote`/`writeSkipped` without `messageId` and with a new `sourceHash` argument, and calls `existingSourceHashes()` — none of which match `EmailFileStore` as it exists before this task's Step 3 edits (it still requires `messageId` and has no `sourceHash`/`existingSourceHashes`). That mismatch is the "red" state, confirmed by inspection.
 
 - [ ] **Step 3: Implement the changes**
 
@@ -681,10 +679,10 @@ struct EmailFileStore {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it compiles clean**
+- [ ] **Step 4: Build the production code (the only local check available)**
 
-Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift test --filter EmailFileStoreTests`
-Expected: builds with no errors.
+Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift build`
+Expected: exit 0, no errors. Confirms `EmailFileStore.swift` compiles; the test file's correctness (including whether it now matches the new signatures) is confirmed later in CI (Task 8, Step 4).
 
 - [ ] **Step 5: Search for other callers of the changed signatures**
 
@@ -708,8 +706,7 @@ git commit -m "feat(email): write sourceHash in EmailFileStore, add existingSour
 
 - [ ] **Step 1: Confirm `routeDecision` test still applies unchanged**
 
-Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift test --filter EmailSourceRoutingTests`
-Expected: builds with no errors — `routeDecision` isn't changing in this task, this just re-confirms the baseline before the surrounding file changes.
+`EmailSourceRoutingTests.swift` can't be locally compile-checked (see environment note), but no change is needed here: `routeDecision`'s signature and behavior are untouched by this task, so it's carried over as-is. Read it once to confirm it still calls `EmailSource.routeDecision(from:classification:classifyFailed:)` — that method isn't changing below.
 
 - [ ] **Step 2: Replace `EmailSource.swift`**
 
@@ -857,10 +854,9 @@ struct EmailSource: InputSource {
 Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift build`
 Expected: builds with no errors. If it references `makeNote` anywhere else, fix that call site (there should be none — `makeNote` was private to `EmailSource` and is fully replaced by `saveRaw` + `generateNote`).
 
-- [ ] **Step 4: Run the full test target to catch orphaned references**
+- [ ] **Step 4: Check for orphaned references by inspection**
 
-Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift test --filter EmailSourceRoutingTests`
-Expected: builds with no errors.
+`mac/Tests/` can't be locally compile-checked. Run: `grep -n "EmailSource\." mac/Tests/LlmIdeMacTests/EmailSourceRoutingTests.swift` and confirm every call it makes (`EmailSource.routeDecision(...)`) still exists with the same signature in the file you just wrote in Step 2 — it does (`routeDecision` is unchanged). Full confirmation happens in CI (Task 8, Step 4).
 
 - [ ] **Step 5: Commit**
 
@@ -979,11 +975,10 @@ Expected: builds with no errors. If the compiler flags a non-exhaustive switch a
 Run: `grep -rn "LibrarySelection.emailTodos\|case .emailTodos" mac/Sources mac/Tests`
 Expected: no matches remain.
 
-- [ ] **Step 5: Confirm the kept files still compile (they're now unreferenced but must still build)**
+- [ ] **Step 5: Confirm the kept files are untouched**
 
-Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift test --filter EmailTodosViewModelTests`
-Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift test --filter IssueTargetOptionsTests`
-Expected: both build with no errors — confirms `EmailTodosView`/`EmailTodosViewModel`/`IssueTargetOptions` are untouched and ready for future reuse.
+Run: `git diff --stat -- mac/Sources/LlmIdeMac/Views/Library/EmailTodosView.swift mac/Sources/LlmIdeMac/ViewModels/EmailTodosViewModel.swift mac/Sources/LlmIdeMac/Services/NotesFolder/EmailNoteStore.swift mac/Sources/LlmIdeMac/Services/Repo/IssueTargetOptions.swift`
+Expected: no output — this task must not modify any of these files, only remove references to `.emailTodos` elsewhere. `swift build` (Step 4) already confirms they still compile since nothing about their internals changed; their tests (`EmailTodosViewModelTests`, `IssueTargetOptionsTests`, `EmailNoteStoreTests`) are unaffected and get the same CI-only confirmation as everything else in this plan.
 
 - [ ] **Step 6: Commit**
 
@@ -1062,10 +1057,10 @@ git commit -m "docs: describe the capture-then-generate pipeline pattern"
 Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift build`
 Expected: exit 0, no errors.
 
-- [ ] **Step 2: Full mac test target compiles**
+- [ ] **Step 2: Confirm `swift test` still fails the same pre-existing way, not a new way**
 
-Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift test`
-Expected: exit 0 (compiles; per the environment note, this does not execute assertions locally).
+Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift test 2>&1 | head -20`
+Expected: the same `error: no such module 'Testing'` documented in the environment note at the top of this plan — a pre-existing, environment-wide limitation, not something this plan's changes caused. This step is a sanity check, not a pass/fail gate; real test verification is Step 4 below.
 
 - [ ] **Step 3: Confirm no leftover references to removed/changed signatures**
 
