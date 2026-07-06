@@ -1,10 +1,11 @@
 import Foundation
 
 /// Ingested email. A fetch source: pulls NEW mail (the server owns the
-/// forward-only high-water mark + seen-ledger), classifies each message
-/// (`/kb/email/classify`) and writes a to-do note or a raw skipped stub into
-/// the dedicated `Email/` folder via `EmailFileStore`, then advances the mark.
-/// Moved out of `SourceIngestService` so the service is a generic driver.
+/// forward-only high-water mark + seen-ledger) and saves each message as a
+/// raw file into the `EmailInbox/` folder via `InboxStore`. Note generation
+/// itself is decoupled from this fetch step — see `generateNote` below and
+/// `InboxGenerationPipeline` — so it runs off whatever is in `EmailInbox/`
+/// regardless of how it got there (fetched here, or dropped in by hand).
 struct EmailSource: InputSource {
     let id = "email"
     let displayName = "Mail"          // Library SOURCES sub-group label
@@ -13,7 +14,7 @@ struct EmailSource: InputSource {
     let platforms = ["email"]
     let mode = SourceMode.fetch
 
-    /// Safety cap on notes created per fetch (first big drain imports the
+    /// Safety cap on messages saved per fetch (first big drain imports the
     /// newest N; the high-water is NOT advanced when capped, so the remainder
     /// re-fetches next run rather than being lost).
     private static let maxPerRun = 50
@@ -31,39 +32,58 @@ struct EmailSource: InputSource {
         }
 
         let messages = result.messages
-        guard !messages.isEmpty else {
-            try? await ctx.api.markEmailSeen(messageIds: [], lastFetchedAt: fetchStart)
-            return .none
-        }
-
+        let inboxRoot = ctx.root.appendingPathComponent("EmailInbox", isDirectory: true)
         let batch = Array(messages.prefix(Self.maxPerRun))
         let capped = messages.count > batch.count
+        let moreAvailable = (messages.count - batch.count) + result.skipped.overCap
 
-        var importedIds: [String] = []
-        var failure: String?
+        var savedIds: [String] = []
+        var saveFailure: String?
         for msg in batch {
             if Task.isCancelled { break }
             do {
-                try await makeNote(from: msg, ctx: ctx)
-                importedIds.append(msg.messageId)
+                try saveRaw(from: msg, inboxRoot: inboxRoot)
+                savedIds.append(msg.messageId)
             } catch {
-                failure = error.localizedDescription
+                saveFailure = error.localizedDescription
                 break
             }
         }
         let cancelled = Task.isCancelled
-
-        let drained = !capped && failure == nil && !cancelled
-        try? await ctx.api.markEmailSeen(messageIds: importedIds,
+        let drained = !capped && saveFailure == nil && !cancelled
+        try? await ctx.api.markEmailSeen(messageIds: savedIds,
                                          lastFetchedAt: drained ? fetchStart : nil)
 
-        if let failure { return .failure(failure, imported: importedIds.count) }
-        let moreAvailable = (messages.count - batch.count) + result.skipped.overCap
-        return .imported(importedIds.count, moreAvailable: moreAvailable,
-                         oversize: result.skipped.oversize)
+        if let saveFailure { return .failure(saveFailure, imported: 0) }
+
+        // Generation pass: scans the whole EmailInbox/ folder (not just what
+        // was just saved above), so raw files added by hand are picked up
+        // too. Dedup is by content hash against existing notes, not DB state.
+        let emailRoot = ctx.root.appendingPathComponent("Email", isDirectory: true)
+        let store = EmailFileStore(root: emailRoot)
+        let knownHashes = store.existingSourceHashes()
+        let (processed, failures) = await InboxGenerationPipeline.run(
+            inboxRoot: inboxRoot, knownHashes: knownHashes
+        ) { item in
+            try await Self.generateNote(item: item, store: store, ctx: ctx)
+        }
+
+        if !failures.isEmpty {
+            return .failure(failures.joined(separator: "; "), imported: processed)
+        }
+        if processed == 0 { return .none }
+        return .imported(processed, moreAvailable: moreAvailable, oversize: result.skipped.oversize)
     }
 
-    /// The write action chosen for a fetched email (pure, unit-testable).
+    /// Saves one fetched message's raw content into `EmailInbox/`. No
+    /// classification happens here — that's the generation pass's job.
+    @MainActor
+    private func saveRaw(from msg: EmailMessage, inboxRoot: URL) throws {
+        let startedAt = AppDateFormatter.parseISO(msg.date) ?? Date()
+        try InboxStore(root: inboxRoot).write(from: msg.from, date: startedAt, subject: msg.subject, body: msg.text)
+    }
+
+    /// The write action chosen for a classified email (pure, unit-testable).
     enum EmailWriteDecision: Equatable {
         case note(LlmIdeAPIClient.EmailClassification)
         case skipped(category: String)
@@ -80,20 +100,15 @@ struct EmailSource: InputSource {
         return c.noteWorthy ? .note(c) : .skipped(category: c.category)
     }
 
-    /// Classify the email, then write a structured to-do note (note-worthy) or
-    /// a raw stub (skipped/bulk/unclassified) into the dedicated `Email/` folder
-    /// via `EmailFileStore`. Bulk senders skip the LLM call. A classify failure
-    /// is persisted raw so nothing is lost.
+    /// Classifies one raw inbox item and writes the resulting note/skip stub
+    /// via `EmailFileStore` — the `generate` step passed to
+    /// `InboxGenerationPipeline.run`. Bulk senders skip the LLM call
+    /// entirely, same as before this pipeline split.
     @MainActor
-    private func makeNote(from msg: EmailMessage, ctx: SourceContext) async throws {
-        let startedAt = AppDateFormatter.parseISO(msg.date) ?? Date()
-        let emailRoot = ctx.root.appendingPathComponent("Email", isDirectory: true)
-        let store = EmailFileStore(root: emailRoot)
-
-        // Bulk senders skip the LLM entirely.
-        if EmailFileStore.isBulkSender(msg.from) {
-            _ = try store.writeSkipped(messageId: msg.messageId, from: msg.from, date: startedAt,
-                                       subject: msg.subject, category: "bulk", originalBody: msg.text)
+    private static func generateNote(item: RawInboxItem, store: EmailFileStore, ctx: SourceContext) async throws {
+        if EmailFileStore.isBulkSender(item.from) {
+            _ = try store.writeSkipped(from: item.from, date: item.date, subject: item.subject,
+                                       category: "bulk", originalBody: item.body, sourceHash: item.hash)
             return
         }
 
@@ -101,18 +116,19 @@ struct EmailSource: InputSource {
         var failed = false
         do {
             classification = try await ctx.api.classifyEmail(
-                subject: msg.subject, from: msg.from, date: msg.date, body: msg.text)
+                subject: item.subject, from: item.from,
+                date: AppDateFormatter.isoString(item.date), body: item.body)
         } catch {
-            failed = true   // classify failed/timed out — persist raw so nothing is lost
+            failed = true
         }
 
-        switch Self.routeDecision(from: msg.from, classification: classification, classifyFailed: failed) {
+        switch routeDecision(from: item.from, classification: classification, classifyFailed: failed) {
         case .note(let c):
-            _ = try store.writeNote(messageId: msg.messageId, from: msg.from, date: startedAt,
-                                    subject: msg.subject, classification: c, originalBody: msg.text)
+            _ = try store.writeNote(from: item.from, date: item.date, subject: item.subject,
+                                    classification: c, originalBody: item.body, sourceHash: item.hash)
         case .skipped(let category):
-            _ = try store.writeSkipped(messageId: msg.messageId, from: msg.from, date: startedAt,
-                                       subject: msg.subject, category: category, originalBody: msg.text)
+            _ = try store.writeSkipped(from: item.from, date: item.date, subject: item.subject,
+                                       category: category, originalBody: item.body, sourceHash: item.hash)
         }
     }
 }

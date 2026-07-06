@@ -43,6 +43,16 @@ flowchart TB
 6. **Dispatch.** On approval, agents in `extension/agents/` open a draft GitHub PR (`llmide/auto/<task>` branch, files under `.llmide-auto/<task>/`), file a ticket, or send a Slack webhook.
 7. **Outcome polling.** `outcome-watcher.mjs` polls GitHub / Backlog / Linear at a slow cadence and writes the result back into the `outcomes` table.
 
+## Data flow — email inbox to note
+
+Email notes follow a two-phase capture-then-generate pattern to keep fetch fast and note creation recoverable.
+
+**Phase 1 — capture.** `EmailSource.fetchAndIngest` pulls messages from the Mail app and writes each one as a raw `.txt` file under `EmailInbox/YYYY/MM/<stamp>-<slug>.txt` via `InboxStore`. No LLM is called; the fetch loop can always re-run without producing duplicates.
+
+**Phase 2 — generate.** `InboxGenerationPipeline.run` scans the `EmailInbox/` tree, skips files whose SHA-256 hash already appears in a note's `sourceHash` frontmatter field (via `EmailFileStore.existingSourceHashes`), and calls the provided `generate` closure for each new file. The closure classifies the email, routes it to a full note or a skipped-record, and writes the result to the normal notes folder.
+
+This split means a crashed or cancelled generation run picks up exactly where it left off on the next fetch, and raw inbox files can be re-processed if the generation logic changes.
+
 ## Tenancy
 
 Every owned row carries a `user_id` foreign key. Three invariants:

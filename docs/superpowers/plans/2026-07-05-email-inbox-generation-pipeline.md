@@ -177,7 +177,7 @@ struct InboxStoreTests {
                               subject: "hi", body: "hello")
     let comps = url.pathComponents
     #expect(comps.contains("2026"))
-    #expect(comps.contains("06"))
+    #expect(comps.contains("05"))
     #expect(url.pathExtension == "txt")
   }
 
@@ -679,15 +679,16 @@ struct EmailFileStore {
 }
 ```
 
-- [ ] **Step 4: Build the production code (the only local check available)**
+- [ ] **Step 4: Build the production code — expect a specific, known failure**
 
 Run: `cd mac && GIT_CONFIG_GLOBAL=/dev/null swift build`
-Expected: exit 0, no errors. Confirms `EmailFileStore.swift` compiles; the test file's correctness (including whether it now matches the new signatures) is confirmed later in CI (Task 8, Step 4).
 
-- [ ] **Step 5: Search for other callers of the changed signatures**
+**Expected: this FAILS to compile right now, and that's correct, not a mistake in your work.** `EmailSource.swift` still calls the old `writeNote(messageId:...)`/`writeSkipped(messageId:...)` signature — it isn't updated until Task 5 (the next task). The error should be something like "extra argument 'messageId' in call" or "missing argument for parameter 'sourceHash'" pointing at `EmailSource.swift`, NOT at `EmailFileStore.swift` itself. Confirm the error is scoped to `EmailSource.swift` only (i.e. `EmailFileStore.swift` itself has no errors reported against it) — that's how you know your Task 4 changes are correct even though the whole target doesn't link yet. Do not attempt to fix `EmailSource.swift` — that's explicitly out of scope for this task and belongs to Task 5.
+
+- [ ] **Step 5: Confirm the only broken caller is the expected one**
 
 Run: `grep -rn "\.writeNote(messageId\|\.writeSkipped(messageId" mac/Sources mac/Tests`
-Expected: no matches (Task 5 will update `EmailSource.swift`, the only production caller — confirm here that nothing else calls the old signature before moving on).
+Expected: exactly the matches inside `mac/Sources/LlmIdeMac/Sources/EmailSource.swift` (its `makeNote` function calls both with the old `messageId:` argument) and nothing else. If anything outside `EmailSource.swift` matches, stop and report — that would be a caller the plan didn't account for.
 
 - [ ] **Step 6: Commit**
 
