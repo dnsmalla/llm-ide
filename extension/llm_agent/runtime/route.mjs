@@ -20,6 +20,7 @@ import { renderGraphifyMemory } from '../../graphkit/index.mjs';
 import { persistTurnMemory } from './memory-persist.mjs';
 import { buildReadableRoots, handleListFiles, handleReadFile } from './handlers/repo-files.mjs';
 import { searchKb } from './handlers/search-kb.mjs';
+import { tasks } from './handlers/session-tasks.mjs';
 import { redactFence } from './redaction.mjs';
 import { logger } from '../../core/logger.mjs';
 import { GLOBAL_HANDLER_NAMES } from './global-handlers.mjs';
@@ -225,6 +226,21 @@ export async function handleCodeAssist({
     // the internal agent uses, now first-class so "what did we decide about
     // X?" doesn't need an ask-internal round-trip.
     'search-kb': (args) => searchKb(args, { kb, userId }),
+    'task-list': () => {
+      const sessionId = agentContext?.sessionId;
+      return { tasks: tasks.listTasks(userId, sessionId) };
+    },
+    'task-create': (args) => {
+      const sessionId = agentContext?.sessionId;
+      return tasks.createTask(userId, sessionId, args.title);
+    },
+    'task-update': (args) => {
+      const sessionId = agentContext?.sessionId;
+      return tasks.updateTask(userId, sessionId, args.taskId, {
+        status: args.status,
+        title: args.title,
+      });
+    },
   };
 
   // Drift guard: this handlers map and GLOBAL_HANDLER_NAMES (imported from
