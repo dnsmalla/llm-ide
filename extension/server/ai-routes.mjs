@@ -391,6 +391,7 @@ export async function handleAIRoutes(req, res) {
           }));
         } catch { /* ignore */ }
 
+        const sessionId = body.agentContext?.sessionId ?? null;
         const enrichedAgentContext = {
           activeProject: body.agentContext.activeProject || null,
           indexedRepos: Array.isArray(body.agentContext.indexedRepos) ? body.agentContext.indexedRepos : [],
@@ -399,6 +400,7 @@ export async function handleAIRoutes(req, res) {
           // Open workspace folder root (home-relative or absolute) for the
           // read-only file tools. Validated server-side in buildReadableRoots.
           workspaceRoot: typeof body.agentContext.workspaceRoot === 'string' ? body.agentContext.workspaceRoot : null,
+          sessionId,
         };
 
         // Build the attachments block + language directive separately
@@ -467,6 +469,7 @@ export async function handleAIRoutes(req, res) {
             });
             mergeMemoryUsage(usage, out);
             writeEvent({ type: 'done', reply: out.reply, pendingTool: out.pendingTool, usage });
+            writeEvent({ type: 'tasks', tasks: out.tasks ?? [], continueNeeded: out.continueNeeded ?? false });
           } catch (err) {
             if (!ac.signal.aborted) writeEvent({ type: 'error', error: err?.message || 'code-assist failed' });
           }
@@ -498,6 +501,8 @@ export async function handleAIRoutes(req, res) {
           reply: out.reply,
           pendingTool: out.pendingTool,
           usage,
+          continueNeeded: out.continueNeeded ?? false,
+          tasks: out.tasks ?? [],
         });
         return true;
       }

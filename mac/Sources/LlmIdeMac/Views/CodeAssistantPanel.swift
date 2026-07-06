@@ -153,6 +153,10 @@ struct CodeAssistantPanel: View {
     @State private var nudgePrompt: String?
     @State private var savingQA = false
     @State private var qaSaveError: String?
+    @State private var agentSessionId: String = UUID().uuidString
+    @State private var agentIsAutonomous: Bool = false
+    @State private var agentStopRequested: Bool = false
+    @State private var agentPendingTasks: [AgentTask] = []
 
     /// Context passed to ReportFaultSheet — captured at the moment the
     /// user clicks "Report this" so the sheet sees the prompt + answer
@@ -1279,6 +1283,24 @@ struct CodeAssistantPanel: View {
                 .background(theme.current.surface)
                 Divider().background(theme.current.border)
             }
+            // Agent task progress list — shown when the agent has pending tasks
+            if !agentPendingTasks.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(agentPendingTasks) { task in
+                        HStack(spacing: 6) {
+                            Image(systemName: agentTaskIcon(task.status))
+                                .foregroundColor(agentTaskColor(task.status))
+                                .font(.caption)
+                            Text(task.title)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+            }
             // Autocomplete dropdown — sits directly above the editor (Cursor-style).
             // Kept ALWAYS in the tree and toggled via height/opacity — do NOT
             // wrap in `if completion.isOpen`. Inserting/removing this sibling
@@ -1467,6 +1489,17 @@ struct CodeAssistantPanel: View {
                 .keyboardShortcut(.cancelAction)   // Esc
                 .help("Stop the running response (Esc)")
                 .accessibilityLabel("Stop")
+            }
+            if agentIsAutonomous && !busy {
+                Button(action: {
+                    agentStopRequested = true
+                    agentIsAutonomous = false
+                }) {
+                    Label("Stop", systemImage: "stop.circle.fill")
+                        .foregroundColor(.red)
+                }
+                .buttonStyle(.borderless)
+                .help("Stop autonomous agent")
             }
             // ⌘↵ submits the draft: sends now when idle, queues when a turn is
             // already running (auto-sends as the next turn).
@@ -1820,7 +1853,8 @@ struct CodeAssistantPanel: View {
             activeProject: activeProject,
             indexedRepos: indexedRepos,
             recentIssues: recentIssues.isEmpty ? nil : recentIssues,
-            workspaceRoot: workspaceRoot
+            workspaceRoot: workspaceRoot,
+            sessionId: agentSessionId
         )
     }
 
@@ -2025,6 +2059,24 @@ struct CodeAssistantPanel: View {
             try Task.checkCancellation()
             history.append(.init(role: .assistant, content: resp.reply))
             self.pendingTool = resp.pendingTool
+            // Update task list display
+            if let newTasks = resp.tasks {
+                agentPendingTasks = newTasks
+            }
+            // Auto-continue if the agent has pending work and the user hasn't stopped
+            if resp.continueNeeded == true && !agentStopRequested {
+                agentIsAutonomous = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    guard !self.agentStopRequested else {
+                        self.agentIsAutonomous = false
+                        return
+                    }
+                    self.startTurn("Continue working on your pending tasks.")
+                }
+            } else {
+                agentIsAutonomous = false
+                agentStopRequested = false
+            }
             if let u = resp.usage {
                 lastMemoryTokens = u.memoryApproxTokens
                 lastMemoryHasChat = u.memoryHasChatMemory ?? false
@@ -2423,6 +2475,10 @@ struct CodeAssistantPanel: View {
         attachNotice = nil
         pendingTool = nil
         error = nil
+        agentSessionId = UUID().uuidString
+        agentPendingTasks = []
+        agentIsAutonomous = false
+        agentStopRequested = false
     }
 
     private func switchSession(to id: UUID) {
@@ -2477,4 +2533,22 @@ struct CodeAssistantPanel: View {
             prefLanguage = "en"
         }
     }
+    private func agentTaskIcon(_ status: String) -> String {
+        switch status {
+        case "completed": return "checkmark.circle.fill"
+        case "in_progress": return "arrow.trianglehead.clockwise"
+        case "skipped": return "minus.circle"
+        default: return "circle"
+        }
+    }
+
+    private func agentTaskColor(_ status: String) -> Color {
+        switch status {
+        case "completed": return .green
+        case "in_progress": return .blue
+        case "skipped": return .secondary
+        default: return .secondary
+        }
+    }
+
 }

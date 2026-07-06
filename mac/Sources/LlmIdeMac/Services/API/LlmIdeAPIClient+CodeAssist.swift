@@ -58,6 +58,8 @@ extension LlmIdeAPIClient {
         let reply: String
         let usage: Usage?
         let pendingTool: PendingTool?       // NEW — optional
+        let continueNeeded: Bool?
+        let tasks: [AgentTask]?
         struct Usage: Codable {
             let attachmentCount: Int
             let attachmentChars: Int
@@ -116,6 +118,8 @@ extension LlmIdeAPIClient {
         let reply: String?               // done
         let pendingTool: PendingTool?    // done
         let usage: CodeAssistResponse.Usage?  // done
+        let continueNeeded: Bool?        // done — agent has more tasks to run
+        let tasks: [AgentTask]?          // done — task list from the agent
         let error: String?               // error
     }
 
@@ -180,6 +184,8 @@ extension LlmIdeAPIClient {
         var reply: String?
         var pendingTool: PendingTool?
         var usage: CodeAssistResponse.Usage?
+        var continueNeeded: Bool?
+        var tasks: [AgentTask]?
         var sawProgress = false
         for try await line in bytes.lines {
             guard line.hasPrefix("data:") else { continue }
@@ -196,6 +202,8 @@ extension LlmIdeAPIClient {
                 reply = evt.reply ?? ""
                 pendingTool = evt.pendingTool
                 usage = evt.usage
+                continueNeeded = evt.continueNeeded
+                tasks = evt.tasks
             case "error":
                 // The backend explicitly reported a failure for THIS turn (the
                 // reason is already redacted server-side). Surface it verbatim
@@ -222,6 +230,6 @@ extension LlmIdeAPIClient {
             throw APIError.http(status: 500, code: "STREAM_INCOMPLETE",
                                 message: "The response stream ended unexpectedly.", details: nil)
         }
-        return CodeAssistResponse(reply: reply, usage: usage, pendingTool: pendingTool)
+        return CodeAssistResponse(reply: reply, usage: usage, pendingTool: pendingTool, continueNeeded: continueNeeded, tasks: tasks)
     }
 }

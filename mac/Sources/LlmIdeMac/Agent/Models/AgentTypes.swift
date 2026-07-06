@@ -11,6 +11,9 @@ struct AgentContext: Codable, Equatable {
     /// server scopes the read-only file tools (list-files / read-file) to this
     /// root plus the indexed repos. Optional for back-compat.
     var workspaceRoot: String?
+    /// Opaque session identifier forwarded to the backend task store so
+    /// multi-turn agentic loops can be correlated across requests.
+    var sessionId: String?
 
     struct Project: Codable, Equatable {
         var name: String
@@ -41,6 +44,12 @@ struct AgentContext: Codable, Equatable {
         var snippet: String?           // first ~160 chars of description
         var updatedAt: String?         // ISO-8601
     }
+}
+
+struct AgentTask: Codable, Identifiable {
+    let id: String
+    let title: String
+    let status: String  // "pending" | "in_progress" | "completed" | "skipped"
 }
 
 /// A write tool the agent wants to run. The Mac client renders a

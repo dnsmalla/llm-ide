@@ -26,4 +26,7 @@ export const GLOBAL_HANDLER_NAMES = Object.freeze([
   'list-files',
   'read-file',
   'search-kb',
+  'task-list',
+  'task-create',
+  'task-update',
 ]);
