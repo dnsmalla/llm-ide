@@ -469,6 +469,7 @@ export async function handleAIRoutes(req, res) {
             });
             mergeMemoryUsage(usage, out);
             writeEvent({ type: 'done', reply: out.reply, pendingTool: out.pendingTool, usage });
+            writeEvent({ type: 'tasks', tasks: out.tasks ?? [], continueNeeded: out.continueNeeded ?? false });
           } catch (err) {
             if (!ac.signal.aborted) writeEvent({ type: 'error', error: err?.message || 'code-assist failed' });
           }
@@ -500,6 +501,8 @@ export async function handleAIRoutes(req, res) {
           reply: out.reply,
           pendingTool: out.pendingTool,
           usage,
+          continueNeeded: out.continueNeeded ?? false,
+          tasks: out.tasks ?? [],
         });
         return true;
       }

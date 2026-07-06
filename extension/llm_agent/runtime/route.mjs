@@ -167,6 +167,17 @@ export async function handleCodeAssist({
     });
   } catch { /* memory is best-effort — keep the base without it */ }
 
+  // Inject session task list so the agent always sees its own task state.
+  const sessionId = agentContext?.sessionId;
+  const sessionTasks = tasks.listTasks(userId, sessionId);
+  if (sessionTasks.length > 0) {
+    const taskLines = sessionTasks.map((t) => {
+      const icon = t.status === 'completed' ? '[x]' : t.status === 'skipped' ? '[-]' : t.status === 'in_progress' ? '[~]' : '[ ]';
+      return `- ${icon} (id:${t.id}) ${t.title}`;
+    }).join('\n');
+    personaBase += `\n\n## Your current task list\n${taskLines}\n\nLegend: [ ] pending  [~] in_progress  [x] completed  [-] skipped`;
+  }
+
   // Global handler set: ask-internal (for app-state-aware questions)
   // plus ask-subagent (for plugin-defined named delegates). The
   // ask-subagent handler is registered unconditionally — when no
@@ -310,5 +321,13 @@ export async function handleCodeAssist({
   // Surface the per-request memory overhead so the client can show it (and the
   // user can judge whether the always-on memory block is worth its tokens).
   const memoryUsage = { chars: memoryChars, approxTokens: Math.round(memoryChars / 4), hasChatMemory: memoryHasChat };
-  return { ...out, memoryUsage, ...(expandedFrom ? { expandedFrom } : {}) };
+  const continueNeeded = tasks.hasPendingWork(userId, agentContext?.sessionId);
+  const currentTasks = tasks.listTasks(userId, agentContext?.sessionId);
+  return {
+    ...out,
+    memoryUsage,
+    ...(expandedFrom ? { expandedFrom } : {}),
+    continueNeeded,
+    tasks: currentTasks,
+  };
 }
