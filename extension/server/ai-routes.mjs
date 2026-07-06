@@ -373,6 +373,7 @@ export async function handleAIRoutes(req, res) {
     prompt += `# User\n${message}\n\nAssistant:`;
 
     const tierModel = resolveTierModel(body);
+    process.stderr.write(`[code-assist] model=${JSON.stringify(body.model)} provider=${JSON.stringify(body.provider)} tierModel=${JSON.stringify(tierModel)}\n`);
 
     try {
       if (body.agentContext) {

@@ -303,7 +303,7 @@ paths:
               type: object
               required: [key]
               properties:
-                key:   { type: string, enum: [github.token, backlog.apiKey, linear.apiKey, slack.webhookUrl, slack.botToken, box.clientSecret, email.imapPassword, claude.apiKey, openai.apiKey, google.apiKey, custom.apiKey, custom.baseUrl, google.email.clientId, google.email.clientSecret, google.email.refreshToken] }
+                key:   { type: string, enum: [github.token, backlog.apiKey, linear.apiKey, slack.webhookUrl, slack.botToken, box.clientSecret, email.imapPassword, claude.apiKey, openai.apiKey, google.apiKey, deepseek.apiKey, custom.apiKey, custom.baseUrl, google.email.clientId, google.email.clientSecret, google.email.refreshToken] }
                 value: { type: string, nullable: true, description: 'null/empty deletes' }
       responses:
         '200': { description: ok }

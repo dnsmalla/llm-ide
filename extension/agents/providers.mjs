@@ -36,19 +36,21 @@ const log = logger.child({ component: 'providers' });
 // Per-provider config: vault key name, operator env fallback, and the CLI
 // binary used for subscription (no-key) mode.
 export const PROVIDERS = {
-  anthropic: { vaultKey: 'claude.apiKey', env: 'ANTHROPIC_API_KEY', cli: 'claude' },
-  openai:    { vaultKey: 'openai.apiKey', env: 'OPENAI_API_KEY',    cli: 'codex'  },
-  google:    { vaultKey: 'google.apiKey', env: 'GOOGLE_API_KEY',    cli: 'gemini' },
+  anthropic: { vaultKey: 'claude.apiKey',    env: 'ANTHROPIC_API_KEY',   cli: 'claude' },
+  openai:    { vaultKey: 'openai.apiKey',    env: 'OPENAI_API_KEY',      cli: 'codex'  },
+  google:    { vaultKey: 'google.apiKey',    env: 'GOOGLE_API_KEY',      cli: 'gemini' },
+  deepseek:  { vaultKey: 'deepseek.apiKey',  env: 'DEEPSEEK_API_KEY',    cli: null     },
   // Generic OpenAI-compatible endpoint — covers OpenRouter, Ollama/LM Studio
-  // (local), DeepSeek, Mistral, Together, etc. The base URL is user-supplied
+  // (local), Mistral, Together, etc. The base URL is user-supplied
   // (vault `custom.baseUrl`); it is NOT id-prefix routable, so callers must
   // select it explicitly (the picker passes provider="custom").
-  custom:    { vaultKey: 'custom.apiKey', env: 'OPENAI_COMPAT_API_KEY', cli: null },
+  custom:    { vaultKey: 'custom.apiKey',    env: 'OPENAI_COMPAT_API_KEY', cli: null  },
 };
 
 export const PROVIDER_IDS = Object.keys(PROVIDERS);
 
 const DEFAULT_OPENAI_BASE = 'https://api.openai.com/v1';
+const DEFAULT_DEEPSEEK_BASE = 'https://api.deepseek.com';
 
 // ── SSRF guard ────────────────────────────────────────────────────────
 //
@@ -150,6 +152,7 @@ export function resolveProvider(model) {
   if (/^claude[-/]/.test(m)) return 'anthropic';
   if (/^(gpt[-_]|o\d|chatgpt|codex|text-davinci)/.test(m)) return 'openai';
   if (/^(gemini[-/]|models\/gemini)/.test(m)) return 'google';
+  if (/^deepseek[-/]/.test(m)) return 'deepseek';
   return 'anthropic';
 }
 
@@ -248,8 +251,8 @@ async function callGoogle({ apiKey, model, prompt, maxTokens, signal }) {
   };
 }
 
-// `custom` is OpenAI-compatible — same adapter, just a different base URL.
-const API_ADAPTERS = { openai: callOpenAI, google: callGoogle, custom: callOpenAI };
+// `custom` and `deepseek` are OpenAI-compatible — same adapter, different base URL.
+const API_ADAPTERS = { openai: callOpenAI, google: callGoogle, deepseek: callOpenAI, custom: callOpenAI };
 
 /**
  * Run a prompt against a non-Anthropic provider over HTTP, with jittered
@@ -527,6 +530,8 @@ const MODELS_ENDPOINT = {
     headers: { Authorization: `Bearer ${key}` } }),
   google: (key) => ({ url: `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`,
     headers: {} }),
+  deepseek: (key) => ({ url: 'https://api.deepseek.com/v1/models',
+    headers: { Authorization: `Bearer ${key}` } }),
 };
 
 function parseModelIds(provider, data) {
@@ -582,6 +587,9 @@ export function chatModels(provider, ids) {
   }
   if (provider === 'anthropic') {
     return list.filter((id) => /^claude-/i.test(id));
+  }
+  if (provider === 'deepseek') {
+    return list.filter((id) => /deepseek/i.test(id));
   }
   return list;
 }

@@ -9,6 +9,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
     case cursor     = "cursor"
     case copilot    = "copilot"
     case gemini     = "gemini"
+    case deepseek   = "deepseek"
     case custom     = "custom"
 
     var id: String { rawValue }
@@ -21,7 +22,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
     /// running Claude. Cursor/Copilot stay hidden — they're editor tools, not
     /// direct API endpoints, so routing their gpt ids to the OpenAI API would
     /// misrepresent the source.
-    static var selectable: [AICliTool] { [.claudeCode, .openai, .gemini, .custom] }
+    static var selectable: [AICliTool] { [.claudeCode, .openai, .gemini, .deepseek, .custom] }
 
     /// Backend provider id this tool's models route to.
     var provider: String {
@@ -29,6 +30,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .claudeCode:            return "anthropic"
         case .openai, .copilot:      return "openai"
         case .gemini:                return "google"
+        case .deepseek:              return "deepseek"
         case .custom:                return "custom"
         case .cursor:                return "anthropic" // mixed; not selectable
         }
@@ -40,6 +42,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case "anthropic": return "claude.apiKey"
         case "openai":    return "openai.apiKey"
         case "google":    return "google.apiKey"
+        case "deepseek":  return "deepseek.apiKey"
         case "custom":    return "custom.apiKey"
         default:          return nil
         }
@@ -52,6 +55,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .cursor:     return "Cursor"
         case .copilot:    return "GitHub Copilot"
         case .gemini:     return "Gemini"
+        case .deepseek:   return "DeepSeek"
         case .custom:     return "Custom"
         }
     }
@@ -63,6 +67,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .cursor:     return "curlybraces.square.fill"
         case .copilot:    return "chevron.left.forwardslash.chevron.right"
         case .gemini:     return "sparkles"
+        case .deepseek:   return "brain.head.profile"
         case .custom:     return "network"
         }
     }
@@ -74,6 +79,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .cursor:     return "AI-first code editor by Anysphere"
         case .copilot:    return "GitHub's AI coding assistant"
         case .gemini:     return "Google Gemini models (API key)"
+        case .deepseek:   return "DeepSeek Chat and Reasoner models (API key)"
         case .custom:     return "Any OpenAI-compatible endpoint (OpenRouter, Ollama, …)"
         }
     }
@@ -112,6 +118,11 @@ enum AICliTool: String, CaseIterable, Identifiable {
                 AIModel(id: "gemini-1.5-pro",             displayName: "Gemini 1.5 Pro"),
                 AIModel(id: "gemini-1.5-flash",           displayName: "Gemini 1.5 Flash"),
             ]
+        case .deepseek:
+            return [
+                AIModel(id: "deepseek-chat",              displayName: "DeepSeek Chat"),
+                AIModel(id: "deepseek-reasoner",          displayName: "DeepSeek Reasoner"),
+            ]
         case .custom:
             // No built-in ids — the endpoint's models come from live discovery
             // (/kb/providers/models) or "Add model…".
@@ -131,6 +142,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .cursor:     return "cursor"
         case .copilot:    return "gh copilot"
         case .gemini:     return "gemini"
+        case .deepseek:   return ""   // no CLI subscription mode
         case .custom:     return ""   // no CLI subscription mode
         }
     }

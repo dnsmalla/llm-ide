@@ -37,9 +37,13 @@ struct ProvidersSettingsSection: View {
                  placeholder: "AIza…",
                  hint: "gemini-* models. With no key, falls back to your logged-in `gemini` CLI (subscription).",
                  tool: .gemini),
+        Provider(id: "deepseek", label: "DeepSeek", vaultKey: "deepseek.apiKey",
+                 placeholder: "sk-…",
+                 hint: "deepseek-chat, deepseek-reasoner models. No CLI mode available.",
+                 tool: .deepseek),
         Provider(id: "custom", label: "Custom (OpenAI-compatible)", vaultKey: "custom.apiKey",
                  placeholder: "API key (any value for local servers)",
-                 hint: "Any OpenAI-compatible endpoint — OpenRouter, Ollama / LM Studio (local), DeepSeek, Mistral. Add a model below or in the composer.",
+                 hint: "Any OpenAI-compatible endpoint — OpenRouter, Ollama / LM Studio (local), Mistral. Add a model below or in the composer.",
                  tool: .custom, needsBaseURL: true),
         Provider(id: "web-search", label: "Web Search (SerpAPI, optional)", vaultKey: "serpapi.apiKey",
                  placeholder: "Optional — your SerpAPI key from https://serpapi.com",
@@ -139,7 +143,7 @@ struct ProvidersSettingsSection: View {
                     Button("Clear") { Task { await clear(p) } }
                         .disabled(busy.contains(p.id))
                 }
-                if p.tool != nil && !p.needsBaseURL {
+                if let tool = p.tool, !tool.cliExecutable.isEmpty, !p.needsBaseURL {
                     Button("Check CLI") { Task { await checkCli(p) } }
                         .disabled(busy.contains(p.id))
                         .help("Verify this provider's logged-in CLI for subscription mode (no key needed)")

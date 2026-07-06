@@ -158,12 +158,18 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
         if (!baseUrl) throw new Error('No base URL configured for the custom provider. Add one in Settings → Model Providers.');
         return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl, signal, meter });
       }
+      if (provider === 'deepseek') {
+        return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl: 'https://api.deepseek.com', signal, meter });
+      }
       return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, signal, meter });
     }
-    // custom has no CLI subscription mode; other providers fall back to their
-    // logged-in CLI.
+    // custom and deepseek have no CLI subscription mode; other providers fall
+    // back to their logged-in CLI.
     if (provider === 'custom') {
       throw new Error('No API key configured for the custom provider. Add one in Settings → Model Providers.');
+    }
+    if (provider === 'deepseek') {
+      throw new Error('No API key configured for DeepSeek. Add one in Settings → Model Providers.');
     }
     const cliText = await runViaCli(provider, prompt);
     // Use the request's own model id, NOT resolvedModel — the local resolveModel
@@ -620,7 +626,7 @@ function resolveClaudeCall({ userId, model, provider: explicitProvider }) {
     : resolveProvider(model);
   const userScopedKey = userId ? safeLookupApiKey(userId) : null;
   const apiKey = userScopedKey || process.env.ANTHROPIC_API_KEY;
-  const resolvedModel = resolveModel(model);
+  const resolvedModel = provider === 'anthropic' ? resolveModel(model) : model;
   return { provider, userScopedKey, apiKey, resolvedModel };
 }
 

@@ -33,6 +33,8 @@ test('resolveProvider: maps model families', () => {
   assert.equal(resolveProvider('codex-mini-latest'), 'openai');
   assert.equal(resolveProvider('gemini-1.5-flash'), 'google');
   assert.equal(resolveProvider('models/gemini-2.0-flash'), 'google');
+  assert.equal(resolveProvider('deepseek-chat'), 'deepseek');
+  assert.equal(resolveProvider('deepseek-reasoner'), 'deepseek');
   assert.equal(resolveProvider(''), 'anthropic');       // blank → default
   assert.equal(resolveProvider('mystery-model'), 'anthropic');
 });
@@ -158,6 +160,22 @@ test('custom: resolveProvider never infers it from a model id', () => {
   // to the anthropic default rather than accidentally hitting the custom path.
   assert.equal(resolveProvider('mistral-large'), 'anthropic');
   assert.equal(resolveProvider('llama-3.1-70b'), 'anthropic');
+});
+
+test('deepseek: completeViaApi posts to the DeepSeek base URL', async () => {
+  const restore = mockFetch(async (url, opts) => {
+    assert.equal(url, 'https://api.deepseek.com/chat/completions');
+    const body = JSON.parse(opts.body);
+    assert.equal(body.model, 'deepseek-chat');
+    return jsonRes(200, { choices: [{ message: { content: 'deepseek-reply' } }] });
+  });
+  try {
+    const out = await completeViaApi('deepseek', {
+      apiKey: 'k', model: 'deepseek-chat', prompt: 'x',
+      baseUrl: 'https://api.deepseek.com',
+    });
+    assert.equal(out, 'deepseek-reply');
+  } finally { restore(); }
 });
 
 test('custom: completeViaApi posts to the configured base URL', async () => {
