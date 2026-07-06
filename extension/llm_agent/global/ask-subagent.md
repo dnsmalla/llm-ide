@@ -12,6 +12,11 @@ schema:
     required: true
     maxLength: 2000
     description: the question or task to delegate to the subagent
+  thread:
+    type: string
+    required: false
+    maxLength: 100
+    description: optional thread identifier for multi-turn subagent context
 ---
 
 # ask-subagent
@@ -41,8 +46,10 @@ or answer directly.
 ## Call shape
 
 <<<TOOL_CALL>>>
-{"name": "ask-subagent", "arguments": {"name": "summarizer", "question": "..."}}
+{"name": "ask-subagent", "arguments": {"name": "summarizer", "question": "...", "thread": "optional-thread-id"}}
 <<<END_TOOL_CALL>>>
+
+`thread` is optional. Omit it for a one-shot isolated call (the default).
 
 ## Result shape
 
@@ -54,8 +61,16 @@ identifiers actually exist.
 
 ## Subagent semantics
 
-- Each call is independent — the subagent has no memory of prior
-  turns. Include all needed context in `question`.
+### Subagent context threads (experimental)
+
+Pass a `thread` string to group multiple calls into a shared context
+thread. Calls with the same `thread` value are presented to the
+subagent as a continuing conversation — it sees prior turns in that
+thread and can build on them without you restating context each time.
+Omit `thread` (or leave it empty) for a one-shot isolated call; the
+subagent has no memory of prior turns and all needed context must be
+included in `question`.
+
 - A subagent has access only to tools its author declared in
   `allowed_tools`. By default that's the empty set (pure-prompt
   subagent). Some subagents may search the KB; none can write.
