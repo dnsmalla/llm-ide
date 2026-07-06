@@ -58,6 +58,8 @@ extension LlmIdeAPIClient {
         let reply: String
         let usage: Usage?
         let pendingTool: PendingTool?       // NEW — optional
+        let continueNeeded: Bool?
+        let tasks: [AgentTask]?
         struct Usage: Codable {
             let attachmentCount: Int
             let attachmentChars: Int
@@ -222,6 +224,6 @@ extension LlmIdeAPIClient {
             throw APIError.http(status: 500, code: "STREAM_INCOMPLETE",
                                 message: "The response stream ended unexpectedly.", details: nil)
         }
-        return CodeAssistResponse(reply: reply, usage: usage, pendingTool: pendingTool)
+        return CodeAssistResponse(reply: reply, usage: usage, pendingTool: pendingTool, continueNeeded: nil, tasks: nil)
     }
 }
