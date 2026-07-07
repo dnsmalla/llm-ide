@@ -38,8 +38,8 @@ protocol MemoryService: Sendable {
 
     /// Validate a fact without writing it. Checks text length (<=280 chars,
     /// matching the TS contract) and that every referenced file exists under
-    /// `repoRoot`. Returns the accumulated errors; `valid` is true iff there
-    /// are none.
+    /// `repoRoot`. Returns a `ValidationResult` whose `details` carry the
+    /// per-check breakdown and whose `valid` is true iff there are no failures.
     func validateFact(repoRoot: URL, fact: ChatMemoryFact) async throws -> ValidationResult
 
     /// Overwrite `repo.md` with `content` (atomic write via MemoryStorage).
@@ -63,9 +63,18 @@ struct MemoryData: Sendable {
 }
 
 /// Validation outcome for `validateFact`.
+///
+/// Mirrors the TypeScript canonical type
+/// (`extension/graphkit/types/memory.ts`): `valid` plus optional `reason`,
+/// `details`, and a `contradicts` flag. `details` is typed `[String]` here for
+/// simplicity (the TS side uses `any[]`); `contradicts` is always `false` from
+/// `validateFact` — contradiction detection is a separate concern handled by
+/// `AutomationService.detectContradictions`.
 struct ValidationResult: Codable, Sendable {
     let valid: Bool
-    let errors: [String]
+    let reason: String?
+    let details: [String]?
+    let contradicts: Bool
 }
 
 /// Placeholder for a bug/fault entry. The faults pipeline (a later phase)
@@ -112,11 +121,11 @@ final actor MemoryServiceImpl: MemoryService {
     }
 
     func validateFact(repoRoot: URL, fact: ChatMemoryFact) async throws -> ValidationResult {
-        var errors: [String] = []
+        var details: [String] = []
 
         // Text length (TS contract: 280 chars max).
         if fact.text.count > 280 {
-            errors.append("Fact text exceeds 280 characters")
+            details.append("Fact text exceeds 280 characters")
         }
 
         // Referenced files must exist under the repo root.
@@ -124,12 +133,21 @@ final actor MemoryServiceImpl: MemoryService {
             for fileRef in files {
                 let fullPath = repoRoot.appendingPathComponent(fileRef)
                 if FileManager.default.fileExists(atPath: fullPath.path) == false {
-                    errors.append("Referenced file does not exist: \(fileRef)")
+                    details.append("Referenced file does not exist: \(fileRef)")
                 }
             }
         }
 
-        return ValidationResult(valid: errors.isEmpty, errors: errors)
+        // Map onto the cross-platform ValidationResult shape: a single summary
+        // `reason`, the per-check breakdown in `details`, and `contradicts`
+        // (always false here — contradiction detection lives in AutomationService).
+        let valid = details.isEmpty
+        return ValidationResult(
+            valid: valid,
+            reason: valid ? nil : "Fact failed validation",
+            details: valid ? nil : details,
+            contradicts: false
+        )
     }
 
     func updateRepoMD(repoRoot: URL, content: String) async throws {

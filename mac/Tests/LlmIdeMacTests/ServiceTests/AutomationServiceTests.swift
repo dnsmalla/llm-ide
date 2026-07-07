@@ -202,7 +202,7 @@ private actor MockMemoryService: MemoryService {
     }
 
     func validateFact(repoRoot: URL, fact: ChatMemoryFact) async throws -> ValidationResult {
-        ValidationResult(valid: true, errors: [])
+        ValidationResult(valid: true, reason: nil, details: nil, contradicts: false)
     }
 
     func updateRepoMD(repoRoot: URL, content: String) async throws {

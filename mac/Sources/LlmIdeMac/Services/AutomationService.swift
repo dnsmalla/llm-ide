@@ -154,9 +154,13 @@ final actor AutomationServiceImpl: AutomationService {
                 do {
                     let validation = try await memoryService.validateFact(repoRoot: repoRoot, fact: fact)
                     if !validation.valid {
-                        removed.append(RemovedFact(
-                            fact: fact,
-                            reason: validation.errors.joined(separator: ", ")))
+                        // Prefer the per-check details (joined), then fall back
+                        // to the summary reason, then a generic label — matching
+                        // the TS-side cleanup reconciliation shape.
+                        let reason = validation.details?.joined(separator: ", ")
+                            ?? validation.reason
+                            ?? "invalid"
+                        removed.append(RemovedFact(fact: fact, reason: reason))
                         continue
                     }
                 } catch {

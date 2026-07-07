@@ -96,9 +96,8 @@ struct MemoryServiceTests {
         let result = try await service.validateFact(repoRoot: repo, fact: longFact)
 
         #expect(!result.valid)
-        // errors is [String]; Array.contains is exact-match, so search the
-        // joined message for the substring.
-        #expect(result.errors.contains(where: { $0.contains("280 characters") }))
+        // `details` carries the per-check breakdown; search it for the substring.
+        #expect(result.details?.contains(where: { $0.contains("280 characters") }) == true)
     }
 
     @Test("validateFact accepts a short fact with no file refs")
@@ -115,7 +114,9 @@ struct MemoryServiceTests {
         let result = try await service.validateFact(repoRoot: repo, fact: fact)
 
         #expect(result.valid)
-        #expect(result.errors.isEmpty)
+        // A valid fact has no failure details (nil) and no contradiction flag.
+        #expect(result.details == nil)
+        #expect(result.contradicts == false)
     }
 
     @Test("validateFact flags a missing referenced file")
@@ -131,7 +132,7 @@ struct MemoryServiceTests {
         let result = try await service.validateFact(repoRoot: repo, fact: fact)
 
         #expect(!result.valid)
-        #expect(result.errors.contains(where: { $0.contains("does/not/exist.md") }))
+        #expect(result.details?.contains(where: { $0.contains("does/not/exist.md") }) == true)
     }
 
     // MARK: - updateRepoMD
