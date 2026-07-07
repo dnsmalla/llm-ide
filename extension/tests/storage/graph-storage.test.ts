@@ -2,8 +2,9 @@
 //
 // Covers: getGraphDir path, read/write round-trip, empty-graph default for
 // missing files, recursive directory creation, atomic write (no leftover
-// temp files), CORRUPTED typed error for invalid JSON, repo roots with
-// spaces (percent-decoding), and doc-fingerprint read/write round-trip.
+// temp files) for both graph.json and doc-fingerprint.txt, CORRUPTED typed
+// error for invalid JSON, repo roots with spaces (percent-decoding), and
+// doc-fingerprint read/write round-trip.
 //
 // Run: node --test tests/storage/graph-storage.test.ts
 
@@ -201,6 +202,24 @@ test('writeDocFingerprint creates the graph directory if it is missing', async (
     await writeDocFingerprint(root, 'abc123');
 
     assert.ok(existsSync(join(dir, '.llm-ide', 'graph', 'doc-fingerprint.txt')));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('writeDocFingerprint overwrites an existing fingerprint atomically (no leftover temp files)', async () => {
+  const { dir, root } = makeRepo();
+  try {
+    await writeDocFingerprint(root, 'abc123');
+    await writeDocFingerprint(root, 'def456');
+
+    const result = await readDocFingerprint(root);
+    assert.equal(result, 'def456');
+
+    // Atomic write must leave no temp files behind in the graph dir.
+    const graphDir = join(dir, '.llm-ide', 'graph');
+    const entries = readdirSync(graphDir);
+    assert.deepEqual(entries.sort(), ['doc-fingerprint.txt']);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

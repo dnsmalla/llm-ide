@@ -144,7 +144,13 @@ export async function readDocFingerprint(repoRoot: URL): Promise<string | null> 
 }
 
 /**
- * Write doc fingerprint.
+ * Write doc fingerprint atomically (temp file + rename).
+ *
+ * Mirrors writeGraphFile's pattern so a crash or interruption mid-write can
+ * never leave a truncated doc-fingerprint.txt on disk: the bytes land in a
+ * sibling temp file first, then a single rename swaps it into place. On
+ * failure the temp file is removed and the error surfaces as a
+ * GraphStorageError, matching the module's documented contract.
  */
 export async function writeDocFingerprint(
   repoRoot: URL,
@@ -154,5 +160,30 @@ export async function writeDocFingerprint(
   await fs.mkdir(graphDir, { recursive: true });
 
   const filePath = path.join(graphDir, 'doc-fingerprint.txt');
-  await fs.writeFile(filePath, fingerprint, 'utf-8');
+  const tempPath = `${filePath}.${process.pid}.tmp`;
+
+  try {
+    await fs.writeFile(tempPath, fingerprint, 'utf-8');
+    await fs.rename(tempPath, filePath);
+  } catch (err) {
+    // Clean up temp file if write/rename failed.
+    try {
+      await fs.unlink(tempPath);
+    } catch {
+      /* already gone */
+    }
+
+    if (errorCode(err) === 'EACCES') {
+      throw new GraphStorageError(
+        'PERMISSION_DENIED',
+        'Cannot write doc fingerprint',
+        filePath
+      );
+    }
+    throw new GraphStorageError(
+      'CORRUPTED',
+      `Failed to write doc fingerprint: ${errorMessage(err)}`,
+      filePath
+    );
+  }
 }
