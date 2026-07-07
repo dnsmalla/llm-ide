@@ -71,10 +71,10 @@ test('writeGraphFile then readGraphFile round-trips nodes and edges', async () =
   try {
     const graph: GraphData = {
       nodes: [
-        { id: '1', title: 'main.ts', kind: 'codeFile' },
-        { id: '2', title: 'App', kind: 'codeSymbol' }
+        { id: '1', title: 'main.ts', kind: 'file' },
+        { id: '2', title: 'App', kind: 'symbol' }
       ],
-      edges: [{ fromId: '1', toId: '2', kind: 'partOf' }]
+      edges: [{ fromId: '1', toId: '2', kind: 'contains' }]
     };
 
     await writeGraphFile(root, graph);
@@ -82,12 +82,12 @@ test('writeGraphFile then readGraphFile round-trips nodes and edges', async () =
 
     assert.equal(result.nodes.length, 2);
     assert.equal(result.nodes[0].id, '1');
-    assert.equal(result.nodes[0].kind, 'codeFile');
+    assert.equal(result.nodes[0].kind, 'file');
     assert.equal(result.nodes[1].id, '2');
     assert.equal(result.edges.length, 1);
     assert.equal(result.edges[0].fromId, '1');
     assert.equal(result.edges[0].toId, '2');
-    assert.equal(result.edges[0].kind, 'partOf');
+    assert.equal(result.edges[0].kind, 'contains');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -132,7 +132,7 @@ test('writeGraphFile writes to the real (decoded) path when the repo root has a 
     const root = pathToFileURL(dir);
 
     await writeGraphFile(root, {
-      nodes: [{ id: '1', title: 'Test', kind: 'codeFile' }],
+      nodes: [{ id: '1', title: 'Test', kind: 'file' }],
       edges: []
     });
 

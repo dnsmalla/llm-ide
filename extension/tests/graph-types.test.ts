@@ -2,11 +2,11 @@
 // This file validates that the types are properly defined and can be used
 
 import { test } from 'node:test';
-import * as assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 
-// Import the types via the barrel - this actually loads the barrel and
-// catches broken re-exports (e.g. referencing not-yet-created modules)
-import {
+// Import type definitions - use `import type` since these are TypeScript-only
+// interfaces that are erased at runtime by --experimental-strip-types
+import type {
   GraphData,
   GraphNode,
   GraphEdge,
@@ -14,7 +14,7 @@ import {
   GraphEdgeKind,
   GraphMode,
   CodeRef
-} from '../graphkit/index.js';
+} from '../graphkit/types/graph.ts';
 
 test('graph types - GraphData structure', () => {
   const graphData: GraphData = {
@@ -30,7 +30,7 @@ test('graph types - GraphNode structure', () => {
   const node: GraphNode = {
     id: 'node-1',
     title: 'App.ts',
-    kind: 'codeFile',
+    kind: 'file',
     metadata: {
       path: '/src/App.ts',
       language: 'typescript'
@@ -39,7 +39,7 @@ test('graph types - GraphNode structure', () => {
 
   assert.strictEqual(typeof node.id, 'string');
   assert.strictEqual(typeof node.title, 'string');
-  assert.strictEqual(node.kind, 'codeFile');
+  assert.strictEqual(node.kind, 'file');
   assert(node.metadata !== undefined);
   assert.strictEqual(typeof node.metadata.path, 'string');
 });
@@ -71,8 +71,8 @@ test('graph types - GraphEdge structure', () => {
 
 test('graph types - GraphNodeKind with all values', () => {
   const kinds: GraphNodeKind[] = [
-    'codeFile',
-    'codeSymbol',
+    'file',
+    'symbol',
     'docPage',
     'memoryChunk',
     'memoryDoc'
@@ -92,7 +92,7 @@ test('graph types - GraphEdgeKind with all values', () => {
   const kinds: GraphEdgeKind[] = [
     'imports',
     'references',
-    'partOf',
+    'contains',
     'relatedTo'
   ];
 
@@ -136,13 +136,13 @@ test('graph types - complete graph example', () => {
       {
         id: 'node-1',
         title: 'App.ts',
-        kind: 'codeFile',
+        kind: 'file',
         metadata: { path: '/src/App.ts' }
       },
       {
         id: 'node-2',
         title: 'authenticate',
-        kind: 'codeSymbol',
+        kind: 'symbol',
         metadata: {
           container: 'App.ts',
           line: 15
@@ -159,7 +159,7 @@ test('graph types - complete graph example', () => {
       {
         fromId: 'node-2',
         toId: 'node-1',
-        kind: 'partOf'
+        kind: 'contains'
       },
       {
         fromId: 'node-3',
@@ -171,8 +171,8 @@ test('graph types - complete graph example', () => {
 
   assert.strictEqual(graphData.nodes.length, 3);
   assert.strictEqual(graphData.edges.length, 2);
-  assert.strictEqual(graphData.nodes[0].kind, 'codeFile');
-  assert.strictEqual(graphData.edges[0].kind, 'partOf');
+  assert.strictEqual(graphData.nodes[0].kind, 'file');
+  assert.strictEqual(graphData.edges[0].kind, 'contains');
 });
 
 test('graph types - GraphData with memory nodes', () => {
@@ -195,14 +195,14 @@ test('graph types - GraphData with memory nodes', () => {
       {
         fromId: 'node-1',
         toId: 'node-2',
-        kind: 'partOf'
+        kind: 'contains'
       }
     ]
   };
 
   assert.strictEqual(graphData.nodes[0].kind, 'memoryChunk');
   assert.strictEqual(graphData.nodes[1].kind, 'memoryDoc');
-  assert.strictEqual(graphData.edges[0].kind, 'partOf');
+  assert.strictEqual(graphData.edges[0].kind, 'contains');
 });
 
 test('graph types - CodeRef rank boundaries', () => {

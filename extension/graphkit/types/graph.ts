@@ -18,10 +18,15 @@ export interface GraphNode {
 
 /**
  * Node kinds in the graph.
+ *
+ * Must stay in lock-step with GraphKit's canonical `CGNodeKind` Swift enum
+ * (mac/.build/checkouts/graph-kit/.../CodeGraphModels.swift). The Swift
+ * `Codable` decoder throws on unknown raw values, so TS writers must emit
+ * these exact strings.
  */
 export type GraphNodeKind =
-  | 'codeFile'
-  | 'codeSymbol'
+  | 'file'
+  | 'symbol'
   | 'docPage'
   | 'memoryChunk'
   | 'memoryDoc';
@@ -37,11 +42,17 @@ export interface GraphEdge {
 
 /**
  * Edge kinds.
+ *
+ * Must stay in lock-step with GraphKit's canonical `CGEdgeKind` Swift enum
+ * (mac/.build/checkouts/graph-kit/.../CodeGraphModels.swift). The Swift
+ * `Codable` decoder throws on unknown raw values, so TS writers must emit
+ * these exact strings. Note there is no `partOf` — use `contains` for
+ * ownership/containment relationships.
  */
 export type GraphEdgeKind =
   | 'imports'
   | 'references'
-  | 'partOf'
+  | 'contains'
   | 'relatedTo';
 
 /**

@@ -4,9 +4,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-// Import the types via the barrel - this actually loads the barrel and
-// catches broken re-exports (e.g. referencing not-yet-created modules)
-import {
+// Import type definitions - use `import type` since these are TypeScript-only
+// interfaces that are erased at runtime by --experimental-strip-types
+import type {
   ChatMemoryFact,
   MemoryData,
   BugReport,
@@ -15,7 +15,7 @@ import {
   ValidationReport,
   FactCategory,
   FactSource
-} from '../graphkit/index.js';
+} from '../graphkit/types/memory.ts';
 
 test('memory types - ChatMemoryFact structure', () => {
   // Create a sample fact to verify type structure
