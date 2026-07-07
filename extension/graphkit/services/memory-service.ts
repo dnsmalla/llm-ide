@@ -16,13 +16,16 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { writeMemoryFile, readChatMemory, writeChatMemory } from '../storage/memory-storage.js';
+// Imports use `.ts` specifiers (not `.js`) so the module loads under
+// `node --test --experimental-strip-types` (Node >= 20). The repo tsconfig sets
+// `allowImportingTsExtensions: true`, so the bundler / `tsc` accept these too.
+import { writeMemoryFile, readChatMemory, writeChatMemory } from '../storage/memory-storage.ts';
 import type {
   MemoryData,
   ChatMemoryFact,
   ValidationResult,
   ValidationReport
-} from '../types/memory.js';
+} from '../types/memory.ts';
 
 /**
  * MemoryService provides high-level memory operations with validation.

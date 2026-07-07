@@ -10,8 +10,8 @@ import { rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { memoryService } from '../services/memory-service.js';
-import { readMemoryFile } from '../storage/memory-storage.js';
+import { memoryService } from '../services/memory-service.ts';
+import { readMemoryFile } from '../storage/memory-storage.ts';
 
 function makeRepo() {
   const dir = path.join(tmpdir(), `llm-ide-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
