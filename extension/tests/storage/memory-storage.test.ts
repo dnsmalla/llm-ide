@@ -8,7 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -32,6 +32,42 @@ test('getMemoryDir returns the .llm-ide/memory path under the repo root', () => 
   const { dir, root } = makeRepo();
   try {
     assert.equal(getMemoryDir(root), join(dir, '.llm-ide', 'memory'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('getMemoryDir handles repo roots containing spaces (percent-decoded)', () => {
+  // A repo path like "/Users/Jane Doe/project" is percent-encoded in a file:
+  // URL ("/Jane%20Doe/..."). getMemoryDir must decode it back to the real path;
+  // using URL.pathname directly would keep the raw %20 and silently target a
+  // non-existent directory.
+  const dir = mkdtempSync(join(tmpdir(), 'memstore with space-'));
+  try {
+    const root = pathToFileURL(dir);
+    assert.equal(getMemoryDir(root), join(dir, '.llm-ide', 'memory'));
+    // And the encoded form must NOT leak through.
+    assert.ok(!getMemoryDir(root).includes('%20'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('writeMemoryFile writes to the real (decoded) path when the repo root has a space', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'memstore with space-'));
+  try {
+    const root = pathToFileURL(dir);
+
+    await writeMemoryFile(root, 'test.md', 'content');
+
+    // File must land at the decoded path on disk...
+    assert.ok(
+      existsSync(join(dir, '.llm-ide', 'memory', 'test.md')),
+      'file should exist at the decoded (space-containing) path'
+    );
+    // ...and read back through the same API.
+    const result = await readMemoryFile(root, 'test.md');
+    assert.equal(result, 'content');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

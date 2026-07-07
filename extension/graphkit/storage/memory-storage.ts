@@ -6,6 +6,7 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ChatMemoryFact } from '../types/memory.js';
 
 /**
@@ -35,7 +36,11 @@ export class MemoryStorageError extends Error {
  * Get the canonical memory directory for a repo.
  */
 export function getMemoryDir(repoRoot: URL): string {
-  return path.join(repoRoot.pathname, '.llm-ide', 'memory');
+  // fileURLToPath decodes percent-encoding (e.g. %20 -> space) so that repo
+  // roots containing spaces (or other chars encoded in a file: URL) resolve to
+  // the real filesystem path. Using repoRoot.pathname directly would keep the
+  // raw %20 and silently point at a non-existent directory.
+  return path.join(fileURLToPath(repoRoot), '.llm-ide', 'memory');
 }
 
 /**
