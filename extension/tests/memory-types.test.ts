@@ -4,8 +4,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-// Import the types - if this compiles, the types exist and are properly structured
-import type {
+// Import the types via the barrel - this actually loads the barrel and
+// catches broken re-exports (e.g. referencing not-yet-created modules)
+import {
   ChatMemoryFact,
   MemoryData,
   BugReport,
