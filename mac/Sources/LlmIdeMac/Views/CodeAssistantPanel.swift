@@ -46,6 +46,8 @@ struct CodeAssistantPanel: View {
     @AppStorage("MEETNOTES_CURRENT_CHAT_SESSION_ID") private var currentSessionIDString: String = ""
 
     @State private var attachments: [LlmIdeAPIClient.CodeAttachment] = []
+    /// Debug alert message for paste testing
+    @State private var pasteDebugAlert: String = ""
     /// Skills/subagents the user invoked from the "/" menu, shown as removable
     /// chips so the composer stays clean. Two flavours, consumed one-shot on the
     /// next send:
@@ -122,6 +124,12 @@ struct CodeAssistantPanel: View {
     @State private var recentIssues: [AgentContext.RecentIssue] = []
     @State private var showingIssueSheet: Bool = false
     @State private var showingCommentSheet: Bool = false
+    @State private var showingGetIssueSheet: Bool = false
+    @State private var showingUpdateIssueSheet: Bool = false
+    @State private var showingListIssuesSheet: Bool = false
+    @State private var showingCreateBranchSheet: Bool = false
+    // PR creation disabled - requires additional backend support
+    // @State private var showingCreatePRSheet: Bool = false
     @State private var showingReviewCodeSheet: Bool = false
     @State private var showingUpdateFileSheet: Bool = false
     @State private var showingGitOpSheet: Bool = false
@@ -175,6 +183,95 @@ struct CodeAssistantPanel: View {
     private var isVeryCompact: Bool { panelWidth < 180 }
 
     var body: some View {
+        baseContent
+            .frame(minWidth: 120)
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { panelWidth = geo.size.width }
+                        .onChange(of: geo.size.width) { _, w in panelWidth = w }
+                }
+            )
+            .background(theme.current.body)
+            .task { await loadLanguage() }
+            .task(id: activeRepoKey) {
+                completion.configure(api: api, repoRoot: activeRepoRoot)
+                await completion.loadMetaIfNeeded()
+            }
+            .onChange(of: draft) { _, newValue in
+                if historyIndex == nil {
+                    completion.update(draft: newValue)
+                } else {
+                    completion.close()
+                }
+            }
+            .sheet(isPresented: $showProjectMemory) {
+                showProjectMemorySheet
+            }
+            .task { await refreshRecentIssuesLoop() }
+            .task { await loadModels(for: AICliTool(rawValue: config.activeCLI) ?? .claudeCode) }
+            .onAppear { handleOnAppear() }
+            .onChange(of: history) { oldValue, newValue in
+                handleHistoryChange(oldValue: oldValue, newValue: newValue)
+            }
+            .onChange(of: config.activeCLI) { _, _ in
+                selectedModel = config.defaultModelId
+            }
+            .onChange(of: activeRepoKey) { _, _ in
+                handleActiveRepoChange()
+            }
+            .onChange(of: initialURL) { _, newURL in
+                handleInitialURLChange(newURL)
+            }
+            .sheet(isPresented: $showingIssueSheet) {
+                showingIssueSheetContent
+            }
+            .sheet(isPresented: $showingReviewCodeSheet, onDismiss: {
+                if pendingTool?.triggerReviewCodeArgs != nil { pendingTool = nil }
+            }) {
+                showingReviewCodeSheetContent
+            }
+            .sheet(isPresented: $showingUpdateFileSheet, onDismiss: {
+                if pendingTool?.updateFileArgs != nil { pendingTool = nil }
+            }) {
+                showingUpdateFileSheetContent
+            }
+            .sheet(isPresented: $showingCommentSheet) {
+                showingCommentSheetContent
+            }
+            .sheet(isPresented: $showingGetIssueSheet) {
+                showingGetIssueSheetContent
+            }
+            .sheet(isPresented: $showingUpdateIssueSheet) {
+                showingUpdateIssueSheetContent
+            }
+            .sheet(isPresented: $showingListIssuesSheet) {
+                showingListIssuesSheetContent
+            }
+            .sheet(isPresented: $showingCreateBranchSheet) {
+                showingCreateBranchSheetContent
+            }
+            .sheet(item: $reportingFault) { ctx in
+                reportingFaultSheetContent(ctx)
+            }
+            .sheet(isPresented: $showLibraryPicker) {
+                showLibraryPickerContent
+            }
+            .sheet(isPresented: $showingGitOpSheet, onDismiss: {
+                if pendingTool?.gitOpArgs != nil { pendingTool = nil }
+            }) {
+                showingGitOpSheetContent
+            }
+            .alert("Paste Debug", isPresented: .constant(!pasteDebugAlert.isEmpty)) {
+                Button("OK") { pasteDebugAlert = "" }
+            } message: {
+                Text(pasteDebugAlert)
+            }
+    }
+
+    // MARK: - Body Components
+
+    private var baseContent: some View {
         VStack(spacing: 0) {
             header
             Divider().background(theme.current.border)
@@ -188,143 +285,98 @@ struct CodeAssistantPanel: View {
             }
             inputBar
         }
-        // Floor of 120pt matches the outer column min in ReviewView.
-        // Compact-mode rendering kicks in below 240pt.
-        .frame(minWidth: 120)
-        .background(
-            GeometryReader { geo in
-                Color.clear
-                    .onAppear { panelWidth = geo.size.width }
-                    .onChange(of: geo.size.width) { _, w in panelWidth = w }
-            }
-        )
-        .background(theme.current.body)
-        .task { await loadLanguage() }
-        // Configure autocomplete for the active repo and load the command/skill
-        // catalog. Re-runs on repo switch so the "@" file index tracks the repo.
-        .task(id: activeRepoKey) {
-            completion.configure(api: api, repoRoot: activeRepoRoot)
-            await completion.loadMetaIfNeeded()
+    }
+
+    // MARK: - Event Handlers
+
+    private func handleOnAppear() {
+        if selectedModel.isEmpty {
+            selectedModel = config.defaultModelId.isEmpty
+                ? AICliTool.claudeCode.defaultModelId
+                : config.defaultModelId
         }
-        .onChange(of: draft) { _, newValue in
-            // While walking prompt history (historyIndex != nil), a recalled
-            // prompt that begins with "/" would otherwise re-open the
-            // autocomplete menu, which then hijacks the next ↑/↓ into menu
-            // navigation instead of continuing through history. Suppress the
-            // menu during recall; normal typing (historyIndex == nil) is
-            // unaffected.
-            if historyIndex == nil {
-                completion.update(draft: newValue)
-            } else {
-                completion.close()
-            }
-        }
-        .sheet(isPresented: $showProjectMemory) {
-            ProjectMemoryView(api: api, repos: activeMemoryRepos, workspaceRoot: activeMemoryWorkspaceRoot)
-                .environmentObject(theme)
-        }
-        .task { await refreshRecentIssuesLoop() }
-        .task { await loadModels(for: AICliTool(rawValue: config.activeCLI) ?? .claudeCode) }
-        .onAppear {
-            if selectedModel.isEmpty {
-                selectedModel = config.defaultModelId.isEmpty
-                    ? AICliTool.claudeCode.defaultModelId
-                    : config.defaultModelId
-            }
-            // Migrate any legacy single-file chat history into a new
-            // session. Idempotent — returns nil if the legacy file
-            // doesn't exist (the common case after first launch).
-            let migrated = ChatSessionStore.migrateLegacy()
+        let migrated = ChatSessionStore.migrateLegacy()
+        sessions = ChatSessionStore.listSessions()
+        if let cur = UUID(uuidString: currentSessionIDString),
+           let session = sessions.first(where: { $0.id == cur }) {
+            history = session.history
+            rebuildSentPrompts(from: session.history)
+        } else if let mid = migrated, let session = sessions.first(where: { $0.id == mid }) {
+            currentSessionIDString = mid.uuidString
+            history = session.history
+            rebuildSentPrompts(from: session.history)
+        } else {
+            let fresh = ChatSession()
+            ChatSessionStore.save(fresh)
+            currentSessionIDString = fresh.id.uuidString
             sessions = ChatSessionStore.listSessions()
-            // Pick the active session: prefer the persisted id (must
-            // still exist), then the just-migrated session, otherwise
-            // mint a fresh one.
-            if let cur = UUID(uuidString: currentSessionIDString),
-               let session = sessions.first(where: { $0.id == cur }) {
-                history = session.history
-                rebuildSentPrompts(from: session.history)
-            } else if let mid = migrated, let session = sessions.first(where: { $0.id == mid }) {
-                currentSessionIDString = mid.uuidString
-                history = session.history
-                rebuildSentPrompts(from: session.history)
-            } else {
-                let fresh = ChatSession()
-                ChatSessionStore.save(fresh)
-                currentSessionIDString = fresh.id.uuidString
-                sessions = ChatSessionStore.listSessions()
-                history = []
-                sentPrompts = []; historyIndex = nil; draftStash = ""
-            }
-            if let url = initialURL, !didAttachInitial {
-                didAttachInitial = true
-                if addFile(url: url) == .added {
-                    autoAttachedPath = displayPath(url)
-                }
-            }
+            history = []
+            sentPrompts = []; historyIndex = nil; draftStash = ""
         }
-        .onChange(of: history) { oldValue, newValue in
-            // Persist into the active session's JSON file. Auto-derive
-            // the title from the first user turn if it's still the
-            // placeholder. Bounded at the last 50 turns.
-            persistCurrentSession(history: Array(newValue.suffix(50)))
-            // VoiceOver live-region announcement: when a brand-new
-            // assistant turn lands (history grew AND the last turn is
-            // an assistant reply), post an `.announcementRequested`
-            // notification so the user hears the response without
-            // navigating. Throttled by count delta — we never fire on
-            // intermediate stream chunks because the panel only appends
-            // a single assistant turn at completion.
-            if newValue.count > oldValue.count,
-               let last = newValue.last,
-               last.role == .assistant {
-                let text = String(last.content.prefix(200))
-                if !text.isEmpty {
-                    NSAccessibility.post(
-                        element: NSApp as Any,
-                        notification: .announcementRequested,
-                        userInfo: [
-                            .announcement: text,
-                            .priority: NSAccessibilityPriorityLevel.high.rawValue,
-                        ]
-                    )
-                }
-            }
-        }
-        .onChange(of: config.activeCLI) { _, _ in
-            selectedModel = config.defaultModelId
-        }
-        .onChange(of: activeRepoKey) { _, _ in
-            session.reset()
-            nudgePrompt = nil
-            qaSaveError = nil
-            autoAttachedPath = nil
-            attachNotice = nil
-        }
-        .onChange(of: initialURL) { _, newURL in
-            // When the user selects a different file in the tree, swap ONLY
-            // the previously auto-attached file — files the user attached
-            // manually are preserved.
-            if let prev = autoAttachedPath {
-                attachments.removeAll { $0.path == prev }
-                autoAttachedPath = nil
-            }
-            attachNotice = nil
-            guard let url = newURL else { return }
+        if let url = initialURL, !didAttachInitial {
             didAttachInitial = true
-            switch addFile(url: url) {
-            case .added:
+            if addFile(url: url) == .added {
                 autoAttachedPath = displayPath(url)
-            case .notText:
-                // The Visual page selects images, which can't be sent as text.
-                // Say so instead of silently ignoring the selection.
-                attachNotice = "“\(url.lastPathComponent)” can’t be attached — images and binary files aren’t supported in chat yet."
-            case .unreadable:
-                attachNotice = "Couldn’t read “\(url.lastPathComponent)”."
-            case .duplicate:
-                break
             }
         }
-        .sheet(isPresented: $showingIssueSheet) {
+    }
+
+    private func handleHistoryChange(oldValue: [LlmIdeAPIClient.CodeAssistTurn], newValue: [LlmIdeAPIClient.CodeAssistTurn]) {
+        persistCurrentSession(history: Array(newValue.suffix(50)))
+        if newValue.count > oldValue.count,
+           let last = newValue.last,
+           last.role == .assistant {
+            let text = String(last.content.prefix(200))
+            if !text.isEmpty {
+                NSAccessibility.post(
+                    element: NSApp as Any,
+                    notification: .announcementRequested,
+                    userInfo: [
+                        .announcement: text,
+                        .priority: NSAccessibilityPriorityLevel.high.rawValue,
+                    ]
+                )
+            }
+        }
+    }
+
+    private func handleActiveRepoChange() {
+        session.reset()
+        nudgePrompt = nil
+        qaSaveError = nil
+        autoAttachedPath = nil
+        attachNotice = nil
+    }
+
+    private func handleInitialURLChange(_ newURL: URL?) {
+        if let prev = autoAttachedPath {
+            attachments.removeAll { $0.path == prev }
+            autoAttachedPath = nil
+        }
+        attachNotice = nil
+        guard let url = newURL else { return }
+        didAttachInitial = true
+        switch addFile(url: url) {
+        case .added:
+            autoAttachedPath = displayPath(url)
+        case .notText:
+            attachNotice = "\u{201C}\(url.lastPathComponent)\u{201D} can't be attached \u{2014} images and binary files aren't supported in chat yet."
+        case .unreadable:
+            attachNotice = "Could not read file: " + url.lastPathComponent + "."
+        case .duplicate:
+            break
+        }
+    }
+
+    // MARK: - Sheet Content Views
+
+    private var showProjectMemorySheet: some View {
+        ProjectMemoryView(api: api, repos: activeMemoryRepos, workspaceRoot: activeMemoryWorkspaceRoot)
+            .environmentObject(theme)
+    }
+
+    private var showingIssueSheetContent: some View {
+        Group {
             if let pt = pendingTool,
                let args = pt.createIssueArgs,
                let target = resolveIssueTarget() {
@@ -350,13 +402,10 @@ struct CodeAssistantPanel: View {
                 .padding(20)
             }
         }
-        .sheet(isPresented: $showingReviewCodeSheet, onDismiss: {
-            // Clear the chat's pendingTool card once the user has
-            // engaged with the Review Code workflow (confirm or cancel).
-            // Otherwise the same "→ Review Code for #N" card stays
-            // tappable and re-opens the workflow on a stale plan.
-            pendingTool = nil
-        }) {
+    }
+
+    private var showingReviewCodeSheetContent: some View {
+        Group {
             if let pt = pendingTool,
                let args = pt.triggerReviewCodeArgs {
                 TriggerReviewCodeSheet(
@@ -375,12 +424,10 @@ struct CodeAssistantPanel: View {
                 .padding(20)
             }
         }
-        .sheet(isPresented: $showingUpdateFileSheet, onDismiss: {
-            // Same pattern as Review Code — once the user has engaged
-            // with the diff sheet (Apply or Cancel), drop the pending
-            // card so it doesn't re-open with stale proposed content.
-            pendingTool = nil
-        }) {
+    }
+
+    private var showingUpdateFileSheetContent: some View {
+        Group {
             if let pt = pendingTool,
                let args = pt.updateFileArgs,
                let match = matchingAttachment(for: args.path) {
@@ -435,7 +482,10 @@ struct CodeAssistantPanel: View {
                 .frame(minWidth: 460)
             }
         }
-        .sheet(isPresented: $showingCommentSheet) {
+    }
+
+    private var showingCommentSheetContent: some View {
+        Group {
             if let pt = pendingTool,
                let args = pt.commentIssueArgs,
                let target = resolveIssueTarget() {
@@ -462,7 +512,116 @@ struct CodeAssistantPanel: View {
                 .padding(20)
             }
         }
-        .sheet(item: $reportingFault) { ctx in
+    }
+
+    private var showingGetIssueSheetContent: some View {
+        Group {
+            if let pt = pendingTool, let args = pt.getIssueArgs, let target = resolveIssueTarget() {
+                GetIssueSheet(
+                    iid: args.iid,
+                    projectId: target.projectId,
+                    providerKind: target.kind,
+                    onConfirm: {
+                        showingGetIssueSheet = false
+                        pendingTool = nil
+                    }
+                )
+            } else {
+                VStack(spacing: 12) {
+                    Text("No issue tracker available.")
+                        .font(.system(size: 13))
+                    Button("Close") { showingGetIssueSheet = false }
+                }
+                .padding(20)
+            }
+        }
+    }
+
+    private var showingUpdateIssueSheetContent: some View {
+        Group {
+            if let pt = pendingTool, let args = pt.updateIssueArgs, let target = resolveIssueTarget() {
+                UpdateIssueSheet(
+                    initialArgs: UpdateIssueSheet.Args(
+                        iid: args.iid,
+                        title: args.title,
+                        body: args.description,
+                        state: args.state,
+                        labels: args.labels
+                    ),
+                    issueTitle: recentIssues.first(where: { $0.iid == args.iid })?.title,
+                    projectId: target.projectId,
+                    providerKind: target.kind,
+                    isAllowed: config.isAllowed(.editIssue, provider: target.kind),
+                    onConfirm: { editedArgs in
+                        await confirmUpdateIssue(editedArgs, target: target)
+                    }
+                )
+            } else {
+                VStack(spacing: 12) {
+                    Text("No issue tracker available.")
+                        .font(.system(size: 13))
+                    Button("Close") { showingUpdateIssueSheet = false }
+                }
+                .padding(20)
+            }
+        }
+    }
+
+    private var showingListIssuesSheetContent: some View {
+        Group {
+            if let pt = pendingTool, let args = pt.listIssuesArgs, let target = resolveIssueTarget() {
+                ListIssuesSheet(
+                    initialArgs: ListIssuesSheetArgs(
+                        search: args.search,
+                        state: args.state,
+                        label: args.label
+                    ),
+                    projectId: target.projectId,
+                    providerKind: target.kind,
+                    onConfirm: {
+                        showingListIssuesSheet = false
+                        pendingTool = nil
+                    }
+                )
+            } else {
+                VStack(spacing: 12) {
+                    Text("No issue tracker available.")
+                        .font(.system(size: 13))
+                    Button("Close") { showingListIssuesSheet = false }
+                }
+                .padding(20)
+            }
+        }
+    }
+
+    @State private var branchSheetContext: AgentContext?
+
+    private var showingCreateBranchSheetContent: some View {
+        Group {
+            if let pt = pendingTool, let args = pt.createBranchArgs {
+                BranchCreationSheet(
+                    initialArgs: BranchCreationSheet.CreateBranchArgs(
+                        branch: args.branch,
+                        startPoint: args.startPoint
+                    ),
+                    currentBranch: branchSheetContext?.currentBranch,
+                    onConfirm: { editedArgs in
+                        await confirmBranchCreation(editedArgs)
+                    }
+                )
+            } else {
+                VStack(spacing: 12) {
+                    Text("Branch creation unavailable.")
+                        .font(.system(size: 13))
+                    Button("Close") { showingCreateBranchSheet = false }
+                }
+                .padding(20)
+            }
+        }
+    }
+
+    private func reportingFaultSheetContent(_ ctx: FaultReportContext) -> some View {
+        Group {
             if let repoRoot = activeRepoRoot {
                 let target = resolveIssueTarget()
                 ReportFaultSheet(
@@ -479,32 +638,33 @@ struct CodeAssistantPanel: View {
                 )
                 .environmentObject(theme)
                 .environmentObject(config)
+            } else {
+                EmptyView()
             }
         }
-        .sheet(isPresented: $showLibraryPicker) {
-            LibraryPicker(
-                allowed: [.code, .notes, .data],
-                mode: .multi,
-                title: "Add from Library"
-            ) { items in
-                attachNotice = nil
-                var rejected: [String] = []
-                for item in items where addFile(url: item.url) == .notText {
-                    rejected.append(item.name)
-                }
-                if !rejected.isEmpty {
-                    attachNotice = rejected.count == 1
-                        ? "\u{201C}\(rejected[0])\u{201D} can\u{2019}t be attached \u{2014} images and binary files aren\u{2019}t supported in chat yet."
-                        : "\(rejected.count) files couldn\u{2019}t be attached \u{2014} images and binary files aren\u{2019}t supported in chat yet."
-                }
+    }
+
+    private var showLibraryPickerContent: some View {
+        LibraryPicker(
+            allowed: [.code, .notes, .data],
+            mode: .multi,
+            title: "Add from Library"
+        ) { items in
+            attachNotice = nil
+            var rejected: [String] = []
+            for item in items where addFile(url: item.url) == .notText {
+                rejected.append(item.name)
+            }
+            if !rejected.isEmpty {
+                attachNotice = rejected.count == 1
+                    ? "File: " + rejected[0] + " - can not be attached"
+                    : "\(rejected.count) files couldn't be attached — images and binary files aren't supported in chat yet."
             }
         }
-        .sheet(isPresented: $showingGitOpSheet, onDismiss: {
-            // System dismissal (Escape/swipe): clear the stale pending op.
-            // (runGitOpFlow already nils pendingTool before this fires on the confirm
-            // path, so this only catches Cancel/Escape.)
-            if pendingTool?.gitOpArgs != nil { pendingTool = nil }
-        }) {
+    }
+
+    private var showingGitOpSheetContent: some View {
+        Group {
             if let pt = pendingTool, let g = pt.gitOpArgs {
                 GitOpSheet(
                     args: g,
@@ -525,9 +685,11 @@ struct CodeAssistantPanel: View {
                     Button("Close") { showingGitOpSheet = false }
                 }
                 .padding(20)
+                .environmentObject(theme)
             }
         }
     }
+
 
     // MARK: - Fault → Issue routing
 
@@ -597,7 +759,7 @@ struct CodeAssistantPanel: View {
     }
 
     /// Target descriptor returned by `resolveIssueTarget`.
-    private struct IssueTarget {
+    internal struct IssueTarget {
         let kind: RepoBackendKind
         let projectId: String
         let label: String
@@ -745,8 +907,22 @@ struct CodeAssistantPanel: View {
                                turn.role == .assistant {
                                 PendingActionCard(pendingTool: pt) {
                                     switch pt.name {
-                                    case "comment-gitlab-issue":
+                                    case "create-gitlab-issue", "create-issue":
+                                        showingIssueSheet = true
+                                    case "comment-gitlab-issue", "comment-issue":
                                         showingCommentSheet = true
+                                    case "get-issue":
+                                        showingGetIssueSheet = true
+                                    case "update-issue":
+                                        showingUpdateIssueSheet = true
+                                    case "list-issues":
+                                        showingListIssuesSheet = true
+                                    case "create-branch":
+                                        showingCreateBranchSheet = true
+                                        Task { branchSheetContext = await buildAgentContext() }
+                                    // PR creation disabled - requires additional backend support
+                                    // case "create-gitlab-mr", "create-pr":
+                                    //     showingCreatePRSheet = true
                                     case "trigger-review-code":
                                         showingReviewCodeSheet = true
                                     case "update-file":
@@ -758,7 +934,7 @@ struct CodeAssistantPanel: View {
                                             showingGitOpSheet = true
                                         }
                                     default:
-                                        showingIssueSheet = true
+                                        break
                                     }
                                 }
                                 .padding(.top, 4)
@@ -1000,7 +1176,14 @@ struct CodeAssistantPanel: View {
     /// resolves the first allow-listed one (the agent's actual write target),
     /// so we hand it the full indexedRepos list rather than guessing first.
     private var activeMemoryRepos: [String] {
-        buildAgentContext().indexedRepos.compactMap { $0.path }
+        let codeItems = library.items(for: .code)
+        let grouped = Dictionary(grouping: codeItems.filter { $0.folderOrigin != nil },
+                                 by: { $0.folderOrigin! })
+        return grouped.keys.sorted().compactMap { folder in
+            let items = grouped[folder] ?? []
+            let ancestor = commonAncestor(items.map { $0.path })
+            return ancestor.isEmpty ? nil : homeRelativePath(ancestor)
+        }
     }
 
     /// The open Explorer folder ("~/…") for the project-memory viewer, so memory
@@ -1348,7 +1531,10 @@ struct CodeAssistantPanel: View {
                     onArrowDown: { arrowDownAction() },
                     onReturn: { if completion.isOpen { acceptCompletion(); return true }; return false },
                     onTab: { if completion.isOpen { acceptCompletion(); return true }; return false },
-                    onEscape: { if completion.isOpen { completion.close(); return true }; return false }
+                    onEscape: { if completion.isOpen { completion.close(); return true }; return false },
+                    onPaste: { items in
+                        handlePastedItems(items)
+                    }
                 )
                 .frame(height: composerHeight)
                 .padding(.horizontal, 8)
@@ -1773,6 +1959,88 @@ struct CodeAssistantPanel: View {
         return p
     }
 
+    /// Handles pasted items (images or files) from the pasteboard.
+    /// For images, saves them to temporary files and attaches them to the chat.
+    private func handlePastedItems(_ items: [NSPasteboardItem]) {
+        print("📥 handlePastedItems called with \(items.count) items")
+
+        for item in items {
+            if let types = item.types as? [NSPasteboard.PasteboardType] {
+                let typeStrings = types.map { $0.rawValue }
+                print("🔍 Processing item with types: \(typeStrings)")
+
+                // Try to extract image data
+                for pasteboardType in types {
+                    let typeString = pasteboardType.rawValue
+                    print("🔍 Checking type: \(typeString)")
+
+                    if let data = item.data(forType: pasteboardType) {
+                        print("📊 Found \(typeString): \(data.count) bytes")
+
+                        // If it's an image type, save it
+                        if typeString.contains("png") {
+                            print("✅ Saving as PNG")
+                            saveAndAttachImage(data, fileExtension: "png")
+                            return
+                        } else if typeString.contains("jpeg") || typeString.contains("jpg") {
+                            print("✅ Saving as JPEG")
+                            saveAndAttachImage(data, fileExtension: "jpg")
+                            return
+                        } else if typeString.contains("tiff") {
+                            print("✅ Saving as TIFF")
+                            saveAndAttachImage(data, fileExtension: "tiff")
+                            return
+                        } else if typeString.contains("image") {
+                            print("✅ Saving as generic image")
+                            saveAndAttachImage(data, fileExtension: "png")
+                            return
+                        }
+                    }
+                }
+            }
+        }
+        print("❌ No image data found in pasteboard items")
+    }
+
+    /// Saves image data to a temporary file and attaches it to the chat.
+    /// Converts binary image data to base64 encoding so it can be sent as text content.
+    private func saveAndAttachImage(_ data: Data, fileExtension: String) {
+        print("💾 saveAndAttachImage called: \(data.count) bytes, extension: \(fileExtension)")
+
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileName = "paste-\(UUID().uuidString).\(fileExtension)"
+        let tempURL = tempDir.appendingPathComponent(fileName)
+
+        do {
+            // Save the original binary data to temp file
+            try data.write(to: tempURL)
+            print("✅ Saved to temp file: \(tempURL.path)")
+
+            // Convert to base64 for text-based attachment system
+            let base64String = data.base64EncodedString()
+            let path = displayPath(tempURL)
+            print("📎 Path: \(path), Base64 length: \(base64String.count)")
+
+            // Check if already attached
+            if attachments.contains(where: { $0.path == path }) {
+                print("⚠️ Already attached, skipping")
+                pasteDebugAlert += "⚠️ Already attached\n"
+                return
+            }
+
+            // Create attachment with base64 content
+            let content = "[Image: \(fileExtension.uppercased())]\nBase64: \(base64String)"
+            attachments.append(.init(path: path, content: content))
+            print("✅ Attachment added! Total attachments: \(attachments.count)")
+
+            let successMessage = "✅ Image attached!\n📎 File: \(path)\n📊 Size: \(data.count) bytes\n📎 Total attachments: \(attachments.count)"
+            pasteDebugAlert += successMessage + "\n"
+        } catch {
+            print("❌ Failed to save pasted image to \(tempURL.path): \(error)")
+            pasteDebugAlert += "❌ Error: \(error)\n"
+        }
+    }
+
     // MARK: - Agent context
 
     /// Pure derivation: maps an active project (if any) to an
@@ -1816,7 +2084,7 @@ struct CodeAssistantPanel: View {
     /// Builds the per-request snapshot of "what the agent should know":
     /// the active GitLab project and the user's indexed code repos.
     /// Recomputed every send so Settings changes are picked up live.
-    private func buildAgentContext() -> AgentContext {
+    private func buildAgentContext() async -> AgentContext {
         // New: derive from the active workspace's linkedRepo. Falls
         // through to nil when no project is open (Welcome screen path)
         // or when the active project has no linked repo set. Existing
@@ -1849,12 +2117,56 @@ struct CodeAssistantPanel: View {
         // so "find the README and review it" can resolve a real file.
         let workspaceRoot = WorkspaceRoot.resolve(config: config, projectStore: projectStore)
             .map { homeRelativePath($0.path) }
+
+        // Git context: populate currentBranch and gitStatus so the agent
+        // can answer repo-state questions without a git-op tool call.
+        // Resolved from the active repo URL; nil when not in a git repo.
+        var gitBranch: String?
+        var gitStatus: AgentContext.GitStatus?
+        if let repoURL = config.activeRepoLocalURL, WorkspaceRoot.isGitRepo(repoURL) {
+            let repoManager = RepoManager()
+            // Get current branch
+            if let branch = try? await repoManager.runGit(["rev-parse", "--abbrev-ref", "HEAD"], at: repoURL) {
+                gitBranch = branch.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            // Get status counts (porcelain v1: XY filename)
+            if let status = try? await repoManager.runGit(["status", "--porcelain=v1"], at: repoURL) {
+                let lines = status.split(separator: "\n")
+                let staged = lines.filter { $0.prefix(1) != " " && $0.prefix(1) != "?" }.count
+                let unstaged = lines.filter { $0.count >= 2 && $0.dropFirst().prefix(1) != " " }.count
+                // Get ahead/behind from branch tracking
+                var ahead = 0, behind = 0, hasUpstream = false
+                if let branch = gitBranch,
+                   let tracking = try? await repoManager.runGit(["rev-parse", "--abbrev-ref", "\(branch)@{upstream}"], at: repoURL),
+                   !tracking.contains("no upstream") {
+                    hasUpstream = true
+                    let counts = try? await repoManager.runGit(["rev-list", "--left-right", "--count", "\(branch)...@{u}"], at: repoURL)
+                    if let counts = counts {
+                        let parts = counts.split(separator: "\t").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        if parts.count == 2 {
+                            ahead = Int(parts[0]) ?? 0
+                            behind = Int(parts[1]) ?? 0
+                        }
+                    }
+                }
+                gitStatus = AgentContext.GitStatus(
+                    staged: staged,
+                    unstaged: unstaged,
+                    ahead: ahead,
+                    behind: behind,
+                    hasUpstream: hasUpstream
+                )
+            }
+        }
+
         return AgentContext(
             activeProject: activeProject,
             indexedRepos: indexedRepos,
             recentIssues: recentIssues.isEmpty ? nil : recentIssues,
             workspaceRoot: workspaceRoot,
-            sessionId: agentSessionId
+            sessionId: agentSessionId,
+            currentBranch: gitBranch,
+            gitStatus: gitStatus
         )
     }
 
@@ -1872,31 +2184,60 @@ struct CodeAssistantPanel: View {
     }
 
     private func refreshRecentIssuesOnce() async {
-        guard let project = config.gitLabSavedProjects.first(where: { $0.isActive }),
-              let pid = project.resolvedId else {
+        // Determine the active project and its provider
+        guard let activeProject = Self.deriveActiveProject(from: projectStore.activeProject)
+            ?? Self.deriveActiveProject(fromConfig: config),
+              let provider = activeProject.provider else {
             recentIssues = []
             return
         }
-        let client = GitLabClient()
+
+        // Create the appropriate RepoBackend based on provider
+        let backend: RepoBackend
+        let projectId: String
+
+        if provider == "GitLab" {
+            guard let project = config.gitLabSavedProjects.first(where: { $0.isActive }),
+                  let pid = project.resolvedId else {
+                recentIssues = []
+                return
+            }
+            backend = RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
+            projectId = String(pid)
+        } else if provider == "GitHub" {
+            guard let repo = config.gitHubSavedRepos.first(where: { $0.isActive }),
+                  let (owner, name) = GitHubClient.ownerAndName(from: repo.url) else {
+                recentIssues = []
+                return
+            }
+            backend = RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
+            projectId = "\(owner)/\(name)"
+        } else {
+            recentIssues = []
+            return
+        }
+
         do {
             // Open issues only: that's what the user actively references.
             // Closed issues clutter the prompt without much upside.
-            let filter = IssueFilter(state: .opened)
-            let issues = try await client.listIssues(projectId: pid, filter: filter, page: 1)
+            let filter = RepoIssueFilter(state: .opened, search: "", labelName: "")
+            let issues = try await backend.listIssues(projectId: projectId, filter: filter, page: 1)
+
             // Cap at 15 so the prompt context doesn't blow up; pick the
-            // most recently updated.
+            // most recently updated. Sort by updatedAt (descending).
             let capped = Array(
                 issues
                     .sorted { $0.updatedAt > $1.updatedAt }
                     .prefix(15)
             )
+
             recentIssues = capped.map { issue in
-                let desc = issue.description ?? ""
+                let desc = issue.body ?? ""
                 let snippet = desc.isEmpty ? nil : String(desc.prefix(160))
                 return AgentContext.RecentIssue(
-                    iid: issue.iid,
+                    iid: issue.number,  // Use `number` (GitLab iid, GitHub number)
                     title: issue.title,
-                    state: issue.state,
+                    state: issue.state,   // "opened" / "closed"
                     labels: issue.labels,
                     snippet: snippet,
                     updatedAt: issue.updatedAt
@@ -2289,6 +2630,95 @@ struct CodeAssistantPanel: View {
         }
     }
 
+    /// Confirm an update-issue action. Executes the update via RepoBackend and
+    /// appends a synthetic turn so the agent can acknowledge.
+    ///
+    /// NOTE: State changes (close/reopen) require separate API calls and are
+    /// not yet supported. This implementation handles title, description, and
+    /// label updates only.
+    private func confirmUpdateIssue(_ args: UpdateIssueSheet.Args,
+                                     target: IssueTarget) async -> UpdateIssueSheet.ConfirmResult {
+        let client: RepoBackend = target.kind == .gitlab
+            ? RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
+            : RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
+        do {
+            // Build the issue payload with only the fields that changed
+            var payload = RepoIssuePayload()
+            if let title = args.title { payload.title = title }
+            if let description = args.body { payload.body = description }
+            if let labels = args.labels { payload.labels = labels }
+
+            _ = try await client.updateIssue(projectId: target.projectId, number: args.iid, payload: payload)
+            self.pendingTool = nil
+            history.append(.init(
+                role: .user,
+                content: "(executed update-issue → #\(args.iid))"
+            ))
+            await sendFollowup()
+            return .success(args.iid)
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+    }
+
+    private func confirmBranchCreation(_ args: BranchCreationSheet.Args) async -> BranchCreationSheet.ConfirmResult {
+        guard let repoURL = config.activeRepoLocalURL, WorkspaceRoot.isGitRepo(repoURL) else {
+            return .failure("Not in a git repository")
+        }
+
+        let repoManager = RepoManager()
+        do {
+            // Build the git command arguments
+            var gitArgs = ["branch", args.branch]
+            if let startPoint = args.startPoint {
+                gitArgs.append(startPoint)
+            }
+
+            _ = try await repoManager.runGit(gitArgs, at: repoURL)
+
+            self.pendingTool = nil
+            history.append(.init(
+                role: .user,
+                content: "(executed create-branch → \(args.branch))"
+            ))
+            await sendFollowup()
+            return .success(args.branch)
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+    }
+
+    // PR creation disabled - requires additional backend support (RepoPRPayload, createPR method)
+    // private func confirmPRCreation(_ args: PRCreationSheet.Args,
+    //                                 target: IssueTarget) async -> PRCreationSheet.ConfirmResult {
+    //     let client: RepoBackend = target.kind == .gitlab
+    //         ? RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
+    //         : RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
+    //
+    //     do {
+    //         // Build the PR/MR payload
+    //         var payload = RepoPRPayload()
+    //         payload.title = args.title
+    //         payload.body = args.description
+    //         payload.sourceBranch = args.sourceBranch
+    //         payload.targetBranch = args.targetBranch
+    //         if let labels = args.labels { payload.labels = labels }
+    //         if let assignee = args.assignee { payload.assignee = assignee }
+    //
+    //         let result = try await client.createPR(projectId: target.projectId, payload: payload)
+    //
+    //         self.pendingTool = nil
+    //         history.append(.init(
+    //             role: .user,
+    //             content: "(executed create-pr → !\(result.iid))"
+    //         ))
+    //         await sendFollowup()
+    //         return .success(iid: result.iid, webUrl: result.webUrl)
+    //     } catch {
+    //         return .failure(error.localizedDescription)
+    //     }
+    // }
+
     /// Whether a proposed git op may run WITHOUT the confirm card:
     ///   - read-tier (status/log/diff/branch): always — never mutates anything.
     ///   - write-tier (add, commit, create_branch, checkout, pull_ff, push): only
@@ -2362,7 +2792,7 @@ struct CodeAssistantPanel: View {
     ) async throws -> LlmIdeAPIClient.CodeAssistResponse {
         let provider = (AICliTool(rawValue: config.activeCLI) ?? .claudeCode).provider
         let model = selectedModel.isEmpty ? nil : selectedModel
-        let ctx = buildAgentContext()
+        let ctx = await buildAgentContext()
         do {
             return try await api.codeAssistStream(
                 message: message, language: prefLanguage, model: model, provider: provider,
@@ -2550,5 +2980,512 @@ struct CodeAssistantPanel: View {
         default: return .secondary
         }
     }
+
+}
+
+// MARK: - Issue Sheets
+
+/// Sheet for reading full issue details
+struct GetIssueSheet: View {
+    let iid: Int
+    let projectId: String
+    let providerKind: RepoBackendKind
+    let onConfirm: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var theme: ThemeStore
+    @State private var isLoading = false
+    @State private var issue: RepoIssue?
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            if isLoading {
+                ProgressView("Loading issue...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let issue = issue {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("#\(issue.number): \(issue.title)")
+                        .font(.system(size: 16, weight: .semibold))
+
+                    HStack(spacing: 8) {
+                        Text(issue.state.capitalized)
+                            .font(.system(size: 11, weight: .medium))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(stateColor(for: issue.state))
+                            .foregroundStyle(.white)
+                            .clipShape(Capsule())
+                        if !issue.labels.isEmpty {
+                            ForEach(issue.labels.prefix(3), id: \.self) { label in
+                                Text(label)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                            }
+                        }
+                    }
+
+                    if let body = issue.body, !body.isEmpty {
+                        Divider()
+                        Text(body)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Divider()
+                    VStack(alignment: .leading, spacing: 6) {
+                        if !issue.webUrl.isEmpty {
+                            HStack(spacing: 6) {
+                                Image(systemName: "link")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                Text(issue.webUrl)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                        HStack(spacing: 6) {
+                            Image(systemName: "clock")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                            Text(formatDate(issue.updatedAt))
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                        if issue.commentCount > 0 {
+                            HStack(spacing: 6) {
+                                Image(systemName: "bubble.left")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                                Text("\(issue.commentCount) comment\(issue.commentCount == 1 ? "" : "s")")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    Spacer()
+                    Button("Done") {
+                        dismiss()
+                        onConfirm()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+                }
+                .padding(20)
+            } else if let error = error {
+                VStack(spacing: 12) {
+                    Text("Failed to load issue")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text(error)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Button("Close") {
+                        dismiss()
+                        onConfirm()
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(20)
+            }
+        }
+        .frame(width: 500, height: 400)
+        .task {
+            await loadIssue()
+        }
+    }
+
+    private func loadIssue() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        let client: RepoBackend = providerKind == .gitlab
+            ? RepoBackendFactory.guarded(GitLabClient(config: AppConfig.shared), config: AppConfig.shared)
+            : RepoBackendFactory.guarded(GitHubClient(config: AppConfig.shared), config: AppConfig.shared)
+
+        do {
+            let filter = RepoIssueFilter(state: .all, search: "", labelName: "")
+            let issues = try await client.listIssues(projectId: projectId, filter: filter, page: 1)
+            if let found = issues.first(where: { $0.number == iid }) {
+                issue = found
+            } else {
+                error = "Issue #\(iid) not found"
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func stateColor(for state: String) -> Color {
+        switch state.lowercased() {
+        case "opened": return .green
+        case "closed": return .red
+        default: return .secondary
+        }
+    }
+
+    private func formatDate(_ date: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        guard let d = formatter.date(from: date) else { return date }
+        let relative = RelativeDateTimeFormatter()
+        return relative.localizedString(for: d, relativeTo: Date())
+    }
+}
+
+/// Sheet for updating an issue
+struct UpdateIssueSheet: View {
+    struct Args {
+        var iid: Int
+        var title: String?
+        var body: String?
+        var state: String?
+        var labels: [String]?
+    }
+
+    enum ConfirmResult {
+        case success(Int)
+        case failure(String)
+    }
+
+    let initialArgs: Args
+    let issueTitle: String?
+    let projectId: String
+    let providerKind: RepoBackendKind
+    let isAllowed: Bool
+    let onConfirm: (Args) async -> ConfirmResult
+
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var theme: ThemeStore
+    @State private var title: String
+    @State private var bodyText: String
+    @State private var selectedState: String
+    @State private var labelsText: String
+    @State private var isRunning = false
+    @State private var errorMessage: String?
+
+    init(initialArgs: Args, issueTitle: String?, projectId: String, providerKind: RepoBackendKind, isAllowed: Bool, onConfirm: @escaping (Args) async -> ConfirmResult) {
+        self.initialArgs = initialArgs
+        self.issueTitle = issueTitle
+        self.projectId = projectId
+        self.providerKind = providerKind
+        self.isAllowed = isAllowed
+        self.onConfirm = onConfirm
+        self._title = State(initialValue: initialArgs.title ?? "")
+        self._bodyText = State(initialValue: initialArgs.body ?? "")
+        self._selectedState = State(initialValue: initialArgs.state ?? "opened")
+        self._labelsText = State(initialValue: (initialArgs.labels ?? []).joined(separator: ", "))
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Title")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    TextField("Issue title", text: $title)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!isAllowed || isRunning)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("State")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Picker("State", selection: $selectedState) {
+                        Text("Opened").tag("opened")
+                        Text("Closed").tag("closed")
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(!isAllowed || isRunning)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Labels")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    TextField("bug, enhancement, priority (comma-separated)", text: $labelsText)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!isAllowed || isRunning)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Description")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    TextEditor(text: $bodyText)
+                        .font(.system(size: 13))
+                        .frame(height: 120)
+                        .background(Color.secondary.opacity(0.05))
+                        .cornerRadius(6)
+                        .disabled(!isAllowed || isRunning)
+                }
+
+                if let error = errorMessage {
+                    Text(error)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red)
+                }
+
+                Spacer()
+                HStack(spacing: 12) {
+                    Button("Cancel") { dismiss() }
+                        .buttonStyle(.bordered)
+                        .disabled(isRunning)
+
+                    Button("Update Issue") { Task { await submit() } }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!isAllowed || isRunning || title.isEmpty)
+
+                    if isRunning { ProgressView().scaleEffect(0.8) }
+                }
+            }
+            .padding(20)
+            .navigationTitle("Update Issue #\(initialArgs.iid)")
+        }
+        .frame(width: 500, height: 500)
+    }
+
+    private func submit() async {
+        isRunning = true
+        defer { isRunning = false }
+        errorMessage = nil
+
+        let labels = labelsText.isEmpty ? [] : labelsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+
+        let args = Args(
+            iid: initialArgs.iid,
+            title: title.isEmpty ? nil : title,
+            body: bodyText.isEmpty ? nil : bodyText,
+            state: selectedState,
+            labels: labels.isEmpty ? nil : labels
+        )
+
+        let result = await onConfirm(args)
+        switch result {
+        case .success: dismiss()
+        case .failure(let message): errorMessage = message
+        }
+    }
+}
+
+/// Arguments for listing issues
+struct ListIssuesSheetArgs {
+    var search: String?
+    var state: String?
+    var label: String?
+}
+
+/// Sheet for listing/searching issues
+struct ListIssuesSheet: View {
+    let initialArgs: ListIssuesSheetArgs
+    let projectId: String
+    let providerKind: RepoBackendKind
+    let onConfirm: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var theme: ThemeStore
+    @State private var searchQuery = ""
+    @State private var stateFilter: String?
+    @State private var labelFilter = ""
+    @State private var issues: [RepoIssue] = []
+    @State private var isLoading = false
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                VStack(spacing: 12) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                        TextField("Search issues", text: $searchQuery)
+                            .textFieldStyle(.plain)
+                            .onChange(of: searchQuery) { _, _ in Task { await loadIssues() } }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.secondary.opacity(0.05))
+                    .cornerRadius(8)
+
+                    Picker("State", selection: Binding(
+                        get: { stateFilter ?? "" },
+                        set: { stateFilter = $0.isEmpty ? nil : $0 }
+                    )) {
+                        Text("All States").tag("")
+                        Text("Opened").tag("opened")
+                        Text("Closed").tag("closed")
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: stateFilter) { _, _ in Task { await loadIssues() } }
+
+                    HStack(spacing: 8) {
+                        Image(systemName: "tag")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        TextField("Filter by label", text: $labelFilter)
+                            .textFieldStyle(.plain)
+                            .onChange(of: labelFilter) { _, _ in Task { await loadIssues() } }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.secondary.opacity(0.05))
+                    .cornerRadius(8)
+                }
+                .padding(16)
+
+                Divider()
+                if isLoading {
+                    ProgressView("Searching issues...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let error = error {
+                    VStack(spacing: 12) {
+                        Text("Search failed")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text(error)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                        Button("Retry") { Task { await loadIssues() } }
+                            .buttonStyle(.bordered)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if issues.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "tray")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.secondary)
+                        Text("No issues found")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(issues) { issue in
+                                IssueRow(issue: issue)
+                                    .onTapGesture {
+                                        let pasteboard = NSPasteboard.general
+                                        pasteboard.clearContents()
+                                        pasteboard.setString("#\(issue.number)", forType: .string)
+                                    }
+                            }
+                        }
+                    }
+                }
+
+                Divider()
+                Button("Close") {
+                    dismiss()
+                    onConfirm()
+                }
+                .buttonStyle(.bordered)
+                .padding(16)
+            }
+            .navigationTitle("Issues")
+        }
+        .frame(width: 600, height: 500)
+        .task {
+            searchQuery = initialArgs.search ?? ""
+            stateFilter = initialArgs.state
+            labelFilter = initialArgs.label ?? ""
+            await loadIssues()
+        }
+    }
+
+    private func loadIssues() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        let client: RepoBackend = providerKind == .gitlab
+            ? RepoBackendFactory.guarded(GitLabClient(config: AppConfig.shared), config: AppConfig.shared)
+            : RepoBackendFactory.guarded(GitHubClient(config: AppConfig.shared), config: AppConfig.shared)
+
+        do {
+            let filter = RepoIssueFilter(
+                state: stateFilter == nil ? .all : (stateFilter == "opened" ? .opened : .closed),
+                search: searchQuery,
+                labelName: labelFilter.isEmpty ? "" : labelFilter
+            )
+            self.issues = try await client.listIssues(projectId: projectId, filter: filter, page: 1)
+            self.error = nil
+        } catch {
+            self.error = error.localizedDescription
+            self.issues = []
+        }
+    }
+
+    struct IssueRow: View {
+        let issue: RepoIssue
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top) {
+                    Text("#\(issue.number)")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.blue)
+
+                    Text(issue.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(2)
+
+                    Spacer()
+                    Text(issue.state.capitalized)
+                        .font(.system(size: 10, weight: .medium))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(stateColor(for: issue.state))
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                }
+
+                HStack(spacing: 12) {
+                    if !issue.labels.isEmpty {
+                        Text(issue.labels.prefix(3).joined(separator: ", "))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+                    Text(formatDate(issue.updatedAt))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+
+                    if issue.commentCount > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "bubble.left")
+                                .font(.system(size: 9))
+                            Text("\(issue.commentCount)")
+                                .font(.system(size: 10))
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color.secondary.opacity(0.03))
+        }
+
+        private func stateColor(for state: String) -> Color {
+            switch state.lowercased() {
+            case "opened": return .green
+            case "closed": return .red
+            default: return .secondary
+            }
+        }
+
+        private func formatDate(_ date: String) -> String {
+            let formatter = ISO8601DateFormatter()
+            guard let d = formatter.date(from: date) else { return date }
+            let relative = RelativeDateTimeFormatter()
+            return relative.localizedString(for: d, relativeTo: Date())
+        }
+    }
+
 
 }
