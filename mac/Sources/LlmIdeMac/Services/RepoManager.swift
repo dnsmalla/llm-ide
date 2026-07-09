@@ -261,6 +261,9 @@ final class RepoManager {
             return try await run(["stash", "push", "-u"])
         case .clean:
             return try await run(["clean", "-fd"])   // NOT -x; never nukes ignored files without explicit intent
+        case .clone:
+            guard let url = a.ref else { throw RepoError.commandFailed("clone needs a repository URL") }
+            return try await run(["clone", url, repoURL.path])
         case .merge_to_main:
             // The ONLY op allowed to reach origin/<default>. Caller (sheet) has
             // confirmed at destructive tier.

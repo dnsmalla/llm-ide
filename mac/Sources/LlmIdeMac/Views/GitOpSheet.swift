@@ -52,6 +52,7 @@ struct GitOpSheet: View {
         case .reset:         return "git reset --\(args.mode ?? "mixed") \(args.ref ?? "HEAD")"
         case .stash:         return "git stash push -u"
         case .clean:         return "git clean -fd"
+        case .clone:         return "git clone <repo-url>"
         case .merge_to_main: return "git checkout main && git merge --ff-only \(args.branch ?? "") && git push origin main"
         case .add:           return "git add -A"
         case .status, .log, .diff, .branch: return "git \(args.op.rawValue)"

@@ -467,6 +467,15 @@ final class AppConfig: ObservableObject {
     @Published var autoCodeRunGenerateKnowledge: Bool {
         didSet { defaults.set(autoCodeRunGenerateKnowledge, forKey: "autoCodeRunGenerateKnowledge") }
     }
+    @Published var autoCodeRunGenerateDoc: Bool {
+        didSet { defaults.set(autoCodeRunGenerateDoc, forKey: "autoCodeRunGenerateDoc") }
+    }
+    @Published var autoCodeRunUpdateIssues: Bool {
+        didSet { defaults.set(autoCodeRunUpdateIssues, forKey: "autoCodeRunUpdateIssues") }
+    }
+    @Published var autoCodeRunUpdatePlanStatus: Bool {
+        didSet { defaults.set(autoCodeRunUpdatePlanStatus, forKey: "autoCodeRunUpdatePlanStatus") }
+    }
 
     // Default prompt templates for each auto task type. Review tasks are
     // READ-ONLY: they must not modify the repo (the loop reverts any stray
@@ -474,6 +483,8 @@ final class AppConfig: ObservableObject {
     static let defaultTemplateReviewCode = "Review the recent commits in this repository for bugs, security issues, and code style problems. This is a READ-ONLY review: do NOT edit, create, or delete any files, and do NOT commit or push. Print your findings as a summary to your output."
     static let defaultTemplateReviewDoc = "Review the documentation in this repository for sections that are out of date with recent code changes, unclear, or incomplete. This is a READ-ONLY review: do NOT edit, create, or delete any files, and do NOT commit or push. List the specific docs and the fixes you would make to your output."
     static let defaultTemplateReviewConflicts = "Check this repository for merge conflicts (conflict markers, unmerged paths). This is a READ-ONLY review: do NOT edit, create, or delete any files, and do NOT commit or push. List which files conflict and how you would resolve each to your output."
+    static let defaultTemplateGenerateDoc = "Generate comprehensive documentation for recent code changes in this repository. Focus on:\n1. New or modified public APIs/functions\n2. Updated data structures and interfaces\n3. Configuration changes\n4. Migration guides if breaking changes were introduced\n\nThis is READ-ONLY: do NOT edit, create, or delete any files. Output the documentation in markdown format suitable for the project's docs/ folder."
+    static let defaultTemplateUpdateIssues = "Review recent code changes, meeting notes, and detected issues in this repository. For each significant finding that requires action:\n\n1. Check if a related issue already exists in the issue tracker\n2. If not, create a new issue with:\n   - Clear title describing the problem\n   - Detailed description with reproduction steps if applicable\n   - Appropriate labels/tags\n   - Priority level based on severity\n   - Related files/commits referenced\n\nThis is READ-ONLY for the codebase: only interact with the issue tracker API. Do NOT modify any source files."
 
     @Published var autoTaskTemplateReviewCode: String {
         didSet { defaults.set(autoTaskTemplateReviewCode, forKey: "autoTaskTemplateReviewCode") }
@@ -483,6 +494,12 @@ final class AppConfig: ObservableObject {
     }
     @Published var autoTaskTemplateReviewConflicts: String {
         didSet { defaults.set(autoTaskTemplateReviewConflicts, forKey: "autoTaskTemplateReviewConflicts") }
+    }
+    @Published var autoTaskTemplateGenerateDoc: String {
+        didSet { defaults.set(autoTaskTemplateGenerateDoc, forKey: "autoTaskTemplateGenerateDoc") }
+    }
+    @Published var autoTaskTemplateUpdateIssues: String {
+        didSet { defaults.set(autoTaskTemplateUpdateIssues, forKey: "autoTaskTemplateUpdateIssues") }
     }
 
     // ── Backend supervisor ────────────────────────────────────────────
@@ -649,9 +666,14 @@ final class AppConfig: ObservableObject {
         self.autoCodeRunReviewConflicts = defaults.object(forKey: "autoCodeRunReviewConflicts") as? Bool ?? false
         self.autoCodeRunRegression = defaults.object(forKey: "autoCodeRunRegression") as? Bool ?? false
         self.autoCodeRunGenerateKnowledge = defaults.object(forKey: "autoCodeRunGenerateKnowledge") as? Bool ?? true
+        self.autoCodeRunGenerateDoc = defaults.object(forKey: "autoCodeRunGenerateDoc") as? Bool ?? true
+        self.autoCodeRunUpdateIssues = defaults.object(forKey: "autoCodeRunUpdateIssues") as? Bool ?? false
+        self.autoCodeRunUpdatePlanStatus = defaults.object(forKey: "autoCodeRunUpdatePlanStatus") as? Bool ?? false
         self.autoTaskTemplateReviewCode = defaults.string(forKey: "autoTaskTemplateReviewCode") ?? Self.defaultTemplateReviewCode
         self.autoTaskTemplateReviewDoc = defaults.string(forKey: "autoTaskTemplateReviewDoc") ?? Self.defaultTemplateReviewDoc
         self.autoTaskTemplateReviewConflicts = defaults.string(forKey: "autoTaskTemplateReviewConflicts") ?? Self.defaultTemplateReviewConflicts
+        self.autoTaskTemplateGenerateDoc = defaults.string(forKey: "autoTaskTemplateGenerateDoc") ?? Self.defaultTemplateGenerateDoc
+        self.autoTaskTemplateUpdateIssues = defaults.string(forKey: "autoTaskTemplateUpdateIssues") ?? Self.defaultTemplateUpdateIssues
         self.backendNodePath = defaults.string(forKey: "backendNodePath") ?? ""
         self.backendWorkingDir = defaults.string(forKey: "backendWorkingDir") ?? ""
         // Default ON so the out-of-box experience (backend auto-starts on

@@ -504,6 +504,32 @@ final class AutoCodeUpdateService: ObservableObject {
                     taskErrors[AutoTask.reviewConflicts.rawValue] = "Review Conflicts task failed. Check ~/Library/Logs/LLM IDE/auto-task-review-conflicts.log"
                 }
             }
+
+            if !Task.isCancelled, config.autoCodeRunGenerateDoc {
+                let ok = await runCLI(prompt: config.autoTaskTemplateGenerateDoc,
+                                      localPath: capturedGitRoot,
+                                      logSuffix: "generate-doc",
+                                      logDir: logDir)
+                taskOutputs[AutoTask.generateDoc.rawValue] = logTail(suffix: "generate-doc", logDir: logDir)
+                if ok {
+                    taskErrors.removeValue(forKey: AutoTask.generateDoc.rawValue)
+                } else {
+                    taskErrors[AutoTask.generateDoc.rawValue] = "Generate Documentation task failed. Check ~/Library/Logs/LLM IDE/auto-task-generate-doc.log"
+                }
+            }
+
+            if !Task.isCancelled, config.autoCodeRunUpdateIssues {
+                let ok = await runCLI(prompt: config.autoTaskTemplateUpdateIssues,
+                                      localPath: capturedGitRoot,
+                                      logSuffix: "update-issues",
+                                      logDir: logDir)
+                taskOutputs[AutoTask.updateIssues.rawValue] = logTail(suffix: "update-issues", logDir: logDir)
+                if ok {
+                    taskErrors.removeValue(forKey: AutoTask.updateIssues.rawValue)
+                } else {
+                    taskErrors[AutoTask.updateIssues.rawValue] = "Update Issues task failed. Check ~/Library/Logs/LLM IDE/auto-task-update-issues.log"
+                }
+            }
         }
 
         // 7. Regression sweep — re-asks every `status: fixed` FaultReport
@@ -522,6 +548,12 @@ final class AutoCodeUpdateService: ObservableObject {
         // code index). This row just surfaces "what's there" for the user.
         if !Task.isCancelled, config.autoCodeRunGenerateKnowledge {
             reportKnowledge(projectRoot: resolved.projectRoot)
+        }
+
+        // 9. Plan status refresh — polls external outcome trackers (GitHub/GitLab/Linear/Backlog)
+        // for dispatched plan tasks and updates their status locally. Off by default; opt-in via Settings.
+        if !Task.isCancelled, config.autoCodeRunUpdatePlanStatus {
+            await refreshPlanStatuses(projectRoot: resolved.projectRoot)
         }
 
         // A user-initiated stop wins over the normal summary.
@@ -602,6 +634,47 @@ final class AutoCodeUpdateService: ObservableObject {
             taskErrors[AutoTask.regression.rawValue] = "Regression: \(regressed)/\(total) regressed\(reopened)."
         } else {
             taskErrors.removeValue(forKey: AutoTask.regression.rawValue)
+        }
+    }
+
+    /// Refreshes plan task statuses from external outcome trackers (GitHub/GitLab/Linear/Backlog).
+    /// Calls the /kb/outcomes/refresh endpoint which polls all configured providers and
+    /// persists updated statuses. Success/failure is surfaced via taskOutputs/taskErrors.
+    private func refreshPlanStatuses(projectRoot: String) async {
+        let key = AutoTask.updatePlanStatus.rawValue
+        guard let api else {
+            taskErrors[key] = "Plan status refresh skipped — no API client wired."
+            return
+        }
+        guard !projectRoot.isEmpty else {
+            taskErrors[key] = "Plan status refresh skipped — no project root resolved."
+            return
+        }
+
+        do {
+            // The refresh endpoint polls all providers and persists results server-side.
+            // We only get a summary back, not per-task details.
+            let summary = try await api.refreshOutcomes(taskIds: [])
+
+            let total = summary.pollCount
+            let changed = summary.changedCount
+            let errored = summary.pollErroredCount
+
+            if total == 0 {
+                taskOutputs[key] = "No dispatched plan tasks found — nothing to refresh."
+            } else if changed > 0 {
+                taskOutputs[key] = "Refreshed \(total) plan tasks — \(changed) statuses updated."
+            } else {
+                taskOutputs[key] = "Refreshed \(total) plan tasks — no changes."
+            }
+
+            if errored > 0 {
+                taskErrors[key] = "Plan status refresh completed with \(errored) poll errors (check provider credentials)."
+            } else {
+                taskErrors.removeValue(forKey: key)
+            }
+        } catch {
+            taskErrors[key] = "Plan status refresh failed: \(error.localizedDescription)"
         }
     }
 

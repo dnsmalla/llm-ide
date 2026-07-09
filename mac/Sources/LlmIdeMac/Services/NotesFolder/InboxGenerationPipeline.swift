@@ -38,7 +38,14 @@ enum InboxGenerationPipeline {
         }
         var processed = 0
         var failures: [String] = []
-        for case let file as URL in enumerator {
+
+        // Collect all URLs first to avoid iterator issues in async contexts (Swift 6)
+        var allFiles: [URL] = []
+        while let file = enumerator.nextObject() as? URL {
+            allFiles.append(file)
+        }
+
+        for file in allFiles {
             guard file.pathExtension.lowercased() == "txt" else { continue }
             guard let data = try? Data(contentsOf: file) else { continue }
             let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()

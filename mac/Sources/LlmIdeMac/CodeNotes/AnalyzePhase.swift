@@ -16,7 +16,8 @@ public struct AnalyzePhase {
 
     public static func buildPrompt(batch: CodeBatch, scan: ScanResult, notesDir: String) -> String {
         var lines: [String] = []
-        lines.append("Write one enriched code note per file into `\(notesDir)`.")
+        lines.append("Write one enriched code note per file into `system/graph/`.")
+        lines.append("These are code notes that become part of the graph - write them directly into the graph folder.")
         lines.append("For each file, summarize its purpose and record import links to its neighbors.")
         lines.append("")
 
@@ -37,7 +38,7 @@ public struct AnalyzePhase {
 
     public func run(batch: CodeBatch, scan: ScanResult, repoRoot: URL) async -> Result<Void, CodeNoteError> {
         let prompt = Self.buildPrompt(batch: batch, scan: scan,
-                                      notesDir: "system/graph/notes")
+                                      notesDir: "system/graph")
         do {
             let (code, _, stderr) = try await launcher.run(
                 executable: cliExecutable,

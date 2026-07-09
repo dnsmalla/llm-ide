@@ -28,8 +28,6 @@ struct HistoryTextEditor: NSViewRepresentable {
     var onReturn: (() -> Bool)? = nil
     var onTab: (() -> Bool)? = nil
     var onEscape: (() -> Bool)? = nil
-    /// Callback for handling paste events. Receives array of NSPasteboardItem.
-    var onPaste: (([NSPasteboardItem]) -> Void)? = nil
 
     func makeNSView(context: Context) -> NSScrollView {
         let textView = ArrowInterceptingTextView()
@@ -50,7 +48,6 @@ struct HistoryTextEditor: NSViewRepresentable {
         textView.onReturn = onReturn
         textView.onTab = onTab
         textView.onEscape = onEscape
-        textView.onPaste = onPaste
 
         let scroll = NSScrollView()
         scroll.documentView = textView
@@ -82,7 +79,6 @@ struct HistoryTextEditor: NSViewRepresentable {
         textView.onReturn = onReturn
         textView.onTab = onTab
         textView.onEscape = onEscape
-        textView.onPaste = onPaste
         textView.font = font
         textView.textColor = textColor
         // Only push the binding into the view when it actually differs — e.g. a
@@ -118,46 +114,6 @@ final class ArrowInterceptingTextView: NSTextView {
     var onReturn: (() -> Bool)?
     var onTab: (() -> Bool)?
     var onEscape: (() -> Bool)?
-    var onPaste: (([NSPasteboardItem]) -> Void)?
-
-    override func paste(_ sender: Any?) {
-        let pasteboard = NSPasteboard.general
-        let items = pasteboard.pasteboardItems ?? []
-
-        print("🔍 Paste method called, items count: \(items.count)")
-
-        if items.isEmpty {
-            super.paste(sender)
-            return
-        }
-
-        // Check if ANY item contains image data
-        var hasImages = false
-        for item in items {
-            if let types = item.types as? [NSPasteboard.PasteboardType] {
-                let typeStrings = types.map { $0.rawValue }
-                print("🔍 Item types: \(typeStrings)")
-                if typeStrings.contains("public.png") ||
-                   typeStrings.contains("public.jpeg") ||
-                   typeStrings.contains("public.tiff") ||
-                   typeStrings.contains("public.image") {
-                    hasImages = true
-                    print("✅ Image detected!")
-                    break
-                }
-            }
-        }
-
-        if hasImages {
-            // Handle image paste in the parent
-            print("🔍 Calling onPaste callback for images")
-            onPaste?(items)
-        } else {
-            // Handle text paste normally
-            print("🔍 No image detected, using normal paste")
-            super.paste(sender)
-        }
-    }
 
     override func keyDown(with event: NSEvent) {
         // Only plain arrows (no ⌘/⌥/⌃/⇧) drive history; modified arrows keep

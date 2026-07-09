@@ -60,14 +60,28 @@ struct AutoCodeView: View {
 
             Divider()
 
-            // Task type rows
+            // Task type rows - organized by category
             VStack(spacing: 0) {
+                // Review Tasks
+                taskCategoryHeader("Review Tasks")
                 taskRow(.reviewCode,      label: "Review Code",      icon: "checkmark.shield",
                         enabled: $config.autoCodeRunReviewCode)
                 taskRow(.reviewDoc,       label: "Review Doc",       icon: "doc.text.magnifyingglass",
                         enabled: $config.autoCodeRunReviewDoc)
                 taskRow(.reviewConflicts, label: "Review Conflicts", icon: "exclamationmark.triangle",
                         enabled: $config.autoCodeRunReviewConflicts)
+
+                // Automation Tasks
+                taskCategoryHeader("Automation Tasks")
+                taskRow(.updateIssues,    label: "Update Issues",      icon: "checklist",
+                        enabled: $config.autoCodeRunUpdateIssues)
+                taskRow(.updatePlanStatus, label: "Update Plan Status",  icon: "chart.bar.doc.horizontal",
+                        enabled: $config.autoCodeRunUpdatePlanStatus)
+                taskRow(.generateDoc,     label: "Generate Documentation", icon: "wand.and.stars",
+                        enabled: $config.autoCodeRunGenerateDoc)
+
+                // Maintenance Tasks
+                taskCategoryHeader("Maintenance Tasks")
                 taskRow(.regression,      label: "Regression",       icon: "arrow.uturn.backward.circle",
                         enabled: $config.autoCodeRunRegression)
                 taskRow(.generateKnowledge, label: "Knowledge",       icon: "brain",
@@ -175,6 +189,19 @@ struct AutoCodeView: View {
                     .frame(width: 3)
             }
         }
+    }
+
+    @ViewBuilder
+    private func taskCategoryHeader(_ title: String) -> some View {
+        HStack(spacing: 0) {
+            Text(title.uppercased())
+                .font(Typography.section)
+                .foregroundStyle(theme.current.textMuted)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(theme.current.body)
     }
 
     private var modelLimitsRow: some View {
@@ -385,6 +412,22 @@ struct AutoCodeView: View {
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
+            case .updatePlanStatus:
+                Text("What this does")
+                    .font(Typography.section)
+                    .foregroundStyle(t.textMuted)
+                Text("Polls external outcome trackers (GitHub/GitLab/Linear/Backlog) for all dispatched plan tasks and updates their status in the local plan. Tasks marked as done/closed externally will be marked as completed in the plan.")
+                    .font(Typography.body)
+                    .foregroundStyle(t.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Status comes from external providers, not from a template — so there's nothing to edit here. Use the Plans tab to manually refresh status or view individual task outcomes.")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Off by default. Toggling it on adds a status refresh pass to the end of every Auto Code run. Requires provider credentials (GitHub/GitLab/Linear) to be configured in Settings.")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
             default:
                 EmptyView()
             }
@@ -433,6 +476,15 @@ enum AutoTask: String, CaseIterable, Identifiable {
     /// auto code-index); this task surfaces the current state for the user to
     /// REVIEW. Structural — no editable prompt template.
     case generateKnowledge
+    /// Documentation generation from code changes. Generates comprehensive
+    /// docs for new APIs, data structures, config changes, and migration guides.
+    case generateDoc
+    /// Issue creation and updates from code review findings and meeting
+    /// action items. Creates or updates GitHub/GitLab issues.
+    case updateIssues
+    /// Plan status updates from external outcome trackers (GitHub/GitLab/Linear/Backlog).
+    /// Polls external providers and updates plan task statuses. Structural — no editable prompt.
+    case updatePlanStatus
 
     var id: String { rawValue }
 
@@ -443,6 +495,9 @@ enum AutoTask: String, CaseIterable, Identifiable {
         case .reviewConflicts:   return "Review Conflicts"
         case .regression:        return "Regression"
         case .generateKnowledge: return "Knowledge"
+        case .generateDoc:       return "Generate Documentation"
+        case .updateIssues:      return "Update Issues"
+        case .updatePlanStatus:  return "Update Plan Status"
         }
     }
 
@@ -453,6 +508,9 @@ enum AutoTask: String, CaseIterable, Identifiable {
         case .reviewConflicts:   return "exclamationmark.triangle"
         case .regression:        return "arrow.uturn.backward.circle"
         case .generateKnowledge: return "brain"
+        case .generateDoc:       return "wand.and.stars"
+        case .updateIssues:      return "checklist"
+        case .updatePlanStatus:  return "chart.bar.doc.horizontal"
         }
     }
 
@@ -467,6 +525,11 @@ enum AutoTask: String, CaseIterable, Identifiable {
                                               set: { config.autoTaskTemplateReviewDoc = $0 })
         case .reviewConflicts: return Binding(get: { config.autoTaskTemplateReviewConflicts },
                                               set: { config.autoTaskTemplateReviewConflicts = $0 })
+        case .generateDoc:     return Binding(get: { config.autoTaskTemplateGenerateDoc },
+                                              set: { config.autoTaskTemplateGenerateDoc = $0 })
+        case .updateIssues:    return Binding(get: { config.autoTaskTemplateUpdateIssues },
+                                              set: { config.autoTaskTemplateUpdateIssues = $0 })
+        case .updatePlanStatus: return nil
         case .regression, .generateKnowledge: return nil
         }
     }
@@ -476,6 +539,9 @@ enum AutoTask: String, CaseIterable, Identifiable {
         case .reviewCode:      config.autoTaskTemplateReviewCode = AppConfig.defaultTemplateReviewCode
         case .reviewDoc:       config.autoTaskTemplateReviewDoc = AppConfig.defaultTemplateReviewDoc
         case .reviewConflicts: config.autoTaskTemplateReviewConflicts = AppConfig.defaultTemplateReviewConflicts
+        case .generateDoc:     config.autoTaskTemplateGenerateDoc = AppConfig.defaultTemplateGenerateDoc
+        case .updateIssues:    config.autoTaskTemplateUpdateIssues = AppConfig.defaultTemplateUpdateIssues
+        case .updatePlanStatus: break       // no template to reset
         case .regression, .generateKnowledge: break       // no template to reset
         }
     }

@@ -20,7 +20,6 @@ struct PlannedInputSource: Identifiable {
 /// `CaptionScraper` is one file plus one registry entry.
 enum InputSourceRegistry {
     static let planned: [PlannedInputSource] = [
-        .init(id: "calendar", icon: "calendar",
-              title: "Calendar", subtitle: "Pull events and agendas"),
+        // No planned sources - remove when ready to add one
     ]
 }

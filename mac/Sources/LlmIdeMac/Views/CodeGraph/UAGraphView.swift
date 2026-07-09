@@ -1307,6 +1307,8 @@ struct UAGraphView: View {
         // Fingerprint only the repo-walk case so an unchanged re-generate can be
         // skipped next time; nil for file-scoped generates.
         let fingerprintRepo = selectedFiles == nil ? repo : nil
+        // Capture main actor value before entering Task.detached to avoid Swift 6 warning
+        let maxDegree = Self.docGraphMaxDegree
         runTask = Task.detached(priority: .userInitiated) {
             let mem: GeneratedMemory
             if let files = selectedFiles {
@@ -1321,7 +1323,7 @@ struct UAGraphView: View {
             // Cap per-node edges before layout: the doc graph over-generates
             // links (a real repo hit ~700k edges / avg degree 124), which no
             // force layout can untangle — it collapses into a hairball line.
-            let docGraph = GraphPrune.capDegree(mem.graph, maxDegree: Self.docGraphMaxDegree)
+            let docGraph = GraphPrune.capDegree(mem.graph, maxDegree: maxDegree)
             let initial = CodeGraphLayout.compute(docGraph,
                                                   canvasSize: CGSize(width: 1200, height: 800))
             if Task.isCancelled { return }
@@ -1368,6 +1370,8 @@ struct UAGraphView: View {
                 code = cachedCode   // already markdown-free (stripped when cached)
                 codeFromCache = true
             }
+            // Capture main actor value before entering Task.detached to avoid Swift 6 warning
+            let maxDegree = Self.docGraphMaxDegree
             let result = await Task.detached(priority: .userInitiated) { () -> (data: CGData, chunks: [MemoryChunk], docs: Int) in
                 let doc: (graph: CGData, chunks: [MemoryChunk], docs: Int)
                 if let reusedDoc {
@@ -1379,7 +1383,7 @@ struct UAGraphView: View {
                 // Cap the doc side's per-node edges (the code side is already
                 // sparse and meaningful) before merging — otherwise the doc
                 // graph's edge explosion collapses the combined layout too.
-                let prunedDoc = GraphPrune.capDegree(doc.graph, maxDegree: Self.docGraphMaxDegree)
+                let prunedDoc = GraphPrune.capDegree(doc.graph, maxDegree: maxDegree)
                 let merged = KnowledgeGraphService.merge(code: code, doc: prunedDoc, chunks: doc.chunks)
                 let laid = CodeGraphLayout.compute(merged, canvasSize: CGSize(width: 1200, height: 800))
                 return (laid, doc.chunks, doc.docs)

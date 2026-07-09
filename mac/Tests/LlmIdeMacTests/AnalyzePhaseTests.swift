@@ -27,11 +27,11 @@ struct AnalyzePhaseTests {
 
     @Test func promptIncludesFilesSymbolsNeighborsAndNotesDir() {
         let prompt = AnalyzePhase.buildPrompt(batch: sampleBatch(), scan: sampleScan(),
-                                              notesDir: "system/graph/notes")
+                                              notesDir: "system/graph")
         #expect(prompt.contains("a.ts"))
         #expect(prompt.contains("foo"))
         #expect(prompt.contains("b.ts"))        // neighbor
-        #expect(prompt.contains("system/graph/notes"))
+        #expect(prompt.contains("system/graph"))
         #expect(prompt.contains("imports"))     // import-link instruction
     }
 

@@ -71,6 +71,96 @@ struct PendingActionCard: View {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(3)
                         }
+                    } else if let args = pendingTool.gitOpArgs {
+                        Text(args.op.rawValue.uppercased())
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                        // Show message for commit, branch for branch ops
+                        if let message = args.message, !message.isEmpty {
+                            Text(descriptionPreview(message))
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        } else if let branch = args.branch, !branch.isEmpty {
+                            Text("branch: \(branch)")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        } else if let ref = args.ref, !ref.isEmpty {
+                            Text("ref: \(ref)")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    } else if let args = pendingTool.getIssueArgs {
+                        Text("Read issue #\(args.iid)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                        Text("Show full issue details")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    } else if let args = pendingTool.updateIssueArgs {
+                        Text("Update issue #\(args.iid)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                        if let title = args.title, !title.isEmpty {
+                            Text(descriptionPreview(title))
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        } else if let state = args.state, !state.isEmpty {
+                            Text("State: \(state)")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    } else if let args = pendingTool.listIssuesArgs {
+                        Text("Search issues")
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                        if let search = args.search, !search.isEmpty {
+                            Text("Search: \(search)")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        } else if let state = args.state, !state.isEmpty {
+                            Text("Filter: \(state)")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        } else if let label = args.label, !label.isEmpty {
+                            Text("Label: \(label)")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    } else if let args = pendingTool.createBranchArgs {
+                        Text("Create branch")
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                        Text(args.branch)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        if let startPoint = args.startPoint, !startPoint.isEmpty {
+                            Text("from: \(startPoint)")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    } else if let args = pendingTool.createPRArgs {
+                        Text("Create merge request")
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                        Text(args.title)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                        Text("\(args.sourceBranch) → \(args.targetBranch)")
+                            .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                     } else {
                         Text(pendingTool.name)
                             .font(.system(size: 13, weight: .regular))
@@ -90,10 +180,16 @@ struct PendingActionCard: View {
 
     private var headline: String {
         switch pendingTool.name {
-        case "create-gitlab-issue": return "WILL CREATE GITLAB ISSUE"
-        case "comment-gitlab-issue": return "WILL COMMENT ON GITLAB ISSUE"
+        case "create-gitlab-issue", "create-issue": return "WILL CREATE ISSUE"
+        case "comment-gitlab-issue", "comment-issue": return "WILL COMMENT ON ISSUE"
+        case "get-issue": return "WILL READ ISSUE"
+        case "update-issue": return "WILL UPDATE ISSUE"
+        case "list-issues": return "WILL LIST ISSUES"
+        case "create-branch": return "WILL CREATE BRANCH"
+        case "create-gitlab-mr", "create-pr": return "WILL CREATE MERGE REQUEST"
         case "trigger-review-code": return "WILL OPEN REVIEW CODE WORKFLOW"
         case "update-file": return "WILL UPDATE FILE"
+        case "git-op": return "WILL RUN GIT OPERATION"
         default: return "PENDING ACTION: \(pendingTool.name.uppercased())"
         }
     }

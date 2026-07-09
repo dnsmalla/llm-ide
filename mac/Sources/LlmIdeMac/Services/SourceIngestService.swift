@@ -40,22 +40,6 @@ struct SourceIngestService {
         await importSource(id: "email")
     }
 
-    /// Fetch + ingest every fetch source, then ONE rescan/notify if any source
-    /// did work. Returns the per-source outcomes keyed by source id.
-    /// (Forward-looking: today only email is a fetch source; a new fetch source
-    /// is picked up automatically.)
-    func importAll() async -> [String: SourceIngestResult] {
-        var results: [String: SourceIngestResult] = [:]
-        var didWork = false
-        for source in SourceRegistry.fetchSources {
-            let r = await source.fetchAndIngest(context)
-            results[source.id] = r
-            if Self.needsRescan(r) { didWork = true }
-        }
-        if didWork { await rescanAndNotify() }
-        return results
-    }
-
     /// Whether a result warrants a Library re-index: only when content may have
     /// landed (`.imported`) or a partial import failed mid-batch (`.failure`).
     /// `.none` (no new items) and `.noSource` change nothing on disk.

@@ -59,13 +59,12 @@ struct EmailSource: InputSource {
         // Generation pass: scans the whole EmailInbox/ folder (not just what
         // was just saved above), so raw files added by hand are picked up
         // too. Dedup is by content hash against existing notes, not DB state.
-        let emailRoot = ctx.root.appendingPathComponent("Email", isDirectory: true)
-        let store = EmailFileStore(root: emailRoot)
-        let knownHashes = store.existingSourceHashes()
+        let writer = EmailNoteWriter(repoRoot: ctx.root)
+        let knownHashes = try? await writer.existingSourceHashes()
         let (processed, failures) = await InboxGenerationPipeline.run(
-            inboxRoot: inboxRoot, knownHashes: knownHashes
+            inboxRoot: inboxRoot, knownHashes: knownHashes ?? []
         ) { item in
-            try await Self.generateNote(item: item, store: store, ctx: ctx)
+            try await Self.generateNote(item: item, writer: writer, ctx: ctx)
         }
 
         if !failures.isEmpty {
@@ -101,14 +100,21 @@ struct EmailSource: InputSource {
     }
 
     /// Classifies one raw inbox item and writes the resulting note/skip stub
-    /// via `EmailFileStore` — the `generate` step passed to
+    /// via `EmailNoteWriter` — the `generate` step passed to
     /// `InboxGenerationPipeline.run`. Bulk senders skip the LLM call
     /// entirely, same as before this pipeline split.
     @MainActor
-    private static func generateNote(item: RawInboxItem, store: EmailFileStore, ctx: SourceContext) async throws {
+    private static func generateNote(item: RawInboxItem, writer: EmailNoteWriter, ctx: SourceContext) async throws {
+        // Build raw file path for tracking (relative from repo root)
+        let rawFileName = item.url.lastPathComponent
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy/MM"
+        let monthPath = dateFormatter.string(from: item.date)
+        let rawFile = "EmailInbox/\(monthPath)/\(rawFileName)"
+
         if EmailFileStore.isBulkSender(item.from) {
-            _ = try store.writeSkipped(from: item.from, date: item.date, subject: item.subject,
-                                       category: "bulk", originalBody: item.body, sourceHash: item.hash)
+            _ = try await writer.writeSkipped(from: item.from, date: item.date, subject: item.subject,
+                                       category: "bulk", originalBody: item.body, sourceHash: item.hash, rawFile: rawFile)
             return
         }
 
@@ -124,11 +130,11 @@ struct EmailSource: InputSource {
 
         switch routeDecision(from: item.from, classification: classification, classifyFailed: failed) {
         case .note(let c):
-            _ = try store.writeNote(from: item.from, date: item.date, subject: item.subject,
-                                    classification: c, originalBody: item.body, sourceHash: item.hash)
+            _ = try await writer.writeNote(from: item.from, date: item.date, subject: item.subject,
+                                    classification: c, originalBody: item.body, sourceHash: item.hash, rawFile: rawFile)
         case .skipped(let category):
-            _ = try store.writeSkipped(from: item.from, date: item.date, subject: item.subject,
-                                       category: category, originalBody: item.body, sourceHash: item.hash)
+            _ = try await writer.writeSkipped(from: item.from, date: item.date, subject: item.subject,
+                                       category: category, originalBody: item.body, sourceHash: item.hash, rawFile: rawFile)
         }
     }
 }

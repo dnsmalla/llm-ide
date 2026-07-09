@@ -760,14 +760,26 @@ struct AppShell: View {
             ? fileURL.deletingPathExtension().lastPathComponent
             : fm.title
         let indexer = appEnv?.indexer
-        let notesOutputFolder = appEnv?.notesOutputFolder
+        let projectRoot = appEnv?.projectRoot
 
         Task.detached(priority: .background) { [api] in
-            // Build .docx path before entering the shared service.
+            guard let projectRoot = projectRoot else { return }
+
+            // Build raw file path for tracking
+            let rawFileName = fileURL.lastPathComponent
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy/MM"
+            let monthPath = dateFormatter.string(from: fm.startedAt)
+            let rawFile = "meetings/\(monthPath)/\(rawFileName)"
+
+            // Create MeetingNoteWriter
+            let writer = MeetingNoteWriter(repoRoot: projectRoot)
+
+            // Build .docx path using unified structure
             let dateSlug = AppDateFormatter.dateHourMinuteLocal(fm.startedAt)
             let stem     = fileURL.deletingPathExtension().lastPathComponent.prefix(8)
-            let docxURL  = notesOutputFolder?.appendingPathComponent(
-                "\(dateSlug)-\(stem)-meeting-notes.docx")
+            let filename = "\(dateSlug)-\(stem)-meeting-notes.docx"
+            let docxURL  = writer.outputDirectory(for: fm.startedAt).appendingPathComponent(filename)
 
             // 1. AI summary + write summary + generate .docx (shared pipeline).
             await MeetingSummarizationService.run(
@@ -782,7 +794,20 @@ struct AppShell: View {
                 docxOutputURL: docxURL,
                 root: root)
 
-            // 2. Re-scan so the library row updates with the new gist.
+            // 2. Read the generated .docx and save it via MeetingNoteWriter for unified storage
+            if let docxData = try? Data(contentsOf: docxURL) {
+                _ = try? await writer.writeNote(
+                    docxContent: docxData,
+                    title: title,
+                    startedAt: fm.startedAt,
+                    participants: fm.participants,
+                    rawFile: rawFile
+                )
+                // Remove the temporary .docx file
+                try? FileManager.default.removeItem(at: docxURL)
+            }
+
+            // 3. Re-scan so the library row updates with the new gist.
             try? indexer?.fullScan()
 
             await MainActor.run {
@@ -814,9 +839,11 @@ struct AppShell: View {
             : payload.meetingTitle
         // Capture appEnv on main actor before jumping to background.
         let indexer = appEnv?.indexer
-        let notesOutputFolder = appEnv?.notesOutputFolder
+        let projectRoot = appEnv?.projectRoot
 
         Task.detached(priority: .background) { [api] in
+            guard let projectRoot = projectRoot else { return }
+
             do {
                 // 1. Create the partial .md file.
                 let handle = try store.createPartial(
@@ -843,6 +870,13 @@ struct AppShell: View {
                     endedAt: Date(),
                     participants: payload.participants)
 
+                // Build raw file path for tracking
+                let rawFileName = url.lastPathComponent
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyy/MM"
+                let monthPath = dateFormatter.string(from: startedAt)
+                let rawFile = "meetings/\(monthPath)/\(rawFileName)"
+
                 try? PartialRecovery(notesFolder: root).cleanup(id: payload.sessionId)
 
                 // 4. Force the Library index to pick up the new file immediately
@@ -850,13 +884,16 @@ struct AppShell: View {
                 //    fullScan() is thread-safe (serialised via scanLock).
                 try? indexer?.fullScan()
 
-                // 5+7. AI summary + .docx note (non-fatal, 5-minute hard cap).
-                //      Include a short session-id suffix to prevent overwriting
-                //      when two meetings start within the same minute.
+                // 5. Create MeetingNoteWriter for unified storage
+                let writer = MeetingNoteWriter(repoRoot: projectRoot)
+
+                // Build .docx path using unified structure
                 let dateSlug = AppDateFormatter.dateHourMinuteLocal(startedAt)
                 let idSuffix = payload.sessionId.prefix(8)
-                let docxURL  = notesOutputFolder?.appendingPathComponent(
-                    "\(dateSlug)-\(idSuffix)-meeting-notes.docx")
+                let filename = "\(dateSlug)-\(idSuffix)-meeting-notes.docx"
+                let docxURL  = writer.outputDirectory(for: startedAt).appendingPathComponent(filename)
+
+                // 6+8. AI summary + .docx note (non-fatal, 5-minute hard cap).
                 await MeetingSummarizationService.run(
                     api: api,
                     transcript: payload.transcript,
@@ -869,7 +906,20 @@ struct AppShell: View {
                     docxOutputURL: docxURL,
                     root: root)
 
-                // 6. Re-scan so the index picks up any frontmatter changes.
+                // 7. Read the generated .docx and save it via MeetingNoteWriter for unified storage
+                if let docxData = try? Data(contentsOf: docxURL) {
+                    _ = try? await writer.writeNote(
+                        docxContent: docxData,
+                        title: title,
+                        startedAt: startedAt,
+                        participants: payload.participants,
+                        rawFile: rawFile
+                    )
+                    // Remove the temporary .docx file
+                    try? FileManager.default.removeItem(at: docxURL)
+                }
+
+                // 8. Re-scan so the index picks up any frontmatter changes.
                 try? indexer?.fullScan()
 
                 // Keep the raw .md transcript in meetings/ so it

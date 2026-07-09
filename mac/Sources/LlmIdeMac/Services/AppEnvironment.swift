@@ -10,7 +10,7 @@ final class AppEnvironment {
     /// The active project root, if any.  Stored at init time so that
     /// `notesOutputFolder` can return `<projectRoot>/notes/` when a project
     /// is open instead of deriving the path from `meetingsFolder`.
-    private let projectRoot: URL?
+    public let projectRoot: URL?
 
     /// - Parameter indexRootURL: Directory that contains (or will contain)
     ///   the `system/index.sqlite` file.  Pass the **project root** when

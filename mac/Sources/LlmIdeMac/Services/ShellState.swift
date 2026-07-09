@@ -16,7 +16,7 @@ final class ShellState {
             case .live:      return "Live"
             case .explorer:  return "Explorer"
             case .search:    return "Search"
-            case .plans:     return "Review Doc"
+            case .plans:     return "Plans"
             case .conflicts: return "Review Conflicts"
             case .sourceControl: return "Source Control"
             case .issues:    return "Issues"

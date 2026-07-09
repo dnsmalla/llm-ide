@@ -5,6 +5,7 @@ import SwiftUI
 struct AttachmentChip: View {
     let path: String
     let charCount: Int
+    let isBinary: Bool
     let onRemove: () -> Void
 
     @EnvironmentObject var theme: ThemeStore
@@ -12,13 +13,13 @@ struct AttachmentChip: View {
     var body: some View {
         let t = theme.current
         HStack(spacing: 4) {
-            Image(systemName: "doc.text")
+            Image(systemName: isBinary ? "doc" : "doc.text")
                 .font(.system(size: 10))
                 .foregroundStyle(t.textMuted)
             Text(displayPath)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(t.text)
-                .help(path + "  ·  \(charCount) chars")
+                .help(helpText)
             Button(action: onRemove) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 11))
@@ -37,5 +38,18 @@ struct AttachmentChip: View {
         let parts = path.split(separator: "/")
         guard let last = parts.last else { return path }
         return parts.count >= 2 ? "\(parts[parts.count - 2])/\(last)" : String(last)
+    }
+
+    private var helpText: String {
+        let sizeLabel: String
+        if isBinary {
+            // For binary files, charCount is the base64 length. Estimate original size.
+            // Base64 encoding increases size by ~33%, so we divide by 1.33 to estimate.
+            let estimatedBytes = Int(Double(charCount) / 1.33)
+            sizeLabel = ByteCountFormatter.string(fromByteCount: Int64(estimatedBytes), countStyle: .file)
+        } else {
+            sizeLabel = "\(charCount) chars"
+        }
+        return "\(path)  ·  \(sizeLabel)"
     }
 }

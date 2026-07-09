@@ -6,9 +6,14 @@
 export { memoryService } from './memory-service.ts';
 export { graphService } from './graph-service.ts';
 export { automationService } from './automation-service.ts';
+export { NoteService } from './note-service.ts';
 export type {
   AgentContext,
   UIAction,
   CleanupReport,
-  ContradictionReport
+  ContradictionReport,
+  NoteMetadata,
+  NoteFilter,
+  NoteType
 } from './automation-service.ts';
+export type { NoteMetadata, NoteFilter, NoteType } from './note-service.ts';

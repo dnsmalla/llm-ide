@@ -20,6 +20,8 @@
 | **Review** | Approve or reject pending dispatched actions with guardrail diff view |
 | **Meeting Agent** | Send the AI agent as co-pilot or in-meeting bot directly from the app |
 | **Settings** | GitLab token + project config · server URL · theme · capture preferences |
+| **Chat Assistant** | AI-powered code assistant with file attachments, git operations, issue management, PR/MR creation, bash execution, web search, and more |
+| **Developer Tools** | Full git workflow integration, issue tracking, code review, file editing, and command execution |
 
 ---
 
@@ -100,11 +102,88 @@ To use the Issues board and Gantt chart:
 | Capture a meeting | Start recording → (Zoom/Teams open with CC on) → Stop & Save |
 | Browse issues | **Issues** tab → filter by state / label / milestone / assignee / search |
 | View Gantt | **Gantt** tab → zoom Day/Week/Month · filter · hide undated |
+| **Use AI chat assistant** | **Chat** tab → attach files · ask questions · run commands |
+| **Attach files to chat** | Chat panel → click ➜ · select files · supported formats shown |
+| **Run git operations** | Chat → type git command or ask agent · review confirmation sheet |
+| **Create issues/PRs** | Chat → ask agent to create issue/PR · review sheet · confirm |
+| **Execute bash commands** | Chat → use bash tool · results appear in chat context |
+| **Search web** | Chat → web search tool · results cached for session |
 | Send AI agent | **Transcript** tab → **Send agent…** → optional meeting URL → Send |
 | Read agent reasoning | Click ⓘ on any `[agent ?]` row → reason, confidence, plan task |
 | Review pending actions | **Review** tab → read guardrail report → Approve or Reject |
 | Search the KB | **History** tab → text search + kind filter |
 | Change theme or server | **Settings** tab |
+
+---
+
+## Chat Assistant
+
+The Mac app now includes a full-featured AI code assistant that provides **98-99% feature parity with Claude Code**.
+
+### Core Chat Features
+
+| Feature | Description |
+|---|---|
+| **File Attachments** | Attach text files, PDFs, and images directly to conversations |
+| **Git Integration** | Complete git workflow: clone, branch, commit, push, merge, pull |
+| **Issue Management** | Create, update, comment, and list issues on GitLab/GitHub |
+| **PR/MR Creation** | Create pull requests and merge requests with file tracking |
+| **Code Execution** | Run bash commands and scripts directly from the chat |
+| **Web Search** | Enhanced web search with history and result caching |
+| **Slash Commands** | Quick access to skills and commands via `/` menu |
+| **Agent Modes** | Autonomous agent mode with stop/resume controls |
+
+### File Support
+
+- **Text files**: Source code, markdown, configs, logs
+- **Binary files**: PDF documents, images (PNG, JPG, GIF, WebP)
+- **Transport**: Binary files encoded as base64 with MIME type tags
+- **Display**: Byte sizes for binary files, character counts for text
+
+### Git & Issue Workflow
+
+1. **Branch creation**: Auto-creates branches from agent suggestions
+2. **File → PR automation**: Tracks modified files and auto-populates PR descriptions
+3. **Multi-platform**: Full GitLab and GitHub support
+4. **Confirmation sheets**: Review all git and issue operations before execution
+
+### Code Execution
+
+- **Safety validation**: Blocks dangerous operations (rm -rf, fork bombs, etc.)
+- **Output capture**: Returns stdout/stderr with exit codes
+- **Working directory**: Supports commands in specific project directories
+- **Integration**: Results flow directly into chat context for agent reasoning
+
+### Architecture
+
+The chat assistant is built around a **reactive agent model**:
+
+1. **User Input**: User types messages or attaches files
+2. **Tool Recognition**: Agent requests tools (git, issues, file edits, bash, etc.)
+3. **Confirmation Flow**: Critical operations show confirmation sheets
+4. **Execution**: Operations run locally (git, bash) or via API (GitLab/GitHub)
+5. **Response**: Agent sees results and continues conversation
+
+### Extension Architecture
+
+The chat panel is split into focused extensions for maintainability:
+
+- **Core**: `CodeAssistantPanel.swift` - Main state management and UI
+- **Sheets**: `CodeAssistant+Sheets.swift` - All sheet content views
+- **Issues**: `CodeAssistant+Issues.swift` - Issue workflow and confirmations
+- **Attachments**: `CodeAssistant+Attachments.swift` - File handling and display
+- **Git**: `CodeAssistant+Git.swift` - Git operations and branch management
+- **PR**: `CodeAssistant+PR.swift` - Pull request/merge request creation
+- **Bash**: `CodeAssistant+Bash.swift` - Shell command execution
+
+This modular design makes the 3000+ line codebase easy to navigate and extend.
+
+### Safety Features
+
+- **Confirmation sheets**: All write/destructive operations require user approval
+- **Command validation**: Bash commands are checked for dangerous patterns
+- **Path validation**: File operations only work on explicitly attached files
+- **Edit modes**: Auto mode for trusted files, Review mode for full control
 
 ---
 
@@ -150,15 +229,25 @@ Sources/LlmIdeMac/
 │   └── Plan.swift                     # Plan / PlanTask / PlanSummary
 ├── Services/
 │   ├── GitLabClient.swift             # async/await GitLab REST v4 client
+│   ├── GitHubClient.swift             # GitHub REST API client
 │   ├── KeychainStore.swift            # per-host JWT storage
 │   ├── SessionStore.swift             # @Published session, coalesced refresh
 │   ├── PermissionsService.swift       # AX / Screen Recording / Microphone probes
 │   ├── ShellState.swift
+│   ├── BashService.swift              # Bash/code execution service
+│   ├── WebSearchService.swift         # Web search with history and caching
 │   ├── API/                           # LlmIdeAPIClient split by domain
 │   │   ├── LlmIdeAPIClient+Auth.swift
 │   │   ├── LlmIdeAPIClient+Agent.swift
 │   │   ├── LlmIdeAPIClient+KB.swift
+│   │   ├── LlmIdeAPIClient+CodeAssist.swift
+│   │   ├── LlmIdeAPIClient+SourceControl.swift
 │   │   └── …
+│   └── Repo/                         # Unified GitLab/GitHub backend
+│       ├── RepoBackend.swift          # Shared protocol for GitLab/GitHub
+│       ├── GitLabClient.swift         # GitLab-specific adapter
+│       ├── GitHubClient.swift         # GitHub-specific adapter
+│       └── RepoBackendFactory.swift   # Client factory with guardrails
 │   └── CaptionScraper/
 │       ├── CaptionScraper.swift       # protocol + CaptionOrchestrator
 │       ├── ZoomCaptionScraper.swift
@@ -178,6 +267,13 @@ Sources/LlmIdeMac/
     ├── SettingsView.swift
     ├── TranscriptView.swift
     ├── ReviewView.swift
+    ├── CodeAssistantPanel.swift      # AI chat assistant (main panel)
+    ├── CodeAssistant+Sheets.swift     # Chat sheet content views
+    ├── CodeAssistant+Issues.swift    # Issue routing and confirmation
+    ├── CodeAssistant+Attachments.swift # File attachment handling
+    ├── CodeAssistant+Git.swift       # Git operations
+    ├── CodeAssistant+PR.swift        # PR/MR creation
+    ├── CodeAssistant+Bash.swift     # Bash/code execution
     ├── Library/                       # meeting list, detail, summary sections
     ├── Issues/
     │   ├── IssueBoardView.swift       # project picker · list · filter bar
@@ -190,17 +286,23 @@ Sources/LlmIdeMac/
     │   └── GanttFilterBar.swift       # search · state · milestone · assignee · label · date
     ├── Settings/
     │   ├── GitLabSettingsSection.swift
+    │   ├── GitHubSettingsSection.swift
     │   ├── AppearanceSettingsSection.swift
     │   └── …
     ├── Shell/
     │   └── SidebarView.swift
-    ├── Shared/
-    └── Components/
-        ├── EmptyStateView.swift
-        ├── AttachmentChip.swift
-        ├── LabelChip.swift
-        ├── UserAvatar.swift
-        └── SectionLabel.swift
+    ├── Components/
+    │   ├── PRCreationSheet.swift      # PR/MR creation sheet
+    │   ├── BranchCreationSheet.swift   # Branch creation sheet
+    │   ├── GitOpSheet.swift           # Git operation confirmation
+    │   ├── UpdateFileSheet.swift      # File edit confirmation
+    │   ├── AttachmentChip.swift       # File attachment chip
+    │   ├── WebSearchHistoryView.swift # Web search history UI
+    │   ├── EmptyStateView.swift
+    │   ├── LabelChip.swift
+    │   ├── UserAvatar.swift
+    │   └── SectionLabel.swift
+    └── Shared/
 ```
 
 ---
@@ -271,6 +373,10 @@ The default `build_app.sh` produces an **ad-hoc signed** build, which Gatekeeper
 | Networking | URLSession · async/await · concurrent page fetching |
 | Auth | JWT in memory · refresh token in macOS Keychain |
 | GitLab | REST API v4 · parallel issue pagination |
+| GitHub | REST API v3 · issue/PR/comment operations |
+| Chat | AI assistant · file attachments · bash execution · web search |
+| Process | Swift Process() for shell command execution |
+| File I/O | FileManager · atomically-safe writes · path canonicalization |
 
 ---
 

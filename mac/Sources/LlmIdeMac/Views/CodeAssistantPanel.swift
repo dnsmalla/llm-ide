@@ -45,9 +45,9 @@ struct CodeAssistantPanel: View {
 
     @AppStorage("MEETNOTES_CURRENT_CHAT_SESSION_ID") private var currentSessionIDString: String = ""
 
-    @State private var attachments: [LlmIdeAPIClient.CodeAttachment] = []
-    /// Debug alert message for paste testing
-    @State private var pasteDebugAlert: String = ""
+    @State var attachments: [LlmIdeAPIClient.CodeAttachment] = []
+    /// Files modified during this session (for File → PR automation)
+    @State var modifiedFiles: Set<String> = []
     /// Skills/subagents the user invoked from the "/" menu, shown as removable
     /// chips so the composer stays clean. Two flavours, consumed one-shot on the
     /// next send:
@@ -55,20 +55,20 @@ struct CodeAssistantPanel: View {
     ///     sent and the server injects its SKILL.md as instructions to follow.
     ///   - `.directive(text)` — in-built skill/subagent the agent runs by name;
     ///     the text ("Use the X skill:") is prepended to the outgoing message.
-    private struct InvokedSkill: Identifiable, Equatable {
+    struct InvokedSkill: Identifiable, Equatable {
         let id: String
         let name: String
         enum Action: Equatable { case library(String); case directive(String) }
         let action: Action
         var iconName: String { if case .library = action { return "books.vertical" } else { return "sparkles" } }
     }
-    @State private var selectedSkills: [InvokedSkill] = []
+    @State var selectedSkills: [InvokedSkill] = []
     /// Per-request project-memory overhead from the last turn, surfaced on the
     /// 🧠 button so the always-on memory block's token cost is visible.
     @State private var lastMemoryTokens: Int?
     @State private var lastMemoryHasChat = false
     @State private var showLibraryPicker = false
-    @State private var history: [LlmIdeAPIClient.CodeAssistTurn] = []
+    @State var history: [LlmIdeAPIClient.CodeAssistTurn] = []
     @State private var sessions: [ChatSession] = []
     @State private var showingSessionPicker: Bool = false
     @State private var draft: String = ""
@@ -79,7 +79,7 @@ struct CodeAssistantPanel: View {
     @State private var sentPrompts: [String] = []
     @State private var historyIndex: Int? = nil
     @State private var draftStash: String = ""
-    @State private var busy: Bool = false
+    @State var busy: Bool = false
     /// Live agent status streamed from /code-assist (SSE): "Searching the web…",
     /// "Writing the answer…", etc. Shown in place of a static "Thinking…" so a
     /// 60–90s agent turn doesn't look hung. Reset at the start/end of each turn.
@@ -105,7 +105,7 @@ struct CodeAssistantPanel: View {
     @State private var autoAttachedPath: String?
     /// Transient notice shown when a picked/selected file can't be attached
     /// (e.g. an image or binary). Prevents the silent drop on the Visual page.
-    @State private var attachNotice: String?
+    @State var attachNotice: String?
     @State private var selectedModel: String = ""
     /// Live provider models, keyed by provider id ("openai"/"google"/...).
     /// Populated from the provider's models endpoint; falls back to the
@@ -117,42 +117,44 @@ struct CodeAssistantPanel: View {
     @AppStorage("MEETNOTES_CUSTOM_MODELS") private var customModelsRaw = "{}"
     @State private var showAddModel = false
     @State private var newModelId = ""
-    @State private var pendingTool: PendingTool?
+    @State var pendingTool: PendingTool?
     /// Snapshot of recent issues for the active project, refreshed on
     /// panel mount and every ~60s. Bundled into agentContext so the
     /// agent recognises references like "fix the colourful icons issue".
-    @State private var recentIssues: [AgentContext.RecentIssue] = []
-    @State private var showingIssueSheet: Bool = false
-    @State private var showingCommentSheet: Bool = false
-    @State private var showingGetIssueSheet: Bool = false
-    @State private var showingUpdateIssueSheet: Bool = false
-    @State private var showingListIssuesSheet: Bool = false
-    @State private var showingCreateBranchSheet: Bool = false
+    @State var recentIssues: [AgentContext.RecentIssue] = []
+    @State var showingIssueSheet: Bool = false
+    @State var showingCommentSheet: Bool = false
+    @State var showingGetIssueSheet: Bool = false
+    @State var showingUpdateIssueSheet: Bool = false
+    @State var showingListIssuesSheet: Bool = false
+    @State var showingCreateBranchSheet: Bool = false
     // PR creation disabled - requires additional backend support
-    // @State private var showingCreatePRSheet: Bool = false
-    @State private var showingReviewCodeSheet: Bool = false
-    @State private var showingUpdateFileSheet: Bool = false
-    @State private var showingGitOpSheet: Bool = false
+    @State var showingCreatePRSheet: Bool = false
+    @State var showingReviewCodeSheet: Bool = false
+    @State var showingUpdateFileSheet: Bool = false
+    @State var showingGitOpSheet: Bool = false
     /// Git ops auto-run (no confirm card) so far within the current user turn —
     /// counting BOTH the primary turn and follow-ups, so "commit and push" can
     /// complete hands-free in Auto mode. Bounded by maxAutoGitOpsPerTurn so a
     /// looping agent can't fire endless write ops. Reset at each user turn start.
-    @State private var autoGitOpsThisTurn = 0
-    private static let maxAutoGitOpsPerTurn = 10
+    @State var autoGitOpsThisTurn = 0
+    static let maxAutoGitOpsPerTurn = 10
     /// Assistant turns the user has explicitly expanded. Combined with the
     /// "latest is always open" rule (see isAssistantExpanded), this collapses
     /// older replies to a lightweight text preview so a long chat stays short.
     @State private var expandedTurns: Set<UUID> = []
-    @State private var reportingFault: FaultReportContext?
+    @State var reportingFault: FaultReportContext?
     /// How file-edit tool calls are accepted. Persisted across launches.
     /// `.review` (default) shows the confirmation card + popup; `.auto`
     /// applies `update-file` edits immediately (to attached files only —
     /// the GitLab actions always confirm regardless).
     @AppStorage("codeAssist.editMode") private var editModeRaw = EditAcceptanceMode.review.rawValue
-    private var editMode: EditAcceptanceMode { EditAcceptanceMode(rawValue: editModeRaw) ?? .review }
+    var editMode: EditAcceptanceMode { EditAcceptanceMode(rawValue: editModeRaw) ?? .review }
     @StateObject private var session = CodeAssistantSession()
     /// Cursor-style "/" (command/skill) + "@" (file) autocomplete for the input.
     @StateObject private var completion = CompletionController()
+    /// Web search enhancement: history and caching
+    @StateObject private var webSearch = WebSearchService()
     /// Project-memory viewer sheet (what the assistant auto-learned).
     @State private var showProjectMemory = false
     /// Captured at the moment the banner appears so Save uses the
@@ -251,6 +253,9 @@ struct CodeAssistantPanel: View {
             .sheet(isPresented: $showingCreateBranchSheet) {
                 showingCreateBranchSheetContent
             }
+            .sheet(isPresented: $showingCreatePRSheet) {
+                showingCreatePRSheetContent
+            }
             .sheet(item: $reportingFault) { ctx in
                 reportingFaultSheetContent(ctx)
             }
@@ -261,11 +266,6 @@ struct CodeAssistantPanel: View {
                 if pendingTool?.gitOpArgs != nil { pendingTool = nil }
             }) {
                 showingGitOpSheetContent
-            }
-            .alert("Paste Debug", isPresented: .constant(!pasteDebugAlert.isEmpty)) {
-                Button("OK") { pasteDebugAlert = "" }
-            } message: {
-                Text(pasteDebugAlert)
             }
     }
 
@@ -594,7 +594,7 @@ struct CodeAssistantPanel: View {
         }
     }
 
-    @State private var branchSheetContext: AgentContext?
+    @State var branchSheetContext: AgentContext?
 
     private var showingCreateBranchSheetContent: some View {
         Group {
@@ -698,7 +698,7 @@ struct CodeAssistantPanel: View {
     /// `config.activeRepoLocalURL`: GitLab project first, then GitHub.
     /// Returns nil when nothing is configured or the active project is
     /// missing the bits we need (token, resolved ID).
-    private func resolveIssueTarget() -> IssueTarget? {
+    func resolveIssueTarget() -> IssueTarget? {
         if !config.gitLabToken.isEmpty,
            let p = config.gitLabSavedProjects.first(where: { $0.isActive }),
            let id = p.resolvedId
@@ -720,7 +720,7 @@ struct CodeAssistantPanel: View {
     /// Build a RepoIssuePayload from the local FaultReport and POST it via
     /// the matching RepoBackend. Returns the new issue's web URL on
     /// success.
-    private func fileFaultAsIssue(_ fault: FaultReport, target: IssueTarget) async throws -> URL? {
+    func fileFaultAsIssue(_ fault: FaultReport, target: IssueTarget) async throws -> URL? {
         let title = fault.notes
             .split(whereSeparator: { $0.isNewline })
             .first.map(String.init)?
@@ -752,8 +752,8 @@ struct CodeAssistantPanel: View {
             labels: labels
         )
         let client: RepoBackend = (target.kind == .gitlab)
-            ? RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
-            : RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
+            ? RepoBackendFactory.guarded(GitLabClient(config: config), config: config) as RepoBackend
+            : RepoBackendFactory.guarded(GitHubClient(config: config), config: config) as RepoBackend
         let issue = try await client.createIssue(projectId: target.projectId, payload: payload)
         return URL(string: issue.webUrl)
     }
@@ -920,9 +920,8 @@ struct CodeAssistantPanel: View {
                                     case "create-branch":
                                         showingCreateBranchSheet = true
                                         Task { branchSheetContext = await buildAgentContext() }
-                                    // PR creation disabled - requires additional backend support
-                                    // case "create-gitlab-mr", "create-pr":
-                                    //     showingCreatePRSheet = true
+                                    case "create-gitlab-mr", "create-pr":
+                                        showingCreatePRSheet = true
                                     case "trigger-review-code":
                                         showingReviewCodeSheet = true
                                     case "update-file":
@@ -933,6 +932,8 @@ struct CodeAssistantPanel: View {
                                         } else {
                                             showingGitOpSheet = true
                                         }
+                                    case "bash":
+                                        Task { await runBashCommand(pt.bashArgs) }
                                     default:
                                         break
                                     }
@@ -1159,7 +1160,7 @@ struct CodeAssistantPanel: View {
     /// points at the clone (`code/<repo>`), so faults written by this
     /// panel landed under `code/<repo>/system/faults` and were
     /// invisible to RegressionView (which reads the project root).
-    private var activeRepoRoot: URL? {
+    var activeRepoRoot: URL? {
         WorkspaceRoot.resolve(config: config, projectStore: projectStore)
     }
 
@@ -1175,7 +1176,7 @@ struct CodeAssistantPanel: View {
     /// Candidate repo paths ("~/…") for the project-memory viewer. The server
     /// resolves the first allow-listed one (the agent's actual write target),
     /// so we hand it the full indexedRepos list rather than guessing first.
-    private var activeMemoryRepos: [String] {
+    internal var activeMemoryRepos: [String] {
         let codeItems = library.items(for: .code)
         let grouped = Dictionary(grouping: codeItems.filter { $0.folderOrigin != nil },
                                  by: { $0.folderOrigin! })
@@ -1188,7 +1189,7 @@ struct CodeAssistantPanel: View {
 
     /// The open Explorer folder ("~/…") for the project-memory viewer, so memory
     /// resolves to the open project even when it isn't a formally-indexed repo.
-    private var activeMemoryWorkspaceRoot: String? {
+    internal var activeMemoryWorkspaceRoot: String? {
         WorkspaceRoot.resolve(config: config, projectStore: projectStore)
             .map { homeRelativePath($0.path) }
     }
@@ -1382,7 +1383,7 @@ struct CodeAssistantPanel: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(attachments) { a in
-                    AttachmentChip(path: a.path, charCount: a.content.count) {
+                    AttachmentChip(path: a.path, charCount: a.content.count, isBinary: a.content.hasPrefix("[binary:")) {
                         attachments.removeAll { $0.path == a.path }
                     }
                 }
@@ -1531,10 +1532,7 @@ struct CodeAssistantPanel: View {
                     onArrowDown: { arrowDownAction() },
                     onReturn: { if completion.isOpen { acceptCompletion(); return true }; return false },
                     onTab: { if completion.isOpen { acceptCompletion(); return true }; return false },
-                    onEscape: { if completion.isOpen { completion.close(); return true }; return false },
-                    onPaste: { items in
-                        handlePastedItems(items)
-                    }
+                    onEscape: { if completion.isOpen { completion.close(); return true }; return false }
                 )
                 .frame(height: composerHeight)
                 .padding(.horizontal, 8)
@@ -1923,124 +1921,6 @@ struct CodeAssistantPanel: View {
 
     enum AttachOutcome { case added, duplicate, notText, unreadable }
 
-    /// Attaches a file’s text content. Returns why it did or didn’t so
-    /// single-file callers can surface a notice instead of dropping
-    /// silently (the bug behind the “Visual” page ignoring images).
-    @discardableResult
-    private func addFile(url: URL) -> AttachOutcome {
-        let path = displayPath(url)
-        // Idempotent — re-adding the same file does nothing.
-        if attachments.contains(where: { $0.path == path }) { return .duplicate }
-        do {
-            let data = try Data(contentsOf: url)
-            // Reject obviously-binary files (≥1% NUL bytes in the first 4K).
-            // An empty file has no bytes to probe — it's valid (empty) text, so
-            // don't let the `0 >= 0` ratio misclassify it as binary.
-            let probe = data.prefix(4096)
-            if !probe.isEmpty {
-                let nulCount = probe.reduce(into: 0) { acc, b in if b == 0 { acc += 1 } }
-                if nulCount * 100 >= probe.count { return .notText }
-            }
-            guard let text = String(data: data, encoding: .utf8) else { return .notText }
-            attachments.append(.init(path: path, content: text))
-            return .added
-        } catch {
-            return .unreadable
-        }
-    }
-
-    /// Replace the home prefix with `~/` for the chip label / prompt.
-    /// Prevents the user's username leaking unnecessarily into LLM
-    /// logs upstream.
-    private func displayPath(_ url: URL) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let p = url.path
-        if p.hasPrefix(home) { return "~" + p.dropFirst(home.count) }
-        return p
-    }
-
-    /// Handles pasted items (images or files) from the pasteboard.
-    /// For images, saves them to temporary files and attaches them to the chat.
-    private func handlePastedItems(_ items: [NSPasteboardItem]) {
-        print("📥 handlePastedItems called with \(items.count) items")
-
-        for item in items {
-            if let types = item.types as? [NSPasteboard.PasteboardType] {
-                let typeStrings = types.map { $0.rawValue }
-                print("🔍 Processing item with types: \(typeStrings)")
-
-                // Try to extract image data
-                for pasteboardType in types {
-                    let typeString = pasteboardType.rawValue
-                    print("🔍 Checking type: \(typeString)")
-
-                    if let data = item.data(forType: pasteboardType) {
-                        print("📊 Found \(typeString): \(data.count) bytes")
-
-                        // If it's an image type, save it
-                        if typeString.contains("png") {
-                            print("✅ Saving as PNG")
-                            saveAndAttachImage(data, fileExtension: "png")
-                            return
-                        } else if typeString.contains("jpeg") || typeString.contains("jpg") {
-                            print("✅ Saving as JPEG")
-                            saveAndAttachImage(data, fileExtension: "jpg")
-                            return
-                        } else if typeString.contains("tiff") {
-                            print("✅ Saving as TIFF")
-                            saveAndAttachImage(data, fileExtension: "tiff")
-                            return
-                        } else if typeString.contains("image") {
-                            print("✅ Saving as generic image")
-                            saveAndAttachImage(data, fileExtension: "png")
-                            return
-                        }
-                    }
-                }
-            }
-        }
-        print("❌ No image data found in pasteboard items")
-    }
-
-    /// Saves image data to a temporary file and attaches it to the chat.
-    /// Converts binary image data to base64 encoding so it can be sent as text content.
-    private func saveAndAttachImage(_ data: Data, fileExtension: String) {
-        print("💾 saveAndAttachImage called: \(data.count) bytes, extension: \(fileExtension)")
-
-        let tempDir = FileManager.default.temporaryDirectory
-        let fileName = "paste-\(UUID().uuidString).\(fileExtension)"
-        let tempURL = tempDir.appendingPathComponent(fileName)
-
-        do {
-            // Save the original binary data to temp file
-            try data.write(to: tempURL)
-            print("✅ Saved to temp file: \(tempURL.path)")
-
-            // Convert to base64 for text-based attachment system
-            let base64String = data.base64EncodedString()
-            let path = displayPath(tempURL)
-            print("📎 Path: \(path), Base64 length: \(base64String.count)")
-
-            // Check if already attached
-            if attachments.contains(where: { $0.path == path }) {
-                print("⚠️ Already attached, skipping")
-                pasteDebugAlert += "⚠️ Already attached\n"
-                return
-            }
-
-            // Create attachment with base64 content
-            let content = "[Image: \(fileExtension.uppercased())]\nBase64: \(base64String)"
-            attachments.append(.init(path: path, content: content))
-            print("✅ Attachment added! Total attachments: \(attachments.count)")
-
-            let successMessage = "✅ Image attached!\n📎 File: \(path)\n📊 Size: \(data.count) bytes\n📎 Total attachments: \(attachments.count)"
-            pasteDebugAlert += successMessage + "\n"
-        } catch {
-            print("❌ Failed to save pasted image to \(tempURL.path): \(error)")
-            pasteDebugAlert += "❌ Error: \(error)\n"
-        }
-    }
-
     // MARK: - Agent context
 
     /// Pure derivation: maps an active project (if any) to an
@@ -2183,7 +2063,7 @@ struct CodeAssistantPanel: View {
         }
     }
 
-    private func refreshRecentIssuesOnce() async {
+    func refreshRecentIssuesOnce() async {
         // Determine the active project and its provider
         guard let activeProject = Self.deriveActiveProject(from: projectStore.activeProject)
             ?? Self.deriveActiveProject(fromConfig: config),
@@ -2473,7 +2353,7 @@ struct CodeAssistantPanel: View {
     /// the user's edited args. On success, appends a synthetic user turn so
     /// the agent can acknowledge in the next round, and re-POSTs /code-assist.
     @MainActor
-    private func confirmCreateIssue(_ args: CreateIssueSheet.Args,
+    func confirmCreateIssue(_ args: CreateIssueSheet.Args,
                                     target: IssueTarget) async -> CreateIssueSheet.ConfirmResult {
         let client: RepoBackend = target.kind == .gitlab
             ? RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
@@ -2507,7 +2387,7 @@ struct CodeAssistantPanel: View {
     /// Returns nil if no match — the caller refuses to write in that
     /// case (defence in depth against the agent emitting a path the
     /// user never attached).
-    private func matchingAttachment(for proposedPath: String,
+    func matchingAttachment(for proposedPath: String,
                                     allowBasenameFallback: Bool = true)
         -> LlmIdeAPIClient.CodeAttachment?
     {
@@ -2550,7 +2430,7 @@ struct CodeAssistantPanel: View {
     /// Append a synthetic ack turn and re-invoke the agent so it can
     /// acknowledge in natural language (matches createIssue flow).
     @MainActor
-    private func confirmUpdateFile(_ args: PendingTool.UpdateFileArgs,
+    func confirmUpdateFile(_ args: PendingTool.UpdateFileArgs,
                                    finalContent: String)
         async -> UpdateFileSheet.ConfirmResult
     {
@@ -2570,6 +2450,8 @@ struct CodeAssistantPanel: View {
         let url = URL(fileURLWithPath: absolute)
         do {
             try finalContent.write(to: url, atomically: true, encoding: .utf8)
+            // Track this file for File → PR automation
+            modifiedFiles.insert(match.path)
         } catch {
             return .failure("Couldn't write \(absolute): \(error.localizedDescription)")
         }
@@ -2608,178 +2490,6 @@ struct CodeAssistantPanel: View {
     }
 
     /// Posts a comment on the given issue via the resolved backend (GitLab or
-    /// GitHub). Mirrors `confirmCreateIssue`: pushes a synthetic ack turn so
-    /// the agent can acknowledge in the next round.
-    @MainActor
-    private func confirmCommentIssue(_ args: CommentIssueSheet.Args,
-                                     target: IssueTarget) async -> CommentIssueSheet.ConfirmResult {
-        let client: RepoBackend = target.kind == .gitlab
-            ? RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
-            : RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
-        do {
-            _ = try await client.createNote(projectId: target.projectId, number: args.iid, body: args.body)
-            self.pendingTool = nil
-            history.append(.init(
-                role: .user,
-                content: "(executed comment-issue → note on #\(args.iid))"
-            ))
-            await sendFollowup()
-            return .success(args.iid)
-        } catch {
-            return .failure(error.localizedDescription)
-        }
-    }
-
-    /// Confirm an update-issue action. Executes the update via RepoBackend and
-    /// appends a synthetic turn so the agent can acknowledge.
-    ///
-    /// NOTE: State changes (close/reopen) require separate API calls and are
-    /// not yet supported. This implementation handles title, description, and
-    /// label updates only.
-    private func confirmUpdateIssue(_ args: UpdateIssueSheet.Args,
-                                     target: IssueTarget) async -> UpdateIssueSheet.ConfirmResult {
-        let client: RepoBackend = target.kind == .gitlab
-            ? RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
-            : RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
-        do {
-            // Build the issue payload with only the fields that changed
-            var payload = RepoIssuePayload()
-            if let title = args.title { payload.title = title }
-            if let description = args.body { payload.body = description }
-            if let labels = args.labels { payload.labels = labels }
-
-            _ = try await client.updateIssue(projectId: target.projectId, number: args.iid, payload: payload)
-            self.pendingTool = nil
-            history.append(.init(
-                role: .user,
-                content: "(executed update-issue → #\(args.iid))"
-            ))
-            await sendFollowup()
-            return .success(args.iid)
-        } catch {
-            return .failure(error.localizedDescription)
-        }
-    }
-
-    private func confirmBranchCreation(_ args: BranchCreationSheet.Args) async -> BranchCreationSheet.ConfirmResult {
-        guard let repoURL = config.activeRepoLocalURL, WorkspaceRoot.isGitRepo(repoURL) else {
-            return .failure("Not in a git repository")
-        }
-
-        let repoManager = RepoManager()
-        do {
-            // Build the git command arguments
-            var gitArgs = ["branch", args.branch]
-            if let startPoint = args.startPoint {
-                gitArgs.append(startPoint)
-            }
-
-            _ = try await repoManager.runGit(gitArgs, at: repoURL)
-
-            self.pendingTool = nil
-            history.append(.init(
-                role: .user,
-                content: "(executed create-branch → \(args.branch))"
-            ))
-            await sendFollowup()
-            return .success(args.branch)
-        } catch {
-            return .failure(error.localizedDescription)
-        }
-    }
-
-    // PR creation disabled - requires additional backend support (RepoPRPayload, createPR method)
-    // private func confirmPRCreation(_ args: PRCreationSheet.Args,
-    //                                 target: IssueTarget) async -> PRCreationSheet.ConfirmResult {
-    //     let client: RepoBackend = target.kind == .gitlab
-    //         ? RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
-    //         : RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
-    //
-    //     do {
-    //         // Build the PR/MR payload
-    //         var payload = RepoPRPayload()
-    //         payload.title = args.title
-    //         payload.body = args.description
-    //         payload.sourceBranch = args.sourceBranch
-    //         payload.targetBranch = args.targetBranch
-    //         if let labels = args.labels { payload.labels = labels }
-    //         if let assignee = args.assignee { payload.assignee = assignee }
-    //
-    //         let result = try await client.createPR(projectId: target.projectId, payload: payload)
-    //
-    //         self.pendingTool = nil
-    //         history.append(.init(
-    //             role: .user,
-    //             content: "(executed create-pr → !\(result.iid))"
-    //         ))
-    //         await sendFollowup()
-    //         return .success(iid: result.iid, webUrl: result.webUrl)
-    //     } catch {
-    //         return .failure(error.localizedDescription)
-    //     }
-    // }
-
-    /// Whether a proposed git op may run WITHOUT the confirm card:
-    ///   - read-tier (status/log/diff/branch): always — never mutates anything.
-    ///   - write-tier (add, commit, create_branch, checkout, pull_ff, push): only
-    ///     in Auto mode. The user opted into automation and these are recoverable
-    ///     (commits/branches are local; push targets the auto-created agent/
-    ///     branch, never main).
-    ///   - destructive (merge, revert, reset, stash, clean, merge_to_main): NEVER
-    ///     — they can lose work or rewrite main, so they always confirm.
-    /// The per-turn count bound stops a looping agent from chaining write ops.
-    private func shouldAutoRunGitOp(_ args: GitOpArgs) -> Bool {
-        guard autoGitOpsThisTurn < Self.maxAutoGitOpsPerTurn else { return false }
-        switch args.op.tier {
-        case .read:        return true
-        case .write:       return editMode == .auto
-        case .destructive: return false
-        }
-    }
-
-    /// Execute an agent git-op: clear pendingTool, run the op, append a synthetic
-    /// result turn, and call sendFollowup so the agent can acknowledge.
-    /// Read-tier ops are auto-run from runTurn; write/destructive run after sheet confirm.
-    @MainActor
-    private func runGitOpFlow(_ args: GitOpArgs) async {
-        pendingTool = nil
-        showingGitOpSheet = false
-        // Resolve the active repo URL — GitLab first, then GitHub (mirrors config.activeRepoLocalURL).
-        guard let repoURL = config.activeRepoLocalURL else {
-            history.append(.init(role: .user,
-                content: "(git \(args.op.rawValue) skipped — no active repository)"))
-            busy = false   // release the turn's busy flag so sendFollowup isn't skipped by its !busy guard
-            await sendFollowup()
-            return
-        }
-        // Resolve auth token: prefer the active GitLab project's token, fall back to GitHub.
-        // For read/local ops the token may be nil; push/pull/merge_to_main use it for the remote.
-        let token: String?
-        if !config.gitLabToken.isEmpty,
-           config.gitLabSavedProjects.first(where: { $0.isActive }) != nil {
-            token = config.gitLabToken
-        } else if !config.gitHubToken.isEmpty,
-                  config.gitHubSavedRepos.first(where: { $0.isActive }) != nil {
-            token = config.gitHubToken
-        } else {
-            token = nil
-        }
-        do {
-            let out = try await RepoManager().runGitOp(args, at: repoURL, token: token)
-            history.append(.init(role: .user,
-                content: "(git \(args.op.rawValue) result)\n\(out.prefix(4000))"))
-        } catch {
-            history.append(.init(role: .user,
-                content: "(git \(args.op.rawValue) failed) \(error.localizedDescription)"))
-        }
-        // A read-tier op auto-runs from INSIDE runTurn (busy still true); clear it
-        // here — like confirmUpdateFile does — or sendFollowup's `guard !busy`
-        // skips and the agent never acts on the git result (the stall). On the
-        // sheet/card path busy is already false, so this is a benign no-op there.
-        busy = false
-        await sendFollowup()
-    }
-
     /// One code-assist round-trip that streams live status, with a safety net:
     /// if the SSE transport fails for any reason other than a user cancellation,
     /// fall back to the buffered endpoint once. So a streaming/parse bug can
@@ -2811,7 +2521,7 @@ struct CodeAssistantPanel: View {
         }
     }
 
-    private func sendFollowup() async {
+    func sendFollowup() async {
         // Don't fire a second round-trip if one is already in flight.
         // Without this guard, rapid confirms or a manual ⌘↵ during
         // model streaming would stack overlapping /code-assist requests.

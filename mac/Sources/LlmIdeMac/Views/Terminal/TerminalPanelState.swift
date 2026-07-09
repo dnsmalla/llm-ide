@@ -2,42 +2,25 @@ import Foundation
 import Observation
 import SwiftUI
 
-/// VSCode-style bottom-panel tabs. Only `.terminal` is functional; the others
-/// are placeholders so the dock reads like VSCode's panel at a glance.
+/// Terminal-only bottom panel. Other VSCode-style tabs removed as placeholders.
 enum BottomDockTab: String, CaseIterable, Identifiable {
-    case problems, output, debugConsole, terminal, ports, gitlens
+    case terminal
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .problems:     return "Problems"
-        case .output:       return "Output"
-        case .debugConsole: return "Debug Console"
         case .terminal:     return "Terminal"
-        case .ports:        return "Ports"
-        case .gitlens:      return "GitLens"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .problems:     return "exclamationmark.triangle"
-        case .output:       return "text.alignleft"
-        case .debugConsole: return "terminal"
         case .terminal:     return "chevron.left.forwardslash.chevron.right"
-        case .ports:        return "antenna.radiowaves.left.and.right"
-        case .gitlens:      return "arrow.triangle.branch"
         }
     }
 
-    /// Muted placeholder copy for the non-functional tabs.
     var placeholder: String {
         switch self {
-        case .problems:     return "No problems have been detected in the workspace."
-        case .output:       return "No output to show yet."
-        case .debugConsole: return "The debug console is not active."
-        case .ports:        return "No forwarded ports.\nRun a server to see ports here."
-        case .gitlens:      return "GitLens insights are not configured."
         case .terminal:     return ""
         }
     }
