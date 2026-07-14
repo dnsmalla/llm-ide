@@ -22,6 +22,19 @@ cd extension && npm run server
 
 Then load `extension/dist/` as an unpacked Chrome extension. Full tutorial: [Record your first meeting](docs/tutorials/01-first-meeting.md).
 
+## Mobile control
+
+Control LLM IDE from your iPhone using the production-ready auto_swift_aicontrol system:
+
+- **Remote desktop** - View and control your Mac from your iPhone
+- **LLM IDE chat** - Ask questions and get responses on mobile
+- **Meeting assistant** - AI co-pilot during video calls
+- **Screen streaming** - Real-time desktop view (800×600 @ 10fps)
+
+📱 **Quick start:** [QUICK_START.md](QUICK_START.md) - 3-step setup guide
+
+**Verify installation:** `./verify-mobile-control.sh` - Automated system checks
+
 ## Documentation
 
 📚 **Full docs:** https://grid-devs.gitlab.io/personal/dinesh/notes-extension/

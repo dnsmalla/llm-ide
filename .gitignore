@@ -84,3 +84,6 @@ flag-semantics-flow-zero.md
 mac/MeetNotesMac.app/
 import-repo-settings.sh
 extension/tests/_skill-library-repo-*/
+
+# Mobile control services (using existing system at ~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/)
+services/
