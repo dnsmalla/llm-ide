@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-cd "$(dirname "$0")/mac"
+cd "$(dirname "$0")/.."
 
 echo "Building LlmIdeMac…"
 if ! swift build 2>&1 | grep -v "^warning:"; then

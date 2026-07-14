@@ -92,7 +92,7 @@ Do not restate the full env-var table here — consult [`../reference/env-vars.m
 
 ## §4 Build, run & deploy
 
-Full CLI reference: [`../reference/cli-scripts.md`](../reference/cli-scripts.md) (`setup.sh`, `run.sh`, and supporting scripts).
+Full CLI reference: [`../reference/cli-scripts.md`](../reference/cli-scripts.md) (`setup.sh`, `mac/Scripts/run.sh`, and supporting scripts).
 
 ### Makefile targets
 
