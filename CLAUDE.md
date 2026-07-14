@@ -224,7 +224,9 @@ LLMIDE_PASSWORD=yourpassword
 
 ### Documentation
 
-- **Quick Start**: `QUICK_START.md`
+- **Quick Start**: `docs/mobile/quick-start.md`
+- **Verification**: `docs/mobile/verification.md`
+- **Verification Script**: `scripts/mobile/verify-mobile-control.sh`
 - **Integration Plan**: `docs/compact-mobile-integration.md`
 - **Complete Summary**: `docs/mobile-control-complete.md`
 - **Original System**: `~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/`
@@ -274,7 +276,7 @@ LLMIDE_PASSWORD=yourpassword
 - **Agent skills** — `extension/agents/*.md` (YAML frontmatter declares intent)
 - **Mac app entry** — `mac/Sources/LlmIdeMac/LlmIdeMacApp.swift`
 - **Mac services** — `mac/Sources/LlmIdeMac/Services/` (follow suffix taxonomy)
-- **Mobile control** — `QUICK_START.md` → `docs/compact-mobile-integration.md` → `~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/`
+- **Mobile control** — `docs/mobile/quick-start.md` → `docs/compact-mobile-integration.md` → `~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/`
 
 ## Testing Checklist
 

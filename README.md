@@ -31,9 +31,9 @@ Control LLM IDE from your iPhone using the production-ready auto_swift_aicontrol
 - **Meeting assistant** - AI co-pilot during video calls
 - **Screen streaming** - Real-time desktop view (800×600 @ 10fps)
 
-📱 **Quick start:** [QUICK_START.md](QUICK_START.md) - 3-step setup guide
+📱 **Quick start:** [docs/mobile/quick-start.md](docs/mobile/quick-start.md) - 3-step setup guide
 
-**Verify installation:** `./verify-mobile-control.sh` - Automated system checks
+**Verify installation:** `./scripts/mobile/verify-mobile-control.sh` - Automated system checks
 
 ## Documentation
 
