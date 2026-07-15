@@ -2,12 +2,15 @@
 # ============================================
 # Build phase: compile Swift code and assemble the .app bundle.
 # Standalone — does not sign, notarize, or package.
+# Usage: ./Scripts/build.sh [--clean-all]
+#   --clean-all: Remove all build caches and rebuild from scratch
 # ============================================
 set -euo pipefail
 
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
+YELLOW='\033[1;33m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -20,6 +23,19 @@ VERSION=$(cat "$PROJ_DIR/VERSION" 2>/dev/null | tr -d '[:space:]')
 if [ -z "$VERSION" ]; then
   echo -e "${RED}[build] mac/VERSION missing or empty${NC}" >&2
   exit 1
+fi
+
+# Check for --clean-all flag
+CLEAN_ALL="${1:-}"
+if [ "$CLEAN_ALL" = "--clean-all" ]; then
+  echo -e "${YELLOW}[build]${NC} --clean-all: removing all build caches..."
+  echo -e "${BLUE}[build]${NC} removing .build directory (Swift Package Manager cache)..."
+  rm -rf "$PROJ_DIR/.build"
+  echo -e "${BLUE}[build]${NC} removing .swiftpm directory..."
+  rm -rf "$PROJ_DIR/.swiftpm"
+  echo -e "${BLUE}[build]${NC} removing Xcode derived data for $APP_NAME..."
+  rm -rf ~/Library/Developer/Xcode/DerivedData/${APP_NAME}* 2>/dev/null || true
+  echo -e "${GREEN}[build]${NC} all caches cleaned"
 fi
 
 echo -e "${BLUE}[build]${NC} stopping any running $APP_NAME..."

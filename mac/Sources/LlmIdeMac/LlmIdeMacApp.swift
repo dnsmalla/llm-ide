@@ -37,6 +37,7 @@ struct LlmIdeMacApp: App {
     @StateObject private var templateStore: DocTemplateStore
     @StateObject private var session: SessionStore
     @StateObject private var config: AppConfig
+    @StateObject private var autoTaskSettings = AutoTaskSettings()
     @StateObject private var capture: CaptionOrchestrator
     @StateObject private var deepLink: DeepLinkRouter
     @StateObject private var liveMirror: LiveSessionMirror
@@ -88,8 +89,10 @@ struct LlmIdeMacApp: App {
         // /kb/project/:id/export on close without threading the client
         // through every call site.
         projectStoreInstance._apiClient = client
+        let autoTaskSettingsInstance = AutoTaskSettings()
         let autoCode = AutoCodeUpdateService(
             config: cfg,
+            autoTaskSettings: autoTaskSettingsInstance,
             gitLabClient: GitLabClient(),
             registry: registry,
             projectStore: projectStoreInstance,
@@ -127,6 +130,7 @@ struct LlmIdeMacApp: App {
         // on RegressionRunner.
         autoUpdater.activity = activity
         autoCode.activity = activity
+        self._autoTaskSettings = StateObject(wrappedValue: autoTaskSettingsInstance)
         self.api = client
         self.autoCapture = AutoCaptureService(capture: orchestrator, config: cfg)
     }
@@ -149,6 +153,7 @@ struct LlmIdeMacApp: App {
                 .environmentObject(templateStore)
                 .environmentObject(session)
                 .environmentObject(config)
+                .environmentObject(autoTaskSettings)
                 .environmentObject(capture)
                 .environmentObject(deepLink)
                 .environmentObject(liveMirror)

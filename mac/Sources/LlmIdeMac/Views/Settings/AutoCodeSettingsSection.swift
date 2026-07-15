@@ -1,14 +1,13 @@
 import SwiftUI
 
 struct AutoCodeSettingsSection: View {
-    @EnvironmentObject private var config: AppConfig
+    @EnvironmentObject private var autoTaskSettings: AutoTaskSettings
     @EnvironmentObject private var autoCodeUpdate: AutoCodeUpdateService
     @EnvironmentObject var theme: ThemeStore
     @Environment(ShellState.self) private var shell
 
     private let lookbackOptions = [1, 3, 5, 10, 20]
     private let dayOptions = [1, 3, 7, 14, 30]
-    /// Cadence options in minutes. Floor matches AutoCodeUpdateService.minIntervalMinutes.
     private let intervalOptions = [5, 15, 30, 60, 180, 360, 720, 1440]
 
     private func intervalLabel(_ minutes: Int) -> String {
@@ -28,9 +27,9 @@ struct AutoCodeSettingsSection: View {
 
                 // Row 1: Enabled toggle
                 Toggle(isOn: Binding(
-                    get: { config.autoCodeUpdateEnabled },
+                    get: { autoTaskSettings.enabled },
                     set: { enabled in
-                        config.autoCodeUpdateEnabled = enabled
+                        autoTaskSettings.enabled = enabled
                         if enabled {
                             autoCodeUpdate.start()
                         } else {
@@ -49,8 +48,8 @@ struct AutoCodeSettingsSection: View {
                     Text("Scan last")
                         .font(Typography.body)
                         .foregroundStyle(theme.current.textMuted)
-                    if config.autoCodeLookbackByDays {
-                        Picker("", selection: $config.autoCodeLookbackDays) {
+                    if autoTaskSettings.lookbackByDays {
+                        Picker("", selection: $autoTaskSettings.lookbackDays) {
                             ForEach(dayOptions, id: \.self) { n in Text("\(n)").tag(n) }
                         }
                         .labelsHidden().pickerStyle(.menu).frame(width: 70)
@@ -58,7 +57,7 @@ struct AutoCodeSettingsSection: View {
                             .font(Typography.body)
                             .foregroundStyle(theme.current.textMuted)
                     } else {
-                        Picker("", selection: $config.autoCodeUpdateLookbackCount) {
+                        Picker("", selection: $autoTaskSettings.lookbackMeetingCount) {
                             ForEach(lookbackOptions, id: \.self) { n in Text("\(n)").tag(n) }
                         }
                         .labelsHidden().pickerStyle(.menu).frame(width: 70)
@@ -67,7 +66,7 @@ struct AutoCodeSettingsSection: View {
                             .foregroundStyle(theme.current.textMuted)
                     }
                     Spacer()
-                    Picker("", selection: $config.autoCodeLookbackByDays) {
+                    Picker("", selection: $autoTaskSettings.lookbackByDays) {
                         Text("by count").tag(false)
                         Text("by age").tag(true)
                     }
@@ -79,7 +78,7 @@ struct AutoCodeSettingsSection: View {
                     Text("Run every")
                         .font(Typography.body)
                         .foregroundStyle(theme.current.textMuted)
-                    Picker("", selection: $config.autoCodeIntervalMinutes) {
+                    Picker("", selection: $autoTaskSettings.intervalMinutes) {
                         ForEach(intervalOptions, id: \.self) { m in
                             Text(intervalLabel(m)).tag(m)
                         }
@@ -93,10 +92,10 @@ struct AutoCodeSettingsSection: View {
                 }
 
                 // Dirty-tree behavior: skip (default) vs auto-stash + restore.
-                Toggle(isOn: $config.autoCodeAutoStash) {
+                Toggle(isOn: $autoTaskSettings.autoStash) {
                     Label("Auto-stash uncommitted changes", systemImage: "tray.and.arrow.down")
                         .font(Typography.caption)
-                        .foregroundStyle(config.autoCodeAutoStash ? theme.current.text : theme.current.textMuted)
+                        .foregroundStyle(autoTaskSettings.autoStash ? theme.current.text : theme.current.textMuted)
                 }
                 .toggleStyle(.checkbox)
                 .help("When on, auto-tasks stash your uncommitted changes before running and restore them after, instead of skipping. If a restore conflicts, your changes stay safe in `git stash`. Off by default.")
@@ -108,25 +107,21 @@ struct AutoCodeSettingsSection: View {
                         .foregroundStyle(theme.current.textMuted)
                         .padding(.top, 2)
 
-                    // Wraps to a second row past ~3 columns at the
-                    // Settings card's natural width; FlowLayout-ish
-                    // behavior via two HStacks keeps the labels from
-                    // truncating on narrower windows.
                     HStack(spacing: Spacing.lg) {
-                        taskToggle("Review Code",      icon: "checkmark.shield",          binding: $config.autoCodeRunReviewCode)
-                        taskToggle("Review Doc",       icon: "doc.text.magnifyingglass",  binding: $config.autoCodeRunReviewDoc)
-                        taskToggle("Review Conflicts", icon: "exclamationmark.triangle",  binding: $config.autoCodeRunReviewConflicts)
-                        taskToggle("Regression",       icon: "arrow.uturn.backward.circle", binding: $config.autoCodeRunRegression)
+                        taskToggle("Review Code",      icon: "checkmark.shield",          binding: $autoTaskSettings.runReviewCode)
+                        taskToggle("Review Doc",       icon: "doc.text.magnifyingglass",  binding: $autoTaskSettings.runReviewDoc)
+                        taskToggle("Review Conflicts", icon: "exclamationmark.triangle",  binding: $autoTaskSettings.runReviewConflicts)
+                        taskToggle("Regression",       icon: "arrow.uturn.backward.circle", binding: $autoTaskSettings.runRegression)
                     }
                     taskToggle("Attempt repair on regression", icon: "wrench.and.screwdriver",
-                               binding: $config.regressionAttemptRepair)
+                               binding: $autoTaskSettings.regressionAttemptRepair)
                     taskToggle("Auto-reopen regressed faults", icon: "arrow.uturn.backward",
-                               binding: $config.regressionAutoReopen)
+                               binding: $autoTaskSettings.regressionAutoReopen)
                     HStack {
                         Image(systemName: "timer").font(.system(size: 12))
                         Text("Verify timeout (s)").font(Typography.caption)
                         Spacer()
-                        TextField("120", value: $config.regressionVerifyTimeout, format: .number)
+                        TextField("120", value: $autoTaskSettings.regressionVerifyTimeout, format: .number)
                             .frame(width: 60).textFieldStyle(.roundedBorder)
                     }
                 }
@@ -163,16 +158,12 @@ struct AutoCodeSettingsSection: View {
                     .controlSize(.small)
                     .disabled(autoCodeUpdate.isRunning)
 
-                    // Stop an in-flight run — cancels remaining tasks and kills
-                    // the currently-running CLI subprocess.
                     if autoCodeUpdate.isRunning {
                         Button("Stop") { autoCodeUpdate.cancel() }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                     }
 
-                    // Review tasks write their findings to log files; give a
-                    // one-click way to read them (success or failure).
                     Button("Reveal Logs") {
                         autoCodeUpdate.revealLogsInFinder()
                     }
@@ -208,10 +199,6 @@ struct AutoCodeSettingsSection: View {
         return "Last run \(ago) · \(autoCodeUpdate.statusMessage)"
     }
 
-    /// Mirrors exactly what `run()` requires to find a target — covers
-    /// GitLab, GitHub, the active project's linkedRepo, and token presence,
-    /// rather than only checking GitLab (which falsely warned GitHub-only
-    /// setups).
     private var hasLinkedRepo: Bool {
         autoCodeUpdate.resolveBackendAndProject() != nil
     }

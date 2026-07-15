@@ -5,6 +5,8 @@
 # and dmg.sh — each phase is standalone-runnable. For a full notarized
 # release, run Scripts/release.sh instead. This shim covers the dev
 # path: build → sign → dmg (skipping notarize).
+# Usage: ./build_app.sh [--clean-all]
+#   --clean-all: Remove all build caches and rebuild from scratch
 # ============================================
 set -euo pipefail
 
@@ -15,9 +17,12 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_DIR="$SCRIPT_DIR/LlmIdeMac.app"
 
+# Pass --clean-all flag to build.sh if provided
+CLEAN_FLAG="${1:-}"
+
 echo -e "${BLUE}[build_app]${NC} dev pipeline: build → sign → dmg"
 
-"$SCRIPT_DIR/Scripts/build.sh"
+"$SCRIPT_DIR/Scripts/build.sh" $CLEAN_FLAG
 "$SCRIPT_DIR/Scripts/sign.sh"
 "$SCRIPT_DIR/Scripts/dmg.sh"
 

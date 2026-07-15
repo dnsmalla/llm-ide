@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getServerUrl, REQUEST_TIMEOUT_MS, authFetch } from '../../lib/config';
+import { listIssues } from '../../lib/kb';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -63,6 +64,10 @@ export function useChat() {
       if (!trimmed || isLoading) return;
       setError(null);
 
+      // Check if the user is asking about issues
+      const issuKeywords = ['issue', 'issues', 'bug', 'ticket', 'github', '#'];
+      const asksAboutIssues = issuKeywords.some(k => trimmed.toLowerCase().includes(k));
+
       const userMsg: ChatMessage = {
         role: 'user',
         content: trimmed,
@@ -84,10 +89,32 @@ export function useChat() {
 
       try {
         const serverUrl = await getServerUrl();
+        
+        // Fetch relevant issues if the user asks about them
+        let issueContext = '';
+        if (asksAboutIssues) {
+          try {
+            const issues = await listIssues({ state: 'open', limit: 10 });
+            if (issues && issues.length > 0) {
+              issueContext = '\n\nRelevant open issues from the knowledge base:\n';
+              issues.forEach(issue => {
+                issueContext += `- #${issue.number}: ${issue.title} (${issue.state}) - ${issue.url}\n`;
+              });
+            }
+          } catch (err) {
+            // Non-fatal: proceed without issue context
+          }
+        }
+
         const response = await authFetch(`${serverUrl}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: trimmed, transcript, history: historySnapshot, language }),
+          body: JSON.stringify({ 
+            message: trimmed + issueContext, 
+            transcript, 
+            history: historySnapshot, 
+            language 
+          }),
           signal: controller.signal,
         });
 

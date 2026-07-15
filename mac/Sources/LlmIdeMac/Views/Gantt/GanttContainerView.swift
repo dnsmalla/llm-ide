@@ -1,8 +1,7 @@
 import SwiftUI
 
 /// Coordinator that owns the project picker, then renders the full Gantt chart
-/// once a project is selected.  Mirrors the project-selection flow in IssueBoardView
-/// so the UX is consistent across the Issues and Gantt sections.
+/// once a project is selected. Currently supports GitLab projects only.
 struct GanttContainerView: View {
     @EnvironmentObject var theme: ThemeStore
     @StateObject private var vm = GanttViewModel()
@@ -64,7 +63,7 @@ struct GanttContainerView: View {
                     icon: hasGitHub ? "rectangle.connected.to.line.below" : "key.slash",
                     title: hasGitHub ? "Gantt requires GitLab" : "GitLab not configured",
                     message: hasGitHub
-                        ? "You have GitHub configured, but Gantt currently only supports GitLab projects.\n\nGitHub support is planned (it needs a shared backend across both providers). Add a GitLab PAT in Settings → GitLab to use this view."
+                        ? "You have GitHub configured, but Gantt currently only supports GitLab projects for timeline planning. Add a GitLab PAT in Settings → GitLab to use this view."
                         : "Add your Personal Access Token in Settings → GitLab to connect.",
                     actionLabel: "Open Settings",
                     action: { NotificationCenter.default.post(name: .openSettings, object: nil) }

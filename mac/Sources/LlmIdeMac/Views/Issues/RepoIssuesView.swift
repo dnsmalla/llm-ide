@@ -23,13 +23,12 @@ struct RepoIssuesView: View {
     var api: LlmIdeAPIClient? = nil
 
     // ── Backend selection
-    @State private var activeBackend: RepoBackendKind = .gitlab
+    @State private var activeBackend: RepoBackendKind? = nil
 
     // ── Project state (per backend)
     @State private var projects: [RepoProject] = []
     @State private var selectedProject: RepoProject?
     @State private var projectsLoading = false
-    @State private var projectsError: String?
 
     // ── Issue state
     @State private var issues: [RepoIssue] = []
@@ -51,14 +50,35 @@ struct RepoIssuesView: View {
     @State private var detailIssue: RepoIssue?
 
     private var availableBackends: [RepoBackendKind] {
+        // Enforce mutual exclusivity: only show the preferred provider
+        if let pref = config.preferredRepoProvider {
+            // If a preference is set, only that provider is available
+            if pref == .gitlab && !config.gitLabToken.isEmpty {
+                return [.gitlab]
+            } else if pref == .github && !config.gitHubToken.isEmpty {
+                return [.github]
+            }
+        }
+        
+        // If no preference or preference is invalid, show all configured providers
+        // (this allows the first one to be selected, then user can set preference)
         var out: [RepoBackendKind] = []
         if !config.gitLabToken.isEmpty { out.append(.gitlab) }
         if !config.gitHubToken.isEmpty { out.append(.github) }
         return out
     }
 
+    private var defaultActiveBackend: RepoBackendKind {
+        // Use preferred provider if set and available
+        if let pref = config.preferredRepoProvider, availableBackends.contains(pref) {
+            return pref
+        }
+        return availableBackends.first ?? .gitlab
+    }
+
     private var currentClient: RepoBackend {
-        switch activeBackend {
+        let backend = activeBackend ?? defaultActiveBackend
+        switch backend {
         case .gitlab: return RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
         case .github: return RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
         }
@@ -202,8 +222,11 @@ struct RepoIssuesView: View {
 
     private var headerBar: some View {
         let t = theme.current
+        let effectiveBackend = activeBackend ?? defaultActiveBackend
         return HStack(spacing: 0) {
-            if availableBackends.count > 1 {
+            // Only show backend picker if multiple providers are available AND no preference is set
+            // (When preference is set, mutual exclusivity hides the other provider)
+            if availableBackends.count > 1 && config.preferredRepoProvider == nil {
                 backendPicker
                 Divider().frame(height: 20).padding(.horizontal, 14)
             }
@@ -241,10 +264,10 @@ struct RepoIssuesView: View {
                     .background(RoundedRectangle(cornerRadius: 8).fill(t.accent))
                 }
                 .buttonStyle(.plain)
-                .disabled(selectedProject == nil || !config.isAllowed(.createIssue, provider: activeBackend))
-                .help(config.isAllowed(.createIssue, provider: activeBackend)
+                .disabled(selectedProject == nil || !config.isAllowed(.createIssue, provider: effectiveBackend))
+                .help(config.isAllowed(.createIssue, provider: effectiveBackend)
                       ? "Create issue  ⌘⇧N"
-                      : "Enable Create issue in Settings → \(activeBackend.displayName) → Automation & Actions")
+                      : "Enable Create issue in Settings → \(effectiveBackend.displayName) → Automation & Actions")
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .padding(.leading, 10)
             }
@@ -256,34 +279,46 @@ struct RepoIssuesView: View {
 
     private var backendPicker: some View {
         let t = theme.current
-        return HStack(spacing: 4) {
-            ForEach(availableBackends, id: \.self) { backend in
-                let active = (backend == activeBackend)
-                Button {
-                    if activeBackend != backend { activeBackend = backend }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: backend.sfSymbol).font(.system(size: 10))
-                        Text(backend.displayName).font(Typography.captionStrong)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                ForEach(availableBackends, id: \.self) { backend in
+                    let active = (backend == (activeBackend ?? defaultActiveBackend))
+                    Button {
+                        let effectiveBackend = activeBackend ?? defaultActiveBackend
+                        if effectiveBackend != backend { activeBackend = backend }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: backend.sfSymbol).font(.system(size: 10))
+                            Text(backend.displayName).font(Typography.captionStrong)
+                            if config.preferredRepoProvider == backend {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(t.accent3)
+                            }
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(RoundedRectangle(cornerRadius: 7)
+                            .fill(active ? t.surface2.opacity(0.7) : Color.clear))
+                        .foregroundStyle(active ? t.text : t.textMuted)
+                        .opacity(active ? 1 : 0.7)
                     }
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 7)
-                        .fill(active ? t.surface2.opacity(0.7) : Color.clear))
-                    .foregroundStyle(active ? t.text : t.textMuted)
-                    .opacity(active ? 1 : 0.7)
+                    .buttonStyle(.plain)
+                    .help(config.preferredRepoProvider == backend
+                          ? "Primary provider (set in Settings)"
+                          : "Switch to \(backend.displayName)")
                 }
-                .buttonStyle(.plain)
-                .help("Switch to \(backend.displayName)")
+                Spacer()
             }
         }
     }
 
     private var projectDropdown: some View {
-        RepoProjectDropdown(
+        let effectiveBackend = activeBackend ?? defaultActiveBackend
+        return RepoProjectDropdown(
             projects: projects,
             selected: $selectedProject,
             isLoading: projectsLoading,
-            backendDisplayName: activeBackend.displayName,
+            backendDisplayName: effectiveBackend.displayName,
             onSelect: { _ in Task { await reloadIssues() } }
         )
     }
@@ -458,6 +493,7 @@ struct RepoIssuesView: View {
     @ViewBuilder
     private var issuesList: some View {
         let t = theme.current
+        let effectiveBackend = activeBackend ?? defaultActiveBackend
         if let err = issuesError {
             EmptyStateView(icon: "exclamationmark.triangle",
                            title: "Failed to load issues",
@@ -468,7 +504,7 @@ struct RepoIssuesView: View {
         } else if selectedProject == nil {
             EmptyStateView(icon: "list.bullet.rectangle",
                            title: "Pick a project",
-                           message: "Choose one of your saved \(activeBackend.displayName) projects to list its issues.")
+                           message: "Choose one of your saved \(effectiveBackend.displayName) projects to list its issues.")
         } else if issues.isEmpty, !issuesLoading {
             EmptyStateView(icon: "tray",
                            title: "No issues",
@@ -481,7 +517,7 @@ struct RepoIssuesView: View {
             RepoKanbanPanel(
                 issues: issues,
                 labels: labels,
-                backend: activeBackend,
+                backend: effectiveBackend,
                 client: currentClient,
                 projectId: selectedProject?.id ?? "",
                 onSelect: { detailIssue = $0 },
@@ -505,16 +541,16 @@ struct RepoIssuesView: View {
     // MARK: - Data
 
     private func initialLoad() async {
-        // Pick the most useful default: if only one backend is set up,
-        // jump straight to it; otherwise prefer GitLab (legacy default).
-        if availableBackends == [.github] { activeBackend = .github }
-        else if !availableBackends.contains(activeBackend) {
-            activeBackend = availableBackends.first ?? .gitlab
+        // Initialize to the preferred provider or first available backend
+        if activeBackend == nil {
+            activeBackend = defaultActiveBackend
         }
         await switchBackend()
     }
 
     private func switchBackend() async {
+        let backend = activeBackend ?? defaultActiveBackend
+        guard availableBackends.contains(backend) else { return }
         projects = []
         issues = []
         selectedProject = nil
@@ -522,9 +558,9 @@ struct RepoIssuesView: View {
     }
 
     private func loadProjects() async {
-        guard availableBackends.contains(activeBackend) else { return }
+        let backend = activeBackend ?? defaultActiveBackend
+        guard availableBackends.contains(backend) else { return }
         projectsLoading = true
-        projectsError = nil
         defer { projectsLoading = false }
         do {
             let fetched = try await currentClient.listProjects()
@@ -535,7 +571,7 @@ struct RepoIssuesView: View {
             if selectedProject == nil { selectedProject = projects.first }
             await reloadIssues()
         } catch {
-            projectsError = error.localizedDescription
+            issuesError = error.localizedDescription
         }
     }
 

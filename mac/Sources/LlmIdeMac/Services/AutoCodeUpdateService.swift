@@ -26,6 +26,7 @@ final class AutoCodeUpdateService: ObservableObject {
     // MARK: - Dependencies
 
     private let config: AppConfig
+    private let autoTaskSettings: AutoTaskSettings
     /// Optional override for tests / dependency injection. When nil (the
     /// normal app wiring) the service resolves a fresh RepoBackend each
     /// run via `resolveBackendAndProject()` so live token / active-repo
@@ -72,15 +73,18 @@ final class AutoCodeUpdateService: ObservableObject {
 
     // MARK: - Init
 
-    init(config: AppConfig, backend: RepoBackend? = nil, registry: ProcessedActionsRegistry,
-         projectStore: ProjectStore? = nil, api: LlmIdeAPIClient? = nil) {
+    init(config: AppConfig, autoTaskSettings: AutoTaskSettings, backend: RepoBackend? = nil, 
+         registry: ProcessedActionsRegistry, projectStore: ProjectStore? = nil, api: LlmIdeAPIClient? = nil) {
         self.config = config
+        self.autoTaskSettings = autoTaskSettings
         self.backendOverride = backend
         self.registry = registry
         self.projectStore = projectStore
         self.api = api
-        isEnabled = config.autoCodeUpdateEnabled
-        cancellable = config.$autoCodeUpdateEnabled
+        isEnabled = autoTaskSettings.enabled
+        
+        // Observe unified auto task settings
+        cancellable = autoTaskSettings.$enabled
             .sink { [weak self] value in
                 guard let self else { return }
                 self.isEnabled = value
@@ -89,7 +93,7 @@ final class AutoCodeUpdateService: ObservableObject {
         // Reschedule the timer when the user changes the cadence — but only
         // while a timer is live (i.e. auto-tasks are enabled). dropFirst so
         // the initial value doesn't reschedule before start() runs.
-        intervalCancellable = config.$autoCodeIntervalMinutes
+        intervalCancellable = autoTaskSettings.$intervalMinutes
             .dropFirst()
             .sink { [weak self] _ in
                 guard let self, self.timer != nil else { return }
@@ -99,12 +103,12 @@ final class AutoCodeUpdateService: ObservableObject {
 
     /// Backwards-compat init for callers still passing a GitLabClient.
     /// New code should pass a `RepoBackend` (or nil to auto-resolve).
-    convenience init(config: AppConfig, gitLabClient: GitLabClient, registry: ProcessedActionsRegistry,
-                     projectStore: ProjectStore? = nil, api: LlmIdeAPIClient? = nil) {
-        self.init(config: config,
+    convenience init(config: AppConfig, autoTaskSettings: AutoTaskSettings, gitLabClient: GitLabClient, 
+                     registry: ProcessedActionsRegistry, projectStore: ProjectStore? = nil, 
+                     api: LlmIdeAPIClient? = nil) {
+        self.init(config: config, autoTaskSettings: autoTaskSettings,
                   backend: RepoBackendFactory.guarded(gitLabClient, config: config),
-                  registry: registry,
-                  projectStore: projectStore, api: api)
+                  registry: registry, projectStore: projectStore, api: api)
     }
 
     // MARK: - Lifecycle
@@ -128,7 +132,7 @@ final class AutoCodeUpdateService: ObservableObject {
     /// interval change.
     private func scheduleTimer() {
         timer?.invalidate()
-        let minutes = max(Self.minIntervalMinutes, config.autoCodeIntervalMinutes)
+        let minutes = max(Self.minIntervalMinutes, autoTaskSettings.intervalMinutes)
         timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(minutes * 60), repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in self.runNow() }
@@ -229,7 +233,7 @@ final class AutoCodeUpdateService: ObservableObject {
         // Opt-in: stash uncommitted changes up front so the dirty-tree guard
         // doesn't skip every task. Restored in the defer above. Default off.
         // The git work runs off the main actor (subprocess calls block).
-        if config.autoCodeAutoStash {
+        if autoTaskSettings.autoStash {
             let path = capturedGitRoot
             let stashResult: (didStash: Bool, branch: String?) = await Task.detached {
                 guard !Self.isWorkingTreeClean(at: path) else { return (false, nil) }
@@ -275,17 +279,17 @@ final class AutoCodeUpdateService: ObservableObject {
         // startedAt is epoch MILLISECONDS.
         let sortedRows = rows.sorted { $0.startedAt > $1.startedAt }
         let recentRows: [MeetingIndex.Row]
-        if config.autoCodeLookbackByDays {
-            let cutoffMs = Self.lookbackCutoffMs(now: Date(), days: config.autoCodeLookbackDays)
+        if autoTaskSettings.lookbackByDays {
+            let cutoffMs = Self.lookbackCutoffMs(now: Date(), days: autoTaskSettings.lookbackDays)
             recentRows = sortedRows.filter { $0.startedAt >= cutoffMs }
         } else {
-            recentRows = Array(sortedRows.prefix(config.autoCodeUpdateLookbackCount))
+            recentRows = Array(sortedRows.prefix(autoTaskSettings.lookbackMeetingCount))
         }
 
         if recentRows.isEmpty {
-            statusMessage = config.autoCodeLookbackByDays
-                ? "No meetings in the last \(max(1, config.autoCodeLookbackDays)) days"
-                : "No meetings found"
+            statusMessage = autoTaskSettings.lookbackByDays
+                ? "No notes found in the last \(max(1, autoTaskSettings.lookbackDays)) days"
+                : "No notes found in your library"
             return
         }
 
@@ -293,9 +297,10 @@ final class AutoCodeUpdateService: ObservableObject {
         let newActions = actions.filter { !registry.isKnown(id: $0.id) }
 
         if newActions.isEmpty && registry.pendingEntries().isEmpty {
-            statusMessage = config.autoCodeLookbackByDays
-                ? "No actions found in last \(max(1, config.autoCodeLookbackDays)) days"
-                : "No actions found in last \(config.autoCodeUpdateLookbackCount) meetings"
+            let lookbackDesc = autoTaskSettings.lookbackByDays
+                ? "last \(max(1, autoTaskSettings.lookbackDays)) days"
+                : "last \(autoTaskSettings.lookbackMeetingCount) notes"
+            statusMessage = "No new action items found in your \(lookbackDesc) (meetings, emails, or Slack)"
             return
         }
 
@@ -468,7 +473,7 @@ final class AutoCodeUpdateService: ObservableObject {
 
         // 6. Run per-task-type CLI prompts for enabled task types
         if !Task.isCancelled, let logDir = logsDirectory() {
-            if !Task.isCancelled, config.autoCodeRunReviewCode {
+            if !Task.isCancelled, autoTaskSettings.runReviewCode {
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewCode,
                                       localPath: capturedGitRoot,
                                       logSuffix: "review-code",
@@ -480,7 +485,7 @@ final class AutoCodeUpdateService: ObservableObject {
                     taskErrors[AutoTask.reviewCode.rawValue] = "Review Code task failed. Check ~/Library/Logs/LLM IDE/auto-task-review-code.log"
                 }
             }
-            if !Task.isCancelled, config.autoCodeRunReviewDoc {
+            if !Task.isCancelled, autoTaskSettings.runReviewDoc {
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewDoc,
                                       localPath: capturedGitRoot,
                                       logSuffix: "review-doc",
@@ -492,7 +497,7 @@ final class AutoCodeUpdateService: ObservableObject {
                     taskErrors[AutoTask.reviewDoc.rawValue] = "Review Doc task failed. Check ~/Library/Logs/LLM IDE/auto-task-review-doc.log"
                 }
             }
-            if !Task.isCancelled, config.autoCodeRunReviewConflicts {
+            if !Task.isCancelled, autoTaskSettings.runReviewConflicts {
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewConflicts,
                                       localPath: capturedGitRoot,
                                       logSuffix: "review-conflicts",
@@ -505,7 +510,7 @@ final class AutoCodeUpdateService: ObservableObject {
                 }
             }
 
-            if !Task.isCancelled, config.autoCodeRunGenerateDoc {
+            if !Task.isCancelled, autoTaskSettings.runGenerateDoc {
                 let ok = await runCLI(prompt: config.autoTaskTemplateGenerateDoc,
                                       localPath: capturedGitRoot,
                                       logSuffix: "generate-doc",
@@ -518,7 +523,7 @@ final class AutoCodeUpdateService: ObservableObject {
                 }
             }
 
-            if !Task.isCancelled, config.autoCodeRunUpdateIssues {
+            if !Task.isCancelled, autoTaskSettings.runUpdateIssues {
                 let ok = await runCLI(prompt: config.autoTaskTemplateUpdateIssues,
                                       localPath: capturedGitRoot,
                                       logSuffix: "update-issues",
@@ -538,7 +543,7 @@ final class AutoCodeUpdateService: ObservableObject {
         // projectRoot — same place RegressionView + the menu count read), but
         // verify commands + git ops run in the git working tree (gitRoot, the
         // clone). Off by default; opt-in via Settings.
-        if !Task.isCancelled, config.autoCodeRunRegression {
+        if !Task.isCancelled, autoTaskSettings.runRegression {
             await runRegressionSweep(projectRoot: resolved.projectRoot,
                                      gitRoot: resolved.gitRoot)
         }
@@ -546,13 +551,13 @@ final class AutoCodeUpdateService: ObservableObject {
         // 8. Knowledge — read-only review of the auto-generated graph + memory
         // (generation itself is automatic: GraphAutoUpdater on open/edit + the
         // code index). This row just surfaces "what's there" for the user.
-        if !Task.isCancelled, config.autoCodeRunGenerateKnowledge {
+        if !Task.isCancelled, autoTaskSettings.runGenerateKnowledge {
             reportKnowledge(projectRoot: resolved.projectRoot)
         }
 
         // 9. Plan status refresh — polls external outcome trackers (GitHub/GitLab/Linear/Backlog)
         // for dispatched plan tasks and updates their status locally. Off by default; opt-in via Settings.
-        if !Task.isCancelled, config.autoCodeRunUpdatePlanStatus {
+        if !Task.isCancelled, autoTaskSettings.runUpdatePlanStatus {
             await refreshPlanStatuses(projectRoot: resolved.projectRoot)
         }
 
@@ -618,11 +623,11 @@ final class AutoCodeUpdateService: ObservableObject {
         let repairer = AgentFaultRepairer(api: api)
         let runner = RegressionRunner(prompter: prompter, judge: judge,
                                       verifier: ShellFaultVerifier(), repairer: repairer,
-                                      verifyTimeout: config.regressionVerifyTimeout, config: config)
+                                      verifyTimeout: autoTaskSettings.regressionVerifyTimeout, config: config)
         runner.activity = activity
         await runner.run(faultsRoot: faultsRoot, gitRoot: gitRootURL,
-                         autoReopen: config.regressionAutoReopen,
-                         attemptRepair: config.regressionAttemptRepair)
+                         autoReopen: autoTaskSettings.regressionAutoReopen,
+                         attemptRepair: autoTaskSettings.regressionAttemptRepair)
         // RegressionRunner's published `results` lives on its own
         // lifetime — we read once after the await for the summary.
         let total = runner.results.count
@@ -630,7 +635,7 @@ final class AutoCodeUpdateService: ObservableObject {
         if total == 0 {
             taskErrors.removeValue(forKey: AutoTask.regression.rawValue)
         } else if regressed > 0 {
-            let reopened = config.regressionAutoReopen ? " (auto-reopened)" : ""
+            let reopened = autoTaskSettings.regressionAutoReopen ? " (auto-reopened)" : ""
             taskErrors[AutoTask.regression.rawValue] = "Regression: \(regressed)/\(total) regressed\(reopened)."
         } else {
             taskErrors.removeValue(forKey: AutoTask.regression.rawValue)

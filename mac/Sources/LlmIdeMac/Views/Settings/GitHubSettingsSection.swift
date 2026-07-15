@@ -23,6 +23,51 @@ struct GitHubSettingsSection: View {
         SettingsSectionCard(icon: "chevron.left.forwardslash.chevron.right", title: "GitHub") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
 
+                // Provider preference banner
+                if !config.gitHubToken.isEmpty && !config.gitLabToken.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button {
+                            // Toggle the preference: if GitHub is preferred, clear it; otherwise set it
+                            if config.preferredRepoProvider == .github {
+                                config.preferredRepoProvider = nil
+                            } else {
+                                config.preferredRepoProvider = .github
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: config.preferredRepoProvider == .github ? "checkmark.circle.fill" : "circle")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(config.preferredRepoProvider == .github ? theme.current.accent : theme.current.border)
+                                Text("Set as primary provider")
+                                    .font(Typography.body)
+                                    .foregroundStyle(theme.current.text)
+                                Spacer()
+                            }
+                        }
+                        .buttonStyle(.plain)
+
+                        if config.preferredRepoProvider == .github {
+                            HStack(spacing: 4) {
+                                Image(systemName: "info.circle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(theme.current.accent3)
+                                Text("Issues, Gantt, and code workflows will use GitHub as the primary provider. GitLab projects are deactivated.")
+                                    .font(Typography.caption)
+                                    .foregroundStyle(theme.current.textMuted)
+                                Spacer()
+                            }
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(theme.current.accent3.opacity(0.08)))
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(theme.current.accent3.opacity(0.2), lineWidth: 1))
+                        }
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(theme.current.surface2))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(theme.current.border.opacity(0.4), lineWidth: 1))
+
+                    Divider().padding(.vertical, 4)
+                }
+
                 // Access Token
                 HStack(spacing: Spacing.md) {
                     Text("Access Token")
@@ -393,13 +438,14 @@ struct GitHubSettingsSection: View {
         defer { busy = false }
 
         do {
-            // Probe with the static helper so an invalid token never
-            // touches the Keychain (the previous version wrote it
-            // before verifying, polluting Keychain on 401/network
-            // failure). Matches GitLabSettingsSection's behavior.
             let user = try await GitHubClient.verifyToken(token)
-            config.gitHubToken = token   // commit only on success
+            config.gitHubToken = token
             status = "✓ Connected as \(user.name ?? user.login)"
+            
+            // If no preference is set, default to GitHub when first token is saved
+            if config.preferredRepoProvider == nil {
+                config.preferredRepoProvider = .github
+            }
         } catch let e as GitHubClient.GitHubError {
             switch e {
             case .httpError(401, _): status = "Invalid token — check scope and expiry."

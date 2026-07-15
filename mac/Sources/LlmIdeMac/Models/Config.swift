@@ -244,6 +244,24 @@ final class AppConfig: ObservableObject {
         gitLabSavedProjects.first(where: { $0.isActive })?.resolvedId
     }
 
+    // ── Repository provider preference ───────────────────────────────
+    /// Preferred repo provider for Issues, Gantt, and Code workflows.
+    /// When set, the non-preferred provider's repositories/projects are
+    /// deactivated to ensure only one provider is active at a time.
+    /// nil = no preference (both can be active when configured).
+    @Published var preferredRepoProvider: RepoBackendKind? {
+        didSet {
+            defaults.set(preferredRepoProvider?.rawValue, forKey: "preferredRepoProvider")
+            // Enforce mutual exclusivity: deactivate the other provider's repos
+            if let pref = preferredRepoProvider {
+                deactivateOtherProvider(than: pref)
+            } else {
+                // When clearing preference, don't auto-activate anything,
+                // just allow both to be independently managed
+            }
+        }
+    }
+
     // ── GitHub integration ────────────────────────────────────────────
     /// PAT (classic or fine-grained). Stored in Keychain.
     @Published var gitHubToken: String {
@@ -290,6 +308,31 @@ final class AppConfig: ObservableObject {
         } else {
             if on { gitLabAllowedOps.insert(op) } else { gitLabAllowedOps.remove(op) }
         }
+    }
+
+    /// Deactivate all repositories/projects of the given provider to enforce
+    /// mutual exclusivity when a preference is set.
+    private func deactivateOtherProvider(than preferred: RepoBackendKind) {
+        if preferred == .gitlab {
+            // Deactivate GitHub repos when GitLab is preferred
+            var updated = gitHubSavedRepos
+            for i in updated.indices {
+                updated[i].isActive = false
+            }
+            gitHubSavedRepos = updated  // Reassign to trigger didSet
+        } else {
+            // Deactivate GitLab projects when GitHub is preferred
+            var updated = gitLabSavedProjects
+            for i in updated.indices {
+                updated[i].isActive = false
+            }
+            gitLabSavedProjects = updated  // Reassign to trigger didSet
+        }
+    }
+
+    /// Clear the provider preference and allow both providers to have active repos.
+    func clearProviderPreference() {
+        preferredRepoProvider = nil
     }
 
     /// Which provider owns the cloned repo at `root`, matched by saved clone
@@ -674,6 +717,14 @@ final class AppConfig: ObservableObject {
         self.autoTaskTemplateReviewConflicts = defaults.string(forKey: "autoTaskTemplateReviewConflicts") ?? Self.defaultTemplateReviewConflicts
         self.autoTaskTemplateGenerateDoc = defaults.string(forKey: "autoTaskTemplateGenerateDoc") ?? Self.defaultTemplateGenerateDoc
         self.autoTaskTemplateUpdateIssues = defaults.string(forKey: "autoTaskTemplateUpdateIssues") ?? Self.defaultTemplateUpdateIssues
+        
+        // Repository provider preference
+        if let rawValue = defaults.string(forKey: "preferredRepoProvider") {
+            self.preferredRepoProvider = RepoBackendKind(rawValue: rawValue)
+        } else {
+            self.preferredRepoProvider = nil
+        }
+        
         self.backendNodePath = defaults.string(forKey: "backendNodePath") ?? ""
         self.backendWorkingDir = defaults.string(forKey: "backendWorkingDir") ?? ""
         // Default ON so the out-of-box experience (backend auto-starts on

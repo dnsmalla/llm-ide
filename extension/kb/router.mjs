@@ -171,6 +171,50 @@ export async function handleKB(req, res) {
       return true;
     }
 
+    // List GitHub issues (and other tickets) from the KB
+    if (req.method === 'GET' && url.startsWith('/kb/issues')) {
+      const u = new URL(url, 'http://127.0.0.1');
+      const repo = u.searchParams.get('repo') || '';
+      const state = u.searchParams.get('state') || 'open';
+      const provider = u.searchParams.get('provider') || 'github';
+      const rawLimit = Number(u.searchParams.get('limit'));
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0
+        ? Math.min(rawLimit, 100)
+        : 20;
+      
+      // Search for tickets matching the filter criteria
+      const allTickets = kb.search(userId, { kind: 'ticket', limit: 1000 });
+      
+      // Filter by provider, repo, and state
+      const filtered = allTickets.filter(t => {
+        const meta = t.meta || {};
+        if (meta.provider !== provider) return false;
+        if (repo && meta.repo !== repo) return false;
+        if (state !== 'all' && meta.state !== state) return false;
+        return true;
+      });
+      
+      // Map to a simpler Issue format
+      const issues = filtered.slice(0, limit).map(t => ({
+        id: t.entityId || t.meetingId,
+        title: t.title,
+        body: t.body,
+        url: t.meta?.ref || '',
+        provider: t.meta?.provider || '',
+        repo: t.meta?.repo,
+        number: t.meta?.number,
+        state: t.meta?.state,
+        labels: t.meta?.labels || [],
+        author: t.meta?.author,
+        createdAt: t.meta?.createdAt,
+        updatedAt: t.meta?.updatedAt,
+        isPR: t.meta?.isPR,
+      }));
+      
+      sendJSON(res, 200, { issues });
+      return true;
+    }
+
     if (req.method === 'GET' && url.startsWith('/kb/meeting/')) {
       const id = decodeURIComponent(url.slice('/kb/meeting/'.length).split('?')[0]);
       if (!id || !SAFE_ID.test(id)) {

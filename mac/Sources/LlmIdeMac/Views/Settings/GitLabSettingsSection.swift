@@ -33,6 +33,51 @@ struct GitLabSettingsSection: View {
         SettingsSectionCard(icon: "checklist", title: "GitLab") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
 
+                // Provider preference banner
+                if !config.gitHubToken.isEmpty && !config.gitLabToken.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button {
+                            // Toggle the preference: if GitLab is preferred, clear it; otherwise set it
+                            if config.preferredRepoProvider == .gitlab {
+                                config.preferredRepoProvider = nil
+                            } else {
+                                config.preferredRepoProvider = .gitlab
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: config.preferredRepoProvider == .gitlab ? "checkmark.circle.fill" : "circle")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(config.preferredRepoProvider == .gitlab ? theme.current.accent : theme.current.border)
+                                Text("Set as primary provider")
+                                    .font(Typography.body)
+                                    .foregroundStyle(theme.current.text)
+                                Spacer()
+                            }
+                        }
+                        .buttonStyle(.plain)
+
+                        if config.preferredRepoProvider == .gitlab {
+                            HStack(spacing: 4) {
+                                Image(systemName: "info.circle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(theme.current.accent3)
+                                Text("Issues, Gantt, and code workflows will use GitLab as the primary provider. GitHub repositories are deactivated.")
+                                    .font(Typography.caption)
+                                    .foregroundStyle(theme.current.textMuted)
+                                Spacer()
+                            }
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(theme.current.accent3.opacity(0.08)))
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(theme.current.accent3.opacity(0.2), lineWidth: 1))
+                        }
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(theme.current.surface2))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(theme.current.border.opacity(0.4), lineWidth: 1))
+
+                    Divider().padding(.vertical, 4)
+                }
+
                 // Access Token
                 HStack(spacing: Spacing.md) {
                     Text("Access Token")
@@ -503,10 +548,6 @@ struct GitLabSettingsSection: View {
             let (data, resp) = try await GitLabClient.session.data(for: req)
             guard let http = resp as? HTTPURLResponse else { gitLabStatus = "No response."; return }
             if http.statusCode == 200 {
-                // GitLab's /user payload mixes types (id: number, bot: bool, …),
-                // so decoding the whole object as [String: String] always fails
-                // and the name fell through to "unknown". Read it untyped and
-                // pull just the string fields we display.
                 let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
                 let name = (obj?["name"] as? String)
                     ?? (obj?["username"] as? String)
@@ -514,6 +555,11 @@ struct GitLabSettingsSection: View {
                 config.gitLabToken = token
                 config.gitLabBaseURL = base
                 gitLabStatus = "✓ Connected as \(name)"
+                
+                // If no preference is set, default to GitLab when first token is saved
+                if config.preferredRepoProvider == nil {
+                    config.preferredRepoProvider = .gitlab
+                }
             } else if http.statusCode == 401 {
                 gitLabStatus = "Invalid token — check scope and expiry."
             } else {

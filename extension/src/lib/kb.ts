@@ -246,3 +246,50 @@ export async function getKBStats(): Promise<KBStats | null> {
     return null;
   }
 }
+
+export interface Issue {
+  id: string;
+  title: string;
+  body: string;
+  url: string;
+  provider: string;
+  repo?: string;
+  number?: number;
+  state?: string;
+  labels?: string[];
+  author?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  isPR?: boolean;
+}
+
+export async function listIssues(opts?: {
+  repo?: string;
+  state?: 'open' | 'closed' | 'all';
+  limit?: number;
+  provider?: string;
+}): Promise<Issue[]> {
+  const serverUrl = await getServerUrl();
+  const params = new URLSearchParams();
+  if (opts?.repo) params.set('repo', opts.repo);
+  if (opts?.state) params.set('state', opts.state);
+  if (opts?.limit) params.set('limit', String(opts.limit));
+  if (opts?.provider) params.set('provider', opts.provider);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await authFetch(`${serverUrl}/kb/issues?${params.toString()}`, {
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error('Issues listing requires a newer server version. Please restart the server.');
+      }
+      throw new Error('Issues listing is temporarily unavailable. Please try again.');
+    }
+    const data = await response.json();
+    return Array.isArray(data?.issues) ? data.issues : [];
+  } finally {
+    clearTimeout(timeout);
+  }
+}
