@@ -33,6 +33,7 @@ enum ProjectScaffolder {
     static let requiredDirectories = [
         "source", "code", "data", "notes",
         "system", "system/faults", "system/graph", "system/cache",
+        ".claude",
     ]
 
     // MARK: - Public entry point
@@ -103,6 +104,9 @@ enum ProjectScaffolder {
         } else {
             log.info("preserving existing non-LLM IDE README at \(folderURL.lastPathComponent, privacy: .public)")
         }
+
+        // 5. .claude directory — project-level agent configuration and instructions
+        ensureClaudeConfig(at: folderURL, project: project)
 
         log.info("scaffold complete: \(folderURL.lastPathComponent, privacy: .public)")
     }
@@ -216,4 +220,137 @@ enum ProjectScaffolder {
 
         """
     }
+
+    // MARK: - .claude Configuration
+
+    /// Create and populate the `.claude/` directory with project-level agent
+    /// configuration and instructions. This makes agents aware of project
+    /// context and allows per-project customization of AI behavior.
+    private static func ensureClaudeConfig(at folderURL: URL, project: Project) {
+        let claudeDir = folderURL.appendingPathComponent(".claude")
+
+        // 1. project.md — project-specific instructions for agents
+        let projectMDURL = claudeDir.appendingPathComponent("project.md")
+        writeIfAbsent(
+            at: projectMDURL,
+            content: makeProjectInstructions(project: project, folderURL: folderURL)
+        )
+
+        // 2. settings.json — project-level agent settings
+        let settingsJSONURL = claudeDir.appendingPathComponent("settings.json")
+        writeIfAbsent(
+            at: settingsJSONURL,
+            content: makeClaudeSettings(project: project)
+        )
+
+        // 3. README.md — explains the .claude directory structure
+        let claudeReadmeURL = claudeDir.appendingPathComponent("README.md")
+        writeIfAbsent(
+            at: claudeReadmeURL,
+            content: claudeDirectoryReadme
+        )
+    }
+
+    /// Generate project.md with project-specific instructions for agents.
+    /// Users can edit this file to provide context about their project.
+    private static func makeProjectInstructions(project: Project, folderURL: URL) -> String {
+        let name = project.displayName
+        let lang = project.settings.language
+        let repoInfo: String = {
+            guard let repo = project.settings.linkedRepo else { return "" }
+            return """
+
+**Linked Repository:**
+- Provider: \(repo.kind.rawValue)
+- Repository: \(repo.remoteId)
+- URL: \(repo.url)
+"""
+        }()
+
+        return """
+# \(name)
+
+> Project-specific instructions for LLM IDE agents.
+>
+> Edit this file to provide context about your project, coding standards,
+> architecture decisions, and any other information that helps agents
+> work more effectively with your codebase.
+
+## Project Overview
+
+**Language:** \(lang.uppercased())\(repoInfo)
+
+## Context for Agents
+
+### Architecture
+<!-- Describe your project's architecture, key components, and how they interact -->
+
+### Coding Standards
+<!-- Your coding conventions, style preferences, and best practices -->
+
+### Important Notes
+<!-- Any critical information agents should know when making changes -->
+
+### Testing Approach
+<!-- How to run tests, what testing framework you use -->
+
+---
+*Instructions in this file are automatically loaded by agents when working
+on this project. Keep it concise and focused on actionable context.*
+"""
+    }
+
+    /// Generate settings.json with project-level agent configuration.
+    private static func makeClaudeSettings(project: Project) -> String {
+        let lang = project.settings.language
+        // Convert to JSON string
+        return """
+{
+  "projectName": "\(project.displayName)",
+  "language": "\(lang)",
+  "enabledFeatures": {
+    "codeReview": true,
+    "docGeneration": true,
+    "issueTracking": true
+  },
+  "agentPreferences": {
+    "contextScope": "project",
+    "includeTests": true,
+    "includeDocs": true
+  }
+}
+"""
+    }
+
+    /// README explaining the .claude directory structure.
+    private static let claudeDirectoryReadme = """
+# .claude Directory
+
+This directory contains project-level configuration and instructions for LLM IDE agents.
+
+## Files
+
+- **project.md** — Project-specific instructions and context for agents.
+  Edit this file to help agents understand your project's architecture,
+  coding standards, and important conventions.
+
+- **settings.json** — Project-level agent preferences and feature flags.
+  Controls which agent features are enabled and how they interact with
+  your project.
+
+## Purpose
+
+Agents automatically load instructions from `project.md` when working on
+this project, giving them project-aware context. Settings in `settings.json`
+allow you to customize agent behavior per project.
+
+## Global vs Project Settings
+
+- **Global settings** (in LLM IDE app Settings): Apply to all projects
+- **Project settings** (this directory): Override or customize for this
+  specific project
+
+---
+*Part of LLM IDE project structure.*
+"""
 }

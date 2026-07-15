@@ -129,6 +129,18 @@ struct AutoCodeSettingsSection: View {
                         TextField("120", value: $config.regressionVerifyTimeout, format: .number)
                             .frame(width: 60).textFieldStyle(.roundedBorder)
                     }
+
+                    Divider().background(theme.current.border)
+
+                    // Automation tasks
+                    taskToggle("Update Issues", icon: "checklist",
+                               binding: $config.autoCodeRunUpdateIssues)
+                    taskToggle("Update Plan Status", icon: "chart.bar.doc.horizontal",
+                               binding: $config.autoCodeRunUpdatePlanStatus)
+                    taskToggle("Generate Documentation", icon: "wand.and.stars",
+                               binding: $config.autoCodeRunGenerateDoc)
+                    taskToggle("Knowledge", icon: "brain",
+                               binding: $config.autoCodeRunGenerateKnowledge)
                 }
 
                 Divider().background(theme.current.border)
@@ -153,7 +165,7 @@ struct AutoCodeSettingsSection: View {
                         if autoCodeUpdate.isRunning {
                             HStack(spacing: 6) {
                                 ProgressView().controlSize(.small)
-                                Text("Running…")
+                                Text(autoCodeUpdate.currentStep ?? "Running…")
                             }
                         } else {
                             Text("Run Now")

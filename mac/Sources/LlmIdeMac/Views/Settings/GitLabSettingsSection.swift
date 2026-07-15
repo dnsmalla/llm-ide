@@ -513,6 +513,8 @@ struct GitLabSettingsSection: View {
                     ?? "unknown"
                 config.gitLabToken = token
                 config.gitLabBaseURL = base
+                // Mutual exclusality: clear GitHub when GitLab is set
+                config.gitHubToken = ""
                 gitLabStatus = "✓ Connected as \(name)"
             } else if http.statusCode == 401 {
                 gitLabStatus = "Invalid token — check scope and expiry."

@@ -399,6 +399,8 @@ struct GitHubSettingsSection: View {
             // failure). Matches GitLabSettingsSection's behavior.
             let user = try await GitHubClient.verifyToken(token)
             config.gitHubToken = token   // commit only on success
+            // Mutual exclusivity: clear GitLab when GitHub is set
+            config.gitLabToken = ""
             status = "✓ Connected as \(user.name ?? user.login)"
         } catch let e as GitHubClient.GitHubError {
             switch e {

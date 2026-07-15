@@ -477,6 +477,15 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(autoCodeRunUpdatePlanStatus, forKey: "autoCodeRunUpdatePlanStatus") }
     }
 
+    // MARK: - Mobile Control
+
+    /// Mobile Control enabled — allows iPhone remote desktop + chat via the
+    /// external auto_swift_aicontrol system. When enabled, the Settings UI
+    /// shows instructions for starting the computer agent and iOS app.
+    @Published var mobileControlEnabled: Bool {
+        didSet { defaults.set(mobileControlEnabled, forKey: "mobileControlEnabled") }
+    }
+
     // Default prompt templates for each auto task type. Review tasks are
     // READ-ONLY: they must not modify the repo (the loop reverts any stray
     // edits) — their findings are captured from stdout in the task log.
@@ -669,6 +678,7 @@ final class AppConfig: ObservableObject {
         self.autoCodeRunGenerateDoc = defaults.object(forKey: "autoCodeRunGenerateDoc") as? Bool ?? true
         self.autoCodeRunUpdateIssues = defaults.object(forKey: "autoCodeRunUpdateIssues") as? Bool ?? false
         self.autoCodeRunUpdatePlanStatus = defaults.object(forKey: "autoCodeRunUpdatePlanStatus") as? Bool ?? false
+        self.mobileControlEnabled = defaults.object(forKey: "mobileControlEnabled") as? Bool ?? false
         self.autoTaskTemplateReviewCode = defaults.string(forKey: "autoTaskTemplateReviewCode") ?? Self.defaultTemplateReviewCode
         self.autoTaskTemplateReviewDoc = defaults.string(forKey: "autoTaskTemplateReviewDoc") ?? Self.defaultTemplateReviewDoc
         self.autoTaskTemplateReviewConflicts = defaults.string(forKey: "autoTaskTemplateReviewConflicts") ?? Self.defaultTemplateReviewConflicts
