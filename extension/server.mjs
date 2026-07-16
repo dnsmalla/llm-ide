@@ -32,7 +32,7 @@ const HOST = config.host;
 // Bump whenever the HTTP surface changes so the extension can detect
 // a stale server process ("you installed the new client but forgot to
 // restart node server.mjs") and surface a clear message.
-const SERVER_API_VERSION = 18;
+const SERVER_API_VERSION = 19;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -109,6 +109,9 @@ const ENDPOINTS = [
   '/kb/agent/personas/active',
   '/kb/agent/ask',
   '/kb/agent/ask/history',
+  '/kb/chat/sessions',
+  '/kb/chat/sessions/:id',
+  '/kb/chat/sessions/:id/messages',
 ];
 
 // Map a route URL to a rate-limit profile (see server/rate-limit.mjs).

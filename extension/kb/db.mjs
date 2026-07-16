@@ -488,6 +488,16 @@ export {
   clearAgentAskMessages,
 } from './personas.mjs';
 
+export {
+  createChatSession,
+  listChatSessions,
+  getChatSession,
+  updateChatSession,
+  deleteChatSession,
+  clearChatMessages,
+  appendChatMessage,
+} from './chat-sessions.mjs';
+
 
 // Meeting-agent question feedback (verdicts + stats) lives in
 // feedback.mjs. Re-exported here for backward compat with existing
@@ -802,6 +812,8 @@ export function deleteUserCascade(userId) {
     // a deleted user's conversation history survived account deletion (PII
     // leak, KB-1).  Explicit delete here closes the gap.
     counts.agent_ask_messages = del('DELETE FROM agent_ask_messages WHERE user_id = ?');
+    counts.chat_messages = del('DELETE FROM chat_messages WHERE user_id = ?');
+    counts.chat_sessions = del('DELETE FROM chat_sessions WHERE user_id = ?');
     counts.refresh_tokens  = del('DELETE FROM refresh_tokens WHERE user_id = ?');
     // migration 0008 — password-reset tokens are tied to a user; if we
     // skip these the column hangs as a dangling reference after the

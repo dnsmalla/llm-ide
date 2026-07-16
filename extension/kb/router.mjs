@@ -21,6 +21,7 @@ import { handlePlanningRoutes } from './routes/planning.mjs';
 import { handleIssueScheduleRoutes } from './routes/issue-schedule.mjs';
 import { handleLiveRoutes } from './routes/live.mjs';
 import { handleReviewRoutes } from './routes/review.mjs';
+import { handleChatRoutes } from './routes/chat.mjs';
 // runGuardrails moved into routes/review.mjs.
 import { summarizeTranscript } from '../agents/summarize.mjs';
 import { classifyEmail } from '../agents/email-classify.mjs';
@@ -886,6 +887,9 @@ export async function handleKB(req, res) {
     // the canonical record is the persisted meeting created by
     // /kb/ingest when the user clicks Stop & Save. See routes/live.mjs.
     if (await handleLiveRoutes(req, res, { userId, url })) return true;
+
+    // ── Unified chat sessions (mac + extension) ─────────────────
+    if (await handleChatRoutes(req, res, { userId, url })) return true;
 
     // ── Meeting agent ────────────────────────────────────────────
     // All /kb/agent/* routes live in routes/agent.mjs. Returns true

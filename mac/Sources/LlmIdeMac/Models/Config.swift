@@ -524,9 +524,17 @@ final class AppConfig: ObservableObject {
 
     /// Mobile Control enabled — allows iPhone remote desktop + chat via the
     /// external auto_swift_aicontrol system. When enabled, the Settings UI
-    /// shows instructions for starting the computer agent and iOS app.
+    /// supervises the computer agent like Settings → Backend.
     @Published var mobileControlEnabled: Bool {
         didSet { defaults.set(mobileControlEnabled, forKey: "mobileControlEnabled") }
+    }
+    /// Directory containing the computer-agent `package.json` (npm start → :3006).
+    @Published var mobileControlAgentPath: String {
+        didSet { defaults.set(mobileControlAgentPath, forKey: "mobileControlAgentPath") }
+    }
+    /// When true and Mobile Control is enabled, start the computer agent on app launch.
+    @Published var mobileControlAutoStart: Bool {
+        didSet { defaults.set(mobileControlAutoStart, forKey: "mobileControlAutoStart") }
     }
 
     // Default prompt templates for each auto task type. Review tasks are
@@ -722,6 +730,8 @@ final class AppConfig: ObservableObject {
         self.autoCodeRunUpdateIssues = defaults.object(forKey: "autoCodeRunUpdateIssues") as? Bool ?? false
         self.autoCodeRunUpdatePlanStatus = defaults.object(forKey: "autoCodeRunUpdatePlanStatus") as? Bool ?? false
         self.mobileControlEnabled = defaults.object(forKey: "mobileControlEnabled") as? Bool ?? false
+        self.mobileControlAgentPath = defaults.string(forKey: "mobileControlAgentPath") ?? ""
+        self.mobileControlAutoStart = defaults.object(forKey: "mobileControlAutoStart") as? Bool ?? true
         self.autoTaskTemplateReviewCode = defaults.string(forKey: "autoTaskTemplateReviewCode") ?? Self.defaultTemplateReviewCode
         self.autoTaskTemplateReviewDoc = defaults.string(forKey: "autoTaskTemplateReviewDoc") ?? Self.defaultTemplateReviewDoc
         self.autoTaskTemplateReviewConflicts = defaults.string(forKey: "autoTaskTemplateReviewConflicts") ?? Self.defaultTemplateReviewConflicts

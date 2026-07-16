@@ -24,10 +24,10 @@ struct BackendSettingsSection: View {
                 pathRow(
                     label: "Project folder",
                     text: $dirDraft,
-                    placeholder: "/path/to/meet-notes/extension",
+                    placeholder: "/path/to/llm-ide/extension",
                     onPick: pickDir,
-                    onDetect: nil,
-                    detectHint: nil
+                    onDetect: detectProjectDir,
+                    detectHint: "Auto-detect"
                 )
 
                 Toggle("Start backend on app launch", isOn: Binding(
@@ -61,6 +61,8 @@ struct BackendSettingsSection: View {
         .onAppear {
             nodeDraft = config.backendNodePath
             dirDraft = config.backendWorkingDir
+            if nodeDraft.isEmpty { detectNode() }
+            if dirDraft.isEmpty { detectProjectDir() }
         }
     }
 
@@ -264,6 +266,17 @@ struct BackendSettingsSection: View {
             nodeDraft = p
         } else {
             backend.lastError = "Could not find a node binary in /opt/homebrew, /usr/local, or /usr/bin. Paste the full path manually."
+        }
+    }
+
+    private func detectProjectDir() {
+        BackendManager.resolveLaunchPaths(config: config)
+        if !config.backendWorkingDir.isEmpty {
+            dirDraft = config.backendWorkingDir
+        } else if let found = LaunchPathResolver.findServerDirectory() {
+            dirDraft = found
+        } else {
+            backend.lastError = "Could not find server.mjs. Browse to the extension folder or clone llm-ide."
         }
     }
 }

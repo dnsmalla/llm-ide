@@ -1,6 +1,13 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getServerUrl, REQUEST_TIMEOUT_MS, authFetch } from '../../lib/config';
 import { listIssues } from '../../lib/kb';
+import {
+  ensureTranscriptSessionId,
+  loadTranscriptMessages,
+  appendChatMessage,
+  clearChatSessionMessages,
+  type UnifiedChatMessage,
+} from '../../lib/unified-chat';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -9,15 +16,13 @@ export interface ChatMessage {
 }
 
 // How many prior messages we send to the LLM as context per /chat request.
-// This is a PROMPT-SIZE bound, not a storage bound — it keeps Claude fast
-// and stops the context from growing unboundedly on long sessions.
 const MAX_HISTORY = 10;
 const STORAGE_KEY = 'chatMessages';
-// Maximum number of messages kept in chrome.storage.local.  The 5 MB quota
-// is shared with the transcript store; capping chat history here prevents
-// one long session from crowding out transcripts.  The in-context MAX_HISTORY
-// (prompt size) is separate and unchanged.
 const MAX_STORED_MESSAGES = 200;
+
+function toChatMessage(m: UnifiedChatMessage): ChatMessage {
+  return { role: m.role as 'user' | 'assistant', content: m.content, timestamp: m.timestamp };
+}
 
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -26,26 +31,46 @@ export function useChat() {
   const [quotaWarning, setQuotaWarning] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const hydratedRef = useRef(false);
+  const sessionIdRef = useRef<string | null>(null);
+  const serverBackedRef = useRef(false);
 
-  // Rehydrate from storage on mount, then persist on every change.
+  // Rehydrate from server (preferred) or chrome.storage fallback.
   useEffect(() => {
-    chrome.storage?.local
-      ?.get(STORAGE_KEY)
-      .then((result) => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const sid = await ensureTranscriptSessionId();
+        if (cancelled) return;
+        if (sid) {
+          sessionIdRef.current = sid;
+          serverBackedRef.current = true;
+          const serverMsgs = await loadTranscriptMessages(sid);
+          if (cancelled) return;
+          if (serverMsgs.length > 0) {
+            setMessages(serverMsgs.filter((m) => m.role === 'user' || m.role === 'assistant').map(toChatMessage));
+            hydratedRef.current = true;
+            return;
+          }
+        }
+      } catch {
+        // fall through to local storage
+      }
+      try {
+        const result = await chrome.storage?.local?.get(STORAGE_KEY);
         const saved = result?.[STORAGE_KEY];
-        if (Array.isArray(saved)) setMessages(saved);
-      })
-      .catch(() => {})
-      .finally(() => {
-        hydratedRef.current = true;
-      });
+        if (!cancelled && Array.isArray(saved)) setMessages(saved);
+      } catch {
+        /* ignore */
+      } finally {
+        if (!cancelled) hydratedRef.current = true;
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
+  // Local fallback persistence when server sync unavailable.
   useEffect(() => {
-    if (!hydratedRef.current) return;
-    // Prune to the most recent MAX_STORED_MESSAGES before writing so the
-    // chat store doesn't crowd out transcripts in the shared 5 MB quota.
-    // The in-context MAX_HISTORY (prompt size) is a separate, smaller cap.
+    if (!hydratedRef.current || serverBackedRef.current) return;
     const toStore = messages.length > MAX_STORED_MESSAGES ? messages.slice(-MAX_STORED_MESSAGES) : messages;
     chrome.storage?.local?.set({ [STORAGE_KEY]: toStore }).catch((err: Error) => {
       const msg = err?.message || String(err);
@@ -64,9 +89,8 @@ export function useChat() {
       if (!trimmed || isLoading) return;
       setError(null);
 
-      // Check if the user is asking about issues
-      const issuKeywords = ['issue', 'issues', 'bug', 'ticket', 'github', '#'];
-      const asksAboutIssues = issuKeywords.some(k => trimmed.toLowerCase().includes(k));
+      const issueKeywords = ['issue', 'issues', 'bug', 'ticket', 'github', '#'];
+      const asksAboutIssues = issueKeywords.some((k) => trimmed.toLowerCase().includes(k));
 
       const userMsg: ChatMessage = {
         role: 'user',
@@ -81,6 +105,15 @@ export function useChat() {
         return updated;
       });
 
+      const sid = sessionIdRef.current;
+      if (serverBackedRef.current && sid) {
+        try {
+          await appendChatMessage(sid, 'user', trimmed);
+        } catch {
+          /* non-fatal — still answer */
+        }
+      }
+
       setIsLoading(true);
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -89,31 +122,30 @@ export function useChat() {
 
       try {
         const serverUrl = await getServerUrl();
-        
-        // Fetch relevant issues if the user asks about them
+
         let issueContext = '';
         if (asksAboutIssues) {
           try {
             const issues = await listIssues({ state: 'open', limit: 10 });
             if (issues && issues.length > 0) {
               issueContext = '\n\nRelevant open issues from the knowledge base:\n';
-              issues.forEach(issue => {
+              issues.forEach((issue) => {
                 issueContext += `- #${issue.number}: ${issue.title} (${issue.state}) - ${issue.url}\n`;
               });
             }
-          } catch (err) {
-            // Non-fatal: proceed without issue context
+          } catch {
+            /* non-fatal */
           }
         }
 
         const response = await authFetch(`${serverUrl}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            message: trimmed + issueContext, 
-            transcript, 
-            history: historySnapshot, 
-            language 
+          body: JSON.stringify({
+            message: trimmed + issueContext,
+            transcript,
+            history: historySnapshot,
+            language,
           }),
           signal: controller.signal,
         });
@@ -133,6 +165,14 @@ export function useChat() {
           timestamp: Date.now(),
         };
         setMessages((prev) => [...prev, assistantMsg]);
+
+        if (serverBackedRef.current && sid) {
+          try {
+            await appendChatMessage(sid, 'assistant', data.reply);
+          } catch {
+            /* non-fatal */
+          }
+        }
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
         setError(err instanceof Error ? err.message : 'Unknown error');
@@ -151,7 +191,12 @@ export function useChat() {
     setError(null);
     setQuotaWarning(null);
     setIsLoading(false);
-    chrome.storage?.local?.remove(STORAGE_KEY).catch(() => {});
+    const sid = sessionIdRef.current;
+    if (serverBackedRef.current && sid) {
+      clearChatSessionMessages(sid).catch(() => {});
+    } else {
+      chrome.storage?.local?.remove(STORAGE_KEY).catch(() => {});
+    }
   }, []);
 
   return { messages, isLoading, error, quotaWarning, sendMessage, clearChat };

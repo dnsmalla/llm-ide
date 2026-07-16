@@ -129,13 +129,13 @@ struct AutoCodeSettingsSection: View {
 
                     // Automation tasks
                     taskToggle("Update Issues", icon: "checklist",
-                               binding: $config.autoCodeRunUpdateIssues)
+                               binding: $autoTaskSettings.runUpdateIssues)
                     taskToggle("Update Plan Status", icon: "chart.bar.doc.horizontal",
-                               binding: $config.autoCodeRunUpdatePlanStatus)
+                               binding: $autoTaskSettings.runUpdatePlanStatus)
                     taskToggle("Generate Documentation", icon: "wand.and.stars",
-                               binding: $config.autoCodeRunGenerateDoc)
+                               binding: $autoTaskSettings.runGenerateDoc)
                     taskToggle("Knowledge", icon: "brain",
-                               binding: $config.autoCodeRunGenerateKnowledge)
+                               binding: $autoTaskSettings.runGenerateKnowledge)
                 }
 
                 Divider().background(theme.current.border)

@@ -114,9 +114,14 @@ struct MenuBarAutoTaskView: View {
             Divider()
 
             // Settings link
-            Text("Configure in Settings")
-                .font(.caption)
-                .foregroundStyle(theme.current.accent)
+            Button {
+                NotificationCenter.default.post(name: .openSettings, object: nil)
+            } label: {
+                Text("Configure in Settings")
+                    .font(.caption)
+                    .foregroundStyle(theme.current.accent)
+            }
+            .buttonStyle(.plain)
         }
         .padding(12)
         .frame(width: 280)

@@ -75,6 +75,7 @@ const REQUIRED_ENDPOINTS = [
   '/kb/review/approve',
   '/kb/notify/slack',
   '/kb/outcomes/refresh',
+  '/kb/chat/sessions',
 ];
 
 // Minimum server API version this client requires. The server reports
@@ -84,7 +85,7 @@ const REQUIRED_ENDPOINTS = [
 // silently used here. Bump this in lockstep with SERVER_API_VERSION whenever a
 // contract change lands that this client depends on. A NEWER server is fine
 // (backward-compatible), so we only flag servers BELOW this floor.
-const MIN_SERVER_API_VERSION = 18;
+const MIN_SERVER_API_VERSION = 19;
 
 export default function App() {
   // Auth gate is the very first hook so login renders before any of the

@@ -149,6 +149,8 @@ final class BackendManager {
         if !hasServer(config.backendWorkingDir) {
             if let found = defaultProjectFolders().first(where: { hasServer($0.path) }) {
                 config.backendWorkingDir = found.path
+            } else if let found = LaunchPathResolver.findServerDirectory() {
+                config.backendWorkingDir = found
             }
         }
     }

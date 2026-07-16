@@ -12,13 +12,13 @@ test('buildHealthPayload exposes schema version and full endpoint capability lis
     dbOk: true,
     claude: { ok: true },
     migration: { current: 7 },
-    apiVersion: 18,
+    apiVersion: 19,
     endpoints: ['/generate-notes', '/kb/system/status'],
     serverStartedAt: startedAt,
   });
 
   assert.equal(payload.status, 'ok');
-  assert.equal(payload.apiVersion, 18);
+  assert.equal(payload.apiVersion, 19);
   assert.equal(payload.schemaVersion, 7);
   assert.ok(payload.uptimeSec >= 4);
   assert.deepEqual(payload.endpoints, ['/generate-notes', '/kb/system/status']);
@@ -30,7 +30,7 @@ test('buildHealthPayload reports degraded dependencies without dropping the capa
     dbOk: false,
     claude: { ok: false, error: 'CLI not installed' },
     migration: null,
-    apiVersion: 18,
+    apiVersion: 19,
     endpoints: ['/generate-notes'],
     serverStartedAt: Date.now(),
   });

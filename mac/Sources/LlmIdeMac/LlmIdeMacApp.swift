@@ -48,6 +48,7 @@ struct LlmIdeMacApp: App {
     @StateObject private var graphAutoUpdater: GraphAutoUpdater
     @StateObject private var graphSessionStore = GraphSessionStore()
     @State private var backend = BackendManager()
+    @State private var mobileControl = MobileControlManager()
     @State private var quickSwitcherShown = false
     @State private var activityStore: ActivityStore
     private let api: LlmIdeAPIClient
@@ -55,11 +56,8 @@ struct LlmIdeMacApp: App {
 
     init() {
         installCrashHandlers()
-        // Always start with a clean Code Assistant chat: discard every
-        // persisted session (and the legacy single-file history) so old
-        // conversations never carry across launches. Runs exactly once
-        // per process — the panel's .onAppear then mints a fresh chat.
-        ChatSessionStore.wipeAllForFreshLaunch()
+        // Chat sessions persist across launches (server + local JSON).
+        // CodeAssistantPanel loads the last session on appear.
         // Build the dependency graph once, on the main actor where
         // SwiftUI requires it.  The API client needs SessionStore
         // so it can mint authorization headers from the live token.
@@ -164,6 +162,7 @@ struct LlmIdeMacApp: App {
                 .environmentObject(graphAutoUpdater)
                 .environmentObject(graphSessionStore)
                 .environment(backend)
+                .environment(mobileControl)
                 .environment(activityStore)
                 // 1000 gives the 3-pane Review layout breathing room
                 // (sidebar ~240 + code ~380 + assistant ~280 = 900,
@@ -223,6 +222,9 @@ struct LlmIdeMacApp: App {
                             await Self.awaitBackendReady(timeoutSec: 3)
                         }
                     }
+                    if config.mobileControlEnabled, config.mobileControlAutoStart {
+                        autoStartMobileControl()
+                    }
                     // Restore persisted session on launch, if any.
                     await session.bootstrap(api: api)
                     autoCapture.start()
@@ -240,6 +242,7 @@ struct LlmIdeMacApp: App {
                 // quits the app.
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     backend.stop()
+                    mobileControl.stopIfOwned()
                 }
                 .task {
                     if session.isAuthenticated { liveMirror.start() }
@@ -311,6 +314,22 @@ struct LlmIdeMacApp: App {
                 .accessibilityLabel(capture.isRunning ? "LLM IDE — recording" : "LLM IDE")
         }
         .menuBarExtraStyle(.menu)
+
+        // Auto Tasks — manual Run Now / Stop without opening the main window.
+        MenuBarExtra {
+            MenuBarAutoTaskView()
+                .environmentObject(theme)
+                .environmentObject(autoTaskSettings)
+                .environmentObject(autoCodeUpdate)
+        } label: {
+            Image(systemName: autoCodeUpdate.isRunning
+                  ? "arrow.triangle.2.circlepath.circle.fill"
+                  : "arrow.triangle.2.circlepath.circle")
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(autoTaskSettings.enabled ? .primary : .secondary)
+                .accessibilityLabel("Auto Tasks")
+        }
+        .menuBarExtraStyle(.window)
     }
 
     /// Always tries to start the backend on app launch:
@@ -325,6 +344,15 @@ struct LlmIdeMacApp: App {
         BackendManager.resolveLaunchPaths(config: config)
         guard !config.backendNodePath.isEmpty, !config.backendWorkingDir.isEmpty else { return }
         backend.start(nodePath: config.backendNodePath, workingDirectory: config.backendWorkingDir)
+    }
+
+    /// Start or adopt the computer-agent when Mobile Control is enabled.
+    @MainActor
+    private func autoStartMobileControl() {
+        LaunchPathResolver.resolveMobileAgentPath(config: config)
+        let path = config.mobileControlAgentPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return }
+        mobileControl.start(agentPath: path)
     }
 
     /// Poll `/health` briefly so session restore — which talks to the
