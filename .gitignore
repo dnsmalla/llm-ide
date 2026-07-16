@@ -99,5 +99,10 @@ mac/MeetNotesMac.app/
 import-repo-settings.sh
 extension/tests/_skill-library-repo-*/
 
-# Mobile control services (using existing system at ~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/)
-services/
+# Top-level copy of the external computer-agent (lives at
+# ~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/). Anchored to the repo
+# root with a leading slash so it does NOT match nested directories of the
+# same name — notably mac/Sources/LlmIdeMac/Services/, which is real app
+# source and must stay tracked. (A bare `services/` silently ignored new
+# *Service.swift files there.)
+/services/
