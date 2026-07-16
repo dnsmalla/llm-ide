@@ -138,7 +138,7 @@ struct AutoCodeView: View {
                 Button {
                     autoCode.runNow()
                 } label: {
-                    Label(autoCode.isRunning ? "Running…" : "Run Now",
+                    Label(autoCode.isRunning ? (autoCode.currentStep ?? "Running…") : "Run Now",
                           systemImage: autoCode.isRunning ? "ellipsis.circle" : "play.fill")
                         .frame(maxWidth: .infinity)
                 }

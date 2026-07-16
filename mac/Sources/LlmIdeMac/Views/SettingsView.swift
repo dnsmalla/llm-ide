@@ -28,6 +28,7 @@ struct SettingsView: View {
                         SidebarVisibilitySection()
                         UpdatesSettingsSection()
                         AboutSettingsSection()
+                        MobileControlSettingsSection()
                     }
 
                     // Project-scoped settings — only visible when a project is

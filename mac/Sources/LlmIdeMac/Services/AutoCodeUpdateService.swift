@@ -22,6 +22,9 @@ final class AutoCodeUpdateService: ObservableObject {
     /// Tail of each review task's last-run log, keyed by `AutoTask.rawValue`.
     /// Lets the UI show review findings inline instead of only in a file.
     @Published private(set) var taskOutputs: [String: String] = [:]
+    /// Human-readable description of the currently running step (e.g., "Creating issues", "Running Review Code").
+    /// nil when no run is active. Updated throughout the run() flow so the UI shows live progress.
+    @Published private(set) var currentStep: String?
 
     // MARK: - Dependencies
 
@@ -186,6 +189,7 @@ final class AutoCodeUpdateService: ObservableObject {
     func run() async {
         guard !isRunning else { return }
         isRunning = true
+        currentStep = "Initializing"
         createdCount = 0
         implementedCount = 0
         failedCount = 0
@@ -199,6 +203,7 @@ final class AutoCodeUpdateService: ObservableObject {
         var stashPath: String? = nil
         defer {
             isRunning = false
+            currentStep = nil
             lastRunDate = Date()
             // Restore the stash OFF the main actor — checkout + pop can be slow
             // on a large repo and must not freeze the UI. Fire-and-forget; on a
@@ -250,6 +255,7 @@ final class AutoCodeUpdateService: ObservableObject {
         // Resolve the notes folder (meetings/ when a project is active)
         let notesFolderURL = NotesFolderConfig().currentFolder
 
+        currentStep = "Extracting actions from meeting notes"
         // 1. Extract actions from recent notes.
         // The SQLite index lives at <projectRoot>/system/index.sqlite (via
         // ProjectLayout.indexDB) when a project is open, matching what
@@ -304,6 +310,7 @@ final class AutoCodeUpdateService: ObservableObject {
             return
         }
 
+        currentStep = "Fetching existing issues"
         // 2. Fetch existing issues from the active backend. We paginate
         // until a page returns < 100 items (the cap most backends honor)
         // or we hit a soft ceiling so a runaway project can't pin the
@@ -320,6 +327,7 @@ final class AutoCodeUpdateService: ObservableObject {
 
         let normalizedExistingTitles = Set(existingIssues.map { NoteActionExtractor.normalize($0.title) })
 
+        currentStep = "Creating new issues from meeting notes"
         // 3. Create issues for genuinely new actions (allow-list gated)
         for action in newActions where autoSteps.createIssue {
             if Task.isCancelled { break }
@@ -349,6 +357,7 @@ final class AutoCodeUpdateService: ObservableObject {
             }
         }
 
+        currentStep = "Implementing pending issues"
         // 4. Implement pending entries via CLI subprocess (branch + commit),
         // but only when both branch-cut and auto-commit are allowed. Steps 5–8
         // (status, regression sweep, knowledge review) are independent and must
@@ -474,6 +483,7 @@ final class AutoCodeUpdateService: ObservableObject {
         // 6. Run per-task-type CLI prompts for enabled task types
         if !Task.isCancelled, let logDir = logsDirectory() {
             if !Task.isCancelled, autoTaskSettings.runReviewCode {
+                currentStep = "Running Review Code"
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewCode,
                                       localPath: capturedGitRoot,
                                       logSuffix: "review-code",
@@ -486,6 +496,7 @@ final class AutoCodeUpdateService: ObservableObject {
                 }
             }
             if !Task.isCancelled, autoTaskSettings.runReviewDoc {
+                currentStep = "Running Review Doc"
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewDoc,
                                       localPath: capturedGitRoot,
                                       logSuffix: "review-doc",
@@ -498,6 +509,7 @@ final class AutoCodeUpdateService: ObservableObject {
                 }
             }
             if !Task.isCancelled, autoTaskSettings.runReviewConflicts {
+                currentStep = "Running Review Conflicts"
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewConflicts,
                                       localPath: capturedGitRoot,
                                       logSuffix: "review-conflicts",
@@ -511,6 +523,7 @@ final class AutoCodeUpdateService: ObservableObject {
             }
 
             if !Task.isCancelled, autoTaskSettings.runGenerateDoc {
+                currentStep = "Generating Documentation"
                 let ok = await runCLI(prompt: config.autoTaskTemplateGenerateDoc,
                                       localPath: capturedGitRoot,
                                       logSuffix: "generate-doc",
@@ -524,6 +537,7 @@ final class AutoCodeUpdateService: ObservableObject {
             }
 
             if !Task.isCancelled, autoTaskSettings.runUpdateIssues {
+                currentStep = "Updating Issues"
                 let ok = await runCLI(prompt: config.autoTaskTemplateUpdateIssues,
                                       localPath: capturedGitRoot,
                                       logSuffix: "update-issues",
@@ -544,6 +558,7 @@ final class AutoCodeUpdateService: ObservableObject {
         // verify commands + git ops run in the git working tree (gitRoot, the
         // clone). Off by default; opt-in via Settings.
         if !Task.isCancelled, autoTaskSettings.runRegression {
+            currentStep = "Running Regression sweep"
             await runRegressionSweep(projectRoot: resolved.projectRoot,
                                      gitRoot: resolved.gitRoot)
         }
@@ -552,12 +567,14 @@ final class AutoCodeUpdateService: ObservableObject {
         // (generation itself is automatic: GraphAutoUpdater on open/edit + the
         // code index). This row just surfaces "what's there" for the user.
         if !Task.isCancelled, autoTaskSettings.runGenerateKnowledge {
+            currentStep = "Reviewing Knowledge"
             reportKnowledge(projectRoot: resolved.projectRoot)
         }
 
         // 9. Plan status refresh — polls external outcome trackers (GitHub/GitLab/Linear/Backlog)
         // for dispatched plan tasks and updates their status locally. Off by default; opt-in via Settings.
         if !Task.isCancelled, autoTaskSettings.runUpdatePlanStatus {
+            currentStep = "Refreshing Plan statuses"
             await refreshPlanStatuses(projectRoot: resolved.projectRoot)
         }
 

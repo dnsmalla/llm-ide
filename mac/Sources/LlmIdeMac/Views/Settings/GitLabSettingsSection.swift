@@ -554,6 +554,8 @@ struct GitLabSettingsSection: View {
                     ?? "unknown"
                 config.gitLabToken = token
                 config.gitLabBaseURL = base
+                // Mutual exclusality: clear GitHub when GitLab is set
+                config.gitHubToken = ""
                 gitLabStatus = "✓ Connected as \(name)"
                 
                 // If no preference is set, default to GitLab when first token is saved

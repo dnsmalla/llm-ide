@@ -440,9 +440,9 @@ struct GitHubSettingsSection: View {
         do {
             let user = try await GitHubClient.verifyToken(token)
             config.gitHubToken = token
+            config.gitLabToken = ""
             status = "✓ Connected as \(user.name ?? user.login)"
             
-            // If no preference is set, default to GitHub when first token is saved
             if config.preferredRepoProvider == nil {
                 config.preferredRepoProvider = .github
             }
