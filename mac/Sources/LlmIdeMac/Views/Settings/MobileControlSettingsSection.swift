@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Mobile Control settings — supervises the external computer-agent
 /// (`npm start` on :3006) with the same start/stop/log UX as Backend.
@@ -9,6 +10,13 @@ struct MobileControlSettingsSection: View {
 
     @State private var agentDraft: String = ""
     @State private var autoScroll: Bool = true
+    @State private var connection = MobileConnectionInfo.current()
+
+    /// Tracks Screen Recording + Accessibility so the panel can show
+    /// granted/needed state and offer one-click "add LLM IDE to the TCC
+    /// list" — the computer-agent (screenshot-desktop + nut-js) needs both.
+    @StateObject private var permissions = PermissionsService()
+    @Environment(\.scenePhase) private var scenePhase
 
     private let iosAppPath = "~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/apps/ios"
 
@@ -29,6 +37,14 @@ struct MobileControlSettingsSection: View {
                 .toggleStyle(.switch)
 
                 if config.mobileControlEnabled {
+                    Divider().padding(.vertical, 4)
+
+                    connectionBlock
+
+                    Divider().padding(.vertical, 4)
+
+                    permissionsBlock
+
                     Divider().padding(.vertical, 4)
 
                     pathRow(
@@ -74,9 +90,252 @@ struct MobileControlSettingsSection: View {
             }
         }
         .onAppear {
+            connection = MobileConnectionInfo.current()
             agentDraft = config.mobileControlAgentPath
             if agentDraft.isEmpty { detectAgentPath() }
+            permissions.refreshAll()
+            if config.mobileControlEnabled { permissions.startPolling() }
         }
+        .onDisappear {
+            permissions.stopPolling()
+        }
+        .onChange(of: config.mobileControlEnabled) { _, enabled in
+            // Auto-add: toggling Mobile Control on fires the macOS prompts
+            // that add LLM IDE to the Screen Recording + Accessibility
+            // lists, so the user doesn't hunt through System Settings.
+            if enabled {
+                permissions.startPolling()
+                autoPromptPermissionsIfNeeded()
+            } else {
+                permissions.stopPolling()
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // The user likely just connected Tailscale in another app;
+            // re-probe when we regain focus so the IP shows without Refresh.
+            if phase == .active { connection = MobileConnectionInfo.current() }
+        }
+    }
+
+    /// Refresh permission state and fire the macOS prompts for anything not
+    /// yet granted — auto-adds LLM IDE to the relevant TCC lists. No-op for
+    /// already-granted permissions.
+    private func autoPromptPermissionsIfNeeded() {
+        permissions.refreshAll()
+        if permissions.accessibility != .granted { permissions.promptAccessibility() }
+        if permissions.screenRecording != .granted { permissions.promptScreenRecording() }
+    }
+
+    // MARK: - Connection info
+
+    /// The IP / Port / PIN the iPhone app needs for Direct-IP connect.
+    /// Surfaces the Tailscale address first (works from any network) and the
+    /// local Wi-Fi address as a fallback (same-network only). Re-detect on
+    /// appear or via Refresh — the addresses move with the network.
+    private var connectionBlock: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack {
+                Text("Connection")
+                    .font(Typography.section)
+                    .foregroundStyle(theme.current.textMuted)
+                Spacer()
+                Button {
+                    connection = MobileConnectionInfo.current()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                        .font(Typography.caption)
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            }
+
+            tailscaleRow
+            copyableRow(label: "Local Wi-Fi", value: connection.lanIP, hint: "same network")
+            copyableRow(label: "Port", value: "\(connection.port)")
+            copyableRow(label: "PIN", value: connection.pin)
+
+            Text("Enter these in the iOS app → Direct IP connect. Prefer the Tailscale address — it works across Wi-Fi and cellular.")
+                .font(Typography.caption)
+                .foregroundStyle(theme.current.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(theme.current.body.opacity(0.6)))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(theme.current.border.opacity(0.4)))
+    }
+
+    @ViewBuilder
+    private func copyableRow(label: String, value: String?, hint: String? = nil, prominent: Bool = false) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Text(label)
+                .font(Typography.body)
+                .foregroundStyle(theme.current.textMuted)
+                .frame(width: 110, alignment: .leading)
+            if let value, !value.isEmpty {
+                Text(value)
+                    .font(Typography.mono)
+                    .foregroundStyle(prominent ? theme.current.accent3 : theme.current.text)
+                    .textSelection(.enabled)
+                if let hint {
+                    Text(hint)
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                }
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(value, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.current.textMuted)
+                }
+                .buttonStyle(.borderless)
+                .help("Copy \(label)")
+            } else {
+                Text("—")
+                    .font(Typography.mono)
+                    .foregroundStyle(theme.current.textMuted)
+                Spacer()
+            }
+        }
+    }
+
+    // MARK: - Tailscale row
+
+    /// Adaptive: shows the Tailscale IP when connected, an "Open Tailscale"
+    /// affordance when the app is installed but stopped, or an install hint
+    /// when Tailscale isn't present. Avoids the bare "—" that made a healthy
+    /// "not connected" state look broken.
+    @ViewBuilder
+    private var tailscaleRow: some View {
+        if let ip = connection.tailscaleIP, !ip.isEmpty {
+            copyableRow(label: "Tailscale", value: ip, hint: "any network", prominent: true)
+        } else if LocalIPs.tailscaleAppURL() != nil {
+            HStack(spacing: Spacing.sm) {
+                Text("Tailscale")
+                    .font(Typography.body)
+                    .foregroundStyle(theme.current.textMuted)
+                    .frame(width: 110, alignment: .leading)
+                Text("Not connected")
+                    .font(Typography.mono)
+                    .foregroundStyle(theme.current.danger)
+                Spacer()
+                Button("Open Tailscale") {
+                    if let url = LocalIPs.tailscaleAppURL() {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Launch Tailscale, sign in / connect, then return here")
+            }
+        } else {
+            HStack(spacing: Spacing.sm) {
+                Text("Tailscale")
+                    .font(Typography.body)
+                    .foregroundStyle(theme.current.textMuted)
+                    .frame(width: 110, alignment: .leading)
+                Text("Not installed")
+                    .font(Typography.mono)
+                    .foregroundStyle(theme.current.textMuted)
+                Spacer()
+                Link("Install…", destination: URL(string: "https://tailscale.com/download/mac")!)
+                    .font(Typography.caption)
+            }
+        }
+    }
+
+    // MARK: - Permissions block
+
+    /// Screen Recording + Accessibility status with one-click "add LLM IDE
+    /// to the TCC list". The computer-agent can't stream the screen or inject
+    /// input without these. Non-blocking — chat still works without them.
+    private var permissionsBlock: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("macOS Permissions")
+                .font(Typography.section)
+                .foregroundStyle(theme.current.textMuted)
+
+            permissionRow(
+                title: "Screen Recording",
+                detail: "Lets the agent stream your screen to the iPhone.",
+                state: permissions.screenRecording,
+                enable: { permissions.promptScreenRecording() },
+                pane: .screenRecording
+            )
+            permissionRow(
+                title: "Accessibility",
+                detail: "Lets the agent inject mouse + keyboard for remote control.",
+                state: permissions.accessibility,
+                enable: { permissions.promptAccessibility() },
+                pane: .accessibility
+            )
+
+            Text("Grant these to LLM IDE. If you run the agent from your own terminal instead, that terminal needs the grant — then quit and relaunch the app.")
+                .font(Typography.caption)
+                .foregroundStyle(theme.current.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(theme.current.body.opacity(0.6)))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(theme.current.border.opacity(0.4)))
+    }
+
+    @ViewBuilder
+    private func permissionRow(
+        title: String,
+        detail: String,
+        state: PermissionsService.State,
+        enable: @escaping () -> Void,
+        pane: PermissionsService.SettingsPane
+    ) -> some View {
+        HStack(spacing: Spacing.sm) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(title).font(Typography.body).foregroundStyle(theme.current.text)
+                    permStatusPill(state)
+                }
+                Text(detail)
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            if state != .granted {
+                Button("Enable") { enable() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .help("Add LLM IDE to this list, then toggle it on in System Settings")
+            }
+            Button("Open Settings") { permissions.openSystemSettings(pane: pane) }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+    }
+
+    @ViewBuilder
+    private func permStatusPill(_ state: PermissionsService.State) -> some View {
+        let (label, fg, bg): (String, Color, Color) = {
+            switch state {
+            case .granted: return ("granted",
+                                   theme.current.accent3,
+                                   theme.current.accent3.opacity(theme.current.isDark ? 0.20 : 0.12))
+            case .denied:  return ("needed",
+                                   theme.current.danger,
+                                   theme.current.danger.opacity(theme.current.isDark ? 0.20 : 0.12))
+            case .unknown: return ("unknown",
+                                   theme.current.textMuted,
+                                   theme.current.textMuted.opacity(theme.current.isDark ? 0.18 : 0.10))
+            }
+        }()
+        Text(label)
+            .font(Typography.captionStrong)
+            .foregroundStyle(fg)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, 2)
+            .background(bg)
+            .clipShape(Capsule())
     }
 
     // MARK: - Path row
@@ -144,6 +403,7 @@ struct MobileControlSettingsSection: View {
         default:
             Button("Start") {
                 savePath()
+                autoPromptPermissionsIfNeeded()
                 mobile.start(agentPath: config.mobileControlAgentPath)
             }
             .buttonStyle(.borderedProminent)

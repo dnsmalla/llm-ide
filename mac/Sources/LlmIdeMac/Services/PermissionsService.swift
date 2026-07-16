@@ -77,6 +77,17 @@ final class PermissionsService: ObservableObject {
         _ = AXIsProcessTrustedWithOptions([prompt: kCFBooleanTrue] as CFDictionary)
     }
 
+    /// Trigger the macOS Screen Recording prompt — adds this app to the
+    /// Screen Recording list (unchecked) so the user can toggle it on,
+    /// then quit+relaunch. Mirrors `promptAccessibility` so the Mobile
+    /// Control panel can offer the same one-click "add myself to the list".
+    /// `CGRequestScreenCaptureAccess` returns true if already granted and
+    /// is a no-op when the user previously denied — that case is covered
+    /// by `openSystemSettings(pane: .screenRecording)`.
+    func promptScreenRecording() {
+        _ = CGRequestScreenCaptureAccess()
+    }
+
     func promptMicrophone() {
         AVCaptureDevice.requestAccess(for: .audio) { _ in
             DispatchQueue.main.async { self.refreshMicrophone() }
