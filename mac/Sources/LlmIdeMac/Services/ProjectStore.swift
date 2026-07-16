@@ -100,6 +100,10 @@ final class ProjectStore: ObservableObject {
             log.error("scaffold failed at \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
 
+        // Wire Claude / Cursor / Codex / … skills into the project path
+        // via the local server (central .skills kit). Best-effort.
+        installSkillsBestEffort(at: url, language: project.settings.language)
+
         // ── Single-source-of-truth sync ───────────────────────────────
         // NotesFolderConfig (UserDefaults) must reflect the project's
         // meetings/ directory BEFORE activeProject is published so that
@@ -141,7 +145,31 @@ final class ProjectStore: ObservableObject {
         }
         // Idempotent; preserves a repo's own README (see ProjectScaffolder).
         try ProjectScaffolder.scaffold(at: url, project: project)
+        // New Project / adopt — install the shared agent skills kit now that
+        // system/project.json exists (server requires the project marker).
+        installSkillsBestEffort(at: url, language: project.settings.language)
         return project
+    }
+
+    /// Rebuild canonical folders + refresh the central skills kit for the
+    /// active project. Used by Settings → Paths → "Rebuild missing folders".
+    func rebuildActiveProjectFolders() throws {
+        guard let ap = activeProject else {
+            throw ProjectStoreError.noActiveProject
+        }
+        let url = URL(fileURLWithPath: ap.localPath)
+        try ProjectScaffolder.scaffold(at: url, project: ap.bundle)
+        installSkillsBestEffort(at: url, language: ap.bundle.settings.language)
+    }
+
+    /// Symlink the central skills kit into `url` for Claude / Cursor /
+    /// Codex / `.agents` / Gemini. Tries the local server first, then a
+    /// direct `install.sh` fallback. Non-blocking and non-fatal.
+    private func installSkillsBestEffort(at url: URL, language: String) {
+        ProjectSkillsInstaller.installBestEffort(
+            projectPath: url.path,
+            language: language,
+            api: _apiClient)
     }
 
     func switchTo(recent entry: RecentEntry) throws {
@@ -375,12 +403,15 @@ final class ProjectStore: ObservableObject {
 
 enum ProjectStoreError: LocalizedError {
     case exportInProgress
+    case noActiveProject
     case invalidFolderStructure(String)   // associated value = folder name
 
     var errorDescription: String? {
         switch self {
         case .exportInProgress:
             return "Cannot switch projects while an export is in progress. Please wait for the export to finish."
+        case .noActiveProject:
+            return "No project is open."
         case .invalidFolderStructure(let name):
             return """
                 "\(name)" is not a LLM IDE project.

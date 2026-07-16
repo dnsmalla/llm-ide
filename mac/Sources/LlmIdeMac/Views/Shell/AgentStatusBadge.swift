@@ -208,18 +208,6 @@ struct AgentStatusBadge: View {
                 Image(systemName: "bubble.left.and.bubble.right")
             }
             .help("Ask the agent (⌘⇧A)")
-
-            Button {
-                showingPopover = false
-                // Persona CRUD moved from Settings to Library →
-                // Agents. We jump into Library and let the user
-                // pick a row; selecting an existing persona id
-                // here would race with the in-flight runs refresh.
-                shell.section = .library
-            } label: {
-                Image(systemName: "gearshape")
-            }
-            .help("Manage agent personas in Library → Agents")
         }
     }
 

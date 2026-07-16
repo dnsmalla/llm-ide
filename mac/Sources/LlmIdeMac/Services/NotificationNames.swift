@@ -36,12 +36,6 @@ extension Notification.Name {
     /// AppShell, which owns the sheet so it survives section changes.
     static let openAskAgentSheet = Notification.Name("openAskAgentSheet")
 
-    /// Posted after a successful persona create / update / set-active /
-    /// delete in Library → Agents. Listeners that cache persona fields
-    /// (Library's row list, AppShell's auto-dispatch observer) reload
-    /// immediately rather than waiting for the next polling tick.
-    static let agentPersonaChanged = Notification.Name("agentPersonaChanged")
-
     // MARK: - Library / meetings
 
     /// Posted by LibraryRow when the user requests an action on a

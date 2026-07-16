@@ -127,4 +127,35 @@ extension LlmIdeAPIClient {
             authenticated: true)
     }
 
+    // MARK: - Project skills install
+
+    /// Result of `POST /kb/project/install-skills` — wires the central
+    /// skills kit into a project folder for Claude / Cursor / Codex / …
+    struct InstallProjectSkillsResult: Decodable {
+        let ok: Bool
+        let path: String
+        let kit: String
+        let stacks: String
+        let tools: [String]
+        let stdout: String?
+    }
+
+    /// Install (or refresh) the central skills kit into `path`.
+    /// Requires the folder to already be a LLM IDE project
+    /// (`system/project.json`). Best-effort from the Mac scaffolder —
+    /// failures are logged, not fatal to project open.
+    func installProjectSkills(path: String,
+                              language: String? = nil,
+                              stacks: String? = nil) async throws -> InstallProjectSkillsResult {
+        struct Req: Encodable {
+            let path: String
+            let language: String?
+            let stacks: String?
+        }
+        return try await post(
+            "/kb/project/install-skills",
+            body: Req(path: path, language: language, stacks: stacks),
+            authenticated: true)
+    }
+
 }

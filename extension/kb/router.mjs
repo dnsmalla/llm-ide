@@ -36,6 +36,7 @@ import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { recordActivity, listActivity, unreadCount, markSeen, ACTIVITY_KINDS } from './activity.mjs';
 import { getLimits, setLimits, usageSummary, resolveModel, recordUsage, getRateLimits, PROVIDERS as USAGE_PROVIDERS } from './usage.mjs';
+import { installProjectSkills } from './install-project-skills.mjs';
 
 // SSE concurrency tracking now lives in routes/live.mjs alongside
 // the stream route itself.
@@ -266,6 +267,29 @@ export async function handleKB(req, res) {
         sendJSON(res, 200, result);
       } catch (err) {
         sendJSON(res, 500, { error: { code: 'EXPORT_FAILED', message: err.message } });
+      }
+      return true;
+    }
+
+    // Install central skills kit into a project folder (New Project / Rebuild).
+    // Body: { path: absoluteDir, language?: string, stacks?: string }.
+    // Requires system/project.json so arbitrary paths cannot be written.
+    if (req.method === 'POST' && url === '/kb/project/install-skills') {
+      const body = parseJSON(await readBody(req)) || {};
+      try {
+        const result = installProjectSkills({
+          path: body.path,
+          language: body.language,
+          stacks: body.stacks,
+        });
+        sendJSON(res, 200, result);
+      } catch (err) {
+        const code = err?.code || 'INSTALL_FAILED';
+        const status =
+          code === 'INVALID_PATH' || code === 'NOT_A_PROJECT' ? 400
+          : code === 'PATH_NOT_FOUND' || code === 'KIT_MISSING' ? 404
+          : 500;
+        sendJSON(res, status, { error: { code, message: err.message } });
       }
       return true;
     }

@@ -519,7 +519,7 @@ final class BackendManager {
     /// its version via /health.apiVersion; if the live server is
     /// older than this, the Mac app surfaces an "update your server"
     /// banner instead of hitting silent 4xx/5xx.
-    nonisolated static let minimumServerApiVersion = 18
+    nonisolated static let minimumServerApiVersion = 20
 
     struct HealthProbeResult {
         let ok: Bool

@@ -6,12 +6,13 @@
 // its SKILL.md as context so the agent can follow it.
 //
 // Repo is resolved the SAME way scripts/sync-skills.sh resolves it
-// ($SKILLS_REPO → ~/skills → ~/Desktop/skills → cache), but READ-ONLY and
-// network-free: if no local clone exists we return an empty catalog rather than
-// cloning. All I/O is best-effort and never throws.
+// ($SKILLS_REPO → <repo>/.skills → ~/skills → ~/Desktop/skills → cache),
+// but READ-ONLY and network-free: if no local clone exists we return an empty
+// catalog rather than cloning. All I/O is best-effort and never throws.
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import yaml from 'js-yaml';
 
@@ -20,13 +21,18 @@ import yaml from 'js-yaml';
 const LIBRARY_FAMILIES = ['skills', 'runtime'];
 const MAX_DESC = 200;
 
+// extension/llm_agent/skills/ → repo root (three levels up).
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../..');
+
 let _cache = null;
 
 // Locate the central skills checkout on disk. Marker: registry.yaml or an
 // agent-tools/ dir (mirrors sync-skills.sh). No network clone.
+// Prefer the pinned project submodule at <repo>/.skills when present.
 export function resolveCentralSkillsRepo() {
   const candidates = [];
   if (process.env.SKILLS_REPO) candidates.push(process.env.SKILLS_REPO);
+  candidates.push(join(REPO_ROOT, '.skills'));
   candidates.push(join(homedir(), 'skills'));
   candidates.push(join(homedir(), 'Desktop', 'skills'));
   candidates.push(join(homedir(), '.cache', 'dnsmalla-skills'));

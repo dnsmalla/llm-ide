@@ -63,19 +63,8 @@ final class ShellState {
     enum LibrarySelection: Hashable {
         case meeting(String)
         case file(URL)
-        /// A persona/agent row. String is the persona slug. We only
-        /// have one persona today ("default") but the slug keeps the
-        /// door open for multi-persona without churning the enum.
-        case agent(String)
         /// A plugin row. String is the plugin's `name` field.
         case plugin(String)
-        /// A built-in (non-deletable) agent row — "meeting-assistant"
-        /// or "ask-agent". These are always present and locked.
-        case builtinAgent(String)
-        /// A skill row (built-in or plugin-contributed). String is the
-        /// skill `name` from its frontmatter.
-        case skill(String)
-
     }
 
     var section: Section = .explorer

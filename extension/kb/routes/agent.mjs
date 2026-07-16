@@ -304,24 +304,12 @@ export async function handleAgentRoutes(req, res, ctx) {
     return true;
   }
 
-  // GET /kb/agent/skills
-  //   Returns all installed skills grouped by source: global tools,
-  //   internal KB skills, and per-plugin skills.  This powers the
-  //   Library → Skills section in the Mac app — read-only catalog,
-  //   enable-state is NOT considered (users see everything available).
-  if (req.method === 'GET' && url === '/kb/agent/skills') {
-    sendJSON(res, 200, listAllSkills());
-    return true;
-  }
-
   // GET /kb/agent/catalog
-  //   Full Library catalog: skills + built-in agent descriptions +
-  //   plugin subagents. One request loads the entire Library sidebar.
+  //   Executable skills + plugin subagents for the Code Assistant "/" menu.
   //   { skills: { global, internal, plugins }, subagents: { plugins } }
   if (req.method === 'GET' && url === '/kb/agent/catalog') {
     const skills = listAllSkills();
     const installed = listInstalledPlugins(userId);
-    // Flatten subagents from enabled plugins for the Library sidebar.
     const pluginSubagents = [];
     for (const p of installed.plugins) {
       if (p.subagents && p.subagents.length > 0) {
@@ -341,7 +329,7 @@ export async function handleAgentRoutes(req, res, ctx) {
 
   // GET /kb/agent/commands
   //   Enabled slash-commands for THIS user (plugin-enable-aware), powering the
-  //   chat input's "/" autocomplete. Shape mirrors /kb/agent/skills.
+  //   chat input's "/" autocomplete.
   //   { commands: [{ trigger, description, args: [{name, required}], pluginName }] }
   if (req.method === 'GET' && url.split('?')[0] === '/kb/agent/commands') {
     const { commands } = buildPerUserSkillSet(userId);

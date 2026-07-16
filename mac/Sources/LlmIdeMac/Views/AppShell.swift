@@ -14,7 +14,6 @@ struct AppShell: View {
     @EnvironmentObject var graphSessionStore: GraphSessionStore
     @State private var shell = ShellState()
     @State private var itemStore = LibraryItemStore()
-    @State private var catalogStore = AgentCatalogStore()
     @State private var appEnv: AppEnvironment?
     @State private var envInitError: String?
     @State private var pendingOrphan: PartialRecovery.Orphan?
@@ -81,13 +80,10 @@ struct AppShell: View {
         // Auto-dispatch: when capture transitions from off → on and
         // the user enabled the persona flag, fire dispatchAgent once.
         // First time it runs we lazily load the flag; afterwards we
-        // trust the cache (refreshed via .agentPersonaChanged below).
+        // trust the cache for the rest of the session.
         .onChange(of: capture.isRunning) { wasRunning, nowRunning in
             guard !wasRunning, nowRunning else { return }
             Task { await maybeAutoDispatch() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .agentPersonaChanged)) { _ in
-            Task { await refreshAutoDispatchFlag() }
         }
         .onAppear {
             // Guard against re-registration if onAppear fires more than once
@@ -168,7 +164,6 @@ struct AppShell: View {
         // layouts.
         .environment(shell)
         .environment(itemStore)
-        .environment(catalogStore)
         .task {
             guard let env = appEnv else { return }
             env.startWatching {

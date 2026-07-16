@@ -5,7 +5,6 @@ struct LibraryView: View {
     @Environment(ShellState.self) private var shell
     @Environment(AppEnvironment.self) private var env
     @Environment(LibraryItemStore.self) private var itemStore
-    @Environment(AgentCatalogStore.self) private var catalogStore
     @EnvironmentObject private var projectStore: ProjectStore
     @EnvironmentObject private var theme: ThemeStore
     @State private var vm: LibraryViewModel?
@@ -34,10 +33,6 @@ struct LibraryView: View {
     /// and refreshed when the user (re-)opens Library. Failures are
     /// silent — the sidebar just shows an empty Plugins section.
     @State private var plugins: [PluginInfo] = []
-    /// All of the user's personas, surfaced as Library rows. Cached
-    /// on first load + refreshed on .agentPersonaChanged.
-    @State private var agentPersonas: [LlmIdeAPIClient.AgentPersonaRow] = []
-    @State private var activePersonaId: String?
     @State private var showingGitInstallSheet = false
     @State private var showingClaudeImportSheet = false
     @State private var pluginInstallMessage: String?
@@ -50,7 +45,7 @@ struct LibraryView: View {
     /// expanded. One uniform mechanism drives every section's chevron.
     /// Every section is seeded collapsed so the library opens in a clean,
     /// fully-closed state; the user expands what they need. Survives relaunch.
-    @AppStorage("library.collapsedSections") private var collapsedSectionsRaw = "meetings,code,data,notes,agents,skills,plugins"
+    @AppStorage("library.collapsedSections") private var collapsedSectionsRaw = "meetings,code,data,notes,plugins"
 
     var body: some View {
         Group {
@@ -69,10 +64,7 @@ struct LibraryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { migrateLegacySourceCollapseKeys() }
         .task { await load() }
-        .task { await loadAgentsAndPlugins() }
-        .onReceive(NotificationCenter.default.publisher(for: .agentPersonaChanged)) { _ in
-            Task { await loadAgentsAndPlugins() }
-        }
+        .task { await loadPlugins() }
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
             Task { @MainActor in
                 // Refresh the meeting list. syncMeetingNotes is handled
@@ -207,23 +199,14 @@ struct LibraryView: View {
             // ── Notes section ─────────────────────────────────────────
             fileTreeSection(.notes)
 
-            // ── Agents section ────────────────────────────────────────
-            // Three groups: built-in core agents (locked), user
-            // personas (editable, + button to add), plugin subagents
-            // (locked, from installed plugins).
-            agentsSection
-
-            // ── Skills section ────────────────────────────────────────
-            // Three groups: global tools, core KB skills, plugin skills.
-            // All read-only / locked — editing requires changing the
-            // skill file on disk or managing via the Plugin install flow.
-            skillsSection
-
             // ── Plugins section ───────────────────────────────────────
             // User-scoped — shown regardless of active project. Install /
             // import / reload live in this section's header menu (the ⊕);
             // uninstall in each row's context menu. (Plugin management is
             // wholly here now — there is no Settings → Plugins.)
+            // Agents / Skills browse UIs were removed; skills install into
+            // the project via the central kit, and the Code Assistant "/"
+            // menu still discovers them.
             pluginsSection
         }
         .listStyle(.inset)
@@ -649,186 +632,6 @@ struct LibraryView: View {
         }
     }
 
-    // MARK: - Agents section
-
-    @ViewBuilder
-    private var agentsSection: some View {
-        let allPluginSubagents = catalogStore.catalog?.subagents.plugins ?? []
-
-        Section {
-            // All content only rendered when expanded — collapsed by default.
-            if sectionExpanded("agents").wrappedValue {
-                // ── Sub-group 1: Built-in core agents (locked) ──────────
-                subGroupLabel("Built-in", icon: "shield.checkmark.fill", color: theme.current.info)
-
-                AgentLibraryRow(
-                    title: "Meeting Assistant",
-                    subtitle: "Live in-session question loop",
-                    kind: .builtin
-                )
-                .tag(ShellState.LibrarySelection.builtinAgent("meeting-assistant"))
-
-                AgentLibraryRow(
-                    title: "Ask Agent",
-                    subtitle: "Code-assist & knowledge loop",
-                    kind: .builtin
-                )
-                .tag(ShellState.LibrarySelection.builtinAgent("ask-agent"))
-
-                // ── Sub-group 2: User personas (editable) ───────────────
-                subGroupLabel("My Personas", icon: "person.crop.circle", color: theme.current.categoryPurple)
-
-                if agentPersonas.isEmpty {
-                    AgentLibraryRow(
-                        title: "No personas yet",
-                        subtitle: "Tap + to create one",
-                        kind: .persona(isActive: false)
-                    )
-                    .tag(ShellState.LibrarySelection.agent("default"))
-                    .foregroundStyle(.secondary)
-                } else {
-                    ForEach(agentPersonas) { p in
-                        let isActive = p.id == activePersonaId
-                        AgentLibraryRow(
-                            title: p.name?.isEmpty == false ? p.name! : "(unnamed)",
-                            subtitle: isActive ? "Active persona" : "Persona",
-                            kind: .persona(isActive: isActive)
-                        )
-                        .tag(ShellState.LibrarySelection.agent(p.id))
-                    }
-                }
-
-                // ── Sub-group 3: Plugin subagents (locked) ──────────────
-                if !allPluginSubagents.isEmpty {
-                    subGroupLabel("From Plugins", icon: "puzzlepiece.extension", color: theme.current.categoryTeal)
-                    ForEach(allPluginSubagents, id: \.pluginName) { group in
-                        ForEach(group.subagents, id: \.name) { sub in
-                            AgentLibraryRow(
-                                title: sub.name,
-                                subtitle: group.pluginDisplayName,
-                                kind: .plugin
-                            )
-                            .tag(ShellState.LibrarySelection.plugin(group.pluginName))
-                        }
-                    }
-                }
-            }
-        } header: {
-            agentsHeader
-        }
-    }
-
-    @ViewBuilder
-    private var agentsHeader: some View {
-        let pluginSubagentCount = (catalogStore.catalog?.subagents.plugins ?? [])
-            .reduce(0) { $0 + $1.subagents.count }
-        let total = 2 + agentPersonas.count + pluginSubagentCount
-        unifiedSectionHeader(
-            id: "agents", title: "Agents", icon: "brain.head.profile",
-            tint: theme.current.accent, count: total
-        ) {
-            // Add-persona button — sits outside the collapse toggle.
-            Button {
-                Task { await addPersona() }
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(theme.current.accent.opacity(0.6))
-                    .frame(width: 18, height: 18)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .frame(width: 20)
-            .disabled(agentPersonas.count >= 10)
-            .help(agentPersonas.count >= 10 ? "Persona limit reached (10)" : "Add a persona")
-        }
-    }
-
-    private func addPersona() async {
-        guard let resp = try? await api.createAgentPersona(name: "New persona", promptSuffix: "", autoDispatch: false) else { return }
-        let newest = resp.personas.sorted { $0.createdAt < $1.createdAt }.last
-        self.agentPersonas = resp.personas
-        self.activePersonaId = resp.active
-        if let id = newest?.id {
-            shell.librarySelection = .agent(id)
-        }
-    }
-
-    // MARK: - Shared sub-group label
-
-    /// Unified sub-group label used by both the Agents and Skills sections.
-    /// All sub-groups across both sections render identically: small icon,
-    /// caption2 semi-bold text, subtle top padding.
-    private func subGroupLabel(_ title: String, icon: String, color: Color) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(color)
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-        }
-        .padding(.top, 4)
-        .listRowSeparator(.hidden)
-    }
-
-    // MARK: - Skills section
-
-    @ViewBuilder
-    private var skillsSection: some View {
-        let globalSkills   = catalogStore.catalog?.skills.global   ?? []
-        let internalSkills = catalogStore.catalog?.skills.internal ?? []
-        let pluginGroups   = catalogStore.catalog?.skills.plugins  ?? []
-        let totalSkills    = globalSkills.count + internalSkills.count
-            + pluginGroups.reduce(0) { $0 + $1.skills.count }
-
-        Section {
-            // Content only rendered when expanded — collapsed by default.
-            if sectionExpanded("skills").wrappedValue {
-                if totalSkills == 0 {
-                    emptyRow("Loading skills…", icon: "hourglass")
-                } else {
-                    // Global tools sub-group label
-                    if !globalSkills.isEmpty {
-                        subGroupLabel("Global Tools", icon: "globe", color: theme.current.info)
-                        ForEach(globalSkills) { skill in
-                            SkillLibraryRow(skill: skill, pluginName: nil)
-                                .tag(ShellState.LibrarySelection.skill(skill.name))
-                        }
-                    }
-                    // Core KB skills sub-group
-                    if !internalSkills.isEmpty {
-                        subGroupLabel("Core Skills", icon: "building.columns", color: theme.current.categoryPurple)
-                        ForEach(internalSkills) { skill in
-                            SkillLibraryRow(skill: skill, pluginName: nil)
-                                .tag(ShellState.LibrarySelection.skill(skill.name))
-                        }
-                    }
-                    // Plugin skills
-                    if !pluginGroups.isEmpty {
-                        subGroupLabel("From Plugins", icon: "puzzlepiece.extension", color: theme.current.categoryTeal)
-                        ForEach(pluginGroups, id: \.pluginName) { group in
-                            ForEach(group.skills) { skill in
-                                SkillLibraryRow(skill: skill, pluginName: group.pluginName)
-                                    .tag(ShellState.LibrarySelection.skill(skill.name))
-                                    .padding(.leading, 6)
-                            }
-                        }
-                    }
-                }
-            }
-        } header: {
-            skillsHeader(count: totalSkills)
-        }
-    }
-
-    private func skillsHeader(count: Int) -> some View {
-        unifiedSectionHeader(
-            id: "skills", title: "Skills", icon: "wrench.and.screwdriver",
-            tint: theme.current.success, count: count
-        ) { EmptyView() }
-    }
-
     @ViewBuilder
     private var pluginsSection: some View {
         Section {
@@ -853,9 +656,7 @@ struct LibraryView: View {
         }
     }
 
-    /// Section header row with the "+" install menu. Mirrors the visual
-    /// style of the Agents and Skills headers: icon + SectionLabel on the
-    /// left, small icon-button on the right — same size and colour token.
+    /// Section header row with the "+" install menu.
     @ViewBuilder
     private var pluginsHeader: some View {
         unifiedSectionHeader(
@@ -924,21 +725,11 @@ struct LibraryView: View {
         }
     }
 
-    /// One-shot load for agents, plugins, and the skill catalog.
-    /// Errors are swallowed — each section degrades gracefully:
-    /// Agents shows default row, Plugins stays empty, Skills shows
-    /// "Loading…" until the catalog arrives (or stays empty on error).
-    private func loadAgentsAndPlugins() async {
-        async let personasTask = try? api.listAgentPersonas()
-        async let pluginsTask  = try? api.listPlugins()
-        let personasResp = await personasTask
-        let pluginsResp  = await pluginsTask
-        self.agentPersonas   = personasResp?.personas ?? []
-        self.activePersonaId = personasResp?.active
-        self.plugins         = pluginsResp?.plugins ?? []
-        // Catalog loads via the shared store so LibraryDetailView can
-        // read it without its own network call.
-        await catalogStore.load(api: api)
+    /// Load installed plugins for the Library → Plugins section.
+    /// Errors are swallowed — the section stays empty on failure.
+    private func loadPlugins() async {
+        let pluginsResp = try? await api.listPlugins()
+        self.plugins = pluginsResp?.plugins ?? []
     }
 
     private func refreshPlugins() async {

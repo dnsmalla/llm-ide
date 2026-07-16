@@ -46,38 +46,8 @@ extension LlmIdeAPIClient {
         var id: String { sessionId }
     }
 
-    /// One row in the user's persona registry. The active persona's
-    /// fields shape every conversational LLM surface — /chat,
-    /// /code-assist, /kb/agent/ask, the in-meeting agent loop.
-    struct AgentPersonaRow: Codable, Equatable, Identifiable {
-        let id: String
-        let name: String?
-        let promptSuffix: String?
-        let autoDispatch: Bool
-        let createdAt: Double
-
-        enum CodingKeys: String, CodingKey {
-            case id, name, promptSuffix, autoDispatch, createdAt
-        }
-        init(id: String, name: String?, promptSuffix: String?, autoDispatch: Bool, createdAt: Double) {
-            self.id = id; self.name = name; self.promptSuffix = promptSuffix
-            self.autoDispatch = autoDispatch; self.createdAt = createdAt
-        }
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            self.id = try c.decode(String.self, forKey: .id)
-            self.name = try c.decodeIfPresent(String.self, forKey: .name)
-            self.promptSuffix = try c.decodeIfPresent(String.self, forKey: .promptSuffix)
-            self.autoDispatch = (try? c.decodeIfPresent(Bool.self, forKey: .autoDispatch)) ?? false
-            self.createdAt = (try? c.decodeIfPresent(Double.self, forKey: .createdAt)) ?? 0
-        }
-    }
-
-    struct AgentPersonaList: Decodable {
-        let personas: [AgentPersonaRow]
-        let active: String?
-    }
-
+    /// Active persona fields that shape conversational LLM surfaces
+    /// (/chat, /code-assist, /kb/agent/ask, the in-meeting agent loop).
     struct AgentPersona: Codable, Equatable {
         let name: String?
         let promptSuffix: String?
@@ -230,57 +200,6 @@ extension LlmIdeAPIClient {
         return r.reply
     }
 
-    // Multi-persona surface ─────────────────────────────────────
-
-    func listAgentPersonas() async throws -> AgentPersonaList {
-        try await get("/kb/agent/personas", authenticated: true)
-    }
-
-    func createAgentPersona(name: String, promptSuffix: String, autoDispatch: Bool) async throws -> AgentPersonaList {
-        struct Req: Encodable { let name: String; let promptSuffix: String; let autoDispatch: Bool }
-        struct Resp: Decodable {
-            let persona: AgentPersonaRow
-            let personas: [AgentPersonaRow]
-            let active: String?
-        }
-        let r: Resp = try await post(
-            "/kb/agent/personas",
-            body: Req(name: name, promptSuffix: promptSuffix, autoDispatch: autoDispatch),
-            authenticated: true,
-        )
-        return AgentPersonaList(personas: r.personas, active: r.active)
-    }
-
-    func updateAgentPersona(id: String, name: String, promptSuffix: String, autoDispatch: Bool) async throws -> AgentPersonaRow {
-        struct Req: Encodable { let name: String; let promptSuffix: String; let autoDispatch: Bool }
-        struct Resp: Decodable { let persona: AgentPersonaRow }
-        let r: Resp = try await send(
-            path: "/kb/agent/personas/\(percentEncoded(id))",
-            method: "PUT",
-            body: Req(name: name, promptSuffix: promptSuffix, autoDispatch: autoDispatch),
-            authenticated: true,
-        )
-        return r.persona
-    }
-
-    @discardableResult
-    func deleteAgentPersona(id: String) async throws -> Bool {
-        struct Resp: Decodable { let removed: Bool }
-        let r: Resp = try await delete("/kb/agent/personas/\(percentEncoded(id))", authenticated: true)
-        return r.removed
-    }
-
-    func setActiveAgentPersona(id: String) async throws -> AgentPersonaList {
-        struct Req: Encodable { let id: String }
-        let r: AgentPersonaList = try await send(
-            path: "/kb/agent/personas/active",
-            method: "PUT",
-            body: Req(id: id),
-            authenticated: true,
-        )
-        return r
-    }
-
     func getAgentFeedbackStats(sinceDays: Int = 30) async throws -> AgentFeedbackStats {
         try await get("/kb/agent/feedback/stats?sinceDays=\(sinceDays)", authenticated: true)
     }
@@ -330,7 +249,8 @@ extension LlmIdeAPIClient {
         let subagents: [SubagentEntry]
     }
 
-    /// Combined catalog: skills + subagents — loaded once for the Library.
+    /// Combined catalog: executable skills + plugin subagents — used by
+    /// the Code Assistant "/" autocomplete (CompletionController).
     struct AgentSkillCatalog: Decodable {
         let skills: SkillsCatalog
         let subagents: SubagentsCatalog
@@ -340,9 +260,8 @@ extension LlmIdeAPIClient {
         }
     }
 
-    /// Fetch the full Library catalog (skills + subagents).
-    /// Called once on Library appear; fails gracefully — caller shows
-    /// empty sections rather than surfacing a hard error.
+    /// Fetch skills + plugin subagents for the chat "/" menu.
+    /// Failures are swallowed by the caller (empty autocomplete).
     func listAgentSkillCatalog() async throws -> AgentSkillCatalog {
         try await get("/kb/agent/catalog", authenticated: true)
     }

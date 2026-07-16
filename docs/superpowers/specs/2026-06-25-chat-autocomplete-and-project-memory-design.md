@@ -40,7 +40,7 @@ Symbols are **out of scope for v1** (no symbol index exists on the Mac side). `@
 ### Backend
 
 `GET /kb/agent/commands` → `{ commands: [{ trigger, description, args }] }`, derived from the per-user enabled
-command set. Mirrors the existing `/kb/agent/skills` endpoint shape. Args come from each command's `argsSchema`
+command set. Mirrors the `/kb/agent/catalog` skills shape. Args come from each command's `argsSchema`
 (keys + required flag only — enough for placeholder hints).
 
 ### Mac UI

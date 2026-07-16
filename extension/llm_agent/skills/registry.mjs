@@ -1,7 +1,8 @@
 // The skill registry — single owner of every skill-related concern:
 // core skill loading (global + internal), the plugin-skill cache, the
-// per-user effective skill/command/subagent view, the Library catalog,
-// plugin reload, and the startup handler-wiring check.
+// per-user effective skill/command/subagent view, the agent catalog
+// (for chat "/" autocomplete), plugin reload, and the startup
+// handler-wiring check.
 //
 // route.mjs (the /code-assist orchestrator) and the HTTP routes import
 // from here; nothing else should reach into skill state directly.
@@ -112,17 +113,15 @@ export function reloadPlugins() {
 }
 
 // Cache for listAllSkills() — populated on first call, invalidated by
-// reloadPlugins().  Each call previously re-read every plugin's skills/
-// directory from disk, which adds up when the Library sidebar polls
-// /kb/agent/catalog on every open.
+// reloadPlugins(). Avoids re-reading every plugin's skills/ directory
+// when /kb/agent/catalog is hit repeatedly (chat "/" autocomplete).
 let _allSkillsCache = null;
 
 /**
- * Skill catalog for the Library → Skills section in the Mac app.
+ * Skill catalog for GET /kb/agent/catalog (Code Assistant "/" menu).
  * Returns ALL installed skills grouped by source — global tools,
- * internal (KB-aware) skills, and per-plugin skills.  Plugin
- * enable-state is NOT considered here; this is a catalog view so the
- * user can see what's available regardless of which plugins are on.
+ * internal (KB-aware) skills, and per-plugin skills. Plugin
+ * enable-state is NOT considered here; this is a discovery catalog.
  *
  * Each skill entry: { name, kind, description }.
  * Plugin groups: { pluginName, pluginDisplayName, skills[] }.

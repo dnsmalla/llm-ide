@@ -32,7 +32,7 @@ const HOST = config.host;
 // Bump whenever the HTTP surface changes so the extension can detect
 // a stale server process ("you installed the new client but forgot to
 // restart node server.mjs") and surface a clear message.
-const SERVER_API_VERSION = 19;
+const SERVER_API_VERSION = 20;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -45,6 +45,8 @@ const ENDPOINTS = [
   '/kb/search',
   '/kb/meeting/:id',
   '/kb/entity/:id',
+  '/kb/project/:id/export',
+  '/kb/project/install-skills',
   '/kb/stats',
   '/kb/system/status',
   '/kb/delete',
@@ -107,6 +109,10 @@ const ENDPOINTS = [
   '/kb/agent/personas',
   '/kb/agent/personas/:id',
   '/kb/agent/personas/active',
+  '/kb/agent/catalog',
+  '/kb/agent/commands',
+  '/kb/agent/skill-library',
+  '/kb/agent/project-memory',
   '/kb/agent/ask',
   '/kb/agent/ask/history',
   '/kb/chat/sessions',
@@ -180,6 +186,8 @@ function rateLimitProfile(url, method) {
   // special-cased onto dispatch above, before the '/kb/connect-' rule.)
   if (url === '/kb/box/test') return 'dispatch';
   if (url === '/kb/activity' || url === '/kb/activity/seen') return 'kbWrite';
+  // Local filesystem symlink install of the skills kit into a project path.
+  if (url === '/kb/project/install-skills') return 'kbWrite';
   return null;
 }
 

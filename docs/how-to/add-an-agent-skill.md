@@ -59,7 +59,7 @@ Central CI (`validate.sh`) enforces this frontmatter shape — the same rules th
 cd extension && npm run sync:skills
 ```
 
-This pulls `agent-tools/` → `internal/skills/` and `agent-globals/` (the `.md` defs) → `global/`, then records the synced central commit in `extension/.skills-lock`. Commit the changed def(s) **and** the updated `.skills-lock` — the `skills-drift` workflow checks them against that pin. (Source resolution: `$SKILLS_REPO`, then `~/skills`, then a cached clone — see `scripts/sync-skills.sh`.)
+This pulls `agent-tools/` → `internal/skills/` and `agent-globals/` (the `.md` defs) → `global/`, then records the synced central commit in `extension/.skills-lock`. Commit the changed def(s) **and** the updated `.skills-lock` — the `skills-drift` workflow checks them against that pin. (Source resolution: `$SKILLS_REPO`, then the project `.skills` submodule, then `~/skills`, then a cached clone — see `scripts/sync-skills.sh`. For Claude/Cursor/Codex process skills, see [install-central-skills.md](install-central-skills.md).)
 
 ### 4. Server side — the handler (stays local)
 

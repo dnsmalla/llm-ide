@@ -100,6 +100,30 @@ struct ProjectScaffolderTests {
         }
     }
 
+    @Test func scaffoldWritesAgentEntryFilesForAllTools() throws {
+        let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        try ProjectScaffolder.scaffold(at: dir, project: sampleProject())
+        let fm = FileManager.default
+        for name in ["CLAUDE.md", "AGENTS.md", "GEMINI.md", ".cursorrules"] {
+            let url = dir.appendingPathComponent(name)
+            #expect(fm.fileExists(atPath: url.path), "missing entry file: \(name)")
+            let body = try String(contentsOf: url, encoding: .utf8)
+            #expect(body.contains("<!-- llmide:auto"), "\(name) should be LLM IDE-managed")
+            #expect(body.contains(".claude/project.md"), "\(name) should point at project notes")
+            #expect(body.contains(".cursor/skills/"), "\(name) should mention Cursor skills")
+        }
+    }
+
+    @Test func scaffoldPreservesHandAuthoredClaudeMd() throws {
+        let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let claude = dir.appendingPathComponent("CLAUDE.md")
+        let original = "# My hand-written Claude instructions\n"
+        try original.write(to: claude, atomically: true, encoding: .utf8)
+        try ProjectScaffolder.scaffold(at: dir, project: sampleProject())
+        let after = try String(contentsOf: claude, encoding: .utf8)
+        #expect(after == original, "must not clobber hand-authored CLAUDE.md")
+    }
+
     @Test func scaffoldDoesNotCreateOldDirectories() throws {
         let dir = try tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
         try ProjectScaffolder.scaffold(at: dir, project: sampleProject())

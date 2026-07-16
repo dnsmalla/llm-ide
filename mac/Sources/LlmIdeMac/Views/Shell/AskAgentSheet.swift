@@ -148,7 +148,7 @@ struct AskAgentSheet: View {
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Ask the agent anything. It answers in the voice you configured in Library → Agents (active persona).")
+            Text("Ask the agent anything about the current meeting or project.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Text("Examples:")

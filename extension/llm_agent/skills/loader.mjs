@@ -157,7 +157,7 @@ export function loadSkills(dir, { requireBase = true, ignore = [] } = {}) {
       continue;
     }
     // Optional `description` frontmatter field — a 1-2 sentence
-    // human-readable summary shown in the Library → Skills catalog.
+    // human-readable summary for the agent catalog / "/" menu.
     // Falls back to the first non-heading line of the body.
     const bodyDescription = extractBodyDescription(parsed.body);
     const description = typeof fm.description === 'string' && fm.description.trim()

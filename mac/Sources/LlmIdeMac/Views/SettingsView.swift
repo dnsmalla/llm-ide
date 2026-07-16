@@ -8,8 +8,8 @@ struct SettingsView: View {
     var body: some View {
         // ScrollViewReader so Library's "Open in Settings" deep-link can
         // jump to a specific card. Anchor id matches the string posted with
-        // `.scrollSettingsToCard` ("connections" today; agents and plugins
-        // moved entirely to Library).
+        // `.scrollSettingsToCard` ("connections" today). Plugin install/
+        // browse lives in Library → Plugins.
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.lg) {
@@ -54,12 +54,6 @@ struct SettingsView: View {
                                 PreferencesSettingsSection(api: api)
                             }
                             Group {
-                                // Agent CRUD and Plugin management both live
-                                // in Library now (Agents detail view; the
-                                // Plugins section + PluginDetailView) — removed
-                                // from Settings to keep one source of truth.
-                                // The agent/plugin runtime is server-side and
-                                // "browse" already lived in Library.
                                 AutoCodeSettingsSection()
                                 GraphMemorySettingsSection()
                             }

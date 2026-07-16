@@ -108,6 +108,11 @@ enum ProjectScaffolder {
         // 5. .claude directory — project-level agent configuration and instructions
         ensureClaudeConfig(at: folderURL, project: project)
 
+        // 6. Root entry files every AI tool reads on open (CLAUDE.md,
+        //    AGENTS.md, .cursorrules, GEMINI.md). Skills/rules dirs are
+        //    filled later by ProjectSkillsInstaller; these point agents there.
+        ensureAgentEntryFiles(at: folderURL, project: project)
+
         log.info("scaffold complete: \(folderURL.lastPathComponent, privacy: .public)")
     }
 
@@ -145,16 +150,53 @@ enum ProjectScaffolder {
     system/graph/
     system/sync.json
     *.partial.md
+    # Agent skills — relative symlinks into the LLM IDE central kit (.skills).
+    # Re-created by New Project / Rebuild missing folders via the local server.
+    .claude/skills/
+    .claude/rules/
+    .claude/agents
+    .claude/commands
+    .claude/prompts
+    .cursor/
+    .codex/
+    .agents/
+    .gemini/
     # <<< LLM IDE managed
     """
 
     /// Ensure the project-root .gitignore contains the managed block. Creates
     /// the file if absent; appends the block once if the marker is missing;
-    /// no-ops if already present. Never rewrites the user's own rules.
+    /// when an older managed block is present without the agent-skills
+    /// ignores, injects those lines before the closing marker. Never rewrites
+    /// the user's own rules above the managed section.
     private static func ensureRootGitignore(at folderURL: URL) {
         let url = folderURL.appendingPathComponent(".gitignore")
         let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-        if existing.contains("# >>> LLM IDE managed") { return }
+        if existing.contains("# >>> LLM IDE managed") {
+            // Upgrade path: older scaffolds lacked the agent-skills ignores.
+            if !existing.contains(".agents/") {
+                let injected = existing.replacingOccurrences(
+                    of: "# <<< LLM IDE managed",
+                    with: """
+                    # Agent skills — relative symlinks into the LLM IDE central kit (.skills).
+                    .claude/skills/
+                    .claude/rules/
+                    .claude/agents
+                    .claude/commands
+                    .claude/prompts
+                    .cursor/
+                    .codex/
+                    .agents/
+                    .gemini/
+                    # <<< LLM IDE managed
+                    """)
+                if injected != existing {
+                    do { try injected.write(to: url, atomically: true, encoding: .utf8) }
+                    catch { log.error("gitignore upgrade failed: \(error.localizedDescription, privacy: .public)") }
+                }
+            }
+            return
+        }
         let combined: String
         if existing.isEmpty {
             combined = managedGitignoreBlock + "\n"
@@ -338,6 +380,9 @@ This directory contains project-level configuration and instructions for LLM IDE
   Controls which agent features are enabled and how they interact with
   your project.
 
+- **skills/** / **rules/** — Linked from the central LLM IDE skills kit
+  (Claude / Cursor / Codex share the same kit via sibling tool dirs).
+
 ## Purpose
 
 Agents automatically load instructions from `project.md` when working on
@@ -353,4 +398,92 @@ allow you to customize agent behavior per project.
 ---
 *Part of LLM IDE project structure.*
 """
+
+    // MARK: - Root agent entry files
+
+    /// Write the root files each AI tool loads as project instructions.
+    ///
+    /// | File           | Tool        |
+    /// |----------------|-------------|
+    /// | `CLAUDE.md`    | Claude Code |
+    /// | `AGENTS.md`    | Codex / open `.agents` |
+    /// | `.cursorrules` | Cursor      |
+    /// | `GEMINI.md`    | Gemini CLI  |
+    ///
+    /// Only creates/refreshes LLM IDE-managed files (absent, or carrying the
+    /// `llmide:auto` marker). Never clobbers a hand-authored entry file.
+    private static func ensureAgentEntryFiles(at folderURL: URL, project: Project) {
+        let body = makeAgentEntryFile(project: project)
+        let targets: [(String, String)] = [
+            ("CLAUDE.md", body),
+            ("AGENTS.md", body),
+            ("GEMINI.md", body),
+            (".cursorrules", body),
+        ]
+        for (name, content) in targets {
+            let url = folderURL.appendingPathComponent(name)
+            let existing = try? String(contentsOf: url, encoding: .utf8)
+            if existing == nil || existing!.contains("<!-- llmide:auto") {
+                writeAlways(at: url, content: content)
+            } else {
+                log.info("preserving existing \(name, privacy: .public) at \(folderURL.lastPathComponent, privacy: .public)")
+            }
+        }
+    }
+
+    /// Shared entry-file body for Claude / Cursor / Codex / Gemini.
+    /// Points every tool at the same project context + installed skill/rule dirs.
+    private static func makeAgentEntryFile(project: Project) -> String {
+        let name = project.displayName
+        let lang = project.settings.language.uppercased()
+        return """
+        # \(name)
+
+        > Managed by **LLM IDE**. Entry point for Claude Code, Cursor, Codex, and Gemini.
+        >
+        <!-- llmide:auto — refreshed on New Project / Rebuild missing folders -->
+
+        ## Project context
+
+        - **Name:** \(name)
+        - **Language:** \(lang)
+        - **Editable project notes:** [`.claude/project.md`](.claude/project.md) — put architecture, conventions, and gotchas there.
+
+        ## Folder layout
+
+        | Path | Purpose |
+        |------|---------|
+        | `source/` | Meeting & email transcripts |
+        | `code/` | Code / cloned repos |
+        | `data/` | Documents & data files |
+        | `notes/` | Generated notes |
+        | `system/` | LLM IDE settings (mostly git-ignored) |
+
+        ## Skills & rules (all agents)
+
+        The central skills kit is symlinked into this project (via New Project /
+        Rebuild). Each tool reads its own directory:
+
+        | Tool | Skills | Rules / config |
+        |------|--------|----------------|
+        | Claude Code | `.claude/skills/` | `.claude/rules/`, `.claude/commands/`, `.claude/agents/` |
+        | Cursor | `.cursor/skills/` | `.cursor/rules/` (+ this `.cursorrules`) |
+        | Codex | `.codex/skills/` | `.codex/rules/`, `.codex/agents/` |
+        | Open `.agents` | `.agents/skills/` | — |
+        | Gemini | `.gemini/skills/` | `.gemini/rules/` |
+
+        Prefer invoking a matching skill (e.g. `/brainstorming`, `/systematic-debugging`)
+        before inventing a parallel workflow.
+
+        ## How to work here
+
+        1. Read `.claude/project.md` for project-specific instructions.
+        2. Use skills from the tool dirs above for process / domain work.
+        3. Keep changes small; put durable conventions into `.claude/project.md`.
+
+        ---
+        *Auto-generated by LLM IDE. Edit `.claude/project.md` for lasting notes;
+        hand-edit this file only if you remove the `llmide:auto` marker.*
+        """
+    }
 }

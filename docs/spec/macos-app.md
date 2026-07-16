@@ -131,7 +131,7 @@ The Library section gets a 3-column layout (sidebar | list | detail). All other 
 
 | Suffix | Role | Examples |
 |---|---|---|
-| `*Store` | Observable state / data store (publish `@Published` properties) | `SessionStore`, `ProjectStore`, `AgentRunsStore`, `DocTemplateStore`, `GitStatusStore`, `VerifyApprovalStore`, `LibraryItemStore`, `AgentCatalogStore` |
+| `*Store` | Observable state / data store (publish `@Published` properties) | `SessionStore`, `ProjectStore`, `AgentRunsStore`, `DocTemplateStore`, `GitStatusStore`, `VerifyApprovalStore`, `LibraryItemStore` |
 | `*Service` | Logic / side-effect handler (may publish state) | `AutoCaptureService`, `AutoCodeUpdateService`, `CodeWorkflowService`, `FaultPackService`, `PermissionsService`, `SourceControlService`, `SearchService`, `UpdateService` |
 | `*Client` | Networking — calls external APIs | `LlmIdeAPIClient` (backend), `GitLabClient`, `GitHubClient` |
 | `*Manager` | Lifecycle + process/resource management | `BackendManager`, `RepoManager` |

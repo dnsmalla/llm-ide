@@ -101,14 +101,14 @@ struct PathsSettingsSection: View {
             HStack {
                 Spacer()
                 Button {
-                    rebuildProjectFolders(ap)
+                    rebuildProjectFolders()
                 } label: {
                     Label("Rebuild missing folders", systemImage: "folder.badge.plus")
                         .font(Typography.captionStrong)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .help("Re-create any of the project's canonical folders that are missing.")
+                .help("Re-create missing project folders and refresh Claude / Cursor / Codex skills from the central kit.")
             }
 
             if let status = createStatus {
@@ -173,17 +173,14 @@ struct PathsSettingsSection: View {
         }
     }
 
-    /// Re-create any of the active project's canonical folders that
-    /// are missing. Idempotent — ProjectScaffolder only creates what
-    /// isn't already there and preserves the project's README.
-    private func rebuildProjectFolders(_ ap: ProjectStore.ActiveProject) {
+    /// Re-create missing canonical folders and refresh the central
+    /// skills kit (Claude / Cursor / Codex / …) into the project path.
+    private func rebuildProjectFolders() {
         createError = nil
         createStatus = nil
         do {
-            try ProjectScaffolder.scaffold(
-                at: URL(fileURLWithPath: ap.localPath),
-                project: ap.bundle)
-            createStatus = "Project folders rebuilt."
+            try projectStore.rebuildActiveProjectFolders()
+            createStatus = "Project folders rebuilt. Agent skills refreshing…"
         } catch {
             createError = "Couldn't rebuild folders: \(error.localizedDescription)"
         }

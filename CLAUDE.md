@@ -86,12 +86,14 @@ LLM IDE is a **local-first AI meeting intelligence system** comprising four surf
 
 ```
 llm-ide/
+├── .skills/             # git submodule → dnsmalla/skills (single source of truth)
+├── scripts/install-skills.sh  # symlink kit into Claude/Cursor/Codex/.agents/Gemini
 ├── extension/           # Chrome extension + local server
 │   ├── core/            # Framework-free primitives (config, utils, errors, logger)
 │   ├── server/          # HTTP server (no framework), routing, middleware
 │   ├── kb/              # SQLite knowledge base, migrations, FTS5
-│   ├── agents/          # Markdown agent skills (YAML frontmatter)
-│   ├── llm_agent/       # Claude CLI orchestrator (shell-out wrapper)
+│   ├── agents/          # Server pipeline agents (planner, risk, codegen, …) — not skills
+│   ├── llm_agent/       # Claude CLI orchestrator + synced agent-tool defs
 │   ├── connectors/      # Outbound integrations (GitHub, GitLab, Backlog, Linear, Slack)
 │   ├── guardrails/      # Secret/PII/destructive-op pattern scanners
 │   ├── src/             # React UI (side panel, popup, content scripts)
@@ -107,6 +109,22 @@ llm-ide/
 ├── docs/                # mkdocs site (Diátaxis framework)
 └── kb/                  # Runtime data only (SQLite db, dev secrets)
 ```
+
+### Central skills (all agents)
+
+Process/domain `SKILL.md` skills are **not** authored in this repo. They live in the
+[`.skills`](https://github.com/dnsmalla/skills) submodule. After clone/pull:
+
+```bash
+git submodule update --init --recursive .skills
+bash scripts/install-skills.sh          # also run by ./setup.sh
+```
+
+That creates relative symlinks under `.claude/skills`, `.cursor/skills`,
+`.codex/skills`, `.agents/skills`, and `.gemini/skills` so every agent tool
+loads the same kit. Agent-loop tool **definitions** still sync with
+`cd extension && npm run sync:skills` (handlers stay local). See
+[`docs/how-to/install-central-skills.md`](docs/how-to/install-central-skills.md).
 
 ### Module Boundaries (Extension)
 
@@ -265,6 +283,7 @@ LLMIDE_PASSWORD=yourpassword
 | Persist UI state | `chrome.storage.local` via the owning hook; do NOT add new store |
 | Add new tab | `TABS` array in `extension/src/sidepanel/App.tsx` + new panel block |
 | Persist meeting data | Extend `SavedTranscript` in `extension/src/lib/storage.ts`; write in `stopRecording()` |
+| Install agent skills into a user project | Auto on New Project / Rebuild via `POST /kb/project/install-skills` (`extension/kb/install-project-skills.mjs`); kit lives in `.skills` |
 | Add mobile control feature | Modify `~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/services/computer-agent/src/` (computer agent) or `~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/apps/ios/MyApp/` (iOS app) |
 | Extend LLM IDE mobile API | Add endpoint to `extension/server.mjs` + expose via `llmide-client.ts` in computer agent |
 
@@ -273,7 +292,8 @@ LLMIDE_PASSWORD=yourpassword
 - **Server internals** — `extension/server.mjs` → follow router into `extension/kb/router.mjs`
 - **KB operations** — `extension/kb/db.mjs` (every state-mutating helper takes `userId` first)
 - **Caption capture** — `extension/src/content/caption-scraper.ts` → `extension/src/sidepanel/hooks/useTranscript.ts`
-- **Agent skills** — `extension/agents/*.md` (YAML frontmatter declares intent)
+- **Central skills kit** — `.skills/` submodule + `docs/how-to/install-central-skills.md`
+- **Agent-loop tool defs** — `extension/llm_agent/{global,internal/skills}/` (mirrors of central)
 - **Mac app entry** — `mac/Sources/LlmIdeMac/LlmIdeMacApp.swift`
 - **Mac services** — `mac/Sources/LlmIdeMac/Services/` (follow suffix taxonomy)
 - **Mobile control** — `docs/mobile/quick-start.md` → `docs/compact-mobile-integration.md` → `~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/`

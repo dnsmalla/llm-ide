@@ -6,6 +6,10 @@
 
 set -e
 
+# Always resolve paths from the repo root (this script lives there).
+REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$REPO_ROOT"
+
 echo "========================================="
 echo "   LLM IDE Extension Initialization   "
 echo "========================================="
@@ -36,13 +40,13 @@ echo "✅ npm detected: $(npm -v)"
 # 3. Handle specific extension dependencies
 export TARGET_DIR="extension"
 
-if [ -d "$TARGET_DIR" ]; then
+if [ -d "$REPO_ROOT/$TARGET_DIR" ]; then
     echo "⚙️ Resolving local backend engine dependencies..."
-    cd $TARGET_DIR
-    
-    # We purposefully run an install that reconstructs native modules (better-sqlite3)
-    npm install
-    
+    (
+        cd "$REPO_ROOT/$TARGET_DIR"
+        # We purposefully run an install that reconstructs native modules (better-sqlite3)
+        npm install
+    )
     echo "✅ Backend dependencies compiled successfully!"
 else
     echo "⚠️ Target directory /$TARGET_DIR not found. Please run this script from the project root."
@@ -75,9 +79,23 @@ fi
 
 # Enable the repo's git hooks (same as `make hooks`). The pre-push hook runs
 # `make regression` when mac/ changes; bypass with `git push --no-verify`.
-if [ -d .githooks ]; then
-    git config core.hooksPath .githooks
+if [ -d "$REPO_ROOT/.githooks" ]; then
+    git -C "$REPO_ROOT" config core.hooksPath .githooks
     echo "✅ git hooks enabled (.githooks)"
+fi
+
+# 5. Central skills kit — pin via `.skills` submodule, then symlink into
+# every AI tool dir (Claude / Cursor / Codex / .agents / Gemini).
+echo ""
+echo "⚙️  Wiring central skills kit for all agents..."
+if [ -f "$REPO_ROOT/.gitmodules" ] && grep -q 'path = \.skills' "$REPO_ROOT/.gitmodules" 2>/dev/null; then
+    git -C "$REPO_ROOT" submodule update --init --recursive .skills
+fi
+if [ -f "$REPO_ROOT/scripts/install-skills.sh" ]; then
+    bash "$REPO_ROOT/scripts/install-skills.sh"
+    echo "✅ Skills installed (Claude / Cursor / Codex / .agents / Gemini)"
+else
+    echo "⚠️  scripts/install-skills.sh not found — skip skills wiring"
 fi
 
 echo ""
@@ -88,4 +106,7 @@ echo "The system is fully resolved and ready to activate."
 echo "To boot the intelligent backend server, execute:"
 echo ""
 echo "    cd extension && npm run server"
+echo ""
+echo "Skills (Claude / Cursor / Codex / …) come from the .skills submodule."
+echo "Refresh with:  bash scripts/install-skills.sh"
 echo ""
