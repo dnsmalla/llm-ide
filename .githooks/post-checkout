@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Re-install skills when switching to a branch with a different .skills pointer.
+# $1=prev HEAD, $2=new HEAD, $3=1 if branch checkout (0 if file checkout)
+set -euo pipefail
+
+PREV="$1"
+CURR="$2"
+IS_BRANCH="$3"
+
+[ "$IS_BRANCH" = "1" ] || exit 0   # skip file-level checkouts
+
+ROOT="$(git rev-parse --show-toplevel)"
+changed=$(git diff --name-only "$PREV" "$CURR" 2>/dev/null || true)
+if echo "$changed" | grep -q "^\.skills$\|^\.gitmodules$"; then
+  echo "🔄  .skills pointer changed — updating submodule and reinstalling skills..."
+  git submodule update --init --recursive .skills
+  bash "$ROOT/scripts/install-skills.sh" --prune
+  echo "✅  Skills up to date."
+fi

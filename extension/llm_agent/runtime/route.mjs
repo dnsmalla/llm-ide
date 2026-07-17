@@ -20,6 +20,7 @@ import { renderGraphifyMemory } from '../../graphkit/index.mjs';
 import { persistTurnMemory } from './memory-persist.mjs';
 import { buildReadableRoots, handleListFiles, handleReadFile } from './handlers/repo-files.mjs';
 import { searchKb } from './handlers/search-kb.mjs';
+import { handleRunBash } from './handlers/run-bash.mjs';
 import { tasks } from './handlers/session-tasks.mjs';
 import { redactFence } from './redaction.mjs';
 import { logger } from '../../core/logger.mjs';
@@ -252,6 +253,9 @@ export async function handleCodeAssist({
         title: args.title,
       });
     },
+    'run-bash': (args) => handleRunBash(args, {
+      workspaceRoot: agentContext?.workspaceRoot,
+    }),
   };
 
   // Drift guard: this handlers map and GLOBAL_HANDLER_NAMES (imported from

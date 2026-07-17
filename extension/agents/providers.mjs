@@ -353,7 +353,17 @@ const CLI_ARG_BUILDERS = {
   // block…" straight into the reply (and again on the nested ask-internal hop
   // → duplicated). Auth + model still resolve, so the subscription-login path
   // is unaffected — `claude -p` becomes a clean, hook-free model endpoint.
-  anthropic: (p) => ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '-p', p],
+  //
+  // `--system-prompt 'You are a helpful AI assistant.'` replaces Claude Code's
+  // default system prompt (which declares "I'm Claude Code operating in this
+  // repo…"). Without it the model breaks character — it knows it's Claude Code
+  // and overrides the LLM IDE persona injected via the user-message prompt,
+  // printing commands to copy-paste instead of calling tools, and narrating its
+  // Claude Code identity into replies. The replacement is intentionally minimal:
+  // the real system prompt (persona, skills, tool defs) arrives in the user
+  // message where the agent loop embeds it; this flag only clears the identity
+  // conflict.
+  anthropic: (p) => ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '--system-prompt', 'You are a helpful AI assistant.', '-p', p],
   openai:    (p) => ['exec', p],   // codex exec "<prompt>"
   google:    (p) => ['-p', p],     // gemini -p "<prompt>"
 };

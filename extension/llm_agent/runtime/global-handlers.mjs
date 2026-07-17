@@ -29,4 +29,5 @@ export const GLOBAL_HANDLER_NAMES = Object.freeze([
   'task-list',
   'task-create',
   'task-update',
+  'run-bash',
 ]);

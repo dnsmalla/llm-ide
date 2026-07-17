@@ -97,6 +97,9 @@ if [ -f "$REPO_ROOT/scripts/install-skills.sh" ]; then
 else
     echo "⚠️  scripts/install-skills.sh not found — skip skills wiring"
 fi
+if [ -f "$REPO_ROOT/scripts/sync-skills.sh" ]; then
+    bash "$REPO_ROOT/scripts/sync-skills.sh" 2>/dev/null && echo "✅ Agent tool definitions synced from .skills" || echo "⚠️  sync-skills skipped (central repo unavailable)"
+fi
 
 echo ""
 echo "========================================="
@@ -108,5 +111,6 @@ echo ""
 echo "    cd extension && npm run server"
 echo ""
 echo "Skills (Claude / Cursor / Codex / …) come from the .skills submodule."
-echo "Refresh with:  bash scripts/install-skills.sh"
+echo "Refresh dev skills:   bash scripts/install-skills.sh"
+echo "Sync agent tools:     bash scripts/sync-skills.sh"
 echo ""

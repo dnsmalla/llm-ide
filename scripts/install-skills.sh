@@ -25,8 +25,11 @@ fi
 # llm-ide stacks: TypeScript extension + Swift mac app.
 STACKS="${LLMIDE_SKILL_STACKS:-typescript,swift}"
 
+# claude: only install skills (kit has no claude-specific agents/commands).
+# The kit's install.sh replaces .claude/agents with a symlink to
+# .skills/config/tool/claude/agents — which is empty — wiping local agent
+# files. Exclude claude from the full install; we wire skills separately.
 args=(
-  --tool claude
   --tool cursor
   --tool codex
   --tool agents
@@ -40,7 +43,35 @@ args=(
 args+=("$@")
 
 echo "==> Installing skills from $KIT into $ROOT"
-echo "    tools: claude cursor codex agents gemini"
+echo "    tools: cursor codex agents gemini (claude handled separately below)"
 echo "    stacks: $STACKS"
 bash "$KIT/scripts/install.sh" "$ROOT" "${args[@]}"
+
+# Install claude skills manually: symlink each kit skill that lists 'claude'
+# in its tools declaration. Agents are in .claude/agents/ as a real dir with
+# symlinks — the kit's install.sh would replace that with an empty symlink dir.
+echo "==> Installing claude skills"
+mkdir -p "$ROOT/.claude/skills"
+python3 - <<'PY'
+import os, yaml, pathlib
+
+kit = os.environ.get("KIT")
+root = os.environ.get("ROOT")
+reg = yaml.safe_load(open(f"{kit}/registry.yaml"))
+skills_dir = pathlib.Path(f"{root}/.claude/skills")
+linked = 0
+for s in reg.get("skills", []):
+    if "claude" not in s.get("tools", []):
+        continue
+    src = pathlib.Path(kit) / s["path"]
+    if not src.exists():
+        continue
+    link = skills_dir / s["id"]
+    if link.is_symlink():
+        link.unlink()
+    rel = os.path.relpath(src, skills_dir)
+    link.symlink_to(rel)
+    linked += 1
+print(f"claude: linked {linked} skills -> .claude/skills")
+PY
 echo "✅ Skills installed for all agents."
