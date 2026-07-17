@@ -58,6 +58,7 @@ export async function handleCodeAssist({
   kb,
   userId,
   onProgress,               // optional: live status callback (SSE → client)
+  maxIterations: maxIterationsOverride,  // optional: override for tests
 }) {
   // Per-user plugin view. Building it is cheap (Map clone + readdir
   // for each enabled plugin's skills/). Done per request so a user
@@ -298,7 +299,7 @@ export async function handleCodeAssist({
     handlers,
     onProgress,
     model: GLOBAL_AGENT_MODEL,
-    maxIterations: 1000,      // global cap raised; see runAgentLoop DEFAULT_MAX_ITERATIONS (10)
+    maxIterations: maxIterationsOverride ?? 1000,  // global cap raised; see runAgentLoop DEFAULT_MAX_ITERATIONS (10)
     // Long-form writing / refactoring asks routinely take 60-90s per
     // Claude call; with a single internal delegation that's two calls
     // back-to-back. 3 minutes covers the realistic worst case while

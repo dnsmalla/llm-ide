@@ -175,6 +175,7 @@ test('e2e: global iteration cap of 3 — graceful notice on overflow', async () 
     runClaude: fakeClaude,
     kb: { search: () => [], listMeetings: () => ({ items: [] }) },
     userId: 'user-1',
+    maxIterations: 4,
   });
   assert.match(out.reply, /iteration limit/i);
 });
