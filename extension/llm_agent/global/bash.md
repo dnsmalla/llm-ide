@@ -1,6 +1,7 @@
 ---
 name: bash
 kind: write
+confirmation: editable-sheet
 schema:
   command:
     type: string
