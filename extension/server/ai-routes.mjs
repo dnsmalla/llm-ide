@@ -451,6 +451,8 @@ export async function handleAIRoutes(req, res) {
               attachmentsText,
               skillsText,
               languageDirective,
+              model: tierModel,
+              provider: body.provider,
               // Forward the agent loop's per-call opts (maxTokens budget +
               // deadline signal) — without this the loop's AbortSignal.timeout
               // and maxTokens never reach runClaude, so the deadline-abort is
@@ -458,9 +460,13 @@ export async function handleAIRoutes(req, res) {
               // signal with the route's client-disconnect signal so EITHER aborts.
               runClaude: (p, opts = {}) => runClaude(p, {
                 userId: req.user?.id,
-                model: tierModel,
-                provider: body.provider,
+                // opts.model (the agent loop's GLOBAL_AGENT_MODEL) overrides
+                // the user's tier model for agent calls; drop provider so it
+                // is derived from the model (e.g. claude-* -> anthropic).
+                model: opts.model ?? tierModel,
+                provider: opts.model ? undefined : body.provider,
                 maxTokens: opts.maxTokens,
+                tools: opts.tools,
                 signal: opts.signal ? AbortSignal.any([opts.signal, ac.signal]) : ac.signal,
               }),
               kb,
@@ -484,13 +490,19 @@ export async function handleAIRoutes(req, res) {
           attachmentsText,
           skillsText,
           languageDirective,
+          model: tierModel,
+          provider: body.provider,
           // Forward the loop's per-call opts here too (buffered path): the
           // loop's maxTokens budget + its deadline signal must reach runClaude.
           runClaude: (p, opts = {}) => runClaude(p, {
             userId: req.user?.id,
-            model: tierModel,
-            provider: body.provider,
+            // opts.model (the agent loop's GLOBAL_AGENT_MODEL) overrides
+            // the user's tier model for agent calls; drop provider so it
+            // is derived from the model (e.g. claude-* -> anthropic).
+            model: opts.model ?? tierModel,
+            provider: opts.model ? undefined : body.provider,
             maxTokens: opts.maxTokens,
+            tools: opts.tools,
             signal: opts.signal,
           }),
           kb,

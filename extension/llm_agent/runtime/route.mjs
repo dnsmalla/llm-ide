@@ -7,7 +7,7 @@
 // views, the catalog) lives in the skills module —
 // llm_agent/skills/registry.mjs. This file only orchestrates.
 
-import { runAgentLoop } from './loop.mjs';
+import { runAgentLoop, runNativeAgentLoop } from './loop.mjs';
 import { askInternal } from './handlers/ask-internal.mjs';
 import { askSubagent } from './handlers/ask-subagent.mjs';
 import { handleWebSearch } from './handlers/web-search.mjs';
@@ -25,6 +25,8 @@ import { tasks } from './handlers/session-tasks.mjs';
 import { redactFence } from './redaction.mjs';
 import { logger } from '../../core/logger.mjs';
 import { GLOBAL_HANDLER_NAMES } from './global-handlers.mjs';
+import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider } from '../../agents/providers.mjs';
+import { skillsToOpenAITools } from './openai-tools.mjs';
 
 // Re-exported for the HTTP routes that historically imported these
 // from here (server/auth-routes.mjs, kb/routes/agent.mjs import the
@@ -47,6 +49,21 @@ const SUBAGENT_MODEL = process.env.LLMIDE_SUBAGENT_MODEL || GLOBAL_AGENT_MODEL;
 // intentionally empty so no app-state leaks into global's prompt.
 const globalPromptBase = composeGlobalPrompt();
 
+// System prompt for the native tool-calling loop (deepseek/openai/custom).
+// Intentionally tool-oriented and fence-free: the skill definitions travel in
+// the OpenAI `tools` param, so the prompt must NOT also describe them via the
+// <<<TOOL_CALL>>> fence (that caused the model to emit write-tool fences and
+// loop). Mirrors how Cursor/IDE agents keep the static prompt minimal for
+// caching and let the tools array carry capability.
+const NATIVE_SYSTEM_PROMPT = [
+  'You are the LLM IDE Code Assistant. Help the user by calling the provided tools.',
+  'Use run-bash to run a shell command, list-files / read-file for the workspace,',
+  'search-kb for meetings/notes/issues, web-search / fetch-url for the web,',
+  'ask-internal for app state. Call a tool when action is needed; its result comes',
+  'back to you automatically. Once you have what you need, answer the user concisely.',
+  'Never print a command for the user to copy — call the tool.',
+].join(' ');
+
 export async function handleCodeAssist({
   message,
   history,
@@ -59,6 +76,8 @@ export async function handleCodeAssist({
   userId,
   onProgress,               // optional: live status callback (SSE → client)
   maxIterations: maxIterationsOverride,  // optional: override for tests
+  model,                    // resolved model id (from the client) — routes native vs fence loop
+  provider,                 // explicit provider id from the client, if any
 }) {
   // Per-user plugin view. Building it is cheap (Map clone + readdir
   // for each enabled plugin's skills/). Done per request so a user
@@ -278,34 +297,49 @@ export async function handleCodeAssist({
     );
   }
 
-  const out = await runAgentLoop({
-    skills: globalSkills.skills,
-    userMessage: composedUserMessage,
-    history: Array.isArray(history) ? history : [],
-    // base = global's composed prompt (role + ask-internal skill).
-    // The rest of agentContext is intentionally empty so the loop's
-    // composeSystemContext produces only (none configured) sections,
-    // which then collapse to "## Active project\n- (none
-    // configured)\n## Indexed code repositories ...\n- (none indexed)".
-    //
-    // The agent's prompt instructs it not to look at those — but in
-    // practice global doesn't need to see them either. They cost ~120
-    // tokens; tolerable for the architectural cleanliness of using
-    // the same composer for both agents.
-    agentContext: { base: personaBase },
-    runClaude,
-    kb,
-    userId,
-    handlers,
-    onProgress,
-    model: GLOBAL_AGENT_MODEL,
-    maxIterations: maxIterationsOverride ?? 1000,  // global cap raised; see runAgentLoop DEFAULT_MAX_ITERATIONS (10)
-    // Long-form writing / refactoring asks routinely take 60-90s per
-    // Claude call; with a single internal delegation that's two calls
-    // back-to-back. 3 minutes covers the realistic worst case while
-    // still bounding a truly stuck loop.
-    deadlineMs: 180_000,
-  });
+  // Native tool-calling loop for OpenAI-compatible providers (deepseek/openai/
+  // custom). They speak the OpenAI function-calling API, so use the proper
+  // messages-based loop (Cursor/OpenAI pattern: results fed back as native
+  // `tool` messages, natural termination) instead of the text-fence loop, which
+  // those models don't follow and which loops when results come back as fences.
+  const NATIVE_PROVIDERS = new Set(['deepseek', 'openai', 'custom']);
+  const effProvider = (typeof provider === 'string' && provider) || resolveProvider(model);
+  const nativeKey = NATIVE_PROVIDERS.has(effProvider) ? providerApiKey(userId, effProvider) : null;
+  let out;
+  if (nativeKey && typeof model === 'string' && model) {
+    const nativeBaseUrl = effProvider === 'custom' ? customBaseUrl(userId)
+      : effProvider === 'deepseek' ? 'https://api.deepseek.com' : undefined;
+    out = await runNativeAgentLoop({
+      systemPrompt: NATIVE_SYSTEM_PROMPT,
+      userMessage: composedUserMessage,
+      history: Array.isArray(history) ? history : [],
+      skills: globalSkills.skills,
+      tools: skillsToOpenAITools(globalSkills.skills, { readOnly: true }),
+      complete: (opts) => callOpenAI({ apiKey: nativeKey, model, baseUrl: nativeBaseUrl, ...opts }),
+      userId,
+      handlers,
+      kb,
+      onProgress,
+      maxIterations: maxIterationsOverride ?? 50,
+      deadlineMs: 180_000,
+    });
+  } else {
+    out = await runAgentLoop({
+      skills: globalSkills.skills,
+      userMessage: composedUserMessage,
+      history: Array.isArray(history) ? history : [],
+      // base = global's composed prompt (role + ask-internal skill).
+      agentContext: { base: personaBase },
+      runClaude,
+      kb,
+      userId,
+      handlers,
+      onProgress,
+      model: GLOBAL_AGENT_MODEL,
+      maxIterations: maxIterationsOverride ?? 1000,  // global cap raised; see runAgentLoop DEFAULT_MAX_ITERATIONS (10)
+      deadlineMs: 180_000,
+    });
+  }
 
   // Auto project-memory capture. Distill durable, project-specific facts from
   // this turn and merge them into the active repo's chat-memory.md, which

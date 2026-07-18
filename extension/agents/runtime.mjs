@@ -91,7 +91,7 @@ const MAX_PROMPT_CHARS = 500_000;
 // so multi-user deployments charge each user's own Anthropic account
 // rather than the operator's CLI login.  When userId is omitted (or
 // the user has no stored key) we fall back to the operator's CLI auth.
-export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, autoFallback = true } = {}) {
+export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, tools, autoFallback = true } = {}) {
   if (typeof prompt !== 'string') {
     throw new Error('runClaude: prompt must be a string');
   }
@@ -156,12 +156,12 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
       if (provider === 'custom') {
         const baseUrl = customBaseUrl(userId);
         if (!baseUrl) throw new Error('No base URL configured for the custom provider. Add one in Settings → Model Providers.');
-        return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl, signal, meter });
+        return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl, signal, meter, tools });
       }
       if (provider === 'deepseek') {
-        return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl: 'https://api.deepseek.com', signal, meter });
+        return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl: 'https://api.deepseek.com', signal, meter, tools });
       }
-      return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, signal, meter });
+      return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, signal, meter, tools });
     }
     // custom and deepseek have no CLI subscription mode; other providers fall
     // back to their logged-in CLI.

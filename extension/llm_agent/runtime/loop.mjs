@@ -314,3 +314,115 @@ export async function runAgentLoop({
   const capMsg = `\n\n_(reached the ${cap}-call tool iteration limit — try again)_`;
   return { reply: (preToolText.trim() + capMsg), pendingTool: null, iterations: cap, cacheHits };
 }
+
+/**
+ * Native tool-calling agent loop for OpenAI-compatible providers
+ * (deepseek/openai/custom) — the Cursor/OpenAI pattern: maintain a real
+ * messages array, feed tool results back as native `{role:'tool',
+ * tool_call_id}` messages, and terminate naturally when the model returns no
+ * tool_calls. This is the correct shape for providers that speak the OpenAI
+ * function-calling API; the fence-based `runAgentLoop` above stays the path for
+ * anthropic/CLI/google.
+ *
+ * `complete({messages, tools, maxTokens, signal})` is injected — in production
+ * it's callOpenAI bound to the resolved key/model/baseUrl; in tests it's a mock.
+ * Returns the same shape as runAgentLoop: { reply, pendingTool, iterations,
+ * cacheHits }. Write tools surface as `pendingTool` for the client (one per
+ * turn), exactly as the fence loop does.
+ */
+export async function runNativeAgentLoop({
+  systemPrompt, userMessage, history, skills, tools, complete,
+  userId, handlers, kb, maxIterations, deadlineMs, depth = 0, onProgress,
+}) {
+  const emit = (event) => { try { onProgress?.(event); } catch { /* ignore */ } };
+  if (depth > MAX_LOOP_DEPTH) throw new Error(`agent loop nesting exceeds depth ${MAX_LOOP_DEPTH}`);
+  const cap = Number.isFinite(maxIterations) && maxIterations > 0 ? maxIterations : DEFAULT_MAX_ITERATIONS;
+  const deadline = Number.isFinite(deadlineMs) && deadlineMs > 0 ? deadlineMs : DEFAULT_DEADLINE_MS;
+  const startTs = Date.now();
+
+  // Seed the conversation: system + prior turns (so multi-turn follow-ups keep
+  // context) + the current user turn. Mirrors the fence loop's renderHistoryBlock
+  // window (last 8) and its redactFence sanitising of replayed client content.
+  const messages = [{ role: 'system', content: systemPrompt }];
+  if (Array.isArray(history)) {
+    for (const msg of history.slice(-8)) {
+      const role = msg?.role === 'user' ? 'user' : msg?.role === 'assistant' ? 'assistant' : null;
+      const content = typeof msg?.content === 'string' ? redactFence(msg.content.slice(0, 6000)) : '';
+      if (role && content) messages.push({ role, content });
+    }
+  }
+  messages.push({ role: 'user', content: userMessage });
+
+  for (let i = 0; i < cap; i++) {
+    const remaining = deadline - (Date.now() - startTs);
+    if (remaining <= 0) return { reply: '_(agent timed out)_', pendingTool: null, iterations: i, cacheHits: 0 };
+    emit({ phase: i === 0 ? 'thinking' : 'writing', iteration: i + 1 });
+
+    let resp;
+    try {
+      resp = await complete({
+        messages,
+        tools,
+        maxTokens: 2048,
+        signal: AbortSignal.timeout(remaining),
+      });
+    } catch (err) {
+      if (err?.name === 'AbortError' || err?.code === 'ABORT_ERR') {
+        return { reply: '_(agent timed out)_', pendingTool: null, iterations: i, cacheHits: 0 };
+      }
+      throw err;
+    }
+    const { text, toolCalls } = resp;
+
+    // No tool calls → the model produced its user-facing answer. Natural
+    // termination — no artificial iteration cap needed for well-behaved models.
+    if (!Array.isArray(toolCalls) || !toolCalls.length) {
+      return { reply: (text || '').trim(), pendingTool: null, iterations: i + 1, cacheHits: 0 };
+    }
+
+    // Append the assistant turn (with its tool_calls) per the OpenAI contract —
+    // the API requires every tool_call to be answered by a tool message below.
+    messages.push({
+      role: 'assistant',
+      content: text || null,
+      tool_calls: toolCalls.map((tc, idx) => ({
+        id: tc.id || `call_${i}_${idx}`,
+        type: 'function',
+        function: { name: tc.name, arguments: JSON.stringify(tc.arguments || {}) },
+      })),
+    });
+
+    // Execute each tool call and feed results back as native tool messages.
+    for (const [idx, tc] of toolCalls.entries()) {
+      const callId = tc.id || `call_${i}_${idx}`;
+      const skill = skills.get(tc.name);
+      if (!skill) {
+        messages.push({ role: 'tool', tool_call_id: callId, name: tc.name, content: JSON.stringify({ error: `Unknown tool: ${tc.name}` }) });
+        continue;
+      }
+      const validation = validateArgs(skill.schema, tc.arguments || {});
+      if (validation.error) {
+        messages.push({ role: 'tool', tool_call_id: callId, name: tc.name, content: JSON.stringify({ error: validation.error }) });
+        continue;
+      }
+      logger.info('skill_invoked', { skill: skill.name, kind: skill.kind, userId, iteration: i + 1 });
+      if (skill.kind === 'write') {
+        // One write per turn — surface for client confirmation (pendingTool).
+        return { reply: (text || '').trim(), pendingTool: { name: tc.name, arguments: validation.value }, iterations: i + 1, cacheHits: 0 };
+      }
+      emit({ phase: 'tool', tool: skill.name, iteration: i + 1 });
+      let result;
+      try {
+        result = await handlers[skill.name](validation.value, { userId, kb, handlers, depth: depth + 1 });
+      } catch (err) {
+        result = { error: `Tool ${skill.name} threw: ${err.message}` };
+      }
+      if (result?.pendingTool) {
+        return { reply: (text || '').trim(), pendingTool: result.pendingTool, iterations: i + 1, cacheHits: 0 };
+      }
+      messages.push({ role: 'tool', tool_call_id: callId, name: skill.name, content: JSON.stringify(redactDeep(result)) });
+    }
+  }
+
+  return { reply: '_(reached the tool iteration limit — try again)_', pendingTool: null, iterations: cap, cacheHits: 0 };
+}
