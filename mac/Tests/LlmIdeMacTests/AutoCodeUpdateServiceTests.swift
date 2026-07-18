@@ -61,7 +61,7 @@ struct AutoCodeUpdateServiceTests {
         let registry = ProcessedActionsRegistry(
             storeURL: stateRoot.appendingPathComponent("reg.json"))
         let svc = await MainActor.run {
-            AutoCodeUpdateService(config: cfg, autoTaskSettings: AutoTaskSettings(), registry: registry, projectStore: store)
+            AutoCodeUpdateService(config: cfg, autoTaskSettings: AutoTaskSettings(), registry: registry, projectStore: store, logStore: TaskLogStore())
         }
         let resolved = await MainActor.run { svc.resolveBackendAndProject() }
         #expect(resolved?.projectId == "o/n")
@@ -110,7 +110,7 @@ struct AutoCodeUpdateServiceTests {
         let registry = ProcessedActionsRegistry(
             storeURL: stateRoot.appendingPathComponent("reg.json"))
         let svc = await MainActor.run {
-            AutoCodeUpdateService(config: cfg, autoTaskSettings: AutoTaskSettings(), registry: registry, projectStore: store)
+            AutoCodeUpdateService(config: cfg, autoTaskSettings: AutoTaskSettings(), registry: registry, projectStore: store, logStore: TaskLogStore())
         }
         let resolved = await MainActor.run { svc.resolveBackendAndProject() }
         #expect(resolved?.gitRoot == clone.path)        // git ops target the clone
@@ -145,7 +145,7 @@ struct AutoCodeUpdateServiceTests {
         let registry = ProcessedActionsRegistry(
             storeURL: stateRoot.appendingPathComponent("reg.json"))
         let svc = await MainActor.run {
-            AutoCodeUpdateService(config: cfg, autoTaskSettings: AutoTaskSettings(), registry: registry, projectStore: store)
+            AutoCodeUpdateService(config: cfg, autoTaskSettings: AutoTaskSettings(), registry: registry, projectStore: store, logStore: TaskLogStore())
         }
         let resolved = await MainActor.run { svc.resolveBackendAndProject() }
         #expect(resolved == nil)

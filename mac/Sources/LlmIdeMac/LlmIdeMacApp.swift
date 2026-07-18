@@ -42,6 +42,7 @@ struct LlmIdeMacApp: App {
     @StateObject private var deepLink: DeepLinkRouter
     @StateObject private var liveMirror: LiveSessionMirror
     @StateObject private var autoCodeUpdate: AutoCodeUpdateService
+    @StateObject private var logStore: TaskLogStore
     @StateObject private var updateService = UpdateService()
     @StateObject private var projectStore: ProjectStore
     @StateObject private var agentRuns: AgentRunsStore
@@ -88,13 +89,15 @@ struct LlmIdeMacApp: App {
         // through every call site.
         projectStoreInstance._apiClient = client
         let autoTaskSettingsInstance = AutoTaskSettings()
+        let taskLogStore = TaskLogStore()
         let autoCode = AutoCodeUpdateService(
             config: cfg,
             autoTaskSettings: autoTaskSettingsInstance,
             gitLabClient: GitLabClient(),
             registry: registry,
             projectStore: projectStoreInstance,
-            api: client)
+            api: client,
+            logStore: taskLogStore)
 
         // The registry's `bootstrap()` (the disk-read path) is invoked
         // from the AppShell's first `.task` tick — see `autoCode.start()`
@@ -114,6 +117,7 @@ struct LlmIdeMacApp: App {
         self._deepLink = StateObject(wrappedValue: router)
         self._liveMirror = StateObject(wrappedValue: mirror)
         self._autoCodeUpdate = StateObject(wrappedValue: autoCode)
+        self._logStore = StateObject(wrappedValue: taskLogStore)
         self._projectStore = StateObject(wrappedValue: projectStoreInstance)
         let runs = AgentRunsStore(api: client)
         self._agentRuns = StateObject(wrappedValue: runs)
@@ -156,6 +160,7 @@ struct LlmIdeMacApp: App {
                 .environmentObject(deepLink)
                 .environmentObject(liveMirror)
                 .environmentObject(autoCodeUpdate)
+                .environmentObject(logStore)
                 .environmentObject(updateService)
                 .environmentObject(projectStore)
                 .environmentObject(agentRuns)
@@ -321,6 +326,7 @@ struct LlmIdeMacApp: App {
                 .environmentObject(theme)
                 .environmentObject(autoTaskSettings)
                 .environmentObject(autoCodeUpdate)
+                .environmentObject(logStore)
         } label: {
             Image(systemName: autoCodeUpdate.isRunning
                   ? "arrow.triangle.2.circlepath.circle.fill"

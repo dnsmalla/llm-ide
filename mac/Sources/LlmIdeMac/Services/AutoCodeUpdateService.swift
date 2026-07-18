@@ -42,6 +42,11 @@ final class AutoCodeUpdateService: ObservableObject {
     /// reason is surfaced via `taskErrors` ("Regression skipped — no API
     /// client wired."); the rest of the run is unaffected.
     private let api: LlmIdeAPIClient?
+    /// Per-task live log store; appended to from the CLI `Pipe` streamer and
+    /// read by the Auto Task page. Defaults to a fresh store so existing
+    /// callers/tests that omit it still compile; the app injects the shared
+    /// instance the UI observes.
+    private let logStore: TaskLogStore
     private let log = Logger(subsystem: "com.llmide.macapp", category: "AutoCodeUpdateService")
 
     /// Activity feed store. Set once by the app entry after construction.
@@ -76,14 +81,17 @@ final class AutoCodeUpdateService: ObservableObject {
 
     // MARK: - Init
 
-    init(config: AppConfig, autoTaskSettings: AutoTaskSettings, backend: RepoBackend? = nil, 
-         registry: ProcessedActionsRegistry, projectStore: ProjectStore? = nil, api: LlmIdeAPIClient? = nil) {
+    @MainActor
+    init(config: AppConfig, autoTaskSettings: AutoTaskSettings, backend: RepoBackend? = nil,
+         registry: ProcessedActionsRegistry, projectStore: ProjectStore? = nil,
+         api: LlmIdeAPIClient? = nil, logStore: TaskLogStore) {
         self.config = config
         self.autoTaskSettings = autoTaskSettings
         self.backendOverride = backend
         self.registry = registry
         self.projectStore = projectStore
         self.api = api
+        self.logStore = logStore
         isEnabled = autoTaskSettings.enabled
         
         // Observe unified auto task settings
@@ -106,12 +114,12 @@ final class AutoCodeUpdateService: ObservableObject {
 
     /// Backwards-compat init for callers still passing a GitLabClient.
     /// New code should pass a `RepoBackend` (or nil to auto-resolve).
-    convenience init(config: AppConfig, autoTaskSettings: AutoTaskSettings, gitLabClient: GitLabClient, 
-                     registry: ProcessedActionsRegistry, projectStore: ProjectStore? = nil, 
-                     api: LlmIdeAPIClient? = nil) {
+    convenience init(config: AppConfig, autoTaskSettings: AutoTaskSettings, gitLabClient: GitLabClient,
+                     registry: ProcessedActionsRegistry, projectStore: ProjectStore? = nil,
+                     api: LlmIdeAPIClient? = nil, logStore: TaskLogStore) {
         self.init(config: config, autoTaskSettings: autoTaskSettings,
                   backend: RepoBackendFactory.guarded(gitLabClient, config: config),
-                  registry: registry, projectStore: projectStore, api: api)
+                  registry: registry, projectStore: projectStore, api: api, logStore: logStore)
     }
 
     // MARK: - Lifecycle
