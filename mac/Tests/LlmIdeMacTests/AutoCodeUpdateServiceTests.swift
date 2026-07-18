@@ -168,4 +168,34 @@ struct AutoCodeUpdateServiceTests {
         svc.runSingle(.reviewCode)
         #expect(svc.currentTask == nil)
     }
+
+    /// Toggling `enabled` via the model (the Menu/Settings path — no explicit
+    /// start()/stop() call) must arm AND disarm the scheduler. Previously the
+    /// observer only called stop() on disable, so enabling from the Menu bar
+    /// flipped the displayed state but left the timer unarmed: auto-tasks
+    /// never ran on schedule.
+    @MainActor
+    @Test func enablingViaModelArmsAndDisarmsTheAutoTimer() async {
+        let cfg = Self.isolatedConfig()
+        let stateRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("auto-timer-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: stateRoot, withIntermediateDirectories: true)
+        let registry = ProcessedActionsRegistry(storeURL: stateRoot.appendingPathComponent("reg.json"))
+        let settings = AutoTaskSettings(
+            defaults: UserDefaults(suiteName: "autocode-timer-\(UUID().uuidString)")!)
+        settings.enabled = false
+        let svc = AutoCodeUpdateService(config: cfg, autoTaskSettings: settings,
+                                        registry: registry, logStore: TaskLogStore())
+
+        // Disabled at construction → timer not armed.
+        #expect(svc.isAutoTimerArmed == false)
+
+        // Flip enabled via the model — the observer must arm the timer.
+        settings.enabled = true
+        #expect(svc.isAutoTimerArmed == true)
+
+        // Flipping back off must disarm it.
+        settings.enabled = false
+        #expect(svc.isAutoTimerArmed == false)
+    }
 }

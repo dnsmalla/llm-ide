@@ -54,6 +54,8 @@ final class AutoCodeUpdateService: ObservableObject {
     weak var activity: ActivityStore?
 
     private var timer: Timer?
+    /// Test/observability hook: true while the auto-run timer is armed.
+    var isAutoTimerArmed: Bool { timer != nil }
     /// Floor for the configurable cadence so a 0/garbage value can't spin
     /// the timer hot.
     private static let minIntervalMinutes = 5
@@ -93,12 +95,18 @@ final class AutoCodeUpdateService: ObservableObject {
         self.logStore = logStore
         isEnabled = autoTaskSettings.enabled
         
-        // Observe unified auto task settings
+        // Arm/disarm the scheduler from the single source of truth. Every
+        // enable path (Menu, Settings, the Auto Tasks page, app boot) flows
+        // through `autoTaskSettings.enabled`, so this is the ONE place that
+        // toggles the actual timer — no surface needs to call start()/stop()
+        // itself. dropFirst skips the initial value so we don't arm during
+        // init (app boot arms via start() if already enabled).
         cancellable = autoTaskSettings.$enabled
+            .dropFirst()
             .sink { [weak self] value in
                 guard let self else { return }
                 self.isEnabled = value
-                if !value { self.stop() }
+                if value { self.start() } else { self.stop() }
             }
         // Reschedule the timer when the user changes the cadence — but only
         // while a timer is live (i.e. auto-tasks are enabled). dropFirst so
