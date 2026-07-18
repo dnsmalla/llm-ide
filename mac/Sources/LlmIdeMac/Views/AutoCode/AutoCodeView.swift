@@ -514,6 +514,20 @@ enum AutoTask: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Log-file suffix used by `runCLI(prompt:)`, `logTail`, and error hints.
+    var logSuffix: String {
+        switch self {
+        case .reviewCode:        return "review-code"
+        case .reviewDoc:         return "review-doc"
+        case .reviewConflicts:   return "review-conflicts"
+        case .regression:        return "regression"
+        case .generateKnowledge: return "knowledge"
+        case .generateDoc:       return "generate-doc"
+        case .updateIssues:      return "update-issues"
+        case .updatePlanStatus:  return "update-plan-status"
+        }
+    }
+
     /// Structural tasks (regression, generateKnowledge) don't have a user-
     /// editable prompt template. Callers should hide the template editor when
     /// this returns nil.

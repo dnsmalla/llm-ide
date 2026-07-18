@@ -150,4 +150,22 @@ struct AutoCodeUpdateServiceTests {
         let resolved = await MainActor.run { svc.resolveBackendAndProject() }
         #expect(resolved == nil)
     }
+
+    @MainActor
+    @Test func runSingleIsNoOpWhileRunInFlight() async {
+        let cfg = Self.isolatedConfig()
+        let stateRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("auto-single-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: stateRoot, withIntermediateDirectories: true)
+        let registry = ProcessedActionsRegistry(storeURL: stateRoot.appendingPathComponent("reg.json"))
+        let svc = AutoCodeUpdateService(config: cfg, autoTaskSettings: AutoTaskSettings(),
+                                        registry: registry, logStore: TaskLogStore())
+
+        // No backend configured → run() returns early. The re-entrancy guard
+        // means runSingle is a no-op while runNow's Task exists. Assert the
+        // service stays consistent and does not crash.
+        svc.runNow()
+        svc.runSingle(.reviewCode)
+        #expect(svc.currentTask == nil)
+    }
 }

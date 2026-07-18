@@ -21,7 +21,9 @@ final class AutoCodeUpdateService: ObservableObject {
     @Published private(set) var taskErrors: [String: String] = [:]
     /// Tail of each review task's last-run log, keyed by `AutoTask.rawValue`.
     /// Lets the UI show review findings inline instead of only in a file.
-    @Published private(set) var taskOutputs: [String: String] = [:]
+    @Published private(set) var taskOutputs: [String: String] = [:]   // kept; Task 5 removes the last reader
+    /// Which task is running right now (drives the per-task ▶ spinner). nil when idle.
+    @Published private(set) var currentTask: AutoTask? = nil
     /// Human-readable description of the currently running step (e.g., "Creating issues", "Running Review Code").
     /// nil when no run is active. Updated throughout the run() flow so the UI shows live progress.
     @Published private(set) var currentStep: String?
@@ -161,6 +163,111 @@ final class AutoCodeUpdateService: ObservableObject {
         }
     }
 
+    /// Per-task manual run (the ▶ button on a task's page). Runs JUST that one
+    /// task body, ignoring its enable checkbox. Shares the `runTask` re-entrancy
+    /// guard with `runNow()` so a global run and a per-task run can't overlap.
+    func runSingle(_ task: AutoTask) {
+        guard runTask == nil else { return }
+        runTask = Task { [weak self] in
+            await self?.runOne(task)
+            self?.runTask = nil
+        }
+    }
+
+    /// Resolve backend/project once, then run a single task body.
+    private func runOne(_ task: AutoTask) async {
+        guard !isRunning else { return }
+        isRunning = true
+        defer {
+            isRunning = false
+            currentTask = nil
+            currentStep = nil
+            lastRunDate = Date()
+        }
+        guard let resolved = resolveBackendAndProject() else {
+            statusMessage = "No linked repo — configure in GitLab or GitHub settings"
+            return
+        }
+        guard let logDir = logsDirectory() else {
+            statusMessage = "Logs directory unavailable"
+            return
+        }
+        await runTaskBody(task, resolved: resolved, logDir: logDir)
+        statusMessage = "\(task.label) — done"
+    }
+
+    /// Run a single task body. Called by the orchestrator `run()` (enabled
+    /// tasks) and by `runOne(_:)` (per-task manual run). Each case logs a start
+    /// marker and routes its output into `logStore[task]`.
+    private func runTaskBody(_ task: AutoTask, resolved: ResolvedRepo, logDir: URL) async {
+        logStore.append(task, "— run started —")
+        currentTask = task
+        defer { currentTask = nil }
+        switch task {
+        case .reviewCode:
+            currentStep = "Running Review Code"
+            let ok = await runCLI(prompt: config.autoTaskTemplateReviewCode,
+                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix, logDir: logDir)
+            appendTail(to: task, suffix: task.logSuffix, logDir: logDir)
+            finishPromptTask(task, ok: ok)
+        case .reviewDoc:
+            currentStep = "Running Review Doc"
+            let ok = await runCLI(prompt: config.autoTaskTemplateReviewDoc,
+                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix, logDir: logDir)
+            appendTail(to: task, suffix: task.logSuffix, logDir: logDir)
+            finishPromptTask(task, ok: ok)
+        case .reviewConflicts:
+            currentStep = "Running Review Conflicts"
+            let ok = await runCLI(prompt: config.autoTaskTemplateReviewConflicts,
+                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix, logDir: logDir)
+            appendTail(to: task, suffix: task.logSuffix, logDir: logDir)
+            finishPromptTask(task, ok: ok)
+        case .generateDoc:
+            currentStep = "Generating Documentation"
+            let ok = await runCLI(prompt: config.autoTaskTemplateGenerateDoc,
+                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix, logDir: logDir)
+            appendTail(to: task, suffix: task.logSuffix, logDir: logDir)
+            finishPromptTask(task, ok: ok)
+        case .updateIssues:
+            currentStep = "Updating Issues"
+            let ok = await runCLI(prompt: config.autoTaskTemplateUpdateIssues,
+                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix, logDir: logDir)
+            appendTail(to: task, suffix: task.logSuffix, logDir: logDir)
+            finishPromptTask(task, ok: ok)
+        case .regression:
+            currentStep = "Running Regression sweep"
+            await runRegressionSweep(projectRoot: resolved.projectRoot, gitRoot: resolved.gitRoot)
+        case .generateKnowledge:
+            currentStep = "Reviewing Knowledge"
+            reportKnowledge(projectRoot: resolved.projectRoot)
+        case .updatePlanStatus:
+            currentStep = "Refreshing Plan statuses"
+            await refreshPlanStatuses(projectRoot: resolved.projectRoot)
+        }
+    }
+
+    /// Append the post-run log tail to the task's live buffer. We mirror the
+    /// `.log` file once the CLI finishes rather than streaming line-by-line, so
+    /// the buffer reflects the final tail of the run (the file stays the
+    /// permanent record).
+    private func appendTail(to task: AutoTask, suffix: String, logDir: URL) {
+        let tail = logTail(suffix: suffix, logDir: logDir)
+        tail.split(separator: "\n", omittingEmptySubsequences: true).forEach {
+            logStore.append(task, String($0))
+        }
+    }
+
+    /// Shared success/error bookkeeping for the 5 prompt tasks.
+    private func finishPromptTask(_ task: AutoTask, ok: Bool) {
+        if ok {
+            taskErrors.removeValue(forKey: task.rawValue)
+            logStore.append(task, "— run finished —")
+        } else {
+            taskErrors[task.rawValue] = "\(task.label) task failed. Check ~/Library/Logs/LLM IDE/auto-task-\(task.logSuffix).log"
+            logStore.append(task, "— run failed —", level: .error)
+        }
+    }
+
     /// Stop the in-flight run: cancel the run Task (so it bails at the next
     /// task boundary) and terminate the currently-executing subprocess (so
     /// we don't wait out its 10-minute timeout).
@@ -203,7 +310,6 @@ final class AutoCodeUpdateService: ObservableObject {
         failedCount = 0
         lastError = nil
         taskErrors = [:]
-        taskOutputs = [:]
         // Auto-stash bookkeeping (opt-in). Declared before the defer so the
         // defer can always restore, even on an early return.
         var didStash = false
@@ -488,102 +594,17 @@ final class AutoCodeUpdateService: ObservableObject {
             failedCount > 0 ? "\(failedCount) failed" : nil,
         ].compactMap { $0 }
 
-        // 6. Run per-task-type CLI prompts for enabled task types
+        // 6. Run each enabled task body, in left-pane order.
+        let enabledOrder: [AutoTask] = [
+            .reviewCode, .reviewDoc, .reviewConflicts,
+            .updateIssues, .updatePlanStatus, .generateDoc,
+            .regression, .generateKnowledge
+        ]
         if !Task.isCancelled, let logDir = logsDirectory() {
-            if !Task.isCancelled, autoTaskSettings.runReviewCode {
-                currentStep = "Running Review Code"
-                let ok = await runCLI(prompt: config.autoTaskTemplateReviewCode,
-                                      localPath: capturedGitRoot,
-                                      logSuffix: "review-code",
-                                      logDir: logDir)
-                taskOutputs[AutoTask.reviewCode.rawValue] = logTail(suffix: "review-code", logDir: logDir)
-                if ok {
-                    taskErrors.removeValue(forKey: AutoTask.reviewCode.rawValue)
-                } else {
-                    taskErrors[AutoTask.reviewCode.rawValue] = "Review Code task failed. Check ~/Library/Logs/LLM IDE/auto-task-review-code.log"
-                }
+            for task in enabledOrder where isTaskEnabled(task) {
+                if Task.isCancelled { break }
+                await runTaskBody(task, resolved: resolved, logDir: logDir)
             }
-            if !Task.isCancelled, autoTaskSettings.runReviewDoc {
-                currentStep = "Running Review Doc"
-                let ok = await runCLI(prompt: config.autoTaskTemplateReviewDoc,
-                                      localPath: capturedGitRoot,
-                                      logSuffix: "review-doc",
-                                      logDir: logDir)
-                taskOutputs[AutoTask.reviewDoc.rawValue] = logTail(suffix: "review-doc", logDir: logDir)
-                if ok {
-                    taskErrors.removeValue(forKey: AutoTask.reviewDoc.rawValue)
-                } else {
-                    taskErrors[AutoTask.reviewDoc.rawValue] = "Review Doc task failed. Check ~/Library/Logs/LLM IDE/auto-task-review-doc.log"
-                }
-            }
-            if !Task.isCancelled, autoTaskSettings.runReviewConflicts {
-                currentStep = "Running Review Conflicts"
-                let ok = await runCLI(prompt: config.autoTaskTemplateReviewConflicts,
-                                      localPath: capturedGitRoot,
-                                      logSuffix: "review-conflicts",
-                                      logDir: logDir)
-                taskOutputs[AutoTask.reviewConflicts.rawValue] = logTail(suffix: "review-conflicts", logDir: logDir)
-                if ok {
-                    taskErrors.removeValue(forKey: AutoTask.reviewConflicts.rawValue)
-                } else {
-                    taskErrors[AutoTask.reviewConflicts.rawValue] = "Review Conflicts task failed. Check ~/Library/Logs/LLM IDE/auto-task-review-conflicts.log"
-                }
-            }
-
-            if !Task.isCancelled, autoTaskSettings.runGenerateDoc {
-                currentStep = "Generating Documentation"
-                let ok = await runCLI(prompt: config.autoTaskTemplateGenerateDoc,
-                                      localPath: capturedGitRoot,
-                                      logSuffix: "generate-doc",
-                                      logDir: logDir)
-                taskOutputs[AutoTask.generateDoc.rawValue] = logTail(suffix: "generate-doc", logDir: logDir)
-                if ok {
-                    taskErrors.removeValue(forKey: AutoTask.generateDoc.rawValue)
-                } else {
-                    taskErrors[AutoTask.generateDoc.rawValue] = "Generate Documentation task failed. Check ~/Library/Logs/LLM IDE/auto-task-generate-doc.log"
-                }
-            }
-
-            if !Task.isCancelled, autoTaskSettings.runUpdateIssues {
-                currentStep = "Updating Issues"
-                let ok = await runCLI(prompt: config.autoTaskTemplateUpdateIssues,
-                                      localPath: capturedGitRoot,
-                                      logSuffix: "update-issues",
-                                      logDir: logDir)
-                taskOutputs[AutoTask.updateIssues.rawValue] = logTail(suffix: "update-issues", logDir: logDir)
-                if ok {
-                    taskErrors.removeValue(forKey: AutoTask.updateIssues.rawValue)
-                } else {
-                    taskErrors[AutoTask.updateIssues.rawValue] = "Update Issues task failed. Check ~/Library/Logs/LLM IDE/auto-task-update-issues.log"
-                }
-            }
-        }
-
-        // 7. Regression sweep — re-asks every `status: fixed` FaultReport
-        // saved under <projectRoot>/system/faults/ and flips any regressed
-        // ones back to `status: open`. Faults are PROJECT-level data (read at
-        // projectRoot — same place RegressionView + the menu count read), but
-        // verify commands + git ops run in the git working tree (gitRoot, the
-        // clone). Off by default; opt-in via Settings.
-        if !Task.isCancelled, autoTaskSettings.runRegression {
-            currentStep = "Running Regression sweep"
-            await runRegressionSweep(projectRoot: resolved.projectRoot,
-                                     gitRoot: resolved.gitRoot)
-        }
-
-        // 8. Knowledge — read-only review of the auto-generated graph + memory
-        // (generation itself is automatic: GraphAutoUpdater on open/edit + the
-        // code index). This row just surfaces "what's there" for the user.
-        if !Task.isCancelled, autoTaskSettings.runGenerateKnowledge {
-            currentStep = "Reviewing Knowledge"
-            reportKnowledge(projectRoot: resolved.projectRoot)
-        }
-
-        // 9. Plan status refresh — polls external outcome trackers (GitHub/GitLab/Linear/Backlog)
-        // for dispatched plan tasks and updates their status locally. Off by default; opt-in via Settings.
-        if !Task.isCancelled, autoTaskSettings.runUpdatePlanStatus {
-            currentStep = "Refreshing Plan statuses"
-            await refreshPlanStatuses(projectRoot: resolved.projectRoot)
         }
 
         // A user-initiated stop wins over the normal summary.
@@ -595,6 +616,22 @@ final class AutoCodeUpdateService: ObservableObject {
         allEntries = registry.allEntries()
     }
 
+    /// True when the user's per-task enable checkbox is on for `task`. Drives
+    /// the `enabledOrder` loop in `run()` (per-task manual runs via `runSingle`
+    /// ignore this — they run the task regardless).
+    private func isTaskEnabled(_ task: AutoTask) -> Bool {
+        switch task {
+        case .reviewCode:        return autoTaskSettings.runReviewCode
+        case .reviewDoc:         return autoTaskSettings.runReviewDoc
+        case .reviewConflicts:   return autoTaskSettings.runReviewConflicts
+        case .regression:        return autoTaskSettings.runRegression
+        case .generateKnowledge: return autoTaskSettings.runGenerateKnowledge
+        case .generateDoc:       return autoTaskSettings.runGenerateDoc
+        case .updateIssues:      return autoTaskSettings.runUpdateIssues
+        case .updatePlanStatus:  return autoTaskSettings.runUpdatePlanStatus
+        }
+    }
+
     /// Read-only review row for the Auto Tasks panel: report the current state
     /// of the auto-generated knowledge (code-graph file count + agent-memory
     /// files) for the active project. Generation is automatic (GraphAutoUpdater
@@ -603,7 +640,7 @@ final class AutoCodeUpdateService: ObservableObject {
     private func reportKnowledge(projectRoot: String) {
         let key = AutoTask.generateKnowledge.rawValue
         guard let repo = GraphAutoUpdater.repoToGraph(projectRoot: URL(fileURLWithPath: projectRoot)) else {
-            taskOutputs[key] = "No code to graph in this project yet."
+            logStore.append(.generateKnowledge, "No code to graph in this project yet.")
             return
         }
         var lines: [String] = ["Repo: \(repo.lastPathComponent)"]
@@ -619,7 +656,7 @@ final class AutoCodeUpdateService: ObservableObject {
         let mem = ((try? FileManager.default.contentsOfDirectory(atPath: memDir.path)) ?? [])
             .filter { $0.hasSuffix(".md") }.sorted()
         lines.append(mem.isEmpty ? "Memory: none yet." : "Memory: \(mem.joined(separator: ", "))")
-        taskOutputs[key] = lines.joined(separator: "\n")
+        for line in lines { logStore.append(.generateKnowledge, line) }
         taskErrors.removeValue(forKey: key)
     }
 
@@ -659,11 +696,14 @@ final class AutoCodeUpdateService: ObservableObject {
         let regressed = runner.results.filter { $0.verdict == .regressed }.count
         if total == 0 {
             taskErrors.removeValue(forKey: AutoTask.regression.rawValue)
+            logStore.append(.regression, "No fixed faults to re-verify.")
         } else if regressed > 0 {
             let reopened = autoTaskSettings.regressionAutoReopen ? " (auto-reopened)" : ""
             taskErrors[AutoTask.regression.rawValue] = "Regression: \(regressed)/\(total) regressed\(reopened)."
+            logStore.append(.regression, "\(regressed)/\(total) faults regressed\(reopened).", level: .error)
         } else {
             taskErrors.removeValue(forKey: AutoTask.regression.rawValue)
+            logStore.append(.regression, "\(total) faults re-verified — no regressions.")
         }
     }
 
@@ -691,11 +731,11 @@ final class AutoCodeUpdateService: ObservableObject {
             let errored = summary.pollErroredCount
 
             if total == 0 {
-                taskOutputs[key] = "No dispatched plan tasks found — nothing to refresh."
+                logStore.append(.updatePlanStatus, "No dispatched plan tasks found — nothing to refresh.")
             } else if changed > 0 {
-                taskOutputs[key] = "Refreshed \(total) plan tasks — \(changed) statuses updated."
+                logStore.append(.updatePlanStatus, "Refreshed \(total) plan tasks — \(changed) statuses updated.")
             } else {
-                taskOutputs[key] = "Refreshed \(total) plan tasks — no changes."
+                logStore.append(.updatePlanStatus, "Refreshed \(total) plan tasks — no changes.")
             }
 
             if errored > 0 {
