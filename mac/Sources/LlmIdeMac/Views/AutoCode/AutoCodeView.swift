@@ -8,6 +8,8 @@ struct AutoCodeView: View {
     @EnvironmentObject private var autoCode: AutoCodeUpdateService
     @EnvironmentObject private var config: AppConfig
     @EnvironmentObject private var theme: ThemeStore
+    @EnvironmentObject private var logStore: TaskLogStore
+    @EnvironmentObject private var autoTaskSettings: AutoTaskSettings
 
     @State private var selectedTask: AutoTask? = .reviewCode
     @State private var taskToReset: AutoTask? = nil
@@ -275,6 +277,15 @@ struct AutoCodeView: View {
                     .font(Typography.title)
                     .foregroundStyle(theme.current.text)
                 Spacer()
+                Button { autoCode.runSingle(task) } label: {
+                    Label(autoCode.currentTask == task
+                          ? (autoCode.currentStep ?? "Running…")
+                          : "Run",
+                          systemImage: autoCode.currentTask == task ? "ellipsis.circle" : "play.fill")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(autoCode.isRunning)
                 if task.templateBinding(config: config) != nil {
                     Button("Restore Default") {
                         taskToReset = task
@@ -290,32 +301,17 @@ struct AutoCodeView: View {
 
             Divider()
 
-            if let template = task.templateBinding(config: config) {
-                Text("Prompt template")
-                    .font(Typography.section)
-                    .foregroundStyle(theme.current.textMuted)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
-                    .padding(.bottom, 6)
-
-                TextEditor(text: template)
-                    .font(Typography.mono)
-                    .foregroundStyle(theme.current.text)
-                    .scrollContentBackground(.hidden)
-                    .background(theme.current.surface)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(theme.current.border, lineWidth: 1)
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 16)
-                    )
-            } else {
-                // Structural task (regression). Explain what it does
-                // and where the prompts come from instead of an empty
-                // editor.
-                structuralTaskDescription(task)
+            // Preview + Edit (or structural config), scrollable together.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    previewSection(task)
+                    if let template = task.templateBinding(config: config) {
+                        editSection(template: template)
+                    } else {
+                        structuralConfigSection(task)
+                    }
+                }
+                .padding(20)
             }
 
             if let error = autoCode.taskErrors[task.rawValue] {
@@ -324,44 +320,19 @@ struct AutoCodeView: View {
                     .padding(.vertical, 4)
             }
 
-            // Inline review findings from the last run — so the user reads
-            // them here instead of hunting for the log file. (Reveal Logs in
-            // Settings still opens the full log + the rotated .prev copy.)
-            if let findings = autoCode.taskOutputs[task.rawValue], !findings.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Findings (last run)")
-                        .font(Typography.section)
-                        .foregroundStyle(theme.current.textMuted)
-                    ScrollView {
-                        Text(findings)
-                            .font(Typography.mono)
-                            .foregroundStyle(theme.current.text)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(8)
-                    }
-                    .frame(maxHeight: 220)
-                    .background(theme.current.surface)
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(theme.current.border, lineWidth: 1))
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 4)
-            }
-
-            Spacer(minLength: 0)
+            // Live, scrollable per-task log (accumulates across runs).
+            logSection(task)
 
             // Last run status
             if let last = autoCode.lastRunDate {
                 Divider()
-                HStack {
-                    Text("Last run \(last, style: .relative) ago · \(autoCode.statusMessage)")
-                        .font(Typography.caption)
-                        .foregroundStyle(theme.current.textMuted)
-                    Spacer()
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 8)
-                .background(theme.current.surface)
+                Text("Last run \(last, style: .relative) ago · \(autoCode.statusMessage)")
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+                    .background(theme.current.surface)
             }
         }
         .background(theme.current.body)
@@ -385,57 +356,92 @@ struct AutoCodeView: View {
         }
     }
 
-    // MARK: - Helpers
-
-    /// Right-pane content for tasks that don't take a prompt template
-    /// (today: regression). Describes what the task does + where the
-    /// inputs come from so the user knows what changing the toggle on
-    /// the left actually triggers.
     @ViewBuilder
-    private func structuralTaskDescription(_ task: AutoTask) -> some View {
-        let t = theme.current
-        VStack(alignment: .leading, spacing: 10) {
-            switch task {
-            case .regression:
-                Text("What this does")
-                    .font(Typography.section)
-                    .foregroundStyle(t.textMuted)
-                Text("Re-asks every `status: fixed` fault report saved under `<repo>/system/faults/` and flips any that come back with a different answer back to `status: open` so they show up in the next code review.")
-                    .font(Typography.body)
-                    .foregroundStyle(t.text)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Prompts come from the saved fault reports themselves, not from a template — so there's nothing to edit here. Use the standalone Regression tab to run an ad-hoc sweep with a UI that streams progress per fault.")
-                    .font(Typography.caption)
-                    .foregroundStyle(t.textMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Off by default. Toggling it on adds a regression pass to the end of every Auto Code run — typically a few seconds per fixed fault, multiplied by however many you have. Skip if your fault archive is large or if you're on a flaky network.")
-                    .font(Typography.caption)
-                    .foregroundStyle(t.textMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            case .updatePlanStatus:
-                Text("What this does")
-                    .font(Typography.section)
-                    .foregroundStyle(t.textMuted)
-                Text("Polls external outcome trackers (GitHub/GitLab/Linear/Backlog) for all dispatched plan tasks and updates their status in the local plan. Tasks marked as done/closed externally will be marked as completed in the plan.")
-                    .font(Typography.body)
-                    .foregroundStyle(t.text)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Status comes from external providers, not from a template — so there's nothing to edit here. Use the Plans tab to manually refresh status or view individual task outcomes.")
-                    .font(Typography.caption)
-                    .foregroundStyle(t.textMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Off by default. Toggling it on adds a status refresh pass to the end of every Auto Code run. Requires provider credentials (GitHub/GitLab/Linear) to be configured in Settings.")
-                    .font(Typography.caption)
-                    .foregroundStyle(t.textMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            default:
-                EmptyView()
-            }
+    private func previewSection(_ task: AutoTask) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Preview")
+                .font(Typography.section)
+                .foregroundStyle(theme.current.textMuted)
+            MarkdownPreview(markdown: previewMarkdown(for: task))
+                .frame(maxWidth: .infinity)
+                .background(theme.current.surface)
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(theme.current.border, lineWidth: 1))
+                .cornerRadius(6)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 16)
-        .padding(.bottom, 16)
     }
+
+    /// Markdown shown in the preview: the editable template for prompt tasks,
+    /// a static About doc for structural tasks.
+    private func previewMarkdown(for task: AutoTask) -> String {
+        task.templateBinding(config: config)?.wrappedValue ?? aboutMarkdown(for: task)
+    }
+
+    @ViewBuilder
+    private func editSection(template: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Edit template")
+                .font(Typography.section)
+                .foregroundStyle(theme.current.textMuted)
+            TextEditor(text: template)
+                .font(Typography.mono)
+                .foregroundStyle(theme.current.text)
+                .scrollContentBackground(.hidden)
+                .background(theme.current.surface)
+                .frame(minHeight: 180)
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(theme.current.border, lineWidth: 1))
+                .cornerRadius(6)
+        }
+    }
+
+    /// Live, scrollable per-task log with a Clear button.
+    @ViewBuilder
+    private func logSection(_ task: AutoTask) -> some View {
+        let lines = logStore.lines(for: task)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Log · live")
+                    .font(Typography.section)
+                    .foregroundStyle(theme.current.textMuted)
+                Spacer()
+                Button { logStore.clear(task) } label: {
+                    Label("Clear", systemImage: "trash")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(theme.current.textMuted)
+                .font(Typography.caption)
+                .disabled(lines.isEmpty)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(lines) { line in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(line.timestamp, format: .dateTime.hour().minute().second())
+                                .font(Typography.caption)
+                                .foregroundStyle(theme.current.textMuted)
+                            Text(line.text)
+                                .font(Typography.mono)
+                                .foregroundStyle(line.level == .error ? theme.current.danger : theme.current.text)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.horizontal, 8)
+                    }
+                }
+                .padding(8)
+            }
+            .frame(maxHeight: 320)
+            .background(theme.current.surface)
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(theme.current.border, lineWidth: 1))
+            .cornerRadius(6)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+        }
+    }
+
+    // MARK: - Helpers
 
     @ViewBuilder
     private func statusIcon(_ status: ProcessedActionsRegistry.EntryStatus) -> some View {
@@ -557,6 +563,89 @@ enum AutoTask: String, CaseIterable, Identifiable {
         case .updateIssues:    config.autoTaskTemplateUpdateIssues = AppConfig.defaultTemplateUpdateIssues
         case .updatePlanStatus: break       // no template to reset
         case .regression, .generateKnowledge: break       // no template to reset
+        }
+    }
+}
+
+/// Wraps `SelfSizingMarkdownView`, capturing its reported content height into
+/// `@State` so the preview sizes to its rendered markdown inside the page's
+/// `ScrollView`.
+private struct MarkdownPreview: View {
+    let markdown: String
+    @EnvironmentObject private var theme: ThemeStore
+    @State private var height: CGFloat = 1
+
+    var body: some View {
+        SelfSizingMarkdownView(markdown: markdown, isDark: theme.current.isDark) { h in
+            if abs(h - height) > 1 { height = h }
+        }
+        .frame(height: max(height, 1))
+    }
+}
+
+private extension AutoCodeView {
+    /// Static markdown shown as the "preview" for structural (non-template) tasks.
+    func aboutMarkdown(for task: AutoTask) -> String {
+        switch task {
+        case .regression:
+            return """
+            # Regression
+
+            Re-asks every `status: fixed` fault report under `<repo>/system/faults/` and
+            flips any that come back with a different answer to `status: open`.
+
+            Prompts come from the saved fault reports, so there's no prompt template to edit.
+            Configure the sweep behavior below.
+            """
+        case .generateKnowledge:
+            return """
+            # Knowledge
+
+            Surfaces the current state of the auto-generated code graph + agent memory.
+            Generation itself is automatic (on open/edit); this task only reports what's there.
+            """
+        case .updatePlanStatus:
+            return """
+            # Update Plan Status
+
+            Polls external outcome trackers (GitHub/GitLab/Linear/Backlog) for dispatched
+            plan tasks and updates their local status. Requires provider credentials.
+            """
+        default:
+            return ""
+        }
+    }
+
+    /// Config controls for structural tasks. Today only Regression has knobs;
+    /// the other two render an "about" hint only.
+    @ViewBuilder
+    func structuralConfigSection(_ task: AutoTask) -> some View {
+        switch task {
+        case .regression:
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Configuration")
+                    .font(Typography.section)
+                    .foregroundStyle(theme.current.textMuted)
+                Toggle(isOn: $autoTaskSettings.regressionAttemptRepair) {
+                    Label("Attempt repair on regression", systemImage: "wrench.and.screwdriver")
+                }.toggleStyle(.checkbox)
+                Toggle(isOn: $autoTaskSettings.regressionAutoReopen) {
+                    Label("Auto-reopen regressed faults", systemImage: "arrow.uturn.backward")
+                }.toggleStyle(.checkbox)
+                HStack {
+                    Image(systemName: "timer").font(.system(size: 12))
+                    Text("Verify timeout (s)").font(Typography.caption)
+                    Spacer()
+                    TextField("120", value: $autoTaskSettings.regressionVerifyTimeout, format: .number)
+                        .frame(width: 60).textFieldStyle(.roundedBorder)
+                }
+            }
+        case .generateKnowledge, .updatePlanStatus:
+            Text("Nothing to configure — see the description above.")
+                .font(Typography.caption)
+                .foregroundStyle(theme.current.textMuted)
+        default:
+            EmptyView()
         }
     }
 }

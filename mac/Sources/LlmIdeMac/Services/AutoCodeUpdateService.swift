@@ -19,9 +19,6 @@ final class AutoCodeUpdateService: ObservableObject {
     @Published private(set) var allEntries: [ProcessedActionsRegistry.RegistryEntry] = []
     @Published private(set) var lastError: String? = nil
     @Published private(set) var taskErrors: [String: String] = [:]
-    /// Tail of each review task's last-run log, keyed by `AutoTask.rawValue`.
-    /// Lets the UI show review findings inline instead of only in a file.
-    @Published private(set) var taskOutputs: [String: String] = [:]   // kept; Task 5 removes the last reader
     /// Which task is running right now (drives the per-task ▶ spinner). nil when idle.
     @Published private(set) var currentTask: AutoTask? = nil
     /// Human-readable description of the currently running step (e.g., "Creating issues", "Running Review Code").
@@ -709,7 +706,7 @@ final class AutoCodeUpdateService: ObservableObject {
 
     /// Refreshes plan task statuses from external outcome trackers (GitHub/GitLab/Linear/Backlog).
     /// Calls the /kb/outcomes/refresh endpoint which polls all configured providers and
-    /// persists updated statuses. Success/failure is surfaced via taskOutputs/taskErrors.
+    /// persists updated statuses. Success/failure is surfaced via taskErrors.
     private func refreshPlanStatuses(projectRoot: String) async {
         let key = AutoTask.updatePlanStatus.rawValue
         guard let api else {
