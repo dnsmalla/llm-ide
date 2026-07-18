@@ -35,19 +35,16 @@ struct AutoCodeView: View {
         VStack(spacing: 0) {
             // Enable toggle header
             HStack {
-                Toggle("", isOn: Binding(
-                    get: { config.autoCodeUpdateEnabled },
-                    set: { on in
-                        config.autoCodeUpdateEnabled = on
-                        if on { autoCode.start() } else { autoCode.stop() }
-                    }
-                ))
+                // Bound to the shared AutoTaskSettings (single source of truth)
+                // so this stays live with the Menu bar + Settings. Arming the
+                // scheduler is the service's job — it observes `enabled`.
+                Toggle("", isOn: $autoTaskSettings.enabled)
                 .toggleStyle(.switch)
                 .labelsHidden()
 
-                Text(config.autoCodeUpdateEnabled ? "Enabled" : "Disabled")
+                Text(autoTaskSettings.enabled ? "Enabled" : "Disabled")
                     .font(Typography.body.weight(.semibold))
-                    .foregroundStyle(config.autoCodeUpdateEnabled
+                    .foregroundStyle(autoTaskSettings.enabled
                         ? theme.current.accent : theme.current.textMuted)
 
                 Spacer()
@@ -67,27 +64,27 @@ struct AutoCodeView: View {
                 // Review Tasks
                 taskCategoryHeader("Review Tasks")
                 taskRow(.reviewCode,      label: "Review Code",      icon: "checkmark.shield",
-                        enabled: $config.autoCodeRunReviewCode)
+                        enabled: $autoTaskSettings.runReviewCode)
                 taskRow(.reviewDoc,       label: "Review Doc",       icon: "doc.text.magnifyingglass",
-                        enabled: $config.autoCodeRunReviewDoc)
+                        enabled: $autoTaskSettings.runReviewDoc)
                 taskRow(.reviewConflicts, label: "Review Conflicts", icon: "exclamationmark.triangle",
-                        enabled: $config.autoCodeRunReviewConflicts)
+                        enabled: $autoTaskSettings.runReviewConflicts)
 
                 // Automation Tasks
                 taskCategoryHeader("Automation Tasks")
                 taskRow(.updateIssues,    label: "Update Issues",      icon: "checklist",
-                        enabled: $config.autoCodeRunUpdateIssues)
+                        enabled: $autoTaskSettings.runUpdateIssues)
                 taskRow(.updatePlanStatus, label: "Update Plan Status",  icon: "chart.bar.doc.horizontal",
-                        enabled: $config.autoCodeRunUpdatePlanStatus)
+                        enabled: $autoTaskSettings.runUpdatePlanStatus)
                 taskRow(.generateDoc,     label: "Generate Documentation", icon: "wand.and.stars",
-                        enabled: $config.autoCodeRunGenerateDoc)
+                        enabled: $autoTaskSettings.runGenerateDoc)
 
                 // Maintenance Tasks
                 taskCategoryHeader("Maintenance Tasks")
                 taskRow(.regression,      label: "Regression",       icon: "arrow.uturn.backward.circle",
-                        enabled: $config.autoCodeRunRegression)
+                        enabled: $autoTaskSettings.runRegression)
                 taskRow(.generateKnowledge, label: "Knowledge",       icon: "brain",
-                        enabled: $config.autoCodeRunGenerateKnowledge)
+                        enabled: $autoTaskSettings.runGenerateKnowledge)
             }
             .padding(.vertical, 4)
 

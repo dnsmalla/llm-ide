@@ -233,7 +233,7 @@ struct LlmIdeMacApp: App {
                     // Restore persisted session on launch, if any.
                     await session.bootstrap(api: api)
                     autoCapture.start()
-                    if config.autoCodeUpdateEnabled { autoCodeUpdate.start() }
+                    if autoTaskSettings.enabled { autoCodeUpdate.start() }
                 }
                 // Start / stop the live caption mirror in lockstep
                 // with authentication.  When signed out, polling
