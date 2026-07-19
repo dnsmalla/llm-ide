@@ -64,6 +64,7 @@ struct VisualView: View {
 
             if chatVisible {
                 CodeAssistantPanel(api: api,
+                                   scope: .visual,
                                    initialURL: treeSelectedURL,
                                    showFileAttachButtons: true,
                                    showModelPicker: true)

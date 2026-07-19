@@ -81,6 +81,7 @@ struct ExplorerView: View {
 
                         if chatVisible {
                             CodeAssistantPanel(api: api,
+                                               scope: .explorer,
                                                initialURL: activeTab,
                                                showFileAttachButtons: true,
                                                showModelPicker: true)

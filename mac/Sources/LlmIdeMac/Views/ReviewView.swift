@@ -157,6 +157,7 @@ struct ReviewView: View {
 
             if chatVisible {
                 CodeAssistantPanel(api: api,
+                                   scope: .conflicts,
                                    initialURL: activeTabURL,
                                    showFileAttachButtons: true,
                                    showModelPicker: true)

@@ -31,6 +31,9 @@ enum EditAcceptanceMode: String, CaseIterable, Identifiable {
 
 struct CodeAssistantPanel: View {
     let api: LlmIdeAPIClient
+    /// Which section this chat belongs to — keys the persisted chat file
+    /// (`sessions/<scope>.json`). Required: each embedding site passes its own.
+    let scope: ChatScope
     /// When set, this file is attached automatically the first time the panel appears.
     var initialURL: URL? = nil
     /// Hide "Add from Library" from the input bar (use when file is auto-attached).
@@ -42,8 +45,6 @@ struct CodeAssistantPanel: View {
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
     @Environment(LibraryItemStore.self) private var library
-
-    @AppStorage("MEETNOTES_CURRENT_CHAT_SESSION_ID") private var currentSessionIDString: String = ""
 
     @State var attachments: [LlmIdeAPIClient.CodeAttachment] = []
     /// Files modified during this session (for File → PR automation)
@@ -69,8 +70,6 @@ struct CodeAssistantPanel: View {
     @State private var lastMemoryHasChat = false
     @State private var showLibraryPicker = false
     @State var history: [LlmIdeAPIClient.CodeAssistTurn] = []
-    @State private var sessions: [ChatSession] = []
-    @State private var showingSessionPicker: Bool = false
     @State private var draft: String = ""
     /// Shell / Claude-Code-style prompt history: submitted prompts (oldest →
     /// newest). Up-arrow walks back through them, Down walks forward, Down past
@@ -295,24 +294,9 @@ struct CodeAssistantPanel: View {
                 ? AICliTool.claudeCode.defaultModelId
                 : config.defaultModelId
         }
-        let migrated = ChatSessionStore.migrateLegacy()
-        sessions = ChatSessionStore.listSessions()
-        if let cur = UUID(uuidString: currentSessionIDString),
-           let session = sessions.first(where: { $0.id == cur }) {
-            history = session.history
-            rebuildSentPrompts(from: session.history)
-        } else if let mid = migrated, let session = sessions.first(where: { $0.id == mid }) {
-            currentSessionIDString = mid.uuidString
-            history = session.history
-            rebuildSentPrompts(from: session.history)
-        } else {
-            let fresh = ChatSession()
-            ChatSessionStore.save(fresh)
-            currentSessionIDString = fresh.id.uuidString
-            sessions = ChatSessionStore.listSessions()
-            history = []
-            sentPrompts = []; historyIndex = nil; draftStash = ""
-        }
+        let session = ChatSessionStore.load(for: scope)
+        history = session.history
+        rebuildSentPrompts(from: session.history)
         if let url = initialURL, !didAttachInitial {
             didAttachInitial = true
             if addFile(url: url) == .added {
@@ -322,7 +306,7 @@ struct CodeAssistantPanel: View {
     }
 
     private func handleHistoryChange(oldValue: [LlmIdeAPIClient.CodeAssistTurn], newValue: [LlmIdeAPIClient.CodeAssistTurn]) {
-        persistCurrentSession(history: Array(newValue.suffix(50)))
+        persistCurrentChat(history: Array(newValue.suffix(50)))
         if newValue.count > oldValue.count,
            let last = newValue.last,
            last.role == .assistant {
@@ -784,106 +768,29 @@ struct CodeAssistantPanel: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            sessionDropdownButton
+            clearChatButton
         }
         .padding(.horizontal, isVeryCompact ? 6 : Spacing.md)
         .padding(.vertical, 8)
     }
 
-    /// Cursor-style chat-list dropdown: shows the current session's
-    /// title and opens a popover with recent sessions + "New chat".
-    private var sessionDropdownButton: some View {
+    /// Header button: wipe this section's chat (replaces the multi-session
+    /// picker — there's one chat per section now).
+    private var clearChatButton: some View {
         Button {
-            // Refresh the list every time the popover opens so the
-            // ordering reflects the latest `lastUsedAt`.
-            sessions = ChatSessionStore.listSessions()
-            showingSessionPicker.toggle()
+            clearCurrentChat()
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "bubble.left.and.bubble.right")
-                    .font(.system(size: 10, weight: .medium))
-                if !isVeryCompact {
-                    Text(currentSessionTitle)
-                        .font(.system(size: 11))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .medium))
-            }
-            .padding(.horizontal, isVeryCompact ? 4 : 8)
-            .padding(.vertical, 4)
-            .foregroundStyle(theme.current.textMuted)
-            .frame(maxWidth: isCompact ? 90 : 220, alignment: .trailing)
-            .contentShape(Rectangle())
+            Image(systemName: "trash")
+                .font(.system(size: 11, weight: .medium))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .foregroundStyle(theme.current.textMuted)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Switch chat session")
-        .accessibilityLabel("Switch chat session")
-        .popover(isPresented: $showingSessionPicker, arrowEdge: .top) {
-            sessionPickerPopover
-        }
-    }
-
-    private var currentSessionTitle: String {
-        guard let cur = UUID(uuidString: currentSessionIDString),
-              let s = sessions.first(where: { $0.id == cur }) else {
-            return "New chat"
-        }
-        return s.title.isEmpty ? "New chat" : s.title
-    }
-
-    private var sessionPickerPopover: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                showingSessionPicker = false
-                createNewSession()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .medium))
-                    Text("New chat")
-                        .font(.system(size: 12, weight: .medium))
-                    Spacer()
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(theme.current.text)
-
-            Divider()
-
-            if sessions.isEmpty {
-                Text("No saved chats yet.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.current.textMuted)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(sessions.prefix(20))) { session in
-                            SessionRow(
-                                session: session,
-                                isActive: session.id.uuidString == currentSessionIDString,
-                                onSelect: {
-                                    showingSessionPicker = false
-                                    switchSession(to: session.id)
-                                },
-                                onDelete: {
-                                    deleteSession(session.id)
-                                }
-                            )
-                            .environmentObject(theme)
-                        }
-                    }
-                }
-                .frame(maxHeight: 320)
-            }
-        }
-        .frame(width: 320)
+        .help("Clear this section's chat")
+        .accessibilityLabel("Clear chat")
+        .disabled(history.isEmpty)
     }
 
     // MARK: - Chat scroll
@@ -2560,12 +2467,10 @@ struct CodeAssistantPanel: View {
 
     // MARK: - Session management
 
-    /// Persist `history` into the active session's JSON file, deriving
-    /// a title from the first user turn if it's still "New chat".
-    private func persistCurrentSession(history: [LlmIdeAPIClient.CodeAssistTurn]) {
-        guard let cur = UUID(uuidString: currentSessionIDString) else { return }
-        var session = ChatSessionStore.load(id: cur)
-            ?? ChatSession(id: cur, history: history)
+    /// Persist `history` into this section's chat file, deriving a title
+    /// from the first user turn if it's still "New chat".
+    private func persistCurrentChat(history: [LlmIdeAPIClient.CodeAssistTurn]) {
+        var session = ChatSessionStore.load(for: scope)
         session.history = history
         if session.title == "New chat" || session.title.isEmpty {
             if let firstUser = history.first(where: { $0.role == .user }) {
@@ -2577,8 +2482,7 @@ struct CodeAssistantPanel: View {
                 }
             }
         }
-        ChatSessionStore.save(session)
-        sessions = ChatSessionStore.listSessions()
+        ChatSessionStore.save(session, for: scope)
     }
 
     /// Spawn a new empty session, persist it, switch to it, and clear
@@ -2595,17 +2499,12 @@ struct CodeAssistantPanel: View {
         expandedTurns.removeAll()
     }
 
-    private func createNewSession() {
-        // Flush the outgoing session synchronously first. The
-        // .onChange(of: history) persist is deferred to the next view update,
-        // so without this an explicit save the last reply can be lost when we
-        // immediately repoint currentSessionIDString / clear history below.
-        persistCurrentSession(history: Array(history.suffix(50)))
+    /// Clear this section's chat: delete the file and reset all composer
+    /// + agent state. (Replaces the old "new session" action — there is now
+    /// exactly one chat per section.)
+    private func clearCurrentChat() {
+        ChatSessionStore.clear(for: scope)
         resetActiveTurnState()
-        let fresh = ChatSession()
-        ChatSessionStore.save(fresh)
-        currentSessionIDString = fresh.id.uuidString
-        sessions = ChatSessionStore.listSessions()
         history = []
         sentPrompts = []; historyIndex = nil; draftStash = ""
         draft = ""
@@ -2619,50 +2518,6 @@ struct CodeAssistantPanel: View {
         agentPendingTasks = []
         agentIsAutonomous = false
         agentStopRequested = false
-    }
-
-    private func switchSession(to id: UUID) {
-        guard id.uuidString != currentSessionIDString else { return }
-        guard let session = ChatSessionStore.load(id: id) else { return }
-        // Flush the OUTGOING session (current id + current history, incl. its
-        // last reply) before repointing — the .onChange persist is deferred,
-        // so relying on it alone can drop the final reply on a same-runloop
-        // navigation away.
-        persistCurrentSession(history: Array(history.suffix(50)))
-        resetActiveTurnState()
-        currentSessionIDString = id.uuidString
-        history = session.history
-        rebuildSentPrompts(from: session.history)
-        draft = ""
-        attachments.removeAll()
-        selectedSkills.removeAll()
-        autoAttachedPath = nil
-        attachNotice = nil
-        pendingTool = nil
-        error = nil
-        // Bump lastUsedAt so this session moves to the top of the list.
-        ChatSessionStore.save(session)
-        sessions = ChatSessionStore.listSessions()
-    }
-
-    private func deleteSession(_ id: UUID) {
-        // If we're deleting the ACTIVE session, cancel any in-flight turn first
-        // (mirrors switch/create). Otherwise the running turn would append its
-        // reply onto the next session's history and leave `busy` stuck.
-        if id.uuidString == currentSessionIDString { resetActiveTurnState() }
-        ChatSessionStore.delete(id: id)
-        sessions = ChatSessionStore.listSessions()
-        if id.uuidString == currentSessionIDString {
-            // Deleted the active session — fall back to most recent, or
-            // mint a fresh one.
-            if let next = sessions.first {
-                currentSessionIDString = next.id.uuidString
-                history = next.history
-                rebuildSentPrompts(from: next.history)
-            } else {
-                createNewSession()
-            }
-        }
     }
 
     private func loadLanguage() async {

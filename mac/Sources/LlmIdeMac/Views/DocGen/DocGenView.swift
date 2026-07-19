@@ -46,6 +46,7 @@ struct DocGenView: View {
             if chatVisible {
                 CodeAssistantPanel(
                     api: api,
+                    scope: .docGen,
                     initialURL: nil,
                     showFileAttachButtons: true,
                     showModelPicker: true)
