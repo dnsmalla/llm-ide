@@ -44,8 +44,7 @@ enum ChatSessionStore {
 
     // MARK: - Per-section (scope-keyed) chat
 
-    /// `sessions/<scope>.json`. Named `scopeFileURL` to avoid clashing with
-    /// the legacy `fileURL(for id: UUID)` while both coexist.
+    /// The chat file for `scope`: `sessions/<scope>.json`.
     private static func scopeFileURL(for scope: ChatScope) -> URL? {
         sessionsDir?.appendingPathComponent("\(scope.rawValue).json")
     }

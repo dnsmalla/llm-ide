@@ -11,19 +11,9 @@ struct ReviewConfig {
     let emptyHint: String
     let emptyHintWidth: CGFloat
 
-    // (ReviewConfig.code removed with the .review section — Explorer now
-    // owns the project file-browser role. ReviewView serves .docs and
-    // .conflicts only.)
-
-    static let docs = ReviewConfig(
-        treeTitle: "DOCUMENTS",
-        treeCategories: [.notes, .data],
-        treeLabel: "Documents",
-        emptyIcon: "doc.text.magnifyingglass",
-        emptyTitle: "Select a document to view",
-        emptyHint: "Import notes, reports, PDFs, or data files\nusing **Add file** or **Add folder** in the tree",
-        emptyHintWidth: 300
-    )
+    // ReviewView now serves .conflicts only. (.docs left with the .plans
+    // section; .code left earlier with .review — Explorer owns the
+    // project file-browser role.)
 
     static let conflicts = ReviewConfig(
         treeTitle: "CODE & NOTES",

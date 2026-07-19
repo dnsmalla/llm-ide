@@ -65,4 +65,47 @@ struct ChatSessionStoreTests {
         #expect(ChatSessionStore.load(for: .explorer).history.first?.content == "keep me")
         #expect(ChatSessionStore.load(for: .docGen).history.isEmpty)
     }
+
+    @Test func saveBumpsLastUsedAt() {
+        overrideDir()
+        var session = ChatSessionStore.load(for: .visual)
+        let before = session.lastUsedAt
+        session.history = [.init(role: .user, content: "x")]
+        ChatSessionStore.save(session, for: .visual)
+
+        let reloaded = ChatSessionStore.load(for: .visual)
+        #expect(reloaded.lastUsedAt >= before)
+    }
+
+    @Test func loadQuarantinesCorruptFileAndReturnsFresh() {
+        overrideDir()
+        // Save a valid file (creates sessions/<scope>.json via the store),
+        // then clobber it with garbage.
+        var session = ChatSessionStore.load(for: .explorer)
+        session.history = [.init(role: .user, content: "good")]
+        ChatSessionStore.save(session, for: .explorer)
+        let file = ChatSessionStore.baseDirectoryOverride!
+            .appendingPathComponent("sessions").appendingPathComponent("explorer.json")
+        try? "{ broken".data(using: .utf8)?.write(to: file)
+
+        let reloaded = ChatSessionStore.load(for: .explorer)
+        #expect(reloaded.history.isEmpty)            // fresh fallback
+        #expect(reloaded.title == "New chat")
+        #expect(!FileManager.default.fileExists(atPath: file.path))  // quarantined aside
+    }
+
+    @Test func clearAllWipesEveryScope() {
+        overrideDir()
+        var a = ChatSessionStore.load(for: .explorer)
+        a.history = [.init(role: .user, content: "a")]
+        ChatSessionStore.save(a, for: .explorer)
+        var b = ChatSessionStore.load(for: .conflicts)
+        b.history = [.init(role: .user, content: "b")]
+        ChatSessionStore.save(b, for: .conflicts)
+
+        ChatSessionStore.clear()   // no-arg — the sign-out wipe
+
+        #expect(ChatSessionStore.load(for: .explorer).history.isEmpty)
+        #expect(ChatSessionStore.load(for: .conflicts).history.isEmpty)
+    }
 }

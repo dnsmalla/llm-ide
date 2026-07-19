@@ -97,12 +97,13 @@ final class DeepLinkRouter: ObservableObject {
             DispatchQueue.main.async { open() }
         }
 
-        // Tab is the first segment.  llmide://transcript / -plan /
-        // -review / -history / -settings.  Anything else falls back
-        // to transcript (the most common reason to deep-link from the
-        // extension is "show me what I'm capturing right now").
+        // Tab is the first segment.  llmide://transcript / -review /
+        // -history / -settings.  Anything else (including the removed
+        // -plan) falls back to transcript (the most common reason to
+        // deep-link from the extension is "show me what I'm capturing
+        // right now").
         let host = url.host?.lowercased() ?? "transcript"
-        let allowed: Set<String> = ["transcript", "plan", "history", "settings"]
+        let allowed: Set<String> = ["transcript", "history", "settings"]
         let tab = allowed.contains(host) ? host : "transcript"
 
         // Optional session subscription.  Constrained to a safe ID
