@@ -30,6 +30,15 @@ struct AutoCodeView: View {
                 .frame(minWidth: 300, maxWidth: .infinity)
         }
         .background(theme.current.body)
+        .onChange(of: autoCode.currentTask) { _, new in
+            // During a global Run Now the orchestrator advances currentTask
+            // task-by-task; follow it so the user watches each log fill.
+            // Per-task ▶ Run leaves currentTask == the viewed task (no jump).
+            if let new {
+                selectedTask = new
+                showModelLimits = false
+            }
+        }
     }
 
     // MARK: - Left pane
