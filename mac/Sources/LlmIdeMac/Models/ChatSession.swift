@@ -1,5 +1,12 @@
 import Foundation
 
+/// Which sidebar section a chat belongs to. The section IS the chat
+/// identity: each scope maps to exactly one persisted chat file
+/// (`sessions/<scope>.json`). Add a case when a new section gets chat.
+enum ChatScope: String, Codable, CaseIterable {
+    case explorer, conflicts, visual, docGen
+}
+
 /// One persisted Code Assistant chat session — Cursor-style, where the
 /// user can have many parallel conversations and switch between them
 /// from a dropdown in the panel header. Each session lives as a
