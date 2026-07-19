@@ -15,6 +15,9 @@ struct AutoCodeView: View {
     @State private var taskToReset: AutoTask? = nil
     /// When true the right pane shows the usage-limits panel instead of a task.
     @State private var showModelLimits = false
+    private enum EditPreviewMode { case edit, preview }
+    /// Which pane the per-task page shows for prompt tasks. Default Edit.
+    @State private var editPreview: EditPreviewMode = .edit
 
     var body: some View {
         // Fixed-width left column — HSplitView overrides a child's width
@@ -298,12 +301,21 @@ struct AutoCodeView: View {
 
             Divider()
 
-            // Preview + Edit (or structural config), scrollable together.
+            // Edit | Preview toggle (prompt tasks), or structural config.
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    previewSection(task)
                     if let template = task.templateBinding(config: config) {
-                        editSection(template: template)
+                        Picker("", selection: $editPreview) {
+                            Text("Edit").tag(EditPreviewMode.edit)
+                            Text("Preview").tag(EditPreviewMode.preview)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        if editPreview == .edit {
+                            editSection(template: template)
+                        } else {
+                            previewSection(task)
+                        }
                     } else {
                         structuralConfigSection(task)
                     }
