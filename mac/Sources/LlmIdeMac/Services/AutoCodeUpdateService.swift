@@ -18,6 +18,11 @@ final class AutoCodeUpdateService: ObservableObject {
     @Published private(set) var failedCount = 0
     @Published private(set) var allEntries: [ProcessedActionsRegistry.RegistryEntry] = []
     @Published private(set) var lastError: String? = nil
+    /// Human-readable reason for the last `resolveBackendAndProject()` nil —
+    /// token / active-project / clone-path state. Surfaced in the task log +
+    /// left-pane banner so a misconfigured backend is obvious, not a silent
+    /// "no linked repo".
+    @Published private(set) var lastResolveDiagnosis: String? = nil
     @Published private(set) var taskErrors: [String: String] = [:]
     /// Which task is running right now (drives the per-task ▶ spinner). nil when idle.
     @Published private(set) var currentTask: AutoTask? = nil
@@ -190,7 +195,9 @@ final class AutoCodeUpdateService: ObservableObject {
             lastRunDate = Date()
         }
         guard let resolved = resolveBackendAndProject() else {
-            statusMessage = "No linked repo — configure in GitLab or GitHub settings"
+            let reason = lastResolveDiagnosis ?? "No linked repo — configure in GitLab or GitHub settings"
+            statusMessage = "No linked repo"
+            logStore.append(task, "⚠ \(reason)", level: .error)
             return
         }
         guard let logDir = logsDirectory() else {
@@ -333,7 +340,9 @@ final class AutoCodeUpdateService: ObservableObject {
         // GitHub via the RepoBackend protocol — precedence matches
         // `AppConfig.activeRepoLocalURL` (GitLab first, then GitHub).
         guard let resolved = resolveBackendAndProject() else {
-            statusMessage = "No linked repo — configure in GitLab or GitHub settings"
+            let reason = lastResolveDiagnosis ?? "No linked repo — configure in GitLab or GitHub settings"
+            statusMessage = "No linked repo"
+            setError(reason)
             return
         }
         let client = resolved.client
@@ -1328,6 +1337,7 @@ final class AutoCodeUpdateService: ObservableObject {
             case .gitlab:
                 guard !config.gitLabToken.isEmpty else {
                     log.warning("Active project linkedRepo is GitLab but gitLabToken is empty — skipping run")
+                    lastResolveDiagnosis = "Active project is linked to GitLab but the GitLab token is empty — add it in Settings."
                     return nil
                 }
                 // Linked model: the project root IS the working tree.
@@ -1336,6 +1346,7 @@ final class AutoCodeUpdateService: ObservableObject {
             case .github:
                 guard !config.gitHubToken.isEmpty else {
                     log.warning("Active project linkedRepo is GitHub but gitHubToken is empty — skipping run")
+                    lastResolveDiagnosis = "Active project is linked to GitHub but the GitHub token is empty — add it in Settings."
                     return nil
                 }
                 // Linked model: the project root IS the working tree.
@@ -1369,7 +1380,25 @@ final class AutoCodeUpdateService: ObservableObject {
                          gitRoot: local,
                          projectRoot: projectStore?.activeProject?.localPath ?? local)
         }
+        let d = resolveDiagnosis()
+        lastResolveDiagnosis = d
+        log.warning("auto_task_resolve_failed \(d, privacy: .public)")
         return nil
+    }
+
+    /// One-line summary of why `resolveBackendAndProject()` found no usable
+    /// backend — shown in the task log so a misconfiguration is obvious.
+    private func resolveDiagnosis() -> String {
+        let glToken = config.gitLabToken.isEmpty ? "empty" : "set"
+        let ghToken = config.gitHubToken.isEmpty ? "empty" : "set"
+        let activeName = projectStore?.activeProject?.bundle.displayName ?? "none"
+        let linked: String = {
+            guard let l = projectStore?.activeProject?.bundle.settings.linkedRepo else { return "none" }
+            return "\(l.kind) remoteId=\(l.remoteId)"
+        }()
+        let glClone = config.gitLabSavedProjects.first(where: { $0.isActive })?.localPath ?? "(none / empty)"
+        let ghClone = config.gitHubSavedRepos.first(where: { $0.isActive })?.localPath ?? "(none / empty)"
+        return "No usable backend — GitLab token=\(glToken); GitHub token=\(ghToken); active project='\(activeName)' (linkedRepo=\(linked)); active GitLab project clone=\(glClone); active GitHub repo clone=\(ghClone). Need an active project/repo with a matching token + a non-empty local clone path."
     }
 
     /// Paginated fetch — walks `listIssues` until a page returns fewer
