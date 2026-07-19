@@ -198,4 +198,33 @@ struct AutoCodeUpdateServiceTests {
         settings.enabled = false
         #expect(svc.isAutoTimerArmed == false)
     }
+
+    /// Regression: a GitLab repo that was cloned (localPath set) + marked
+    /// active but never "Resolve"d (resolvedId == nil) must STILL resolve —
+    /// the local CLI tasks only need the clone path. Previously the GitLab
+    /// legacy branch gated on `resolvedId` and returned nil, so Auto Tasks
+    /// showed "No linked repo" even though clone/fetch/code-assistant git
+    /// worked (they use the looser `isActive && isCloned` predicate).
+    @MainActor
+    @Test func gitLabClonedButUnresolvedResolves() {
+        let cfg = Self.isolatedConfig()
+        cfg.gitLabToken = "glpat-test-token"
+        var p = SavedGitLabProject(url: "https://gitlab.com/acme/app",
+                                   displayName: "App", isActive: true)
+        p.localPath = "/tmp/llm-ide-test-clone-\(UUID().uuidString)"
+        cfg.gitLabSavedProjects = [p]
+
+        let stateRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("auto-gl-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: stateRoot, withIntermediateDirectories: true)
+        let registry = ProcessedActionsRegistry(storeURL: stateRoot.appendingPathComponent("reg.json"))
+        // No projectStore → no active project / no linkedRepo → forces the
+        // legacy GitLab branch (the one that used to gate on resolvedId).
+        let svc = AutoCodeUpdateService(config: cfg, autoTaskSettings: AutoTaskSettings(),
+                                        registry: registry, logStore: TaskLogStore())
+
+        let resolved = svc.resolveBackendAndProject()
+        #expect(resolved != nil)
+        #expect(resolved?.gitRoot == p.localPath)
+    }
 }

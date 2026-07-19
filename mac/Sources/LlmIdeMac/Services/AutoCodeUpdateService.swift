@@ -1289,11 +1289,15 @@ final class AutoCodeUpdateService: ObservableObject {
         let projectRoot: String
     }
 
-    /// Pick the active repo target. Precedence matches
-    /// `AppConfig.activeRepoLocalURL`: GitLab project first (since it
-    /// historically owned this flow), then GitHub. Returns nil when no
-    /// usable target is configured (missing token, no active project,
-    /// or no local clone path).
+    /// Pick the active repo target for an auto-task run. Order:
+    ///   1. test `backendOverride` (if set);
+    ///   2. the active project's `linkedRepo` (authoritative when set —
+    ///      requires the matching token; no fall-through);
+    ///   3. legacy: the active CLONED saved repo (GitLab first, then GitHub),
+    ///      matching `AppConfig.activeRepoLocalURL`'s `isActive && isCloned`
+    ///      predicate — a local clone path is enough; `resolvedId` is
+    ///      best-effort (the clone flow doesn't populate it).
+    /// Returns nil when none yield a usable local clone + token.
     func resolveBackendAndProject() -> ResolvedRepo? {
         // Test override wins over project-store resolution so tests can
         // inject a stub RepoBackend regardless of what's persisted on disk.
@@ -1359,14 +1363,18 @@ final class AutoCodeUpdateService: ObservableObject {
         // here; post-migration this branch is dead code that we keep for
         // safety until Phase 2 retires it.
 
-        // Auto-resolve from config.
+        // Auto-resolve from config. Mirrors `AppConfig.activeRepoLocalURL`'s
+        // `isActive && isCloned` predicate: a clone path is enough. `resolvedId`
+        // is best-effort — the clone flow writes `localPath` but not the
+        // numeric id (that's the separate "Resolve" action), and the local CLI
+        // tasks only need the clone path (gitRoot). API tasks that need the
+        // real id will fail at the call if it's still unresolved.
         if !config.gitLabToken.isEmpty,
            let p = config.gitLabSavedProjects.first(where: { $0.isActive }),
-           let id = p.resolvedId,
            let local = p.localPath, !local.isEmpty
         {
             return .init(client: RepoBackendFactory.guarded(GitLabClient(config: config), config: config),
-                         projectId: String(id),
+                         projectId: String(p.resolvedId ?? 0),
                          gitRoot: local,
                          projectRoot: projectStore?.activeProject?.localPath ?? local)
         }
