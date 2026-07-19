@@ -266,12 +266,6 @@ struct MeetingDetailView: View {
             .disabled(vm?.frontmatter == nil)
             .keyboardShortcut("e", modifiers: .command)
             .help("Export as Markdown (⌘E)")
-
-            Button(action: { shell.section = .plans }) {
-                Label("Open in Plan", systemImage: "list.bullet.rectangle")
-            }
-            .disabled(vm?.frontmatter == nil)
-            .help("Generate a plan from this meeting")
         }
     }
 

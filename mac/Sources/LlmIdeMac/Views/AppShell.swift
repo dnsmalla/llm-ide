@@ -316,7 +316,7 @@ struct AppShell: View {
     /// is the field; `.explorer`/`.sourceControl` are the panel-header switcher;
     /// `.settings` is in the account menu; `.live` only while a session runs.
     private static let toolOrder: [ShellState.Section] = [
-        .codeGraph, .autoCode, .plans, .conflicts, .issues,
+        .codeGraph, .autoCode, .conflicts, .issues,
         .gantt, .regression, .docGen, .visual, .library, .live,
     ]
     private var liveActive: Bool { capture.isRunning || liveMirror.activeSession != nil }
@@ -433,7 +433,6 @@ struct AppShell: View {
         case .live:      TranscriptView(api: api)
         case .explorer:  ExplorerView(api: api)
         case .search:    SearchView(api: api)
-        case .plans:     ReviewView(api: api, config: .docs)
         case .conflicts: ReviewView(api: api, config: .conflicts)
         case .sourceControl: SourceControlView(api: api)
         case .issues:    issuesRoute

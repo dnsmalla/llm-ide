@@ -6,7 +6,7 @@ import SwiftUI
 @Observable
 final class ShellState {
     enum Section: String, Hashable, CaseIterable {
-        case library, live, explorer, search, plans, conflicts, sourceControl, issues, gantt, visual, docGen, autoCode, codeGraph, regression, settings
+        case library, live, explorer, search, conflicts, sourceControl, issues, gantt, visual, docGen, autoCode, codeGraph, regression, settings
 
         /// User-friendly label — single source of truth so the sidebar
         /// row, the settings toggle and any future menu item agree.
@@ -16,7 +16,6 @@ final class ShellState {
             case .live:      return "Live"
             case .explorer:  return "Explorer"
             case .search:    return "Search"
-            case .plans:     return "Plans"
             case .conflicts: return "Review Conflicts"
             case .sourceControl: return "Source Control"
             case .issues:    return "Issues"
@@ -36,7 +35,6 @@ final class ShellState {
             case .live:      return "waveform"
             case .explorer:  return "folder"
             case .search:    return "magnifyingglass"
-            case .plans:     return "doc.text.magnifyingglass"
             case .conflicts: return "exclamationmark.triangle"
             case .sourceControl: return "arrow.triangle.branch"
             case .issues:    return "checklist"
@@ -56,7 +54,7 @@ final class ShellState {
         /// turned off. `.live` is already conditional on capture state
         /// so it doesn't appear here either.
         static let userHideable: [Section] = [
-            .explorer, .search, .plans, .conflicts, .sourceControl, .issues, .gantt, .visual, .docGen, .autoCode, .codeGraph, .regression
+            .explorer, .search, .conflicts, .sourceControl, .issues, .gantt, .visual, .docGen, .autoCode, .codeGraph, .regression
         ]
     }
 
@@ -97,7 +95,6 @@ extension ShellState.Section {
         case "transcript": self = .live
         case "history":    self = .library
         case "visual":     self = .visual
-        case "plan":       self = .plans
         case "settings":   self = .settings
         default:           return nil
         }
@@ -117,7 +114,6 @@ extension ShellState.Section {
         // ── Code (green family) ──────────────────────────
         case .explorer:   return Color(red: 0.25, green: 0.68, blue: 0.40) // forest green
         case .search:     return Color(red: 0.35, green: 0.72, blue: 0.42) // green
-        case .plans:      return Color(red: 0.30, green: 0.65, blue: 0.55) // teal-green
         case .conflicts:  return Color(red: 0.50, green: 0.72, blue: 0.30) // lime-green
         case .sourceControl: return Color(red: 0.30, green: 0.70, blue: 0.45) // green
         case .autoCode:   return .teal
