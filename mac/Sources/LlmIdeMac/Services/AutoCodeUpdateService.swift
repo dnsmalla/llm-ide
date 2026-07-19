@@ -1180,13 +1180,17 @@ final class AutoCodeUpdateService: ObservableObject {
         process.standardOutput = pipe
         process.standardError = pipe
         let store = logStore
-        var accumulator = LineAccumulator()
+        // readabilityHandler is a @Sendable closure firing on a background
+        // queue. Foundation invokes it serially, but to satisfy Swift
+        // concurrency (and stay correct if that ever changes) the line
+        // accumulator is guarded by a lock.
+        let accumulator = OSAllocatedUnfairLock(initialState: LineAccumulator())
         pipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             // availableData is empty ONLY at EOF (Apple contract).
             if data.isEmpty {
                 handle.readabilityHandler = nil
-                if let rest = accumulator.flush() {
+                if let rest = accumulator.withLock({ $0.flush() }) {
                     logFileHandle?.write((rest + "\n").data(using: .utf8) ?? Data())
                     let captured = rest
                     Task { @MainActor in store.append(task, captured) }
@@ -1196,7 +1200,7 @@ final class AutoCodeUpdateService: ObservableObject {
             }
             logFileHandle?.write(data)
             guard let chunk = String(data: data, encoding: .utf8) else { return }
-            for line in accumulator.feed(chunk) {
+            for line in accumulator.withLock({ $0.feed(chunk) }) {
                 let captured = line
                 Task { @MainActor in store.append(task, captured) }
             }
@@ -1404,16 +1408,6 @@ final class AutoCodeUpdateService: ObservableObject {
             .appendingPathExtension("prev." + url.pathExtension)
         try? fm.removeItem(at: prev)
         try? fm.moveItem(at: url, to: prev)
-    }
-
-    /// Tail of an auto-task log, for showing review findings inline in the
-    /// UI without opening Finder. Capped to the last `maxChars` characters.
-    func logTail(suffix: String, logDir: URL, maxChars: Int = 6_000) -> String {
-        let url = logDir.appendingPathComponent("auto-task-\(suffix).log")
-        guard let data = try? Data(contentsOf: url),
-              let s = String(data: data, encoding: .utf8) else { return "" }
-        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.count > maxChars ? "…\n" + String(trimmed.suffix(maxChars)) : trimmed
     }
 
     /// Reveal the auto-task logs folder in Finder. Review tasks write their
