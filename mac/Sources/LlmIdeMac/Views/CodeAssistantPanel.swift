@@ -2485,12 +2485,12 @@ struct CodeAssistantPanel: View {
         ChatSessionStore.save(session, for: scope)
     }
 
-    /// Spawn a new empty session, persist it, switch to it, and clear
-    /// in-memory composer state. Per-project `recentIssues` stays.
-    /// Cancel any in-flight turn and clear per-conversation transient state.
-    /// Called when the active session changes so a running turn can't land its
-    /// reply in — or leave `busy` stuck locking — the new session, and so
-    /// queued messages / expanded-turn ids don't bleed across sessions.
+    /// Cancel any in-flight turn and clear per-conversation transient
+    /// state (`busy`, `queued`, `expandedTurns`). Called from
+    /// `clearCurrentChat()` when this section's chat is cleared, so a
+    /// running reply can't land its result in — or leave `busy` stuck
+    /// locking — the freshly emptied chat, and queued messages /
+    /// expanded-turn ids don't survive the clear.
     private func resetActiveTurnState() {
         runTask?.cancel()
         runTask = nil

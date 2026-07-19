@@ -60,10 +60,6 @@ struct AccountSettingsSection: View {
                                 KeychainStore.logout()
                                 config.gitLabToken = ""
                                 ChatSessionStore.clear()
-                                // Reset the active-session pointer so
-                                // the next sign-in starts fresh.
-                                UserDefaults.standard.removeObject(
-                                    forKey: "MEETNOTES_CURRENT_CHAT_SESSION_ID")
                             }
                         }
                         Button("Cancel", role: .cancel) { }
