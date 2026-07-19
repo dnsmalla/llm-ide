@@ -1299,99 +1299,60 @@ final class AutoCodeUpdateService: ObservableObject {
     ///      best-effort (the clone flow doesn't populate it).
     /// Returns nil when none yield a usable local clone + token.
     func resolveBackendAndProject() -> ResolvedRepo? {
-        // Test override wins over project-store resolution so tests can
-        // inject a stub RepoBackend regardless of what's persisted on disk.
-        // Honor the test override unconditionally — caller provided it
-        // because they want this backend, even if the user's config
-        // would prefer another. Project ID is derived from whichever
-        // saved config matches the override's kind.
+        // Test override: inject a stub backend for tests
         if let backend = backendOverride {
-            switch backend.kind {
-            case .gitlab:
-                if let p = config.gitLabSavedProjects.first(where: { $0.isActive }),
-                   let id = p.resolvedId,
-                   let local = p.localPath, !local.isEmpty {
-                    return .init(client: backend, projectId: String(id),
-                                 gitRoot: local,
-                                 projectRoot: projectStore?.activeProject?.localPath ?? local)
-                }
-            case .github:
-                if let r = config.gitHubSavedRepos.first(where: { $0.isActive }),
-                   let (owner, name) = GitHubClient.ownerAndName(from: r.url),
-                   let local = r.localPath, !local.isEmpty {
-                    return .init(client: backend, projectId: "\(owner)/\(name)",
-                                 gitRoot: local,
-                                 projectRoot: projectStore?.activeProject?.localPath ?? local)
-                }
-            }
-            return nil
+            return resolveWithBackend(backend)
         }
 
-        // Active project's linkedRepo is authoritative when set. If the
-        // matching token is missing we return nil (and log) instead of
-        // falling through to a legacy repo from a different workflow —
-        // silent fall-through there was the fault code review caught: a user
-        // who linked a GitHub repo to their active project but forgot to
-        // add a GitHub token would have seen auto-update target their
-        // legacy GitLab project instead.
+        // Active project's linkedRepo is authoritative when set
         if let active = projectStore?.activeProject,
            let linked = active.bundle.settings.linkedRepo {
-            let local = active.localPath
-            switch linked.kind {
-            case .gitlab:
-                guard !config.gitLabToken.isEmpty else {
-                    log.warning("Active project linkedRepo is GitLab but gitLabToken is empty — skipping run")
-                    lastResolveDiagnosis = "Active project is linked to GitLab but the GitLab token is empty — add it in Settings."
-                    return nil
-                }
-                // Linked model: the project root IS the working tree.
-                return .init(client: backendOverride ?? RepoBackendFactory.guarded(GitLabClient(config: config), config: config),
-                             projectId: linked.remoteId, gitRoot: local, projectRoot: local)
-            case .github:
-                guard !config.gitHubToken.isEmpty else {
-                    log.warning("Active project linkedRepo is GitHub but gitHubToken is empty — skipping run")
-                    lastResolveDiagnosis = "Active project is linked to GitHub but the GitHub token is empty — add it in Settings."
-                    return nil
-                }
-                // Linked model: the project root IS the working tree.
-                return .init(client: backendOverride ?? RepoBackendFactory.guarded(GitHubClient(config: config), config: config),
-                             projectId: linked.remoteId, gitRoot: local, projectRoot: local)
-            }
+            return resolveLinkedRepo(active, linked: linked)
         }
-        // Legacy fallback: ONLY reached when there's no active project OR
-        // the active project has no linkedRepo set. Pre-migration users land
-        // here; post-migration this branch is dead code that we keep for
-        // safety until Phase 2 retires it.
 
-        // Auto-resolve from config. Mirrors `AppConfig.activeRepoLocalURL`'s
-        // `isActive && isCloned` predicate: a clone path is enough. `resolvedId`
-        // is best-effort — the clone flow writes `localPath` but not the
-        // numeric id (that's the separate "Resolve" action), and the local CLI
-        // tasks only need the clone path (gitRoot). API tasks that need the
-        // real id will fail at the call if it's still unresolved.
-        if !config.gitLabToken.isEmpty,
-           let p = config.gitLabSavedProjects.first(where: { $0.isActive }),
-           let local = p.localPath, !local.isEmpty
-        {
-            return .init(client: RepoBackendFactory.guarded(GitLabClient(config: config), config: config),
-                         projectId: String(p.resolvedId ?? 0),
-                         gitRoot: local,
-                         projectRoot: projectStore?.activeProject?.localPath ?? local)
-        }
-        if !config.gitHubToken.isEmpty,
-           let r = config.gitHubSavedRepos.first(where: { $0.isActive }),
-           let (owner, name) = GitHubClient.ownerAndName(from: r.url),
-           let local = r.localPath, !local.isEmpty
-        {
-            return .init(client: RepoBackendFactory.guarded(GitHubClient(config: config), config: config),
-                         projectId: "\(owner)/\(name)",
-                         gitRoot: local,
-                         projectRoot: projectStore?.activeProject?.localPath ?? local)
-        }
         let d = resolveDiagnosis()
         lastResolveDiagnosis = d
         log.warning("auto_task_resolve_failed \(d, privacy: .public)")
         return nil
+    }
+
+    private func resolveWithBackend(_ backend: RepoBackend) -> ResolvedRepo? {
+        switch backend.kind {
+        case .gitlab:
+            guard let p = config.gitLabSavedProjects.first(where: { $0.isActive }),
+                  let id = p.resolvedId,
+                  let local = p.localPath, !local.isEmpty else { return nil }
+            return .init(client: backend, projectId: String(id),
+                         gitRoot: local,
+                         projectRoot: projectStore?.activeProject?.localPath ?? local)
+        case .github:
+            guard let r = config.gitHubSavedRepos.first(where: { $0.isActive }),
+                  let (owner, name) = GitHubClient.ownerAndName(from: r.url),
+                  let local = r.localPath, !local.isEmpty else { return nil }
+            return .init(client: backend, projectId: "\(owner)/\(name)",
+                         gitRoot: local,
+                         projectRoot: projectStore?.activeProject?.localPath ?? local)
+        }
+    }
+
+    private func resolveLinkedRepo(_ active: ProjectStore.ActiveProject, linked: ProjectSettings.LinkedRepo) -> ResolvedRepo? {
+        let local = active.localPath
+        let kind = linked.kind
+        let token = kind == .gitlab ? config.gitLabToken : config.gitHubToken
+        let tokenName = kind == .gitlab ? "GitLab" : "GitHub"
+
+        guard !token.isEmpty else {
+            let msg = "Active project is linked to \(tokenName) but the \(tokenName.lowercased()) token is empty — add it in Settings."
+            log.warning("Active project linkedRepo is \(tokenName) but token is empty — skipping run")
+            lastResolveDiagnosis = msg
+            return nil
+        }
+
+        let client = backendOverride ?? RepoBackendFactory.guarded(
+            kind == .gitlab ? GitLabClient(config: config) : GitHubClient(config: config),
+            config: config
+        )
+        return .init(client: client, projectId: linked.remoteId, gitRoot: local, projectRoot: local)
     }
 
     /// One-line summary of why `resolveBackendAndProject()` found no usable
