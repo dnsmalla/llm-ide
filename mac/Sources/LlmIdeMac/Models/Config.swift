@@ -450,74 +450,13 @@ final class AppConfig: ObservableObject {
     static let defaultMemorySubdir = ProjectLayout.memorySubdir
 
     // ── Auto Code Update ──────────────────────────────────────────────
-    /// When true, the app automatically scans recent meeting notes for
-    /// action items and creates GitLab issues, then invokes the active
-    /// AI CLI tool to implement each issue.
-    @Published var autoCodeUpdateEnabled: Bool {
-        didSet { defaults.set(autoCodeUpdateEnabled, forKey: "autoCodeUpdateEnabled") }
-    }
-
-    /// Number of recent meeting notes to scan when auto code update runs.
+    /// Default meeting-count lookback, projected into `defaultProjectSettings`
+    /// as the per-project `regressionLookbackCount` for newly-materialised
+    /// projects. The live Auto Tasks state (enabled, cadence, lookback mode,
+    /// per-task toggles, auto-stash) lives on `AutoTaskSettings` — the single
+    /// source of truth shared by the Menu bar, Settings, and the Auto Tasks page.
     @Published var autoCodeUpdateLookbackCount: Int {
         didSet { defaults.set(autoCodeUpdateLookbackCount, forKey: "autoCodeUpdateLookbackCount") }
-    }
-
-    /// How often the auto-task timer fires, in minutes. Drives the
-    /// repeating scheduler in AutoCodeUpdateService (was a hardcoded 60).
-    @Published var autoCodeIntervalMinutes: Int {
-        didSet { defaults.set(autoCodeIntervalMinutes, forKey: "autoCodeIntervalMinutes") }
-    }
-
-    /// Lookback mode for the meeting scan. false = by count (the historical
-    /// behaviour, uses `autoCodeUpdateLookbackCount`); true = by age in days
-    /// (uses `autoCodeLookbackDays`).
-    @Published var autoCodeLookbackByDays: Bool {
-        didSet { defaults.set(autoCodeLookbackByDays, forKey: "autoCodeLookbackByDays") }
-    }
-    /// Age window (days) for the by-age lookback mode.
-    @Published var autoCodeLookbackDays: Int {
-        didSet { defaults.set(autoCodeLookbackDays, forKey: "autoCodeLookbackDays") }
-    }
-
-    /// When true, auto-tasks stash uncommitted changes before running and
-    /// restore them after, instead of skipping on a dirty tree. Off by
-    /// default — stashing the user's WIP is surprising, so it's opt-in.
-    @Published var autoCodeAutoStash: Bool {
-        didSet { defaults.set(autoCodeAutoStash, forKey: "autoCodeAutoStash") }
-    }
-
-    /// Which review task types to include in the auto-run pipeline.
-    @Published var autoCodeRunReviewCode: Bool {
-        didSet { defaults.set(autoCodeRunReviewCode, forKey: "autoCodeRunReviewCode") }
-    }
-    @Published var autoCodeRunReviewDoc: Bool {
-        didSet { defaults.set(autoCodeRunReviewDoc, forKey: "autoCodeRunReviewDoc") }
-    }
-    @Published var autoCodeRunReviewConflicts: Bool {
-        didSet { defaults.set(autoCodeRunReviewConflicts, forKey: "autoCodeRunReviewConflicts") }
-    }
-    /// Whether the Auto Code Update run also fires a regression sweep
-    /// against `<repo>/system/faults/` (re-asks every
-    /// `status: fixed` fault, auto-reopens regressions). Off by default
-    /// — the sweep can be slow on a big fault archive and uses LLM
-    /// turns, so users opt in.
-    @Published var autoCodeRunRegression: Bool {
-        didSet { defaults.set(autoCodeRunRegression, forKey: "autoCodeRunRegression") }
-    }
-    /// Surface the auto-generated knowledge (code graph + memory + index) as a
-    /// reviewable Auto Tasks row. Default ON — knowledge generation is core to
-    /// the product's autonomous purpose; the row is read-only status, cheap.
-    @Published var autoCodeRunGenerateKnowledge: Bool {
-        didSet { defaults.set(autoCodeRunGenerateKnowledge, forKey: "autoCodeRunGenerateKnowledge") }
-    }
-    @Published var autoCodeRunGenerateDoc: Bool {
-        didSet { defaults.set(autoCodeRunGenerateDoc, forKey: "autoCodeRunGenerateDoc") }
-    }
-    @Published var autoCodeRunUpdateIssues: Bool {
-        didSet { defaults.set(autoCodeRunUpdateIssues, forKey: "autoCodeRunUpdateIssues") }
-    }
-    @Published var autoCodeRunUpdatePlanStatus: Bool {
-        didSet { defaults.set(autoCodeRunUpdatePlanStatus, forKey: "autoCodeRunUpdatePlanStatus") }
     }
 
     // MARK: - Mobile Control
@@ -715,20 +654,7 @@ final class AppConfig: ObservableObject {
         } else {
             self.boxSource = nil
         }
-        self.autoCodeUpdateEnabled = defaults.object(forKey: "autoCodeUpdateEnabled") as? Bool ?? false
         self.autoCodeUpdateLookbackCount = defaults.object(forKey: "autoCodeUpdateLookbackCount") as? Int ?? 5
-        self.autoCodeIntervalMinutes = defaults.object(forKey: "autoCodeIntervalMinutes") as? Int ?? 60
-        self.autoCodeLookbackByDays = defaults.object(forKey: "autoCodeLookbackByDays") as? Bool ?? false
-        self.autoCodeLookbackDays = defaults.object(forKey: "autoCodeLookbackDays") as? Int ?? 7
-        self.autoCodeAutoStash = defaults.object(forKey: "autoCodeAutoStash") as? Bool ?? false
-        self.autoCodeRunReviewCode = defaults.object(forKey: "autoCodeRunReviewCode") as? Bool ?? true
-        self.autoCodeRunReviewDoc = defaults.object(forKey: "autoCodeRunReviewDoc") as? Bool ?? true
-        self.autoCodeRunReviewConflicts = defaults.object(forKey: "autoCodeRunReviewConflicts") as? Bool ?? false
-        self.autoCodeRunRegression = defaults.object(forKey: "autoCodeRunRegression") as? Bool ?? false
-        self.autoCodeRunGenerateKnowledge = defaults.object(forKey: "autoCodeRunGenerateKnowledge") as? Bool ?? true
-        self.autoCodeRunGenerateDoc = defaults.object(forKey: "autoCodeRunGenerateDoc") as? Bool ?? true
-        self.autoCodeRunUpdateIssues = defaults.object(forKey: "autoCodeRunUpdateIssues") as? Bool ?? false
-        self.autoCodeRunUpdatePlanStatus = defaults.object(forKey: "autoCodeRunUpdatePlanStatus") as? Bool ?? false
         self.mobileControlEnabled = defaults.object(forKey: "mobileControlEnabled") as? Bool ?? false
         self.mobileControlAgentPath = defaults.string(forKey: "mobileControlAgentPath") ?? ""
         self.mobileControlAutoStart = defaults.object(forKey: "mobileControlAutoStart") as? Bool ?? true
