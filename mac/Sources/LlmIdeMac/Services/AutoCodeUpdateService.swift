@@ -205,39 +205,39 @@ final class AutoCodeUpdateService: ObservableObject {
     /// tasks) and by `runOne(_:)` (per-task manual run). Each case logs a start
     /// marker and routes its output into `logStore[task]`.
     private func runTaskBody(_ task: AutoTask, resolved: ResolvedRepo, logDir: URL) async {
-        logStore.append(task, "— run started —")
+        logStore.append(task, "Running \(task.label)…")
         currentTask = task
         defer { currentTask = nil }
         switch task {
         case .reviewCode:
             currentStep = "Running Review Code"
             let ok = await runCLI(prompt: config.autoTaskTemplateReviewCode,
-                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix, logDir: logDir)
-            appendTail(to: task, suffix: task.logSuffix, logDir: logDir)
+                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix,
+                                  logDir: logDir, task: task)
             finishPromptTask(task, ok: ok)
         case .reviewDoc:
             currentStep = "Running Review Doc"
             let ok = await runCLI(prompt: config.autoTaskTemplateReviewDoc,
-                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix, logDir: logDir)
-            appendTail(to: task, suffix: task.logSuffix, logDir: logDir)
+                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix,
+                                  logDir: logDir, task: task)
             finishPromptTask(task, ok: ok)
         case .reviewConflicts:
             currentStep = "Running Review Conflicts"
             let ok = await runCLI(prompt: config.autoTaskTemplateReviewConflicts,
-                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix, logDir: logDir)
-            appendTail(to: task, suffix: task.logSuffix, logDir: logDir)
+                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix,
+                                  logDir: logDir, task: task)
             finishPromptTask(task, ok: ok)
         case .generateDoc:
             currentStep = "Generating Documentation"
             let ok = await runCLI(prompt: config.autoTaskTemplateGenerateDoc,
-                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix, logDir: logDir)
-            appendTail(to: task, suffix: task.logSuffix, logDir: logDir)
+                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix,
+                                  logDir: logDir, task: task)
             finishPromptTask(task, ok: ok)
         case .updateIssues:
             currentStep = "Updating Issues"
             let ok = await runCLI(prompt: config.autoTaskTemplateUpdateIssues,
-                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix, logDir: logDir)
-            appendTail(to: task, suffix: task.logSuffix, logDir: logDir)
+                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix,
+                                  logDir: logDir, task: task)
             finishPromptTask(task, ok: ok)
         case .regression:
             currentStep = "Running Regression sweep"
@@ -248,17 +248,6 @@ final class AutoCodeUpdateService: ObservableObject {
         case .updatePlanStatus:
             currentStep = "Refreshing Plan statuses"
             await refreshPlanStatuses(projectRoot: resolved.projectRoot)
-        }
-    }
-
-    /// Append the post-run log tail to the task's live buffer. We mirror the
-    /// `.log` file once the CLI finishes rather than streaming line-by-line, so
-    /// the buffer reflects the final tail of the run (the file stays the
-    /// permanent record).
-    private func appendTail(to task: AutoTask, suffix: String, logDir: URL) {
-        let tail = logTail(suffix: suffix, logDir: logDir)
-        tail.split(separator: "\n", omittingEmptySubsequences: true).forEach {
-            logStore.append(task, String($0))
         }
     }
 
@@ -1115,7 +1104,8 @@ final class AutoCodeUpdateService: ObservableObject {
         return result
     }
 
-    private func runCLI(prompt: String, localPath: String, logSuffix: String, logDir: URL) async -> Bool {
+    private func runCLI(prompt: String, localPath: String, logSuffix: String, logDir: URL,
+                        task: AutoTask) async -> Bool {
         let cliTool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
         let cliCommand = cliTool.cliExecutable
         let components = cliCommand.split(separator: " ").map(String.init)
@@ -1174,6 +1164,11 @@ final class AutoCodeUpdateService: ObservableObject {
         process.arguments = args
         process.currentDirectoryURL = URL(fileURLWithPath: localPath)
 
+        // Stream stdout+stderr LIVE: tee each decoded line to the log file
+        // AND append it to the task's in-memory buffer so the Auto Task page
+        // shows output as it happens (not only the post-run tail). The file
+        // handle is owned by the readabilityHandler and closed at EOF — there
+        // is no `defer` close, which would race the handler's final write.
         let logFileHandle: FileHandle?
         do {
             logFileHandle = try FileHandle(forWritingTo: logURL)
@@ -1181,10 +1176,30 @@ final class AutoCodeUpdateService: ObservableObject {
             log.error("Failed to open auto-task log file \(logURL.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
             logFileHandle = nil
         }
-        defer { logFileHandle?.closeFile() }
-        if let fh = logFileHandle {
-            process.standardOutput = fh
-            process.standardError = fh
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        let store = logStore
+        var accumulator = LineAccumulator()
+        pipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            // availableData is empty ONLY at EOF (Apple contract).
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+                if let rest = accumulator.flush() {
+                    logFileHandle?.write((rest + "\n").data(using: .utf8) ?? Data())
+                    let captured = rest
+                    Task { @MainActor in store.append(task, captured) }
+                }
+                logFileHandle?.closeFile()
+                return
+            }
+            logFileHandle?.write(data)
+            guard let chunk = String(data: data, encoding: .utf8) else { return }
+            for line in accumulator.feed(chunk) {
+                let captured = line
+                Task { @MainActor in store.append(task, captured) }
+            }
         }
         // Detach stdin so a stray permission prompt can never hang the run.
         process.standardInput = FileHandle.nullDevice
