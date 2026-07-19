@@ -15,14 +15,5 @@ worthwhile but needs a small refactor first.
   init, and add a test-only init that takes the protocols. Then assert on
   recorded calls.
 
-## ChatSessionStoreTests (deferred)
-- `ChatSessionStore` uses `FileManager.default.url(for:
-  .applicationSupportDirectory ...)`, which is process-global. Overriding
-  it cleanly requires either a `baseDirProvider` static hook or factoring
-  the file IO behind a `ChatSessionStorage` protocol with a temp-dir
-  implementation for tests.
-- Round-trip / sort / delete / clear / migrateLegacy are all good
-  candidates once that hook lands.
-
 Server-side path-traversal regression coverage was the priority for this
 commit and ships in `extension/tests/kb-router-path-traversal.test.mjs`.

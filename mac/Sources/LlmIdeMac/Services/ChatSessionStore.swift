@@ -1,14 +1,12 @@
 import Foundation
 import os.log
 
-/// Multi-session chat persistence. Replaces the legacy single-file
-/// `ChatHistoryStore`. Each session is its own JSON file at
-/// `~/Library/Application Support/LLM IDE/sessions/<uuid>.json` so we
-/// don't rewrite the entire history on every turn — only the touched
-/// session's file. The sessions/ directory is enumerated to list.
-///
-/// Corrupt files are renamed `.corrupt-<unix-ts>` and skipped, mirroring
-/// the ChatHistoryStore pattern.
+/// Per-section chat persistence. Each sidebar section that shows chat
+/// (Explorer, Review Conflicts, Visual, Doc Gen) owns exactly one chat,
+/// stored as `~/Library/Application Support/LLM IDE/sessions/<scope>.json`.
+/// The section (`ChatScope`) is the identity — load/save/clear are keyed by
+/// it. Corrupt files are renamed `.corrupt-<unix-ts>` and skipped (a fresh
+/// session is returned), mirroring the prior ChatHistoryStore pattern.
 enum ChatSessionStore {
     private static let log = Logger(subsystem: "com.llmide.macapp", category: "ChatSessionStore")
 

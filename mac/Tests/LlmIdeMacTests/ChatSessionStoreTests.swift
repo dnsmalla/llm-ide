@@ -6,12 +6,11 @@ import Foundation
 struct ChatSessionStoreTests {
 
     /// Point the store at a throwaway "LLM IDE" dir for this test.
-    private func overrideDir() -> URL {
+    private func overrideDir() {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("chatstore-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         ChatSessionStore.baseDirectoryOverride = dir
-        return dir
     }
 
     @Test func loadReturnsFreshWhenNoFile() {

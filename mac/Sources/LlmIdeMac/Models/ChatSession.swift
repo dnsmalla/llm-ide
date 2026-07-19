@@ -7,11 +7,11 @@ enum ChatScope: String, Codable, CaseIterable {
     case explorer, conflicts, visual, docGen
 }
 
-/// One persisted Code Assistant chat session — Cursor-style, where the
-/// user can have many parallel conversations and switch between them
-/// from a dropdown in the panel header. Each session lives as a
-/// standalone JSON file under Application Support so we don't have to
-/// rewrite a giant index every time one turn lands.
+/// One persisted Code Assistant chat for a single sidebar section. Each
+/// section owns exactly one session, stored as `sessions/<scope>.json`; the
+/// section (not this struct) is the identity, so there is no `scope` field
+/// here. Lives as a standalone JSON file under Application Support so a turn
+/// only rewrites one small file.
 struct ChatSession: Identifiable, Codable, Equatable {
     /// Persistence schema version. Bump whenever the on-disk layout
     /// breaks. Absent on legacy files written before this field
