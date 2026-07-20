@@ -154,6 +154,12 @@ struct CodeAssistantPanel: View {
     @StateObject private var completion = CompletionController()
     /// Web search enhancement: history and caching
     @StateObject private var webSearch = WebSearchService()
+    /// Voice input service — macOS NSSpeechRecognizer wrapper
+    @State private var voiceService = VoiceInputService()
+    /// Voice UI state — recording, interim text, errors
+    @State private var voiceState = ChatVoiceState()
+    /// Mobile command router — sends commands to agent on :3006
+    @State private var mobileRouter: MobileCommandRouter?
     /// Project-memory viewer sheet (what the assistant auto-learned).
     @State private var showProjectMemory = false
     /// Captured at the moment the banner appears so Save uses the
@@ -204,6 +210,12 @@ struct CodeAssistantPanel: View {
                     completion.update(draft: newValue)
                 } else {
                     completion.close()
+                }
+                // Send real-time typing feedback to mobile
+                Task {
+                    if !newValue.isEmpty {
+                        await mobileRouter?.notifyTyping(newValue)
+                    }
                 }
             }
             .sheet(isPresented: $showProjectMemory) {
@@ -282,6 +294,19 @@ struct CodeAssistantPanel: View {
             if let prompt = nudgePrompt, activeRepoRoot != nil {
                 nudgeBanner(prompt: prompt)
             }
+            // Voice indicators
+            if voiceState.error != nil {
+                voiceErrorBanner
+                    .padding(8)
+            }
+            if voiceState.isRecording {
+                recordingIndicator
+                    .padding(8)
+            }
+            if !voiceState.interimText.isEmpty {
+                interimTextDisplay
+                    .padding(8)
+            }
             inputBar
         }
     }
@@ -302,6 +327,19 @@ struct CodeAssistantPanel: View {
             if addFile(url: url) == .added {
                 autoAttachedPath = displayPath(url)
             }
+        }
+
+        // Setup voice service callbacks
+        voiceService.onFinalResult = { [weak self] text in
+            self?.handleVoiceResult(text)
+        }
+        voiceService.onError = { [weak self] error in
+            self?.voiceState.setError(error)
+        }
+
+        // Initialize mobile command router
+        if mobileRouter == nil {
+            mobileRouter = MobileCommandRouter()
         }
     }
 
@@ -1489,6 +1527,7 @@ struct CodeAssistantPanel: View {
             memoryButton
             Spacer()
             keyHint
+            voiceControlButton
             sendButton
         }
     }
@@ -1517,6 +1556,7 @@ struct CodeAssistantPanel: View {
             HStack(spacing: 6) {
                 Spacer(minLength: 0)
                 keyHint
+                voiceControlButton
                 sendButton
             }
         }
@@ -2065,6 +2105,12 @@ struct CodeAssistantPanel: View {
         let msg = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !msg.isEmpty else { return }
         draft = ""
+
+        // Send to mobile app
+        Task {
+            await mobileRouter?.sendMessage(msg)
+        }
+
         // Record the PLAIN text for ↑ recall (not the skill-decorated message).
         if sentPrompts.last != msg {
             sentPrompts.append(msg)

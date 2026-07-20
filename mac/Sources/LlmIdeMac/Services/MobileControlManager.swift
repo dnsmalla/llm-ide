@@ -232,6 +232,16 @@ final class MobileControlManager {
         logLines.removeAll(keepingCapacity: true)
     }
 
+    /// Log a command originating from the chat interface.
+    func logChatCommand(_ command: String, payload: [String: Any] = [:]) {
+        var detail = command
+        if !payload.isEmpty, let json = try? JSONSerialization.data(withJSONObject: payload),
+           let str = String(data: json, encoding: .utf8) {
+            detail += " \(str)"
+        }
+        append("CHAT: \(detail)", stream: .info)
+    }
+
     // MARK: - npm detection + probes
 
     /// First npm binary in well-known macOS locations. Mirrors
