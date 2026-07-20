@@ -1513,6 +1513,48 @@ a:focus-visible {
   min-height: 0;
 }
 
+/* Chat session controls (Add/Delete buttons) */
+.chat-session-controls {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  justify-content: flex-end;
+}
+
+.chat-btn-add,
+.chat-btn-delete {
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.chat-btn-add {
+  background: var(--color-primary-dim);
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary-border);
+}
+
+.chat-btn-add:hover:not(:disabled) {
+  background: var(--color-primary);
+  color: var(--color-bg);
+}
+
+.chat-btn-delete {
+  background: var(--color-danger-dim);
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger-border);
+}
+
+.chat-btn-delete:hover:not(:disabled) {
+  background: var(--color-danger);
+  color: white;
+}
+
+.chat-btn-delete:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;

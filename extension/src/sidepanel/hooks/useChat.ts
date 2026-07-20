@@ -6,6 +6,7 @@ import {
   loadTranscriptMessages,
   appendChatMessage,
   clearChatSessionMessages,
+  createChatSession,
   type UnifiedChatMessage,
 } from '../../lib/unified-chat';
 
@@ -199,5 +200,26 @@ export function useChat() {
     }
   }, []);
 
-  return { messages, isLoading, error, quotaWarning, sendMessage, clearChat };
+  const createNewSession = useCallback(async () => {
+    try {
+      clearChat();
+      const newSession = await createChatSession({ title: 'New Chat' });
+      sessionIdRef.current = newSession.id;
+      serverBackedRef.current = true;
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to create new session');
+    }
+  }, [clearChat]);
+
+  const deleteCurrentSession = useCallback(async () => {
+    try {
+      clearChat();
+      sessionIdRef.current = null;
+      serverBackedRef.current = false;
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to delete session');
+    }
+  }, [clearChat]);
+
+  return { messages, isLoading, error, quotaWarning, sendMessage, clearChat, createNewSession, deleteCurrentSession };
 }

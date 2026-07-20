@@ -683,6 +683,9 @@ export default function App() {
               hasTranscript={transcript.fullTranscript.length > 0}
               onSend={(msg) => chat.sendMessage(msg, transcript.fullTranscript, transcript.primaryLang)}
               onClear={chat.clearChat}
+              onAddSession={chat.createNewSession}
+              onDeleteSession={chat.deleteCurrentSession}
+              canDelete={chat.messages.length > 0}
             />
           </div>
         )}

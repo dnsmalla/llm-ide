@@ -11,6 +11,9 @@ interface Props {
   hasTranscript: boolean;
   onSend: (message: string) => void;
   onClear: () => void;
+  onAddSession?: () => void;
+  onDeleteSession?: () => void;
+  canDelete?: boolean;
 }
 
 const QUICK_PROMPTS = [
@@ -21,7 +24,18 @@ const QUICK_PROMPTS = [
   'Who said what about the deadline?',
 ];
 
-export default function ChatView({ messages, isLoading, error, quotaWarning, hasTranscript, onSend, onClear }: Props) {
+export default function ChatView({
+  messages,
+  isLoading,
+  error,
+  quotaWarning,
+  hasTranscript,
+  onSend,
+  onClear,
+  onAddSession,
+  onDeleteSession,
+  canDelete = true
+}: Props) {
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
   // Guard against double-submit when Enter fires before isLoading flips.
@@ -53,6 +67,35 @@ export default function ChatView({ messages, isLoading, error, quotaWarning, has
 
   return (
     <div className="chat-view">
+      {/* Chat session controls */}
+      {(onAddSession || onDeleteSession) && (
+        <div className="chat-session-controls">
+          {onAddSession && (
+            <button
+              type="button"
+              className="btn btn-sm chat-btn-add"
+              onClick={onAddSession}
+              title="New chat session"
+              aria-label="Start a new chat session"
+            >
+              + New
+            </button>
+          )}
+          {onDeleteSession && (
+            <button
+              type="button"
+              className="btn btn-sm chat-btn-delete"
+              onClick={onDeleteSession}
+              disabled={!canDelete}
+              title="Delete current chat session"
+              aria-label="Delete current chat session"
+            >
+              🗑 Delete
+            </button>
+          )}
+        </div>
+      )}
+
       {quotaWarning && (
         <div className="error-message quota-warning" role="alert">
           {quotaWarning}
