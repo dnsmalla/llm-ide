@@ -155,11 +155,11 @@ struct CodeAssistantPanel: View {
     /// Web search enhancement: history and caching
     @StateObject private var webSearch = WebSearchService()
     /// Voice input service — macOS NSSpeechRecognizer wrapper
-    @State private var voiceService = VoiceInputService()
+    @State var voiceService = VoiceInputService()
     /// Voice UI state — recording, interim text, errors
-    @State private var voiceState = ChatVoiceState()
+    @State var voiceState = ChatVoiceState()
     /// Mobile command router — sends commands to agent on :3006
-    @State private var mobileRouter: MobileCommandRouter?
+    @State var mobileRouter: MobileCommandRouter?
     /// Project-memory viewer sheet (what the assistant auto-learned).
     @State private var showProjectMemory = false
     /// Captured at the moment the banner appears so Save uses the
@@ -329,12 +329,25 @@ struct CodeAssistantPanel: View {
             }
         }
 
-        // Setup voice service callbacks
-        voiceService.onFinalResult = { [weak self] text in
-            self?.handleVoiceResult(text)
-        }
-        voiceService.onError = { [weak self] error in
-            self?.voiceState.setError(error)
+        // Setup voice service callbacks - use task to capture state
+        Task { @MainActor in
+            // Callbacks will be set when service is ready
+            voiceService.onFinalResult = { text in
+                // Append to draft
+                if !self.draft.isEmpty && !self.draft.hasSuffix(" ") {
+                    self.draft += " "
+                }
+                self.draft += text
+                // Send to mobile
+                Task {
+                    await self.mobileRouter?.sendVoiceTranscript(text)
+                }
+                // Reset state
+                self.voiceState.reset()
+            }
+            voiceService.onError = { error in
+                self.voiceState.setError(error)
+            }
         }
 
         // Initialize mobile command router

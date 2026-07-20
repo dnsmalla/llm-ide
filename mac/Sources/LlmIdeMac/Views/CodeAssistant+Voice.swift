@@ -111,28 +111,6 @@ extension CodeAssistantPanel {
         }
     }
 
-    /// Handle final voice recognition result — append to input.
-    func handleVoiceResult(_ text: String) {
-        Task {
-            // Append transcribed text to input
-            if !draft.isEmpty && !draft.hasSuffix(" ") {
-                draft += " "
-            }
-            draft += text
-
-            // Send to mobile app
-            await mobileRouter?.sendVoiceTranscript(text)
-
-            // Reset voice state
-            voiceState.reset()
-        }
-    }
-
-    /// Handle interim voice results while user is still speaking.
-    func handleVoiceInterimResult(_ text: String) {
-        voiceState.updateInterimText(text)
-    }
-
     // MARK: - Keyboard Shortcuts
 
     /// Register keyboard shortcuts: Cmd+M for voice, Alt+arrows for mobile.
