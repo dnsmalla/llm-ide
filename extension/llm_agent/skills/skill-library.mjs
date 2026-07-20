@@ -14,7 +14,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 // Families NOT already surfaced via /kb/agent/catalog (which covers
 // agent-globals + agent-tools). These are the "all the other skills".

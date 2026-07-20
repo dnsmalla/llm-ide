@@ -6,7 +6,7 @@
 
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 const VALID_KINDS = new Set(['read', 'write']);
 const VALID_SCHEMA_TYPES = new Set(['string', 'number', 'boolean', 'string[]']);

@@ -23,7 +23,7 @@
 import { readdirSync, readFileSync, statSync, lstatSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import os from 'node:os';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 // Reserved slug — never let a plugin pretend to be a core skill.
 const RESERVED_NAMES = new Set(['global', 'internal', 'core', 'kb', 'system']);
