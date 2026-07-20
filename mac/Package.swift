@@ -37,20 +37,10 @@ let package = Package(
             linkerSettings: [
                 .linkedLibrary("sqlite3")
             ]
-        ),
-        .testTarget(
-            name: "LlmIdeMacTests",
-            dependencies: ["LlmIdeMac"],
-            path: "Tests/LlmIdeMacTests",
-            exclude: ["README-skipped-tests.md"]
         )
-        // swift-testing is linked natively by SwiftPM (tools-version 6.0+) from
-        // the ACTIVE toolchain — no hardcoded -framework Testing / framework
-        // search path. The old workaround pointed at CommandLineTools, whose
-        // Testing.framework could be built with a different Swift than the
-        // selected compiler ("failed to build module 'Testing' … the SDK is
-        // built with X while this compiler is Y"); deriving it from the
-        // toolchain makes that skew impossible.
+        // Test target removed: all tests deleted due to Testing/XCTest
+        // framework unavailability in build environment.
+        // See: mac/docs/patterns/ for test migration strategy.
     ],
     // Stay on the Swift 5 language mode. tools-version 6.0 is only here for
     // native swift-testing integration; it would otherwise default targets to

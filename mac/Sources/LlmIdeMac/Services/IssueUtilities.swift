@@ -38,13 +38,13 @@ struct IssueUtilities {
 
     /// Fetch only open issues (common case).
     func fetchOpenIssues(maxPages: Int = 20) async throws -> [RepoIssue] {
-        var filter = RepoIssueFilter(state: .opened, search: "", labelName: "")
+        let filter = RepoIssueFilter(state: .opened, search: "", labelName: "")
         return try await fetchAllIssues(filter: filter, maxPages: maxPages)
     }
 
     /// Fetch issues by state: opened, closed, or all.
     func fetchByState(_ state: RepoIssueFilter.IssueState, maxPages: Int = 20) async throws -> [RepoIssue] {
-        var filter = RepoIssueFilter(state: state, search: "", labelName: "")
+        let filter = RepoIssueFilter(state: state, search: "", labelName: "")
         return try await fetchAllIssues(filter: filter, maxPages: maxPages)
     }
 
