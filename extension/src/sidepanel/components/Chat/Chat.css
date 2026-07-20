@@ -529,3 +529,242 @@
     color: white;
   }
 }
+
+/* ============================================================
+   CHAT WITH VOICE - Voice Input & Mobile Control
+   ============================================================ */
+
+.chat-with-voice {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* Voice & Mobile Controls */
+.chat-voice-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  background: var(--color-bg-1);
+}
+
+/* Voice Input Button */
+.voice-input-btn {
+  background: var(--color-bg-2);
+  border: 2px solid var(--color-border);
+  border-radius: 50%;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+  position: relative;
+}
+
+.voice-input-btn:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
+}
+
+.voice-input-btn.recording {
+  background: var(--color-danger-dim);
+  border-color: var(--color-danger);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(234, 67, 53, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(234, 67, 53, 0);
+  }
+}
+
+.voice-input-btn .recording-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: var(--color-danger);
+  border-radius: 50%;
+  margin-right: 4px;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 49%, 100% {
+    opacity: 1;
+  }
+  50%, 99% {
+    opacity: 0.3;
+  }
+}
+
+.voice-input-btn.recording::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  background: var(--color-danger);
+  border-radius: 50%;
+  animation: wave 2s infinite;
+}
+
+@keyframes wave {
+  0% {
+    box-shadow: 0 0 0 0 rgba(234, 67, 53, 0.7);
+  }
+  100% {
+    box-shadow: 0 0 0 12px rgba(234, 67, 53, 0);
+  }
+}
+
+/* Mobile Status */
+.mobile-status {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  transition: all var(--transition-fast);
+  flex-grow: 1;
+}
+
+.mobile-status.connected {
+  background: var(--color-success-dim);
+  color: var(--color-success);
+  border: 1px solid var(--color-success);
+}
+
+.mobile-status.connected::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--color-success);
+  border-radius: 50%;
+  animation: pulse-green 2s infinite;
+}
+
+@keyframes pulse-green {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.mobile-status.disconnected {
+  background: var(--color-warning-dim);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning);
+}
+
+/* Recording Indicator */
+.recording-indicator {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-danger-dim);
+  border-top: 1px solid var(--color-danger);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  text-align: center;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Interim Text Display */
+.interim-text {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-2);
+  border-top: 1px dashed var(--color-border);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-style: italic;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.interim-text .cursor {
+  animation: blink-cursor 1s infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 49% {
+    opacity: 1;
+  }
+  50%, 100% {
+    opacity: 0;
+  }
+}
+
+/* Voice Input - Mobile Mode */
+.chat-with-voice > .chat-container {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Responsive Voice Controls */
+@media (max-width: 479px) {
+  .chat-voice-controls {
+    padding: var(--space-2) var(--space-3);
+    gap: var(--space-2);
+  }
+
+  .voice-input-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+  }
+
+  .mobile-status {
+    display: none;
+  }
+}
+
+/* Keyboard Shortcuts Display */
+.voice-shortcuts {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  gap: var(--space-3);
+  overflow-x: auto;
+}
+
+.shortcut-item {
+  display: flex;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+
+.shortcut-key {
+  background: var(--color-bg-2);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  border: 1px solid var(--color-border);
+}
