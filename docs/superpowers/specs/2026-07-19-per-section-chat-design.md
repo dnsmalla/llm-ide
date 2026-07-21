@@ -1,3 +1,5 @@
+> **Superseded (storage/UI):** Multi-session UUID history per scope — see `2026-07-21-cursor-style-chat-history-design.md`. Per-section isolation and Plans removal remain in effect.
+
 # Per-Section Chat — Design
 
 ## Goal
