@@ -181,6 +181,19 @@ struct CodeAssistantPanel: View {
     @State private var agentIsAutonomous: Bool = false
     @State private var agentStopRequested: Bool = false
     @State private var agentPendingTasks: [AgentTask] = []
+    /// Bumped every time the active chat session changes (create/switch/
+    /// delete-fallback). Captured by the auto-continue `asyncAfter` closure
+    /// before its delay; if the epoch has moved on by the time it fires, the
+    /// closure no-ops instead of starting a turn against a different chat's
+    /// history. `agentStopRequested` alone isn't enough here because it's a
+    /// single shared flag, not scoped to the session that scheduled the
+    /// closure.
+    @State private var sessionEpoch: UInt = 0
+    /// While `true`, `handleHistoryChange` persists but skips the VoiceOver
+    /// announcement. Set around bulk history loads (switch/delete-fallback/
+    /// on-appear) so restoring an old chat doesn't read its last message
+    /// aloud as if the assistant had just replied.
+    @State private var suppressHistoryAnnounce = false
 
     /// Context passed to ReportFaultSheet — captured at the moment the
     /// user clicks "Report this" so the sheet sees the prompt + answer
@@ -334,6 +347,7 @@ struct CodeAssistantPanel: View {
         if currentSessionIDString.isEmpty {
             currentSessionIDString = UserDefaults.standard.string(forKey: pointerKey) ?? ""
         }
+        suppressHistoryAnnounce = true
         if let cur = UUID(uuidString: currentSessionIDString),
            let session = ChatSessionStore.load(id: cur),
            session.scope == scope {
@@ -345,13 +359,9 @@ struct CodeAssistantPanel: View {
             rebuildSentPrompts(from: newest.history)
             UserDefaults.standard.set(currentSessionIDString, forKey: pointerKey)
         } else {
-            let fresh = ChatSession(scope: scope)
-            ChatSessionStore.save(fresh)
-            currentSessionIDString = fresh.id.uuidString
-            history = []
-            UserDefaults.standard.set(currentSessionIDString, forKey: pointerKey)
-            refreshSessions()
+            mintFreshSession()
         }
+        DispatchQueue.main.async { suppressHistoryAnnounce = false }
         if let url = initialURL, !didAttachInitial {
             didAttachInitial = true
             if addFile(url: url) == .added {
@@ -388,6 +398,7 @@ struct CodeAssistantPanel: View {
 
     private func handleHistoryChange(oldValue: [LlmIdeAPIClient.CodeAssistTurn], newValue: [LlmIdeAPIClient.CodeAssistTurn]) {
         persistCurrentChat(history: Array(newValue.suffix(50)))
+        guard !suppressHistoryAnnounce else { return }
         if newValue.count > oldValue.count,
            let last = newValue.last,
            last.role == .assistant {
@@ -2380,7 +2391,12 @@ struct CodeAssistantPanel: View {
             // Auto-continue if the agent has pending work and the user hasn't stopped
             if resp.continueNeeded == true && !agentStopRequested {
                 agentIsAutonomous = true
+                let scheduledEpoch = sessionEpoch
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    // The active chat may have changed (switch/new/delete)
+                    // during this delay — don't let a stale continuation
+                    // fire a turn against a different session's history.
+                    guard self.sessionEpoch == scheduledEpoch else { return }
                     guard !self.agentStopRequested else {
                         self.agentIsAutonomous = false
                         return
@@ -2655,6 +2671,12 @@ struct CodeAssistantPanel: View {
 
     /// Persist `history` into the current UUID session file, deriving a
     /// title from the first user turn if it's still "New chat".
+    ///
+    /// Does NOT call `refreshSessions()` — this runs on every history change
+    /// (i.e. every turn), and the sidebar/dropdown session list only needs
+    /// to reflect the latest title/timestamp when it's actually shown or
+    /// when sessions are created/switched/deleted. Reloading the list from
+    /// disk on every message was wasted work on the hot path.
     private func persistCurrentChat(history: [LlmIdeAPIClient.CodeAssistTurn]) {
         guard let id = UUID(uuidString: currentSessionIDString) else { return }
         var session = ChatSessionStore.load(id: id) ?? ChatSession(id: id, scope: scope)
@@ -2671,7 +2693,6 @@ struct CodeAssistantPanel: View {
             }
         }
         ChatSessionStore.save(session)
-        refreshSessions()
     }
 
     /// Reload `sessions` for this scope from disk, newest first.
@@ -2699,9 +2720,18 @@ struct CodeAssistantPanel: View {
         expandedTurns.removeAll()
     }
 
-    /// Reset all composer + agent transient state for a freshly created or
-    /// switched-to chat. Does not touch `history` — callers set that first.
-    private func resetComposerState() {
+    /// Reset all composer + agent transient state for a freshly created,
+    /// switched-to, or fallback chat. Does NOT touch `history` — callers are
+    /// responsible for that. If the caller also calls `rebuildSentPrompts`
+    /// (i.e. it's loading a non-empty history rather than starting a blank
+    /// chat), call it AFTER this so its seeded `sentPrompts`/`historyIndex`/
+    /// `draftStash` aren't clobbered by the blanket reset below.
+    ///
+    /// Bumps `sessionEpoch` and mints a fresh `agentSessionId`, so anything
+    /// tied to the outgoing session — in particular the auto-continue
+    /// `asyncAfter` closure scheduled from `startTurn` — can detect the
+    /// switch and no-op instead of acting on the new session's history.
+    private func resetTransientSessionState() {
         sentPrompts = []; historyIndex = nil; draftStash = ""
         draft = ""
         attachments.removeAll()
@@ -2714,6 +2744,21 @@ struct CodeAssistantPanel: View {
         agentPendingTasks = []
         agentIsAutonomous = false
         agentStopRequested = false
+        sessionEpoch += 1
+    }
+
+    /// Save `fresh` as the new current session, point all the bookkeeping
+    /// (pointer, defaults, sessions list) at it, and reset transient state
+    /// for a blank chat. Shared tail of `createNewSession` and the
+    /// no-sessions-left branch of `deleteSession`.
+    private func mintFreshSession() {
+        let fresh = ChatSession(scope: scope)
+        ChatSessionStore.save(fresh)
+        currentSessionIDString = fresh.id.uuidString
+        rememberCurrentPointer()
+        refreshSessions()
+        history = []
+        resetTransientSessionState()
     }
 
     /// Start a new empty chat for this scope. No-op if the current chat is
@@ -2726,13 +2771,7 @@ struct CodeAssistantPanel: View {
         }
         persistCurrentChat(history: Array(history.suffix(50)))
         resetActiveTurnState()
-        let fresh = ChatSession(scope: scope)
-        ChatSessionStore.save(fresh)
-        currentSessionIDString = fresh.id.uuidString
-        rememberCurrentPointer()
-        refreshSessions()
-        history = []
-        resetComposerState()
+        mintFreshSession()
     }
 
     /// Switch the active chat to `id`, persisting the outgoing chat first.
@@ -2743,15 +2782,11 @@ struct CodeAssistantPanel: View {
         resetActiveTurnState()
         currentSessionIDString = id.uuidString
         rememberCurrentPointer()
+        resetTransientSessionState()
+        suppressHistoryAnnounce = true
         history = session.history
         rebuildSentPrompts(from: session.history)
-        draft = ""
-        attachments.removeAll()
-        selectedSkills.removeAll()
-        autoAttachedPath = nil
-        attachNotice = nil
-        pendingTool = nil
-        error = nil
+        DispatchQueue.main.async { suppressHistoryAnnounce = false }
         ChatSessionStore.save(session)
         refreshSessions()
     }
@@ -2766,19 +2801,15 @@ struct CodeAssistantPanel: View {
             if let next = sessions.first {
                 currentSessionIDString = next.id.uuidString
                 rememberCurrentPointer()
+                resetTransientSessionState()
+                suppressHistoryAnnounce = true
                 history = next.history
                 rebuildSentPrompts(from: next.history)
+                DispatchQueue.main.async { suppressHistoryAnnounce = false }
             } else {
-                // Clear the pointer first so createNewSession's empty-chat
-                // no-op (which checks currentSessionIDString) doesn't apply.
-                currentSessionIDString = ""
-                let fresh = ChatSession(scope: scope)
-                ChatSessionStore.save(fresh)
-                currentSessionIDString = fresh.id.uuidString
-                rememberCurrentPointer()
-                refreshSessions()
-                history = []
-                resetComposerState()
+                // No sessions left for this scope — mint a blank one and
+                // point everything (pointer, defaults, sessions list) at it.
+                mintFreshSession()
             }
         }
     }
