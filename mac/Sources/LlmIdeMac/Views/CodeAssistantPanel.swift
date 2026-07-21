@@ -163,7 +163,7 @@ struct CodeAssistantPanel: View {
     @StateObject private var completion = CompletionController()
     /// Web search enhancement: history and caching
     @StateObject private var webSearch = WebSearchService()
-    /// Voice input service — macOS NSSpeechRecognizer wrapper
+    /// Voice input service — SFSpeechRecognizer + mic tap for freeform dictation
     @State var voiceService = VoiceInputService()
     /// Voice UI state — recording, interim text, errors
     @State var voiceState = ChatVoiceState()
@@ -373,17 +373,17 @@ struct CodeAssistantPanel: View {
         Task { @MainActor in
             // Callbacks will be set when service is ready
             voiceService.onFinalResult = { text in
-                // Append to draft
                 if !self.draft.isEmpty && !self.draft.hasSuffix(" ") {
                     self.draft += " "
                 }
                 self.draft += text
-                // Send to mobile
                 Task {
                     await self.mobileRouter?.sendVoiceTranscript(text)
                 }
-                // Reset state
                 self.voiceState.reset()
+            }
+            voiceService.onPartialResult = { text in
+                self.voiceState.updateInterimText(text)
             }
             voiceService.onError = { error in
                 self.voiceState.setError(error)

@@ -124,7 +124,9 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <key>NSSupportsAutomaticTermination</key>
     <false/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>LLM IDE uses the microphone only when caption scraping is unavailable, as a fallback transcription source.</string>
+    <string>LLM IDE uses the microphone for chat voice input and as a fallback transcription source when caption scraping is unavailable.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>LLM IDE converts your spoken words into text for the chat composer.</string>
     <key>NSScreenCaptureDescription</key>
     <string>LLM IDE can capture audio from a single meeting app (Zoom, Teams, etc.) when its in-app captions are not exposed.</string>
     <key>NSAppTransportSecurity</key>

@@ -53,6 +53,10 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>LLM IDE uses the microphone for chat voice input and as a fallback transcription source when caption scraping is unavailable.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>LLM IDE converts your spoken words into text for the chat composer.</string>
 </dict>
 </plist>
 PLIST

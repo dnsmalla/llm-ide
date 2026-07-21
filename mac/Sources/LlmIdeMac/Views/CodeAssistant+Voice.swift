@@ -98,14 +98,17 @@ extension CodeAssistantPanel {
     /// Toggle voice input recording on/off. Cmd+M keyboard shortcut.
     func toggleVoiceInput() {
         if voiceState.isRecording {
-            // Stop listening
             voiceState.setRecording(false)
             voiceService.stopListening()
-        } else {
-            // Start listening
-            voiceState.setRecording(true)
-            let started = voiceService.startListening()
-            if !started {
+            return
+        }
+        Task { @MainActor in
+            let started = await voiceService.startListening()
+            if started {
+                voiceState.setRecording(true)
+            } else if voiceState.error == nil {
+                // Service already called onError for specific permission / locale
+                // failures; only set a generic fallback when nothing else landed.
                 voiceState.setError("Failed to start voice input")
             }
         }
