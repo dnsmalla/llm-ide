@@ -13,42 +13,40 @@ enum ChatScope: String, Codable, CaseIterable {
 /// here. Lives as a standalone JSON file under Application Support so a turn
 /// only rewrites one small file.
 struct ChatSession: Identifiable, Codable, Equatable {
-    /// Persistence schema version. Bump whenever the on-disk layout
-    /// breaks. Absent on legacy files written before this field
-    /// existed — `init(from:)` defaults to `1` in that case so old
-    /// sessions keep decoding. See `docs/reference/persistence.md`.
     var storeVersion: Int = 1
     let id: UUID
-    /// Auto-derived from the first user turn the first time the user
-    /// sends a message in this session. Can be renamed later (UI not
-    /// shipped in this commit but the field is editable).
+    /// Section this chat belongs to. Nil only when decoding legacy UUID
+    /// files written before scope existed — those are orphans and must not
+    /// appear in `list(for:)`.
+    var scope: ChatScope?
     var title: String
     let createdAt: Date
     var lastUsedAt: Date
     var history: [LlmIdeAPIClient.CodeAssistTurn]
 
     init(id: UUID = UUID(),
+         scope: ChatScope,
          title: String = "New chat",
          createdAt: Date = Date(),
          lastUsedAt: Date = Date(),
          history: [LlmIdeAPIClient.CodeAssistTurn] = []) {
         self.id = id
+        self.scope = scope
         self.title = title
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
         self.history = history
     }
 
-    // Custom decode so files written before `storeVersion` existed
-    // continue to load. New writes always include the field.
     enum CodingKeys: String, CodingKey {
-        case storeVersion, id, title, createdAt, lastUsedAt, history
+        case storeVersion, id, scope, title, createdAt, lastUsedAt, history
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.storeVersion = (try? c.decode(Int.self, forKey: .storeVersion)) ?? 1
         self.id = try c.decode(UUID.self, forKey: .id)
+        self.scope = try? c.decode(ChatScope.self, forKey: .scope)
         self.title = try c.decode(String.self, forKey: .title)
         self.createdAt = try c.decode(Date.self, forKey: .createdAt)
         self.lastUsedAt = try c.decode(Date.self, forKey: .lastUsedAt)
