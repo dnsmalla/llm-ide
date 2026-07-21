@@ -1,12 +1,12 @@
 import Foundation
 import os.log
 
-/// Per-section chat persistence. Each sidebar section that shows chat
-/// (Explorer, Review Conflicts, Visual, Doc Gen) owns exactly one chat,
-/// stored as `~/Library/Application Support/LLM IDE/sessions/<scope>.json`.
-/// The section (`ChatScope`) is the identity — load/save/clear are keyed by
-/// it. Corrupt files are renamed `.corrupt-<unix-ts>` and skipped (a fresh
-/// session is returned), mirroring the prior ChatHistoryStore pattern.
+/// Multi-session chat persistence. Each chat is a UUID JSON file under
+/// `~/Library/Application Support/LLM IDE/sessions/<uuid>.json`, tagged with
+/// a `ChatScope` for listing and migration. Legacy one-file-per-scope
+/// (`sessions/<scope>.json`) is migrated once on first access. Corrupt files
+/// are renamed `.corrupt-<unix-ts>` and skipped, mirroring the prior
+/// ChatHistoryStore pattern.
 enum ChatSessionStore {
     private static let log = Logger(subsystem: "com.llmide.macapp", category: "ChatSessionStore")
 
@@ -36,57 +36,120 @@ enum ChatSessionStore {
         return dir
     }
 
-    /// Wipe every session — used by Sign Out.
-    static func clear() {
-        guard let dir = sessionsDir else { return }
-        try? FileManager.default.removeItem(at: dir)
+    private static func fileURL(for id: UUID) -> URL? {
+        sessionsDir?.appendingPathComponent("\(id.uuidString).json")
     }
 
-    // MARK: - Per-section (scope-keyed) chat
-
-    /// The chat file for `scope`: `sessions/<scope>.json`.
-    private static func scopeFileURL(for scope: ChatScope) -> URL? {
+    private static func legacyScopeFileURL(for scope: ChatScope) -> URL? {
         sessionsDir?.appendingPathComponent("\(scope.rawValue).json")
     }
 
-    /// The one chat for this section, or a fresh empty session if none is
-    /// saved yet (first open). Corrupt files are quarantined like the legacy
-    /// path and a fresh session is returned.
-    static func load(for scope: ChatScope) -> ChatSession {
-        guard let url = scopeFileURL(for: scope),
-              FileManager.default.fileExists(atPath: url.path),
-              let data = try? Data(contentsOf: url) else {
-            return ChatSession()
+    /// List sessions for `scope`, newest `lastUsedAt` first. Skips orphans
+    /// (decoded files with nil scope) and non-matching scopes.
+    static func list(for scope: ChatScope) -> [ChatSession] {
+        guard let dir = sessionsDir,
+              let contents = try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: nil) else { return [] }
+        var out: [ChatSession] = []
+        for url in contents where url.pathExtension == "json" {
+            // Skip legacy scope filenames — migration owns those.
+            let name = url.deletingPathExtension().lastPathComponent
+            if ChatScope(rawValue: name) != nil { continue }
+            guard let data = try? Data(contentsOf: url) else { continue }
+            do {
+                let s = try AppJSON.decoder.decode(ChatSession.self, from: data)
+                if s.scope == scope { out.append(s) }
+            } catch {
+                quarantine(url, error: error)
+            }
         }
+        return out.sorted { $0.lastUsedAt > $1.lastUsedAt }
+    }
+
+    static func load(id: UUID) -> ChatSession? {
+        guard let url = fileURL(for: id),
+              FileManager.default.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url) else { return nil }
         do {
             return try AppJSON.decoder.decode(ChatSession.self, from: data)
         } catch {
-            log.warning("chat_session_decode_failed scope=\(scope.rawValue, privacy: .public) err=\(error.localizedDescription, privacy: .public)")
-            let stamp = Int(Date().timeIntervalSince1970)
-            let corrupt = url.deletingPathExtension().appendingPathExtension("corrupt-\(stamp)")
-            try? FileManager.default.moveItem(at: url, to: corrupt)
-            return ChatSession()
+            quarantine(url, error: error)
+            return nil
         }
     }
 
-    /// Persist `session` as this section's chat (`sessions/<scope>.json`).
-    /// Bumps `lastUsedAt` so the file reflects the last touch.
-    static func save(_ session: ChatSession, for scope: ChatScope) {
-        guard let url = scopeFileURL(for: scope) else { return }
+    static func save(_ session: ChatSession) {
+        guard session.scope != nil, let url = fileURL(for: session.id) else { return }
         var bumped = session
         bumped.lastUsedAt = Date()
         do {
             let data = try AppJSON.encoder.encode(bumped)
             try data.write(to: url, options: .atomic)
         } catch {
-            log.warning("chat_session_save_failed scope=\(scope.rawValue, privacy: .public) err=\(error.localizedDescription, privacy: .public)")
+            log.warning("chat_session_save_failed id=\(session.id.uuidString, privacy: .public) err=\(error.localizedDescription, privacy: .public)")
         }
     }
 
-    /// Delete one section's chat file — the "Clear chat" action. The on-disk
-    /// file goes away; the in-memory history is reset by the caller.
-    static func clear(for scope: ChatScope) {
-        guard let url = scopeFileURL(for: scope) else { return }
+    static func delete(id: UUID) {
+        guard let url = fileURL(for: id) else { return }
         try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Delete every UUID session whose scope matches (not the legacy file).
+    static func clear(for scope: ChatScope) {
+        for s in list(for: scope) { delete(id: s.id) }
+    }
+
+    /// Sign-out: wipe the whole sessions directory.
+    static func clear() {
+        guard let dir = sessionsDir else { return }
+        try? FileManager.default.removeItem(at: dir)
+    }
+
+    /// If `sessions/<scope>.json` exists, convert once to a UUID file with
+    /// `scope` set, delete the legacy file, and return the migrated session.
+    /// Idempotent when no legacy file remains.
+    static func migrateScopeFileIfNeeded(for scope: ChatScope) -> ChatSession? {
+        guard let legacy = legacyScopeFileURL(for: scope),
+              FileManager.default.fileExists(atPath: legacy.path) else { return nil }
+        guard let data = try? Data(contentsOf: legacy) else {
+            try? FileManager.default.removeItem(at: legacy)
+            return nil
+        }
+        do {
+            var session = try AppJSON.decoder.decode(ChatSession.self, from: data)
+            session.scope = scope
+            save(session)
+            try? FileManager.default.removeItem(at: legacy)
+            return session
+        } catch {
+            quarantine(legacy, error: error)
+            return nil
+        }
+    }
+
+    // MARK: - TEMP shims (remove in Task 4)
+
+    /// TEMP — remove in Task 4
+    static func load(for scope: ChatScope) -> ChatSession {
+        _ = migrateScopeFileIfNeeded(for: scope)
+        if let first = list(for: scope).first { return first }
+        let fresh = ChatSession(scope: scope)
+        save(fresh)
+        return fresh
+    }
+
+    /// TEMP — remove in Task 4
+    static func save(_ session: ChatSession, for scope: ChatScope) {
+        var s = session
+        s.scope = scope
+        save(s)
+    }
+
+    private static func quarantine(_ url: URL, error: Error) {
+        log.warning("chat_session_decode_failed file=\(url.lastPathComponent, privacy: .public) err=\(error.localizedDescription, privacy: .public)")
+        let stamp = Int(Date().timeIntervalSince1970)
+        let corrupt = url.deletingPathExtension().appendingPathExtension("corrupt-\(stamp)")
+        try? FileManager.default.moveItem(at: url, to: corrupt)
     }
 }
