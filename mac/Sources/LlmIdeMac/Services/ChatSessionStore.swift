@@ -95,9 +95,13 @@ enum ChatSessionStore {
         try? FileManager.default.removeItem(at: url)
     }
 
-    /// Delete every UUID session whose scope matches (not the legacy file).
+    /// Delete every UUID session whose scope matches, plus any legacy scope file.
     static func clear(for scope: ChatScope) {
         for s in list(for: scope) { delete(id: s.id) }
+        if let legacy = legacyScopeFileURL(for: scope),
+           FileManager.default.fileExists(atPath: legacy.path) {
+            try? FileManager.default.removeItem(at: legacy)
+        }
     }
 
     /// Sign-out: wipe the whole sessions directory.
@@ -113,14 +117,22 @@ enum ChatSessionStore {
         guard let legacy = legacyScopeFileURL(for: scope),
               FileManager.default.fileExists(atPath: legacy.path) else { return nil }
         guard let data = try? Data(contentsOf: legacy) else {
-            try? FileManager.default.removeItem(at: legacy)
+            log.warning("chat_session_legacy_read_failed file=\(legacy.lastPathComponent, privacy: .public)")
+            quarantineUnreadable(legacy)
             return nil
         }
         do {
             var session = try AppJSON.decoder.decode(ChatSession.self, from: data)
             session.scope = scope
             save(session)
-            try? FileManager.default.removeItem(at: legacy)
+            do {
+                try FileManager.default.removeItem(at: legacy)
+            } catch {
+                log.warning("chat_session_legacy_delete_failed file=\(legacy.lastPathComponent, privacy: .public) err=\(error.localizedDescription, privacy: .public)")
+            }
+            if FileManager.default.fileExists(atPath: legacy.path) {
+                log.warning("chat_session_legacy_still_present file=\(legacy.lastPathComponent, privacy: .public)")
+            }
             return session
         } catch {
             quarantine(legacy, error: error)
@@ -134,9 +146,7 @@ enum ChatSessionStore {
     static func load(for scope: ChatScope) -> ChatSession {
         _ = migrateScopeFileIfNeeded(for: scope)
         if let first = list(for: scope).first { return first }
-        let fresh = ChatSession(scope: scope)
-        save(fresh)
-        return fresh
+        return ChatSession(scope: scope)
     }
 
     /// TEMP — remove in Task 4
@@ -148,6 +158,10 @@ enum ChatSessionStore {
 
     private static func quarantine(_ url: URL, error: Error) {
         log.warning("chat_session_decode_failed file=\(url.lastPathComponent, privacy: .public) err=\(error.localizedDescription, privacy: .public)")
+        quarantineUnreadable(url)
+    }
+
+    private static func quarantineUnreadable(_ url: URL) {
         let stamp = Int(Date().timeIntervalSince1970)
         let corrupt = url.deletingPathExtension().appendingPathExtension("corrupt-\(stamp)")
         try? FileManager.default.moveItem(at: url, to: corrupt)
