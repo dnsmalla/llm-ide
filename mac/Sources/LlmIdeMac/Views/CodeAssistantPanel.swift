@@ -31,8 +31,10 @@ enum EditAcceptanceMode: String, CaseIterable, Identifiable {
 
 struct CodeAssistantPanel: View {
     let api: LlmIdeAPIClient
-    /// Which section this chat belongs to — keys the persisted chat file
-    /// (`sessions/<scope>.json`). Required: each embedding site passes its own.
+    /// Which section this chat belongs to. Chats are UUID files under
+    /// `sessions/<uuid>.json` tagged with this scope; `ChatSessionStore`
+    /// lists/filters by it and a per-scope pointer in UserDefaults tracks
+    /// the current session. Required: each embedding site passes its own.
     let scope: ChatScope
     /// When set, this file is attached automatically the first time the panel appears.
     var initialURL: URL? = nil
@@ -78,6 +80,13 @@ struct CodeAssistantPanel: View {
     @State private var sentPrompts: [String] = []
     @State private var historyIndex: Int? = nil
     @State private var draftStash: String = ""
+    /// Recent chats for this scope, newest `lastUsedAt` first — backs the
+    /// session-picker popover.
+    @State private var sessions: [ChatSession] = []
+    @State private var showingSessionPicker = false
+    /// UUID string of the chat currently loaded into `history`. Mirrored to
+    /// UserDefaults under `chat.current.<scope>` so it survives relaunch.
+    @State private var currentSessionIDString: String = ""
     @State var busy: Bool = false
     /// Live agent status streamed from /code-assist (SSE): "Searching the web…",
     /// "Writing the answer…", etc. Shown in place of a static "Thinking…" so a
@@ -319,9 +328,30 @@ struct CodeAssistantPanel: View {
                 ? AICliTool.claudeCode.defaultModelId
                 : config.defaultModelId
         }
-        let session = ChatSessionStore.load(for: scope)
-        history = session.history
-        rebuildSentPrompts(from: session.history)
+        _ = ChatSessionStore.migrateScopeFileIfNeeded(for: scope)
+        refreshSessions()
+        let pointerKey = "chat.current.\(scope.rawValue)"
+        if currentSessionIDString.isEmpty {
+            currentSessionIDString = UserDefaults.standard.string(forKey: pointerKey) ?? ""
+        }
+        if let cur = UUID(uuidString: currentSessionIDString),
+           let session = ChatSessionStore.load(id: cur),
+           session.scope == scope {
+            history = session.history
+            rebuildSentPrompts(from: session.history)
+        } else if let newest = sessions.first {
+            currentSessionIDString = newest.id.uuidString
+            history = newest.history
+            rebuildSentPrompts(from: newest.history)
+            UserDefaults.standard.set(currentSessionIDString, forKey: pointerKey)
+        } else {
+            let fresh = ChatSession(scope: scope)
+            ChatSessionStore.save(fresh)
+            currentSessionIDString = fresh.id.uuidString
+            history = []
+            UserDefaults.standard.set(currentSessionIDString, forKey: pointerKey)
+            refreshSessions()
+        }
         if let url = initialURL, !didAttachInitial {
             didAttachInitial = true
             if addFile(url: url) == .added {
@@ -819,14 +849,111 @@ struct CodeAssistantPanel: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
+            sessionDropdownButton
             clearChatButton
         }
         .padding(.horizontal, isVeryCompact ? 6 : Spacing.md)
         .padding(.vertical, 8)
     }
 
-    /// Header button: wipe this section's chat (replaces the multi-session
-    /// picker — there's one chat per section now).
+    /// Cursor-style chat-list dropdown: shows the current session's
+    /// title and opens a popover with recent sessions + "New chat".
+    private var sessionDropdownButton: some View {
+        Button {
+            // Refresh the list every time the popover opens so the
+            // ordering reflects the latest `lastUsedAt`.
+            refreshSessions()
+            showingSessionPicker.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.system(size: 10, weight: .medium))
+                if !isVeryCompact {
+                    Text(currentSessionTitle)
+                        .font(.system(size: 11))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .medium))
+            }
+            .padding(.horizontal, isVeryCompact ? 4 : 8)
+            .padding(.vertical, 4)
+            .foregroundStyle(theme.current.textMuted)
+            .frame(maxWidth: isCompact ? 90 : 220, alignment: .trailing)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Switch chat session")
+        .accessibilityLabel("Switch chat session")
+        .popover(isPresented: $showingSessionPicker, arrowEdge: .top) {
+            sessionPickerPopover
+        }
+    }
+
+    private var currentSessionTitle: String {
+        guard let cur = UUID(uuidString: currentSessionIDString),
+              let s = sessions.first(where: { $0.id == cur }) else {
+            return "New chat"
+        }
+        return s.title.isEmpty ? "New chat" : s.title
+    }
+
+    private var sessionPickerPopover: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                showingSessionPicker = false
+                createNewSession()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .medium))
+                    Text("New chat")
+                        .font(.system(size: 12, weight: .medium))
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.current.text)
+
+            Divider()
+
+            if sessions.isEmpty {
+                Text("No saved chats yet.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.current.textMuted)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(sessions.prefix(20))) { session in
+                            SessionRow(
+                                session: session,
+                                isActive: session.id.uuidString == currentSessionIDString,
+                                onSelect: {
+                                    showingSessionPicker = false
+                                    switchSession(to: session.id)
+                                },
+                                onDelete: {
+                                    deleteSession(session.id)
+                                }
+                            )
+                            .environmentObject(theme)
+                        }
+                    }
+                }
+                .frame(maxHeight: 320)
+            }
+        }
+        .frame(width: 320)
+    }
+
+    /// Header button: delete the current chat (mints a fresh empty one if
+    /// it was the last remaining session for this scope).
     private var clearChatButton: some View {
         Button {
             clearCurrentChat()
@@ -839,9 +966,9 @@ struct CodeAssistantPanel: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Clear this section's chat")
-        .accessibilityLabel("Clear chat")
-        .disabled(history.isEmpty)
+        .help("Delete current chat")
+        .accessibilityLabel("Delete current chat")
+        .disabled(history.isEmpty && sessions.count <= 1)
     }
 
     // MARK: - Chat scroll
@@ -2526,10 +2653,12 @@ struct CodeAssistantPanel: View {
 
     // MARK: - Session management
 
-    /// Persist `history` into this section's chat file, deriving a title
-    /// from the first user turn if it's still "New chat".
+    /// Persist `history` into the current UUID session file, deriving a
+    /// title from the first user turn if it's still "New chat".
     private func persistCurrentChat(history: [LlmIdeAPIClient.CodeAssistTurn]) {
-        var session = ChatSessionStore.load(for: scope)
+        guard let id = UUID(uuidString: currentSessionIDString) else { return }
+        var session = ChatSessionStore.load(id: id) ?? ChatSession(id: id, scope: scope)
+        session.scope = scope
         session.history = history
         if session.title == "New chat" || session.title.isEmpty {
             if let firstUser = history.first(where: { $0.role == .user }) {
@@ -2541,15 +2670,27 @@ struct CodeAssistantPanel: View {
                 }
             }
         }
-        ChatSessionStore.save(session, for: scope)
+        ChatSessionStore.save(session)
+        refreshSessions()
+    }
+
+    /// Reload `sessions` for this scope from disk, newest first.
+    private func refreshSessions() {
+        sessions = ChatSessionStore.list(for: scope)
+    }
+
+    /// Mirror `currentSessionIDString` to UserDefaults so the current chat
+    /// survives relaunch.
+    private func rememberCurrentPointer() {
+        UserDefaults.standard.set(currentSessionIDString, forKey: "chat.current.\(scope.rawValue)")
     }
 
     /// Cancel any in-flight turn and clear per-conversation transient
-    /// state (`busy`, `queued`, `expandedTurns`). Called from
-    /// `clearCurrentChat()` when this section's chat is cleared, so a
-    /// running reply can't land its result in — or leave `busy` stuck
-    /// locking — the freshly emptied chat, and queued messages /
-    /// expanded-turn ids don't survive the clear.
+    /// state (`busy`, `queued`, `expandedTurns`). Called whenever the
+    /// active chat is swapped out (create/switch/delete) so a running
+    /// reply can't land its result in — or leave `busy` stuck locking —
+    /// the newly active chat, and queued messages / expanded-turn ids
+    /// don't survive the swap.
     private func resetActiveTurnState() {
         runTask?.cancel()
         runTask = nil
@@ -2558,13 +2699,9 @@ struct CodeAssistantPanel: View {
         expandedTurns.removeAll()
     }
 
-    /// Clear this section's chat: delete the file and reset all composer
-    /// + agent state. (Replaces the old "new session" action — there is now
-    /// exactly one chat per section.)
-    private func clearCurrentChat() {
-        ChatSessionStore.clear(for: scope)
-        resetActiveTurnState()
-        history = []
+    /// Reset all composer + agent transient state for a freshly created or
+    /// switched-to chat. Does not touch `history` — callers set that first.
+    private func resetComposerState() {
         sentPrompts = []; historyIndex = nil; draftStash = ""
         draft = ""
         attachments.removeAll()
@@ -2577,6 +2714,83 @@ struct CodeAssistantPanel: View {
         agentPendingTasks = []
         agentIsAutonomous = false
         agentStopRequested = false
+    }
+
+    /// Start a new empty chat for this scope. No-op if the current chat is
+    /// already an untouched "New chat" (avoids duplicate empty rows from
+    /// repeated taps on "+ New chat").
+    private func createNewSession() {
+        if history.isEmpty {
+            let title = sessions.first(where: { $0.id.uuidString == currentSessionIDString })?.title ?? "New chat"
+            if title == "New chat" || title.isEmpty { return }
+        }
+        persistCurrentChat(history: Array(history.suffix(50)))
+        resetActiveTurnState()
+        let fresh = ChatSession(scope: scope)
+        ChatSessionStore.save(fresh)
+        currentSessionIDString = fresh.id.uuidString
+        rememberCurrentPointer()
+        refreshSessions()
+        history = []
+        resetComposerState()
+    }
+
+    /// Switch the active chat to `id`, persisting the outgoing chat first.
+    private func switchSession(to id: UUID) {
+        guard id.uuidString != currentSessionIDString else { return }
+        guard let session = ChatSessionStore.load(id: id), session.scope == scope else { return }
+        persistCurrentChat(history: Array(history.suffix(50)))
+        resetActiveTurnState()
+        currentSessionIDString = id.uuidString
+        rememberCurrentPointer()
+        history = session.history
+        rebuildSentPrompts(from: session.history)
+        draft = ""
+        attachments.removeAll()
+        selectedSkills.removeAll()
+        autoAttachedPath = nil
+        attachNotice = nil
+        pendingTool = nil
+        error = nil
+        ChatSessionStore.save(session)
+        refreshSessions()
+    }
+
+    /// Delete chat `id`. If it was the active chat, switch to the next most
+    /// recent session, or mint a fresh empty one if none remain.
+    private func deleteSession(_ id: UUID) {
+        if id.uuidString == currentSessionIDString { resetActiveTurnState() }
+        ChatSessionStore.delete(id: id)
+        refreshSessions()
+        if id.uuidString == currentSessionIDString {
+            if let next = sessions.first {
+                currentSessionIDString = next.id.uuidString
+                rememberCurrentPointer()
+                history = next.history
+                rebuildSentPrompts(from: next.history)
+            } else {
+                // Clear the pointer first so createNewSession's empty-chat
+                // no-op (which checks currentSessionIDString) doesn't apply.
+                currentSessionIDString = ""
+                let fresh = ChatSession(scope: scope)
+                ChatSessionStore.save(fresh)
+                currentSessionIDString = fresh.id.uuidString
+                rememberCurrentPointer()
+                refreshSessions()
+                history = []
+                resetComposerState()
+            }
+        }
+    }
+
+    /// Header trash: delete the current chat (mints a fresh empty one if it
+    /// was the last remaining session for this scope).
+    private func clearCurrentChat() {
+        guard let id = UUID(uuidString: currentSessionIDString) else {
+            createNewSession()
+            return
+        }
+        deleteSession(id)
     }
 
     private func loadLanguage() async {

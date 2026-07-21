@@ -1,17 +1,16 @@
 import Foundation
 
-/// Which sidebar section a chat belongs to. The section IS the chat
-/// identity: each scope maps to exactly one persisted chat file
-/// (`sessions/<scope>.json`). Add a case when a new section gets chat.
+/// Which sidebar section a chat belongs to. A section can own many chats;
+/// `ChatSessionStore.list(for:)` filters the UUID session files down to
+/// this scope. Add a case when a new section gets chat.
 enum ChatScope: String, Codable, CaseIterable {
     case explorer, conflicts, visual, docGen
 }
 
-/// One persisted Code Assistant chat for a single sidebar section. Each
-/// section owns exactly one session, stored as `sessions/<scope>.json`; the
-/// section (not this struct) is the identity, so there is no `scope` field
-/// here. Lives as a standalone JSON file under Application Support so a turn
-/// only rewrites one small file.
+/// One persisted Code Assistant chat. Stored as its own
+/// `sessions/<uuid>.json` file under Application Support, tagged with the
+/// sidebar section (`scope`) it belongs to, so a section can have multiple
+/// chats and a turn only rewrites one small file.
 struct ChatSession: Identifiable, Codable, Equatable {
     var storeVersion: Int = 1
     let id: UUID

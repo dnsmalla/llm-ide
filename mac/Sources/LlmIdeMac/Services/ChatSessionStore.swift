@@ -140,22 +140,6 @@ enum ChatSessionStore {
         }
     }
 
-    // MARK: - TEMP shims (remove in Task 4)
-
-    /// TEMP — remove in Task 4
-    static func load(for scope: ChatScope) -> ChatSession {
-        _ = migrateScopeFileIfNeeded(for: scope)
-        if let first = list(for: scope).first { return first }
-        return ChatSession(scope: scope)
-    }
-
-    /// TEMP — remove in Task 4
-    static func save(_ session: ChatSession, for scope: ChatScope) {
-        var s = session
-        s.scope = scope
-        save(s)
-    }
-
     private static func quarantine(_ url: URL, error: Error) {
         log.warning("chat_session_decode_failed file=\(url.lastPathComponent, privacy: .public) err=\(error.localizedDescription, privacy: .public)")
         quarantineUnreadable(url)
