@@ -2740,6 +2740,7 @@ struct CodeAssistantPanel: View {
         attachNotice = nil
         pendingTool = nil
         error = nil
+        nudgePrompt = nil
         agentSessionId = UUID().uuidString
         agentPendingTasks = []
         agentIsAutonomous = false
