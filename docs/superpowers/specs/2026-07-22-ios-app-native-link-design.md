@@ -229,8 +229,8 @@ Phases 3–5 can be reordered; chat (3) is recommended before capture/input beca
 
 ---
 
-## 9. Open Questions (for review)
+## 9. Resolved Decisions (review defaults applied)
 
-- **Port**: keep the historical `3006`, or pick a fresh port now that there's no Node agent to clash with? (Recommend: keep `3006` to minimize iOS-side churn.)
-- **Bonjour service type rename**: `_aicontrol._tcp` → `_llmide._tcp` requires a matching `NSBonjourServices` entry in the iOS `Info.plist`. Confirmed in scope; flagging the Info.plist edit explicitly.
-- **iPad**: the iOS app targets device family 1,2 (iPhone + iPad). Keep iPad support, or iPhone-only? (Recommend: keep — it's already there.)
+- **Port**: keep `3006` (minimizes iOS-side churn; no Node agent remains to clash with).
+- **Bonjour service type**: `_aicontrol._tcp` → `_llmide._tcp`, with the matching `NSBonjourServices` entry updated in the iOS `Info.plist`.
+- **iPad**: keep support (device family 1,2 is already configured).
