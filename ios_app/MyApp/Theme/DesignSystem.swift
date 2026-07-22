@@ -1,6 +1,6 @@
 //
 //  DesignSystem.swift
-//  Production design system for AI Control
+//  Production design system for LLM IDE
 //
 
 import SwiftUI

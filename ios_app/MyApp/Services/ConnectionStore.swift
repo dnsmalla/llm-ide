@@ -50,7 +50,7 @@ final class ConnectionStore: ObservableObject {
 private enum PinKeychain {
     private static var baseQuery: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: "com.aicontrol.device-pin",
+         kSecAttrService as String: "com.llmide.device-pin",
          kSecAttrAccount as String: "saved-mac"]
     }
 

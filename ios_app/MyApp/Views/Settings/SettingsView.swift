@@ -121,7 +121,7 @@ struct SettingsView: View {
 
                     Divider().padding(.horizontal, DesignSystem.Spacing.md)
 
-                    Text("AI Control connects directly to your Mac over Wi‑Fi or Tailscale. No cloud, no account — your screen never leaves your network.")
+                    Text("LLM IDE connects directly to your Mac over Wi‑Fi or Tailscale. No cloud, no account — your screen never leaves your network.")
                         .font(.system(size: DesignSystem.Typography.footnote))
                         .foregroundColor(DesignSystem.Colors.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)

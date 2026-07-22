@@ -21,13 +21,13 @@ final class SpeechRecognizer: ObservableObject {
         SFSpeechRecognizer.requestAuthorization { [weak self] status in
             Task { @MainActor in
                 guard status == .authorized else {
-                    self?.errorMessage = "Speech recognition not allowed. Enable it in Settings → AI Control."
+                    self?.errorMessage = "Speech recognition not allowed. Enable it in Settings → LLM IDE."
                     return
                 }
                 AVAudioSession.sharedInstance().requestRecordPermission { granted in
                     Task { @MainActor in
                         guard granted else {
-                            self?.errorMessage = "Microphone access needed. Enable it in Settings → AI Control."
+                            self?.errorMessage = "Microphone access needed. Enable it in Settings → LLM IDE."
                             return
                         }
                         self?.beginSession()

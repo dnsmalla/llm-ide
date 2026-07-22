@@ -41,7 +41,7 @@ struct ConnectView: View {
             .padding(DesignSystem.Layout.marginMobile)
         }
         .background(DesignSystem.Colors.background)
-        .navigationTitle("AI Control")
+        .navigationTitle("LLM IDE")
         .navigationBarTitleDisplayMode(.large)
         .onAppear {
             ip  = connectionStore.deviceIP

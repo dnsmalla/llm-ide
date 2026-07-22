@@ -7,7 +7,7 @@ struct DiscoveredDevice: Identifiable, Equatable {
     let port: Int
 }
 
-/// Discovers AI Control agents on the local network via Bonjour (_aicontrol._tcp).
+/// Discovers llm-ide Mac apps on the local network via Bonjour (_llmide._tcp).
 @MainActor
 final class DeviceDiscovery: NSObject, ObservableObject {
     @Published var devices: [DiscoveredDevice] = []
@@ -19,7 +19,7 @@ final class DeviceDiscovery: NSObject, ObservableObject {
     func start() {
         isSearching = true
         browser.delegate = self
-        browser.searchForServices(ofType: "_aicontrol._tcp.", inDomain: "local.")
+        browser.searchForServices(ofType: "_llmide._tcp.", inDomain: "local.")
     }
 
     func stop() {

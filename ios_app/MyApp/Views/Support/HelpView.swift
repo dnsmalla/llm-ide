@@ -8,7 +8,7 @@ struct HelpView: View {
                     Text("Help & FAQ")
                         .font(.system(size: DesignSystem.Typography.title, weight: .bold))
                         .foregroundColor(DesignSystem.Colors.textPrimary)
-                    Text("Get help with AI Control")
+                    Text("Get help with LLM IDE")
                         .font(.system(size: DesignSystem.Typography.body))
                         .foregroundColor(DesignSystem.Colors.textSecondary)
                 }
@@ -16,11 +16,11 @@ struct HelpView: View {
                 VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
                     HelpSection(
                         title: "Getting started",
-                        content: "1. On your Mac, open the AI Control Agent app — a display icon appears in the menu bar.\n2. Click the icon and scan the QR code with this app — or tap your Mac when it appears in the list and enter the 6-digit PIN shown in the menu.\n3. Your Mac's screen appears. Tap to click, drag with the hand tool, and use the keyboard button to type."
+                        content: "1. On your Mac, open the LLM IDE app — a display icon appears in the menu bar.\n2. Click the icon and scan the QR code with this app — or tap your Mac when it appears in the list and enter the 6-digit PIN shown in the menu.\n3. Your Mac's screen appears. Tap to click, drag with the hand tool, and use the keyboard button to type."
                     )
                     HelpSection(
                         title: "Mac permissions",
-                        content: "AI Control Agent needs two permissions in System Settings → Privacy & Security:\n• Screen Recording — to stream the screen\n• Accessibility — to move the mouse and type\nThe menu shows a Grant button if Screen Recording is missing. Stop and start the agent after granting."
+                        content: "LLM IDE needs two permissions in System Settings → Privacy & Security:\n• Screen Recording — to stream the screen\n• Accessibility — to move the mouse and type\nThe menu shows a Grant button if Screen Recording is missing. Stop and start the agent after granting."
                     )
                     HelpSection(
                         title: "Gestures",
