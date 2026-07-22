@@ -15,3 +15,51 @@ public enum MobileProtocol {
     /// Drop the connection if no heartbeat is received within this window.
     public static let heartbeatTimeout: TimeInterval = 25
 }
+
+// MARK: - Connection lifecycle messages
+
+/// Client → server keepalive.
+public struct Heartbeat: Codable, Equatable {
+    public let type = "heartbeat"
+    public init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+    }
+}
+
+/// Server → client heartbeat acknowledgement.
+public struct HeartbeatAck: Codable, Equatable {
+    public let type = "heartbeat_ack"
+    public let ts: Double
+    public init(ts: Double) { self.ts = ts }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case ts
+    }
+}
+
+/// Server → client: pairing succeeded; carry the Mac's device name.
+public struct Connected: Codable, Equatable {
+    public let type = "connected"
+    public let deviceName: String
+    public init(deviceName: String) { self.deviceName = deviceName }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case deviceName
+    }
+}
+
+/// Server → client: PIN rejected; sent before closing the socket.
+public struct AuthFailed: Codable, Equatable {
+    public let type = "auth_failed"
+    public let message: String
+    public init(message: String) { self.message = message }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case message
+    }
+}
