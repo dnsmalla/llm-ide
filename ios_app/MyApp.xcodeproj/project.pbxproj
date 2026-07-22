@@ -21,6 +21,7 @@
 		A1B2C3D4E5F607890A1B2C01 /* ConnectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F607890A1B2C02 /* ConnectionStore.swift */; };
 		C9D0E1F2A3B405060C9D0E01 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B405060C9D0E02 /* SpeechRecognizer.swift */; };
 		F1E2D3C4B5A607890F1E2D01 /* DeviceDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E2D3C4B5A607890F1E2D02 /* DeviceDiscovery.swift */; };
+		BA4E414CCA79B719381FF75E /* SharedProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = D93CD22A115FBBAB8240DF00 /* XCSwiftPackageProductDependency */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -169,6 +170,7 @@
 			buildConfigurationList = A4FAA3409601C5ECB54DBC85 /* Build configuration list for PBXNativeTarget "MyApp" */;
 			buildPhases = (
 				750257455CA6C48D952C723D /* Sources */,
+				B84FA0D79C95C83382B38318 /* Frameworks */,
 				34FAD6744D8462372A0B029C /* Resources */,
 			);
 			buildRules = (
@@ -177,6 +179,7 @@
 			);
 			name = MyApp;
 			packageProductDependencies = (
+				D93CD22A115FBBAB8240DF00 /* XCSwiftPackageProductDependency */,
 			);
 			productName = MyApp;
 			productReference = 237B2E48D363E5FB9B47CB07 /* MyApp.app */;
@@ -201,6 +204,9 @@
 			);
 			mainGroup = 61B286794EC1C95E4FD91338;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				D6C8EF34D21FB574D73E59C6 /* XCLocalSwiftPackageReference "SharedProtocol" */,
+			);
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -208,6 +214,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B84FA0D79C95C83382B38318 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BA4E414CCA79B719381FF75E /* SharedProtocol in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXResourcesBuildPhase section */
 		34FAD6744D8462372A0B029C /* Resources */ = {
@@ -427,6 +444,14 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		D6C8EF34D21FB574D73E59C6 /* XCLocalSwiftPackageReference "SharedProtocol" */ = {isa = XCLocalSwiftPackageReference; relativePath = "SharedProtocol";};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		D93CD22A115FBBAB8240DF00 /* XCSwiftPackageProductDependency */ = {isa = XCSwiftPackageProductDependency; package = D6C8EF34D21FB574D73E59C6 /* XCLocalSwiftPackageReference "SharedProtocol" */; productName = SharedProtocol;};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = D20D8C134AF0630A2765B38B /* Project object */;
 }
