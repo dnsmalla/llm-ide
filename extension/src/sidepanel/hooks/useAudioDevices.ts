@@ -36,7 +36,7 @@ export function useAudioDevices() {
   useEffect(() => {
     chrome.storage?.local
       ?.get(['micDeviceId', 'micVolume'])
-      .then((result) => {
+      .then((result: { micDeviceId?: string; micVolume?: number }) => {
         if (result.micDeviceId) setSelectedDeviceId(result.micDeviceId);
         if (result.micVolume !== undefined) setVolume(result.micVolume);
       })

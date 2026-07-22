@@ -10,7 +10,7 @@ interface ChatMessageType {
   timestamp: number;
 }
 
-export { ChatMessageType as ChatMessage };
+export type { ChatMessageType as ChatMessage };
 
 interface ChatContainerProps {
   messages: ChatMessageType[];

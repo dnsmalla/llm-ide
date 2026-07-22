@@ -72,7 +72,10 @@ export async function getChatSession(id: string, limit = 200): Promise<UnifiedCh
   const data = await res.json();
   const session = data.session as UnifiedChatSession;
   if (session?.messages) {
-    session.messages = session.messages.map(toClientMessage);
+    // The server delivers each message with `createdAt` (seconds); map from
+    // the raw (untyped) payload so toClientMessage sees that shape rather than
+    // the already-normalized `timestamp` the cast above implies.
+    session.messages = (data.session.messages ?? []).map(toClientMessage);
   }
   return session;
 }
