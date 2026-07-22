@@ -16,6 +16,7 @@ import AppKit
 struct PathsSettingsSection: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var projectStore: ProjectStore
+    @EnvironmentObject var templateStore: DocTemplateStore
     @Environment(AppEnvironment.self) private var env
 
     @State private var createStatus: String?
@@ -92,6 +93,8 @@ struct PathsSettingsSection: View {
                              url: L.dataDir, note: "Documents, data, images", accent: t.textMuted)
             projectFolderRow(label: "notes/", icon: "note.text",
                              url: L.notesDir, note: "Generated notes", accent: t.textMuted)
+            projectFolderRow(label: "templates/", icon: "doc.badge.gearshape",
+                             url: L.templatesDir, note: "Doc Gen templates", accent: t.textMuted)
             projectFolderRow(label: "system/", icon: "gearshape",
                              url: L.systemDir, note: "Settings, faults, graph, index (managed)", accent: t.textMuted)
 
@@ -108,7 +111,7 @@ struct PathsSettingsSection: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .help("Re-create missing project folders and refresh Claude / Cursor / Codex skills from the central kit.")
+                .help("Re-create missing project folders, seed Doc Gen templates, and refresh Claude / Cursor / Codex skills from the central kit.")
             }
 
             if let status = createStatus {
@@ -180,6 +183,9 @@ struct PathsSettingsSection: View {
         createStatus = nil
         do {
             try projectStore.rebuildActiveProjectFolders()
+            if let root = projectStore.activeProject.map({ URL(fileURLWithPath: $0.localPath) }) {
+                templateStore.reloadProjectTemplates(at: root)
+            }
             createStatus = "Project folders rebuilt. Agent skills refreshing…"
         } catch {
             createError = "Couldn't rebuild folders: \(error.localizedDescription)"

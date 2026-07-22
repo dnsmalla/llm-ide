@@ -301,12 +301,12 @@ struct HelpGuideView: View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             helpHeader("Doc Gen", icon: "wand.and.stars", tint: .pink)
 
-            helpParagraph("Generate documentation from your codebase automatically. Point it at source files and the AI produces markdown docs covering modules, functions, and usage examples.")
+            helpParagraph("Generate structured Markdown documents from your Library. Pick a template (built-in or imported `.md`), select notes, data, or meeting transcripts as sources, then export the result as a `.md` file into your project's data folder.")
 
-            helpCard("Use cases", icon: "doc.richtext") {
-                helpBullet("API reference docs from source code")
-                helpBullet("README generation for new modules")
-                helpBullet("Onboarding guides for team members joining the project")
+            helpCard("Workflow", icon: "wand.and.stars") {
+                helpBullet("Choose a template in the left Sources panel (or import your own `.md` with `##` headings)")
+                helpBullet("Check Library notes, data files, or meeting transcripts as sources")
+                helpBullet("Generate → edit the Markdown → Export .md")
             }
         }
     }

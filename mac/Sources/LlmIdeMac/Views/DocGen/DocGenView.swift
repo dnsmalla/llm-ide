@@ -3,7 +3,8 @@ import SwiftUI
 struct DocGenView: View {
     let api: LlmIdeAPIClient
     @StateObject private var vm = DocGenViewModel()
-    @State private var sourceVisible = false
+    /// Sources panel visible by default so template + Library pickers are discoverable.
+    @AppStorage("DOCGEN_SOURCES_VISIBLE") private var sourceVisible = true
     /// Chat open-state is persisted (default open) so the assistant reads as
     /// the primary surface — same pattern as Explorer / Review / Visual. A
     /// manual close sticks across launches.

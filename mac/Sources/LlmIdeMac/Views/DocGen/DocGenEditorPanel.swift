@@ -117,7 +117,10 @@ struct DocGenEditorPanel: View {
                 Button {
                     let root = projectStore.activeProject
                         .map { URL(fileURLWithPath: $0.localPath) }
-                    vm.exportMarkdown(content: content, api: api, projectRoot: root)
+                    let exportText = editableContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? content
+                        : editableContent
+                    vm.exportMarkdown(content: exportText, api: api, projectRoot: root)
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "arrow.down.circle.fill").font(.system(size: 12))
@@ -379,7 +382,7 @@ struct DocGenEditorPanel: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.current.success)
-                Text("Document ready — edit or export")
+                Text("Document ready — edit below, then export as Markdown (.md)")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 HStack(spacing: 4) {

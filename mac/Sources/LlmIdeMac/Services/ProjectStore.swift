@@ -274,11 +274,13 @@ final class ProjectStore: ObservableObject {
     // MARK: - Internals
 
     private func createFromDefaults(folder: URL) -> Project {
-        Project(
+        var settings = defaults
+        settings.docTemplatesActive = ProjectDocTemplatesSeeder.defaultActiveSlugs()
+        return Project(
             id: RandomID.generate(),
             displayName: folder.lastPathComponent,
             createdAt: Date(),
-            settings: defaults)
+            settings: settings)
     }
 
     private func bumpRecent(id: String, path: String, displayName: String) {

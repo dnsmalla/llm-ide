@@ -6,6 +6,8 @@ final class DocGenViewModel: ObservableObject {
     @Published var selectedSources: Set<DocGenSource> = []
     @Published var selectedTemplate: DocTemplate?
     @Published private(set) var generationState: GenerationState = .idle
+    /// Source display names that could not be read before the last generate attempt.
+    @Published private(set) var unreadableSourceNames: Set<String> = []
 
     enum GenerationState {
         case idle
@@ -23,6 +25,7 @@ final class DocGenViewModel: ObservableObject {
         guard let template = selectedTemplate else { return }
         generationTask?.cancel()
         generationState = .generating
+        unreadableSourceNames = []
 
         generationTask = Task {
             do {
@@ -53,6 +56,14 @@ final class DocGenViewModel: ObservableObject {
                     }
                 }
                 guard !Task.isCancelled else { return }
+                unreadableSourceNames = Set(skippedSources)
+                guard !sources.isEmpty else {
+                    generationState = .error(
+                        skippedSources.isEmpty
+                            ? "No readable source content. Select .md or .txt files from the Library."
+                            : "Could not read any selected sources: \(skippedSources.joined(separator: ", "))")
+                    return
+                }
                 let result = try await api.generateDoc(
                     templateName: template.name,
                     sections: template.sections,
@@ -69,10 +80,12 @@ final class DocGenViewModel: ObservableObject {
     func cancelGeneration() {
         generationTask?.cancel()
         generationState = .idle
+        unreadableSourceNames = []
     }
 
     func resetToIdle() {
         generationState = .idle
+        unreadableSourceNames = []
     }
 
     /// Export the generated markdown.  When `projectRoot` is supplied the file

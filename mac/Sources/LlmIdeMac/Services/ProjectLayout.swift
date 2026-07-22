@@ -6,7 +6,7 @@ import Foundation
 ///
 /// ```
 /// <root>/
-/// ├── source/   code/   data/   notes/     ← user content (= Library sections)
+/// ├── source/   code/   data/   notes/   templates/   ← user content
 /// └── system/                              ← generated / system data
 ///     ├── project.json  (marker + settings)
 ///     ├── faults/   graph/   cache/
@@ -15,11 +15,18 @@ import Foundation
 struct ProjectLayout {
     let root: URL
 
-    // User content — mirrors the Library's four sections.
+    // User content — mirrors the Library's four sections + doc templates.
     var sourceDir: URL { root.appendingPathComponent("source", isDirectory: true) }
     var codeDir:   URL { root.appendingPathComponent("code", isDirectory: true) }
     var dataDir:   URL { root.appendingPathComponent("data", isDirectory: true) }
     var notesDir:  URL { root.appendingPathComponent("notes", isDirectory: true) }
+    /// Doc Gen templates — one subfolder per template (`templates/<slug>/template.md`).
+    var templatesDir: URL { root.appendingPathComponent("templates", isDirectory: true) }
+
+    /// Folder for a named template slug, e.g. `meeting-summary`.
+    func templateDir(named folderName: String) -> URL {
+        templatesDir.appendingPathComponent(folderName, isDirectory: true)
+    }
 
     // System / generated data — one visible container.
     var systemDir:   URL { root.appendingPathComponent("system", isDirectory: true) }

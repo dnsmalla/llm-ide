@@ -5,11 +5,11 @@ struct DocGenSourcePanel: View {
     let api: LlmIdeAPIClient
 
     @EnvironmentObject private var templateStore: DocTemplateStore
+    @EnvironmentObject private var projectStore: ProjectStore
     @EnvironmentObject private var theme: ThemeStore
     @Environment(LibraryItemStore.self) private var itemStore
     @State private var showTemplateImporter = false
     @State private var showTemplateManager = false
-    @State private var failedFileIDs: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,6 +33,7 @@ struct DocGenSourcePanel: View {
         .sheet(isPresented: $showTemplateManager) {
             DocTemplateManagerSheet()
                 .environmentObject(templateStore)
+                .environmentObject(projectStore)
                 .frame(minWidth: 580, minHeight: 500)
         }
         .fileImporter(
@@ -56,20 +57,24 @@ struct DocGenSourcePanel: View {
             HStack {
                 sectionHeader(title: "Template", icon: "doc.badge.gearshape", color: theme.current.accent)
                 Spacer()
-                if !templateStore.templates.isEmpty {
-                    Button {
-                        showTemplateImporter = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 20, height: 20)
-                            .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.trailing, 14)
-                    .padding(.top, 10)
+                Button { showTemplateManager = true } label: {
+                    Text("Manage")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
                 }
+                .buttonStyle(.plain)
+                .padding(.trailing, 4)
+                .padding(.top, 10)
+                Button { showTemplateImporter = true } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 20)
+                        .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 14)
+                .padding(.top, 10)
             }
 
             if templateStore.templates.isEmpty {
@@ -92,6 +97,11 @@ struct DocGenSourcePanel: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
+                            if projectStore.activeProject != nil {
+                                Text("Imports into `templates/<name>/template.md` in your project.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
                         Spacer(minLength: 0)
                     }
@@ -128,82 +138,28 @@ struct DocGenSourcePanel: View {
     @ViewBuilder
     private func templateRow(_ template: DocTemplate) -> some View {
         let selected = vm.selectedTemplate?.id == template.id
-        HStack(spacing: 8) {
-            // Radio + label — tappable
-            Button {
+        TemplateSourceRow(
+            template: template,
+            selected: selected,
+            accent: theme.current.accent,
+            canDelete: template.isEditable,
+            onSelect: {
                 vm.selectedTemplate = selected ? nil : template
-            } label: {
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .strokeBorder(
-                                selected ? theme.current.accent : Color.secondary.opacity(0.3),
-                                lineWidth: 1.5)
-                            .frame(width: 16, height: 16)
-                        if selected {
-                            Circle()
-                                .fill(theme.current.accent)
-                                .frame(width: 8, height: 8)
-                        }
-                    }
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(template.name)
-                            .font(.callout)
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        HStack(spacing: 4) {
-                            Image(systemName: "doc.text")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.tertiary)
-                            Text("\(template.sections.count) sections")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            // Delete button
-            Button {
+            },
+            onDelete: {
                 if vm.selectedTemplate?.id == template.id {
                     vm.selectedTemplate = nil
                 }
                 templateStore.delete(id: template.id)
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .frame(width: 22, height: 22)
-                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
-            }
-            .buttonStyle(.plain)
-            .opacity(0)
-            .overlay(
-                // Show delete only on hover using a clear overlay trick
-                Color.clear.contentShape(Rectangle())
-            )
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            selected ? theme.current.accent.opacity(0.08) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 8)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(
-                    selected ? theme.current.accent.opacity(0.25) : Color.clear,
-                    lineWidth: 1)
-        )
+            })
         .contextMenu {
-            Button(role: .destructive) {
-                if vm.selectedTemplate?.id == template.id { vm.selectedTemplate = nil }
-                templateStore.delete(id: template.id)
-            } label: {
-                Label("Delete Template", systemImage: "trash")
+            if template.isEditable {
+                Button(role: .destructive) {
+                    if vm.selectedTemplate?.id == template.id { vm.selectedTemplate = nil }
+                    templateStore.delete(id: template.id)
+                } label: {
+                    Label("Delete Template", systemImage: "trash")
+                }
             }
         }
         .animation(.easeInOut(duration: 0.1), value: selected)
@@ -212,7 +168,7 @@ struct DocGenSourcePanel: View {
     // MARK: - Notes section
 
     private var notesSection: some View {
-        let items = itemStore.items(for: .notes)
+        let items = textSources(from: itemStore.items(for: .notes))
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
                 sectionHeader(title: "Notes", icon: "note.text", color: .blue)
@@ -220,7 +176,7 @@ struct DocGenSourcePanel: View {
             }
 
             if items.isEmpty {
-                emptyHint("No notes imported yet")
+                emptyHint("No .md/.txt notes in Library yet")
             } else {
                 ForEach(items) { item in
                     fileRow(item: item, iconColor: .blue)
@@ -232,7 +188,7 @@ struct DocGenSourcePanel: View {
     // MARK: - Data section
 
     private var dataSection: some View {
-        let items = itemStore.items(for: .data)
+        let items = textSources(from: itemStore.items(for: .data))
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
                 sectionHeader(title: "Data", icon: "tablecells", color: .purple)
@@ -240,7 +196,7 @@ struct DocGenSourcePanel: View {
             }
 
             if items.isEmpty {
-                emptyHint("No data files imported yet")
+                emptyHint("No .md/.txt/.csv data files in Library yet")
             } else {
                 ForEach(items) { item in
                     fileRow(item: item, iconColor: .purple)
@@ -252,14 +208,14 @@ struct DocGenSourcePanel: View {
     // MARK: - Sources (meetings) section
 
     private var sourcesSection: some View {
-        let items = itemStore.items(for: .meetings)
+        let items = textSources(from: itemStore.items(for: .meetings))
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
                 sectionHeader(title: "Sources", icon: "waveform.and.mic", color: .indigo)
                 Spacer()
             }
             if items.isEmpty {
-                emptyHint("No sources captured yet")
+                emptyHint("No .md meeting transcripts in Library yet")
             } else {
                 ForEach(items) { item in
                     fileRow(item: item, iconColor: .indigo)
@@ -352,7 +308,7 @@ struct DocGenSourcePanel: View {
 
                 Spacer(minLength: 0)
 
-                if failedFileIDs.contains(item.id) {
+                if vm.unreadableSourceNames.contains(item.name) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.caption2)
                         .foregroundStyle(theme.current.warning)
@@ -375,5 +331,98 @@ struct DocGenSourcePanel: View {
         case "json":               return "curlybraces"
         default:                   return "doc"
         }
+    }
+
+    /// Doc Gen reads UTF-8 text only — offer `.md`, `.txt`, `.json`, `.csv`.
+    private func textSources(from items: [LibraryItem]) -> [LibraryItem] {
+        let allowed: Set<String> = ["md", "markdown", "txt", "json", "csv"]
+        return items.filter { allowed.contains($0.ext.lowercased()) }
+    }
+}
+
+// MARK: - Template row with hover delete
+
+private struct TemplateSourceRow: View {
+    let template: DocTemplate
+    let selected: Bool
+    let accent: Color
+    let canDelete: Bool
+    let onSelect: () -> Void
+    let onDelete: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onSelect) {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .strokeBorder(
+                                selected ? accent : Color.secondary.opacity(0.3),
+                                lineWidth: 1.5)
+                            .frame(width: 16, height: 16)
+                        if selected {
+                            Circle().fill(accent).frame(width: 8, height: 8)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 4) {
+                            Text(template.name)
+                                .font(.callout)
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            if template.isProjectTemplate {
+                                Text("Project")
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1)
+                                    .background(Color.secondary.opacity(0.12), in: Capsule())
+                            } else if template.isBuiltin {
+                                Text("Built-in")
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1)
+                                    .background(Color.secondary.opacity(0.12), in: Capsule())
+                            }
+                        }
+                        HStack(spacing: 4) {
+                            Image(systemName: "doc.text")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                            Text("\(template.sections.count) sections")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if canDelete {
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 22, height: 22)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
+                }
+                .buttonStyle(.plain)
+                .opacity(hovering ? 1 : 0)
+                .help("Delete template")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(selected ? accent.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(selected ? accent.opacity(0.25) : Color.clear, lineWidth: 1)
+        )
+        .onHover { hovering = $0 }
     }
 }

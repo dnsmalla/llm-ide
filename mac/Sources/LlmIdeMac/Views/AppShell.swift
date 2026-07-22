@@ -10,6 +10,7 @@ struct AppShell: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
+    @EnvironmentObject var templateStore: DocTemplateStore
     @EnvironmentObject var graphAutoUpdater: GraphAutoUpdater
     @EnvironmentObject var graphSessionStore: GraphSessionStore
     @State private var shell = ShellState()
@@ -243,6 +244,10 @@ struct AppShell: View {
             // close). bindProject runs the one-time legacy migration and a
             // fresh scan, so the index follows the active project.
             bindLibraryStore()
+            reloadDocTemplatesForActiveProject()
+        }
+        .task(id: projectStore.activeProject?.localPath) {
+            reloadDocTemplatesForActiveProject()
         }
         // Ingest the open project's code into the KB so the agent can SEARCH it
         // (search-kb / findContext), not just read files. Keyed on the active
@@ -675,6 +680,11 @@ struct AppShell: View {
             .map { URL(fileURLWithPath: $0.localPath) }
         itemStore.bindProject(root: root)
         itemStore.setExternalCodeFolders(config.localCodeFolders)
+    }
+
+    private func reloadDocTemplatesForActiveProject() {
+        let root = projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath) }
+        templateStore.reloadProjectTemplates(at: root)
     }
 
     /// Ensures every path in `config.localCodeFolders` is referenced by the

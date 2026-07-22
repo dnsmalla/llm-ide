@@ -10,11 +10,12 @@ import os.log
 ///
 /// ```
 /// <projectFolder>/
-/// ├── source/   ← meeting & email transcripts (your Sources)
-/// ├── code/     ← code files
-/// ├── data/     ← documents, data files, images
-/// ├── notes/    ← notes generated from meetings/email
-/// └── system/   ← LLM IDE managed: settings, faults, graph, index (most git-ignored)
+/// ├── source/     ← meeting & email transcripts (your Sources)
+/// ├── code/       ← code files
+/// ├── data/       ← documents, data files, images
+/// ├── notes/      ← notes generated from meetings/email
+/// ├── templates/  ← Doc Gen templates (`<slug>/template.md`)
+/// └── system/     ← LLM IDE managed: settings, faults, graph, index (most git-ignored)
 ///     ├── project.json   ← project metadata (written by ProjectStore)
 ///     ├── sync.json      ← last export info  (git-ignored)
 ///     ├── index.sqlite   ← full-text index   (git-ignored)
@@ -31,7 +32,7 @@ enum ProjectScaffolder {
 
     // Directories that must exist under every project root.
     static let requiredDirectories = [
-        "source", "code", "data", "notes",
+        "source", "code", "data", "notes", "templates",
         "system", "system/faults", "system/graph", "system/cache",
         ".claude",
     ]
@@ -112,6 +113,9 @@ enum ProjectScaffolder {
         //    AGENTS.md, .cursorrules, GEMINI.md). Skills/rules dirs are
         //    filled later by ProjectSkillsInstaller; these point agents there.
         ensureAgentEntryFiles(at: folderURL, project: project)
+
+        // 7. Doc Gen templates — default subfolders under templates/
+        ProjectDocTemplatesSeeder.seedIfNeeded(at: folderURL)
 
         log.info("scaffold complete: \(folderURL.lastPathComponent, privacy: .public)")
     }
@@ -244,11 +248,12 @@ enum ProjectScaffolder {
 
         ```
         \(name)/
-        ├── source/   ← meeting & email transcripts (your Sources)
-        ├── code/     ← code files
-        ├── data/     ← documents, data files, images
-        ├── notes/    ← notes generated from meetings/email
-        └── system/   ← LLM IDE managed: settings, faults, graph, index (most git-ignored)
+        ├── source/     ← meeting & email transcripts (your Sources)
+        ├── code/       ← code files
+        ├── data/       ← documents, data files, images
+        ├── notes/      ← notes generated from meetings/email
+        ├── templates/  ← Doc Gen templates (`<slug>/template.md`)
+        └── system/     ← LLM IDE managed: settings, faults, graph, index (most git-ignored)
         ```
 
         ## Meetings
@@ -457,6 +462,7 @@ allow you to customize agent behavior per project.
         | `code/` | Code / cloned repos |
         | `data/` | Documents & data files |
         | `notes/` | Generated notes |
+        | `templates/` | Doc Gen templates (`<slug>/template.md`) |
         | `system/` | LLM IDE settings (mostly git-ignored) |
 
         ## Skills & rules (all agents)

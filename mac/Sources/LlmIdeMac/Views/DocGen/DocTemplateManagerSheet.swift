@@ -3,6 +3,7 @@ import SwiftUI
 struct DocTemplateManagerSheet: View {
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var store: DocTemplateStore
+    @EnvironmentObject private var projectStore: ProjectStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var selectedID: UUID?
@@ -37,6 +38,15 @@ struct DocTemplateManagerSheet: View {
 
     private var templateList: some View {
         VStack(spacing: 0) {
+            if store.hasProjectTemplates {
+                Text("Templates live in your project's `templates/` folder.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+                    .padding(.bottom, 4)
+            }
+
             List(selection: $selectedID) {
                 if store.templates.isEmpty {
                     Text("No templates yet")
@@ -60,9 +70,9 @@ struct DocTemplateManagerSheet: View {
                     sections: ["Section 1"],
                     rawContent: nil,
                     isBuiltin: false)
-                store.add(newTemplate)
-                selectedID = newTemplate.id
-                editingTemplate = newTemplate
+                let created = store.add(newTemplate)
+                selectedID = created.id
+                editingTemplate = created
             } label: {
                 Label("New", systemImage: "plus")
                     .font(.callout)
@@ -83,23 +93,33 @@ struct DocTemplateManagerSheet: View {
         }
     }
 
-
-
     @ViewBuilder
     private func customDetail(_ template: DocTemplate) -> some View {
         let binding = Binding<DocTemplate>(
             get: { editingTemplate ?? template },
             set: { editingTemplate = $0 }
         )
+        let editable = template.isEditable
 
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 16) {
+                if template.isBuiltin && !store.hasProjectTemplates {
+                    Text("Built-in template — duplicate to customize, or open a project to edit `templates/` on disk.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let folder = template.folderName {
+                    Text("Saved as `templates/\(folder)/template.md`")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 TextField("Template name", text: Binding(
                     get: { binding.wrappedValue.name },
                     set: { binding.wrappedValue.name = $0 }
                 ))
                 .textFieldStyle(.roundedBorder)
                 .font(.title3)
+                .disabled(!editable)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Sections")
@@ -119,6 +139,7 @@ struct DocTemplateManagerSheet: View {
                                         .foregroundStyle(theme.current.danger.opacity(0.8))
                                 }
                                 .buttonStyle(.borderless)
+                                .disabled(!editable)
                             }
                         }
                         .onMove { from, to in
@@ -127,14 +148,16 @@ struct DocTemplateManagerSheet: View {
                     }
                     .listStyle(.bordered)
                     .frame(minHeight: 160)
+                    .disabled(!editable)
 
                     HStack {
                         TextField("Add section…", text: $newSectionName)
                             .textFieldStyle(.roundedBorder)
                             .onSubmit { addSection(to: binding) }
+                            .disabled(!editable)
                         Button("Add") { addSection(to: binding) }
                             .buttonStyle(.bordered)
-                            .disabled(newSectionName.trimmingCharacters(in: .whitespaces).isEmpty)
+                            .disabled(!editable || newSectionName.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 }
             }
@@ -145,18 +168,22 @@ struct DocTemplateManagerSheet: View {
             Divider()
 
             HStack {
-                Button("Delete", role: .destructive) {
-                    showDeleteConfirmation = true
-                }
-                .buttonStyle(.bordered)
-                .confirmationDialog("Delete this template?", isPresented: $showDeleteConfirmation) {
+                if editable {
                     Button("Delete", role: .destructive) {
-                        store.delete(id: template.id)
-                        selectedID = store.templates.first?.id
-                        editingTemplate = nil
+                        showDeleteConfirmation = true
                     }
-                } message: {
-                    Text("This template will be permanently deleted.")
+                    .buttonStyle(.bordered)
+                    .confirmationDialog("Delete this template?", isPresented: $showDeleteConfirmation) {
+                        Button("Delete", role: .destructive) {
+                            store.delete(id: template.id)
+                            selectedID = store.templates.first?.id
+                            editingTemplate = nil
+                        }
+                    } message: {
+                        Text(store.hasProjectTemplates
+                             ? "The template folder will be removed from your project."
+                             : "This template will be permanently deleted.")
+                    }
                 }
 
                 Spacer()
@@ -164,12 +191,13 @@ struct DocTemplateManagerSheet: View {
                 Button("Save") {
                     if var t = editingTemplate {
                         t.sections = t.sections.filter { !$0.isEmpty }
+                        t.rawContent = nil
                         store.update(t)
                         editingTemplate = nil
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(editingTemplate == nil)
+                .disabled(!editable || editingTemplate == nil)
             }
             .padding(16)
         }
