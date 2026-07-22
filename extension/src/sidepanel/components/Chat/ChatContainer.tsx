@@ -4,11 +4,13 @@ import ChatInput from './ChatInput';
 import ChatEmpty from './ChatEmpty';
 import ChatLoading from './ChatLoading';
 
-export interface ChatMessage as ChatMessageType {
+interface ChatMessageType {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
 }
+
+export { ChatMessageType as ChatMessage };
 
 interface ChatContainerProps {
   messages: ChatMessageType[];

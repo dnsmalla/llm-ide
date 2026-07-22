@@ -162,6 +162,54 @@ final class ProjectStore: ObservableObject {
         installSkillsBestEffort(at: url, language: ap.bundle.settings.language)
     }
 
+    /// Bind (or unbind) the active project to a saved repo so Auto Tasks and
+    /// the code assistant can resolve it. `linkedRepo` is the authoritative
+    /// source for `AutoCodeUpdateService.resolveBackendAndProject()`; nothing
+    /// else populated it, which is why Auto Tasks reported "No linked repo".
+    /// Persists to the project's `system/project.json` so the link survives
+    /// relaunches. No-op (and no write) when no project is open or the value
+    /// is unchanged.
+    func setLinkedRepo(_ linked: ProjectSettings.LinkedRepo?) {
+        guard let ap = activeProject else { return }
+        guard ap.bundle.settings.linkedRepo != linked else { return }
+        var bundle = ap.bundle
+        bundle.settings.linkedRepo = linked
+        activeProject = ActiveProject(bundle: bundle, localPath: ap.localPath)
+        let jsonURL = ProjectLayout(root: URL(fileURLWithPath: ap.localPath)).projectJSON
+        try? writeProjectJSON(bundle, to: jsonURL)
+        NotificationCenter.default.post(name: .activeProjectChanged, object: nil)
+    }
+
+    /// Derive the active project's `linkedRepo` from whichever saved repo is
+    /// currently active in Settings, then persist it via `setLinkedRepo`.
+    /// Precedence — GitLab first, then GitHub — mirrors
+    /// `CodeAssistantPanel.deriveActiveProject(fromConfig:)`; tokens are
+    /// mutually exclusive (each Save&verify clears the other), so the order
+    /// only matters the instant both are set. Called by the GitLab/GitHub
+    /// settings sections after a repo is activated, cloned, resolved, or
+    /// cleared, so the link stays in sync with the saved-repo config.
+    func syncLinkedRepoFromConfig(_ config: AppConfig) {
+        if !config.gitLabToken.isEmpty,
+           let p = config.gitLabSavedProjects.first(where: { $0.isActive }) {
+            setLinkedRepo(ProjectSettings.LinkedRepo(
+                kind: .gitlab, url: p.url,
+                remoteId: String(p.resolvedId ?? 0),
+                defaultBranch: p.defaultBranch))
+            return
+        }
+        if !config.gitHubToken.isEmpty,
+           let r = config.gitHubSavedRepos.first(where: { $0.isActive }),
+           let (owner, name) = GitHubClient.ownerAndName(from: r.url) {
+            setLinkedRepo(ProjectSettings.LinkedRepo(
+                kind: .github, url: r.url,
+                remoteId: "\(owner)/\(name)",
+                defaultBranch: r.defaultBranch))
+            return
+        }
+        // No active repo / no token → unlink.
+        setLinkedRepo(nil)
+    }
+
     /// Symlink the central skills kit into `url` for Claude / Cursor /
     /// Codex / `.agents` / Gemini. Tries the local server first, then a
     /// direct `install.sh` fallback. Non-blocking and non-fatal.

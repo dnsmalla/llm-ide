@@ -1336,7 +1336,7 @@ final class AutoCodeUpdateService: ObservableObject {
     }
 
     private func resolveLinkedRepo(_ active: ProjectStore.ActiveProject, linked: ProjectSettings.LinkedRepo) -> ResolvedRepo? {
-        let local = active.localPath
+        let projectRoot = active.localPath
         let kind = linked.kind
         let token = kind == .gitlab ? config.gitLabToken : config.gitHubToken
         let tokenName = kind == .gitlab ? "GitLab" : "GitHub"
@@ -1352,7 +1352,33 @@ final class AutoCodeUpdateService: ObservableObject {
             kind == .gitlab ? GitLabClient(config: config) : GitHubClient(config: config),
             config: config
         )
-        return .init(client: client, projectId: linked.remoteId, gitRoot: local, projectRoot: local)
+        // gitRoot: the bound saved repo's clone path when one exists — the
+        // app clones into `<project>/code/<repo>`, so the git working tree
+        // lives there, not at the project root. Falls back to the project
+        // root for the "project-is-a-repo" / "opened the clone as its own
+        // project" cases where there is no saved-repo entry.
+        let gitRoot = savedRepoClonePath(for: linked) ?? projectRoot
+        return .init(client: client, projectId: linked.remoteId, gitRoot: gitRoot, projectRoot: projectRoot)
+    }
+
+    /// Local clone path of the saved repo bound via `linkedRepo`, so auto-
+    /// tasks run in the repo's working tree rather than the project root.
+    /// Returns nil when no matching saved repo exists or it hasn't been
+    /// cloned yet; callers fall back to the project root.
+    private func savedRepoClonePath(for linked: ProjectSettings.LinkedRepo) -> String? {
+        switch linked.kind {
+        case .github:
+            guard let repo = config.gitHubSavedRepos.first(where: {
+                guard let (owner, name) = GitHubClient.ownerAndName(from: $0.url) else { return false }
+                return "\(owner)/\(name)" == linked.remoteId
+            }), let path = repo.localPath, !path.isEmpty else { return nil }
+            return path
+        case .gitlab:
+            guard let p = config.gitLabSavedProjects
+                .first(where: { String($0.resolvedId ?? 0) == linked.remoteId }),
+                let path = p.localPath, !path.isEmpty else { return nil }
+            return path
+        }
     }
 
     /// One-line summary of why `resolveBackendAndProject()` found no usable

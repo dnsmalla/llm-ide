@@ -90,10 +90,17 @@ struct LlmIdeMacApp: App {
         projectStoreInstance._apiClient = client
         let autoTaskSettingsInstance = AutoTaskSettings()
         let taskLogStore = TaskLogStore()
+        // `backend: nil` ⇒ auto-resolve from the active project's `linkedRepo`,
+        // which supports BOTH GitLab and GitHub (set by syncLinkedRepoFromConfig).
+        // Passing a GitLabClient here used to set `backendOverride` to a GitLab
+        // backend, which made resolveBackendAndProject() short-circuit into
+        // resolveWithBackend() — a path that ONLY checks GitLab saved projects.
+        // GitHub repos were silently ignored → "No linked repo". Leave the
+        // override for tests only.
         let autoCode = AutoCodeUpdateService(
             config: cfg,
             autoTaskSettings: autoTaskSettingsInstance,
-            gitLabClient: GitLabClient(),
+            backend: nil,
             registry: registry,
             projectStore: projectStoreInstance,
             api: client,
@@ -199,6 +206,13 @@ struct LlmIdeMacApp: App {
                         Logger(subsystem: "com.llmide.macapp", category: "Migration")
                             .info("Imported \(result.imported, privacy: .public) legacy projects")
                     }
+                    // Self-heal the active project's `linkedRepo` from the
+                    // currently-active saved repo. Setups that predate the
+                    // writer (saved repo configured when nothing populated
+                    // linkedRepo) get linked automatically on launch instead
+                    // of requiring the user to re-toggle the active radio.
+                    // Idempotent — a no-op once the link matches.
+                    projectStore.syncLinkedRepoFromConfig(config)
                     // Lazy bootstrap: DocTemplateStore's disk read is
                     // deferred from init() to here so LlmIdeMacApp.init
                     // stays cheap.  Run first so any UI that reads
@@ -241,6 +255,17 @@ struct LlmIdeMacApp: App {
                 // immediate visibility of any active extension session.
                 .onChange(of: session.isAuthenticated) { _, authed in
                     if authed { liveMirror.start() } else { liveMirror.stop() }
+                }
+                // Keep the active project's `linkedRepo` bound to the
+                // currently-active saved repo whenever the active project
+                // changes. The one-shot launch sync in `.task` above only
+                // covers a project restored at launch; this covers projects
+                // opened or switched to afterward (and re-runs if the saved
+                // repo config changed since). Idempotent — setLinkedRepo
+                // no-ops once the link already matches, so the reassignment
+                // it causes here can't loop.
+                .onChange(of: projectStore.activeProject) { _, _ in
+                    projectStore.syncLinkedRepoFromConfig(config)
                 }
                 // Stop the supervised backend on Cmd-Q so we don't
                 // leak an orphan node process every time the user

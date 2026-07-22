@@ -111,6 +111,7 @@ struct GitHubSettingsSection: View {
                             config.gitHubSavedRepos = []
                             tokenDraft = ""
                             status = "Cleared."
+                            relink()
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -189,6 +190,15 @@ struct GitHubSettingsSection: View {
            let idx = config.gitHubSavedRepos.firstIndex(where: { $0.id == first.id }) {
             config.gitHubSavedRepos[idx].isActive = true
         }
+        relink()
+    }
+
+    /// Re-derive the active project's `linkedRepo` from the saved-repo config
+    /// so Auto Tasks / the code assistant resolve this GitHub repo. Idempotent
+    /// — safe to call after every mutation of the active repo, clone path,
+    /// resolved id, or token. No-op when no project is open.
+    private func relink() {
+        projectStore.syncLinkedRepoFromConfig(config)
     }
 
     @ViewBuilder
@@ -204,6 +214,7 @@ struct GitHubSettingsSection: View {
                     for i in config.gitHubSavedRepos.indices {
                         config.gitHubSavedRepos[i].isActive = (config.gitHubSavedRepos[i].id == r.id)
                     }
+                    relink()
                 } label: {
                     Image(systemName: r.isActive ? "largecircle.fill.circle" : "circle")
                         .font(.system(size: 16))
@@ -383,6 +394,7 @@ struct GitHubSettingsSection: View {
                     config.gitHubSavedRepos[idx].localPath = destURL.path
                     config.gitHubSavedRepos[idx].defaultBranch = branch
                 }
+                relink()
                 // Only when cloning STANDALONE (no active project) do we adopt
                 // the bare clone as its own LLM IDE project so "Open Folder"
                 // accepts it. A clone inside the active project's code/ is
@@ -424,6 +436,7 @@ struct GitHubSettingsSection: View {
                     config.gitHubSavedRepos[idx].displayName = repoResult.name
                 }
             }
+            relink()
         } catch {
             resolveErrors[r.id] = error.localizedDescription
         }
@@ -442,10 +455,11 @@ struct GitHubSettingsSection: View {
             config.gitHubToken = token
             config.gitLabToken = ""
             status = "✓ Connected as \(user.name ?? user.login)"
-            
+
             if config.preferredRepoProvider == nil {
                 config.preferredRepoProvider = .github
             }
+            relink()
         } catch let e as GitHubClient.GitHubError {
             switch e {
             case .httpError(401, _): status = "Invalid token — check scope and expiry."

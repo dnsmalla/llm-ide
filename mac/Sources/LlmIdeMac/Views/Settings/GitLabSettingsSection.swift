@@ -123,6 +123,7 @@ struct GitLabSettingsSection: View {
                             config.gitLabSavedProjects = []
                             gitLabTokenDraft = ""
                             gitLabStatus = "Cleared."
+                            relink()
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -205,6 +206,15 @@ struct GitLabSettingsSection: View {
            let idx = config.gitLabSavedProjects.firstIndex(where: { $0.id == first.id }) {
             config.gitLabSavedProjects[idx].isActive = true
         }
+        relink()
+    }
+
+    /// Re-derive the active project's `linkedRepo` from the saved-repo config
+    /// so Auto Tasks / the code assistant resolve this GitLab project.
+    /// Idempotent — safe to call after every mutation of the active project,
+    /// clone path, resolved id, or token. No-op when no project is open.
+    private func relink() {
+        projectStore.syncLinkedRepoFromConfig(config)
     }
 
     // MARK: - Project row
@@ -223,6 +233,7 @@ struct GitLabSettingsSection: View {
                     for i in config.gitLabSavedProjects.indices {
                         config.gitLabSavedProjects[i].isActive = (config.gitLabSavedProjects[i].id == p.id)
                     }
+                    relink()
                 } label: {
                     Image(systemName: p.isActive ? "largecircle.fill.circle" : "circle")
                         .font(.system(size: 16))
@@ -418,6 +429,7 @@ struct GitLabSettingsSection: View {
                     config.gitLabSavedProjects[idx].localPath = destURL.path
                     config.gitLabSavedProjects[idx].defaultBranch = branch
                 }
+                relink()
                 // Index the cloned tree into the Library so it shows
                 // up under CODE. Prune any prior entries with the
                 // same folderOrigin first — otherwise an earlier
@@ -515,6 +527,7 @@ struct GitLabSettingsSection: View {
                 config.gitLabSavedProjects[idx].displayName = project.name
             }
         }
+        relink()
     }
 
     // MARK: - Save & verify token
@@ -557,11 +570,12 @@ struct GitLabSettingsSection: View {
                 // Mutual exclusality: clear GitHub when GitLab is set
                 config.gitHubToken = ""
                 gitLabStatus = "✓ Connected as \(name)"
-                
+
                 // If no preference is set, default to GitLab when first token is saved
                 if config.preferredRepoProvider == nil {
                     config.preferredRepoProvider = .gitlab
                 }
+                relink()
             } else if http.statusCode == 401 {
                 gitLabStatus = "Invalid token — check scope and expiry."
             } else {
