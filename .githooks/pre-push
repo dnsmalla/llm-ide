@@ -33,6 +33,7 @@ mac_build_busy() {
 zero=0000000000000000000000000000000000000000
 mac_changed=0
 ext_changed=0
+ios_changed=0
 
 # stdin: <local_ref> <local_sha> <remote_ref> <remote_sha> per pushed ref.
 while read -r local_ref local_sha remote_ref remote_sha; do
@@ -53,6 +54,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     fi
     if printf '%s\n' "$files" | grep -q '^extension/'; then
         ext_changed=1
+    fi
+    if printf '%s\n' "$files" | grep -q '^ios_app/'; then
+        ios_changed=1
     fi
 done
 
@@ -106,4 +110,14 @@ if [ "$ext_changed" -eq 1 ]; then
         exit 1
     fi
 fi
+
+if [ "$ios_changed" -eq 1 ]; then
+    echo "pre-push: ios_app/ changed — running SharedProtocol tests…"
+    if ! (cd "$(git rev-parse --show-toplevel)/ios_app/SharedProtocol" && swift test); then
+        echo "pre-push: SharedProtocol test gate FAILED — push aborted." >&2
+        echo "          Fix the failure, or bypass with: git push --no-verify" >&2
+        exit 1
+    fi
+fi
+
 exit 0
