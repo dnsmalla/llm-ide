@@ -168,7 +168,7 @@ struct DocGenSourcePanel: View {
     // MARK: - Notes section
 
     private var notesSection: some View {
-        let items = textSources(from: itemStore.items(for: .notes))
+        let items = itemStore.items(for: .notes)
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
                 sectionHeader(title: "Notes", icon: "note.text", color: .blue)
@@ -176,7 +176,7 @@ struct DocGenSourcePanel: View {
             }
 
             if items.isEmpty {
-                emptyHint("No .md/.txt notes in Library yet")
+                emptyHint("No notes in Library yet")
             } else {
                 ForEach(items) { item in
                     fileRow(item: item, iconColor: .blue)
@@ -188,7 +188,7 @@ struct DocGenSourcePanel: View {
     // MARK: - Data section
 
     private var dataSection: some View {
-        let items = textSources(from: itemStore.items(for: .data))
+        let items = itemStore.items(for: .data)
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
                 sectionHeader(title: "Data", icon: "tablecells", color: .purple)
@@ -196,7 +196,7 @@ struct DocGenSourcePanel: View {
             }
 
             if items.isEmpty {
-                emptyHint("No .md/.txt/.csv data files in Library yet")
+                emptyHint("No data files in Library yet")
             } else {
                 ForEach(items) { item in
                     fileRow(item: item, iconColor: .purple)
@@ -208,14 +208,14 @@ struct DocGenSourcePanel: View {
     // MARK: - Sources (meetings) section
 
     private var sourcesSection: some View {
-        let items = textSources(from: itemStore.items(for: .meetings))
+        let items = itemStore.items(for: .meetings)
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
                 sectionHeader(title: "Sources", icon: "waveform.and.mic", color: .indigo)
                 Spacer()
             }
             if items.isEmpty {
-                emptyHint("No .md meeting transcripts in Library yet")
+                emptyHint("No meeting transcripts in Library yet")
             } else {
                 ForEach(items) { item in
                     fileRow(item: item, iconColor: .indigo)
@@ -333,11 +333,6 @@ struct DocGenSourcePanel: View {
         }
     }
 
-    /// Doc Gen reads UTF-8 text only — offer `.md`, `.txt`, `.json`, `.csv`.
-    private func textSources(from items: [LibraryItem]) -> [LibraryItem] {
-        let allowed: Set<String> = ["md", "markdown", "txt", "json", "csv"]
-        return items.filter { allowed.contains($0.ext.lowercased()) }
-    }
 }
 
 // MARK: - Template row with hover delete
