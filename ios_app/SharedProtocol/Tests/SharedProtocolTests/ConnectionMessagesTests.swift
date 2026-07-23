@@ -42,4 +42,39 @@ final class ConnectionMessagesTests: XCTestCase {
         XCTAssertEqual(decoded.type, "pairing")
         XCTAssertEqual(decoded.pin, "123456")
     }
+
+    func testLlmIdeChatRoundTrips() throws {
+        let chat = LlmIdeChat(commandId: "abc", text: "hello",
+                              history: [ChatTurn(role: "user", content: "hi")],
+                              image: ChatImage(mediaType: "image/png", data: "BASE64"))
+        let decoded = try roundTrip(chat)
+        XCTAssertEqual(decoded, chat)
+        XCTAssertEqual(decoded.type, "llmide_chat")
+        XCTAssertEqual(decoded.image?.mediaType, "image/png")
+    }
+
+    func testLlmIdeChatNoImageRoundTrips() throws {
+        let chat = LlmIdeChat(commandId: "x", text: "q", history: [], image: nil)
+        let decoded = try roundTrip(chat)
+        XCTAssertEqual(decoded, chat)
+        XCTAssertNil(decoded.image)
+    }
+
+    func testOutputHasNestedPayload() throws {
+        let out = Output(commandId: "abc", payload: OutputPayload(stream: "reply text", done: true))
+        let data = try JSONEncoder().encode(out)
+        // Nested payload shape matches iOS receive: {"type":"output","commandId":"abc","payload":{"stream":"reply text","done":true}}
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertTrue(json.contains("\"payload\":{\"stream\":\"reply text\",\"done\":true}"), json)
+        let decoded = try roundTrip(out)
+        XCTAssertEqual(decoded.payload.stream, "reply text")
+        XCTAssertEqual(decoded.payload.done, true)
+    }
+
+    func testCommandErrorRoundTrips() throws {
+        let err = CommandError(commandId: "abc", message: "boom")
+        let decoded = try roundTrip(err)
+        XCTAssertEqual(decoded, err)
+        XCTAssertEqual(decoded.type, "error")
+    }
 }
