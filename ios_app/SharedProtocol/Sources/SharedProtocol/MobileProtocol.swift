@@ -63,3 +63,15 @@ public struct AuthFailed: Codable, Equatable {
         case message
     }
 }
+
+/// Client → server: first message after connecting; carries the pairing PIN.
+public struct Pairing: Codable, Equatable {
+    public let type = "pairing"
+    public let pin: String
+    public init(pin: String) { self.pin = pin }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case pin
+    }
+}

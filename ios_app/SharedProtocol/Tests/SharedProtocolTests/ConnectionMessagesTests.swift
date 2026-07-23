@@ -33,4 +33,13 @@ final class ConnectionMessagesTests: XCTestCase {
         XCTAssertEqual(decoded, original)
         XCTAssertEqual(decoded.type, "auth_failed")
     }
+
+    func testPairingRoundTrips() throws {
+        let original = Pairing(pin: "123456")
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Pairing.self, from: data)
+        XCTAssertEqual(decoded, original)
+        XCTAssertEqual(decoded.type, "pairing")
+        XCTAssertEqual(decoded.pin, "123456")
+    }
 }
