@@ -13,6 +13,14 @@ struct ChatMessage: Identifiable, Equatable {
     enum Role { case user, assistant }
 }
 
+/// The currently-loaded explorer-chat session and its on-device transcript.
+/// Mirrors `llmIdeMessages` but is scoped to one Mac-side persistent session.
+struct ExploreCurrentSession: Equatable {
+    let id: String
+    var title: String
+    var history: [ChatMessage]
+}
+
 @MainActor
 final class ControlService: ObservableObject {
     @Published var connectionStatus: ConnectionStatus = .disconnected
@@ -26,8 +34,17 @@ final class ControlService: ObservableObject {
     /// Transient confirmation of one-shot actions (open/close/menu); auto-clears.
     @Published var actionStatus: String?
 
+    /// Explorer-chat sessions (Mac-side persistent state) + the currently
+    /// loaded one. `exploreCurrent.history` is the live transcript.
+    @Published var exploreSessions: [ExploreSessionSummary] = []
+    @Published var exploreCurrent: ExploreCurrentSession?
+
     /// Command ids whose streamed reply belongs to the llm-ide transcript.
     private var llmIdeCommandIds: Set<String> = []
+    /// Command ids whose streamed reply belongs to the explorer transcript.
+    /// Explore chat is one-in-flight, but a Set mirrors `llmIdeCommandIds`
+    /// and is robust to overlapping done/stream frames.
+    private var exploreCommandIds: Set<String> = []
     private var actionStatusTask: Task<Void, Never>?
 
     // Frame ordering — decodes happen off-main and can finish out of order.
@@ -232,6 +249,80 @@ final class ControlService: ObservableObject {
         llmIdeMessages.removeAll()
     }
 
+    // MARK: — Explorer-chat sessions
+
+    /// Ask the Mac for the current list of explorer-chat sessions. Reply lands
+    /// in `exploreSessions` via the `explore_session_list` handler.
+    func exploreListSessions() {
+        guard connectionStatus == .connected else { return }
+        guard let data = try? JSONEncoder().encode(ExploreListSessions()),
+              let str = String(data: data, encoding: .utf8) else { return }
+        sendTextFrame(str)
+    }
+
+    /// Load a session's full history into `exploreCurrent`. Reply arrives via
+    /// `explore_session_history`.
+    func exploreLoadSession(_ id: String) {
+        guard connectionStatus == .connected else { return }
+        guard let data = try? JSONEncoder().encode(ExploreLoadSession(sessionId: id)),
+              let str = String(data: data, encoding: .utf8) else { return }
+        sendTextFrame(str)
+    }
+
+    /// Create a new session on the Mac. Reply (`explore_session_created`)
+    /// resets `exploreCurrent` to the new id with empty history and refreshes
+    /// the session list.
+    func exploreNewSession() {
+        guard connectionStatus == .connected else { return }
+        guard let data = try? JSONEncoder().encode(ExploreNewSession()),
+              let str = String(data: data, encoding: .utf8) else { return }
+        sendTextFrame(str)
+    }
+
+    /// Delete a session on the Mac and refresh the list.
+    func exploreDeleteSession(_ id: String) {
+        guard connectionStatus == .connected else { return }
+        guard let data = try? JSONEncoder().encode(ExploreDeleteSession(sessionId: id)),
+              let str = String(data: data, encoding: .utf8) else { return }
+        sendTextFrame(str)
+        // Optimistically drop locally + reload the list to confirm.
+        exploreSessions.removeAll { $0.id == id }
+        if exploreCurrent?.id == id { exploreCurrent = nil }
+        exploreListSessions()
+    }
+
+    /// Send a chat turn within the current explorer session. The reply streams
+    /// back through the same `output`/`done` path as `sendLlmideChat`, routed
+    /// by `commandId` membership in `exploreCommandIds`.
+    func sendExploreChat(_ text: String, sessionId: String) {
+        guard connectionStatus == .connected else { return }
+        // If the caller is chatting without a loaded session (edge case),
+        // initialize a local one bound to the provided sessionId.
+        if exploreCurrent == nil {
+            exploreCurrent = ExploreCurrentSession(id: sessionId, title: "Session", history: [])
+        }
+        // History sent to the Mac = prior turns only (the new user turn is
+        // appended locally below). Server re-caps to its own window.
+        let history = (exploreCurrent?.history ?? [])
+            .suffix(8)
+            .compactMap { m -> ChatTurn? in
+                guard !m.text.isEmpty else { return nil }
+                return ChatTurn(role: m.role == .assistant ? "assistant" : "user", content: m.text)
+            }
+        exploreCurrent?.history.append(ChatMessage(role: .user, text: text))
+        exploreCurrent?.history.append(ChatMessage(role: .assistant, text: ""))
+        llmStreaming = true
+        let id = UUID().uuidString
+        exploreCommandIds.insert(id)
+        let chat = ExploreChat(sessionId: sessionId, commandId: id, text: text, history: history)
+        if let data = try? JSONEncoder().encode(chat),
+           let str = String(data: data, encoding: .utf8) {
+            sendTextFrame(str)
+        } else {
+            errorMessage = "Failed to encode explore chat message"
+        }
+    }
+
     /// Open the llm-ide Mac app. With a `tab` it navigates there via the
     /// `llmide://` deep link (which also launches the app if needed).
     func openLlmIde(tab: String? = nil) {
@@ -370,16 +461,39 @@ final class ControlService: ObservableObject {
                (payload["started"] as? Bool) != true {
                 setActionStatus(msg)
             }
+        case "explore_session_list":
+            if let list = try? JSONDecoder().decode(ExploreSessionList.self, from: data) {
+                exploreSessions = list.sessions
+            }
+        case "explore_session_history":
+            if let hist = try? JSONDecoder().decode(ExploreSessionHistory.self, from: data) {
+                exploreCurrent = ExploreCurrentSession(
+                    id: hist.sessionId,
+                    title: hist.title,
+                    history: hist.history.map {
+                        ChatMessage(role: $0.role == "assistant" ? .assistant : .user, text: $0.content)
+                    }
+                )
+            }
+        case "explore_session_created":
+            if let created = try? JSONDecoder().decode(ExploreSessionCreated.self, from: data) {
+                exploreCurrent = ExploreCurrentSession(id: created.sessionId, title: "New session", history: [])
+                exploreListSessions()   // refresh the sidebar list
+            }
         case "output":
             let commandId = json["commandId"] as? String
             let toLlmIde = commandId.map { llmIdeCommandIds.contains($0) } ?? false
+            let toExplore = commandId.map { exploreCommandIds.contains($0) } ?? false
             if let payload = json["payload"] as? [String: Any] {
                 if let chunk = payload["stream"] as? String, !chunk.isEmpty {
-                    appendAssistantChunk(chunk, toLlmIde: toLlmIde)
+                    appendAssistantChunk(chunk, toLlmIde: toLlmIde, toExplore: toExplore)
                 }
                 if let done = payload["done"] as? Bool, done {
                     llmStreaming = false
-                    if let id = commandId { llmIdeCommandIds.remove(id) }
+                    if let id = commandId {
+                        llmIdeCommandIds.remove(id)
+                        exploreCommandIds.remove(id)
+                    }
                 }
             }
         case "error":
@@ -390,15 +504,28 @@ final class ControlService: ObservableObject {
                 // Drop the empty "…" placeholder left by a failed chat turn.
                 removeTrailingEmptyAssistant(&messages)
                 removeTrailingEmptyAssistant(&llmIdeMessages)
+                if var current = exploreCurrent {
+                    removeTrailingEmptyAssistant(&current.history)
+                    exploreCurrent = current
+                }
             }
         default:
             break
         }
     }
 
-    private func appendAssistantChunk(_ chunk: String, toLlmIde: Bool) {
-        if toLlmIde { appendToLastAssistant(&llmIdeMessages, chunk) }
-        else { appendToLastAssistant(&messages, chunk) }
+    private func appendAssistantChunk(_ chunk: String, toLlmIde: Bool, toExplore: Bool = false) {
+        if toLlmIde {
+            appendToLastAssistant(&llmIdeMessages, chunk)
+        } else if toExplore {
+            // `exploreCurrent` is a value type; mutate a local copy then
+            // reassign so `@Published` fires deterministically.
+            guard var current = exploreCurrent else { return }
+            appendToLastAssistant(&current.history, chunk)
+            exploreCurrent = current
+        } else {
+            appendToLastAssistant(&messages, chunk)
+        }
     }
 
     private func appendToLastAssistant(_ list: inout [ChatMessage], _ chunk: String) {
