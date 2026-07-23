@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import SharedProtocol
 
 /// One entry in the AI prompt conversation.
 struct ChatMessage: Identifiable, Equatable {
@@ -68,6 +69,15 @@ final class ControlService: ObservableObject {
         }
         webSocketTask = URLSession(configuration: .default).webSocketTask(with: url)
         webSocketTask?.resume()
+        // Message-based pairing: the first frame after the WS opens must be a
+        // Pairing{pin} message. The Mac replies Connected{deviceName} (handled
+        // in handleMessage → "connected") or AuthFailed{message} (→ "auth_failed",
+        // which stops retrying). The ?pin= query is no longer required by the Mac
+        // but is left in the URL harmlessly to minimize churn.
+        if let data = try? JSONEncoder().encode(Pairing(pin: pin)),
+           let str = String(data: data, encoding: .utf8) {
+            sendTextFrame(str)
+        }
         receiveMessage()
     }
 
@@ -257,15 +267,21 @@ final class ControlService: ObservableObject {
 
     // MARK: — Internal
 
-    private func sendRaw(_ msg: [String: Any]) {
-        guard let task = webSocketTask,
-              let data = try? JSONSerialization.data(withJSONObject: msg),
-              let str = String(data: data, encoding: .utf8) else { return }
-        task.send(.string(str)) { [weak self] err in
+    /// Send a pre-encoded JSON string over the WebSocket. Single send path for
+    /// both dict-based messages (`sendRaw`) and Codable-encoded frames (`Pairing`).
+    private func sendTextFrame(_ string: String) {
+        guard let task = webSocketTask else { return }
+        task.send(.string(string)) { [weak self] err in
             if let err {
                 Task { @MainActor in self?.errorMessage = err.localizedDescription }
             }
         }
+    }
+
+    private func sendRaw(_ msg: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: msg),
+              let str = String(data: data, encoding: .utf8) else { return }
+        sendTextFrame(str)
     }
 
     private func receiveMessage() {
