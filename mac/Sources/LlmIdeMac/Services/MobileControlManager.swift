@@ -120,16 +120,73 @@ final class MobileControlManager {
 
     // MARK: - Inbound + logging
 
-    /// Dispatch decoded inbound client messages. Phase 3 handles llm-ide chat;
-    /// deep-link/app/menu commands arrive in Phase 3b.
+    /// Dispatch decoded inbound client messages by `type` discriminator.
+    ///
+    /// The SharedProtocol structs use `let type = "…"` with a synthesized
+    /// `init(from:)` that does NOT validate the discriminator value, and
+    /// several explorer structs (`ExploreListSessions`/`ExploreNewSession`)
+    /// are empty — so a greedy sequential `decode` lets the first empty
+    /// struct swallow every payload (it succeeds on any JSON carrying a
+    /// string `type`). To keep `ExploreLoadSession`/`ExploreNewSession`/
+    /// `ExploreDeleteSession`/`ExploreChat` reachable, we decode a one-field
+    /// `{type}` envelope ONCE and `switch` on it — mirroring the iOS receive
+    /// loop. Each case then decodes its full message type and runs the
+    /// existing handler body verbatim.
     private func handleInbound(_ data: Data) {
-        if let chat = try? JSONDecoder().decode(LlmIdeChat.self, from: data) {
-            append(.info, "Chat: \(chat.text.prefix(40))")
-            Task { await handleChat(chat) }
+        struct Envelope: Decodable { let type: String }
+        guard let env = try? JSONDecoder().decode(Envelope.self, from: data) else {
+            let preview = String(data: data, encoding: .utf8) ?? "<\(data.count) bytes>"
+            append(.info, "Unhandled inbound (no type): \(preview)")
             return
         }
-        let preview = String(data: data, encoding: .utf8) ?? "<\(data.count) bytes>"
-        append(.info, "Unhandled inbound: \(preview)")
+
+        switch env.type {
+        case "llmide_chat":
+            // Phase 3/4 chat proxy — must keep working alongside explorer ops.
+            if let chat = try? JSONDecoder().decode(LlmIdeChat.self, from: data) {
+                append(.info, "Chat: \(chat.text.prefix(40))")
+                Task { await handleChat(chat) }
+            }
+        case "explore_list_sessions":
+            // `ChatSessionStore` is Mac-local JSON keyed by `ChatScope.explorer`.
+            let rows = ChatSessionStore.list(for: .explorer).map {
+                ExploreSessionSummary(id: $0.id.uuidString,
+                                      title: $0.title,
+                                      lastUsedAt: $0.lastUsedAt.timeIntervalSince1970)
+            }
+            append(.info, "Explore list: \(rows.count) session(s)")
+            Task { await server?.send(ExploreSessionList(sessions: rows)) }
+        case "explore_load_session":
+            if let m = try? JSONDecoder().decode(ExploreLoadSession.self, from: data),
+               let s = ChatSessionStore.load(id: UUID(uuidString: m.sessionId) ?? UUID()) {
+                // `CodeAssistTurn` → `ChatTurn`: drop the client-only `id`, surface
+                // the role as its raw string ("user"/"assistant").
+                let turns = s.history.map { ChatTurn(role: $0.role.rawValue, content: $0.content) }
+                append(.info, "Explore load: \(s.id.uuidString.prefix(8))")
+                Task { await server?.send(ExploreSessionHistory(sessionId: s.id.uuidString,
+                                                                title: s.title,
+                                                                history: turns)) }
+            }
+        case "explore_new_session":
+            let s = ChatSession(scope: .explorer, title: "New chat")
+            ChatSessionStore.save(s)
+            append(.info, "Explore new: \(s.id.uuidString.prefix(8))")
+            Task { await server?.send(ExploreSessionCreated(sessionId: s.id.uuidString)) }
+        case "explore_delete_session":
+            if let m = try? JSONDecoder().decode(ExploreDeleteSession.self, from: data) {
+                if let uid = UUID(uuidString: m.sessionId) {
+                    ChatSessionStore.delete(id: uid)
+                    append(.info, "Explore delete: \(uid.uuidString.prefix(8))")
+                }
+            }
+        case "explore_chat":
+            // TODO(Task 3): decode `ExploreChat` → proxy a turn through the
+            // explorer session, persist the appended history, and reply via
+            // `handleExploreChat`.
+            append(.info, "explore_chat dispatch pending Task 3")
+        default:
+            append(.info, "Unhandled inbound type: \(env.type)")
+        }
     }
 
     /// Proxy an llm-ide chat turn through the backend agent. The reply is sent
