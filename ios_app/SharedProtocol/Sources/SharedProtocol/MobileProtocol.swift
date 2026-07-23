@@ -90,15 +90,25 @@ public struct ChatImage: Codable, Equatable {
     public init(mediaType: String, data: String) { self.mediaType = mediaType; self.data = data }
 }
 
-/// Client → server: ask the llm-ide agent a question.
+public struct ChatFileText: Codable, Equatable {
+    public let name: String
+    public let text: String
+    public init(name: String, text: String) { self.name = name; self.text = text }
+}
+
+/// Client → server: ask the llm-ide agent a question. Images are base64; files
+/// carry text extracted on-device (not binary) to stay under the WS frame cap.
 public struct LlmIdeChat: Codable, Equatable {
     public let type = "llmide_chat"
     public let commandId: String
     public let text: String
     public let history: [ChatTurn]
-    public let image: ChatImage?
-    public init(commandId: String, text: String, history: [ChatTurn], image: ChatImage?) {
-        self.commandId = commandId; self.text = text; self.history = history; self.image = image
+    public let images: [ChatImage]
+    public let files: [ChatFileText]
+    public init(commandId: String, text: String, history: [ChatTurn],
+                images: [ChatImage] = [], files: [ChatFileText] = []) {
+        self.commandId = commandId; self.text = text; self.history = history
+        self.images = images; self.files = files
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -106,7 +116,8 @@ public struct LlmIdeChat: Codable, Equatable {
         case commandId
         case text
         case history
-        case image
+        case images
+        case files
     }
 }
 

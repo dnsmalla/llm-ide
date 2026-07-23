@@ -46,18 +46,21 @@ final class ConnectionMessagesTests: XCTestCase {
     func testLlmIdeChatRoundTrips() throws {
         let chat = LlmIdeChat(commandId: "abc", text: "hello",
                               history: [ChatTurn(role: "user", content: "hi")],
-                              image: ChatImage(mediaType: "image/png", data: "BASE64"))
+                              images: [ChatImage(mediaType: "image/png", data: "B64")],
+                              files: [ChatFileText(name: "notes.md", text: "# hi")])
         let decoded = try roundTrip(chat)
         XCTAssertEqual(decoded, chat)
         XCTAssertEqual(decoded.type, "llmide_chat")
-        XCTAssertEqual(decoded.image?.mediaType, "image/png")
+        XCTAssertEqual(decoded.images.count, 1)
+        XCTAssertEqual(decoded.files.first?.name, "notes.md")
     }
 
-    func testLlmIdeChatNoImageRoundTrips() throws {
-        let chat = LlmIdeChat(commandId: "x", text: "q", history: [], image: nil)
+    func testLlmIdeChatTextOnlyRoundTrips() throws {
+        let chat = LlmIdeChat(commandId: "x", text: "q", history: [], images: [], files: [])
         let decoded = try roundTrip(chat)
         XCTAssertEqual(decoded, chat)
-        XCTAssertNil(decoded.image)
+        XCTAssertTrue(decoded.images.isEmpty)
+        XCTAssertTrue(decoded.files.isEmpty)
     }
 
     func testOutputHasNestedPayload() throws {
