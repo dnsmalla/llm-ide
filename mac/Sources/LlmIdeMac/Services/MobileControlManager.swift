@@ -180,10 +180,10 @@ final class MobileControlManager {
                 }
             }
         case "explore_chat":
-            // TODO(Task 3): decode `ExploreChat` → proxy a turn through the
-            // explorer session, persist the appended history, and reply via
-            // `handleExploreChat`.
-            append(.info, "explore_chat dispatch pending Task 3")
+            if let chat = try? JSONDecoder().decode(ExploreChat.self, from: data) {
+                append(.info, "Explore chat in \(chat.sessionId.prefix(8))")
+                Task { await handleExploreChat(chat) }
+            }
         default:
             append(.info, "Unhandled inbound type: \(env.type)")
         }
@@ -210,6 +210,50 @@ final class MobileControlManager {
                                       payload: OutputPayload(stream: reply, done: true)))
         } catch {
             append(.stderr, "askAgent failed: \(error.localizedDescription)")
+            lastError = error.localizedDescription
+            await server?.send(CommandError(commandId: chat.commandId, message: error.localizedDescription))
+        }
+    }
+
+    /// Proxy an explorer chat turn through the backend Code Assistant and
+    /// persist the appended history into the Mac's `ChatSessionStore`, so the
+    /// phone and Mac stay in sync. The reply is sent back as a nested `Output`
+    /// payload (`{stream, done:true}`); failures surface as a `CommandError`
+    /// and are mirrored into the Mac log + `lastError`. Mirrors `handleChat`
+    /// but routes through `codeAssistStream` (live agent progress) and writes
+    /// the user + assistant turns back to the session file.
+    private func handleExploreChat(_ chat: ExploreChat) async {
+        guard let api else {
+            await server?.send(CommandError(commandId: chat.commandId, message: "Backend not configured"))
+            return
+        }
+        guard let sid = UUID(uuidString: chat.sessionId) else {
+            await server?.send(CommandError(commandId: chat.commandId, message: "Bad session id"))
+            return
+        }
+        let history = chat.history.map {
+            LlmIdeAPIClient.CodeAssistTurn(role: .init(rawValue: $0.role) ?? .user, content: $0.content)
+        }
+        do {
+            let resp = try await api.codeAssistStream(
+                message: chat.text,
+                language: nil,
+                history: history,
+                attachments: [],
+                skills: [],
+                onProgress: { [weak self] label in self?.append(.info, "code-assist: \(label)") }
+            )
+            // Persist user + assistant turns into the Mac session (keeps phone & Mac in sync).
+            if var session = ChatSessionStore.load(id: sid) {
+                session.history.append(LlmIdeAPIClient.CodeAssistTurn(role: .user, content: chat.text))
+                session.history.append(LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: resp.reply))
+                if session.title == "New chat" { session.title = String(chat.text.prefix(40)) }
+                ChatSessionStore.save(session)
+            }
+            await server?.send(Output(commandId: chat.commandId,
+                                      payload: OutputPayload(stream: resp.reply, done: true)))
+        } catch {
+            append(.stderr, "code-assist failed: \(error.localizedDescription)")
             lastError = error.localizedDescription
             await server?.send(CommandError(commandId: chat.commandId, message: error.localizedDescription))
         }
