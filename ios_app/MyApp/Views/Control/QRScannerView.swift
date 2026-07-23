@@ -1,8 +1,8 @@
 import SwiftUI
 import AVFoundation
 
-/// Result of scanning the agent's pairing QR code
-/// (`aicontrol://pair?ip=…&port=…&pin=…`).
+/// Result of scanning the Mac app's pairing QR code
+/// (`llmide://pair?ip=…&port=…&pin=…`; also accepts the legacy `aicontrol://`).
 struct PairingInfo {
     let ip: String
     let port: Int
@@ -10,7 +10,7 @@ struct PairingInfo {
 
     init?(from string: String) {
         guard let components = URLComponents(string: string),
-              components.scheme == "aicontrol",
+              ["llmide", "aicontrol"].contains(components.scheme),
               let items = components.queryItems,
               let ip = items.first(where: { $0.name == "ip" })?.value, !ip.isEmpty,
               let pin = items.first(where: { $0.name == "pin" })?.value, !pin.isEmpty
