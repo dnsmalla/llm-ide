@@ -63,9 +63,11 @@ final class ConnectionMessagesTests: XCTestCase {
     func testOutputHasNestedPayload() throws {
         let out = Output(commandId: "abc", payload: OutputPayload(stream: "reply text", done: true))
         let data = try JSONEncoder().encode(out)
-        // Nested payload shape matches iOS receive: {"type":"output","commandId":"abc","payload":{"stream":"reply text","done":true}}
+        // Nested payload shape matches iOS receive: {"type":"output",...,"payload":{"stream":...,"done":...}}.
+        // Assert only that `payload` is a nested object (field order is not guaranteed by
+        // JSONEncoder); the decoded-field checks below verify the values.
         let json = try XCTUnwrap(String(data: data, encoding: .utf8))
-        XCTAssertTrue(json.contains("\"payload\":{\"stream\":\"reply text\",\"done\":true}"), json)
+        XCTAssertTrue(json.contains("\"payload\":{"), "expected nested payload object, got: \(json)")
         let decoded = try roundTrip(out)
         XCTAssertEqual(decoded.payload.stream, "reply text")
         XCTAssertEqual(decoded.payload.done, true)
