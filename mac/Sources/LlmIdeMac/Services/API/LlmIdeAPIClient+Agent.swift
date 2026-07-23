@@ -190,19 +190,19 @@ extension LlmIdeAPIClient {
     /// this conversation, capped to the last 10 server-side; pass
     /// whatever the UI has accumulated.
     func askAgent(message: String, history: [AgentAskMessage] = [],
-                  image: (mediaType: String, data: String)? = nil) async throws -> String {
+                  images: [(mediaType: String, data: String)] = []) async throws -> String {
         struct WireMsg: Encodable { let role: String; let content: String }
         struct WireImage: Encodable { let mediaType: String; let data: String }
         struct Req: Encodable {
             let message: String
             let history: [WireMsg]
-            let image: WireImage?
+            let image: [WireImage]
         }
         struct Resp: Decodable { let reply: String }
-        let wire = history.map { WireMsg(role: $0.role.rawValue, content: $0.content) }
-        let img = image.map { WireImage(mediaType: $0.mediaType, data: $0.data) }
+        let wireHistory = history.map { WireMsg(role: $0.role.rawValue, content: $0.content) }
+        let wireImages = images.map { WireImage(mediaType: $0.mediaType, data: $0.data) }
         let r: Resp = try await post("/kb/agent/ask",
-                                     body: Req(message: message, history: wire, image: img),
+                                     body: Req(message: message, history: wireHistory, image: wireImages),
                                      authenticated: true)
         return r.reply
     }

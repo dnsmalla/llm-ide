@@ -144,9 +144,11 @@ final class MobileControlManager {
         let history = chat.history.map {
             LlmIdeAPIClient.AgentAskMessage(role: .init(rawValue: $0.role) ?? .user, content: $0.content)
         }
-        let image = chat.image.map { (mediaType: $0.mediaType, data: $0.data) }
+        let images = chat.images.map { (mediaType: $0.mediaType, data: $0.data) }
+        // Fold extracted file text into the prompt (mirrors how history is folded server-side).
+        let message = Self.messageWithFiles(chat.text, files: chat.files)
         do {
-            let reply = try await api.askAgent(message: chat.text, history: history, image: image)
+            let reply = try await api.askAgent(message: message, history: history, images: images)
             await server?.send(Output(commandId: chat.commandId,
                                       payload: OutputPayload(stream: reply, done: true)))
         } catch {
@@ -154,6 +156,15 @@ final class MobileControlManager {
             lastError = error.localizedDescription
             await server?.send(CommandError(commandId: chat.commandId, message: error.localizedDescription))
         }
+    }
+
+    /// Prepend each extracted file's text as a fenced block before the user's
+    /// message, so the agent sees the file contents as context. Empty when no
+    /// files were attached (returns the text unchanged).
+    private static func messageWithFiles(_ text: String, files: [ChatFileText]) -> String {
+        guard !files.isEmpty else { return text }
+        let blocks = files.map { "--- File: \($0.name) ---\n\($0.text)" }.joined(separator: "\n\n")
+        return "\(blocks)\n\n\(text)"
     }
 
     /// The user-facing Mac name, used as both the WebSocket device name and the

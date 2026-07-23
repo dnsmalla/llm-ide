@@ -38,7 +38,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
     func start() throws {
         let opts = NWProtocolWebSocket.Options()
         opts.autoReplyPing = true
-        opts.maximumMessageSize = 1_048_576
+        opts.maximumMessageSize = 8_388_608   // 8 MiB — matches the :3456 body cap; paired-LAN only
         let params = NWParameters.tcp
         params.defaultProtocolStack.applicationProtocols.insert(opts, at: 0)
         let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: UInt16(port))!)
