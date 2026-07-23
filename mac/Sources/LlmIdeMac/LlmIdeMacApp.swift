@@ -272,7 +272,7 @@ struct LlmIdeMacApp: App {
                 // quits the app.
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     backend.stop()
-                    mobileControl.stopIfOwned()
+                    mobileControl.stop()
                 }
                 .task {
                     if session.isAuthenticated { liveMirror.start() }
@@ -377,13 +377,13 @@ struct LlmIdeMacApp: App {
         backend.start(nodePath: config.backendNodePath, workingDirectory: config.backendWorkingDir)
     }
 
-    /// Start or adopt the computer-agent when Mobile Control is enabled.
+    /// Start the native mobile control server when Mobile Control is enabled.
+    /// (The caller additionally gates on `mobileControlAutoStart`.)
     @MainActor
     private func autoStartMobileControl() {
-        LaunchPathResolver.resolveMobileAgentPath(config: config)
-        let path = config.mobileControlAgentPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !path.isEmpty else { return }
-        mobileControl.start(agentPath: path)
+        if config.mobileControlEnabled {
+            mobileControl.start()
+        }
     }
 
     /// Poll `/health` briefly so session restore — which talks to the

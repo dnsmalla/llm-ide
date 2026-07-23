@@ -375,11 +375,6 @@ struct MobileControlSettingsSection: View {
             Text(label)
                 .font(Typography.caption)
                 .foregroundStyle(theme.current.text)
-            if let pid = mobile.pid {
-                Text("· pid \(pid)")
-                    .font(Typography.caption)
-                    .foregroundStyle(theme.current.textMuted)
-            }
         }
     }
 
@@ -396,7 +391,7 @@ struct MobileControlSettingsSection: View {
     private var actionButton: some View {
         switch mobile.status {
         case .running, .starting:
-            Button("Stop") { mobile.stopIfOwned() }
+            Button("Stop") { mobile.stop() }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(theme.current.danger)
@@ -404,7 +399,7 @@ struct MobileControlSettingsSection: View {
             Button("Start") {
                 savePath()
                 autoPromptPermissionsIfNeeded()
-                mobile.start(agentPath: config.mobileControlAgentPath)
+                mobile.start()
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
