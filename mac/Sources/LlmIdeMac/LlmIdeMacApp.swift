@@ -142,6 +142,11 @@ struct LlmIdeMacApp: App {
         self._autoTaskSettings = StateObject(wrappedValue: autoTaskSettingsInstance)
         self.api = client
         self.autoCapture = AutoCaptureService(capture: orchestrator, config: cfg)
+        // Hand the API client to the mobile control manager so inbound
+        // llm-ide chat turns from the iPhone can be proxied to the backend.
+        // Done last so all stored properties (incl. autoCapture) are set
+        // before `self.mobileControl` is read.
+        mobileControl.api = client
     }
 
     var body: some Scene {
