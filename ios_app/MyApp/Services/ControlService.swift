@@ -201,21 +201,24 @@ final class ControlService: ObservableObject {
         guard targetDevice != nil, connectionStatus == .connected else { return }
         // Prior turns become history for the agent (server re-caps to 10).
         // History is text-only — prior images aren't re-sent.
-        let history: [[String: String]] = llmIdeMessages.suffix(10).compactMap { m in
+        let history = llmIdeMessages.suffix(10).compactMap { m -> ChatTurn? in
             guard !m.text.isEmpty else { return nil }
-            return ["role": m.role == .assistant ? "assistant" : "user", "content": m.text]
+            return ChatTurn(role: m.role == .assistant ? "assistant" : "user", content: m.text)
         }
         llmIdeMessages.append(ChatMessage(role: .user, text: text, imageData: image?.data))
         llmIdeMessages.append(ChatMessage(role: .assistant, text: ""))
         llmStreaming = true
         let id = UUID().uuidString
         llmIdeCommandIds.insert(id)
-        var payload: [String: Any] = ["text": text, "history": history]
-        if let image {
-            payload["image"] = ["mediaType": image.mediaType,
-                                "data": image.data.base64EncodedString()]
+        let img = image.map { ChatImage(mediaType: $0.mediaType, data: $0.data.base64EncodedString()) }
+        let chat = LlmIdeChat(commandId: id, text: text, history: history, image: img)
+        if let data = try? JSONEncoder().encode(chat),
+           let str = String(data: data, encoding: .utf8) {
+            sendTextFrame(str)
+        } else {
+            errorMessage = "Failed to encode chat message"
+            disconnect(clearDirect: true)
         }
-        sendCommand(type: "llmide_chat", payload: payload, id: id)
     }
 
     func clearLlmIdeChat() {
