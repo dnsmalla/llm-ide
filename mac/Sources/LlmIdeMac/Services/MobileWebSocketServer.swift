@@ -43,8 +43,8 @@ final class MobileWebSocketServer: @unchecked Sendable {
         params.defaultProtocolStack.applicationProtocols.insert(opts, at: 0)
         let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: UInt16(port))!)
         listener.newConnectionHandler = { [weak self] conn in self?.handle(conn) }
+        self.listener = listener          // assign BEFORE start
         listener.start(queue: queue)
-        self.listener = listener
         onLog("WebSocket listening on :\(port)")
     }
 
@@ -143,8 +143,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
     private func routeInbound(data: Data) {
         // Heartbeat is handled here; everything else is forwarded to the manager
         // (Phase 3 wires chat/commands; Phase 4/5 wire viewing/input).
-        if let hb = try? JSONDecoder().decode(Heartbeat.self, from: data),
-           hb.type == "heartbeat" {
+        if (try? JSONDecoder().decode(Heartbeat.self, from: data)) != nil {
             Task { await self.send(HeartbeatAck(ts: Date().timeIntervalSince1970)) }
             return
         }

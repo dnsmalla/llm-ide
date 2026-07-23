@@ -104,7 +104,16 @@ struct MobileConnectionInfo: Equatable {
         let lanIP = LocalIPs.lanIPv4()
         let pin = AgentPin.read()
         let host = tailscaleIP ?? lanIP
-        let qr = host.map { "llmide://pair?ip=\($0)&port=\(port)&pin=\(pin ?? "")" }
+        let qr = host.flatMap { host -> String? in
+            var c = URLComponents()
+            c.scheme = "llmide"; c.host = "pair"
+            c.queryItems = [
+                URLQueryItem(name: "ip", value: host),
+                URLQueryItem(name: "port", value: String(port)),
+                URLQueryItem(name: "pin", value: pin ?? "")
+            ]
+            return c.url?.absoluteString
+        }
         return MobileConnectionInfo(
             tailscaleIP: tailscaleIP,
             lanIP: lanIP,

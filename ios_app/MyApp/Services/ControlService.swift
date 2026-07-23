@@ -77,6 +77,9 @@ final class ControlService: ObservableObject {
         if let data = try? JSONEncoder().encode(Pairing(pin: pin)),
            let str = String(data: data, encoding: .utf8) {
             sendTextFrame(str)
+        } else {
+            errorMessage = "Failed to encode pairing message"
+            disconnect(clearDirect: true)
         }
         receiveMessage()
     }

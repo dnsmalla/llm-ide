@@ -37,7 +37,7 @@ let keychainAccount = "mobile::pin"
 
 func readPinFromKeychain() -> String? {
     let p = Process()
-    p.launchPath = "/usr/bin/security"
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
     p.arguments = ["find-generic-password", "-s", keychainService,
                    "-a", keychainAccount, "-w"]
     let pipe = Pipe(); p.standardOutput = pipe; p.standardError = Pipe()
