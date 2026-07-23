@@ -189,13 +189,20 @@ extension LlmIdeAPIClient {
     /// matches the in-meeting voice. History is the prior turns of
     /// this conversation, capped to the last 10 server-side; pass
     /// whatever the UI has accumulated.
-    func askAgent(message: String, history: [AgentAskMessage] = []) async throws -> String {
+    func askAgent(message: String, history: [AgentAskMessage] = [],
+                  image: (mediaType: String, data: String)? = nil) async throws -> String {
         struct WireMsg: Encodable { let role: String; let content: String }
-        struct Req: Encodable { let message: String; let history: [WireMsg] }
+        struct WireImage: Encodable { let mediaType: String; let data: String }
+        struct Req: Encodable {
+            let message: String
+            let history: [WireMsg]
+            let image: WireImage?
+        }
         struct Resp: Decodable { let reply: String }
         let wire = history.map { WireMsg(role: $0.role.rawValue, content: $0.content) }
+        let img = image.map { WireImage(mediaType: $0.mediaType, data: $0.data) }
         let r: Resp = try await post("/kb/agent/ask",
-                                     body: Req(message: message, history: wire),
+                                     body: Req(message: message, history: wire, image: img),
                                      authenticated: true)
         return r.reply
     }
