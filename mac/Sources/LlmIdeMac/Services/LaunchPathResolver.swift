@@ -1,9 +1,8 @@
 import Foundation
 
-/// Resolves on-disk paths to the Node backend (`server.mjs`) and the
-/// external mobile computer-agent. Used by `BackendManager`,
-/// `MobileControlManager`, and the Settings screens when the user hasn't
-/// pinned a path manually.
+/// Resolves on-disk paths to the Node backend (`server.mjs`). Used by
+/// `BackendManager` and the Settings screens when the user hasn't pinned
+/// a path manually.
 ///
 /// Pure filesystem search — no shelling out — and bounded so a sprawling
 /// home directory can't stall app launch. Mirrors the candidate-list +
@@ -43,40 +42,6 @@ enum LaunchPathResolver {
             }
         }
         return nil
-    }
-
-    // MARK: - Mobile computer-agent
-
-    /// Validate-and-repair `config.mobileControlAgentPath`. A stored path
-    /// that no longer looks like the agent (the folder moved/was renamed) is
-    /// re-detected from the known `auto_swift_aicontrol` install locations
-    /// rather than trusted blindly — same contract as
-    /// `BackendManager.resolveLaunchPaths`.
-    static func resolveMobileAgentPath(config: AppConfig) {
-        let fm = FileManager.default
-        let home = fm.homeDirectoryForCurrentUser
-
-        let current = config.mobileControlAgentPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !current.isEmpty && looksLikeAgent(current) { return }
-
-        let candidates = [
-            home.appendingPathComponent("Desktop/auto_sys/swift_apps/auto_swift_aicontrol/services/computer-agent"),
-            home.appendingPathComponent("Developer/auto_sys/swift_apps/auto_swift_aicontrol/services/computer-agent"),
-        ]
-        for candidate in candidates where looksLikeAgent(candidate.path) {
-            config.mobileControlAgentPath = candidate.path
-            return
-        }
-    }
-
-    /// True iff `dir` contains both `package.json` and `src/index.ts` — the
-    /// computer-agent's entry shape. Used to validate a stored path so a
-    /// moved/renamed folder is re-detected, not silently trusted.
-    private static func looksLikeAgent(_ dir: String) -> Bool {
-        let fm = FileManager.default
-        let url = URL(fileURLWithPath: dir)
-        return fm.fileExists(atPath: url.appendingPathComponent("package.json").path)
-            && fm.fileExists(atPath: url.appendingPathComponent("src/index.ts").path)
     }
 
     /// Skip dot-dirs, build output, and dependency trees during the shallow

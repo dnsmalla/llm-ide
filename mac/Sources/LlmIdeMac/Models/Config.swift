@@ -468,6 +468,8 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(mobileControlEnabled, forKey: "mobileControlEnabled") }
     }
     /// Directory containing the computer-agent `package.json` (npm start → :3006).
+    /// DORMANT: No longer used — the Mac app now runs a native server and no longer
+    /// references an external mobile-agent folder. Kept for config-backwards-compat.
     @Published var mobileControlAgentPath: String {
         didSet { defaults.set(mobileControlAgentPath, forKey: "mobileControlAgentPath") }
     }
