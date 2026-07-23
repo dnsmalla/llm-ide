@@ -156,3 +156,114 @@ public struct CommandError: Codable, Equatable {
         case message
     }
 }
+
+// MARK: - Explorer-chat session messages (Phase B, Task 1)
+
+public struct ExploreSessionSummary: Codable, Equatable {
+    public let id: String
+    public let title: String
+    public let lastUsedAt: Double
+    public init(id: String, title: String, lastUsedAt: Double) { self.id = id; self.title = title; self.lastUsedAt = lastUsedAt }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case lastUsedAt
+    }
+}
+
+public struct ExploreListSessions: Codable, Equatable {
+    public let type = "explore_list_sessions"
+    public init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+    }
+}
+
+public struct ExploreSessionList: Codable, Equatable {
+    public let type = "explore_session_list"
+    public let sessions: [ExploreSessionSummary]
+    public init(sessions: [ExploreSessionSummary]) { self.sessions = sessions }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case sessions
+    }
+}
+
+public struct ExploreLoadSession: Codable, Equatable {
+    public let type = "explore_load_session"
+    public let sessionId: String
+    public init(sessionId: String) { self.sessionId = sessionId }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case sessionId
+    }
+}
+
+public struct ExploreSessionHistory: Codable, Equatable {
+    public let type = "explore_session_history"
+    public let sessionId: String
+    public let title: String
+    public let history: [ChatTurn]
+    public init(sessionId: String, title: String, history: [ChatTurn]) { self.sessionId = sessionId; self.title = title; self.history = history }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case sessionId
+        case title
+        case history
+    }
+}
+
+public struct ExploreNewSession: Codable, Equatable {
+    public let type = "explore_new_session"
+    public init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+    }
+}
+
+public struct ExploreSessionCreated: Codable, Equatable {
+    public let type = "explore_session_created"
+    public let sessionId: String
+    public init(sessionId: String) { self.sessionId = sessionId }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case sessionId
+    }
+}
+
+public struct ExploreDeleteSession: Codable, Equatable {
+    public let type = "explore_delete_session"
+    public let sessionId: String
+    public init(sessionId: String) { self.sessionId = sessionId }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case sessionId
+    }
+}
+
+public struct ExploreChat: Codable, Equatable {
+    public let type = "explore_chat"
+    public let sessionId: String
+    public let commandId: String
+    public let text: String
+    public let history: [ChatTurn]
+    public init(sessionId: String, commandId: String, text: String, history: [ChatTurn]) {
+        self.sessionId = sessionId; self.commandId = commandId; self.text = text; self.history = history
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case sessionId
+        case commandId
+        case text
+        case history
+    }
+}

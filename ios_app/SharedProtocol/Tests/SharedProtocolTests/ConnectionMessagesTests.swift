@@ -82,4 +82,59 @@ final class ConnectionMessagesTests: XCTestCase {
         XCTAssertEqual(decoded, err)
         XCTAssertEqual(decoded.type, "error")
     }
+
+    // MARK: - Explorer-chat session messages (Phase B, Task 1)
+
+    func testExploreChatRoundTrips() throws {
+        let history = [
+            ChatTurn(role: "user", content: "first question"),
+            ChatTurn(role: "assistant", content: "first answer")
+        ]
+        let original = ExploreChat(sessionId: "sess-123", commandId: "cmd-456", text: "new question", history: history)
+        let decoded = try roundTrip(original)
+        XCTAssertEqual(decoded, original)
+        XCTAssertEqual(decoded.type, "explore_chat")
+        XCTAssertEqual(decoded.sessionId, "sess-123")
+        XCTAssertEqual(decoded.commandId, "cmd-456")
+        XCTAssertEqual(decoded.text, "new question")
+        XCTAssertEqual(decoded.history.count, 2)
+        XCTAssertEqual(decoded.history[0].role, "user")
+        XCTAssertEqual(decoded.history[0].content, "first question")
+    }
+
+    func testExploreSessionListRoundTrips() throws {
+        let sessions = [
+            ExploreSessionSummary(id: "sess-1", title: "Project Plan", lastUsedAt: 1_700_000_000),
+            ExploreSessionSummary(id: "sess-2", title: "API Design", lastUsedAt: 1_700_000_100)
+        ]
+        let original = ExploreSessionList(sessions: sessions)
+        let decoded = try roundTrip(original)
+        XCTAssertEqual(decoded, original)
+        XCTAssertEqual(decoded.type, "explore_session_list")
+        XCTAssertEqual(decoded.sessions.count, 2)
+        XCTAssertEqual(decoded.sessions[0].id, "sess-1")
+        XCTAssertEqual(decoded.sessions[0].title, "Project Plan")
+        XCTAssertEqual(decoded.sessions[0].lastUsedAt, 1_700_000_000)
+        XCTAssertEqual(decoded.sessions[1].id, "sess-2")
+        XCTAssertEqual(decoded.sessions[1].title, "API Design")
+        XCTAssertEqual(decoded.sessions[1].lastUsedAt, 1_700_000_100)
+    }
+
+    func testExploreSessionHistoryRoundTrips() throws {
+        let history = [
+            ChatTurn(role: "user", content: "analyze code"),
+            ChatTurn(role: "assistant", content: "I'll analyze it")
+        ]
+        let original = ExploreSessionHistory(sessionId: "sess-abc", title: "Code Review", history: history)
+        let decoded = try roundTrip(original)
+        XCTAssertEqual(decoded, original)
+        XCTAssertEqual(decoded.type, "explore_session_history")
+        XCTAssertEqual(decoded.sessionId, "sess-abc")
+        XCTAssertEqual(decoded.title, "Code Review")
+        XCTAssertEqual(decoded.history.count, 2)
+        XCTAssertEqual(decoded.history[0].role, "user")
+        XCTAssertEqual(decoded.history[0].content, "analyze code")
+        XCTAssertEqual(decoded.history[1].role, "assistant")
+        XCTAssertEqual(decoded.history[1].content, "I'll analyze it")
+    }
 }
