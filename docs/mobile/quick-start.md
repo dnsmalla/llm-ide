@@ -69,6 +69,7 @@ You now have:
 - Pairing + session over a native, in-process WebSocket (no Node helper).
 - Message-based PIN auth backed by the macOS Keychain.
 - Bonjour discovery and an `llmide://pair` QR for one-tap setup.
+- **End-to-end LLM IDE chat**: pair iPhone → ask in iOS chat sheet → Mac proxies to `:3456` → reply streams back.
 - The Mac app bridging chat requests to the LLM IDE backend at `:3456`.
 
 > Screen streaming, remote input, and the full llm-ide command channel arrive in
