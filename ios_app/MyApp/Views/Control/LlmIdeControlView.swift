@@ -1,6 +1,9 @@
 import SwiftUI
 import PhotosUI
 import UIKit
+import PDFKit
+import UniformTypeIdentifiers
+import SharedProtocol
 
 /// Focused chat with the llm-ide agent, driven from the iPhone. Messages
 /// (typed or dictated) go to llm-ide's agent via the Mac agent bridge and the
@@ -12,11 +15,17 @@ struct LlmIdeControlView: View {
 
     @StateObject private var speech = SpeechRecognizer()
     @State private var inputText: String = ""
-    @State private var pendingImageData: Data?      // resized JPEG, ready to send
-    @State private var pickedItem: PhotosPickerItem?
+    @State private var pendingImages: [(data: Data, mediaType: String)] = []   // resized JPEGs, ready to send
+    @State private var pendingFiles: [ChatFileText] = []                        // text extracted on-device
+    @State private var pickedItems: [PhotosPickerItem] = []
     @State private var showPhotoPicker = false
     @State private var showCamera = false
+    @State private var showFilePicker = false
     @FocusState private var isInputFocused: Bool
+
+    /// Max images per send; the bridge caps a frame at 8 MiB so this keeps us
+    /// well under after resize/base64.
+    private let maxImages = 4
 
     private var isConnected: Bool { controlService.connectionStatus == .connected }
 
@@ -51,24 +60,48 @@ struct LlmIdeControlView: View {
             .onChange(of: speech.errorMessage) { msg in
                 if let msg { controlService.errorMessage = msg }
             }
-            .photosPicker(isPresented: $showPhotoPicker, selection: $pickedItem, matching: .images)
-            .onChange(of: pickedItem) { item in
-                guard let item else { return }
+            .photosPicker(isPresented: $showPhotoPicker, selection: $pickedItems,
+                          maxSelectionCount: maxImages, matching: .images)
+            .onChange(of: pickedItems) { items in
+                guard !items.isEmpty else { return }
                 Task {
-                    let data = try? await item.loadTransferable(type: Data.self)
-                    let encoded = data.flatMap { UIImage(data: $0) }.flatMap { encodeForUpload($0) }
+                    var loaded: [Data] = []
+                    for item in items {
+                        if let data = try? await item.loadTransferable(type: Data.self) {
+                            loaded.append(data)
+                        }
+                    }
                     await MainActor.run {
-                        if let encoded { pendingImageData = encoded }
-                        else { controlService.errorMessage = "Couldn't read that image." }
-                        pickedItem = nil
+                        var added = 0
+                        for data in loaded {
+                            guard let ui = UIImage(data: data), let encoded = encodeForUpload(ui) else { continue }
+                            appendImage((data: encoded, mediaType: "image/jpeg")); added += 1
+                        }
+                        if added == 0 { controlService.errorMessage = "Couldn't read that image." }
+                        pickedItems = []
                     }
                 }
             }
             .fullScreenCover(isPresented: $showCamera) {
                 CameraPicker { image in
-                    if let encoded = encodeForUpload(image) { pendingImageData = encoded }
+                    if let encoded = encodeForUpload(image) {
+                        appendImage((data: encoded, mediaType: "image/jpeg"))
+                    }
                 }
                 .ignoresSafeArea()
+            }
+            .fileImporter(isPresented: $showFilePicker,
+                          allowedContentTypes: [.pdf, .plainText, .text]) { result in
+                switch result {
+                case .success(let url):
+                    if let extracted = FileTextExtractor.extract(from: url) {
+                        pendingFiles.append(ChatFileText(name: extracted.name, text: extracted.text))
+                    } else {
+                        controlService.errorMessage = "Couldn't read text from that file."
+                    }
+                case .failure(let err):
+                    controlService.errorMessage = err.localizedDescription
+                }
             }
             .onDisappear { speech.cancel() }
         }
@@ -197,8 +230,8 @@ struct LlmIdeControlView: View {
     private var inputBar: some View {
         VStack(spacing: 0) {
             Divider()
-            if let data = pendingImageData, let ui = UIImage(data: data) {
-                imagePreview(ui)
+            if !pendingImages.isEmpty || !pendingFiles.isEmpty {
+                attachmentChips
             }
             HStack(spacing: DesignSystem.Spacing.sm) {
                 Menu {
@@ -209,6 +242,9 @@ struct LlmIdeControlView: View {
                         Button { showCamera = true } label: {
                             Label("Camera", systemImage: "camera")
                         }
+                    }
+                    Button { showFilePicker = true } label: {
+                        Label("Files…", systemImage: "doc.text")
                     }
                 } label: {
                     Image(systemName: "paperclip")
@@ -259,28 +295,66 @@ struct LlmIdeControlView: View {
         }
     }
 
-    private func imagePreview(_ ui: UIImage) -> some View {
-        HStack(spacing: DesignSystem.Spacing.sm) {
+    /// Horizontal strip of image + file thumbnails above the input bar.
+    private var attachmentChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: DesignSystem.Spacing.sm) {
+                ForEach(Array(pendingImages.enumerated()), id: \.offset) { idx, img in
+                    if let ui = UIImage(data: img.data) {
+                        imageChip(ui, index: idx)
+                    }
+                }
+                ForEach(Array(pendingFiles.enumerated()), id: \.offset) { idx, file in
+                    fileChip(file, index: idx)
+                }
+            }
+            .padding(.horizontal, DesignSystem.Spacing.md)
+            .padding(.vertical, DesignSystem.Spacing.sm)
+        }
+    }
+
+    private func imageChip(_ ui: UIImage, index: Int) -> some View {
+        HStack(spacing: 6) {
             Image(uiImage: ui)
                 .resizable().scaledToFill()
-                .frame(width: 48, height: 48)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            Text("Image attached")
-                .font(.system(size: DesignSystem.Typography.footnote))
-                .foregroundColor(DesignSystem.Colors.textSecondary)
-            Spacer()
-            Button { pendingImageData = nil; haptic(.light) } label: {
+                .frame(width: 36, height: 36)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            Button { removeImage(at: index); haptic(.light) } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 20))
+                    .font(.system(size: 18))
                     .foregroundColor(DesignSystem.Colors.textTertiary)
             }
         }
-        .padding(.horizontal, DesignSystem.Spacing.md)
-        .padding(.top, DesignSystem.Spacing.sm)
+        .padding(4)
+        .background(DesignSystem.Colors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func fileChip(_ file: ChatFileText, index: Int) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "doc.text.fill")
+                .font(.system(size: 16))
+                .foregroundColor(DesignSystem.Colors.primary)
+            Text(file.name)
+                .font(.system(size: DesignSystem.Typography.footnote))
+                .foregroundColor(DesignSystem.Colors.textPrimary)
+                .lineLimit(1)
+            Button { removeFile(at: index); haptic(.light) } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(DesignSystem.Colors.textTertiary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(DesignSystem.Colors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private var canSend: Bool {
-        (!inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || pendingImageData != nil)
+        (!inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !pendingImages.isEmpty
+            || !pendingFiles.isEmpty)
             && isConnected
             && !controlService.llmStreaming   // one question at a time
     }
@@ -289,18 +363,34 @@ struct LlmIdeControlView: View {
 
     private func send() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let imageData = pendingImageData
-        guard !text.isEmpty || imageData != nil else { return }
+        let images = pendingImages
+        let files = pendingFiles
+        guard !text.isEmpty || !images.isEmpty || !files.isEmpty else { return }
         if speech.isListening { speech.finish() }
-        if let imageData {
-            controlService.sendLlmideChat(text, image: (data: imageData, mediaType: "image/jpeg"))
-        } else {
-            controlService.sendLlmideChat(text)
-        }
+        controlService.sendLlmideChat(text, images: images, files: files)
         inputText = ""
-        pendingImageData = nil
+        pendingImages = []
+        pendingFiles = []
         isInputFocused = false
         haptic(.light)
+    }
+
+    private func appendImage(_ img: (data: Data, mediaType: String)) {
+        if pendingImages.count >= maxImages {
+            controlService.errorMessage = "Up to \(maxImages) images at a time."
+            return
+        }
+        pendingImages.append(img)
+    }
+
+    private func removeImage(at index: Int) {
+        guard pendingImages.indices.contains(index) else { return }
+        pendingImages.remove(at: index)
+    }
+
+    private func removeFile(at index: Int) {
+        guard pendingFiles.indices.contains(index) else { return }
+        pendingFiles.remove(at: index)
     }
 
     /// Downscale to a sane max dimension and JPEG-encode, keeping the upload
@@ -362,5 +452,31 @@ struct CameraPicker: UIViewControllerRepresentable {
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
             parent.dismiss()
         }
+    }
+}
+
+/// Extracts text on-device from a user-picked file (PDF via PDFKit, plain text
+/// via `String(contentsOf:)`). The extracted text — not the binary — is sent in
+/// the chat frame, keeping the WebSocket message well under the 8 MiB bridge cap.
+enum FileTextExtractor {
+    /// Returns `(name, text)` if something extractable was read, else nil.
+    /// Text is capped at 50k characters to keep the prompt sane.
+    static func extract(from url: URL) -> (name: String, text: String)? {
+        let name = url.lastPathComponent
+        let ext = url.pathExtension.lowercased()
+        // `.fileImporter` hands back a security-scoped URL; claim access while
+        // the read happens, then release it.
+        let didStart = url.startAccessingSecurityScopedResource()
+        defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+
+        if ext == "pdf", let doc = PDFDocument(url: url),
+           let text = doc.string, !text.isEmpty {
+            return (name, String(text.prefix(50_000)))
+        }
+        if ["md", "txt", "markdown"].contains(ext),
+           let text = try? String(contentsOf: url, encoding: .utf8), !text.isEmpty {
+            return (name, String(text.prefix(50_000)))
+        }
+        return nil
     }
 }

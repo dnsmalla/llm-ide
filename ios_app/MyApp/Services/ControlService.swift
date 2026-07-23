@@ -197,21 +197,28 @@ final class ControlService: ObservableObject {
     /// Ask llm-ide's agent a question. The agent on the Mac forwards it to the
     /// llm-ide localhost API and the reply streams back through the same
     /// `output`/`done` path as `sendPrompt`, so it lands in `messages`.
-    func sendLlmideChat(_ text: String, image: (data: Data, mediaType: String)? = nil) {
+    ///
+    /// `images` are pre-resized JPEG data (displayed as thumbnails on the other
+    /// side); `files` carry text already extracted on-device (PDF/`.md`/`.txt`),
+    /// never binary, so the WS frame stays well under the 8 MiB bridge cap.
+    func sendLlmideChat(_ text: String,
+                        images: [(data: Data, mediaType: String)] = [],
+                        files: [ChatFileText] = []) {
         guard targetDevice != nil, connectionStatus == .connected else { return }
         // Prior turns become history for the agent (server re-caps to 10).
-        // History is text-only — prior images aren't re-sent.
+        // History is text-only — prior images/files aren't re-sent.
         let history = llmIdeMessages.suffix(10).compactMap { m -> ChatTurn? in
             guard !m.text.isEmpty else { return nil }
             return ChatTurn(role: m.role == .assistant ? "assistant" : "user", content: m.text)
         }
-        llmIdeMessages.append(ChatMessage(role: .user, text: text, imageData: image?.data))
+        // Show only the first attached image as a thumbnail in the local bubble.
+        llmIdeMessages.append(ChatMessage(role: .user, text: text, imageData: images.first?.data))
         llmIdeMessages.append(ChatMessage(role: .assistant, text: ""))
         llmStreaming = true
         let id = UUID().uuidString
         llmIdeCommandIds.insert(id)
-        let img = image.map { ChatImage(mediaType: $0.mediaType, data: $0.data.base64EncodedString()) }
-        let chat = LlmIdeChat(commandId: id, text: text, history: history, image: img)
+        let chatImages = images.map { ChatImage(mediaType: $0.mediaType, data: $0.data.base64EncodedString()) }
+        let chat = LlmIdeChat(commandId: id, text: text, history: history, images: chatImages, files: files)
         if let data = try? JSONEncoder().encode(chat),
            let str = String(data: data, encoding: .utf8) {
             sendTextFrame(str)
