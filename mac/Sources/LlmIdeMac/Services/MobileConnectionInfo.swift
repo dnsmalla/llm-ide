@@ -77,35 +77,40 @@ enum LocalIPs {
     }
 }
 
-/// Reads the computer-agent's persisted PIN from `~/.aicontrol.json` — the
-/// same file the agent's `config.ts` loads at startup, so the value shown in
-/// Settings always matches what a new iPhone connection must present.
+/// Reads the mobile-pairing PIN from the macOS Keychain via `MobilePin`
+/// (account `mobile::pin`), so the value surfaced in Settings always matches
+/// the PIN a new iPhone connection must present in its `Pairing` frame.
+/// Replaces the old file-based `~/.aicontrol.json` read.
 enum AgentPin {
-    static func read() -> String? {
-        let path = NSString(string: "~/.aicontrol.json").expandingTildeInPath
-        guard let data = FileManager.default.contents(atPath: path),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let pin = json["pin"] as? String,
-              !pin.isEmpty else { return nil }
-        return pin
-    }
+    static func read() -> String? { MobilePin.read() }
 }
 
 /// Snapshot of everything the iPhone app needs to connect: the Tailscale
-/// and/or local Wi-Fi address, the agent port, and the PIN. Refreshable on
-/// demand — IPs change when the user joins/leaves Tailscale or switches Wi-Fi.
+/// and/or local Wi-Fi address, the agent port, the PIN, and a pairing QR
+/// payload. Refreshable on demand — IPs change when the user joins/leaves
+/// Tailscale or switches Wi-Fi.
 struct MobileConnectionInfo: Equatable {
     let tailscaleIP: String?
     let lanIP: String?
     let port: Int
     let pin: String?
+    /// `llmide://pair?ip=<host>&port=<port>&pin=<pin>` for the iPhone app to
+    /// scan, or nil when no LAN/Tailscale address is available. Prefers the
+    /// Tailscale address (works across networks) over local Wi-Fi.
+    let qrPayload: String?
 
     static func current(port: Int = MobileControlManager.defaultAgentPort) -> MobileConnectionInfo {
-        MobileConnectionInfo(
-            tailscaleIP: LocalIPs.tailscaleIPv4(),
-            lanIP: LocalIPs.lanIPv4(),
+        let tailscaleIP = LocalIPs.tailscaleIPv4()
+        let lanIP = LocalIPs.lanIPv4()
+        let pin = AgentPin.read()
+        let host = tailscaleIP ?? lanIP
+        let qr = host.map { "llmide://pair?ip=\($0)&port=\(port)&pin=\(pin ?? "")" }
+        return MobileConnectionInfo(
+            tailscaleIP: tailscaleIP,
+            lanIP: lanIP,
             port: port,
-            pin: AgentPin.read()
+            pin: pin,
+            qrPayload: qr
         )
     }
 }

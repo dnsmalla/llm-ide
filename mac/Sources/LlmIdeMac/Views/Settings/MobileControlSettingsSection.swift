@@ -1,24 +1,23 @@
 import SwiftUI
 import AppKit
+import CoreImage
 
-/// Mobile Control settings — supervises the external computer-agent
-/// (`npm start` on :3006) with the same start/stop/log UX as Backend.
+/// Mobile Control settings — runs the native WebSocket server + Bonjour
+/// advertiser (:3006) the iPhone app discovers and pairs with, with the same
+/// start/stop/log UX as Backend.
 struct MobileControlSettingsSection: View {
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var theme: ThemeStore
     @Environment(MobileControlManager.self) private var mobile
 
-    @State private var agentDraft: String = ""
     @State private var autoScroll: Bool = true
     @State private var connection = MobileConnectionInfo.current()
 
     /// Tracks Screen Recording + Accessibility so the panel can show
     /// granted/needed state and offer one-click "add LLM IDE to the TCC
-    /// list" — the computer-agent (screenshot-desktop + nut-js) needs both.
+    /// list" — screen capture + input injection both need them.
     @StateObject private var permissions = PermissionsService()
     @Environment(\.scenePhase) private var scenePhase
-
-    private let iosAppPath = "~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/apps/ios"
 
     var body: some View {
         SettingsSectionCard(icon: "iphone", title: "Mobile Control") {
@@ -29,7 +28,7 @@ struct MobileControlSettingsSection: View {
                         Text("Enable Mobile Control")
                             .font(Typography.body)
                             .foregroundStyle(theme.current.text)
-                        Text("iPhone remote desktop + LLM IDE chat via computer agent (:3006)")
+                        Text("iPhone remote desktop + LLM IDE chat via the native server (:3006)")
                             .font(Typography.caption)
                             .foregroundStyle(theme.current.textMuted)
                     }
@@ -47,15 +46,7 @@ struct MobileControlSettingsSection: View {
 
                     Divider().padding(.vertical, 4)
 
-                    pathRow(
-                        label: "Agent folder",
-                        text: $agentDraft,
-                        placeholder: "~/Desktop/.../computer-agent",
-                        onPick: pickAgentDir,
-                        onDetect: detectAgentPath
-                    )
-
-                    Toggle("Start computer agent on app launch", isOn: Binding(
+                    Toggle("Start Mobile Control on app launch", isOn: Binding(
                         get: { config.mobileControlAutoStart },
                         set: { config.mobileControlAutoStart = $0 }
                     ))
@@ -65,10 +56,6 @@ struct MobileControlSettingsSection: View {
                     HStack(spacing: Spacing.sm) {
                         statusPill
                         Spacer()
-                        Button("Save path") { savePath() }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .disabled(!pathDirty)
                         actionButton
                     }
 
@@ -84,15 +71,12 @@ struct MobileControlSettingsSection: View {
 
                     Divider().padding(.vertical, 4)
 
-                    iosHint
                     featuresBlock
                 }
             }
         }
         .onAppear {
             connection = MobileConnectionInfo.current()
-            agentDraft = config.mobileControlAgentPath
-            if agentDraft.isEmpty { detectAgentPath() }
             permissions.refreshAll()
             if config.mobileControlEnabled { permissions.startPolling() }
         }
@@ -154,14 +138,47 @@ struct MobileControlSettingsSection: View {
             copyableRow(label: "Port", value: "\(connection.port)")
             copyableRow(label: "PIN", value: connection.pin)
 
-            Text("Enter these in the iOS app → Direct IP connect. Prefer the Tailscale address — it works across Wi-Fi and cellular.")
+            Text("Enter these in the iOS app → Direct IP connect, or scan the QR below. Prefer the Tailscale address — it works across Wi-Fi and cellular.")
                 .font(Typography.caption)
                 .foregroundStyle(theme.current.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
+
+            qrBlock
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 6).fill(theme.current.body.opacity(0.6)))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(theme.current.border.opacity(0.4)))
+    }
+
+    // MARK: - Pairing QR
+
+    /// Renders the pairing QR (`llmide://pair?ip=…&port=…&pin=…`) from the
+    /// current connection snapshot, so the iPhone app can scan instead of
+    /// typing. nil when no LAN/Tailscale address is available.
+    private var qrBlock: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Pairing QR")
+                .font(Typography.section)
+                .foregroundStyle(theme.current.textMuted)
+            if let payload = connection.qrPayload, let image = qrImage(for: payload) {
+                HStack(alignment: .center, spacing: Spacing.md) {
+                    Image(nsImage: image)
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 200, height: 200)
+                    Text("Scan with the iPhone app to auto-fill the address, port, and PIN.")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                Text("Connect to Wi-Fi or Tailscale to generate a pairing QR.")
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     @ViewBuilder
@@ -338,34 +355,6 @@ struct MobileControlSettingsSection: View {
             .clipShape(Capsule())
     }
 
-    // MARK: - Path row
-
-    @ViewBuilder
-    private func pathRow(
-        label: String,
-        text: Binding<String>,
-        placeholder: String,
-        onPick: @escaping () -> Void,
-        onDetect: @escaping () -> Void
-    ) -> some View {
-        HStack(spacing: Spacing.sm) {
-            Text(label)
-                .font(Typography.body)
-                .foregroundStyle(theme.current.textMuted)
-                .frame(width: 110, alignment: .leading)
-            TextField(placeholder, text: text)
-                .textFieldStyle(.roundedBorder)
-                .font(Typography.mono)
-                .disableAutocorrection(true)
-            Button("Browse…") { onPick() }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            Button("Auto-detect") { onDetect() }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-        }
-    }
-
     // MARK: - Status + actions
 
     private var statusPill: some View {
@@ -397,13 +386,11 @@ struct MobileControlSettingsSection: View {
                 .tint(theme.current.danger)
         default:
             Button("Start") {
-                savePath()
                 autoPromptPermissionsIfNeeded()
                 mobile.start()
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-            .disabled(agentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
     }
 
@@ -466,19 +453,7 @@ struct MobileControlSettingsSection: View {
         }
     }
 
-    // MARK: - iOS + features
-
-    private var iosHint: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("iOS app")
-                .font(Typography.section)
-                .foregroundStyle(theme.current.textMuted)
-            Text("open \(iosAppPath)/MyApp.xcodeproj — run on iPhone (same Wi-Fi), connect with PIN or QR")
-                .font(Typography.caption)
-                .foregroundStyle(theme.current.textMuted)
-                .textSelection(.enabled)
-        }
-    }
+    // MARK: - Features
 
     private var featuresBlock: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -509,32 +484,26 @@ struct MobileControlSettingsSection: View {
     }
 
     // MARK: - Path helpers
+    // Mobile Control no longer needs an agent-folder picker — the native
+    // WebSocket server + Bonjour advertiser run in-process. The path-related
+    // helpers (agentDraft / savePath / pickAgentDir / detectAgentPath) were
+    // removed when the external computer-agent launch model was dropped.
+}
 
-    private var pathDirty: Bool {
-        agentDraft != config.mobileControlAgentPath
-    }
+// MARK: - QR helper
 
-    private func savePath() {
-        config.mobileControlAgentPath = agentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func pickAgentDir() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.title = "Select the computer-agent folder"
-        if panel.runModal() == .OK, let url = panel.url {
-            agentDraft = url.path
-        }
-    }
-
-    private func detectAgentPath() {
-        LaunchPathResolver.resolveMobileAgentPath(config: config)
-        if !config.mobileControlAgentPath.isEmpty {
-            agentDraft = config.mobileControlAgentPath
-        } else {
-            mobile.lastError = "Computer agent not found at the default location. Browse to the folder containing package.json."
-        }
-    }
+/// Renders a string as an `NSImage` QR code via CoreImage. Used by the Mobile
+/// settings panel to show a pairing QR for `MobileConnectionInfo.qrPayload`.
+private func qrImage(for string: String) -> NSImage? {
+    guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+    filter.setValue(string.data(using: .utf8), forKey: "inputMessage")
+    filter.setValue("M", forKey: "inputCorrectionLevel")
+    guard let ciImage = filter.outputImage else { return nil }
+    // CoreImage renders the QR at ~1px per module; scale up so it scans cleanly.
+    let scale = 8.0
+    let scaled = ciImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+    let rep = NSCIImageRep(ciImage: scaled)
+    let nsImage = NSImage(size: rep.size)
+    nsImage.addRepresentation(rep)
+    return nsImage
 }
