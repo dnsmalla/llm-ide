@@ -72,6 +72,8 @@ You now have:
 - **End-to-end LLM IDE chat**: pair iPhone → ask in iOS chat sheet → Mac proxies to `:3456` → reply streams back.
 - The Mac app bridging chat requests to the LLM IDE backend at `:3456`.
 
+**Rich input (Phase 4)**: From the iPhone chat sheet you can send text (including voice transcribed on-device), images (up to 4), and PDF/.md/.txt file attachments (text extracted on-device) into the explorer chat — all proxied through the Mac to `:3456`.
+
 > Screen streaming, remote input, and the full llm-ide command channel arrive in
 > Phases 3–5. Today's surface is **pairing + heartbeat + chat plumbing**.
 
