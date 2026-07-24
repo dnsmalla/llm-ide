@@ -367,7 +367,7 @@ final class ControlService: ObservableObject {
     }
 
     /// Ask the Mac for recent auto-task run history. The Mac replies with
-    /// `auto_task_history_reply`, which lands in `autoTaskHistory`.
+    /// `auto_task_history_reply`, which lands in `autoTaskHistoryEntries`.
     func autoTaskHistory() {
         guard connectionStatus == .connected else { return }
         guard let data = try? JSONEncoder().encode(AutoTaskHistoryList()),

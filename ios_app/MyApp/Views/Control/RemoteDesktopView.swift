@@ -15,6 +15,7 @@ struct RemoteDesktopView: View {
     @State private var showLlmIde: Bool = false
     @State private var showLlmIdeCloseConfirm: Bool = false
     @State private var showExplore: Bool = false
+    @State private var showAutoTask: Bool = false
 
     // Floating, draggable key palette (toggled from the top-right)
     @State private var showKeyPalette: Bool = false
@@ -164,6 +165,10 @@ struct RemoteDesktopView: View {
         }
         .sheet(isPresented: $showExplore) {
             ExplorerChatView()
+                .environmentObject(controlService)
+        }
+        .sheet(isPresented: $showAutoTask) {
+            AutoTaskView()
                 .environmentObject(controlService)
         }
         .confirmationDialog("Quit LLM IDE on your Mac?",
@@ -510,6 +515,15 @@ struct RemoteDesktopView: View {
                 HStack(spacing: 5) {
                     Image(systemName: "sidebar.left")
                     Text("Explore").font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundColor(.white.opacity(0.95))
+            }
+        }
+        ToolbarItem(placement: .topBarLeading) {
+            Button { showAutoTask = true } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "bolt.fill")
+                    Text("Auto").font(.system(size: 13, weight: .semibold))
                 }
                 .foregroundColor(.white.opacity(0.95))
             }
