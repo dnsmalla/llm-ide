@@ -25,13 +25,10 @@ struct ExploreCurrentSession: Equatable {
 final class ControlService: ObservableObject {
     @Published var connectionStatus: ConnectionStatus = .disconnected
     @Published var errorMessage: String?
-    @Published var screenImage: UIImage?
-    @Published var messages: [ChatMessage] = []
-    /// Separate transcript for the llm-ide chat, so it never mixes with the
-    /// on-device LLM ("AI") panel that also uses `messages`.
+    /// Transcript for the llm-ide chat sheet.
     @Published var llmIdeMessages: [ChatMessage] = []
     @Published var llmStreaming: Bool = false
-    /// Transient confirmation of one-shot actions (open/close/menu); auto-clears.
+    /// Transient confirmation of one-shot actions (auto-task acks); auto-clears.
     @Published var actionStatus: String?
 
     /// Explorer-chat sessions (Mac-side persistent state) + the currently
@@ -52,10 +49,6 @@ final class ControlService: ObservableObject {
     /// and is robust to overlapping done/stream frames.
     private var exploreCommandIds: Set<String> = []
     private var actionStatusTask: Task<Void, Never>?
-
-    // Frame ordering — decodes happen off-main and can finish out of order.
-    private var receivedSeq: UInt64 = 0
-    private var shownSeq: UInt64 = 0
 
     enum ConnectionStatus {
         case disconnected, connecting, connected
@@ -117,7 +110,6 @@ final class ControlService: ObservableObject {
         webSocketTask = nil
         connectionStatus = .disconnected
         targetDevice = nil
-        screenImage  = nil
     }
 
     // MARK: — Heartbeat
@@ -134,7 +126,6 @@ final class ControlService: ObservableObject {
                     // Connection is silently dead — force a reconnect.
                     self.webSocketTask?.cancel(with: .goingAway, reason: nil)
                     self.webSocketTask = nil
-                    self.screenImage = nil
                     self.connectionStatus = .disconnected
                     self.scheduleReconnect()
                     return
@@ -146,80 +137,19 @@ final class ControlService: ObservableObject {
 
     // MARK: — Commands
 
-    func startViewing() {
-        guard let targetDevice, connectionStatus == .connected else { return }
-        sendRaw(["type": "start_viewing", "targetDevice": targetDevice])
-    }
-
+    /// Tell the Mac to stop streaming (sent during disconnect/forget). Screen
+    /// streaming was removed with the remote-desktop body, but this is still
+    /// sent by SettingsView's "Forget this Mac" and the toolbar's Disconnect
+    /// for a clean teardown, so it is retained.
     func stopViewing() {
         sendRaw(["type": "stop_viewing"])
-        screenImage = nil
-    }
-
-    func sendRemoteInput(action: [String: Any]) {
-        guard let targetDevice, connectionStatus == .connected else { return }
-        sendRaw(["type": "remote_input", "targetDevice": targetDevice, "action": action])
-    }
-
-    func launchApp(name: String) {
-        guard let targetDevice, connectionStatus == .connected else { return }
-        sendRaw(["type": "launch_app", "targetDevice": targetDevice,
-                 "payload": ["appName": name]])
-    }
-
-    func sendKey(_ key: String, modifiers: [String] = []) {
-        sendRemoteInput(action: ["type": "key", "key": key, "modifiers": modifiers])
-    }
-
-    /// Types a whole string on the Mac in one action (voice dictation, paste).
-    func sendText(_ text: String) {
-        sendRemoteInput(action: ["type": "text", "text": text])
-    }
-
-    func sendPrompt(_ text: String) {
-        guard let targetDevice, connectionStatus == .connected else { return }
-        messages.append(ChatMessage(role: .user, text: text))
-        messages.append(ChatMessage(role: .assistant, text: ""))
-        llmStreaming = true
-        sendRaw([
-            "type": "command",
-            "targetDevice": targetDevice,
-            "command": [
-                "id": UUID().uuidString,
-                "type": "prompt",
-                "payload": ["text": text],
-                "timestamp": ISO8601DateFormatter().string(from: Date())
-            ] as [String: Any]
-        ])
-    }
-
-    func stopPrompt() {
-        guard let targetDevice, connectionStatus == .connected else { return }
-        sendRaw([
-            "type": "command",
-            "targetDevice": targetDevice,
-            "command": [
-                "id": UUID().uuidString,
-                "type": "stop",
-                "payload": [:] as [String: Any]
-            ] as [String: Any]
-        ])
-    }
-
-    func clearChat() {
-        messages.removeAll()
     }
 
     // MARK: — llm-ide control
 
-    /// Display name of the llm-ide Mac app. This is what `open -a`, AppleScript
-    /// `tell application`, and System Events `process` all resolve by — the
-    /// executable is `LlmIdeMac` but the app presents itself as "LLM IDE".
-    static let llmIdeAppName = "LLM IDE"
-
     /// Ask llm-ide's agent a question. The agent on the Mac forwards it to the
     /// llm-ide localhost API and the reply streams back through the same
-    /// `output`/`done` path as `sendPrompt`, so it lands in `messages`.
+    /// `output`/`done` path, landing in `llmIdeMessages`.
     ///
     /// `images` are pre-resized JPEG data (displayed as thumbnails on the other
     /// side); `files` carry text already extracted on-device (PDF/`.md`/`.txt`),
@@ -375,42 +305,7 @@ final class ControlService: ObservableObject {
         sendTextFrame(str)
     }
 
-    /// Open the llm-ide Mac app. With a `tab` it navigates there via the
-    /// `llmide://` deep link (which also launches the app if needed).
-    func openLlmIde(tab: String? = nil) {
-        if let tab {
-            sendCommand(type: "open_url", payload: ["url": "llmide://\(tab)"])
-        } else {
-            launchApp(name: Self.llmIdeAppName)
-        }
-    }
-
-    /// Quit the llm-ide Mac app.
-    func closeLlmIde() {
-        sendCommand(type: "quit_app", payload: ["appName": Self.llmIdeAppName])
-    }
-
-    /// Click a menu-bar path in an app, e.g. ["File", "New"].
-    func clickMenu(app: String, path: [String]) {
-        sendCommand(type: "menu_click", payload: ["appName": app, "path": path])
-    }
-
-    /// Wrap a command in the `{type:"command", command:{…}}` envelope and send.
-    private func sendCommand(type: String, payload: [String: Any], id: String = UUID().uuidString) {
-        guard let targetDevice, connectionStatus == .connected else { return }
-        sendRaw([
-            "type": "command",
-            "targetDevice": targetDevice,
-            "command": [
-                "id": id,
-                "type": type,
-                "payload": payload,
-                "timestamp": ISO8601DateFormatter().string(from: Date())
-            ] as [String: Any]
-        ])
-    }
-
-    /// Show a short-lived confirmation (e.g. "Launched LlmIdeMac"), auto-clearing.
+    /// Show a short-lived confirmation (e.g. an auto-task ack), auto-clearing.
     private func setActionStatus(_ message: String) {
         actionStatus = message
         actionStatusTask?.cancel()
@@ -449,9 +344,9 @@ final class ControlService: ObservableObject {
                     case .string(let str):
                         self?.handleMessage(str)
                     case .data(let data):
-                        if data.count >= 2 && data[0] == 0xFF && data[1] == 0xD8 {
-                            self?.decodeFrame(data)
-                        } else if let str = String(data: data, encoding: .utf8) {
+                        // Only text (JSON) frames are used now; the binary JPEG
+                        // screen-stream branch was removed with the remote-desktop body.
+                        if let str = String(data: data, encoding: .utf8) {
                             self?.handleMessage(str)
                         }
                     @unknown default: break
@@ -459,30 +354,11 @@ final class ControlService: ObservableObject {
                 case .failure:
                     self?.webSocketTask?.cancel(with: .normalClosure, reason: nil)
                     self?.webSocketTask = nil
-                    self?.screenImage = nil
                     self?.connectionStatus = .disconnected
                     self?.scheduleReconnect()
                     return
                 }
                 self?.receiveMessage()
-            }
-        }
-    }
-
-    /// Decode JPEG off the main thread (at ~20fps, main-thread decoding janks
-    /// the UI); a sequence check drops frames that finish out of order.
-    private func decodeFrame(_ data: Data) {
-        receivedSeq += 1
-        let seq = receivedSeq
-        Task.detached(priority: .userInitiated) { [weak self] in
-            guard let image = UIImage(data: data),
-                  let cgImage = image.cgImage else { return }
-            // Force decompression now, not at render time
-            _ = cgImage.dataProvider
-            await MainActor.run {
-                guard let self, seq > self.shownSeq else { return }
-                self.shownSeq = seq
-                self.screenImage = image
             }
         }
     }
@@ -496,7 +372,6 @@ final class ControlService: ObservableObject {
             errorMessage = nil
             reconnectAttempt = 0
             startHeartbeat()
-            startViewing()
         case "heartbeat_ack":
             lastAck = Date()
         case "auth_failed":
@@ -504,15 +379,6 @@ final class ControlService: ObservableObject {
             errorMessage = "Wrong PIN. Check the 6-digit code shown in the agent's terminal on your Mac."
             directPIN = nil
             disconnect(clearDirect: true)
-        case "ack":
-            // One-shot actions (launch/quit/open/menu) carry a human message but
-            // no `started` flag — surface those as a transient confirmation.
-            // Skip prompt acks (started:true) and input acks (no message).
-            if let payload = json["payload"] as? [String: Any],
-               let msg = payload["message"] as? String,
-               (payload["started"] as? Bool) != true {
-                setActionStatus(msg)
-            }
         case "explore_session_list":
             if let list = try? JSONDecoder().decode(ExploreSessionList.self, from: data) {
                 exploreSessions = list.sessions
@@ -542,7 +408,7 @@ final class ControlService: ObservableObject {
             }
         case "auto_task_ack":
             // Minimal: surface a human message if the Mac sent one; ignore
-            // quiet `ok` acks. Reuses the explorer ack transient banner.
+            // quiet `ok` acks.
             if let ack = try? JSONDecoder().decode(AutoTaskAck.self, from: data),
                let msg = ack.message {
                 setActionStatus(msg)
@@ -569,7 +435,6 @@ final class ControlService: ObservableObject {
                 errorMessage = msg
                 llmStreaming = false
                 // Drop the empty "…" placeholder left by a failed chat turn.
-                removeTrailingEmptyAssistant(&messages)
                 removeTrailingEmptyAssistant(&llmIdeMessages)
                 if var current = exploreCurrent {
                     removeTrailingEmptyAssistant(&current.history)
@@ -590,9 +455,9 @@ final class ControlService: ObservableObject {
             guard var current = exploreCurrent else { return }
             appendToLastAssistant(&current.history, chunk)
             exploreCurrent = current
-        } else {
-            appendToLastAssistant(&messages, chunk)
         }
+        // Chunks with no recognized commandId are dropped: the legacy on-device
+        // "AI" prompt transcript (`messages`) was removed with the remote-desktop body.
     }
 
     private func appendToLastAssistant(_ list: inout [ChatMessage], _ chunk: String) {

@@ -8,7 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		060280FFDE8EBB4735C43370 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1050205A71E402C9809036C3 /* LoginView.swift */; };
-		26AD1F92FC290B7312532929 /* RemoteDesktopView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D4D30A5062ADB194BE689A2 /* RemoteDesktopView.swift */; };
+		26AD1F92FC290B7312532929 /* MobileHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D4D30A5062ADB194BE689A2 /* MobileHomeView.swift */; };
 		B7C8D9E0F1A203040B7C8D01 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C8D9E0F1A203040B7C8D02 /* QRScannerView.swift */; };
 		C0DE10A2B3C4D5E6F7081902 /* LlmIdeControlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE10A2B3C4D5E6F7081903 /* LlmIdeControlView.swift */; };
 		E5F6A7B8C9D0E1F2A3B4C501 /* ExplorerChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F6A7B8C9D0E1F2A3B4C502 /* ExplorerChatView.swift */; };
@@ -31,7 +31,7 @@
 		1050205A71E402C9809036C3 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		237B2E48D363E5FB9B47CB07 /* MyApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MyApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		39CD17436AE4D69811BA8EDA /* MyAppApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyAppApp.swift; sourceTree = "<group>"; };
-		5D4D30A5062ADB194BE689A2 /* RemoteDesktopView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteDesktopView.swift; sourceTree = "<group>"; };
+		5D4D30A5062ADB194BE689A2 /* MobileHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileHomeView.swift; sourceTree = "<group>"; };
 		B7C8D9E0F1A203040B7C8D02 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
 		C0DE10A2B3C4D5E6F7081903 /* LlmIdeControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlmIdeControlView.swift; sourceTree = "<group>"; };
 		E5F6A7B8C9D0E1F2A3B4C502 /* ExplorerChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorerChatView.swift; sourceTree = "<group>"; };
@@ -118,7 +118,7 @@
 		99D8815DC559E39FCBCE47AC /* Control */ = {
 			isa = PBXGroup;
 			children = (
-				5D4D30A5062ADB194BE689A2 /* RemoteDesktopView.swift */,
+				5D4D30A5062ADB194BE689A2 /* MobileHomeView.swift */,
 				B7C8D9E0F1A203040B7C8D02 /* QRScannerView.swift */,
 				C0DE10A2B3C4D5E6F7081903 /* LlmIdeControlView.swift */,
 				E5F6A7B8C9D0E1F2A3B4C502 /* ExplorerChatView.swift */,
@@ -257,7 +257,7 @@
 				AC1BAD40D67DE71FEE09690F /* HelpView.swift in Sources */,
 				060280FFDE8EBB4735C43370 /* LoginView.swift in Sources */,
 				FCA16A9A87B1018E6AC5A76C /* MyAppApp.swift in Sources */,
-				26AD1F92FC290B7312532929 /* RemoteDesktopView.swift in Sources */,
+				26AD1F92FC290B7312532929 /* MobileHomeView.swift in Sources */,
 				B7C8D9E0F1A203040B7C8D01 /* QRScannerView.swift in Sources */,
 				C0DE10A2B3C4D5E6F7081902 /* LlmIdeControlView.swift in Sources */,
 				E5F6A7B8C9D0E1F2A3B4C501 /* ExplorerChatView.swift in Sources */,

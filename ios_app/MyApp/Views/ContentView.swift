@@ -6,10 +6,11 @@ struct ContentView: View {
 
     var body: some View {
         if connectionStore.hasDevice {
-            // Already have saved connection — go straight to remote desktop.
-            // RemoteDesktopView shows a spinner while (re)connecting.
+            // Already have saved connection — go straight to the mobile home
+            // (toolbar + Chat/Explore/Auto sheets). Shows a spinner while
+            // (re)connecting.
             NavigationStack {
-                RemoteDesktopView(deviceName: connectionStore.deviceIP)
+                MobileHomeView(deviceName: connectionStore.deviceIP)
                     .onAppear {
                         // Re-establish connection if not already connected.
                         if controlService.connectionStatus == .disconnected {
