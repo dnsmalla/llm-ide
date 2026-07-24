@@ -136,16 +136,19 @@ final class MobileControlManager {
 
     /// Dispatch decoded inbound client messages by `type` discriminator.
     ///
-    /// The SharedProtocol structs use `let type = "…"` with a synthesized
-    /// `init(from:)` that does NOT validate the discriminator value, and
-    /// several explorer structs (`ExploreListSessions`/`ExploreNewSession`)
-    /// are empty — so a greedy sequential `decode` lets the first empty
-    /// struct swallow every payload (it succeeds on any JSON carrying a
-    /// string `type`). To keep `ExploreLoadSession`/`ExploreNewSession`/
-    /// `ExploreDeleteSession`/`ExploreChat` reachable, we decode a one-field
-    /// `{type}` envelope ONCE and `switch` on it — mirroring the iOS receive
-    /// loop. Each case then decodes its full message type and runs the
-    /// existing handler body verbatim.
+    /// Decodes a one-field `{type}` envelope ONCE, then routes to a per-feature
+    /// handler. The SharedProtocol structs use `let type = "…"` with a
+    /// synthesized `init(from:)` that does NOT validate the discriminator
+    /// value, and several explorer structs (`ExploreListSessions`/
+    /// `ExploreNewSession`) are empty — so a greedy sequential `decode` would
+    /// let the first empty struct swallow every payload. The envelope +
+    /// `switch`-on-prefix keeps each full message type reachable and splits the
+    /// three feature channels into their own methods: the `llmide_chat` arm
+    /// stays inline (a single decode + `handleChat`); `explore_*` →
+    /// `handleExplore(type:data:)`; `auto_task_*` →
+    /// `handleAutoTask(type:data:)`. Tag strings come from the single source of
+    /// truth in `MobileProtocol.Tag`. Unknown prefixes log and drop.
+    /// Each case body is byte-identical to the previous monolithic switch.
     private func handleInbound(_ data: Data) {
         struct Envelope: Decodable { let type: String }
         guard let env = try? decoder.decode(Envelope.self, from: data) else {
@@ -155,13 +158,29 @@ final class MobileControlManager {
         }
 
         switch env.type {
-        case "llmide_chat":
+        case MobileProtocol.Tag.llmIdeChat:
             // Phase 3/4 chat proxy — must keep working alongside explorer ops.
             if let chat = try? decoder.decode(LlmIdeChat.self, from: data) {
                 append(.info, "Chat: \(chat.text.prefix(40))")
                 Task { await handleChat(chat) }
             }
-        case "explore_list_sessions":
+        case let t where t.hasPrefix("explore_"):
+            handleExplore(type: t, data: data)
+        case let t where t.hasPrefix("auto_task_"):
+            handleAutoTask(type: t, data: data)
+        default:
+            append(.info, "Unhandled inbound type: \(env.type)")
+        }
+    }
+
+    /// Handle `explore_*` messages: list / load / new / delete / chat for the
+    /// Mac-local explorer-chat sessions (`ChatSessionStore`, scope `.explorer`).
+    /// Each case is the pre-existing body moved verbatim from the old
+    /// monolithic `handleInbound` switch; the shared `decoder`, `reply(_:)`,
+    /// and `append(_:_:)` helpers are unchanged. Mirrors the iOS receive loop.
+    private func handleExplore(type: String, data: Data) {
+        switch type {
+        case MobileProtocol.Tag.exploreListSessions:
             // `ChatSessionStore` is Mac-local JSON keyed by `ChatScope.explorer`.
             let rows = ChatSessionStore.list(for: .explorer).map {
                 ExploreSessionSummary(id: $0.id.uuidString,
@@ -170,7 +189,7 @@ final class MobileControlManager {
             }
             append(.info, "Explore list: \(rows.count) session(s)")
             reply(ExploreSessionList(sessions: rows))
-        case "explore_load_session":
+        case MobileProtocol.Tag.exploreLoadSession:
             if let m = try? decoder.decode(ExploreLoadSession.self, from: data),
                let s = ChatSessionStore.load(id: UUID(uuidString: m.sessionId) ?? UUID()) {
                 // `CodeAssistTurn` → `ChatTurn`: see `ChatTurn(from:)` mapping below.
@@ -180,24 +199,37 @@ final class MobileControlManager {
                                             title: s.title,
                                             history: turns))
             }
-        case "explore_new_session":
+        case MobileProtocol.Tag.exploreNewSession:
             let s = ChatSession(scope: .explorer, title: "New chat")
             ChatSessionStore.save(s)
             append(.info, "Explore new: \(s.id.uuidString.prefix(8))")
             reply(ExploreSessionCreated(sessionId: s.id.uuidString))
-        case "explore_delete_session":
+        case MobileProtocol.Tag.exploreDeleteSession:
             if let m = try? decoder.decode(ExploreDeleteSession.self, from: data) {
                 if let uid = UUID(uuidString: m.sessionId) {
                     ChatSessionStore.delete(id: uid)
                     append(.info, "Explore delete: \(uid.uuidString.prefix(8))")
                 }
             }
-        case "explore_chat":
+        case MobileProtocol.Tag.exploreChat:
             if let chat = try? decoder.decode(ExploreChat.self, from: data) {
                 append(.info, "Explore chat in \(chat.sessionId.prefix(8))")
                 Task { await handleExploreChat(chat) }
             }
-        case "auto_task_list":
+        default:
+            append(.info, "Unhandled explore type: \(type)")
+        }
+    }
+
+    /// Handle `auto_task_*` messages: list / toggle / run / stop / history for
+    /// the Auto Task scheduler. Each case is the pre-existing body moved
+    /// verbatim from the old monolithic `handleInbound` switch; the
+    /// `autoCode`/`autoTaskSettings` deps are @MainActor like this manager.
+    /// `replyNotConfigured(commandId:logLabel:)` mirrors a `CommandError` when
+    /// the wiring is absent so the phone shows a concrete reason.
+    private func handleAutoTask(type: String, data: Data) {
+        switch type {
+        case MobileProtocol.Tag.autoTaskList:
             // Snapshot the current Auto Task scheduler + per-task state. Both
             // deps are @MainActor like this manager, so the reads below are
             // isolation-safe. Missing wiring → a CommandError so the phone
@@ -222,7 +254,7 @@ final class MobileControlManager {
                                       tasks: infos)
             append(.info, "Auto-task state: \(ac.isRunning ? "running" : "idle"), master=\(s.enabled)")
             reply(state)
-        case "auto_task_toggle":
+        case MobileProtocol.Tag.autoTaskToggle:
             // Flip the master enable (task == nil) or a single per-task flag.
             // Routes through AutoTaskSettings.setEnabled / .enabled so the
             // @Published didSet persists + arms/disarms the scheduler exactly
@@ -237,7 +269,7 @@ final class MobileControlManager {
                 }
                 reply(AutoTaskAck(ok: true, message: nil))
             }
-        case "auto_task_run":
+        case MobileProtocol.Tag.autoTaskRun:
             // Trigger a global run (task == nil) or a single per-task manual
             // run. `runNow()`/`runSingle(_:)` are @MainActor-sync — each spins
             // its own internal `Task` — so no await is needed; we're already
@@ -256,14 +288,14 @@ final class MobileControlManager {
                 }
                 reply(AutoTaskAck(ok: true, message: nil))
             }
-        case "auto_task_stop":
+        case MobileProtocol.Tag.autoTaskStop:
             // `cancel()` is @MainActor-sync: cancels the in-flight `runTask`
             // and terminates the active subprocess. No-op when idle; nil-safe
             // via `?` (no wiring → ack still replies, phone doesn't hang).
             autoCode?.cancel()
             append(.info, "Auto-task stop")
             reply(AutoTaskAck(ok: true, message: nil))
-        case "auto_task_history":
+        case MobileProtocol.Tag.autoTaskHistory:
             // Snapshot the processed-actions registry. `allEntries` is
             // @Published on AutoCodeUpdateService (a cached copy of
             // Registry.allEntries()), so the read is cheap and main-isolated.
@@ -275,7 +307,7 @@ final class MobileControlManager {
             append(.info, "Auto-task history: \(entries.count) entries")
             reply(AutoTaskHistoryReply(entries: entries))
         default:
-            append(.info, "Unhandled inbound type: \(env.type)")
+            append(.info, "Unhandled auto-task type: \(type)")
         }
     }
 
