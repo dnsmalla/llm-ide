@@ -147,6 +147,13 @@ struct LlmIdeMacApp: App {
         // Done last so all stored properties (incl. autoCapture) are set
         // before `self.mobileControl` is read.
         mobileControl.api = client
+        // Wire the Auto Task stack so the phone can query scheduler state
+        // (`auto_task_list`) and toggle master / per-task enables
+        // (`auto_task_toggle`). Both locals are constructed above and share
+        // the same @StateObject instances the UI observes — mutating through
+        // them keeps Settings, the Menu bar, and the scheduler in sync.
+        mobileControl.autoCode = autoCode
+        mobileControl.autoTaskSettings = autoTaskSettingsInstance
     }
 
     var body: some Scene {

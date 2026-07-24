@@ -149,6 +149,42 @@ final class AutoTaskSettings: ObservableObject {
         return tasks
     }
     
+    // MARK: - Per-task enable (generic accessors)
+
+    /// True when the per-task enable checkbox is on for `task`. Lets callers
+    /// (the mobile control surface, tests) read a task's enable generically
+    /// without knowing each individual `@Published` flag. Mirrors the private
+    /// `isTaskEnabled(_:)` on `AutoCodeUpdateService`.
+    func isEnabled(task: AutoTask) -> Bool {
+        switch task {
+        case .reviewCode:        return runReviewCode
+        case .reviewDoc:         return runReviewDoc
+        case .reviewConflicts:   return runReviewConflicts
+        case .regression:        return runRegression
+        case .generateKnowledge: return runGenerateKnowledge
+        case .generateDoc:       return runGenerateDoc
+        case .updateIssues:      return runUpdateIssues
+        case .updatePlanStatus:  return runUpdatePlanStatus
+        }
+    }
+
+    /// Set the per-task enable flag. Routes through the `@Published` property
+    /// so the `didSet` persists to UserDefaults and notifies subscribers
+    /// (Settings UI, Menu Bar, `AutoCodeUpdateService`) exactly as a UI
+    /// toggle would — no silent bypass of the single source of truth.
+    func setEnabled(_ value: Bool, task: AutoTask) {
+        switch task {
+        case .reviewCode:        runReviewCode = value
+        case .reviewDoc:         runReviewDoc = value
+        case .reviewConflicts:   runReviewConflicts = value
+        case .regression:        runRegression = value
+        case .generateKnowledge: runGenerateKnowledge = value
+        case .generateDoc:       runGenerateDoc = value
+        case .updateIssues:      runUpdateIssues = value
+        case .updatePlanStatus:  runUpdatePlanStatus = value
+        }
+    }
+
     var menuBarSummary: String {
         guard enabled else { return "Auto Tasks: Disabled" }
         let count = enabledTasks.count

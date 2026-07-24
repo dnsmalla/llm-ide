@@ -45,6 +45,14 @@ final class MobileControlManager {
     /// Set by the app at launch; used to proxy chat to the :3456 backend.
     var api: LlmIdeAPIClient?
 
+    /// Set by the app at launch; backing state for `auto_task_list` replies.
+    /// Both are optional so this manager can still be constructed in previews
+    /// / tests without the full Auto Task stack.
+    var autoCode: AutoCodeUpdateService?
+    /// Set by the app at launch; the single source of truth for master +
+    /// per-task enables, mutated by `auto_task_toggle`.
+    var autoTaskSettings: AutoTaskSettings?
+
     private var server: MobileWebSocketServer?
     private var advertiser: MobileBonjourAdvertiser?
     private let maxLogLines = 5_000
@@ -183,6 +191,48 @@ final class MobileControlManager {
             if let chat = try? JSONDecoder().decode(ExploreChat.self, from: data) {
                 append(.info, "Explore chat in \(chat.sessionId.prefix(8))")
                 Task { await handleExploreChat(chat) }
+            }
+        case "auto_task_list":
+            // Snapshot the current Auto Task scheduler + per-task state. Both
+            // deps are @MainActor like this manager, so the reads below are
+            // isolation-safe. Missing wiring → a CommandError so the phone
+            // shows a concrete reason instead of an unanswered request.
+            guard let ac = autoCode, let s = autoTaskSettings else {
+                append(.stderr, "auto_task_list: Auto-tasks not configured")
+                Task { await server?.send(CommandError(commandId: "auto_task",
+                                                       message: "Auto-tasks not configured")) }
+                return
+            }
+            let infos = AutoTask.allCases.map { t in
+                AutoTaskInfo(id: t.rawValue, label: t.label,
+                             enabled: s.isEnabled(task: t),
+                             lastError: ac.taskErrors[t.rawValue])
+            }
+            let state = AutoTaskState(masterEnabled: s.enabled,
+                                      isRunning: ac.isRunning,
+                                      currentTask: ac.currentTask?.rawValue,
+                                      statusMessage: ac.statusMessage,
+                                      lastRunDate: ac.lastRunDate?.timeIntervalSince1970,
+                                      createdCount: ac.createdCount,
+                                      implementedCount: ac.implementedCount,
+                                      failedCount: ac.failedCount,
+                                      tasks: infos)
+            append(.info, "Auto-task state: \(ac.isRunning ? "running" : "idle"), master=\(s.enabled)")
+            Task { await server?.send(state) }
+        case "auto_task_toggle":
+            // Flip the master enable (task == nil) or a single per-task flag.
+            // Routes through AutoTaskSettings.setEnabled / .enabled so the
+            // @Published didSet persists + arms/disarms the scheduler exactly
+            // as the on-Mac Settings toggle would.
+            if let m = try? JSONDecoder().decode(AutoTaskToggle.self, from: data) {
+                if let taskName = m.task, let t = AutoTask(rawValue: taskName) {
+                    autoTaskSettings?.setEnabled(m.enabled, task: t)
+                    append(.info, "Auto-task toggle \(t.rawValue)=\(m.enabled)")
+                } else {
+                    autoTaskSettings?.enabled = m.enabled
+                    append(.info, "Auto-task master=\(m.enabled)")
+                }
+                Task { await server?.send(AutoTaskAck(ok: true, message: nil)) }
             }
         default:
             append(.info, "Unhandled inbound type: \(env.type)")
