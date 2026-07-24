@@ -18,6 +18,10 @@ final class MobileWebSocketServer: @unchecked Sendable {
     private let onInbound: InboundHandler
     private let onLog: (String) -> Void
     private let queue = DispatchQueue(label: "llmide.mobile.ws")
+    /// Shared decoder for inbound `Pairing`/`Heartbeat` frames. `JSONDecoder`
+    /// is thread-safe for independent `decode(_:)` calls; all access here runs
+    /// on the serial `queue`, so one instance covers both inbound paths.
+    private let decoder = JSONDecoder()
     private var listener: NWListener?
     private var client: NWConnection?
     private var paired = false
@@ -113,7 +117,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
     }
 
     private func handlePairing(data: Data) {
-        guard let pairing = try? JSONDecoder().decode(Pairing.self, from: data) else {
+        guard let pairing = try? decoder.decode(Pairing.self, from: data) else {
             onLog("First frame was not a Pairing message — closing")
             closeWithAuthFailure()
             return
@@ -143,7 +147,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
     private func routeInbound(data: Data) {
         // Heartbeat is handled here; everything else is forwarded to the manager
         // (Phase 3 wires chat/commands; Phase 4/5 wire viewing/input).
-        if (try? JSONDecoder().decode(Heartbeat.self, from: data)) != nil {
+        if (try? decoder.decode(Heartbeat.self, from: data)) != nil {
             Task { await self.send(HeartbeatAck(ts: Date().timeIntervalSince1970)) }
             return
         }

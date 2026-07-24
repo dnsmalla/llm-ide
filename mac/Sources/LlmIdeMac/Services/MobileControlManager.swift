@@ -57,6 +57,12 @@ final class MobileControlManager {
     private var advertiser: MobileBonjourAdvertiser?
     private let maxLogLines = 5_000
 
+    /// Shared decoder reused across every `handleInbound` case. `JSONDecoder`
+    /// is thread-safe for independent `decode(_:)` calls and this manager is
+    /// `@MainActor`, so reusing one instance avoids the per-case allocation
+    /// (previously ~7 fresh decoders per inbound dispatch).
+    private let decoder = JSONDecoder()
+
     init() {
         // Best-effort teardown of the native server on force-quit / Cmd-Q /
         // logout so the listener + Bonjour service don't briefly outlive the
@@ -142,7 +148,7 @@ final class MobileControlManager {
     /// existing handler body verbatim.
     private func handleInbound(_ data: Data) {
         struct Envelope: Decodable { let type: String }
-        guard let env = try? JSONDecoder().decode(Envelope.self, from: data) else {
+        guard let env = try? decoder.decode(Envelope.self, from: data) else {
             let preview = String(data: data, encoding: .utf8) ?? "<\(data.count) bytes>"
             append(.info, "Unhandled inbound (no type): \(preview)")
             return
@@ -151,7 +157,7 @@ final class MobileControlManager {
         switch env.type {
         case "llmide_chat":
             // Phase 3/4 chat proxy — must keep working alongside explorer ops.
-            if let chat = try? JSONDecoder().decode(LlmIdeChat.self, from: data) {
+            if let chat = try? decoder.decode(LlmIdeChat.self, from: data) {
                 append(.info, "Chat: \(chat.text.prefix(40))")
                 Task { await handleChat(chat) }
             }
@@ -163,32 +169,31 @@ final class MobileControlManager {
                                       lastUsedAt: $0.lastUsedAt.timeIntervalSince1970)
             }
             append(.info, "Explore list: \(rows.count) session(s)")
-            Task { await server?.send(ExploreSessionList(sessions: rows)) }
+            reply(ExploreSessionList(sessions: rows))
         case "explore_load_session":
-            if let m = try? JSONDecoder().decode(ExploreLoadSession.self, from: data),
+            if let m = try? decoder.decode(ExploreLoadSession.self, from: data),
                let s = ChatSessionStore.load(id: UUID(uuidString: m.sessionId) ?? UUID()) {
-                // `CodeAssistTurn` → `ChatTurn`: drop the client-only `id`, surface
-                // the role as its raw string ("user"/"assistant").
-                let turns = s.history.map { ChatTurn(role: $0.role.rawValue, content: $0.content) }
+                // `CodeAssistTurn` → `ChatTurn`: see `ChatTurn(from:)` mapping below.
+                let turns = s.history.map { ChatTurn(from: $0) }
                 append(.info, "Explore load: \(s.id.uuidString.prefix(8))")
-                Task { await server?.send(ExploreSessionHistory(sessionId: s.id.uuidString,
-                                                                title: s.title,
-                                                                history: turns)) }
+                reply(ExploreSessionHistory(sessionId: s.id.uuidString,
+                                            title: s.title,
+                                            history: turns))
             }
         case "explore_new_session":
             let s = ChatSession(scope: .explorer, title: "New chat")
             ChatSessionStore.save(s)
             append(.info, "Explore new: \(s.id.uuidString.prefix(8))")
-            Task { await server?.send(ExploreSessionCreated(sessionId: s.id.uuidString)) }
+            reply(ExploreSessionCreated(sessionId: s.id.uuidString))
         case "explore_delete_session":
-            if let m = try? JSONDecoder().decode(ExploreDeleteSession.self, from: data) {
+            if let m = try? decoder.decode(ExploreDeleteSession.self, from: data) {
                 if let uid = UUID(uuidString: m.sessionId) {
                     ChatSessionStore.delete(id: uid)
                     append(.info, "Explore delete: \(uid.uuidString.prefix(8))")
                 }
             }
         case "explore_chat":
-            if let chat = try? JSONDecoder().decode(ExploreChat.self, from: data) {
+            if let chat = try? decoder.decode(ExploreChat.self, from: data) {
                 append(.info, "Explore chat in \(chat.sessionId.prefix(8))")
                 Task { await handleExploreChat(chat) }
             }
@@ -198,9 +203,7 @@ final class MobileControlManager {
             // isolation-safe. Missing wiring → a CommandError so the phone
             // shows a concrete reason instead of an unanswered request.
             guard let ac = autoCode, let s = autoTaskSettings else {
-                append(.stderr, "auto_task_list: Auto-tasks not configured")
-                Task { await server?.send(CommandError(commandId: "auto_task",
-                                                       message: "Auto-tasks not configured")) }
+                replyNotConfigured(commandId: "auto_task", logLabel: "auto_task_list")
                 return
             }
             let infos = AutoTask.allCases.map { t in
@@ -218,13 +221,13 @@ final class MobileControlManager {
                                       failedCount: ac.failedCount,
                                       tasks: infos)
             append(.info, "Auto-task state: \(ac.isRunning ? "running" : "idle"), master=\(s.enabled)")
-            Task { await server?.send(state) }
+            reply(state)
         case "auto_task_toggle":
             // Flip the master enable (task == nil) or a single per-task flag.
             // Routes through AutoTaskSettings.setEnabled / .enabled so the
             // @Published didSet persists + arms/disarms the scheduler exactly
             // as the on-Mac Settings toggle would.
-            if let m = try? JSONDecoder().decode(AutoTaskToggle.self, from: data) {
+            if let m = try? decoder.decode(AutoTaskToggle.self, from: data) {
                 if let taskName = m.task, let t = AutoTask(rawValue: taskName) {
                     autoTaskSettings?.setEnabled(m.enabled, task: t)
                     append(.info, "Auto-task toggle \(t.rawValue)=\(m.enabled)")
@@ -232,7 +235,7 @@ final class MobileControlManager {
                     autoTaskSettings?.enabled = m.enabled
                     append(.info, "Auto-task master=\(m.enabled)")
                 }
-                Task { await server?.send(AutoTaskAck(ok: true, message: nil)) }
+                reply(AutoTaskAck(ok: true, message: nil))
             }
         case "auto_task_run":
             // Trigger a global run (task == nil) or a single per-task manual
@@ -240,12 +243,10 @@ final class MobileControlManager {
             // its own internal `Task` — so no await is needed; we're already
             // on the main actor here (handleInbound is main-isolated).
             guard let ac = autoCode else {
-                append(.stderr, "auto_task_run: Auto-tasks not configured")
-                Task { await server?.send(CommandError(commandId: "auto_task_run",
-                                                       message: "Auto-tasks not configured")) }
+                replyNotConfigured(commandId: "auto_task_run", logLabel: "auto_task_run")
                 return
             }
-            if let m = try? JSONDecoder().decode(AutoTaskRun.self, from: data) {
+            if let m = try? decoder.decode(AutoTaskRun.self, from: data) {
                 if let raw = m.task, let t = AutoTask(rawValue: raw) {
                     ac.runSingle(t)
                     append(.info, "Auto-task run single: \(t.rawValue)")
@@ -253,7 +254,7 @@ final class MobileControlManager {
                     ac.runNow()
                     append(.info, "Auto-task run now")
                 }
-                Task { await server?.send(AutoTaskAck(ok: true, message: nil)) }
+                reply(AutoTaskAck(ok: true, message: nil))
             }
         case "auto_task_stop":
             // `cancel()` is @MainActor-sync: cancels the in-flight `runTask`
@@ -261,7 +262,7 @@ final class MobileControlManager {
             // via `?` (no wiring → ack still replies, phone doesn't hang).
             autoCode?.cancel()
             append(.info, "Auto-task stop")
-            Task { await server?.send(AutoTaskAck(ok: true, message: nil)) }
+            reply(AutoTaskAck(ok: true, message: nil))
         case "auto_task_history":
             // Snapshot the processed-actions registry. `allEntries` is
             // @Published on AutoCodeUpdateService (a cached copy of
@@ -272,7 +273,7 @@ final class MobileControlManager {
                                      lastUpdated: $0.lastUpdated.timeIntervalSince1970)
             }
             append(.info, "Auto-task history: \(entries.count) entries")
-            Task { await server?.send(AutoTaskHistoryReply(entries: entries)) }
+            reply(AutoTaskHistoryReply(entries: entries))
         default:
             append(.info, "Unhandled inbound type: \(env.type)")
         }
@@ -320,9 +321,7 @@ final class MobileControlManager {
             await server?.send(CommandError(commandId: chat.commandId, message: "Bad session id"))
             return
         }
-        let history = chat.history.map {
-            LlmIdeAPIClient.CodeAssistTurn(role: .init(rawValue: $0.role) ?? .user, content: $0.content)
-        }
+        let history = chat.history.map { LlmIdeAPIClient.CodeAssistTurn(from: $0) }
         do {
             let resp = try await api.codeAssistStream(
                 message: chat.text,
@@ -372,5 +371,51 @@ final class MobileControlManager {
         if logLines.count > maxLogLines {
             logLines.removeFirst(logLines.count - maxLogLines)
         }
+    }
+
+    // MARK: - Reply helpers
+
+    /// Fire-and-forget encode + send to the active client. Collapses the
+    /// `Task { await server?.send(...) }` pattern that previously peppered
+    /// `handleInbound` (a non-async context). Sites already inside an `async`
+    /// function (`handleChat`/`handleExploreChat`) call `await server?.send`
+    /// directly — this helper would only double-wrap them in a stray `Task`.
+    private func reply(_ message: some Encodable) {
+        Task { await server?.send(message) }
+    }
+
+    /// Auto-tasks dependency (`autoCode`/`autoTaskSettings`) isn't wired —
+    /// mirror a `CommandError` to the client and a stderr line to the Mac log.
+    /// `commandId` is the wire discriminator the phone keys on; `logLabel` is
+    /// the (separately observable) prefix shown in the Mac log, kept distinct
+    /// to preserve the original "auto_task_list"/"auto_task_run" wording.
+    private func replyNotConfigured(commandId: String, logLabel: String) {
+        append(.stderr, "\(logLabel): Auto-tasks not configured")
+        reply(CommandError(commandId: commandId, message: "Auto-tasks not configured"))
+    }
+}
+
+// MARK: - ChatTurn ↔ CodeAssistTurn mapping
+
+/// The SharedProtocol `ChatTurn` (wire shape) and the Mac-side
+/// `LlmIdeAPIClient.CodeAssistTurn` (Code Assistant view-model) carry the same
+/// `{role, content}` payload but differ in the `id`/role-enum representation.
+/// Both conversion directions live here so the mapping can't drift between the
+/// `explore_load_session` (→) and `handleExploreChat` (←) paths. Defined in
+/// the Mac target (not SharedProtocol) because `CodeAssistTurn` is Mac-local
+/// and a SharedProtocol-side dependency would be circular.
+extension ChatTurn {
+    /// Code Assistant view-model → SharedProtocol wire shape: drop the
+    /// client-only `id`, surface the role as its raw string ("user"/"assistant").
+    init(from t: LlmIdeAPIClient.CodeAssistTurn) {
+        self.init(role: t.role.rawValue, content: t.content)
+    }
+}
+
+extension LlmIdeAPIClient.CodeAssistTurn {
+    /// SharedProtocol wire shape → Code Assistant view-model. Unknown roles
+    /// fall back to `.user` (matches the prior inline behavior).
+    init(from t: ChatTurn) {
+        self.init(role: .init(rawValue: t.role) ?? .user, content: t.content)
     }
 }
