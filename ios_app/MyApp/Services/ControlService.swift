@@ -39,6 +39,12 @@ final class ControlService: ObservableObject {
     @Published var exploreSessions: [ExploreSessionSummary] = []
     @Published var exploreCurrent: ExploreCurrentSession?
 
+    /// Auto-task status (Mac-side) + recent run history. `autoTaskState` is
+    /// refreshed by the Mac after every list/run/stop/toggle; `autoTaskHistoryEntries`
+    /// arrives only in response to `autoTaskHistory()`.
+    @Published var autoTaskState: AutoTaskState?
+    @Published var autoTaskHistoryEntries: [AutoTaskHistoryEntry] = []
+
     /// Command ids whose streamed reply belongs to the llm-ide transcript.
     private var llmIdeCommandIds: Set<String> = []
     /// Command ids whose streamed reply belongs to the explorer transcript.
@@ -323,6 +329,52 @@ final class ControlService: ObservableObject {
         }
     }
 
+    // MARK: — Auto-task
+
+    /// Ask the Mac for the current auto-task state. The Mac replies with
+    /// `auto_task_state`, which lands in `autoTaskState`.
+    func autoTaskList() {
+        guard connectionStatus == .connected else { return }
+        guard let data = try? JSONEncoder().encode(AutoTaskList()),
+              let str = String(data: data, encoding: .utf8) else { return }
+        sendTextFrame(str)
+    }
+
+    /// Start the auto-task loop on the Mac. Pass a `task` id to scope it to
+    /// one task, or nil to run all enabled tasks.
+    func autoTaskRun(_ task: String? = nil) {
+        guard connectionStatus == .connected else { return }
+        guard let data = try? JSONEncoder().encode(AutoTaskRun(task: task)),
+              let str = String(data: data, encoding: .utf8) else { return }
+        sendTextFrame(str)
+    }
+
+    /// Stop the auto-task loop on the Mac.
+    func autoTaskStop() {
+        guard connectionStatus == .connected else { return }
+        guard let data = try? JSONEncoder().encode(AutoTaskStop()),
+              let str = String(data: data, encoding: .utf8) else { return }
+        sendTextFrame(str)
+    }
+
+    /// Toggle a single task's enabled flag, or the master switch when `task`
+    /// is nil. The Mac replies with a fresh `auto_task_state`.
+    func autoTaskToggle(task: String?, enabled: Bool) {
+        guard connectionStatus == .connected else { return }
+        guard let data = try? JSONEncoder().encode(AutoTaskToggle(task: task, enabled: enabled)),
+              let str = String(data: data, encoding: .utf8) else { return }
+        sendTextFrame(str)
+    }
+
+    /// Ask the Mac for recent auto-task run history. The Mac replies with
+    /// `auto_task_history_reply`, which lands in `autoTaskHistory`.
+    func autoTaskHistory() {
+        guard connectionStatus == .connected else { return }
+        guard let data = try? JSONEncoder().encode(AutoTaskHistoryList()),
+              let str = String(data: data, encoding: .utf8) else { return }
+        sendTextFrame(str)
+    }
+
     /// Open the llm-ide Mac app. With a `tab` it navigates there via the
     /// `llmide://` deep link (which also launches the app if needed).
     func openLlmIde(tab: String? = nil) {
@@ -479,6 +531,21 @@ final class ControlService: ObservableObject {
             if let created = try? JSONDecoder().decode(ExploreSessionCreated.self, from: data) {
                 exploreCurrent = ExploreCurrentSession(id: created.sessionId, title: "New session", history: [])
                 exploreListSessions()   // refresh the sidebar list
+            }
+        case "auto_task_state":
+            if let state = try? JSONDecoder().decode(AutoTaskState.self, from: data) {
+                autoTaskState = state
+            }
+        case "auto_task_history_reply":
+            if let reply = try? JSONDecoder().decode(AutoTaskHistoryReply.self, from: data) {
+                autoTaskHistoryEntries = reply.entries
+            }
+        case "auto_task_ack":
+            // Minimal: surface a human message if the Mac sent one; ignore
+            // quiet `ok` acks. Reuses the explorer ack transient banner.
+            if let ack = try? JSONDecoder().decode(AutoTaskAck.self, from: data),
+               let msg = ack.message {
+                setActionStatus(msg)
             }
         case "output":
             let commandId = json["commandId"] as? String
