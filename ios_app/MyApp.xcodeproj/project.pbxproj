@@ -11,6 +11,7 @@
 		26AD1F92FC290B7312532929 /* RemoteDesktopView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D4D30A5062ADB194BE689A2 /* RemoteDesktopView.swift */; };
 		B7C8D9E0F1A203040B7C8D01 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C8D9E0F1A203040B7C8D02 /* QRScannerView.swift */; };
 		C0DE10A2B3C4D5E6F7081902 /* LlmIdeControlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE10A2B3C4D5E6F7081903 /* LlmIdeControlView.swift */; };
+		E5F6A7B8C9D0E1F2A3B4C501 /* ExplorerChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F6A7B8C9D0E1F2A3B4C502 /* ExplorerChatView.swift */; };
 		86D51A8F64D3F1F7AF72109E /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6619B48C5ED4564AD23384A1 /* DesignSystem.swift */; };
 		A351D57F1B94C3E6FBB89A9B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95A7138E88C6309A4CC79A8F /* SettingsView.swift */; };
 		AA3AB884E79B016FD6484990 /* ControlService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 875018D48E30D19CE765EEF8 /* ControlService.swift */; };
@@ -32,6 +33,7 @@
 		5D4D30A5062ADB194BE689A2 /* RemoteDesktopView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteDesktopView.swift; sourceTree = "<group>"; };
 		B7C8D9E0F1A203040B7C8D02 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
 		C0DE10A2B3C4D5E6F7081903 /* LlmIdeControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlmIdeControlView.swift; sourceTree = "<group>"; };
+		E5F6A7B8C9D0E1F2A3B4C502 /* ExplorerChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorerChatView.swift; sourceTree = "<group>"; };
 		6619B48C5ED4564AD23384A1 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
 		875018D48E30D19CE765EEF8 /* ControlService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlService.swift; sourceTree = "<group>"; };
 		95A7138E88C6309A4CC79A8F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -117,6 +119,7 @@
 				5D4D30A5062ADB194BE689A2 /* RemoteDesktopView.swift */,
 				B7C8D9E0F1A203040B7C8D02 /* QRScannerView.swift */,
 				C0DE10A2B3C4D5E6F7081903 /* LlmIdeControlView.swift */,
+				E5F6A7B8C9D0E1F2A3B4C502 /* ExplorerChatView.swift */,
 			);
 			path = Control;
 			sourceTree = "<group>";
@@ -254,6 +257,7 @@
 				26AD1F92FC290B7312532929 /* RemoteDesktopView.swift in Sources */,
 				B7C8D9E0F1A203040B7C8D01 /* QRScannerView.swift in Sources */,
 				C0DE10A2B3C4D5E6F7081902 /* LlmIdeControlView.swift in Sources */,
+				E5F6A7B8C9D0E1F2A3B4C501 /* ExplorerChatView.swift in Sources */,
 				A351D57F1B94C3E6FBB89A9B /* SettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
