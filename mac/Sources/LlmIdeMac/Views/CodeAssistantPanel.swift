@@ -167,8 +167,6 @@ struct CodeAssistantPanel: View {
     @State var voiceService = VoiceInputService()
     /// Voice UI state — recording, interim text, errors
     @State var voiceState = ChatVoiceState()
-    /// Mobile command router — sends commands to agent on :3006
-    @State var mobileRouter: MobileCommandRouter?
     /// Project-memory viewer sheet (what the assistant auto-learned).
     @State private var showProjectMemory = false
     /// Captured at the moment the banner appears so Save uses the
@@ -232,12 +230,6 @@ struct CodeAssistantPanel: View {
                     completion.update(draft: newValue)
                 } else {
                     completion.close()
-                }
-                // Send real-time typing feedback to mobile
-                Task {
-                    if !newValue.isEmpty {
-                        await mobileRouter?.notifyTyping(newValue)
-                    }
                 }
             }
             .sheet(isPresented: $showProjectMemory) {
@@ -377,9 +369,6 @@ struct CodeAssistantPanel: View {
                     self.draft += " "
                 }
                 self.draft += text
-                Task {
-                    await self.mobileRouter?.sendVoiceTranscript(text)
-                }
                 self.voiceState.reset()
             }
             voiceService.onPartialResult = { text in
@@ -388,11 +377,6 @@ struct CodeAssistantPanel: View {
             voiceService.onError = { error in
                 self.voiceState.setError(error)
             }
-        }
-
-        // Initialize mobile command router
-        if mobileRouter == nil {
-            mobileRouter = MobileCommandRouter()
         }
     }
 
@@ -2256,11 +2240,6 @@ struct CodeAssistantPanel: View {
         let msg = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !msg.isEmpty else { return }
         draft = ""
-
-        // Send to mobile app
-        Task {
-            await mobileRouter?.sendMessage(msg)
-        }
 
         // Record the PLAIN text for ↑ recall (not the skill-decorated message).
         if sentPrompts.last != msg {

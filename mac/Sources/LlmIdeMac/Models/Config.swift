@@ -467,12 +467,6 @@ final class AppConfig: ObservableObject {
     @Published var mobileControlEnabled: Bool {
         didSet { defaults.set(mobileControlEnabled, forKey: "mobileControlEnabled") }
     }
-    /// Directory containing the computer-agent `package.json` (npm start → :3006).
-    /// DORMANT: No longer used — the Mac app now runs a native server and no longer
-    /// references an external mobile-agent folder. Kept for config-backwards-compat.
-    @Published var mobileControlAgentPath: String {
-        didSet { defaults.set(mobileControlAgentPath, forKey: "mobileControlAgentPath") }
-    }
     /// When true and Mobile Control is enabled, start the computer agent on app launch.
     @Published var mobileControlAutoStart: Bool {
         didSet { defaults.set(mobileControlAutoStart, forKey: "mobileControlAutoStart") }
@@ -658,7 +652,6 @@ final class AppConfig: ObservableObject {
         }
         self.autoCodeUpdateLookbackCount = defaults.object(forKey: "autoCodeUpdateLookbackCount") as? Int ?? 5
         self.mobileControlEnabled = defaults.object(forKey: "mobileControlEnabled") as? Bool ?? false
-        self.mobileControlAgentPath = defaults.string(forKey: "mobileControlAgentPath") ?? ""
         self.mobileControlAutoStart = defaults.object(forKey: "mobileControlAutoStart") as? Bool ?? true
         self.autoTaskTemplateReviewCode = defaults.string(forKey: "autoTaskTemplateReviewCode") ?? Self.defaultTemplateReviewCode
         self.autoTaskTemplateReviewDoc = defaults.string(forKey: "autoTaskTemplateReviewDoc") ?? Self.defaultTemplateReviewDoc

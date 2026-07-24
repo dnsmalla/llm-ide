@@ -77,14 +77,6 @@ enum LocalIPs {
     }
 }
 
-/// Reads the mobile-pairing PIN from the macOS Keychain via `MobilePin`
-/// (account `mobile::pin`), so the value surfaced in Settings always matches
-/// the PIN a new iPhone connection must present in its `Pairing` frame.
-/// Replaces the old file-based `~/.aicontrol.json` read.
-enum AgentPin {
-    static func read() -> String? { MobilePin.read() }
-}
-
 /// Snapshot of everything the iPhone app needs to connect: the Tailscale
 /// and/or local Wi-Fi address, the agent port, the PIN, and a pairing QR
 /// payload. Refreshable on demand — IPs change when the user joins/leaves
@@ -102,7 +94,7 @@ struct MobileConnectionInfo: Equatable {
     static func current(port: Int = MobileControlManager.defaultAgentPort) -> MobileConnectionInfo {
         let tailscaleIP = LocalIPs.tailscaleIPv4()
         let lanIP = LocalIPs.lanIPv4()
-        let pin = AgentPin.read()
+        let pin = MobilePin.read()
         let host = tailscaleIP ?? lanIP
         let qr = host.flatMap { host -> String? in
             var c = URLComponents()

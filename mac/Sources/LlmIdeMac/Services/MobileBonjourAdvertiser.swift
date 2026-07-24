@@ -4,7 +4,7 @@ import SharedProtocol
 /// Publishes the Mac as `_llmide._tcp` on the LAN so the iPhone can discover it.
 /// Thin wrapper over NetService; Bonjour itself is not unit-testable, so this
 /// class is exercised via the manual checklist.
-final class MobileBonjourAdvertiser: NSObject {
+final class MobileBonjourAdvertiser: NSObject, NetServiceDelegate {
     private let name: String
     private let port: Int
     private var service: NetService?
@@ -25,12 +25,5 @@ final class MobileBonjourAdvertiser: NSObject {
     func stop() {
         service?.stop()
         service = nil
-    }
-}
-
-extension MobileBonjourAdvertiser: NetServiceDelegate {
-    // No-op defaults; surface publish failures to the log if desired.
-    func netService(_ sender: NetService, didNotPublish errorDict: [String: NSNumber]) {
-        // Left intentionally minimal — logged by the manager if needed.
     }
 }

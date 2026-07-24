@@ -58,9 +58,9 @@ enum MobilePin {
     /// `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` to match the rest of
     /// the app's keychain items.
     private static func write(_ pin: String) throws {
-        guard let data = pin.data(using: .utf8) else {
-            throw MobilePinError.encodingFailed
-        }
+        // pin is always a 6-digit ASCII string (`%06d`), so UTF-8 encoding
+        // cannot fail — `Data(_:)` is infallible here.
+        let data = Data(pin.utf8)
         let match: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
@@ -84,7 +84,6 @@ enum MobilePin {
     }
 
     enum MobilePinError: Error {
-        case encodingFailed
         case keychainFailure(OSStatus)
     }
 }

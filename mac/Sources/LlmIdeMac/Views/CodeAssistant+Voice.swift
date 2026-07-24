@@ -122,23 +122,4 @@ extension CodeAssistantPanel {
         // For modifier combinations (Alt+arrows), we need NSEvent monitoring in the sheet/panel.
         // This is handled via the parent view's event handlers in CodeAssistantPanel.
     }
-
-    /// Handle Alt+arrow keyboard shortcuts for mobile navigation.
-    func handleMobileKeyboardShortcut(_ key: String, modifiers: NSEvent.ModifierFlags) {
-        guard modifiers.contains(.option) else { return }
-
-        Task {
-            switch key {
-            case "Up", "↑":
-                await mobileRouter?.scrollUp()
-            case "Down", "↓":
-                await mobileRouter?.scrollDown()
-            case "Delete", "⌫":
-                // Alt+Backspace = go back
-                await mobileRouter?.goBack()
-            default:
-                break
-            }
-        }
-    }
 }
