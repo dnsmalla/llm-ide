@@ -71,6 +71,7 @@ You now have:
 - Bonjour discovery and an `llmide://pair` QR for one-tap setup.
 - **End-to-end LLM IDE chat**: pair iPhone → ask in iOS chat sheet → Mac proxies to `:3456` → reply streams back.
 - The Mac app bridging chat requests to the LLM IDE backend at `:3456`.
+- **Native Explorer Chat** (via the iPhone's "Explore" button): list, load, create, and delete Mac's explorer sessions and chats through the code agent, with turns synced back to the Mac.
 
 **Rich input (Phase 4)**: From the iPhone chat sheet you can send text (including voice transcribed on-device), images (up to 4), and PDF/.md/.txt file attachments (text extracted on-device) into the explorer chat — all proxied through the Mac to `:3456`.
 
