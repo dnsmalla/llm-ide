@@ -144,7 +144,7 @@ struct AutoTaskView: View {
         } else if let last = state?.lastRunDate {
             HStack(spacing: 4) {
                 Circle().fill(Color.gray.opacity(0.5)).frame(width: 6, height: 6)
-                Text("Idle · \(Self.relativeTime(from: last))")
+                Text("Idle · \(Date(epochSeconds: last).relativeTimeShort())")
                     .font(.system(size: DesignSystem.Typography.footnote))
             }
             .foregroundColor(DesignSystem.Colors.textTertiary)
@@ -278,7 +278,7 @@ struct AutoTaskView: View {
                     Text(entry.status)
                         .font(.system(size: DesignSystem.Typography.caption, weight: .medium))
                         .foregroundColor(historyColor(entry.status))
-                    Text("· \(Self.relativeTime(from: entry.lastUpdated))")
+                    Text("· \(Date(epochSeconds: entry.lastUpdated).relativeTimeShort())")
                         .font(.system(size: DesignSystem.Typography.caption))
                         .foregroundColor(DesignSystem.Colors.textTertiary)
                 }
@@ -330,17 +330,4 @@ struct AutoTaskView: View {
     }
 
     // MARK: — Helpers
-
-    private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
-        UIImpactFeedbackGenerator(style: style).impactOccurred()
-    }
-
-    /// `lastRunDate` / `lastUpdated` arrive as epoch seconds
-    /// (Mac sends `timeIntervalSince1970`).
-    private static func relativeTime(from epochSeconds: Double) -> String {
-        let date = Date(timeIntervalSince1970: epochSeconds)
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: date, relativeTo: Date())
-    }
 }

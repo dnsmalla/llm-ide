@@ -147,6 +147,37 @@ final class ControlService: ObservableObject {
 
     // MARK: — llm-ide control
 
+    /// Shared prefix of a streaming-chat turn, factored out so the llm-ide and
+    /// explorer surfaces stay in lock-step: builds the text-only history window
+    /// (prior images/files are never re-sent), appends the user turn + an empty
+    /// assistant placeholder, sets the shared `llmStreaming` flag, and mints a
+    /// commandId into the surface's id set. Returns `(commandId, history)` so
+    /// each caller wraps it in its concrete Codable payload.
+    ///
+    /// History window is unified at 10 turns for both surfaces — the server
+    /// re-caps to its own window regardless, and the pre-refactor `.suffix(8)`
+    /// on the explorer path had no documented reason. NOTE: both surfaces still
+    /// share the single `llmStreaming` flag; the per-surface in-flight fix is
+    /// Task 8 and is deliberately not changed here.
+    @discardableResult
+    private func prepareStreamingChat(
+        messages: inout [ChatMessage],
+        commandIds: inout Set<String>,
+        userText: String,
+        imageData: Data? = nil
+    ) -> (commandId: String, history: [ChatTurn]) {
+        let history = messages.suffix(10).compactMap { m -> ChatTurn? in
+            guard !m.text.isEmpty else { return nil }
+            return ChatTurn(role: m.role == .assistant ? "assistant" : "user", content: m.text)
+        }
+        messages.append(ChatMessage(role: .user, text: userText, imageData: imageData))
+        messages.append(ChatMessage(role: .assistant, text: ""))
+        llmStreaming = true
+        let id = UUID().uuidString
+        commandIds.insert(id)
+        return (id, history)
+    }
+
     /// Ask llm-ide's agent a question. The agent on the Mac forwards it to the
     /// llm-ide localhost API and the reply streams back through the same
     /// `output`/`done` path, landing in `llmIdeMessages`.
@@ -158,20 +189,16 @@ final class ControlService: ObservableObject {
                         images: [(data: Data, mediaType: String)] = [],
                         files: [ChatFileText] = []) {
         guard targetDevice != nil, connectionStatus == .connected else { return }
-        // Prior turns become history for the agent (server re-caps to 10).
-        // History is text-only — prior images/files aren't re-sent.
-        let history = llmIdeMessages.suffix(10).compactMap { m -> ChatTurn? in
-            guard !m.text.isEmpty else { return nil }
-            return ChatTurn(role: m.role == .assistant ? "assistant" : "user", content: m.text)
-        }
         // Show only the first attached image as a thumbnail in the local bubble.
-        llmIdeMessages.append(ChatMessage(role: .user, text: text, imageData: images.first?.data))
-        llmIdeMessages.append(ChatMessage(role: .assistant, text: ""))
-        llmStreaming = true
-        let id = UUID().uuidString
-        llmIdeCommandIds.insert(id)
+        let (id, history) = prepareStreamingChat(
+            messages: &llmIdeMessages,
+            commandIds: &llmIdeCommandIds,
+            userText: text,
+            imageData: images.first?.data
+        )
         let chatImages = images.map { ChatImage(mediaType: $0.mediaType, data: $0.data.base64EncodedString()) }
         let chat = LlmIdeChat(commandId: id, text: text, history: history, images: chatImages, files: files)
+        // Encode error path preserved exactly from pre-refactor (tear down).
         if let data = try? JSONEncoder().encode(chat),
            let str = String(data: data, encoding: .utf8) {
             sendTextFrame(str)
@@ -190,38 +217,27 @@ final class ControlService: ObservableObject {
     /// Ask the Mac for the current list of explorer-chat sessions. Reply lands
     /// in `exploreSessions` via the `explore_session_list` handler.
     func exploreListSessions() {
-        guard connectionStatus == .connected else { return }
-        guard let data = try? JSONEncoder().encode(ExploreListSessions()),
-              let str = String(data: data, encoding: .utf8) else { return }
-        sendTextFrame(str)
+        sendEncodable(ExploreListSessions())
     }
 
     /// Load a session's full history into `exploreCurrent`. Reply arrives via
     /// `explore_session_history`.
     func exploreLoadSession(_ id: String) {
-        guard connectionStatus == .connected else { return }
-        guard let data = try? JSONEncoder().encode(ExploreLoadSession(sessionId: id)),
-              let str = String(data: data, encoding: .utf8) else { return }
-        sendTextFrame(str)
+        sendEncodable(ExploreLoadSession(sessionId: id))
     }
 
     /// Create a new session on the Mac. Reply (`explore_session_created`)
     /// resets `exploreCurrent` to the new id with empty history and refreshes
     /// the session list.
     func exploreNewSession() {
-        guard connectionStatus == .connected else { return }
-        guard let data = try? JSONEncoder().encode(ExploreNewSession()),
-              let str = String(data: data, encoding: .utf8) else { return }
-        sendTextFrame(str)
+        sendEncodable(ExploreNewSession())
     }
 
     /// Delete a session on the Mac and refresh the list.
     func exploreDeleteSession(_ id: String) {
-        guard connectionStatus == .connected else { return }
-        guard let data = try? JSONEncoder().encode(ExploreDeleteSession(sessionId: id)),
-              let str = String(data: data, encoding: .utf8) else { return }
-        sendTextFrame(str)
-        // Optimistically drop locally + reload the list to confirm.
+        sendEncodable(ExploreDeleteSession(sessionId: id))
+        // Optimistic local drop + reload, kept inline (the order — send, then
+        // mutate, then re-list — is preserved exactly from pre-refactor).
         exploreSessions.removeAll { $0.id == id }
         if exploreCurrent?.id == id { exploreCurrent = nil }
         exploreListSessions()
@@ -237,20 +253,17 @@ final class ControlService: ObservableObject {
         if exploreCurrent == nil {
             exploreCurrent = ExploreCurrentSession(id: sessionId, title: "Session", history: [])
         }
-        // History sent to the Mac = prior turns only (the new user turn is
-        // appended locally below). Server re-caps to its own window.
-        let history = (exploreCurrent?.history ?? [])
-            .suffix(8)
-            .compactMap { m -> ChatTurn? in
-                guard !m.text.isEmpty else { return nil }
-                return ChatTurn(role: m.role == .assistant ? "assistant" : "user", content: m.text)
-            }
-        exploreCurrent?.history.append(ChatMessage(role: .user, text: text))
-        exploreCurrent?.history.append(ChatMessage(role: .assistant, text: ""))
-        llmStreaming = true
-        let id = UUID().uuidString
-        exploreCommandIds.insert(id)
-        let chat = ExploreChat(sessionId: sessionId, commandId: id, text: text, history: history)
+        // `exploreCurrent` is a value type — mutate a local copy through the
+        // shared helper, then reassign so `@Published` fires deterministically.
+        var messages = exploreCurrent?.history ?? []
+        let (id, chatHistory) = prepareStreamingChat(
+            messages: &messages,
+            commandIds: &exploreCommandIds,
+            userText: text
+        )
+        exploreCurrent?.history = messages
+        let chat = ExploreChat(sessionId: sessionId, commandId: id, text: text, history: chatHistory)
+        // Encode error path preserved from pre-refactor (surface message, no tear-down).
         if let data = try? JSONEncoder().encode(chat),
            let str = String(data: data, encoding: .utf8) {
             sendTextFrame(str)
@@ -264,45 +277,30 @@ final class ControlService: ObservableObject {
     /// Ask the Mac for the current auto-task state. The Mac replies with
     /// `auto_task_state`, which lands in `autoTaskState`.
     func autoTaskList() {
-        guard connectionStatus == .connected else { return }
-        guard let data = try? JSONEncoder().encode(AutoTaskList()),
-              let str = String(data: data, encoding: .utf8) else { return }
-        sendTextFrame(str)
+        sendEncodable(AutoTaskList())
     }
 
     /// Start the auto-task loop on the Mac. Pass a `task` id to scope it to
     /// one task, or nil to run all enabled tasks.
     func autoTaskRun(_ task: String? = nil) {
-        guard connectionStatus == .connected else { return }
-        guard let data = try? JSONEncoder().encode(AutoTaskRun(task: task)),
-              let str = String(data: data, encoding: .utf8) else { return }
-        sendTextFrame(str)
+        sendEncodable(AutoTaskRun(task: task))
     }
 
     /// Stop the auto-task loop on the Mac.
     func autoTaskStop() {
-        guard connectionStatus == .connected else { return }
-        guard let data = try? JSONEncoder().encode(AutoTaskStop()),
-              let str = String(data: data, encoding: .utf8) else { return }
-        sendTextFrame(str)
+        sendEncodable(AutoTaskStop())
     }
 
     /// Toggle a single task's enabled flag, or the master switch when `task`
     /// is nil. The Mac replies with a fresh `auto_task_state`.
     func autoTaskToggle(task: String?, enabled: Bool) {
-        guard connectionStatus == .connected else { return }
-        guard let data = try? JSONEncoder().encode(AutoTaskToggle(task: task, enabled: enabled)),
-              let str = String(data: data, encoding: .utf8) else { return }
-        sendTextFrame(str)
+        sendEncodable(AutoTaskToggle(task: task, enabled: enabled))
     }
 
     /// Ask the Mac for recent auto-task run history. The Mac replies with
     /// `auto_task_history_reply`, which lands in `autoTaskHistoryEntries`.
     func autoTaskHistory() {
-        guard connectionStatus == .connected else { return }
-        guard let data = try? JSONEncoder().encode(AutoTaskHistoryList()),
-              let str = String(data: data, encoding: .utf8) else { return }
-        sendTextFrame(str)
+        sendEncodable(AutoTaskHistoryList())
     }
 
     /// Show a short-lived confirmation (e.g. an auto-task ack), auto-clearing.
@@ -317,6 +315,19 @@ final class ControlService: ObservableObject {
     }
 
     // MARK: — Internal
+
+    /// Encode and send any Codable outbound message over the WebSocket. Single
+    /// send path for every simple command (explore*, autoTask*): silent no-op
+    /// when disconnected or when the payload won't encode (both indicate a
+    /// programming error; the caller's local state is unaffected). Streaming-
+    /// chat senders (`sendLlmideChat`/`sendExploreChat`) keep their own error
+    /// handling and use `sendTextFrame` directly.
+    private func sendEncodable<T: Encodable>(_ payload: T) {
+        guard connectionStatus == .connected,
+              let data = try? JSONEncoder().encode(payload),
+              let str = String(data: data, encoding: .utf8) else { return }
+        sendTextFrame(str)
+    }
 
     /// Send a pre-encoded JSON string over the WebSocket. Single send path for
     /// both dict-based messages (`sendRaw`) and Codable-encoded frames (`Pairing`).

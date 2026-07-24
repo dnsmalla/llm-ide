@@ -23,8 +23,12 @@ struct ExplorerChatView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                if !isConnected { connectionBanner }
-                if let err = controlService.errorMessage { errorBanner(err) }
+                if !isConnected {
+                    StatusBanner(.connection(isConnecting: controlService.connectionStatus == .connecting))
+                }
+                if let err = controlService.errorMessage {
+                    StatusBanner(.error(message: err) { controlService.errorMessage = nil })
+                }
                 chatTranscript
                 inputBar
             }
@@ -103,7 +107,7 @@ struct ExplorerChatView: View {
                         .font(.system(size: DesignSystem.Typography.body))
                         .foregroundColor(DesignSystem.Colors.textPrimary)
                         .lineLimit(1)
-                    Text(Self.relativeTime(from: session.lastUsedAt))
+                    Text(Date(epochSeconds: session.lastUsedAt).relativeTimeShort())
                         .font(.system(size: DesignSystem.Typography.footnote))
                         .foregroundColor(DesignSystem.Colors.textTertiary)
                 }
@@ -126,10 +130,14 @@ struct ExplorerChatView: View {
                 LazyVStack(spacing: DesignSystem.Spacing.sm) {
                     if let current = controlService.exploreCurrent {
                         if current.history.isEmpty {
-                            emptyState(title: current.title)
+                            EmptyChatState(
+                                icon: "bubble.left.and.text.bubble.right",
+                                title: "Ask anything about this session",
+                                subtitle: "Type a question below to start."
+                            )
                         }
                         ForEach(current.history) { msg in
-                            bubble(msg).id(msg.id)
+                            ChatBubble(message: msg).id(msg.id)
                         }
                     } else {
                         noSessionState
@@ -147,22 +155,9 @@ struct ExplorerChatView: View {
         }
     }
 
-    private func emptyState(title: String) -> some View {
-        VStack(spacing: DesignSystem.Spacing.sm) {
-            Image(systemName: "bubble.left.and.text.bubble.right")
-                .font(.system(size: 34))
-                .foregroundColor(DesignSystem.Colors.textTertiary)
-            Text("Ask anything about this session")
-                .font(.system(size: DesignSystem.Typography.callout, weight: .medium))
-                .foregroundColor(DesignSystem.Colors.textSecondary)
-            Text("Type a question below to start.")
-                .font(.system(size: DesignSystem.Typography.footnote))
-                .foregroundColor(DesignSystem.Colors.textTertiary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
-    }
-
+    /// Left inline — distinct from `EmptyChatState`: different icon, different
+    /// copy, and a "Browse sessions" action button. Only appears in the explorer
+    /// surface, so factoring it out would add parameters for one caller.
     private var noSessionState: some View {
         VStack(spacing: DesignSystem.Spacing.sm) {
             Image(systemName: "sidebar.left")
@@ -192,69 +187,18 @@ struct ExplorerChatView: View {
         .padding(.top, 60)
     }
 
-    @ViewBuilder
-    private func bubble(_ msg: ChatMessage) -> some View {
-        let isUser = msg.role == .user
-        let isThinking = !isUser && msg.text.isEmpty
-        HStack {
-            if isUser { Spacer(minLength: 40) }
-            Group {
-                if isThinking {
-                    HStack(spacing: 8) {
-                        ProgressView().scaleEffect(0.8)
-                        Text("Thinking…")
-                            .font(.system(size: DesignSystem.Typography.body))
-                            .foregroundColor(DesignSystem.Colors.textSecondary)
-                    }
-                } else {
-                    Text(msg.text)
-                        .font(.system(size: DesignSystem.Typography.body))
-                        .foregroundColor(isUser ? .white : DesignSystem.Colors.textPrimary)
-                }
-            }
-            .padding(.horizontal, DesignSystem.Spacing.md)
-            .padding(.vertical, 10)
-            .background(isUser ? DesignSystem.Colors.primary : DesignSystem.Colors.surface)
-            .overlay(
-                RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM)
-                    .stroke(isUser ? Color.clear : DesignSystem.Colors.border, lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM))
-            if !isUser { Spacer(minLength: 40) }
-        }
-    }
-
     // MARK: — Input bar
 
     private var inputBar: some View {
         VStack(spacing: 0) {
             Divider()
-            HStack(spacing: DesignSystem.Spacing.sm) {
-                TextField(hasSession ? "Message explorer" : "Select a session first",
-                          text: $inputText, axis: .vertical)
-                    .font(.system(size: DesignSystem.Typography.body))
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...4)
-                    .focused($isInputFocused)
-                    .padding(.horizontal, DesignSystem.Spacing.md)
-                    .padding(.vertical, 10)
-                    .background(DesignSystem.Colors.surface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL)
-                            .stroke(DesignSystem.Colors.border, lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL))
-                    .onSubmit(send)
-
-                Button(action: send) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 30))
-                        .foregroundColor(canSend ? DesignSystem.Colors.primary : DesignSystem.Colors.textTertiary)
-                }
-                .disabled(!canSend)
-            }
-            .padding(DesignSystem.Spacing.md)
-            .background(DesignSystem.Colors.surfaceSecondary)
+            ChatInputBar(
+                text: $inputText,
+                placeholder: hasSession ? "Message explorer" : "Select a session first",
+                canSend: canSend,
+                isFocused: $isInputFocused,
+                onSend: send
+            )
         }
     }
 
@@ -265,43 +209,6 @@ struct ExplorerChatView: View {
             && !controlService.llmStreaming   // one question at a time (shared flag)
     }
 
-    // MARK: — Banners (mirror LlmIdeControlView)
-
-    private var connectionBanner: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "wifi.slash").font(.system(size: 13))
-            Text(controlService.connectionStatus == .connecting
-                 ? "Connecting to your Mac…" : "Not connected to your Mac")
-                .font(.system(size: DesignSystem.Typography.footnote, weight: .medium))
-            Spacer()
-        }
-        .foregroundColor(.white)
-        .padding(.horizontal, DesignSystem.Spacing.md)
-        .padding(.vertical, 8)
-        .background(DesignSystem.Colors.textTertiary)
-    }
-
-    private func errorBanner(_ message: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 13))
-                .foregroundColor(DesignSystem.Colors.danger)
-            Text(message)
-                .font(.system(size: DesignSystem.Typography.footnote))
-                .foregroundColor(DesignSystem.Colors.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 4)
-            Button { controlService.errorMessage = nil } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(DesignSystem.Colors.textTertiary)
-            }
-        }
-        .padding(.horizontal, DesignSystem.Spacing.md)
-        .padding(.vertical, 8)
-        .background(DesignSystem.Colors.danger.opacity(0.12))
-    }
-
     // MARK: — Actions
 
     private func send() {
@@ -310,16 +217,6 @@ struct ExplorerChatView: View {
         controlService.sendExploreChat(text, sessionId: id)
         inputText = ""
         isInputFocused = false
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    }
-
-    // MARK: — Helpers
-
-    /// `lastUsedAt` arrives as epoch seconds (Mac sends `timeIntervalSince1970`).
-    private static func relativeTime(from epochSeconds: Double) -> String {
-        let date = Date(timeIntervalSince1970: epochSeconds)
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: date, relativeTo: Date())
+        haptic(.light)
     }
 }

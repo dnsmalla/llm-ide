@@ -195,8 +195,4 @@ struct MobileHomeView: View {
         case .disconnected: return "Offline"
         }
     }
-
-    private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
-        UIImpactFeedbackGenerator(style: style).impactOccurred()
-    }
 }

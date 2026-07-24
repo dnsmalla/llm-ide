@@ -32,8 +32,12 @@ struct LlmIdeControlView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                if !isConnected { connectionBanner }
-                if let err = controlService.errorMessage { errorBanner(err) }
+                if !isConnected {
+                    StatusBanner(.connection(isConnecting: controlService.connectionStatus == .connecting))
+                }
+                if let err = controlService.errorMessage {
+                    StatusBanner(.error(message: err) { controlService.errorMessage = nil })
+                }
                 chatTranscript
                 inputBar
             }
@@ -107,41 +111,6 @@ struct LlmIdeControlView: View {
         }
     }
 
-    private var connectionBanner: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "wifi.slash").font(.system(size: 13))
-            Text(controlService.connectionStatus == .connecting
-                 ? "Connecting to your Mac…" : "Not connected to your Mac")
-                .font(.system(size: DesignSystem.Typography.footnote, weight: .medium))
-            Spacer()
-        }
-        .foregroundColor(.white)
-        .padding(.horizontal, DesignSystem.Spacing.md)
-        .padding(.vertical, 8)
-        .background(DesignSystem.Colors.textTertiary)
-    }
-
-    private func errorBanner(_ message: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 13))
-                .foregroundColor(DesignSystem.Colors.danger)
-            Text(message)
-                .font(.system(size: DesignSystem.Typography.footnote))
-                .foregroundColor(DesignSystem.Colors.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 4)
-            Button { controlService.errorMessage = nil } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(DesignSystem.Colors.textTertiary)
-            }
-        }
-        .padding(.horizontal, DesignSystem.Spacing.md)
-        .padding(.vertical, 8)
-        .background(DesignSystem.Colors.danger.opacity(0.12))
-    }
-
     // MARK: — Chat transcript
 
     private var chatTranscript: some View {
@@ -149,10 +118,14 @@ struct LlmIdeControlView: View {
             ScrollView {
                 LazyVStack(spacing: DesignSystem.Spacing.sm) {
                     if controlService.llmIdeMessages.isEmpty {
-                        emptyState
+                        EmptyChatState(
+                            icon: "bubble.left.and.text.bubble.right",
+                            title: "Ask llm-ide anything",
+                            subtitle: "Type or tap the mic to dictate."
+                        )
                     }
                     ForEach(controlService.llmIdeMessages) { msg in
-                        bubble(msg).id(msg.id)
+                        ChatBubble(message: msg).id(msg.id)
                     }
                 }
                 .padding(DesignSystem.Spacing.md)
@@ -167,64 +140,6 @@ struct LlmIdeControlView: View {
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: DesignSystem.Spacing.sm) {
-            Image(systemName: "bubble.left.and.text.bubble.right")
-                .font(.system(size: 34))
-                .foregroundColor(DesignSystem.Colors.textTertiary)
-            Text("Ask llm-ide anything")
-                .font(.system(size: DesignSystem.Typography.callout, weight: .medium))
-                .foregroundColor(DesignSystem.Colors.textSecondary)
-            Text("Type or tap the mic to dictate.")
-                .font(.system(size: DesignSystem.Typography.footnote))
-                .foregroundColor(DesignSystem.Colors.textTertiary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
-    }
-
-    @ViewBuilder
-    private func bubble(_ msg: ChatMessage) -> some View {
-        let isUser = msg.role == .user
-        let isThinking = !isUser && msg.text.isEmpty
-        HStack {
-            if isUser { Spacer(minLength: 40) }
-            Group {
-                if isThinking {
-                    HStack(spacing: 8) {
-                        ProgressView().scaleEffect(0.8)
-                        Text("Thinking…")
-                            .font(.system(size: DesignSystem.Typography.body))
-                            .foregroundColor(DesignSystem.Colors.textSecondary)
-                    }
-                } else {
-                    VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
-                        if let data = msg.imageData, let ui = UIImage(data: data) {
-                            Image(uiImage: ui)
-                                .resizable().scaledToFit()
-                                .frame(maxWidth: 200, maxHeight: 200)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                        }
-                        if !msg.text.isEmpty {
-                            Text(msg.text)
-                                .font(.system(size: DesignSystem.Typography.body))
-                                .foregroundColor(isUser ? .white : DesignSystem.Colors.textPrimary)
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, DesignSystem.Spacing.md)
-            .padding(.vertical, 10)
-            .background(isUser ? DesignSystem.Colors.primary : DesignSystem.Colors.surface)
-            .overlay(
-                RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM)
-                    .stroke(isUser ? Color.clear : DesignSystem.Colors.border, lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM))
-            if !isUser { Spacer(minLength: 40) }
-        }
-    }
-
     // MARK: — Input bar
 
     private var inputBar: some View {
@@ -233,7 +148,13 @@ struct LlmIdeControlView: View {
             if !pendingImages.isEmpty || !pendingFiles.isEmpty {
                 attachmentChips
             }
-            HStack(spacing: DesignSystem.Spacing.sm) {
+            ChatInputBar(
+                text: $inputText,
+                placeholder: speech.isListening ? "Listening…" : "Message llm-ide",
+                canSend: canSend,
+                isFocused: $isInputFocused,
+                onSend: send
+            ) {
                 Menu {
                     Button { showPhotoPicker = true } label: {
                         Label("Photo Library", systemImage: "photo.on.rectangle")
@@ -267,31 +188,7 @@ struct LlmIdeControlView: View {
                         .background(DesignSystem.Colors.surfaceSecondary)
                         .clipShape(Circle())
                 }
-
-                TextField(speech.isListening ? "Listening…" : "Message llm-ide", text: $inputText, axis: .vertical)
-                    .font(.system(size: DesignSystem.Typography.body))
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...4)
-                    .focused($isInputFocused)
-                    .padding(.horizontal, DesignSystem.Spacing.md)
-                    .padding(.vertical, 10)
-                    .background(DesignSystem.Colors.surface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL)
-                            .stroke(DesignSystem.Colors.border, lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusL))
-                    .onSubmit(send)
-
-                Button(action: send) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 30))
-                        .foregroundColor(canSend ? DesignSystem.Colors.primary : DesignSystem.Colors.textTertiary)
-                }
-                .disabled(!canSend)
             }
-            .padding(DesignSystem.Spacing.md)
-            .background(DesignSystem.Colors.surfaceSecondary)
         }
     }
 
@@ -416,10 +313,6 @@ struct LlmIdeControlView: View {
             isInputFocused = false
             speech.start()
         }
-    }
-
-    private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
-        UIImpactFeedbackGenerator(style: style).impactOccurred()
     }
 }
 
