@@ -104,7 +104,10 @@ final class MobileControlManager {
         do {
             try server.start()
         } catch {
-            lastError = "Failed to start mobile server: \(error.localizedDescription)"
+            // Actionable message for the common case — port :3006 already
+            // bound, typically by the old Node computer-agent still running.
+            // The underlying error is preserved in parens for diagnostics.
+            lastError = "Couldn't start the mobile server on port \(MobileProtocol.defaultPort) — the port may already be in use (e.g. the old computer-agent still running). Stop the other process, then Start again. (\(error.localizedDescription))"
             append(.stderr, "ERROR: \(error.localizedDescription)")
             status = .crashed(exitCode: -1)
             return

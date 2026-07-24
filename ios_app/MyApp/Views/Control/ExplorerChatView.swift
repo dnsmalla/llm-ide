@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 import SharedProtocol
 
 /// Native iOS view for the Mac-side "explorer chat" sessions: browse/create/load

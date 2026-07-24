@@ -50,6 +50,11 @@ mac/LlmIdeMac_*.dmg
 .vscode/
 *.swp
 
+# Xcode user-state dirs (per-user, never commit). The `**/` prefix anchors
+# matches anywhere in the tree so both MyApp.xcodeproj/xcuserdata/ and
+# MyApp.xcodeproj/project.xcworkspace/xcuserdata/ stay ignored.
+**/xcuserdata/
+
 # Superpowers — ephemeral process state, not source
 .superpowers/
 .worktrees/

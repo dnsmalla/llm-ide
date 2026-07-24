@@ -1,5 +1,4 @@
 import Foundation
-import UIKit
 import SharedProtocol
 
 // MARK: — Shared chat value types
@@ -93,7 +92,6 @@ final class ConnectionService: ObservableObject {
     weak var autoTaskStore: AutoTaskStore?
 
     private var webSocketTask: URLSessionWebSocketTask?
-    private var targetDevice: String?
     private var reconnectAttempt = 0
 
     private var directIP: String?
@@ -113,7 +111,6 @@ final class ConnectionService: ObservableObject {
         directPort = port
         directPIN  = pin
         disconnect(clearDirect: false)   // cancel old socket first
-        targetDevice = "direct"          // then restore (disconnect clears it only when clearDirect=true)
         connectionStatus = .connecting
         guard let encoded = pin.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: "ws://\(ip):\(port)/ws?pin=\(encoded)") else {
@@ -147,7 +144,6 @@ final class ConnectionService: ObservableObject {
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
         connectionStatus = .disconnected
-        targetDevice = nil
     }
 
     // MARK: — Heartbeat

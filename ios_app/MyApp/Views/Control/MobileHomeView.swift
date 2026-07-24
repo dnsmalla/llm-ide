@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 /// Host shell for a paired Mac: the navigation toolbar (Chat/Explore/Auto
 /// buttons + live status dot + More menu) and the three sheet-presented

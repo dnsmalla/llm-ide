@@ -38,7 +38,11 @@ struct MobileControlSettingsSection: View {
                 if config.mobileControlEnabled {
                     Divider().padding(.vertical, 4)
 
-                    connectionBlock
+                    if case .running = mobile.status {
+                        connectionBlock
+                    } else {
+                        notReadyBlock
+                    }
 
                     Divider().padding(.vertical, 4)
 
@@ -148,6 +152,45 @@ struct MobileControlSettingsSection: View {
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 6).fill(theme.current.body.opacity(0.6)))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(theme.current.border.opacity(0.4)))
+    }
+
+    /// Shown in place of `connectionBlock` when the native server isn't
+    /// running. Prevents the old failure mode where IP/Port/PIN/QR stayed
+    /// visible after a bind failure (e.g. port :3006 already taken by the old
+    /// computer-agent) — the user would then try to pair against a dead server
+    /// and misread the failure as "wrong PIN". The detailed reason, when there
+    /// is one, is surfaced by `lastError` below; this block just steers the
+    /// user to Start. The status pill + Start/Stop button remain visible in
+    /// every state so the user can always recover.
+    private var notReadyBlock: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Pairing info unavailable")
+                .font(Typography.section)
+                .foregroundStyle(theme.current.textMuted)
+            Text(hintForNotRunning)
+                .font(Typography.caption)
+                .foregroundStyle(theme.current.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(theme.current.body.opacity(0.6)))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(theme.current.border.opacity(0.4)))
+    }
+
+    /// One-line, state-specific hint for `notReadyBlock`. The `.running` case
+    /// is unreachable in practice (`notReadyBlock` is only rendered when not
+    /// running) but required for exhaustiveness.
+    private var hintForNotRunning: String {
+        switch mobile.status {
+        case .crashed:
+            return "The mobile server isn't running. If port \(MobileControlManager.defaultAgentPort) is already in use (e.g. the old computer-agent), stop that process, then press Start."
+        case .starting:
+            return "Starting the mobile server — pairing details will appear here once it's ready."
+        case .stopped:
+            return "Press Start to launch the mobile server and reveal the pairing IP, port, and PIN."
+        case .running:
+            return ""
+        }
     }
 
     // MARK: - Pairing QR
