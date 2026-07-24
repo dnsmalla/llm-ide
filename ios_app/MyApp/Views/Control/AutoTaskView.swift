@@ -5,18 +5,19 @@ import SharedProtocol
 /// Native iOS view for the Mac-side "Auto Tasks" surface: the master enable
 /// switch, per-task toggles + single-run buttons, run/stop controls, the live
 /// status + created/implemented/failed counts, and recent run history. Mirrors
-/// the Mac's Auto Tasks tab through the same ControlService bridge Task 4 wired.
+/// the Mac's Auto Tasks tab through the same per-feature-store bridge Task 7 wired.
 ///
 /// Styling mirrors `ExplorerChatView` / `LlmIdeControlView` (DesignSystem tokens,
 /// connection/error banners, "Done" dismiss) so all three sheets feel like one
 /// surface. The Mac is the source of truth — every toggle/run just sends a
 /// request and the reply refreshes `autoTaskState`.
 struct AutoTaskView: View {
-    @EnvironmentObject var controlService: ControlService
+    @EnvironmentObject var connection: ConnectionService
+    @EnvironmentObject var autoTaskStore: AutoTaskStore
     @Environment(\.dismiss) private var dismiss
 
-    private var isConnected: Bool { controlService.connectionStatus == .connected }
-    private var state: AutoTaskState? { controlService.autoTaskState }
+    private var isConnected: Bool { connection.connectionStatus == .connected }
+    private var state: AutoTaskState? { autoTaskStore.autoTaskState }
 
     var body: some View {
         NavigationStack {
@@ -33,7 +34,7 @@ struct AutoTaskView: View {
             .background(DesignSystem.Colors.background.ignoresSafeArea())
             .scrollContentBackground(.hidden)
             .animation(.easeInOut(duration: 0.2), value: state?.isRunning)
-            .animation(.easeInOut(duration: 0.2), value: controlService.errorMessage)
+            .animation(.easeInOut(duration: 0.2), value: connection.errorMessage)
             .navigationTitle("Auto Tasks")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -42,14 +43,14 @@ struct AutoTaskView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        controlService.autoTaskList()
-                        controlService.autoTaskHistory()
+                        autoTaskStore.autoTaskList()
+                        autoTaskStore.autoTaskHistory()
                     } label: { Image(systemName: "arrow.clockwise") }
                 }
             }
             .onAppear {
-                controlService.autoTaskList()
-                controlService.autoTaskHistory()
+                autoTaskStore.autoTaskList()
+                autoTaskStore.autoTaskHistory()
             }
         }
     }
@@ -99,7 +100,7 @@ struct AutoTaskView: View {
                 // Run Now / Stop
                 if state?.isRunning == true {
                     Button(role: .destructive) {
-                        controlService.autoTaskStop()
+                        autoTaskStore.autoTaskStop()
                         haptic(.medium)
                     } label: {
                         Label("Stop", systemImage: "stop.fill")
@@ -108,7 +109,7 @@ struct AutoTaskView: View {
                     .buttonStyle(.borderedProminent)
                 } else {
                     Button {
-                        controlService.autoTaskRun(nil)
+                        autoTaskStore.autoTaskRun(nil)
                         haptic(.medium)
                     } label: {
                         Label("Run Now", systemImage: "play.fill")
@@ -127,7 +128,7 @@ struct AutoTaskView: View {
     private var masterBinding: Binding<Bool> {
         Binding(
             get: { state?.masterEnabled ?? false },
-            set: { controlService.autoTaskToggle(task: nil, enabled: $0) }
+            set: { autoTaskStore.autoTaskToggle(task: nil, enabled: $0) }
         )
     }
 
@@ -193,12 +194,12 @@ struct AutoTaskView: View {
                 .toggleStyle(.switch)
 
                 Button {
-                    controlService.autoTaskRun(task.id)
+                    autoTaskStore.autoTaskRun(task.id)
                     haptic(.light)
                 } label: {
                     Image(systemName: "play.circle")
                         .font(.system(size: 22))
-                        .foregroundColor(controlService.connectionStatus == .connected
+                        .foregroundColor(connection.connectionStatus == .connected
                             ? DesignSystem.Colors.primary
                             : DesignSystem.Colors.textTertiary)
                 }
@@ -230,7 +231,7 @@ struct AutoTaskView: View {
     private func taskBinding(_ task: AutoTaskInfo) -> Binding<Bool> {
         Binding(
             get: { task.enabled },
-            set: { controlService.autoTaskToggle(task: task.id, enabled: $0) }
+            set: { autoTaskStore.autoTaskToggle(task: task.id, enabled: $0) }
         )
     }
 
@@ -238,12 +239,12 @@ struct AutoTaskView: View {
 
     private var historySection: some View {
         Section {
-            if controlService.autoTaskHistoryEntries.isEmpty {
+            if autoTaskStore.autoTaskHistoryEntries.isEmpty {
                 Text("No runs yet")
                     .font(.system(size: DesignSystem.Typography.footnote))
                     .foregroundColor(DesignSystem.Colors.textTertiary)
             } else {
-                ForEach(Array(controlService.autoTaskHistoryEntries.enumerated()), id: \.offset) { _, entry in
+                ForEach(Array(autoTaskStore.autoTaskHistoryEntries.enumerated()), id: \.offset) { _, entry in
                     historyRow(entry)
                 }
             }
@@ -252,7 +253,7 @@ struct AutoTaskView: View {
                 Text("History")
                 Spacer()
                 Button {
-                    controlService.autoTaskHistory()
+                    autoTaskStore.autoTaskHistory()
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12))

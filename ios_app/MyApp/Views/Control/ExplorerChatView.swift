@@ -4,38 +4,39 @@ import SharedProtocol
 
 /// Native iOS view for the Mac-side "explorer chat" sessions: browse/create/load
 /// persistent sessions, read their transcript, and send new turns. Mirrors the
-/// Mac's explorer chat through the same ControlService bridge Task 4 wired.
+/// Mac's explorer chat through the same per-feature-store bridge Task 7 wired.
 ///
 /// Styling mirrors `LlmIdeControlView` (DesignSystem colors/typography, bubble
 /// layout, input bar) so the two chats feel like one surface. The session list
 /// is a sheet so the transcript stays the focus.
 struct ExplorerChatView: View {
-    @EnvironmentObject var controlService: ControlService
+    @EnvironmentObject var connection: ConnectionService
+    @EnvironmentObject var explorerStore: ExplorerChatStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var inputText: String = ""
     @State private var showSessionPicker: Bool = false
     @FocusState private var isInputFocused: Bool
 
-    private var isConnected: Bool { controlService.connectionStatus == .connected }
-    private var hasSession: Bool { controlService.exploreCurrent != nil }
+    private var isConnected: Bool { connection.connectionStatus == .connected }
+    private var hasSession: Bool { explorerStore.exploreCurrent != nil }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 if !isConnected {
-                    StatusBanner(.connection(isConnecting: controlService.connectionStatus == .connecting))
+                    StatusBanner(.connection(isConnecting: connection.connectionStatus == .connecting))
                 }
-                if let err = controlService.errorMessage {
-                    StatusBanner(.error(message: err) { controlService.errorMessage = nil })
+                if let err = connection.errorMessage {
+                    StatusBanner(.error(message: err) { connection.errorMessage = nil })
                 }
                 chatTranscript
                 inputBar
             }
             .background(DesignSystem.Colors.background.ignoresSafeArea())
             .animation(.easeInOut(duration: 0.2), value: isConnected)
-            .animation(.easeInOut(duration: 0.2), value: controlService.errorMessage)
-            .navigationTitle(controlService.exploreCurrent?.title ?? "Explorer")
+            .animation(.easeInOut(duration: 0.2), value: connection.errorMessage)
+            .navigationTitle(explorerStore.exploreCurrent?.title ?? "Explorer")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -44,16 +45,17 @@ struct ExplorerChatView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showSessionPicker = true
-                        controlService.exploreListSessions()
+                        explorerStore.exploreListSessions()
                     } label: { Image(systemName: "sidebar.left") }
                 }
             }
         }
         .sheet(isPresented: $showSessionPicker) {
             sessionPicker
-                .environmentObject(controlService)
+                .environmentObject(connection)
+                .environmentObject(explorerStore)
         }
-        .onAppear { controlService.exploreListSessions() }
+        .onAppear { explorerStore.exploreListSessions() }
     }
 
     // MARK: — Session picker (sheet)
@@ -63,20 +65,20 @@ struct ExplorerChatView: View {
             List {
                 Section {
                     Button {
-                        controlService.exploreNewSession()
+                        explorerStore.exploreNewSession()
                         showSessionPicker = false
                     } label: {
                         Label("New chat", systemImage: "plus.circle.fill")
                             .foregroundColor(DesignSystem.Colors.primary)
                     }
                 }
-                Section(controlService.exploreSessions.isEmpty ? "No sessions yet" : "Recent") {
-                    ForEach(controlService.exploreSessions, id: \.id) { session in
+                Section(explorerStore.exploreSessions.isEmpty ? "No sessions yet" : "Recent") {
+                    ForEach(explorerStore.exploreSessions, id: \.id) { session in
                         sessionRow(session)
                     }
                     .onDelete { indexSet in
                         for idx in indexSet {
-                            controlService.exploreDeleteSession(controlService.exploreSessions[idx].id)
+                            explorerStore.exploreDeleteSession(explorerStore.exploreSessions[idx].id)
                         }
                     }
                 }
@@ -88,14 +90,14 @@ struct ExplorerChatView: View {
                     Button("Done") { showSessionPicker = false }
                 }
             }
-            .onAppear { controlService.exploreListSessions() }
+            .onAppear { explorerStore.exploreListSessions() }
         }
     }
 
     @ViewBuilder
     private func sessionRow(_ session: ExploreSessionSummary) -> some View {
         Button {
-            controlService.exploreLoadSession(session.id)
+            explorerStore.exploreLoadSession(session.id)
             showSessionPicker = false
         } label: {
             HStack(spacing: DesignSystem.Spacing.sm) {
@@ -112,7 +114,7 @@ struct ExplorerChatView: View {
                         .foregroundColor(DesignSystem.Colors.textTertiary)
                 }
                 Spacer(minLength: 0)
-                if controlService.exploreCurrent?.id == session.id {
+                if explorerStore.exploreCurrent?.id == session.id {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(DesignSystem.Colors.primary)
                 }
@@ -128,7 +130,7 @@ struct ExplorerChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: DesignSystem.Spacing.sm) {
-                    if let current = controlService.exploreCurrent {
+                    if let current = explorerStore.exploreCurrent {
                         if current.history.isEmpty {
                             EmptyChatState(
                                 icon: "bubble.left.and.text.bubble.right",
@@ -145,8 +147,8 @@ struct ExplorerChatView: View {
                 }
                 .padding(DesignSystem.Spacing.md)
             }
-            .onChange(of: controlService.exploreCurrent?.history.last?.text) { _ in
-                if let last = controlService.exploreCurrent?.history.last {
+            .onChange(of: explorerStore.exploreCurrent?.history.last?.text) { _ in
+                if let last = explorerStore.exploreCurrent?.history.last {
                     withAnimation(.easeOut(duration: 0.15)) {
                         proxy.scrollTo(last.id, anchor: .bottom)
                     }
@@ -171,7 +173,7 @@ struct ExplorerChatView: View {
                 .foregroundColor(DesignSystem.Colors.textTertiary)
             Button {
                 showSessionPicker = true
-                controlService.exploreListSessions()
+                explorerStore.exploreListSessions()
             } label: {
                 Label("Browse sessions", systemImage: "list.bullet")
                     .font(.system(size: DesignSystem.Typography.body, weight: .medium))
@@ -206,15 +208,15 @@ struct ExplorerChatView: View {
         !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && isConnected
             && hasSession
-            && !controlService.llmStreaming   // one question at a time (shared flag)
+            && !explorerStore.isStreaming   // one question at a time (per-surface flag)
     }
 
     // MARK: — Actions
 
     private func send() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let id = controlService.exploreCurrent?.id else { return }
-        controlService.sendExploreChat(text, sessionId: id)
+        guard !text.isEmpty, let id = explorerStore.exploreCurrent?.id else { return }
+        explorerStore.sendExploreChat(text, sessionId: id)
         inputText = ""
         isInputFocused = false
         haptic(.light)

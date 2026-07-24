@@ -4,7 +4,7 @@ import SwiftUI
 /// transcripts (`LlmIdeControlView.connectionBanner` / `errorBanner(_:)` and
 /// the mirrors in `ExplorerChatView`). One component, two cases — the error
 /// case carries an `onDismiss` so the caller controls how the message clears
-/// (both views set `controlService.errorMessage = nil`).
+/// (both views set `connection.errorMessage = nil`).
 struct StatusBanner: View {
     enum Content {
         /// Gray "wifi.slash" strip. `isConnecting` toggles the copy.

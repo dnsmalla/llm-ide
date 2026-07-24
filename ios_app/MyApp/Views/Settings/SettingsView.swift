@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var connectionStore: ConnectionStore
-    @EnvironmentObject var controlService: ControlService
+    @EnvironmentObject var connection: ConnectionService
 
     var body: some View {
         ScrollView {
@@ -50,8 +50,8 @@ struct SettingsView: View {
                             Divider().padding(.horizontal, DesignSystem.Spacing.md)
 
                             Button(role: .destructive) {
-                                controlService.stopViewing()
-                                controlService.disconnect()
+                                connection.stopViewing()
+                                connection.disconnect()
                                 connectionStore.clear()
                             } label: {
                                 HStack {
@@ -144,7 +144,7 @@ struct SettingsView: View {
     }
 
     private var statusColor: Color {
-        switch controlService.connectionStatus {
+        switch connection.connectionStatus {
         case .connected:    return DesignSystem.Colors.success
         case .connecting:   return DesignSystem.Colors.primary
         case .disconnected: return DesignSystem.Colors.textTertiary
@@ -152,7 +152,7 @@ struct SettingsView: View {
     }
 
     private var statusLabel: String {
-        switch controlService.connectionStatus {
+        switch connection.connectionStatus {
         case .connected:    return "Connected"
         case .connecting:   return "Connecting…"
         case .disconnected: return "Disconnected"

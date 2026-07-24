@@ -15,7 +15,10 @@
 		D7E8F9A0B1C2D304E5F6A701 /* AutoTaskView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7E8F9A0B1C2D304E5F6A702 /* AutoTaskView.swift */; };
 		86D51A8F64D3F1F7AF72109E /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6619B48C5ED4564AD23384A1 /* DesignSystem.swift */; };
 		A351D57F1B94C3E6FBB89A9B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95A7138E88C6309A4CC79A8F /* SettingsView.swift */; };
-		AA3AB884E79B016FD6484990 /* ControlService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 875018D48E30D19CE765EEF8 /* ControlService.swift */; };
+		A7B80010CC00000000000001 /* ConnectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B80010CC00000000000002 /* ConnectionService.swift */; };
+		A7B80010CC00000000000003 /* LlmIdeChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B80010CC00000000000004 /* LlmIdeChatStore.swift */; };
+		A7B80010CC00000000000005 /* ExplorerChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B80010CC00000000000006 /* ExplorerChatStore.swift */; };
+		A7B80010CC00000000000007 /* AutoTaskStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B80010CC00000000000008 /* AutoTaskStore.swift */; };
 		AC1BAD40D67DE71FEE09690F /* HelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A36F27BA352AF7FF9AA51012 /* HelpView.swift */; };
 		B6CF935AF507506E25C1EA4A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 995B956852311CF170F73894 /* ContentView.swift */; };
 		D3D6F9A8DB516321EA005C39 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA5ED588DFDB7A34E47E6C36 /* Assets.xcassets */; };
@@ -42,7 +45,10 @@
 		E5F6A7B8C9D0E1F2A3B4C502 /* ExplorerChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorerChatView.swift; sourceTree = "<group>"; };
 		D7E8F9A0B1C2D304E5F6A702 /* AutoTaskView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTaskView.swift; sourceTree = "<group>"; };
 		6619B48C5ED4564AD23384A1 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
-		875018D48E30D19CE765EEF8 /* ControlService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlService.swift; sourceTree = "<group>"; };
+		A7B80010CC00000000000002 /* ConnectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionService.swift; sourceTree = "<group>"; };
+		A7B80010CC00000000000004 /* LlmIdeChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlmIdeChatStore.swift; sourceTree = "<group>"; };
+		A7B80010CC00000000000006 /* ExplorerChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorerChatStore.swift; sourceTree = "<group>"; };
+		A7B80010CC00000000000008 /* AutoTaskStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTaskStore.swift; sourceTree = "<group>"; };
 		95A7138E88C6309A4CC79A8F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		995B956852311CF170F73894 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A36F27BA352AF7FF9AA51012 /* HelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpView.swift; sourceTree = "<group>"; };
@@ -161,7 +167,10 @@
 			children = (
 				A1B2C3D4E5F607890A1B2C02 /* ConnectionStore.swift */,
 				C9D0E1F2A3B405060C9D0E02 /* SpeechRecognizer.swift */,
-				875018D48E30D19CE765EEF8 /* ControlService.swift */,
+				A7B80010CC00000000000002 /* ConnectionService.swift */,
+				A7B80010CC00000000000004 /* LlmIdeChatStore.swift */,
+				A7B80010CC00000000000006 /* ExplorerChatStore.swift */,
+				A7B80010CC00000000000008 /* AutoTaskStore.swift */,
 				F1E2D3C4B5A607890F1E2D02 /* DeviceDiscovery.swift */,
 			);
 			path = Services;
@@ -266,7 +275,10 @@
 				B6CF935AF507506E25C1EA4A /* ContentView.swift in Sources */,
 				A1B2C3D4E5F607890A1B2C01 /* ConnectionStore.swift in Sources */,
 				C9D0E1F2A3B405060C9D0E01 /* SpeechRecognizer.swift in Sources */,
-				AA3AB884E79B016FD6484990 /* ControlService.swift in Sources */,
+				A7B80010CC00000000000001 /* ConnectionService.swift in Sources */,
+				A7B80010CC00000000000003 /* LlmIdeChatStore.swift in Sources */,
+				A7B80010CC00000000000005 /* ExplorerChatStore.swift in Sources */,
+				A7B80010CC00000000000007 /* AutoTaskStore.swift in Sources */,
 				F1E2D3C4B5A607890F1E2D01 /* DeviceDiscovery.swift in Sources */,
 				86D51A8F64D3F1F7AF72109E /* DesignSystem.swift in Sources */,
 				AC1BAD40D67DE71FEE09690F /* HelpView.swift in Sources */,

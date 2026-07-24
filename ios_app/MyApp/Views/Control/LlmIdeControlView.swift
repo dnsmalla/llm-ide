@@ -10,7 +10,8 @@ import SharedProtocol
 /// reply streams back here. App/tab/menu controls live on the remote-desktop
 /// view instead, so you watch the Mac react on the live screen.
 struct LlmIdeControlView: View {
-    @EnvironmentObject var controlService: ControlService
+    @EnvironmentObject var connection: ConnectionService
+    @EnvironmentObject var llmIdeStore: LlmIdeChatStore
     @Environment(\.dismiss) private var dismiss
 
     @StateObject private var speech = SpeechRecognizer()
@@ -27,23 +28,23 @@ struct LlmIdeControlView: View {
     /// well under after resize/base64.
     private let maxImages = 4
 
-    private var isConnected: Bool { controlService.connectionStatus == .connected }
+    private var isConnected: Bool { connection.connectionStatus == .connected }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 if !isConnected {
-                    StatusBanner(.connection(isConnecting: controlService.connectionStatus == .connecting))
+                    StatusBanner(.connection(isConnecting: connection.connectionStatus == .connecting))
                 }
-                if let err = controlService.errorMessage {
-                    StatusBanner(.error(message: err) { controlService.errorMessage = nil })
+                if let err = connection.errorMessage {
+                    StatusBanner(.error(message: err) { connection.errorMessage = nil })
                 }
                 chatTranscript
                 inputBar
             }
             .background(DesignSystem.Colors.background.ignoresSafeArea())
             .animation(.easeInOut(duration: 0.2), value: isConnected)
-            .animation(.easeInOut(duration: 0.2), value: controlService.errorMessage)
+            .animation(.easeInOut(duration: 0.2), value: connection.errorMessage)
             .navigationTitle("Chat with LLM IDE")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -52,17 +53,17 @@ struct LlmIdeControlView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        controlService.clearLlmIdeChat()
+                        llmIdeStore.clearLlmIdeChat()
                         haptic(.light)
                     } label: { Image(systemName: "trash") }
-                    .disabled(controlService.llmIdeMessages.isEmpty)
+                    .disabled(llmIdeStore.llmIdeMessages.isEmpty)
                 }
             }
             .onChange(of: speech.transcript) { newValue in
                 if speech.isListening { inputText = newValue }
             }
             .onChange(of: speech.errorMessage) { msg in
-                if let msg { controlService.errorMessage = msg }
+                if let msg { connection.errorMessage = msg }
             }
             .photosPicker(isPresented: $showPhotoPicker, selection: $pickedItems,
                           maxSelectionCount: maxImages, matching: .images)
@@ -81,7 +82,7 @@ struct LlmIdeControlView: View {
                             guard let ui = UIImage(data: data), let encoded = encodeForUpload(ui) else { continue }
                             appendImage((data: encoded, mediaType: "image/jpeg")); added += 1
                         }
-                        if added == 0 { controlService.errorMessage = "Couldn't read that image." }
+                        if added == 0 { connection.errorMessage = "Couldn't read that image." }
                         pickedItems = []
                     }
                 }
@@ -101,10 +102,10 @@ struct LlmIdeControlView: View {
                     if let extracted = FileTextExtractor.extract(from: url) {
                         pendingFiles.append(ChatFileText(name: extracted.name, text: extracted.text))
                     } else {
-                        controlService.errorMessage = "Couldn't read text from that file."
+                        connection.errorMessage = "Couldn't read text from that file."
                     }
                 case .failure(let err):
-                    controlService.errorMessage = err.localizedDescription
+                    connection.errorMessage = err.localizedDescription
                 }
             }
             .onDisappear { speech.cancel() }
@@ -117,21 +118,21 @@ struct LlmIdeControlView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: DesignSystem.Spacing.sm) {
-                    if controlService.llmIdeMessages.isEmpty {
+                    if llmIdeStore.llmIdeMessages.isEmpty {
                         EmptyChatState(
                             icon: "bubble.left.and.text.bubble.right",
                             title: "Ask llm-ide anything",
                             subtitle: "Type or tap the mic to dictate."
                         )
                     }
-                    ForEach(controlService.llmIdeMessages) { msg in
+                    ForEach(llmIdeStore.llmIdeMessages) { msg in
                         ChatBubble(message: msg).id(msg.id)
                     }
                 }
                 .padding(DesignSystem.Spacing.md)
             }
-            .onChange(of: controlService.llmIdeMessages.last?.text) { _ in
-                if let last = controlService.llmIdeMessages.last {
+            .onChange(of: llmIdeStore.llmIdeMessages.last?.text) { _ in
+                if let last = llmIdeStore.llmIdeMessages.last {
                     withAnimation(.easeOut(duration: 0.15)) {
                         proxy.scrollTo(last.id, anchor: .bottom)
                     }
@@ -253,7 +254,7 @@ struct LlmIdeControlView: View {
             || !pendingImages.isEmpty
             || !pendingFiles.isEmpty)
             && isConnected
-            && !controlService.llmStreaming   // one question at a time
+            && !llmIdeStore.isStreaming   // one question at a time
     }
 
     // MARK: — Actions
@@ -264,7 +265,7 @@ struct LlmIdeControlView: View {
         let files = pendingFiles
         guard !text.isEmpty || !images.isEmpty || !files.isEmpty else { return }
         if speech.isListening { speech.finish() }
-        controlService.sendLlmideChat(text, images: images, files: files)
+        llmIdeStore.sendLlmideChat(text, images: images, files: files)
         inputText = ""
         pendingImages = []
         pendingFiles = []
@@ -274,7 +275,7 @@ struct LlmIdeControlView: View {
 
     private func appendImage(_ img: (data: Data, mediaType: String)) {
         if pendingImages.count >= maxImages {
-            controlService.errorMessage = "Up to \(maxImages) images at a time."
+            connection.errorMessage = "Up to \(maxImages) images at a time."
             return
         }
         pendingImages.append(img)

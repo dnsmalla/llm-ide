@@ -13,7 +13,10 @@ import UIKit
 /// live surfaces; everything they need lives behind those sheets.
 struct MobileHomeView: View {
     let deviceName: String
-    @EnvironmentObject var controlService: ControlService
+    @EnvironmentObject var connection: ConnectionService
+    @EnvironmentObject var llmIdeStore: LlmIdeChatStore
+    @EnvironmentObject var explorerStore: ExplorerChatStore
+    @EnvironmentObject var autoTaskStore: AutoTaskStore
     @EnvironmentObject var connectionStore: ConnectionStore
 
     @State private var showSettings: Bool = false
@@ -26,7 +29,7 @@ struct MobileHomeView: View {
             Color.black.ignoresSafeArea()
 
             // Error banner — always visible on top when the agent reports a problem.
-            if let error = controlService.errorMessage {
+            if let error = connection.errorMessage {
                 VStack {
                     errorBanner(error)
                     Spacer()
@@ -35,7 +38,7 @@ struct MobileHomeView: View {
 
             // Action toast — confirms one-shot Mac actions (e.g. auto-task acks)
             // while remaining non-blocking.
-            if let status = controlService.actionStatus {
+            if let status = autoTaskStore.actionStatus {
                 VStack {
                     Spacer()
                     actionToast(status).padding(.bottom, 90)
@@ -52,17 +55,20 @@ struct MobileHomeView: View {
         .navigationDestination(isPresented: $showSettings) { SettingsView() }
         .sheet(isPresented: $showLlmIde) {
             LlmIdeControlView()
-                .environmentObject(controlService)
+                .environmentObject(connection)
+                .environmentObject(llmIdeStore)
         }
         .sheet(isPresented: $showExplore) {
             ExplorerChatView()
-                .environmentObject(controlService)
+                .environmentObject(connection)
+                .environmentObject(explorerStore)
         }
         .sheet(isPresented: $showAutoTask) {
             AutoTaskView()
-                .environmentObject(controlService)
+                .environmentObject(connection)
+                .environmentObject(autoTaskStore)
         }
-        .animation(.easeInOut(duration: 0.2), value: controlService.actionStatus)
+        .animation(.easeInOut(duration: 0.2), value: autoTaskStore.actionStatus)
     }
 
     // MARK: — Error banner
@@ -78,7 +84,7 @@ struct MobileHomeView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
             Button {
-                controlService.errorMessage = nil
+                connection.errorMessage = nil
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .semibold))
@@ -147,8 +153,8 @@ struct MobileHomeView: View {
                     }
                     Divider()
                     Button("Disconnect", role: .destructive) {
-                        controlService.stopViewing()
-                        controlService.disconnect()
+                        connection.stopViewing()
+                        connection.disconnect()
                         connectionStore.clear()
                     }
                 } label: {
@@ -181,7 +187,7 @@ struct MobileHomeView: View {
     // MARK: — Helpers
 
     private var statusColor: Color {
-        switch controlService.connectionStatus {
+        switch connection.connectionStatus {
         case .connected:    return .green
         case .connecting:   return .orange
         case .disconnected: return .red
@@ -189,7 +195,7 @@ struct MobileHomeView: View {
     }
 
     private var statusLabel: String {
-        switch controlService.connectionStatus {
+        switch connection.connectionStatus {
         case .connected:    return "Live"
         case .connecting:   return "Connecting"
         case .disconnected: return "Offline"

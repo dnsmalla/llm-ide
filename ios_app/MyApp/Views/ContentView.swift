@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject var controlService: ControlService
+    @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var connectionStore: ConnectionStore
 
     var body: some View {
@@ -13,8 +13,8 @@ struct ContentView: View {
                 MobileHomeView(deviceName: connectionStore.deviceIP)
                     .onAppear {
                         // Re-establish connection if not already connected.
-                        if controlService.connectionStatus == .disconnected {
-                            controlService.connectDirect(
+                        if connection.connectionStatus == .disconnected {
+                            connection.connectDirect(
                                 ip: connectionStore.deviceIP,
                                 port: connectionStore.devicePort,
                                 pin: connectionStore.devicePIN

@@ -3,7 +3,7 @@ import SwiftUI
 /// Entry screen — discovers Macs automatically; falls back to manual IP + PIN entry.
 struct ConnectView: View {
     @EnvironmentObject var connectionStore: ConnectionStore
-    @EnvironmentObject var controlService: ControlService
+    @EnvironmentObject var connection: ConnectionService
     @StateObject private var discovery = DeviceDiscovery()
 
     @State private var ip: String  = ""
@@ -13,7 +13,7 @@ struct ConnectView: View {
     @State private var errorMessage: String?
     @State private var connectAttempted: Bool = false
 
-    private var isConnecting: Bool { controlService.connectionStatus == .connecting }
+    private var isConnecting: Bool { connection.connectionStatus == .connecting }
 
     var body: some View {
         ScrollView {
@@ -49,10 +49,10 @@ struct ConnectView: View {
             discovery.start()
         }
         .onDisappear { discovery.stop() }
-        .onChange(of: controlService.connectionStatus) { status in
+        .onChange(of: connection.connectionStatus) { status in
             switch status {
             case .disconnected where connectAttempted:
-                errorMessage = controlService.errorMessage
+                errorMessage = connection.errorMessage
                     ?? "Could not reach the Mac. Check it's on the same network (or Tailscale) and the agent is running."
                 connectAttempted = false
             case .connected:
@@ -106,7 +106,7 @@ struct ConnectView: View {
                 errorMessage = nil
                 connectAttempted = true
                 connectionStore.save(ip: info.ip, port: info.port, pin: info.pin)
-                controlService.connectDirect(ip: info.ip, port: info.port, pin: info.pin)
+                connection.connectDirect(ip: info.ip, port: info.port, pin: info.pin)
             }
         }
     }
@@ -137,7 +137,7 @@ struct ConnectView: View {
                         connectAttempted = true
                         let portToUse = connectionStore.devicePort > 0 ? connectionStore.devicePort : 3006
                         connectionStore.save(ip: device.host, port: portToUse, pin: resolvedPIN)
-                        controlService.connectDirect(ip: device.host, port: portToUse, pin: resolvedPIN)
+                        connection.connectDirect(ip: device.host, port: portToUse, pin: resolvedPIN)
                     }
                 )
             }
@@ -171,7 +171,7 @@ struct ConnectView: View {
                 errorMessage = nil
                 connectAttempted = true
                 connectionStore.save(ip: ip, port: 3006, pin: pin)
-                controlService.connectDirect(ip: ip, port: 3006, pin: pin)
+                connection.connectDirect(ip: ip, port: 3006, pin: pin)
             } label: {
                 HStack(spacing: DesignSystem.Spacing.sm) {
                     if isConnecting { ProgressView().tint(.white).scaleEffect(0.85) }
