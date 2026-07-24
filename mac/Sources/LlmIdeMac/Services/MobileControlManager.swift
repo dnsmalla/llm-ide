@@ -234,6 +234,45 @@ final class MobileControlManager {
                 }
                 Task { await server?.send(AutoTaskAck(ok: true, message: nil)) }
             }
+        case "auto_task_run":
+            // Trigger a global run (task == nil) or a single per-task manual
+            // run. `runNow()`/`runSingle(_:)` are @MainActor-sync — each spins
+            // its own internal `Task` — so no await is needed; we're already
+            // on the main actor here (handleInbound is main-isolated).
+            guard let ac = autoCode else {
+                append(.stderr, "auto_task_run: Auto-tasks not configured")
+                Task { await server?.send(CommandError(commandId: "auto_task_run",
+                                                       message: "Auto-tasks not configured")) }
+                return
+            }
+            if let m = try? JSONDecoder().decode(AutoTaskRun.self, from: data) {
+                if let raw = m.task, let t = AutoTask(rawValue: raw) {
+                    ac.runSingle(t)
+                    append(.info, "Auto-task run single: \(t.rawValue)")
+                } else {
+                    ac.runNow()
+                    append(.info, "Auto-task run now")
+                }
+                Task { await server?.send(AutoTaskAck(ok: true, message: nil)) }
+            }
+        case "auto_task_stop":
+            // `cancel()` is @MainActor-sync: cancels the in-flight `runTask`
+            // and terminates the active subprocess. No-op when idle; nil-safe
+            // via `?` (no wiring → ack still replies, phone doesn't hang).
+            autoCode?.cancel()
+            append(.info, "Auto-task stop")
+            Task { await server?.send(AutoTaskAck(ok: true, message: nil)) }
+        case "auto_task_history":
+            // Snapshot the processed-actions registry. `allEntries` is
+            // @Published on AutoCodeUpdateService (a cached copy of
+            // Registry.allEntries()), so the read is cheap and main-isolated.
+            let entries = (autoCode?.allEntries ?? []).map {
+                AutoTaskHistoryEntry(actionText: $0.actionText,
+                                     status: $0.status.rawValue,
+                                     lastUpdated: $0.lastUpdated.timeIntervalSince1970)
+            }
+            append(.info, "Auto-task history: \(entries.count) entries")
+            Task { await server?.send(AutoTaskHistoryReply(entries: entries)) }
         default:
             append(.info, "Unhandled inbound type: \(env.type)")
         }
