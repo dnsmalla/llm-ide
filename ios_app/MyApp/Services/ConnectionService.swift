@@ -280,12 +280,14 @@ final class ConnectionService: ObservableObject {
                 explorerStore?.handleOutput(commandId: commandId, payload: payload)
             }
         case "error":
-            // errorMessage is a shared, shell-level surface (stays here). The
-            // streaming-flag reset + empty-placeholder cleanup is delegated to
-            // each chat store, mirroring the pre-refactor blanket reset.
-            if let payload = json["payload"] as? [String: Any],
-               let msg = payload["message"] as? String {
-                errorMessage = msg
+            // CommandError serializes FLAT ({type,commandId,message}) — there is
+            // no nested `payload` — so decode the whole frame and read `.message`
+            // directly. errorMessage is a shared, shell-level surface (stays
+            // here); the streaming-flag reset + empty-placeholder cleanup is
+            // delegated to each chat store, mirroring the pre-refactor blanket
+            // reset. Resetting an already-idle surface is a harmless no-op.
+            if let err = try? JSONDecoder().decode(CommandError.self, from: data) {
+                errorMessage = err.message
                 llmIdeStore?.handleChatError()
                 explorerStore?.handleChatError()
             }
