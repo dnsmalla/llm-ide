@@ -137,4 +137,78 @@ final class ConnectionMessagesTests: XCTestCase {
         XCTAssertEqual(decoded.history[1].role, "assistant")
         XCTAssertEqual(decoded.history[1].content, "I'll analyze it")
     }
+
+    // MARK: - Auto-task messages (Phase C, Task 1)
+
+    func testAutoTaskStateRoundTrips() throws {
+        let tasks = [
+            AutoTaskInfo(id: "github_sync", label: "GitHub Sync", enabled: true, lastError: nil),
+            AutoTaskInfo(id: "gitlab_sync", label: "GitLab Sync", enabled: false, lastError: "Auth failed")
+        ]
+        let original = AutoTaskState(
+            masterEnabled: true,
+            isRunning: true,
+            currentTask: "github_sync",
+            statusMessage: "Syncing commits...",
+            lastRunDate: 1_700_000_000,
+            createdCount: 10,
+            implementedCount: 8,
+            failedCount: 1,
+            tasks: tasks
+        )
+        let decoded = try roundTrip(original)
+        XCTAssertEqual(decoded, original)
+        XCTAssertEqual(decoded.type, "auto_task_state")
+        XCTAssertEqual(decoded.masterEnabled, true)
+        XCTAssertEqual(decoded.isRunning, true)
+        XCTAssertEqual(decoded.currentTask, "github_sync")
+        XCTAssertEqual(decoded.statusMessage, "Syncing commits...")
+        XCTAssertEqual(decoded.lastRunDate, 1_700_000_000)
+        XCTAssertEqual(decoded.createdCount, 10)
+        XCTAssertEqual(decoded.implementedCount, 8)
+        XCTAssertEqual(decoded.failedCount, 1)
+        XCTAssertEqual(decoded.tasks.count, 2)
+        XCTAssertEqual(decoded.tasks[0].id, "github_sync")
+        XCTAssertEqual(decoded.tasks[0].label, "GitHub Sync")
+        XCTAssertEqual(decoded.tasks[0].enabled, true)
+        XCTAssertNil(decoded.tasks[0].lastError)
+        XCTAssertEqual(decoded.tasks[1].id, "gitlab_sync")
+        XCTAssertEqual(decoded.tasks[1].label, "GitLab Sync")
+        XCTAssertEqual(decoded.tasks[1].enabled, false)
+        XCTAssertEqual(decoded.tasks[1].lastError, "Auth failed")
+    }
+
+    func testAutoTaskRunRoundTrips() throws {
+        let original = AutoTaskRun(task: "github_sync")
+        let decoded = try roundTrip(original)
+        XCTAssertEqual(decoded, original)
+        XCTAssertEqual(decoded.type, "auto_task_run")
+        XCTAssertEqual(decoded.task, "github_sync")
+    }
+
+    func testAutoTaskRunNilTaskRoundTrips() throws {
+        let original = AutoTaskRun(task: nil)
+        let decoded = try roundTrip(original)
+        XCTAssertEqual(decoded, original)
+        XCTAssertEqual(decoded.type, "auto_task_run")
+        XCTAssertNil(decoded.task)
+    }
+
+    func testAutoTaskHistoryReplyRoundTrips() throws {
+        let entries = [
+            AutoTaskHistoryEntry(actionText: "Created PR #123", status: "completed", lastUpdated: 1_700_000_000),
+            AutoTaskHistoryEntry(actionText: "Synced commits", status: "failed", lastUpdated: 1_700_000_100)
+        ]
+        let original = AutoTaskHistoryReply(entries: entries)
+        let decoded = try roundTrip(original)
+        XCTAssertEqual(decoded, original)
+        XCTAssertEqual(decoded.type, "auto_task_history_reply")
+        XCTAssertEqual(decoded.entries.count, 2)
+        XCTAssertEqual(decoded.entries[0].actionText, "Created PR #123")
+        XCTAssertEqual(decoded.entries[0].status, "completed")
+        XCTAssertEqual(decoded.entries[0].lastUpdated, 1_700_000_000)
+        XCTAssertEqual(decoded.entries[1].actionText, "Synced commits")
+        XCTAssertEqual(decoded.entries[1].status, "failed")
+        XCTAssertEqual(decoded.entries[1].lastUpdated, 1_700_000_100)
+    }
 }
