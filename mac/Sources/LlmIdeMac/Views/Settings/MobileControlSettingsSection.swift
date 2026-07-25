@@ -525,12 +525,6 @@ struct MobileControlSettingsSection: View {
         .padding(.horizontal, 4)
         .padding(.vertical, 2)
     }
-
-    // MARK: - Path helpers
-    // Mobile Control no longer needs an agent-folder picker — the native
-    // WebSocket server + Bonjour advertiser run in-process. The path-related
-    // helpers (agentDraft / savePath / pickAgentDir / detectAgentPath) were
-    // removed when the external computer-agent launch model was dropped.
 }
 
 // MARK: - QR helper

@@ -356,6 +356,18 @@ final class MobileControlManager {
             await server?.send(CommandError(commandId: chat.commandId, message: "Bad session id"))
             return
         }
+        // Upfront existence check: a stale sessionId (the session was deleted
+        // on the Mac while the phone still holds an old id) would otherwise
+        // stream a reply that the `if var session` block below silently drops
+        // instead of persisting — Mac↔phone drift with no error. Surface it as
+        // a CommandError so the phone can reload its explorer session list.
+        // The re-check below stays as a race fallback (session deleted
+        // mid-request, between this guard and the post-stream persist).
+        guard ChatSessionStore.load(id: sid) != nil else {
+            append(.info, "explore_chat: session \(chat.sessionId.prefix(8)) not found")
+            await server?.send(CommandError(commandId: chat.commandId, message: "Session not found on Mac — it may have been deleted. Reload your explorer sessions."))
+            return
+        }
         let history = chat.history.map { LlmIdeAPIClient.CodeAssistTurn(from: $0) }
         do {
             let resp = try await api.codeAssistStream(
@@ -366,7 +378,11 @@ final class MobileControlManager {
                 skills: [],
                 onProgress: { [weak self] label in self?.append(.info, "code-assist: \(label)") }
             )
-            // Persist user + assistant turns into the Mac session (keeps phone & Mac in sync).
+            // Persist user + assistant turns into the Mac session (keeps phone
+            // & Mac in sync). The upfront guard above already rejected stale
+            // sessions; this re-load is a race fallback for the window between
+            // that guard and now (session deleted mid-stream) — if it hits,
+            // the reply still streams but the turn is dropped on purpose.
             if var session = ChatSessionStore.load(id: sid) {
                 session.history.append(LlmIdeAPIClient.CodeAssistTurn(role: .user, content: chat.text))
                 session.history.append(LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: resp.reply))
