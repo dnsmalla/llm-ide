@@ -112,9 +112,9 @@ if [ "$ext_changed" -eq 1 ]; then
 fi
 
 if [ "$ios_changed" -eq 1 ]; then
-    echo "pre-push: ios_app/ changed — running SharedProtocol tests…"
-    if ! (cd "$(git rev-parse --show-toplevel)/ios_app/SharedProtocol" && swift test); then
-        echo "pre-push: SharedProtocol test gate FAILED — push aborted." >&2
+    echo "pre-push: ios_app/ changed — running SharedProtocol gate (make test-shared-protocol)…"
+    if ! make test-shared-protocol; then
+        echo "pre-push: SharedProtocol gate FAILED — push aborted." >&2
         echo "          Fix the failure, or bypass with: git push --no-verify" >&2
         exit 1
     fi

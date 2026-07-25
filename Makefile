@@ -19,7 +19,7 @@ clean:
 
 # --- mac app -----------------------------------------------------------------
 
-.PHONY: test-mac regression
+.PHONY: test-mac regression test-shared-protocol
 
 # Pin the Xcode toolchain for every Swift build/test below. git invokes the
 # pre-push hook with an environment that can resolve the CommandLineTools swift
@@ -39,8 +39,24 @@ export SDKROOT := $(shell DEVELOPER_DIR='$(shell env -u DEVELOPER_DIR xcode-sele
 
 # Full Swift test suite for the desktop app (ChatSessionStore, etc.).
 # Requires full Xcode — Command Line Tools alone lack the XCTest module.
+HAS_XCTEST := $(shell test -d "$(DEVELOPER_DIR)/Platforms/MacOSX.platform/Developer/Library/Frameworks/XCTest.framework" && echo 1)
+
 test-mac:
-	cd mac && swift build --product LlmIdeMac && swift test
+	cd mac && swift build --product LlmIdeMac
+ifeq ($(HAS_XCTEST),1)
+	cd mac && swift test
+else
+	@echo "⚠ Skipping mac swift test — full Xcode required (XCTest not in $$(xcode-select -p))"
+endif
+
+# SharedProtocol wire-format tests (used by mac + ios_app).
+test-shared-protocol:
+	cd ios_app/SharedProtocol && swift build
+ifeq ($(HAS_XCTEST),1)
+	cd ios_app/SharedProtocol && swift test
+else
+	@echo "⚠ Skipping SharedProtocol swift test — full Xcode required (XCTest not in $$(xcode-select -p))"
+endif
 
 # Pre-upgrade / pre-production regression gate. Runs the Swift suite that
 # guards the fault + regression machinery. Pair with the in-app Regression
