@@ -15,6 +15,7 @@ public struct AutoTaskInfo: Codable, Equatable {
 public struct AutoTaskList: Codable, Equatable {
     public let type = MobileProtocol.Tag.autoTaskList
     public init() {}
+    private enum CodingKeys: String, CodingKey { case type }
 }
 
 public struct AutoTaskState: Codable, Equatable {
@@ -42,17 +43,23 @@ public struct AutoTaskState: Codable, Equatable {
         self.failedCount = failedCount
         self.tasks = tasks
     }
+    private enum CodingKeys: String, CodingKey {
+        case type, masterEnabled, isRunning, currentTask, statusMessage, lastRunDate
+        case createdCount, implementedCount, failedCount, tasks
+    }
 }
 
 public struct AutoTaskRun: Codable, Equatable {
     public let type = MobileProtocol.Tag.autoTaskRun
     public let task: String?
     public init(task: String?) { self.task = task }
+    private enum CodingKeys: String, CodingKey { case type, task }
 }
 
 public struct AutoTaskStop: Codable, Equatable {
     public let type = MobileProtocol.Tag.autoTaskStop
     public init() {}
+    private enum CodingKeys: String, CodingKey { case type }
 }
 
 public struct AutoTaskToggle: Codable, Equatable {
@@ -60,6 +67,7 @@ public struct AutoTaskToggle: Codable, Equatable {
     public let task: String?      // nil = master enable
     public let enabled: Bool
     public init(task: String?, enabled: Bool) { self.task = task; self.enabled = enabled }
+    private enum CodingKeys: String, CodingKey { case type, task, enabled }
 }
 
 public struct AutoTaskAck: Codable, Equatable {
@@ -71,11 +79,13 @@ public struct AutoTaskAck: Codable, Equatable {
         self.ok = ok
         self.message = message
     }
+    private enum CodingKeys: String, CodingKey { case type, ok, message }
 }
 
 public struct AutoTaskHistoryList: Codable, Equatable {
     public let type = MobileProtocol.Tag.autoTaskHistory
     public init() {}
+    private enum CodingKeys: String, CodingKey { case type }
 }
 
 public struct AutoTaskHistoryEntry: Codable, Equatable {
@@ -96,4 +106,5 @@ public struct AutoTaskHistoryReply: Codable, Equatable {
     public init(entries: [AutoTaskHistoryEntry]) {
         self.entries = entries
     }
+    private enum CodingKeys: String, CodingKey { case type, entries }
 }

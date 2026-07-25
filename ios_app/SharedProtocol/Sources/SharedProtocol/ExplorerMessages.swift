@@ -12,18 +12,21 @@ public struct ExploreSessionSummary: Codable, Equatable {
 public struct ExploreListSessions: Codable, Equatable {
     public let type = MobileProtocol.Tag.exploreListSessions
     public init() {}
+    private enum CodingKeys: String, CodingKey { case type }
 }
 
 public struct ExploreSessionList: Codable, Equatable {
     public let type = MobileProtocol.Tag.exploreSessionList
     public let sessions: [ExploreSessionSummary]
     public init(sessions: [ExploreSessionSummary]) { self.sessions = sessions }
+    private enum CodingKeys: String, CodingKey { case type, sessions }
 }
 
 public struct ExploreLoadSession: Codable, Equatable {
     public let type = MobileProtocol.Tag.exploreLoadSession
     public let sessionId: String
     public init(sessionId: String) { self.sessionId = sessionId }
+    private enum CodingKeys: String, CodingKey { case type, sessionId }
 }
 
 public struct ExploreSessionHistory: Codable, Equatable {
@@ -32,23 +35,27 @@ public struct ExploreSessionHistory: Codable, Equatable {
     public let title: String
     public let history: [ChatTurn]
     public init(sessionId: String, title: String, history: [ChatTurn]) { self.sessionId = sessionId; self.title = title; self.history = history }
+    private enum CodingKeys: String, CodingKey { case type, sessionId, title, history }
 }
 
 public struct ExploreNewSession: Codable, Equatable {
     public let type = MobileProtocol.Tag.exploreNewSession
     public init() {}
+    private enum CodingKeys: String, CodingKey { case type }
 }
 
 public struct ExploreSessionCreated: Codable, Equatable {
     public let type = MobileProtocol.Tag.exploreSessionCreated
     public let sessionId: String
     public init(sessionId: String) { self.sessionId = sessionId }
+    private enum CodingKeys: String, CodingKey { case type, sessionId }
 }
 
 public struct ExploreDeleteSession: Codable, Equatable {
     public let type = MobileProtocol.Tag.exploreDeleteSession
     public let sessionId: String
     public init(sessionId: String) { self.sessionId = sessionId }
+    private enum CodingKeys: String, CodingKey { case type, sessionId }
 }
 
 public struct ExploreChat: Codable, Equatable {
@@ -60,4 +67,5 @@ public struct ExploreChat: Codable, Equatable {
     public init(sessionId: String, commandId: String, text: String, history: [ChatTurn]) {
         self.sessionId = sessionId; self.commandId = commandId; self.text = text; self.history = history
     }
+    private enum CodingKeys: String, CodingKey { case type, sessionId, commandId, text, history }
 }

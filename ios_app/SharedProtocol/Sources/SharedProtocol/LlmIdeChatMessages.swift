@@ -34,6 +34,7 @@ public struct LlmIdeChat: Codable, Equatable {
         self.commandId = commandId; self.text = text; self.history = history
         self.images = images; self.files = files
     }
+    private enum CodingKeys: String, CodingKey { case type, commandId, text, history, images, files }
 }
 
 public struct OutputPayload: Codable, Equatable {
@@ -50,6 +51,7 @@ public struct Output: Codable, Equatable {
     public init(commandId: String, payload: OutputPayload) {
         self.commandId = commandId; self.payload = payload
     }
+    private enum CodingKeys: String, CodingKey { case type, commandId, payload }
 }
 
 /// Server → client: a command failed.
@@ -58,4 +60,5 @@ public struct CommandError: Codable, Equatable {
     public let commandId: String?
     public let message: String
     public init(commandId: String?, message: String) { self.commandId = commandId; self.message = message }
+    private enum CodingKeys: String, CodingKey { case type, commandId, message }
 }
