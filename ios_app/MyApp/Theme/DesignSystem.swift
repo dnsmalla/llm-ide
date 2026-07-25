@@ -10,19 +10,19 @@ public struct DesignSystem {
     /// Adaptive palette — every token has a light and dark variant so the app
     /// follows the system appearance.
     public struct Colors {
-        public static let primary          = Color(light: "#5B5FC7", dark: "#7B7FE8")
-        public static let primaryDark      = Color(light: "#4346A8", dark: "#5B5FC7")
-        public static let primaryLight     = Color(light: "#E8E9F9", dark: "#272A4A")
-        public static let background       = Color(light: "#F5F6FA", dark: "#0F1117")
-        public static let surface          = Color(light: "#FFFFFF", dark: "#1A1D27")
-        public static let surfaceSecondary = Color(light: "#FAFBFC", dark: "#232734")
-        public static let textPrimary      = Color(light: "#1A1D2E", dark: "#F2F3F7")
-        public static let textSecondary    = Color(light: "#5C6178", dark: "#A7ACC0")
-        public static let textTertiary     = Color(light: "#8E94A8", dark: "#6E7488")
-        public static let danger           = Color(light: "#E53935", dark: "#FF6B66")
-        public static let success          = Color(light: "#2E7D32", dark: "#5BC75F")
-        public static let border           = Color(light: "#E4E6ED", dark: "#2A2E3D")
-        public static let borderLight      = Color(light: "#EEF0F5", dark: "#232734")
+        public static let primary          = Color(light: "#2E7D8F", dark: "#66B8D1")
+        public static let primaryDark      = Color(light: "#21606E", dark: "#4DA0BB")
+        public static let primaryLight     = Color(light: "#DDEEF1", dark: "#182E33")
+        public static let background       = Color(light: "#F7F7FA", dark: "#12141C")
+        public static let surface          = Color(light: "#FFFFFF", dark: "#242633")
+        public static let surfaceSecondary = Color(light: "#F2F4FA", dark: "#303342")
+        public static let textPrimary      = Color(light: "#1F242E", dark: "#F0F2FA")
+        public static let textSecondary    = Color(light: "#6B758C", dark: "#C7CFE6")
+        public static let textTertiary     = Color(light: "#8B91A3", dark: "#838AA0")
+        public static let danger           = Color(light: "#CC3333", dark: "#F58080")
+        public static let success          = Color(light: "#2EA666", dark: "#61E6A6")
+        public static let border           = Color(light: "#D8DAE3", dark: "#33353C")
+        public static let borderLight      = Color(light: "#ECEEF4", dark: "#262B3A")
         public static var primaryGradient: LinearGradient {
             LinearGradient(colors: [primary, primaryDark], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
