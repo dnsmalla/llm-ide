@@ -3,20 +3,20 @@
 > Pair your iPhone with the Mac app. The Mac app runs the pairing server — **no
 > separate Node process.**
 
-## Companion mode (current)
+## What you get
 
-The iPhone app is a **companion**, not a remote desktop:
+The iPhone app is a **native data companion** for your Mac — structured JSON
+over WebSocket, not a pixel screen mirror:
 
+- **Explore** — list/load/chat Mac explorer sessions (same `ChatSessionStore` as Mac). Attach PDF/Markdown/text files from the iPhone; the Mac runs code-assist with **your Mac Settings** (model + workspace).
+- **Auto** — master enable, per-task toggles, run/stop, counts, and history
 - **Chat** — ask LLM-IDE questions (Mac proxies to `:3456`)
-- **Explore** — Mac explorer-chat sessions
-- **Auto** — Mac auto-task controls
 
-Screen mirroring and remote input were **cancelled**. **Screen Recording is not
-required** on Mac or iPhone for pairing or chat.
+The home screen shows **live Auto Task and Explorer summaries** synced from the
+Mac. Open each surface for full control. This is more reliable than screen
+mirroring: no Screen Recording permission, no JPEG lag, and edits persist on the Mac.
 
-> Install the iOS app from **`ios_app/MyApp.xcodeproj`** in this repo. An older
-> build that still shows “waiting for screen…” is obsolete — delete it from your
-> phone and reinstall from Xcode.
+> Install from **`ios_app/MyApp.xcodeproj`**. Rebuild after pulling.
 
 ## Prerequisites
 
@@ -26,7 +26,8 @@ required** on Mac or iPhone for pairing or chat.
 - iPhone on the same Wi-Fi as the Mac (or Tailscale on both)
 - iOS app built from `ios_app/` (Xcode → run on device)
 
-**Not required for iPhone pairing:** macOS Accessibility, macOS Screen Recording.
+**Not required:** macOS Screen Recording or Accessibility (those were only for the
+removed remote-desktop experiment).
 
 **Helpful on iPhone:** Local Network permission (Bonjour discovery).
 
@@ -51,7 +52,7 @@ Wire flow:
 
 1. iPhone → `{"type":"pairing","pin":"<PIN>"}`
 2. Mac → `{"type":"connected","deviceName":"…"}`
-3. iPhone toolbar shows **Live** — tap **Chat**, **Explore**, or **Auto**
+3. Home shows **Live** with Auto Task + Explorer summaries — tap **Open Explorer** or **Open Auto Tasks**
 
 ## Verify
 
@@ -68,11 +69,17 @@ lsof -i :3006
 
 ## Troubleshooting
 
-### iPhone shows “waiting for screen” or Screen Recording
+### iPhone shows “waiting for screen” or asks for Screen Recording
 
-You have an **old iOS build** (remote-desktop UI). Delete the app, reinstall
-from `ios_app/MyApp.xcodeproj`, pair again. With the current app you should see
-**Chat / Explore / Auto** in the toolbar when **Live**.
+You have an **old iOS build** from the remote-desktop era. Delete the app,
+reinstall from `ios_app/MyApp.xcodeproj`, pair again. The current app shows a
+**native dashboard** (Auto + Explorer cards) when **Live**, not a screen mirror.
+
+### Auto or Explore looks empty
+
+- Tap **↻** on the home screen or open the sheet and refresh
+- Confirm Mobile Control **Running** on the Mac
+- Auto Tasks require the Mac app running with auto-code wired (same as on Mac)
 
 ### iPhone can't find the Mac
 

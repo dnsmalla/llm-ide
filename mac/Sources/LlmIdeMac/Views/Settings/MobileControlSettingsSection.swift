@@ -65,6 +65,8 @@ struct MobileControlSettingsSection: View {
                     logHeader
                     logPane
 
+                    exploreIndexBlock
+
                     Divider().padding(.vertical, 4)
 
                     featuresBlock
@@ -73,6 +75,7 @@ struct MobileControlSettingsSection: View {
         }
         .onAppear {
             connection = MobileConnectionInfo.current()
+            mobile.exploreIndex.bootstrapFromDisk()
         }
         .onChange(of: scenePhase) { _, phase in
             // The user likely just connected Tailscale in another app;
@@ -364,6 +367,86 @@ struct MobileControlSettingsSection: View {
         case .stdout: return theme.current.text
         case .stderr: return theme.current.danger
         case .info:   return theme.current.accent
+        }
+    }
+
+    // MARK: - Explore indexes
+
+    private var exploreIndexBlock: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack {
+                Text("iPhone browse indexes")
+                    .font(Typography.section)
+                    .foregroundStyle(theme.current.textMuted)
+                Spacer()
+                Button(mobile.exploreIndex.isRefreshing ? "Refreshing…" : "Refresh") {
+                    mobile.refreshExploreIndexes(force: true)
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .disabled(mobile.exploreIndex.isRefreshing)
+            }
+            Text("Stored under ~/Library/Application Support/llm-ide/settings/ — iPhone @file and /skill search always reads these JSON files. Rebuilt on workspace change, file edits (debounced), backend start, or every 5 minutes.")
+                .font(Typography.caption)
+                .foregroundStyle(theme.current.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            indexRow(
+                label: "Workspace",
+                file: "mobile-explore-workspace.json",
+                count: mobile.exploreIndex.workspaceEntryCount,
+                updatedAt: mobile.exploreIndex.workspaceUpdatedAt,
+                detail: workspaceIndexDetail
+            )
+            indexRow(
+                label: "Skills",
+                file: "mobile-explore-skills.json",
+                count: mobile.exploreIndex.skillsEntryCount,
+                updatedAt: mobile.exploreIndex.skillsUpdatedAt
+            )
+            if let err = mobile.exploreIndex.lastError, !err.isEmpty {
+                Text(err)
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.danger)
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(theme.current.body.opacity(0.6)))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(theme.current.border.opacity(0.4)))
+    }
+
+    private var workspaceIndexDetail: String? {
+        var parts: [String] = []
+        if let root = mobile.exploreIndex.lastWorkspaceRoot {
+            parts.append(MobileExploreBridge.homeRelativePathForDisplay(root))
+        }
+        if mobile.exploreIndex.workspaceTruncated {
+            parts.append("truncated at \(MobileExploreIndexStore.maxWorkspaceEntries)")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private func indexRow(label: String, file: String, count: Int, updatedAt: Date?, detail: String? = nil) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Text(label)
+                .font(Typography.body)
+                .foregroundStyle(theme.current.textMuted)
+                .frame(width: 90, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(file) · \(count) entries")
+                    .font(Typography.mono)
+                    .foregroundStyle(theme.current.text)
+                Text(updatedAt.map { "Updated \($0.formatted(date: .abbreviated, time: .shortened))" } ?? "Not built yet")
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                if let detail {
+                    Text(detail)
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
         }
     }
 

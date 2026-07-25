@@ -52,9 +52,17 @@ final class MobileControlManager {
     /// Set by the app at launch; the single source of truth for master +
     /// per-task enables, mutated by `auto_task_toggle`.
     var autoTaskSettings: AutoTaskSettings?
+    /// Mac Settings + workspace — used to run iPhone explore prompts with the
+    /// same model/provider and agent context as the desktop Explorer panel.
+    var config: AppConfig?
+    var projectStore: ProjectStore?
+
+    /// Persisted `@file` / `/skill` browse indexes under Application Support settings/.
+    let exploreIndex = MobileExploreIndexStore()
 
     private var server: MobileWebSocketServer?
     private var advertiser: MobileBonjourAdvertiser?
+    private var workspaceWatcher: RepoFileWatcher?
     private let maxLogLines = 5_000
 
     /// Shared decoder reused across every `handleInbound` case. `JSONDecoder`
@@ -119,11 +127,65 @@ final class MobileControlManager {
         self.advertiser = advertiser
 
         status = .running
+        startWorkspaceWatcher()
+        exploreIndex.bootstrapFromDisk()
+        refreshExploreIndexes(force: false)
+    }
+
+    /// Rebuild workspace + skill JSON indexes when the project changes or the
+    /// user presses Refresh in Mobile Control settings.
+    func refreshExploreIndexes(force: Bool) {
+        Task {
+            await exploreIndex.refreshAll(
+                workspaceRoot: mobileWorkspaceURL(),
+                api: api,
+                force: force
+            )
+            if force {
+                let trunc = exploreIndex.workspaceTruncated ? " (workspace truncated)" : ""
+                append(.info, "Mobile explore indexes refreshed — workspace: \(exploreIndex.workspaceEntryCount), skills: \(exploreIndex.skillsEntryCount)\(trunc)")
+            }
+        }
+    }
+
+    func onWorkspaceChanged() {
+        exploreIndex.invalidateWorkspaceIndex()
+        startWorkspaceWatcher()
+        refreshExploreIndexes(force: false)
+    }
+
+    /// Rebuild the skills index once the Node backend is healthy (catalog API).
+    func onBackendReady() {
+        exploreIndex.invalidateSkillsIndex()
+        Task {
+            if let api {
+                await exploreIndex.refreshSkillsIndex(api: api, force: true)
+            }
+        }
+    }
+
+    private func startWorkspaceWatcher() {
+        workspaceWatcher?.stop()
+        workspaceWatcher = nil
+        guard case .running = status, let root = mobileWorkspaceURL() else { return }
+        workspaceWatcher = RepoFileWatcher(repoRoot: root, debounce: 3.0) { [weak self] in
+            Task { @MainActor in self?.onWorkspaceFilesChanged() }
+        }
+    }
+
+    private func onWorkspaceFilesChanged() {
+        guard case .running = status, let root = mobileWorkspaceURL() else { return }
+        Task {
+            await exploreIndex.refreshWorkspaceIndex(root: root, force: true)
+            append(.info, "Workspace index updated after file change (\(exploreIndex.workspaceEntryCount) entries)")
+        }
     }
 
     /// Tear down the native server and Bonjour advertisement. Idempotent —
     /// safe to call from the Quit hook, the Stop button, or a failed restart.
     func stop() {
+        workspaceWatcher?.stop()
+        workspaceWatcher = nil
         server?.stop()
         server = nil
         advertiser?.stop()
@@ -193,15 +255,27 @@ final class MobileControlManager {
             append(.info, "Explore list: \(rows.count) session(s)")
             reply(ExploreSessionList(sessions: rows))
         case MobileProtocol.Tag.exploreLoadSession:
-            if let m = try? decoder.decode(ExploreLoadSession.self, from: data),
-               let s = ChatSessionStore.load(id: UUID(uuidString: m.sessionId) ?? UUID()) {
-                // `CodeAssistTurn` → `ChatTurn`: see `ChatTurn(from:)` mapping below.
-                let turns = s.history.map { ChatTurn(from: $0) }
-                append(.info, "Explore load: \(s.id.uuidString.prefix(8))")
-                reply(ExploreSessionHistory(sessionId: s.id.uuidString,
-                                            title: s.title,
-                                            history: turns))
+            guard let m = try? decoder.decode(ExploreLoadSession.self, from: data) else {
+                append(.info, "Explore load: undecodable payload")
+                reply(CommandError(commandId: "explore_load", message: "Invalid load-session request"))
+                return
             }
+            guard let sid = UUID(uuidString: m.sessionId) else {
+                append(.info, "Explore load: bad session id \"\(m.sessionId.prefix(8))\"")
+                reply(CommandError(commandId: "explore_load", message: "Invalid session id"))
+                return
+            }
+            guard let s = ChatSessionStore.load(id: sid) else {
+                append(.info, "Explore load: session \(sid.uuidString.prefix(8)) not found")
+                reply(CommandError(commandId: "explore_load",
+                                   message: "Session not found on Mac — it may have been deleted."))
+                return
+            }
+            let turns = s.history.map { ChatTurn(from: $0) }
+            append(.info, "Explore load: \(s.id.uuidString.prefix(8))")
+            reply(ExploreSessionHistory(sessionId: s.id.uuidString,
+                                        title: s.title,
+                                        history: turns))
         case MobileProtocol.Tag.exploreNewSession:
             let s = ChatSession(scope: .explorer, title: "New chat")
             ChatSessionStore.save(s)
@@ -219,9 +293,54 @@ final class MobileControlManager {
                 append(.info, "Explore chat in \(chat.sessionId.prefix(8))")
                 Task { await handleExploreChat(chat) }
             }
+        case MobileProtocol.Tag.exploreSearchFiles:
+            if let req = try? decoder.decode(ExploreSearchFiles.self, from: data) {
+                handleExploreSearch(req)
+            }
+        case MobileProtocol.Tag.exploreSearchSkills:
+            if let req = try? decoder.decode(ExploreSearchSkills.self, from: data) {
+                Task { await handleExploreSearchSkills(req) }
+            }
         default:
             append(.info, "Unhandled explore type: \(type)")
         }
+    }
+
+    /// Find files/folders on the Mac workspace by name (for iPhone @file picker).
+    private func handleExploreSearch(_ req: ExploreSearchFiles) {
+        guard let root = mobileWorkspaceURL() else {
+            reply(ExploreSearchReply(workspaceRoot: nil, matches: [],
+                                   error: "No Mac workspace open — open a project in LLM-IDE on your Mac."))
+            return
+        }
+        Task {
+            let limit = min(max(req.limit ?? MobileWorkspaceSearch.defaultLimit, 1), 80)
+            let matches = await exploreIndex.searchWorkspace(
+                query: req.query, workspaceRoot: root, limit: limit)
+            let rootLabel = MobileExploreBridge.homeRelativePathForDisplay(root.path)
+            append(.info, "Explore search \"\(req.query.prefix(40))\" → \(matches.count) hit(s) [index]")
+            reply(ExploreSearchReply(workspaceRoot: rootLabel, matches: matches, error: nil))
+        }
+    }
+
+    /// Find agent skills on the Mac (library + built-in) for iPhone `/skill` picker.
+    private func handleExploreSearchSkills(_ req: ExploreSearchSkills) async {
+        guard let api else {
+            reply(ExploreSkillListReply(matches: [],
+                                        error: "Backend not configured — start LLM-IDE server on your Mac."))
+            return
+        }
+        let limit = min(max(req.limit ?? MobileSkillCatalog.defaultLimit, 1), 80)
+        let matches = await exploreIndex.searchSkills(query: req.query, api: api, limit: limit)
+        append(.info, "Explore skill search \"\(req.query.prefix(40))\" → \(matches.count) hit(s) [index]")
+        reply(ExploreSkillListReply(matches: matches, error: nil))
+    }
+
+    /// Active explorer code root — same precedence as `ExplorerView.root`.
+    private func mobileWorkspaceURL() -> URL? {
+        guard let config, let projectStore else { return nil }
+        if let code = projectStore.activeProjectCodeDir { return code }
+        return WorkspaceRoot.resolve(config: config, projectStore: projectStore)
     }
 
     /// Handle `auto_task_*` messages: list / toggle / run / stop / history for
@@ -369,14 +488,47 @@ final class MobileControlManager {
             return
         }
         let history = chat.history.map { LlmIdeAPIClient.CodeAssistTurn(from: $0) }
+        var attachments = MobileExploreBridge.attachments(from: chat.files)
+        if let root = mobileWorkspaceURL(), !chat.refs.isEmpty {
+            let (refAttachments, refErrors) = MobileWorkspaceSearch.attachments(
+                from: chat.refs, workspaceRoot: root)
+            attachments.append(contentsOf: refAttachments)
+            for err in refErrors { append(.info, "explore_chat: \(err)") }
+        }
+        let agentMessage = MobileWorkspaceSearch.promptWithRefs(chat.text, refs: chat.refs)
+        let (skillMessage, skillIds) = MobileSkillCatalog.resolveMessage(agentMessage, skills: chat.skills)
+        let (model, provider) = config.map { MobileExploreBridge.modelAndProvider(config: $0) }
+            ?? (nil as String?, nil as String?)
+        let agentContext: AgentContext?
+        if let config, let projectStore {
+            agentContext = await MobileExploreBridge.buildAgentContext(
+                config: config, projectStore: projectStore, sessionId: chat.sessionId)
+        } else {
+            agentContext = nil
+            if !chat.files.isEmpty || !chat.refs.isEmpty {
+                append(.info, "explore_chat: Mac workspace not wired — attachments/refs may be limited")
+            }
+        }
         do {
+            let commandId = chat.commandId
             let resp = try await api.codeAssistStream(
-                message: chat.text,
+                message: skillMessage,
                 language: nil,
+                model: model,
+                provider: provider,
                 history: history,
-                attachments: [],
-                skills: [],
-                onProgress: { [weak self] label in self?.append(.info, "code-assist: \(label)") }
+                attachments: attachments,
+                skills: skillIds,
+                agentContext: agentContext,
+                onProgress: { [weak self] label in
+                    guard let self else { return }
+                    append(.info, "code-assist: \(label)")
+                    Task {
+                        await self.server?.send(Output(
+                            commandId: commandId,
+                            payload: OutputPayload(stream: label, done: false)))
+                    }
+                }
             )
             // Persist user + assistant turns into the Mac session (keeps phone
             // & Mac in sync). The upfront guard above already rejected stale
@@ -384,7 +536,7 @@ final class MobileControlManager {
             // that guard and now (session deleted mid-stream) — if it hits,
             // the reply still streams but the turn is dropped on purpose.
             if var session = ChatSessionStore.load(id: sid) {
-                session.history.append(LlmIdeAPIClient.CodeAssistTurn(role: .user, content: chat.text))
+                session.history.append(LlmIdeAPIClient.CodeAssistTurn(role: .user, content: skillMessage))
                 session.history.append(LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: resp.reply))
                 if session.title == "New chat" { session.title = String(chat.text.prefix(40)) }
                 ChatSessionStore.save(session)

@@ -1,20 +1,24 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import SharedProtocol
 
 /// Native iOS view for the Mac-side explorer-chat sessions: browse/create/load
-/// persistent sessions, read their transcript, and send new turns. Proxied
-/// through the paired Mac WebSocket to `ChatSessionStore` on the Mac.
-///
-/// Styling mirrors `LlmIdeControlView` (DesignSystem colors/typography, bubble
-/// layout, input bar) so the two chats feel like one surface. The session list
-/// is a sheet so the transcript stays the focus.
+/// persistent sessions, read their transcript, and send new turns (with optional
+/// file attachments). Proxied through the paired Mac WebSocket; the Mac runs
+/// code-assist with its own agent settings and workspace context.
 struct ExplorerChatView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var explorerStore: ExplorerChatStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var inputText: String = ""
+    @State private var pendingFiles: [ChatFileText] = []
+    @State private var pendingRefs: [ExploreWorkspaceRef] = []
+    @State private var pendingSkills: [ExploreSkillRef] = []
     @State private var showSessionPicker: Bool = false
+    @State private var showFilePicker: Bool = false
+    @State private var showMacSearch: Bool = false
+    @State private var showMacSkills: Bool = false
     @FocusState private var isInputFocused: Bool
 
     private var isConnected: Bool { connection.connectionStatus == .connected }
@@ -54,7 +58,28 @@ struct ExplorerChatView: View {
                 .environmentObject(connection)
                 .environmentObject(explorerStore)
         }
+        .sheet(isPresented: $showMacSearch) {
+            macWorkspaceSearchSheet
+                .environmentObject(explorerStore)
+        }
+        .sheet(isPresented: $showMacSkills) {
+            macSkillSearchSheet
+                .environmentObject(explorerStore)
+        }
         .onAppear { explorerStore.exploreListSessions() }
+        .fileImporter(isPresented: $showFilePicker,
+                      allowedContentTypes: [.pdf, .plainText, .text]) { result in
+            switch result {
+            case .success(let url):
+                if let extracted = FileTextExtractor.extract(from: url) {
+                    pendingFiles.append(ChatFileText(name: extracted.name, text: extracted.text))
+                } else {
+                    connection.errorMessage = "Couldn't read text from that file."
+                }
+            case .failure(let err):
+                connection.errorMessage = err.localizedDescription
+            }
+        }
     }
 
     // MARK: — Session picker (sheet)
@@ -134,7 +159,7 @@ struct ExplorerChatView: View {
                             EmptyChatState(
                                 icon: "bubble.left.and.text.bubble.right",
                                 title: "Ask anything about this session",
-                                subtitle: "Type a question below to start."
+                                subtitle: "Type a question, tap / for Mac skills, @ for Mac files, or attach iPhone files."
                             )
                         }
                         ForEach(current.history) { msg in
@@ -192,6 +217,7 @@ struct ExplorerChatView: View {
 
     private var inputBar: some View {
         VStack(spacing: 0) {
+            if !pendingSkills.isEmpty || !pendingRefs.isEmpty || !pendingFiles.isEmpty { attachmentChips }
             Divider()
             ChatInputBar(
                 text: $inputText,
@@ -199,24 +225,177 @@ struct ExplorerChatView: View {
                 canSend: canSend,
                 isFocused: $isInputFocused,
                 onSend: send
-            )
+            ) {
+                HStack(spacing: DesignSystem.Spacing.xs) {
+                    Button { showMacSkills = true } label: {
+                        Image(systemName: "slash.circle")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(DesignSystem.Colors.primary)
+                            .frame(width: 40, height: 40)
+                            .background(DesignSystem.Colors.surfaceSecondary)
+                            .clipShape(Circle())
+                    }
+                    .disabled(!isConnected)
+                    Button {
+                        showMacSearch = true
+                    } label: {
+                        Image(systemName: "at")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(DesignSystem.Colors.primary)
+                            .frame(width: 40, height: 40)
+                            .background(DesignSystem.Colors.surfaceSecondary)
+                            .clipShape(Circle())
+                    }
+                    .disabled(!isConnected)
+                    Button { showFilePicker = true } label: {
+                        Image(systemName: "paperclip")
+                            .font(.system(size: 18))
+                            .foregroundColor(DesignSystem.Colors.primary)
+                            .frame(width: 40, height: 40)
+                            .background(DesignSystem.Colors.surfaceSecondary)
+                            .clipShape(Circle())
+                    }
+                }
+            }
         }
     }
 
+    private var attachmentChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: DesignSystem.Spacing.sm) {
+                ForEach(pendingSkills) { skill in
+                    skillChip(skill)
+                }
+                ForEach(pendingRefs) { ref in
+                    refChip(ref)
+                }
+                ForEach(Array(pendingFiles.enumerated()), id: \.offset) { idx, file in
+                    fileChip(idx: idx, file: file)
+                }
+            }
+            .padding(.horizontal, DesignSystem.Spacing.md)
+            .padding(.vertical, DesignSystem.Spacing.sm)
+        }
+    }
+
+    private func skillChip(_ skill: ExploreSkillRef) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 16))
+                .foregroundColor(DesignSystem.Colors.primary)
+            Text(skill.displayLabel)
+                .font(.system(size: DesignSystem.Typography.footnote))
+                .foregroundColor(DesignSystem.Colors.textPrimary)
+                .lineLimit(1)
+            Button {
+                pendingSkills.removeAll { $0.id == skill.id }
+                haptic(.light)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(DesignSystem.Colors.textTertiary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(DesignSystem.Colors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func refChip(_ ref: ExploreWorkspaceRef) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: ref.kind == "folder" ? "folder.fill" : "doc.text.fill")
+                .font(.system(size: 16))
+                .foregroundColor(DesignSystem.Colors.primary)
+            Text(ref.displayLabel)
+                .font(.system(size: DesignSystem.Typography.footnote))
+                .foregroundColor(DesignSystem.Colors.textPrimary)
+                .lineLimit(1)
+            Button {
+                pendingRefs.removeAll { $0.id == ref.id }
+                haptic(.light)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(DesignSystem.Colors.textTertiary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(DesignSystem.Colors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func fileChip(idx: Int, file: ChatFileText) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "doc.text.fill")
+                .font(.system(size: 16))
+                .foregroundColor(DesignSystem.Colors.primary)
+            Text(file.name)
+                .font(.system(size: DesignSystem.Typography.footnote))
+                .foregroundColor(DesignSystem.Colors.textPrimary)
+                .lineLimit(1)
+            Button {
+                pendingFiles.remove(at: idx)
+                haptic(.light)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(DesignSystem.Colors.textTertiary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(DesignSystem.Colors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    // MARK: — Mac workspace search (@file / @folder)
+
+    private var macSkillSearchSheet: some View {
+        MacSkillSearchSheet(
+            pendingSkills: $pendingSkills,
+            onDismiss: { showMacSkills = false }
+        )
+    }
+
+    private var macWorkspaceSearchSheet: some View {
+        MacWorkspaceSearchSheet(
+            pendingRefs: $pendingRefs,
+            onDismiss: { showMacSearch = false }
+        )
+    }
+
     private var canSend: Bool {
-        !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && isConnected
-            && hasSession
-            && !explorerStore.isStreaming   // one question at a time (per-surface flag)
+        let hasBody = !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !pendingFiles.isEmpty || !pendingRefs.isEmpty || !pendingSkills.isEmpty
+        return hasBody && isConnected && hasSession && !explorerStore.isStreaming
     }
 
     // MARK: — Actions
 
     private func send() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let id = explorerStore.exploreCurrent?.id else { return }
-        explorerStore.sendExploreChat(text, sessionId: id)
+        let files = pendingFiles
+        let refs = pendingRefs
+        let skills = pendingSkills
+        guard (!text.isEmpty || !files.isEmpty || !refs.isEmpty || !skills.isEmpty),
+              let id = explorerStore.exploreCurrent?.id else { return }
+        let prompt: String
+        if text.isEmpty, !skills.isEmpty {
+            prompt = "Run the selected Mac skill(s)."
+        } else if text.isEmpty, !refs.isEmpty, files.isEmpty {
+            prompt = "Explore the referenced Mac workspace paths."
+        } else if text.isEmpty, !files.isEmpty {
+            prompt = "Review the attached file(s)."
+        } else {
+            prompt = text
+        }
+        explorerStore.sendExploreChat(prompt, sessionId: id, files: files, refs: refs, skills: skills)
         inputText = ""
+        pendingFiles = []
+        pendingRefs = []
+        pendingSkills = []
         isInputFocused = false
         haptic(.light)
     }

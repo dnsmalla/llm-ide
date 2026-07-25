@@ -1,15 +1,9 @@
 import SwiftUI
+import SharedProtocol
 
-/// Host shell for a paired Mac: the navigation toolbar (Chat/Explore/Auto
-/// buttons + live status dot + More menu) and the three sheet-presented
-/// surfaces (LlmIdeControlView / ExplorerChatView / AutoTaskView), plus the
-/// shared error banner and action toast.
-///
-/// The previous remote-desktop body — screen stream, touch→mouse/scroll/drag
-/// mapping, zoom controls, modifier/key palette, voice overlay, and the
-/// on-device "AI" prompt panel — was removed when the iPhone pivoted from a
-/// remote-desktop client to a native chat client. Chat/Explore/Auto are the
-/// live surfaces; everything they need lives behind those sheets.
+/// Host shell for a paired Mac. Renders **native data** from the Mac (Explore
+/// sessions, Auto Task state) — not a pixel screen mirror. Chat / Explore /
+/// Auto open as full-screen sheets for work.
 struct MobileHomeView: View {
     let deviceName: String
     @EnvironmentObject var connection: ConnectionService
@@ -23,15 +17,19 @@ struct MobileHomeView: View {
     @State private var showExplore: Bool = false
     @State private var showAutoTask: Bool = false
 
+    private var isConnected: Bool { connection.connectionStatus == .connected }
+    private var autoState: AutoTaskState? { autoTaskStore.autoTaskState }
+
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            DesignSystem.Colors.background.ignoresSafeArea()
 
-            if connection.connectionStatus == .connected {
-                connectedHint
+            if isConnected {
+                nativeDashboard
+            } else {
+                disconnectedHint
             }
 
-            // Error banner — always visible on top when the agent reports a problem.
             if let error = connection.errorMessage {
                 VStack {
                     errorBanner(error)
@@ -39,12 +37,10 @@ struct MobileHomeView: View {
                 }
             }
 
-            // Action toast — confirms one-shot Mac actions (e.g. auto-task acks)
-            // while remaining non-blocking.
             if let status = autoTaskStore.actionStatus {
                 VStack {
                     Spacer()
-                    actionToast(status).padding(.bottom, 90)
+                    actionToast(status).padding(.bottom, 24)
                 }
                 .allowsHitTesting(false)
             }
@@ -52,7 +48,7 @@ struct MobileHomeView: View {
         .navigationTitle(deviceName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
-        .toolbarBackground(Color.black, for: .navigationBar)
+        .toolbarBackground(DesignSystem.Colors.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .navigationDestination(isPresented: $showSettings) { SettingsView() }
@@ -71,27 +67,219 @@ struct MobileHomeView: View {
                 .environmentObject(connection)
                 .environmentObject(autoTaskStore)
         }
+        .onAppear { refreshMacData() }
+        .onChange(of: connection.connectionStatus) { _, status in
+            if status == .connected { refreshMacData() }
+        }
         .animation(.easeInOut(duration: 0.2), value: autoTaskStore.actionStatus)
     }
 
-    // MARK: — Connected hint (companion mode — no screen mirror)
+    // MARK: — Native dashboard (data mirror, not screen mirror)
 
-    private var connectedHint: some View {
+    private var nativeDashboard: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
+                Text("Work from your iPhone — data syncs with your Mac over the local connection.")
+                    .font(.system(size: DesignSystem.Typography.footnote))
+                    .foregroundColor(DesignSystem.Colors.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                autoTaskSummaryCard
+                exploreSummaryCard
+                primaryActions
+            }
+            .padding(DesignSystem.Spacing.md)
+        }
+    }
+
+    private var autoTaskSummaryCard: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+            HStack {
+                Label("Auto Tasks", systemImage: "bolt.fill")
+                    .font(.system(size: DesignSystem.Typography.headline, weight: .semibold))
+                    .foregroundColor(DesignSystem.Colors.textPrimary)
+                Spacer()
+                if autoState?.isRunning == true {
+                    HStack(spacing: 4) {
+                        ProgressView().scaleEffect(0.65)
+                        Text("Running")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.primary)
+                    }
+                }
+            }
+
+            if let state = autoState {
+                Text(state.statusMessage ?? (state.masterEnabled ? "Enabled on Mac" : "Disabled on Mac"))
+                    .font(.system(size: DesignSystem.Typography.subheadline))
+                    .foregroundColor(DesignSystem.Colors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: DesignSystem.Spacing.sm) {
+                    metricPill("Created", value: state.createdCount)
+                    metricPill("Done", value: state.implementedCount)
+                    metricPill("Failed", value: state.failedCount)
+                }
+
+                if let current = state.currentTask,
+                   let label = state.tasks.first(where: { $0.id == current })?.label {
+                    Text("Current: \(label)")
+                        .font(.system(size: DesignSystem.Typography.caption))
+                        .foregroundColor(DesignSystem.Colors.textTertiary)
+                }
+            } else {
+                Text("Loading auto-task state from Mac…")
+                    .font(.system(size: DesignSystem.Typography.subheadline))
+                    .foregroundColor(DesignSystem.Colors.textTertiary)
+            }
+
+            Button { showAutoTask = true } label: {
+                Text("Open Auto Tasks")
+                    .font(.system(size: DesignSystem.Typography.body, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(DesignSystem.Colors.primary)
+        }
+        .padding(DesignSystem.Spacing.md)
+        .background(DesignSystem.Colors.surfaceSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM))
+    }
+
+    private var exploreSummaryCard: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+            Label("Explorer chat", systemImage: "sidebar.left")
+                .font(.system(size: DesignSystem.Typography.headline, weight: .semibold))
+                .foregroundColor(DesignSystem.Colors.textPrimary)
+
+            if let current = explorerStore.exploreCurrent {
+                Text("Active: \(current.title.isEmpty ? "Untitled" : current.title)")
+                    .font(.system(size: DesignSystem.Typography.subheadline))
+                    .foregroundColor(DesignSystem.Colors.textSecondary)
+                if let last = current.history.last(where: { !$0.text.isEmpty }) {
+                    Text(last.role == .user ? "You: \(last.text)" : last.text)
+                        .font(.system(size: DesignSystem.Typography.footnote))
+                        .foregroundColor(DesignSystem.Colors.textTertiary)
+                        .lineLimit(2)
+                }
+            } else if explorerStore.exploreSessions.isEmpty {
+                Text("No explorer sessions yet on this Mac.")
+                    .font(.system(size: DesignSystem.Typography.subheadline))
+                    .foregroundColor(DesignSystem.Colors.textTertiary)
+            } else {
+                Text("\(explorerStore.exploreSessions.count) session(s) on Mac")
+                    .font(.system(size: DesignSystem.Typography.subheadline))
+                    .foregroundColor(DesignSystem.Colors.textSecondary)
+            }
+
+            if !explorerStore.exploreSessions.isEmpty {
+                ForEach(explorerStore.exploreSessions.prefix(3), id: \.id) { session in
+                    HStack {
+                        Text(session.title.isEmpty ? "Untitled" : session.title)
+                            .font(.system(size: DesignSystem.Typography.footnote))
+                            .foregroundColor(DesignSystem.Colors.textPrimary)
+                            .lineLimit(1)
+                        Spacer()
+                        Text(Date(epochSeconds: session.lastUsedAt).relativeTimeShort())
+                            .font(.system(size: DesignSystem.Typography.caption))
+                            .foregroundColor(DesignSystem.Colors.textTertiary)
+                    }
+                }
+            }
+
+            Button { showExplore = true } label: {
+                Text("Open Explorer")
+                    .font(.system(size: DesignSystem.Typography.body, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(DesignSystem.Colors.primary)
+        }
+        .padding(DesignSystem.Spacing.md)
+        .background(DesignSystem.Colors.surfaceSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM))
+    }
+
+    private var primaryActions: some View {
+        VStack(spacing: DesignSystem.Spacing.sm) {
+            Button { showExplore = true } label: {
+                featureRow(icon: "sidebar.left", title: "Explore", subtitle: "Chat with Mac explorer sessions")
+            }
+            Button { showAutoTask = true } label: {
+                featureRow(icon: "bolt.fill", title: "Auto Tasks", subtitle: "Run and monitor scheduled tasks")
+            }
+            Button { showLlmIde = true } label: {
+                featureRow(icon: "bubble.left.and.text.bubble.right", title: "Chat", subtitle: "Ask LLM-IDE questions")
+            }
+        }
+    }
+
+    private func featureRow(icon: String, title: String, subtitle: String) -> some View {
+        HStack(spacing: DesignSystem.Spacing.md) {
+            Image(systemName: icon)
+                .font(.system(size: 20))
+                .foregroundColor(DesignSystem.Colors.primary)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: DesignSystem.Typography.body, weight: .semibold))
+                    .foregroundColor(DesignSystem.Colors.textPrimary)
+                Text(subtitle)
+                    .font(.system(size: DesignSystem.Typography.footnote))
+                    .foregroundColor(DesignSystem.Colors.textTertiary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(DesignSystem.Colors.textTertiary)
+        }
+        .padding(DesignSystem.Spacing.md)
+        .background(DesignSystem.Colors.surfaceSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM))
+    }
+
+    private func metricPill(_ label: String, value: Int) -> some View {
+        VStack(spacing: 2) {
+            Text("\(value)")
+                .font(.system(size: DesignSystem.Typography.title3, weight: .bold, design: .rounded))
+                .foregroundColor(DesignSystem.Colors.textPrimary)
+            Text(label)
+                .font(.system(size: DesignSystem.Typography.caption))
+                .foregroundColor(DesignSystem.Colors.textTertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(DesignSystem.Colors.background.opacity(0.6))
+        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusS))
+    }
+
+    private func refreshMacData() {
+        guard isConnected else { return }
+        autoTaskStore.autoTaskList()
+        autoTaskStore.autoTaskHistory()
+        explorerStore.exploreListSessions()
+    }
+
+    // MARK: — Disconnected
+
+    private var disconnectedHint: some View {
         VStack(spacing: DesignSystem.Spacing.md) {
-            Image(systemName: "iphone.and.arrow.forward")
-                .font(.system(size: 44))
-                .foregroundColor(DesignSystem.Colors.primary.opacity(0.9))
-            Text("Paired with \(deviceName)")
+            if connection.connectionStatus == .connecting {
+                ProgressView()
+                    .tint(DesignSystem.Colors.primary)
+            } else {
+                Image(systemName: "wifi.slash")
+                    .font(.system(size: 44))
+                    .foregroundColor(DesignSystem.Colors.textTertiary)
+            }
+            Text(connection.connectionStatus == .connecting ? "Connecting…" : "Not connected")
                 .font(.system(size: DesignSystem.Typography.title2, weight: .semibold))
-                .foregroundColor(.white)
-            Text("Use Chat, Explore, or Auto in the toolbar.\nScreen mirroring is not part of this app — no Mac Screen Recording permission is required on either device for pairing.")
+                .foregroundColor(DesignSystem.Colors.textPrimary)
+            Text("Pair again from the login screen if this persists.")
                 .font(.system(size: DesignSystem.Typography.subheadline))
-                .foregroundColor(.white.opacity(0.72))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, DesignSystem.Spacing.xl)
+                .foregroundColor(DesignSystem.Colors.textTertiary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .allowsHitTesting(false)
     }
 
     // MARK: — Error banner
@@ -106,9 +294,7 @@ struct MobileHomeView: View {
                 .foregroundColor(.white)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
-            Button {
-                connection.errorMessage = nil
-            } label: {
+            Button { connection.errorMessage = nil } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.white.opacity(0.7))
@@ -123,53 +309,24 @@ struct MobileHomeView: View {
         .cornerRadius(DesignSystem.Layout.cornerRadiusM)
         .padding(.horizontal, DesignSystem.Spacing.md)
         .padding(.top, DesignSystem.Spacing.sm)
-        .transition(.move(edge: .top).combined(with: .opacity))
     }
 
     // MARK: — Toolbar
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            Button { showLlmIde = true } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "bubble.left.and.text.bubble.right")
-                    Text("Chat").font(.system(size: 13, weight: .semibold))
-                }
-                .foregroundColor(.white.opacity(0.95))
-            }
-        }
-        ToolbarItem(placement: .topBarLeading) {
-            Button { showExplore = true } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "sidebar.left")
-                    Text("Explore").font(.system(size: 13, weight: .semibold))
-                }
-                .foregroundColor(.white.opacity(0.95))
-            }
-        }
-        ToolbarItem(placement: .topBarLeading) {
-            Button { showAutoTask = true } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "bolt.fill")
-                    Text("Auto").font(.system(size: 13, weight: .semibold))
-                }
-                .foregroundColor(.white.opacity(0.95))
-            }
-        }
         ToolbarItem(placement: .topBarTrailing) {
             HStack(spacing: DesignSystem.Spacing.md) {
-                // Live connection status
+                Button { refreshMacData() } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .foregroundColor(DesignSystem.Colors.textSecondary)
+                }
                 HStack(spacing: 5) {
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 8, height: 8)
+                    Circle().fill(statusColor).frame(width: 8, height: 8)
                     Text(statusLabel)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white.opacity(0.7))
+                        .foregroundColor(DesignSystem.Colors.textSecondary)
                 }
-
-                // More menu: settings + disconnect
                 Menu {
                     Button { showSettings = true } label: {
                         Label("Settings", systemImage: "gear")
@@ -182,13 +339,11 @@ struct MobileHomeView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle.fill")
                         .font(.system(size: DesignSystem.Typography.headline))
-                        .foregroundColor(.white.opacity(0.9))
+                        .foregroundColor(DesignSystem.Colors.textSecondary)
                 }
             }
         }
     }
-
-    // MARK: — Action toast
 
     private func actionToast(_ message: String) -> some View {
         HStack(spacing: 6) {
@@ -201,12 +356,8 @@ struct MobileHomeView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(.ultraThinMaterial.opacity(0.9), in: Capsule())
-        .background(Color.black.opacity(0.6), in: Capsule())
         .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
-        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
-
-    // MARK: — Helpers
 
     private var statusColor: Color {
         switch connection.connectionStatus {

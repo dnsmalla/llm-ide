@@ -150,6 +150,8 @@ public struct LlmIdeMacApp: App {
         // them keeps Settings, the Menu bar, and the scheduler in sync.
         mobileControl.autoCode = autoCode
         mobileControl.autoTaskSettings = autoTaskSettingsInstance
+        mobileControl.config = cfg
+        mobileControl.projectStore = projectStoreInstance
     }
 
     public var body: some Scene {
@@ -274,6 +276,14 @@ public struct LlmIdeMacApp: App {
                 // it causes here can't loop.
                 .onChange(of: projectStore.activeProject) { _, _ in
                     projectStore.syncLinkedRepoFromConfig(config)
+                    if config.mobileControlEnabled {
+                        mobileControl.onWorkspaceChanged()
+                    }
+                }
+                .onChange(of: backend.status) { _, newStatus in
+                    if case .running = newStatus, config.mobileControlEnabled {
+                        mobileControl.onBackendReady()
+                    }
                 }
                 // Stop the supervised backend on Cmd-Q so we don't
                 // leak an orphan node process every time the user

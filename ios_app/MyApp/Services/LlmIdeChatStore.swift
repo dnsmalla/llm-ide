@@ -65,6 +65,8 @@ final class LlmIdeChatStore: ObservableObject {
 
     // MARK: — Inbound (called by ConnectionService.receiveMessage dispatch)
 
+    func ownsCommand(_ id: String) -> Bool { llmIdeCommandIds.contains(id) }
+
     /// Handle a streamed `output` frame. Only acts when this store owns the
     /// frame's commandId: appends a `stream` chunk to the last assistant
     /// placeholder, and on `done` clears this surface's `isStreaming` flag and
@@ -72,22 +74,23 @@ final class LlmIdeChatStore: ObservableObject {
     func handleOutput(commandId: String?, payload: [String: Any]) {
         let owns = commandId.map { llmIdeCommandIds.contains($0) } ?? false
         guard owns else { return }
+        let done = payload["done"] as? Bool ?? false
         if let chunk = payload["stream"] as? String, !chunk.isEmpty {
-            appendToLastAssistant(&llmIdeMessages, chunk)
+            if done {
+                setLastAssistant(&llmIdeMessages, chunk)
+            } else {
+                appendToLastAssistant(&llmIdeMessages, chunk)
+            }
         }
-        if let done = payload["done"] as? Bool, done {
+        if done {
             isStreaming = false
             if let id = commandId { llmIdeCommandIds.remove(id) }
         }
     }
 
-    /// Handle a top-level `error` frame: clear this surface's streaming flag
-    /// and drop the empty "…" placeholder left by a failed turn. Called for
-    /// both chat stores from `ConnectionService.handleMessage`, mirroring the
-    /// pre-refactor blanket reset (resetting an already-idle surface is a
-    /// harmless no-op).
-    func handleChatError() {
+    func handleChatError(commandId: String? = nil) {
         isStreaming = false
+        if let commandId { llmIdeCommandIds.remove(commandId) }
         removeTrailingEmptyAssistant(&llmIdeMessages)
     }
 }

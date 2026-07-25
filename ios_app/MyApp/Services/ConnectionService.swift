@@ -61,6 +61,16 @@ func appendToLastAssistant(_ list: inout [ChatMessage], _ chunk: String) {
     }
 }
 
+/// Replace (not append) the trailing assistant bubble — used for live status
+/// lines and the final full reply from Mac code-assist.
+func setLastAssistant(_ list: inout [ChatMessage], _ text: String) {
+    if let idx = list.lastIndex(where: { $0.role == .assistant }) {
+        list[idx].text = text
+    } else {
+        list.append(ChatMessage(role: .assistant, text: text))
+    }
+}
+
 func removeTrailingEmptyAssistant(_ list: inout [ChatMessage]) {
     if let last = list.last, last.role == .assistant, last.text.isEmpty {
         list.removeLast()
@@ -155,6 +165,8 @@ final class ConnectionService: ObservableObject {
         reconnectTask?.cancel()
         reconnectTask = nil
         if clearDirect { directIP = nil; directPIN = nil }
+        llmIdeStore?.handleChatError()
+        explorerStore?.handleChatError()
         invalidateSocket()
         connectionStatus = .disconnected
     }
@@ -236,8 +248,6 @@ final class ConnectionService: ObservableObject {
                     case .string(let str):
                         self.handleMessage(str)
                     case .data(let data):
-                        // Only text (JSON) frames are used now; the binary JPEG
-                        // screen-stream branch was removed with the remote-desktop body.
                         if let str = String(data: data, encoding: .utf8) {
                             self.handleMessage(str)
                         }
@@ -281,6 +291,14 @@ final class ConnectionService: ObservableObject {
             disconnect(clearDirect: true)
         case "explore_session_list", "explore_session_history", "explore_session_created":
             explorerStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
+        case "explore_search_reply":
+            if let reply = try? JSONDecoder().decode(ExploreSearchReply.self, from: data) {
+                explorerStore?.handleSearchReply(reply)
+            }
+        case "explore_skill_list_reply":
+            if let reply = try? JSONDecoder().decode(ExploreSkillListReply.self, from: data) {
+                explorerStore?.handleSkillSearchReply(reply)
+            }
         case "auto_task_state", "auto_task_history_reply", "auto_task_ack":
             autoTaskStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "output":
@@ -292,16 +310,17 @@ final class ConnectionService: ObservableObject {
                 explorerStore?.handleOutput(commandId: commandId, payload: payload)
             }
         case "error":
-            // CommandError serializes FLAT ({type,commandId,message}) — there is
-            // no nested `payload` — so decode the whole frame and read `.message`
-            // directly. errorMessage is a shared, shell-level surface (stays
-            // here); the streaming-flag reset + empty-placeholder cleanup is
-            // delegated to each chat store, mirroring the pre-refactor blanket
-            // reset. Resetting an already-idle surface is a harmless no-op.
             if let err = try? JSONDecoder().decode(CommandError.self, from: data) {
                 errorMessage = err.message
-                llmIdeStore?.handleChatError()
-                explorerStore?.handleChatError()
+                let cid = err.commandId
+                if let cid, llmIdeStore?.ownsCommand(cid) == true {
+                    llmIdeStore?.handleChatError(commandId: cid)
+                } else if let cid, explorerStore?.ownsCommand(cid) == true {
+                    explorerStore?.handleChatError(commandId: cid)
+                } else if cid == nil {
+                    llmIdeStore?.handleChatError()
+                    explorerStore?.handleChatError()
+                }
             }
         default:
             break

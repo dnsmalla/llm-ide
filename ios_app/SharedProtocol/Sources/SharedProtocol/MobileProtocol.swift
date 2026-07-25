@@ -42,6 +42,10 @@ public enum MobileProtocol {
         public static let exploreSessionCreated = "explore_session_created"
         public static let exploreDeleteSession = "explore_delete_session"
         public static let exploreChat = "explore_chat"
+        public static let exploreSearchFiles = "explore_search_files"
+        public static let exploreSearchReply = "explore_search_reply"
+        public static let exploreSearchSkills = "explore_search_skills"
+        public static let exploreSkillListReply = "explore_skill_list_reply"
 
         // MARK: Auto-task channel
         public static let autoTaskList = "auto_task_list"

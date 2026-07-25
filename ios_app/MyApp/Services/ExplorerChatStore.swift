@@ -15,6 +15,15 @@ final class ExplorerChatStore: ObservableObject {
     /// True while a streamed reply for THIS surface is in flight. Replaces the
     /// pre-refactor shared `llmStreaming` flag.
     @Published var isStreaming: Bool = false
+    /// Mac workspace filename search (for @file / @folder picker).
+    @Published var workspaceMatches: [ExploreWorkspaceEntry] = []
+    @Published var workspaceSearchRoot: String?
+    @Published var workspaceSearchError: String?
+    @Published var isSearchingWorkspace: Bool = false
+    /// Mac agent skill search (for /skill picker).
+    @Published var skillMatches: [ExploreSkillEntry] = []
+    @Published var skillSearchError: String?
+    @Published var isSearchingSkills: Bool = false
 
     /// Command ids whose streamed reply belongs to this transcript. Explore
     /// chat is one-in-flight, but a Set mirrors `LlmIdeChatStore` and is robust
@@ -61,34 +70,75 @@ final class ExplorerChatStore: ObservableObject {
         exploreListSessions()
     }
 
-    /// Send a chat turn within the current explorer session. The reply streams
-    /// back through the same `output`/`done` path as `LlmIdeChatStore`, routed
-    /// by `commandId` membership in `exploreCommandIds`.
-    func sendExploreChat(_ text: String, sessionId: String) {
+    /// Send a chat turn within the current explorer session. Optional `files`
+    /// carry text extracted on the iPhone; the Mac attaches them and runs the
+    /// full code-assist agent with desktop Settings.
+    func sendExploreChat(_ text: String, sessionId: String,
+                         files: [ChatFileText] = [], refs: [ExploreWorkspaceRef] = [],
+                         skills: [ExploreSkillRef] = []) {
         guard connection?.connectionStatus == .connected else { return }
-        // If the caller is chatting without a loaded session (edge case),
-        // initialize a local one bound to the provided sessionId.
         if exploreCurrent == nil {
             exploreCurrent = ExploreCurrentSession(id: sessionId, title: "Session", history: [])
         }
-        // `exploreCurrent` is a value type — mutate a local copy through the
-        // shared helper, then reassign so `@Published` fires deterministically.
+        let displayText = Self.transcriptText(text: text, refs: refs, files: files, skills: skills)
         var messages = exploreCurrent?.history ?? []
         let (id, chatHistory) = mintStreamingTurn(
             messages: &messages,
             commandIds: &exploreCommandIds,
-            userText: text
+            userText: displayText
         )
         exploreCurrent?.history = messages
         isStreaming = true
-        let chat = ExploreChat(sessionId: sessionId, commandId: id, text: text, history: chatHistory)
-        // Encode error path preserved from pre-refactor (surface message, no tear-down).
+        let chat = ExploreChat(sessionId: sessionId, commandId: id, text: text,
+                               history: chatHistory, files: files, refs: refs, skills: skills)
         if let data = try? JSONEncoder().encode(chat),
            let str = String(data: data, encoding: .utf8) {
             connection?.sendTextFrame(str)
         } else {
             connection?.errorMessage = "Failed to encode explore chat message"
         }
+    }
+
+    /// Search the Mac workspace for files/folders matching `query`.
+    func searchWorkspace(_ query: String) {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard connection?.connectionStatus == .connected, q.count >= 2 else {
+            workspaceMatches = []
+            return
+        }
+        isSearchingWorkspace = true
+        workspaceSearchError = nil
+        connection?.sendEncodable(ExploreSearchFiles(query: q))
+    }
+
+    /// Search Mac agent skills matching `query`.
+    func searchSkills(_ query: String) {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard connection?.connectionStatus == .connected, q.count >= 1 else {
+            skillMatches = []
+            return
+        }
+        isSearchingSkills = true
+        skillSearchError = nil
+        connection?.sendEncodable(ExploreSearchSkills(query: q))
+    }
+
+    private static func transcriptText(text: String, refs: [ExploreWorkspaceRef],
+                                       files: [ChatFileText], skills: [ExploreSkillRef]) -> String {
+        var parts: [String] = []
+        if !skills.isEmpty {
+            parts.append(skills.map(\.displayLabel).joined(separator: "\n"))
+        }
+        if !refs.isEmpty {
+            parts.append(refs.map(\.displayLabel).joined(separator: "\n"))
+        }
+        if !files.isEmpty {
+            parts.append(files.map { "📎 \($0.name)" }.joined(separator: "\n"))
+        }
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !body.isEmpty { parts.append(body) }
+        if parts.isEmpty { return "Run with selected Mac context." }
+        return parts.joined(separator: "\n\n")
     }
 
     // MARK: — Inbound (called by ConnectionService.receiveMessage dispatch)
@@ -120,6 +170,21 @@ final class ExplorerChatStore: ObservableObject {
         }
     }
 
+    func handleSearchReply(_ reply: ExploreSearchReply) {
+        isSearchingWorkspace = false
+        workspaceMatches = reply.matches
+        workspaceSearchRoot = reply.workspaceRoot
+        workspaceSearchError = reply.error
+    }
+
+    func handleSkillSearchReply(_ reply: ExploreSkillListReply) {
+        isSearchingSkills = false
+        skillMatches = reply.matches
+        skillSearchError = reply.error
+    }
+
+    func ownsCommand(_ id: String) -> Bool { exploreCommandIds.contains(id) }
+
     /// Handle a streamed `output` frame. Only acts when this store owns the
     /// frame's commandId: appends a `stream` chunk to the last assistant
     /// placeholder, and on `done` clears this surface's `isStreaming` flag and
@@ -127,24 +192,21 @@ final class ExplorerChatStore: ObservableObject {
     func handleOutput(commandId: String?, payload: [String: Any]) {
         let owns = commandId.map { exploreCommandIds.contains($0) } ?? false
         guard owns else { return }
+        let done = payload["done"] as? Bool ?? false
         if let chunk = payload["stream"] as? String, !chunk.isEmpty {
-            // `exploreCurrent` is a value type; mutate a local copy then
-            // reassign so `@Published` fires deterministically.
             guard var current = exploreCurrent else { return }
-            appendToLastAssistant(&current.history, chunk)
+            setLastAssistant(&current.history, chunk)
             exploreCurrent = current
         }
-        if let done = payload["done"] as? Bool, done {
+        if done {
             isStreaming = false
             if let id = commandId { exploreCommandIds.remove(id) }
         }
     }
 
-    /// Handle a top-level `error` frame: clear this surface's streaming flag
-    /// and drop the empty placeholder left by a failed turn. Called for both
-    /// chat stores from `ConnectionService.handleMessage`.
-    func handleChatError() {
+    func handleChatError(commandId: String? = nil) {
         isStreaming = false
+        if let commandId { exploreCommandIds.remove(commandId) }
         if var current = exploreCurrent {
             removeTrailingEmptyAssistant(&current.history)
             exploreCurrent = current

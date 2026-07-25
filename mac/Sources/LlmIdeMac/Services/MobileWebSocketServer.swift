@@ -145,8 +145,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
     }
 
     private func routeInbound(data: Data) {
-        // Heartbeat is handled here; everything else is forwarded to the manager
-        // (Phase 3 wires chat/commands; Phase 4/5 wire viewing/input).
+        // Heartbeat is handled here; everything else is forwarded to the manager.
         if (try? decoder.decode(Heartbeat.self, from: data)) != nil {
             Task { await self.send(HeartbeatAck(ts: Date().timeIntervalSince1970)) }
             return

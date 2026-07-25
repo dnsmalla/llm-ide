@@ -64,8 +64,36 @@ public struct ExploreChat: Codable, Equatable {
     public let commandId: String
     public let text: String
     public let history: [ChatTurn]
-    public init(sessionId: String, commandId: String, text: String, history: [ChatTurn]) {
-        self.sessionId = sessionId; self.commandId = commandId; self.text = text; self.history = history
+    /// Text extracted on the iPhone (PDF / plain text). The Mac converts these
+    /// to code-assist attachments and runs the prompt with Mac agent settings.
+    public let files: [ChatFileText]
+    /// Mac workspace paths selected on the iPhone (`@file` / `@folder`).
+    public let refs: [ExploreWorkspaceRef]
+    /// Mac agent skills selected on the iPhone (`/skill name`).
+    public let skills: [ExploreSkillRef]
+    public init(sessionId: String, commandId: String, text: String, history: [ChatTurn],
+                files: [ChatFileText] = [], refs: [ExploreWorkspaceRef] = [],
+                skills: [ExploreSkillRef] = []) {
+        self.sessionId = sessionId
+        self.commandId = commandId
+        self.text = text
+        self.history = history
+        self.files = files
+        self.refs = refs
+        self.skills = skills
     }
-    private enum CodingKeys: String, CodingKey { case type, sessionId, commandId, text, history }
+    private enum CodingKeys: String, CodingKey {
+        case type, sessionId, commandId, text, history, files, refs, skills
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sessionId = try c.decode(String.self, forKey: .sessionId)
+        commandId = try c.decode(String.self, forKey: .commandId)
+        text = try c.decode(String.self, forKey: .text)
+        history = try c.decode([ChatTurn].self, forKey: .history)
+        files = try c.decodeIfPresent([ChatFileText].self, forKey: .files) ?? []
+        refs = try c.decodeIfPresent([ExploreWorkspaceRef].self, forKey: .refs) ?? []
+        skills = try c.decodeIfPresent([ExploreSkillRef].self, forKey: .skills) ?? []
+    }
 }
