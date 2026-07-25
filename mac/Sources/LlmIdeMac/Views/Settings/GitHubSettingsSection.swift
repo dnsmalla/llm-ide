@@ -396,14 +396,14 @@ struct GitHubSettingsSection: View {
                 }
                 relink()
                 // Only when cloning STANDALONE (no active project) do we adopt
-                // the bare clone as its own LLM IDE project so "Open Folder"
+                // the bare clone as its own LLM-IDE project so "Open Folder"
                 // accepts it. A clone inside the active project's code/ is
                 // already part of that project — don't scaffold a nested one.
                 if !intoProject {
                     do {
                         try projectStore.ensureProjectScaffold(at: destURL)
                     } catch {
-                        cloneErrors[r.id] = "Cloned, but couldn't initialize LLM IDE project: \(error.localizedDescription)"
+                        cloneErrors[r.id] = "Cloned, but couldn't initialize LLM-IDE project: \(error.localizedDescription)"
                     }
                 }
                 // Prune stale entries (older clone at a different path) before

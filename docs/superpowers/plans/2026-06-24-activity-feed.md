@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give LLM IDE a single, durable, per-user record of auto-generated events (graph/memory regen, regression, issues, comments, dispatch, outcomes, meetings, email, slack), surfaced in the Mac app as an activity feed with a notification bell + unread badge.
+**Goal:** Give LLM-IDE a single, durable, per-user record of auto-generated events (graph/memory regen, regression, issues, comments, dispatch, outcomes, meetings, email, slack), surfaced in the Mac app as an activity feed with a notification bell + unread badge.
 
 **Architecture:** A new backend per-user `activity` table is the single source of truth, written through one `recordActivity` helper (mirroring the `audit_log`/`recordAudit` pattern). Backend events call `recordActivity` directly; Mac in-process events report via `POST /kb/activity`. A Mac `ActivityStore` short-polls `GET /kb/activity`, and a bell + popover render the feed with an unread badge.
 

@@ -33,7 +33,7 @@ user must attach it and you propose an `update-file`.
 ## Result shape
 
 ```json
-{ "path": "README.md", "content": "# LLM IDE\n...", "truncated": false, "bytes": 1843 }
+{ "path": "README.md", "content": "# LLM-IDE\n...", "truncated": false, "bytes": 1843 }
 ```
 
 `content` is the file's UTF-8 text (truncated past ~200 KB, flagged by

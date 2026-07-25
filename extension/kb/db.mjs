@@ -806,7 +806,6 @@ export function deleteUserCascade(userId) {
     // FK-cascade being enabled.
     counts.user_repos      = del('DELETE FROM user_repos    WHERE user_id = ?');
     counts.user_secrets    = del('DELETE FROM user_secrets  WHERE user_id = ?');
-    counts.user_settings   = del('DELETE FROM user_settings WHERE user_id = ?');
     counts.agent_feedback  = del('DELETE FROM agent_feedback WHERE user_id = ?');
     // migration 0007 — agent ask/chat transcript. No FK cascade declared, so
     // a deleted user's conversation history survived account deletion (PII

@@ -6,7 +6,7 @@ Make the Auto Tasks page feel live and unambiguous when tasks run: stream each t
 
 ## Background (current state)
 
-- `AutoCodeUpdateService.runCLI(prompt:)` (`mac/Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift:1118`) writes the CLI's stdout/stderr straight to a `FileHandle` (`~/Library/Logs/LLM IDE/auto-task-<suffix>.log`). Nothing reaches the in-memory `TaskLogStore` until `appendTail` (`:258`) reads that file's tail **after the CLI exits**. So during a run the log shows at most "— run started —"; the real output appears only at the end.
+- `AutoCodeUpdateService.runCLI(prompt:)` (`mac/Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift:1118`) writes the CLI's stdout/stderr straight to a `FileHandle` (`~/Library/Logs/llm-ide/auto-task-<suffix>.log`). Nothing reaches the in-memory `TaskLogStore` until `appendTail` (`:258`) reads that file's tail **after the CLI exits**. So during a run the log shows at most "— run started —"; the real output appears only at the end.
 - `runTaskBody` (`:207`) appends a start marker, sets `currentTask`, runs the CLI, calls `appendTail`, then a finish marker (`finishPromptTask`).
 - `AutoCodeView.templateEditor` (`mac/Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift:266`) stacks `previewSection` + `editSection` in one `ScrollView` (Preview above Edit). Structural tasks (Regression / Knowledge / Update Plan Status) have no template → render `structuralConfigSection` + an About doc.
 - The orchestrator `run()` already iterates enabled tasks via `runTaskBody`, setting `currentTask` per task; each task's output already routes to its own `logStore[task]` buffer. The left pane highlights the user-selected task but does not follow `currentTask`.

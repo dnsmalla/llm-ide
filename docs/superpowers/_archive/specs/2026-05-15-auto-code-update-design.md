@@ -46,7 +46,7 @@ Parses only the `## Actions` section (same logic as `FolderIndexer.countListItem
 
 ### 3. `ProcessedActionsRegistry`
 
-Persists to `~/Library/Application Support/LLM IDE/processed-actions.json`.
+Persists to `~/Library/Application Support/llm-ide/processed-actions.json`.
 
 ```swift
 struct RegistryEntry: Codable {
@@ -173,7 +173,7 @@ CLI binary resolved from `AICliTool` (same as `CLISettingsSection`):
 - Gemini CLI → `gemini`
 - GitHub Copilot → `gh copilot`
 
-Subprocess runs with `Process`, stdout/stderr captured to log file at `~/Library/Logs/LLM IDE/auto-code-<iid>.log`.
+Subprocess runs with `Process`, stdout/stderr captured to log file at `~/Library/Logs/llm-ide/auto-code-<iid>.log`.
 
 ---
 

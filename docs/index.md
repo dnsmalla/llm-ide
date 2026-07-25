@@ -1,9 +1,9 @@
 ---
-title: LLM IDE — Engineering Documentation
+title: LLM-IDE — Engineering Documentation
 maintainer: TBD
 ---
 
-# LLM IDE — Engineering Documentation
+# LLM-IDE — Engineering Documentation
 
 Internal engineering documentation. End-user docs and customer/admin docs live elsewhere (planned).
 

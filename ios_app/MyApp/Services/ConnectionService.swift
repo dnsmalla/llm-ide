@@ -90,9 +90,16 @@ final class ConnectionService: ObservableObject {
     weak var llmIdeStore: LlmIdeChatStore?
     weak var explorerStore: ExplorerChatStore?
     weak var autoTaskStore: AutoTaskStore?
+    /// Set at app launch so `Connected.deviceName` can update persisted pairing info.
+    weak var connectionStore: ConnectionStore?
 
     private var webSocketTask: URLSessionWebSocketTask?
     private var reconnectAttempt = 0
+    /// Bumped whenever the active socket is replaced or torn down. Receive
+    /// callbacks capture this at registration time and ignore stale results so
+    /// a cancelled connection cannot kill a newer one (the pair→disconnect loop).
+    private var connectionGeneration = 0
+    private var reconnectTask: Task<Void, Never>?
 
     private var directIP: String?
     private var directPort: Int = 3006
@@ -107,11 +114,18 @@ final class ConnectionService: ObservableObject {
     // MARK: — Connection
 
     func connectDirect(ip: String, port: Int = 3006, pin: String) {
+        if connectionStatus == .connected,
+           directIP == ip, directPort == port, directPIN == pin {
+            return
+        }
         directIP   = ip
         directPort = port
         directPIN  = pin
-        disconnect(clearDirect: false)   // cancel old socket first
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        invalidateSocket()
         connectionStatus = .connecting
+        let generation = connectionGeneration
         guard let encoded = pin.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: "ws://\(ip):\(port)/ws?pin=\(encoded)") else {
             errorMessage = "Invalid connection details"
@@ -132,18 +146,26 @@ final class ConnectionService: ObservableObject {
             errorMessage = "Failed to encode pairing message"
             disconnect(clearDirect: true)
         }
-        receiveMessage()
+        receiveMessage(generation: generation)
     }
 
     func disconnect() { disconnect(clearDirect: true) }
 
     private func disconnect(clearDirect: Bool) {
+        reconnectTask?.cancel()
+        reconnectTask = nil
         if clearDirect { directIP = nil; directPIN = nil }
+        invalidateSocket()
+        connectionStatus = .disconnected
+    }
+
+    /// Cancel heartbeat + WebSocket and invalidate in-flight receive loops.
+    private func invalidateSocket() {
+        connectionGeneration += 1
         heartbeatTask?.cancel()
         heartbeatTask = nil
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
-        connectionStatus = .disconnected
     }
 
     // MARK: — Heartbeat
@@ -158,8 +180,7 @@ final class ConnectionService: ObservableObject {
                 guard self.connectionStatus == .connected else { continue }
                 if Date().timeIntervalSince(self.lastAck) > Self.heartbeatTimeout {
                     // Connection is silently dead — force a reconnect.
-                    self.webSocketTask?.cancel(with: .goingAway, reason: nil)
-                    self.webSocketTask = nil
+                    self.invalidateSocket()
                     self.connectionStatus = .disconnected
                     self.scheduleReconnect()
                     return
@@ -167,16 +188,6 @@ final class ConnectionService: ObservableObject {
                 self.sendRaw(["type": "heartbeat"])
             }
         }
-    }
-
-    // MARK: — Commands
-
-    /// Tell the Mac to stop streaming (sent during disconnect/forget). Screen
-    /// streaming was removed with the remote-desktop body, but this is still
-    /// sent by SettingsView's "Forget this Mac" and the toolbar's Disconnect
-    /// for a clean teardown, so it is retained.
-    func stopViewing() {
-        sendRaw(["type": "stop_viewing"])
     }
 
     // MARK: — Sending (used by the feature stores)
@@ -214,30 +225,32 @@ final class ConnectionService: ObservableObject {
 
     // MARK: — Receive loop + dispatch
 
-    private func receiveMessage() {
-        webSocketTask?.receive { [weak self] result in
+    private func receiveMessage(generation: Int) {
+        guard generation == connectionGeneration, let task = webSocketTask else { return }
+        task.receive { [weak self] result in
             Task { @MainActor in
+                guard let self, generation == self.connectionGeneration else { return }
                 switch result {
                 case .success(let msg):
                     switch msg {
                     case .string(let str):
-                        self?.handleMessage(str)
+                        self.handleMessage(str)
                     case .data(let data):
                         // Only text (JSON) frames are used now; the binary JPEG
                         // screen-stream branch was removed with the remote-desktop body.
                         if let str = String(data: data, encoding: .utf8) {
-                            self?.handleMessage(str)
+                            self.handleMessage(str)
                         }
                     @unknown default: break
                     }
                 case .failure:
-                    self?.webSocketTask?.cancel(with: .normalClosure, reason: nil)
-                    self?.webSocketTask = nil
-                    self?.connectionStatus = .disconnected
-                    self?.scheduleReconnect()
+                    guard generation == self.connectionGeneration else { return }
+                    self.invalidateSocket()
+                    self.connectionStatus = .disconnected
+                    self.scheduleReconnect()
                     return
                 }
-                self?.receiveMessage()
+                self.receiveMessage(generation: generation)
             }
         }
     }
@@ -255,12 +268,15 @@ final class ConnectionService: ObservableObject {
             connectionStatus = .connected
             errorMessage = nil
             reconnectAttempt = 0
+            if let connected = try? JSONDecoder().decode(Connected.self, from: data) {
+                connectionStore?.updateDeviceName(connected.deviceName)
+            }
             startHeartbeat()
         case "heartbeat_ack":
             lastAck = Date()
         case "auth_failed":
             // Wrong PIN — reconnecting with the same PIN is pointless.
-            errorMessage = "Wrong PIN. Check the 6-digit code shown in the agent's terminal on your Mac."
+            errorMessage = "Wrong PIN. Check the 6-digit code in LLM-IDE → Settings → Mobile Control on your Mac."
             directPIN = nil
             disconnect(clearDirect: true)
         case "explore_session_list", "explore_session_history", "explore_session_created":
@@ -294,6 +310,7 @@ final class ConnectionService: ObservableObject {
 
     private func scheduleReconnect() {
         guard let ip = directIP, let pin = directPIN else { return }
+        guard reconnectTask == nil else { return }
         // Show "connecting" rather than a false "disconnected" while auto-retrying.
         connectionStatus = .connecting
         let port = directPort
@@ -302,11 +319,13 @@ final class ConnectionService: ObservableObject {
             ? 0
             : min(2_000 * Int(pow(1.5, Double(reconnectAttempt - 1))), 30_000)
         reconnectAttempt += 1
-        Task { @MainActor in
+        reconnectTask = Task { @MainActor in
             if delay > 0 {
                 try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000)
             }
-            if self.directIP != nil { self.connectDirect(ip: ip, port: port, pin: pin) }
+            guard !Task.isCancelled, self.directIP != nil else { return }
+            self.reconnectTask = nil
+            self.connectDirect(ip: ip, port: port, pin: pin)
         }
     }
 }

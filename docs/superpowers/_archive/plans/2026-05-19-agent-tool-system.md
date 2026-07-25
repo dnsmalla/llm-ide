@@ -355,7 +355,7 @@ git commit -m "feat(agent): skill loader with frontmatter validation"
 Create `extension/agent-skills/_base.md`:
 
 ```markdown
-You are the Code Assistant inside LLM IDE. You help the user understand
+You are the Code Assistant inside LLM-IDE. You help the user understand
 their codebase, search their meeting notes, and act on their behalf when
 they ask for something concrete (e.g. filing an issue).
 
@@ -1376,7 +1376,7 @@ test('full loop: real skills, mocked claude — write tool returns pendingTool',
     agentContext: {
       base,
       activeProject: { name: 'notes-extension', url: 'https://gitlab.com/example/notes', defaultBranch: 'main' },
-      indexedRepos: [{ name: 'notes-extension', path: '~/Developer/LLM IDE/notes-extension' }],
+      indexedRepos: [{ name: 'notes-extension', path: '~/Developer/llm-ide/notes-extension' }],
     },
     runClaude: fakeClaude,
     kb: { search: () => [] },
@@ -1494,7 +1494,7 @@ import Foundation
 @Test func agentContextEncodesActiveProject() throws {
     let ctx = AgentContext(
         activeProject: .init(name: "notes-extension", url: "https://gitlab.com/x/notes", defaultBranch: "main"),
-        indexedRepos: [.init(name: "notes-extension", path: "~/Developer/LLM IDE/notes-extension")]
+        indexedRepos: [.init(name: "notes-extension", path: "~/Developer/llm-ide/notes-extension")]
     )
     let data = try JSONEncoder().encode(ctx)
     let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]

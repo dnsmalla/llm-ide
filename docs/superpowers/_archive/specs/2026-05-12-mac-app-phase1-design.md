@@ -117,7 +117,7 @@ Net effect: structurally the app looks like Mail.app / Reminders.app / Notes.app
 ### 6.1 On-disk layout
 
 ```
-<NotesFolder>/                                ← default ~/Documents/LLM IDE/,
+<NotesFolder>/                                ← default ~/Documents/llm-ide/,
 │                                                 configurable in Settings
 ├── 2026/
 │   └── 05/

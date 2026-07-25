@@ -5,6 +5,7 @@ import Foundation
 /// can be inserted here without touching every call site).
 enum L {
     enum App {
-        static let name = "LLM IDE"
+        static let name = AppIdentity.displayName
+        static let slug = AppIdentity.slug
     }
 }

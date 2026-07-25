@@ -1,6 +1,6 @@
 # Help & Support — Auto Tasks & Repository Providers
 
-This section provides comprehensive guidance for using Auto Tasks and configuring your repository provider (GitHub or GitLab) in LLM IDE.
+This section provides comprehensive guidance for using Auto Tasks and configuring your repository provider (GitHub or GitLab) in LLM-IDE.
 
 ## Quick Links
 
@@ -83,7 +83,7 @@ Auto Tasks is an **automation system** that monitors your meetings for action it
 
 ## What are Repository Providers?
 
-LLM IDE integrates with **GitHub** and **GitLab** to:
+LLM-IDE integrates with **GitHub** and **GitLab** to:
 - Manage issues and tasks
 - Create code branches and commits
 - Display timeline/Gantt views
@@ -91,7 +91,7 @@ LLM IDE integrates with **GitHub** and **GitLab** to:
 
 **Why mutual exclusivity?**
 
-LLM IDE enforces that **only one provider is active at a time** because:
+LLM-IDE enforces that **only one provider is active at a time** because:
 
 1. **Simplified mental model** — You always know where issues go
 2. **No duplicate work** — Auto Tasks don't create issues twice
@@ -100,7 +100,7 @@ LLM IDE enforces that **only one provider is active at a time** because:
 
 **Can I use both?**
 
-- **Yes, you can configure both** — LLM IDE remembers both GitHub and GitLab credentials
+- **Yes, you can configure both** — LLM-IDE remembers both GitHub and GitLab credentials
 - **But only one is active** — Whichever you set last becomes the primary provider
 - **Switching is instant** — Your GitHub credentials persist; switch back anytime
 
@@ -145,7 +145,7 @@ For security, most destructive operations require review before executing.
 
 A: No. Auto Tasks need:
 1. Connection to your repository (GitHub/GitLab API)
-2. Connection to LLM IDE server (for AI model calls)
+2. Connection to LLM-IDE server (for AI model calls)
 3. Local repository clone (for git operations)
 
 **Q: Can I disable Auto Tasks without losing my settings?**
@@ -167,15 +167,15 @@ A: Yes, but it's not recommended. The current run will complete against the old 
 
 **Q: What if my token expires?**
 
-A: LLM IDE will notify you with an error. Regenerate your token on GitHub/GitLab and update it in Settings. Auto Tasks won't run again until you do.
+A: LLM-IDE will notify you with an error. Regenerate your token on GitHub/GitLab and update it in Settings. Auto Tasks won't run again until you do.
 
 **Q: Why doesn't Gantt work with GitHub?**
 
-A: GitHub doesn't expose timeline/milestone data in a way that works with LLM IDE's Gantt visualization. GitLab's project roadmap features map directly to Gantt. We're exploring GitHub support in a future version.
+A: GitHub doesn't expose timeline/milestone data in a way that works with LLM-IDE's Gantt visualization. GitLab's project roadmap features map directly to Gantt. We're exploring GitHub support in a future version.
 
 **Q: Can I use a self-hosted GitHub or GitLab?**
 
-A: Yes, but you might need to specify a custom endpoint URL (e.g., `https://github.mycompany.com`). Check if LLM IDE shows an option for "Custom Endpoint" or "Server URL" in Settings.
+A: Yes, but you might need to specify a custom endpoint URL (e.g., `https://github.mycompany.com`). Check if LLM-IDE shows an option for "Custom Endpoint" or "Server URL" in Settings.
 
 **Q: How do I rotate my credentials safely?**
 
@@ -190,7 +190,7 @@ No data is lost; the switch is instant.
 
 **Q: What if I accidentally delete my GitHub PAT or GitLab token?**
 
-A: LLM IDE can't recover it (GitHub/GitLab don't store it either). Generate a new one and update Settings.
+A: LLM-IDE can't recover it (GitHub/GitLab don't store it either). Generate a new one and update Settings.
 
 ## Detailed Guides
 
@@ -221,7 +221,7 @@ If your question isn't answered above:
    - Error message or unexpected behavior
    - Screenshot of settings
    - Relevant log files (sanitize tokens first)
-   - Your LLM IDE version (Help → About)
+   - Your LLM-IDE version (Help → About)
 
 ## Related Topics
 

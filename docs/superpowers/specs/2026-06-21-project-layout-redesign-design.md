@@ -135,7 +135,7 @@ Folder-name constants (`"source"`, `"system"`, etc.) live ONLY here.
 ### `.gitignore` managed block (new)
 
 ```
-# >>> LLM IDE managed
+# >>> LLM-IDE managed
 system/cache/
 system/index.sqlite
 system/index.sqlite-shm
@@ -143,7 +143,7 @@ system/index.sqlite-wal
 system/graph/
 system/sync.json
 *.partial.md
-# <<< LLM IDE managed
+# <<< LLM-IDE managed
 ```
 `system/faults/` and `system/project.json` are **committed** (faults + settings
 are durable, shareable knowledge). `system/graph/` is regenerable → ignored.

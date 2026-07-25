@@ -10,13 +10,19 @@ final class ConnectionStore: ObservableObject {
     @Published var deviceIP: String
     @Published var devicePort: Int
     @Published var devicePIN: String
+    /// Friendly Mac name from the server's `Connected` frame (e.g. "Dinesh's MacBook").
+    @Published private(set) var deviceName: String = ""
 
     var hasDevice: Bool { !deviceIP.isEmpty && !devicePIN.isEmpty }
+
+    /// Title for the paired home screen — prefers the Mac name over raw IP.
+    var displayName: String { deviceName.isEmpty ? deviceIP : deviceName }
 
     init() {
         deviceIP   = defaults.string(forKey: "agent_ip")  ?? ""
         let saved  = defaults.integer(forKey: "agent_port")
         devicePort = saved > 0 ? saved : 3006
+        deviceName = defaults.string(forKey: "agent_device_name") ?? ""
 
         // Migrate a PIN stored by older versions in UserDefaults (plaintext).
         if let legacy = defaults.string(forKey: "agent_pin"), !legacy.isEmpty {
@@ -35,12 +41,21 @@ final class ConnectionStore: ObservableObject {
         PinKeychain.save(pin)
     }
 
+    func updateDeviceName(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        deviceName = trimmed
+        defaults.set(trimmed, forKey: "agent_device_name")
+    }
+
     func clear() {
         deviceIP   = ""
         devicePIN  = ""
         devicePort = 3006
+        deviceName = ""
         defaults.removeObject(forKey: "agent_ip")
         defaults.removeObject(forKey: "agent_port")
+        defaults.removeObject(forKey: "agent_device_name")
         PinKeychain.delete()
     }
 }

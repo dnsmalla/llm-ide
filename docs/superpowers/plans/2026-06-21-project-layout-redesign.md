@@ -83,7 +83,7 @@ struct ProjectLayoutTests {
 // mac/Sources/LlmIdeMac/Services/ProjectLayout.swift
 import Foundation
 
-/// Single source of truth for every canonical path inside a LLM IDE project.
+/// Single source of truth for every canonical path inside a LLM-IDE project.
 /// All folder-name string literals live HERE and nowhere else, so the layout
 /// can be changed in one place.
 ///
@@ -275,7 +275,7 @@ Change the `.gitkeep` dirs line to:
 Replace `managedGitignoreBlock` with:
 ```swift
     private static let managedGitignoreBlock = """
-    # >>> LLM IDE managed (auto-generated / ephemeral) — edit your own rules above
+    # >>> LLM-IDE managed (auto-generated / ephemeral) — edit your own rules above
     system/cache/
     system/index.sqlite
     system/index.sqlite-shm
@@ -283,7 +283,7 @@ Replace `managedGitignoreBlock` with:
     system/graph/
     system/sync.json
     *.partial.md
-    # <<< LLM IDE managed
+    # <<< LLM-IDE managed
     """
 ```
 In `makeReadme(...)`, replace the `## Folder Structure` fenced block with:
@@ -293,7 +293,7 @@ In `makeReadme(...)`, replace the `## Folder Structure` fenced block with:
 ├── code/     ← code files
 ├── data/     ← documents, data files, images
 ├── notes/    ← notes generated from meetings/email
-└── system/   ← LLM IDE managed: settings, faults, graph, index (most git-ignored)
+└── system/   ← LLM-IDE managed: settings, faults, graph, index (most git-ignored)
 ```
 (Drop the Plans section of the README; keep the Meetings section but point it at `source/`.)
 

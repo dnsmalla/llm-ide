@@ -453,7 +453,7 @@ const DEBUG = (() => {
 export function debug(...args: unknown[]): void {
   // Intentional console.log — this is the debug channel, gated behind DEBUG.
   // eslint-disable-next-line no-console
-  if (DEBUG) console.log('[LLM IDE]', ...args);
+  if (DEBUG) console.log('[LLM-IDE]', ...args);
 }
 
 // Timing constants used across the extension

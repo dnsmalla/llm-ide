@@ -1,10 +1,9 @@
 import SwiftUI
 import SharedProtocol
 
-/// Native iOS view for the Mac-side "Auto Tasks" surface: the master enable
-/// switch, per-task toggles + single-run buttons, run/stop controls, the live
-/// status + created/implemented/failed counts, and recent run history. Mirrors
-/// the Mac's Auto Tasks tab through the same per-feature-store bridge Task 7 wired.
+/// Native iOS view for the Mac-side Auto Tasks surface: master enable, per-task
+/// toggles, run/stop controls, live status counts, and run history. Proxied
+/// through the paired Mac WebSocket to the Mac auto-task runner.
 ///
 /// Styling mirrors `ExplorerChatView` / `LlmIdeControlView` (DesignSystem tokens,
 /// connection/error banners, "Done" dismiss) so all three sheets feel like one

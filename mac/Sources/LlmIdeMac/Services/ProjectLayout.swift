@@ -1,6 +1,6 @@
 import Foundation
 
-/// Single source of truth for every canonical path inside a LLM IDE project.
+/// Single source of truth for every canonical path inside a LLM-IDE project.
 /// All folder-name string literals live HERE and nowhere else, so the layout
 /// can be changed in one place.
 ///

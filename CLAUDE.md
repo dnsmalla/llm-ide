@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Product naming:** user-visible **LLM-IDE**, repo slug **llm-ide**, code types **LlmIde**, wire/bundle **llmide** — see [ADR 0016](docs/decisions/0016-naming-convention.md).
+
 ## Common Commands
 
 ### Development & Building
@@ -59,12 +61,12 @@ swift test --filter testAuthFlow                  # Filter by test name
 
 ## Architecture Overview
 
-LLM IDE is a **local-first AI meeting intelligence system** comprising four surfaces that share a single backend:
+LLM-IDE is a **local-first AI meeting intelligence system** comprising four surfaces that share a single backend:
 
 1. **Chrome Extension** (React 18 + TypeScript + Vite) — Meeting capture via platform captions, side panel UI
 2. **macOS App** (SwiftUI) — Native capture via Accessibility API, full KB + Issues + Gantt + Code Assistant
 3. **Local Server** (Node 20+, pure HTTP) — Bound to 127.0.0.1:3456, handles AI orchestration and data persistence
-4. **Mobile Control** (iOS + Node.js) — Remote desktop + LLM IDE chat via existing auto_swift_aicontrol system
+4. **Mobile Control** (iOS + Mac native) — iPhone companion for chat, explorer, and auto-tasks
 
 ### Core Data Flow
 
@@ -182,92 +184,74 @@ Swift type suffixes communicate role — pick matching suffix when adding new ty
 
 ## Mobile Control System
 
-LLM IDE includes mobile control capabilities using the existing `auto_swift_aicontrol` system (located at `~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/`).
+LLM-IDE includes a native mobile companion: the **Mac app** runs a WebSocket server on `:3006` (Bonjour `_llmide._tcp` + PIN pairing), and the **iOS app** in `ios_app/` connects as a client. Chat requests are proxied to the local backend at `http://127.0.0.1:3456`.
+
+> The external Node `computer-agent` (`auto_swift_aicontrol`) is **retired**. Remote desktop / screen streaming / input injection were cancelled; the iPhone is a chat/explorer/auto-tasks companion only.
 
 ### Architecture
 
 ```
-iPhone App (SwiftUI)
+iPhone App (SwiftUI, ios_app/)
     │ Bonjour + WebSocket + PIN auth
     ▼
-Computer Agent (Node.js @ :3006)
-    │ WebSocket server
-    ├──► Screen capture (screenshot-desktop)
-    ├──► Input injection (@nut-tree-fork/nut-js)
-    └──► LLM IDE API client (http://127.0.0.1:3456)
+LLM-IDE Mac app (native NWListener WebSocket on :3006)
+    │ MobileControlManager.handleInbound
+    ├──► LLM-IDE Chat → LlmIdeAPIClient (:3456)
+    ├──► Explorer sessions → ChatSessionStore
+    └──► Auto Tasks → AutoCodeUpdateService / AutoTaskSettings
         │
         ▼
-LLM IDE Server (Node.js @ :3456)
+LLM-IDE Server (Node.js @ :3456)
     └── Main backend server
 ```
 
 ### Quick Start
 
 ```bash
-# Terminal 1: Start LLM IDE server
+# Terminal 1: Start LLM-IDE server
 cd ~/llm-ide/extension && node server.mjs
 
-# Terminal 2: Start computer agent
-cd ~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/services/computer-agent && npm start
+# Terminal 2: Mac app — Settings → Mobile Control → Start
+# (or launch LlmIdeMac with mobile control auto-start enabled)
 
-# Terminal 3: Open iOS app (Xcode)
-cd ~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/apps/ios && open MyApp.xcodeproj
-# Run on physical iPhone (same Wi-Fi)
+# Terminal 3: iOS app (Xcode)
+cd ~/llm-ide/ios_app && open MyApp.xcodeproj
+# Run on physical iPhone (same Wi-Fi or Tailscale)
 ```
 
 ### Features
 
-- **Remote Desktop** - Screen streaming (800×600 @ 10fps) + touch control
-- **LLM IDE Chat** - Ask questions, get responses on mobile
-- **Meeting Assistant** - AI co-pilot during video calls
-- **Device Discovery** - Automatic Bonjour/mDNS discovery
-- **PIN Authentication** - 6-digit PIN + QR code fallback
-- **Input Control** - Mouse + keyboard via @nut-tree-fork/nut-js
-
-### Configuration
-
-Computer agent uses `.env` file:
-```bash
-PORT=3006
-PIN=123456
-LLMIDE_URL=http://127.0.0.1:3456
-LLMIDE_EMAIL=your@email.com
-LLMIDE_PASSWORD=yourpassword
-```
+- **LLM-IDE Chat** — Ask questions from iPhone (streamed via Mac → :3456)
+- **Explorer** — List and chat with Mac explorer sessions
+- **Auto Tasks** — Toggle and inspect scheduled auto-code tasks
+- **Device Discovery** — Bonjour/mDNS (`_llmide._tcp`) or Direct IP + PIN
+- **PIN Authentication** — 6-digit PIN + QR code (`llmide://pair?…`)
 
 ### Permissions Required
 
-- **macOS**: Screen Recording + Accessibility (System Settings → Privacy & Security)
-- **iOS**: Local Network (for Bonjour discovery)
+- **macOS**: None for mobile chat (Accessibility/Screen Recording are for caption capture elsewhere, not mobile pairing)
+- **iOS**: Local Network (Bonjour discovery)
 
 ### Documentation
 
 - **Quick Start**: `docs/mobile/quick-start.md`
 - **Verification**: `docs/mobile/verification.md`
-- **Verification Script**: `scripts/mobile/verify-mobile-control.sh`
-- **Integration Plan**: `docs/compact-mobile-integration.md`
-- **Complete Summary**: `docs/mobile-control-complete.md`
-- **Original System**: `~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/`
+- **Loopback check**: `scripts/mobile/verify-native-pairing.swift`
+- **Historical (Node agent)**: `docs/archive/compact-mobile-integration.md`, `docs/archive/mobile-control-complete.md`
 
-### Key Files (Computer Agent)
+### Key Files (Mac)
 
 ```
-~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/services/computer-agent/
-├── src/index.ts              # Entry point (Bonjour, QR code, server startup)
-├── src/server.ts             # WebSocket server with PIN auth
-├── src/llmide-client.ts     # LLM IDE API client
-├── src/command-handler.ts   # Command routing
-└── .env                      # Configuration (PIN, port, etc.)
-```
+mac/Sources/LlmIdeMac/Services/
+├── MobileControlManager.swift   # WebSocket dispatch + backend proxy
+├── MobileWebSocketServer.swift  # NWListener on :3006
+├── MobileBonjourAdvertiser.swift
+└── MobilePin.swift              # Pairing PIN (Keychain)
 
-### Key Files (iOS App)
-
-```
-~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/apps/ios/MyApp/
-├── MyAppApp.swift           # App entry point
-├── Views/ContentView.swift  # Remote desktop UI
-├── Services/ControlService.swift  # WebSocket client
-└── Services/DeviceDiscovery.swift  # Bonjour discovery
+ios_app/SharedProtocol/          # Codable wire types (Mac + iOS)
+ios_app/MyApp/Services/
+├── ConnectionService.swift      # WebSocket client + pairing
+└── DeviceDiscovery.swift        # Bonjour browser
 ```
 
 ## Entry Points for Development
@@ -284,8 +268,8 @@ LLMIDE_PASSWORD=yourpassword
 | Add new tab | `TABS` array in `extension/src/sidepanel/App.tsx` + new panel block |
 | Persist meeting data | Extend `SavedTranscript` in `extension/src/lib/storage.ts`; write in `stopRecording()` |
 | Install agent skills into a user project | Auto on New Project / Rebuild via `POST /kb/project/install-skills` (`extension/kb/install-project-skills.mjs`); kit lives in `.skills` |
-| Add mobile control feature | Modify `~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/services/computer-agent/src/` (computer agent) or `~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/apps/ios/MyApp/` (iOS app) |
-| Extend LLM IDE mobile API | Add endpoint to `extension/server.mjs` + expose via `llmide-client.ts` in computer agent |
+| Add mobile control feature | `mac/Sources/LlmIdeMac/Services/MobileControlManager.swift` (Mac dispatch) + `ios_app/MyApp/Services/ConnectionService.swift` (iOS client) + `ios_app/SharedProtocol/` (wire types) |
+| Extend LLM-IDE mobile API | Add endpoint to `extension/server.mjs` + expose via `LlmIdeAPIClient` on Mac (mobile chat proxies through Mac app) |
 
 ### Starting Points for Reading
 
@@ -296,7 +280,7 @@ LLMIDE_PASSWORD=yourpassword
 - **Agent-loop tool defs** — `extension/llm_agent/{global,internal/skills}/` (mirrors of central)
 - **Mac app entry** — `mac/Sources/LlmIdeMac/LlmIdeMacApp.swift`
 - **Mac services** — `mac/Sources/LlmIdeMac/Services/` (follow suffix taxonomy)
-- **Mobile control** — `docs/mobile/quick-start.md` → `docs/compact-mobile-integration.md` → `~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/`
+- **Mobile control** — `docs/mobile/quick-start.md` → `mac/Sources/LlmIdeMac/Services/MobileControlManager.swift` → `ios_app/SharedProtocol/`
 
 ## Testing Checklist
 

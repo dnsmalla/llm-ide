@@ -4,7 +4,7 @@ title: Runbooks
 
 # Runbooks
 
-Incident-response and recovery procedures for the LLM IDE server. Each
+Incident-response and recovery procedures for the LLM-IDE server. Each
 runbook follows the same shape:
 
 1. **Symptom** — what the operator sees

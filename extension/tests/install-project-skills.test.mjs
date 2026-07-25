@@ -48,7 +48,7 @@ test('assertInstallableProjectPath rejects relative / missing / non-project', ()
   assert.throws(() => assertInstallableProjectPath('/no/such/path-' + Date.now()), /does not exist|not accessible/);
   const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-bare-'));
   try {
-    assert.throws(() => assertInstallableProjectPath(bare), /not a LLM IDE project/);
+    assert.throws(() => assertInstallableProjectPath(bare), /not a LLM-IDE project/);
   } finally {
     fs.rmSync(bare, { recursive: true, force: true });
   }

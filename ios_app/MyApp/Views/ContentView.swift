@@ -10,7 +10,7 @@ struct ContentView: View {
             // (toolbar + Chat/Explore/Auto sheets). Shows a spinner while
             // (re)connecting.
             NavigationStack {
-                MobileHomeView(deviceName: connectionStore.deviceIP)
+                MobileHomeView(deviceName: connectionStore.displayName)
                     .onAppear {
                         // Re-establish connection if not already connected.
                         if connection.connectionStatus == .disconnected {

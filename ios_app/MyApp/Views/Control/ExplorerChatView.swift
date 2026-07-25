@@ -1,9 +1,9 @@
 import SwiftUI
 import SharedProtocol
 
-/// Native iOS view for the Mac-side "explorer chat" sessions: browse/create/load
-/// persistent sessions, read their transcript, and send new turns. Mirrors the
-/// Mac's explorer chat through the same per-feature-store bridge Task 7 wired.
+/// Native iOS view for the Mac-side explorer-chat sessions: browse/create/load
+/// persistent sessions, read their transcript, and send new turns. Proxied
+/// through the paired Mac WebSocket to `ChatSessionStore` on the Mac.
 ///
 /// Styling mirrors `LlmIdeControlView` (DesignSystem colors/typography, bubble
 /// layout, input bar) so the two chats feel like one surface. The session list

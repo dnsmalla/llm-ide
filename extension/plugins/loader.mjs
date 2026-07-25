@@ -11,9 +11,9 @@
 //                        a prompt template with {{argName}} slots.
 //
 // Plugins live under the OS-standard per-user data directory:
-//   ~/Library/Application Support/LLM IDE/plugins/   (macOS)
+//   ~/Library/Application Support/llm-ide/plugins/   (macOS; legacy: LLM IDE)
 //   $XDG_DATA_HOME/llmide/plugins/                  (Linux)
-//   %APPDATA%\LLM IDE\plugins\                       (Windows)
+//   %APPDATA%\llm-ide\plugins\                       (Windows; legacy: LLM IDE)
 //
 // Per-user enable state is stored in the existing user_secrets vault
 // under the synthetic key 'plugins.enabled' (JSON array of plugin
@@ -76,12 +76,25 @@ export function defaultPluginDir() {
   if (process.env.LLMIDE_PLUGIN_DIR) return process.env.LLMIDE_PLUGIN_DIR;
   const home = os.homedir();
   if (process.platform === 'darwin') {
-    return join(home, 'Library', 'Application Support', 'LLM IDE', 'plugins');
+    return resolveSupportSubdir(home, 'Library/Application Support', 'plugins');
   }
   if (process.platform === 'win32') {
-    return join(process.env.APPDATA || join(home, 'AppData', 'Roaming'), 'LLM IDE', 'plugins');
+    const base = process.env.APPDATA || join(home, 'AppData', 'Roaming');
+    const canonical = join(base, 'llm-ide', 'plugins');
+    const legacy = join(base, 'LLM IDE', 'plugins');
+    if (existsSync(legacy) && !existsSync(join(base, 'llm-ide'))) return legacy;
+    return canonical;
   }
   return join(process.env.XDG_DATA_HOME || join(home, '.local', 'share'), 'llmide', 'plugins');
+}
+
+/** Prefer `llm-ide/`; fall back to legacy `LLM IDE/` when only that exists. */
+function resolveSupportSubdir(home, supportRelative, subdir, { absoluteBase } = {}) {
+  const base = absoluteBase ?? join(home, ...supportRelative.split('/'));
+  const canonical = join(base, 'llm-ide', subdir);
+  const legacy = join(base, 'LLM IDE', subdir);
+  if (existsSync(legacy) && !existsSync(join(base, 'llm-ide'))) return legacy;
+  return canonical;
 }
 
 function parseFrontmatter(raw) {

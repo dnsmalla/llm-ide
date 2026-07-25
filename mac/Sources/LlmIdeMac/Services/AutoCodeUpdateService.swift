@@ -264,7 +264,7 @@ final class AutoCodeUpdateService: ObservableObject {
             taskErrors.removeValue(forKey: task.rawValue)
             logStore.append(task, "— run finished —")
         } else {
-            taskErrors[task.rawValue] = "\(task.label) task failed. Check ~/Library/Logs/LLM IDE/auto-task-\(task.logSuffix).log"
+            taskErrors[task.rawValue] = "\(task.label) task failed. Check ~/Library/Logs/\(AppIdentity.logsDirName)/auto-task-\(task.logSuffix).log"
             logStore.append(task, "— run failed —", level: .error)
         }
     }
@@ -1442,16 +1442,7 @@ final class AutoCodeUpdateService: ObservableObject {
     }
 
     private func logsDirectory() -> URL? {
-        guard let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first else {
-            return nil
-        }
-        let url = base.appendingPathComponent("Logs/LLM IDE")
-        do {
-            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        } catch {
-            log.error("Failed to create logs directory \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            return nil
-        }
+        let url = AppIdentity.logsRoot()
         return url
     }
 }

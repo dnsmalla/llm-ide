@@ -127,7 +127,7 @@ mkdir -p extension/llm_agent/runtime/handlers
 ```markdown
 # llm_agent
 
-All agent runtime for the LLM IDE Code Assistant lives here. Two
+All agent runtime for the LLM-IDE Code Assistant lives here. Two
 agents share one engine:
 
 - `global/` — the front-line agent. Lean prompt, one tool
@@ -1012,7 +1012,7 @@ Goal: replace today's monolithic skill `_base.md` with two pieces — a role-and
 Create `extension/llm_agent/internal/prompt.md`:
 
 ```markdown
-You are the LLM IDE internal agent. You answer questions and
+You are the LLM-IDE internal agent. You answer questions and
 perform actions about THIS specific app's state — its GitLab
 project, library, issues, meetings, action items, decisions, and
 indexed code — on behalf of an upstream caller (the global
@@ -1167,7 +1167,7 @@ test('composeInternalPrompt includes role, system context, base, and all skill b
       recentMeetings: [],
     },
   });
-  assert.match(prompt, /LLM IDE internal agent/);   // from prompt.md
+  assert.match(prompt, /LLM-IDE internal agent/);   // from prompt.md
   assert.match(prompt, /# System context/);
   assert.match(prompt, /## Active GitLab project/);
   assert.match(prompt, /#1 colourful/);
@@ -1278,9 +1278,9 @@ Goal: write the global prompt + its one skill, and implement the `ask-internal` 
 Create `extension/llm_agent/global/prompt.md`:
 
 ```markdown
-You are the Code Assistant for LLM IDE. You answer the user
+You are the Code Assistant for LLM-IDE. You answer the user
 directly using your general engineering knowledge, and delegate
-to the internal LLM IDE agent when the user's request touches
+to the internal LLM-IDE agent when the user's request touches
 THIS specific app — its project, library, issues, meetings, or
 any other application state.
 
@@ -1368,7 +1368,7 @@ schema:
 
 # ask-internal
 
-Delegate to the LLM IDE internal agent — the only authority on
+Delegate to the LLM-IDE internal agent — the only authority on
 this app's state.
 
 ## When to use
@@ -1445,7 +1445,7 @@ const GLOBAL_SKILLS_DIR = join(__dirname, '..', 'llm_agent', 'global');
 test('composeGlobalPrompt is lean — no system context, only role + ask-internal skill', () => {
   const skills = loadSkills(GLOBAL_SKILLS_DIR);
   const prompt = composeGlobalPrompt({ skills: skills.skills });
-  assert.match(prompt, /Code Assistant for LLM IDE/);
+  assert.match(prompt, /Code Assistant for LLM-IDE/);
   assert.match(prompt, /# ask-internal/);
   // Regression guard: no app-specific context leaks into global.
   assert.doesNotMatch(prompt, /## Active GitLab project/);
@@ -1565,7 +1565,7 @@ export function composeGlobalPrompt({ skills }) {
 Create `extension/llm_agent/runtime/handlers/ask-internal.mjs`:
 
 ```javascript
-// Read handler: delegates a question to the internal LLM IDE
+// Read handler: delegates a question to the internal LLM-IDE
 // agent. Runs a fresh internal sub-loop and bundles its
 // {reply, pendingTool} as {answer, pendingTool} for global to read.
 
@@ -2054,7 +2054,7 @@ test('e2e: regression guard — global never sees app-specific context', async (
   const globalPrompt = promptsSeen[0];
   assert.doesNotMatch(globalPrompt, /TopSecretTitle/);
   assert.doesNotMatch(globalPrompt, /## Recent open issues/);
-  assert.match(globalPrompt, /Code Assistant for LLM IDE/);
+  assert.match(globalPrompt, /Code Assistant for LLM-IDE/);
   // Second runClaude call is internal's first turn.
   const internalPrompt = promptsSeen[1];
   assert.match(internalPrompt, /TopSecretTitle/);
@@ -2062,7 +2062,7 @@ test('e2e: regression guard — global never sees app-specific context', async (
   // Internal MUST receive its role-and-rules prompt. If this assertion
   // ever fails, the askInternal handler stopped concatenating
   // internal/prompt.md into agentContext.base.
-  assert.match(internalPrompt, /LLM IDE internal agent/);
+  assert.match(internalPrompt, /LLM-IDE internal agent/);
 });
 ```
 
@@ -2201,7 +2201,7 @@ applies_to: server, extension, mac
 
 ## Goal
 
-Teach the internal LLM IDE agent a new capability — either a read (server-executed) or a write (client-confirmed).
+Teach the internal LLM-IDE agent a new capability — either a read (server-executed) or a write (client-confirmed).
 
 > The **global** agent has only one skill (`ask-internal`). Don't add skills there — they'd defeat the token-savings goal. All app-aware capabilities live on internal.
 

@@ -391,7 +391,7 @@ The table below maps every Apple-only dependency to its source location and a po
 | Port listener lookup | `/usr/sbin/lsof -ti :<port> -sTCP:LISTEN` launched via `Process` | `Services/BackendManager.swift:BackendManager.killExternalListener()` (line 457) | REPLACE |
 | Terminal emulator | SwiftTerm `LocalProcessTerminalView` | `Views/Terminal/TerminalSessionView.swift:TerminalSessionView` (line 8) | REPLACE |
 | Auto-update | Sparkle (`SPUStandardUpdaterController`, `SUFeedURL`, `SUPublicEDKey`) | `Services/UpdateService.swift:UpdateService` | REPLACE |
-| App-support paths | `FileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)` | `Services/LibraryItemStore.swift` (line 32) — `LLM IDE/library_items.json`; `Services/ChatSessionStore.swift` (line 17) — `LLM IDE/sessions/<uuid>.json`; `Models/Config.swift` (line 19) — corrupt-config stash under `LLM IDE/` | ABSTRACT |
+| App-support paths | `FileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)` | `Services/LibraryItemStore.swift` (line 32) — `LLM-IDE/library_items.json`; `Services/ChatSessionStore.swift` (line 17) — `LLM-IDE/sessions/<uuid>.json`; `Models/Config.swift` (line 19) — corrupt-config stash under `LLM-IDE/` | ABSTRACT |
 | Screen recording probe | `CGPreflightScreenCaptureAccess()` | `Services/PermissionsService.swift:PermissionsService.refreshScreenRecording()` (line 33) | REPLACE |
 | System Settings deep links | `x-apple.systempreferences:…` URL scheme via `NSWorkspace.shared.open` | `Services/PermissionsService.swift:PermissionsService.openSystemSettings(pane:)` (line 89) | REPLACE |
 

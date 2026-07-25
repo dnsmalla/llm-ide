@@ -1,6 +1,6 @@
 # Configure GitHub & GitLab
 
-LLM IDE supports both GitHub and GitLab, but enforces **mutual exclusivity**: only one provider can be active at a time across all features (Issues, Gantt, Auto Tasks, Code Workflows).
+LLM-IDE supports both GitHub and GitLab, but enforces **mutual exclusivity**: only one provider can be active at a time across all features (Issues, Gantt, Auto Tasks, Code Workflows).
 
 This guide explains how to choose a provider, configure credentials, and switch between them.
 
@@ -52,12 +52,12 @@ Why only one provider? Because:
 
 1. Go to [github.com/settings/tokens](https://github.com/settings/tokens)
 2. Click **Generate new token → Generate new token (classic)**
-3. Name it: "LLM IDE"
+3. Name it: "LLM-IDE"
 4. Set expiration: 90 days (rotate before expiry)
 
 #### Step 2: Select Required Scopes
 
-LLM IDE needs these permissions:
+LLM-IDE needs these permissions:
 
 - **`repo`** — Full control of private repositories
   - Needed for: read/write issues, comments, creating branches
@@ -74,12 +74,12 @@ Recommended scopes for most users:
 
 1. Click **Generate token**
 2. **Copy immediately** — GitHub won't show it again
-3. Paste into LLM IDE **Settings → GitHub → API Token**
+3. Paste into LLM-IDE **Settings → GitHub → API Token**
 4. Click **Verify & Save**
 
 ### Verify Your Configuration
 
-After saving, LLM IDE will:
+After saving, LLM-IDE will:
 1. Check token validity
 2. Fetch your available repositories
 3. Verify the local clone path exists
@@ -125,10 +125,10 @@ Once configured, GitHub enables:
 GitHub recommends rotating tokens every 90 days:
 
 1. Go to [github.com/settings/tokens](https://github.com/settings/tokens)
-2. Find your "LLM IDE" token
+2. Find your "LLM-IDE" token
 3. Click **Regenerate token**
 4. Copy the new token
-5. Update LLM IDE **Settings → GitHub → API Token**
+5. Update LLM-IDE **Settings → GitHub → API Token**
 6. Click **Verify & Save**
 7. Return to GitHub and delete the old token
 
@@ -140,13 +140,13 @@ GitHub recommends rotating tokens every 90 days:
 
 1. Go to [gitlab.com/-/user_settings/personal_access_tokens](https://gitlab.com/-/user_settings/personal_access_tokens)
 2. Click **Add new token**
-3. Name: "LLM IDE"
+3. Name: "LLM-IDE"
 4. Expiration: 90 days (rotate before expiry)
 5. Select scopes (see next step)
 
 #### Step 2: Select Required Scopes
 
-LLM IDE needs these permissions:
+LLM-IDE needs these permissions:
 
 - **`api`** — Full API access
   - Needed for: read/write issues, merge requests, pipelines
@@ -166,12 +166,12 @@ Recommended scopes:
 
 1. Click **Create personal access token**
 2. **Copy immediately** — GitLab won't show it again
-3. Paste into LLM IDE **Settings → GitLab → API Token**
+3. Paste into LLM-IDE **Settings → GitLab → API Token**
 4. Click **Verify & Save**
 
 ### Verify Your Configuration
 
-After saving, LLM IDE will:
+After saving, LLM-IDE will:
 1. Check token validity
 2. Fetch your available projects
 3. Verify the local clone path
@@ -219,10 +219,10 @@ Once configured, GitLab enables:
 GitLab recommends rotating tokens every 90 days:
 
 1. Go to [gitlab.com/-/user_settings/personal_access_tokens](https://gitlab.com/-/user_settings/personal_access_tokens)
-2. Find your "LLM IDE" token
+2. Find your "LLM-IDE" token
 3. Click the **Revoke** button
 4. Create a new token (repeat Step 1–3 above)
-5. Update LLM IDE **Settings → GitLab → API Token**
+5. Update LLM-IDE **Settings → GitLab → API Token**
 6. Click **Verify & Save**
 
 ## Switching Providers
@@ -288,12 +288,12 @@ If you don't see these fields, contact support — your instance may need specia
 1. Generate a new token on GitHub/GitLab
 2. Ensure it hasn't expired
 3. Verify required scopes are selected
-4. Paste the new token into LLM IDE
+4. Paste the new token into LLM-IDE
 5. Click **Verify & Save**
 
 ### "Repository not found"
 
-**Cause:** LLM IDE can't access the repo with your token.
+**Cause:** LLM-IDE can't access the repo with your token.
 
 **Fixes:**
 - **Check the project path:**
@@ -318,7 +318,7 @@ If you don't see these fields, contact support — your instance may need specia
    # GitLab
    git clone https://gitlab.com/group/project /path/to/repo
    ```
-4. Update LLM IDE with the correct path
+4. Update LLM-IDE with the correct path
 5. Click **Verify & Save**
 
 ### "Can't switch providers"
@@ -326,7 +326,7 @@ If you don't see these fields, contact support — your instance may need specia
 **Cause:** Might be a transient issue or state corruption.
 
 **Fix:**
-1. Close and reopen LLM IDE
+1. Close and reopen LLM-IDE
 2. Try switching again
 3. If still stuck, clear provider settings and reconfigure
 4. Contact support if the issue persists
@@ -348,7 +348,7 @@ If you don't see these fields, contact support — your instance may need specia
 - **Use fine-grained tokens** (GitHub) — Grant only needed permissions
 - **Revoke old tokens immediately** — Don't leave stale tokens active
 - **Use strong, unique tokens** — Don't reuse across tools
-- **Store tokens securely** — LLM IDE keeps them in macOS Keychain
+- **Store tokens securely** — LLM-IDE keeps them in macOS Keychain
 - **Monitor token usage** — Check GitHub/GitLab logs for suspicious access
 
 ### ✗ Don't Do This

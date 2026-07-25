@@ -25,8 +25,7 @@ fileprivate func installCrashHandlers() {
     }
 }
 
-@main
-struct LlmIdeMacApp: App {
+public struct LlmIdeMacApp: App {
     // Adopt an NSApplicationDelegate to handle reopen and "should-quit"
     // events SwiftUI alone can't express on macOS.  Without this,
     // closing the main window kills the process AND a second deep
@@ -55,7 +54,7 @@ struct LlmIdeMacApp: App {
     private let api: LlmIdeAPIClient
     private let autoCapture: AutoCaptureService
 
-    init() {
+    public init() {
         installCrashHandlers()
         // Chat sessions persist across launches (server + local JSON).
         // CodeAssistantPanel loads the last session on appear.
@@ -71,13 +70,10 @@ struct LlmIdeMacApp: App {
         let themeStore = ThemeStore(initial: Theme.find(id: cfg.themeID))
         let router = DeepLinkRouter()
         let mirror = LiveSessionMirror(api: client)
-        let appSupportBase = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? URL(fileURLWithPath: NSHomeDirectory())
-                .appendingPathComponent("Library/Application Support")
-        let registryURL = appSupportBase.appendingPathComponent("LLM IDE/processed-actions.json")
+        let appSupportBase = AppIdentity.applicationSupportRoot()
+        let registryURL = appSupportBase.appendingPathComponent("processed-actions.json")
         let registry = ProcessedActionsRegistry(storeURL: registryURL)
-        let projectStoreStateDir = appSupportBase.appendingPathComponent("LLM IDE")
+        let projectStoreStateDir = appSupportBase
         let projectStoreInstance = ProjectStore(stateDirectory: projectStoreStateDir,
                                                  defaults: cfg.defaultProjectSettings)
         // Wire ProjectStore into the API client so write endpoints
@@ -156,7 +152,7 @@ struct LlmIdeMacApp: App {
         mobileControl.autoTaskSettings = autoTaskSettingsInstance
     }
 
-    var body: some Scene {
+    public var body: some Scene {
         // Use `Window` (singular) instead of `WindowGroup` so SwiftUI
         // enforces one main window per process.  `WindowGroup` lets a
         // deep-link arrival spawn a second window of the same scene
@@ -313,16 +309,18 @@ struct LlmIdeMacApp: App {
         // Titlebar blends with the sidebar / toolbar (no separator
         // line) — matches Mail.app, Notes.app, Reminders.app.
         .windowToolbarStyle(.unified)
-        // Replace SwiftUI's default "LLM IDE" → "About" group so we
+        // Replace SwiftUI's default product name → "About" group so we
         // can slot the Sparkle "Check for updates…" item beside it.
         // .appInfo lives under the app menu's first divider — exactly
         // where every macOS app puts its update entry.
         .commands {
             CommandGroup(after: .appInfo) {
-                Button("Check for Updates…") {
-                    updateService.checkForUpdates()
+                if updateService.isUpdateFeedConfigured {
+                    Button("Check for Updates…") {
+                        updateService.checkForUpdates()
+                    }
+                    .disabled(!updateService.canCheckForUpdates)
                 }
-                .disabled(!updateService.canCheckForUpdates)
             }
             CommandGroup(after: .windowList) {
                 Button("Quick Switch Project…") { quickSwitcherShown = true }
@@ -353,7 +351,7 @@ struct LlmIdeMacApp: App {
             Image(systemName: capture.isRunning ? "record.circle.fill" : "record.circle")
                 .symbolRenderingMode(.palette)
                 .foregroundStyle(capture.isRunning ? .red : .secondary)
-                .accessibilityLabel(capture.isRunning ? "LLM IDE — recording" : "LLM IDE")
+                .accessibilityLabel(capture.isRunning ? "\(L.App.name) — recording" : L.App.name)
         }
         .menuBarExtraStyle(.menu)
 
@@ -514,7 +512,7 @@ struct MenuBarMenu: View {
             Text("Not signed in")
         }
         Divider()
-        Button("Quit LLM IDE") { NSApplication.shared.terminate(nil) }
+        Button("Quit \(L.App.name)") { NSApplication.shared.terminate(nil) }
             .keyboardShortcut("q")
         // The MenuBarExtra menu re-renders on each open, but
         // @State doesn't get a fresh init on each render — so

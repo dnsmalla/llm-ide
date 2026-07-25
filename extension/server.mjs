@@ -369,7 +369,7 @@ const server = http.createServer(async (req, res) => {
 <html lang="en"><head>
 <meta charset="utf-8" />
 <meta http-equiv="refresh" content="0; url=${targetHtml}" />
-<title>Opening LLM IDE…</title>
+<title>Opening LLM-IDE…</title>
 <style>
   :root { color-scheme: light dark; }
   body { font-family:-apple-system,BlinkMacSystemFont,sans-serif;
@@ -401,10 +401,10 @@ const server = http.createServer(async (req, res) => {
 </style>
 </head><body>
 <div class="card">
-  <h1><span class="pulse"></span>Opening LLM IDE…</h1>
+  <h1><span class="pulse"></span>Opening LLM-IDE…</h1>
   <p>Handing off to the desktop app.</p>
   <p class="muted">If nothing happens, click the button below.</p>
-  <a class="btn" href="${targetHtml}">Open LLM IDE</a>
+  <a class="btn" href="${targetHtml}">Open LLM-IDE</a>
 </div>
 <script>
   // Belt-and-braces: in addition to the meta refresh, fire the URL

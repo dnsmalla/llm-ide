@@ -18,31 +18,37 @@ struct UpdatesSettingsSection: View {
     var body: some View {
         SettingsSectionCard(icon: "arrow.down.circle", title: "Updates") {
             VStack(alignment: .leading, spacing: Spacing.md) {
-                SettingsHint("LLM IDE checks for new versions in the background. Turn this off to opt out — you'll still be able to run a manual check.")
+                if updateService.isUpdateFeedConfigured {
+                    SettingsHint("LLM-IDE checks for new versions in the background. Turn this off to opt out — you'll still be able to run a manual check.")
+                } else {
+                    SettingsHint("This is a development build — Sparkle auto-update is disabled. Rebuild from git or install a release DMG to receive updates.")
+                }
 
                 versionRow
 
-                Divider().opacity(0.4)
+                if updateService.isUpdateFeedConfigured {
+                    Divider().opacity(0.4)
 
-                Toggle(isOn: Binding(
-                    get: { updateService.automaticChecksEnabled },
-                    set: { updateService.automaticChecksEnabled = $0 }
-                )) {
-                    Text("Check for updates automatically")
-                }
-                .toggleStyle(.switch)
-                .controlSize(.small)
-
-                HStack {
-                    Spacer()
-                    Button {
-                        updateService.checkForUpdates()
-                    } label: {
-                        Label("Check now", systemImage: "arrow.clockwise")
+                    Toggle(isOn: Binding(
+                        get: { updateService.automaticChecksEnabled },
+                        set: { updateService.automaticChecksEnabled = $0 }
+                    )) {
+                        Text("Check for updates automatically")
                     }
-                    .buttonStyle(.bordered)
+                    .toggleStyle(.switch)
                     .controlSize(.small)
-                    .disabled(!updateService.canCheckForUpdates)
+
+                    HStack {
+                        Spacer()
+                        Button {
+                            updateService.checkForUpdates()
+                        } label: {
+                            Label("Check now", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(!updateService.canCheckForUpdates)
+                    }
                 }
             }
         }

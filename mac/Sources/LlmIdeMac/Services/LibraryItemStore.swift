@@ -28,10 +28,8 @@ final class LibraryItemStore {
     var onExternalCodeFoldersChanged: (([String]) -> Void)?
 
     private var storeURL: URL? {
-        FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first?
-            .appendingPathComponent("LLM IDE/library_items.json")
+        AppIdentity.applicationSupportRoot()
+            .appendingPathComponent("library_items.json")
     }
 
     /// The live index now comes from `rescan()` against the bound project

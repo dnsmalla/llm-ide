@@ -56,7 +56,7 @@ const globalPromptBase = composeGlobalPrompt();
 // loop). Mirrors how Cursor/IDE agents keep the static prompt minimal for
 // caching and let the tools array carry capability.
 const NATIVE_SYSTEM_PROMPT = [
-  'You are the LLM IDE Code Assistant. Help the user by calling the provided tools.',
+  'You are the LLM-IDE Code Assistant. Help the user by calling the provided tools.',
   'Use run-bash to run a shell command, list-files / read-file for the workspace,',
   'search-kb for meetings/notes/issues, web-search / fetch-url for the web,',
   'ask-internal for app state. Call a tool when action is needed; its result comes',

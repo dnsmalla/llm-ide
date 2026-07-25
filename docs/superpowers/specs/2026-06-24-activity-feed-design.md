@@ -1,7 +1,7 @@
 # Activity Feed + Notification Bell — Design
 
 **Status:** approved design (2026-06-24)
-**Goal:** Give LLM IDE a single, durable, per-user record of auto-generated events, surfaced in the Mac app as an in-app activity feed with a notification bell + unread badge.
+**Goal:** Give LLM-IDE a single, durable, per-user record of auto-generated events, surfaced in the Mac app as an in-app activity feed with a notification bell + unread badge.
 
 ---
 

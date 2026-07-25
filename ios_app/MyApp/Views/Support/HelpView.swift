@@ -8,7 +8,7 @@ struct HelpView: View {
                     Text("Help & FAQ")
                         .font(.system(size: DesignSystem.Typography.title, weight: .bold))
                         .foregroundColor(DesignSystem.Colors.textPrimary)
-                    Text("Get help with LLM IDE")
+                    Text("Get help with LLM-IDE")
                         .font(.system(size: DesignSystem.Typography.body))
                         .foregroundColor(DesignSystem.Colors.textSecondary)
                 }
@@ -16,27 +16,40 @@ struct HelpView: View {
                 VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
                     HelpSection(
                         title: "Getting started",
-                        content: "1. On your Mac, open the LLM IDE app — a display icon appears in the menu bar.\n2. Click the icon and scan the QR code with this app — or tap your Mac when it appears in the list and enter the 6-digit PIN shown in the menu.\n3. Your Mac's screen appears. Tap to click, drag with the hand tool, and use the keyboard button to type."
+                        content: """
+                        1. On your Mac: LLM-IDE → Settings → Mobile Control → Start.
+                        2. Note the IP, port (:3006), and PIN (or scan the pairing QR).
+                        3. On iPhone: pick your Mac from the list, or enter IP + PIN manually.
+                        4. When status shows Live, tap Chat, Explore, or Auto in the toolbar — the iPhone is a companion, not a screen mirror.
+                        """
                     )
                     HelpSection(
-                        title: "Mac permissions",
-                        content: "LLM IDE needs two permissions in System Settings → Privacy & Security:\n• Screen Recording — to stream the screen\n• Accessibility — to move the mouse and type\nThe menu shows a Grant button if Screen Recording is missing. Stop and start the agent after granting."
+                        title: "Permissions",
+                        content: """
+                        • iPhone: Local Network (for Bonjour discovery) — iOS prompts on first launch.
+                        • Mac: Screen Recording and Accessibility are for meeting caption capture in the Mac app, not for iPhone pairing. You do not need to grant them to use Chat / Explore / Auto from your phone.
+                        """
                     )
                     HelpSection(
-                        title: "Gestures",
-                        content: "• Tap — click\n• Double-tap — double-click\n• Press and hold — right-click\n• Pinch or the +/− buttons — zoom in and out\n• While zoomed, drag with one finger to pan\n• Drag tool — drag windows or select text\n• Scroll tool — drag up/down to scroll the Mac"
-                    )
-                    HelpSection(
-                        title: "AI prompts",
-                        content: "Tap the chat bubble in the toolbar to send prompts to the AI agent on your Mac. Responses stream back live; tap the red stop button to cancel."
+                        title: "Chat, Explore, Auto",
+                        content: """
+                        • Chat — ask LLM-IDE questions; replies stream from your Mac's local server.
+                        • Explore — browse and chat with Mac explorer sessions.
+                        • Auto — toggle and inspect scheduled auto-code tasks.
+                        """
                     )
                     HelpSection(
                         title: "Different networks",
-                        content: "Automatic discovery only works on the same Wi-Fi. To connect from anywhere, install Tailscale on both devices, then scan the QR code or enter your Mac's Tailscale IP (100.x.x.x) manually."
+                        content: "Automatic discovery only works on the same Wi-Fi. For remote access, install Tailscale on both devices, then use your Mac's Tailscale IP (100.x.x.x) or scan the QR from Mobile Control settings."
                     )
                     HelpSection(
                         title: "Mac not found?",
-                        content: "• Check the menu bar icon — the agent status should say “Waiting for iPhone”\n• Make sure iPhone and Mac are on the same Wi-Fi\n• Use manual entry with an IP from the menu bar dropdown\n• Wrong PIN? The current PIN is always shown in the menu"
+                        content: """
+                        • Mobile Control must show Running on the Mac (Settings → Mobile Control).
+                        • Same Wi-Fi or Tailscale; guest/corporate Wi-Fi often blocks Bonjour — use Direct IP + PIN.
+                        • Wrong PIN? Copy it again from Mac Settings → Mobile Control.
+                        • Port :3006 busy? Stop any old computer-agent process: lsof -i :3006
+                        """
                     )
                 }
                 .padding(DesignSystem.Spacing.lg)

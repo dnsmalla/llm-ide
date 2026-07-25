@@ -14,7 +14,7 @@ const GLOBAL_SKILLS_DIR = join(__dirname, '..', 'llm_agent', 'global');
 
 test('composeGlobalPrompt is the role BASE only — no skills, no system context', () => {
   const prompt = composeGlobalPrompt();
-  assert.match(prompt, /Code Assistant for LLM IDE/);          // role present
+  assert.match(prompt, /Code Assistant for LLM-IDE/);          // role present
   // Skill bodies are NOT embedded in the base — the loop renders them once
   // (see the dedup guard below). Embedding them here too double-sent skills.
   assert.doesNotMatch(prompt, /# Available skills/);
@@ -29,7 +29,7 @@ test('assembled global prompt renders skills exactly once (dedup guard)', () => 
   const skills = loadSkills(GLOBAL_SKILLS_DIR);
   // What the loop actually builds for the global agent: base + (no context) + skills.
   const full = buildSystemPrompt({ base: composeGlobalPrompt(), skills: skills.skills, agentContextBlock: '' });
-  assert.match(full, /Code Assistant for LLM IDE/);            // role still there
+  assert.match(full, /Code Assistant for LLM-IDE/);            // role still there
   assert.match(full, /# ask-internal/);                        // skills present (rendered by the loop)
   // Exactly one "# Available skills" header — previously two (base + loop).
   assert.equal((full.match(/# Available skills/g) || []).length, 1);

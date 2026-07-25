@@ -119,7 +119,7 @@ final class BackendManager {
             home.appendingPathComponent("Desktop/llm-ide/extension"),
             home.appendingPathComponent("Desktop/meet-notes/extension"),
             home.appendingPathComponent("Developer/meet-notes/extension"),
-            home.appendingPathComponent("Developer/LLM IDE/notes-extension/extension"),
+            home.appendingPathComponent("Developer/llm-ide/notes-extension/extension"),
         ]
         let bundleParent = Bundle.main.bundleURL.deletingLastPathComponent()
         out.append(bundleParent.deletingLastPathComponent().appendingPathComponent("extension"))

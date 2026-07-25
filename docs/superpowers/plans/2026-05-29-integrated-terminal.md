@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a Cursor-style bottom terminal panel to the LLM IDE Mac app with a real PTY-backed shell, multiple tabs, drag-to-resize, and Ctrl+` toggle.
+**Goal:** Add a Cursor-style bottom terminal panel to the LLM-IDE Mac app with a real PTY-backed shell, multiple tabs, drag-to-resize, and Ctrl+` toggle.
 
 **Architecture:** `TerminalSession` owns one `LocalProcessTerminalView` (SwiftTerm AppKit view) per tab. `TerminalPanelState` manages the list of sessions and panel open/height state. `TerminalPanelView` renders the resize handle + tab bar + a ZStack of session views (kept alive off-screen to preserve scrollback). Wired into `AppShell` above `StatusBar`.
 

@@ -1,4 +1,4 @@
-// Back-compat shim for the MeetNotes → LLM IDE rename.
+// Back-compat shim for the MeetNotes → LLM-IDE rename.
 //
 // Config and other modules now read `LLMIDE_*` environment variables, but
 // existing deployments may still set the old `MEETNOTES_*` names. For each old

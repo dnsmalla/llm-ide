@@ -5,7 +5,7 @@ status: stable
 
 # System architecture
 
-System-wide architecture for LLM IDE. For server-internal details (request pipeline, vault, audit log, tenancy invariants), see [`server-internals.md`](server-internals.md).
+System-wide architecture for LLM-IDE. For server-internal details (request pipeline, vault, audit log, tenancy invariants), see [`server-internals.md`](server-internals.md).
 
 ## Goals
 

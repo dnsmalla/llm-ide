@@ -77,7 +77,7 @@ final class ProjectStore: ObservableObject {
 
         // Guard against opening arbitrary non-project folders.
         // Throws ProjectStoreError.invalidFolderStructure when the folder
-        // is non-empty and missing the required LLM IDE sub-folder tree.
+        // is non-empty and missing the required LLM-IDE sub-folder tree.
         try ProjectScaffolder.validate(at: url)
 
         let projectJSON = ProjectLayout(root: url).projectJSON
@@ -123,13 +123,13 @@ final class ProjectStore: ObservableObject {
         NotificationCenter.default.post(name: .notesFolderChanged, object: nil)
     }
 
-    /// Adopt `folderURL` as a LLM IDE project: write `system/project.json`
+    /// Adopt `folderURL` as a LLM-IDE project: write `system/project.json`
     /// and the canonical folder tree if they don't already exist. Idempotent —
     /// safe on an existing project (returns its bundle unchanged).
     ///
     /// Unlike `openFolder`, this deliberately does NOT run
     /// `ProjectScaffolder.validate` first, so it can adopt a folder that is
-    /// non-empty and lacks the LLM IDE tree — e.g. a freshly-cloned code
+    /// non-empty and lacks the LLM-IDE tree — e.g. a freshly-cloned code
     /// repo. After this call the folder passes validation and `openFolder`
     /// succeeds. Does not activate the project or touch recents.
     @discardableResult
@@ -464,11 +464,11 @@ enum ProjectStoreError: LocalizedError {
             return "No project is open."
         case .invalidFolderStructure(let name):
             return """
-                "\(name)" is not a LLM IDE project.
+                "\(name)" is not a LLM-IDE project.
 
                 A valid project folder must contain meetings/, notes/, and plans/ sub-folders, \
-                or have been created by LLM IDE. \
-                Select an existing LLM IDE project folder, or choose an empty folder to start a new project.
+                or have been created by LLM-IDE. \
+                Select an existing LLM-IDE project folder, or choose an empty folder to start a new project.
                 """
         }
     }

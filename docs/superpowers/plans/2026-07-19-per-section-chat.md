@@ -14,7 +14,7 @@
 - **Verify with `swift build` / `swift test`, not SourceKit alone** (SourceKit produces stale errors in this project).
 - **Build/test commands:** `cd mac && swift build` and `cd mac && swift test`. Pre-warm the build before pushing; the git pre-push hook runs `swift build` + `swift test`.
 - **Existing test style:** `@Suite("…", .serialized) struct …`, `@Test func …`, `#expect`, isolated temp dirs. Follow it.
-- **Scope identity = file name.** A section's chat lives at `~/Library/Application Support/LLM IDE/sessions/<scope>.json`. `ChatSession` does **not** get a `scope` field (YAGNI — the file name is the identity).
+- **Scope identity = file name.** A section's chat lives at `~/Library/Application Support/llm-ide/sessions/<scope>.json`. `ChatSession` does **not** get a `scope` field (YAGNI — the file name is the identity).
 - **Additive before removal.** Task 1 adds the new scope-keyed store methods alongside the old ones (overloads — no clash). Task 2 migrates the panel. Task 3 removes the now-dead old methods. Each task leaves a green build.
 - **Core chat function is unchanged:** send/receive, file attach, model picker, attachments, skills, edit-acceptance mode all stay.
 - **Conventional Commits, one concern per commit.** Suggested branch: `feat/per-section-chat` (create from `main` before Task 1).
@@ -80,7 +80,7 @@ In `ChatSessionStore.swift`, change the `baseDir` computed property (lines 15-24
         guard let base = try? FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask,
             appropriateFor: nil, create: true) else { return nil }
-        let dir = base.appendingPathComponent("LLM IDE", isDirectory: true)
+        let dir = base.appendingPathComponent("LLM-IDE", isDirectory: true)
         if !FileManager.default.fileExists(atPath: dir.path) {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }
@@ -155,7 +155,7 @@ import Foundation
 @Suite("ChatSessionStore scope-keyed", .serialized)
 struct ChatSessionStoreTests {
 
-    /// Point the store at a throwaway "LLM IDE" dir for this test.
+    /// Point the store at a throwaway "LLM-IDE" dir for this test.
     private func overrideDir() -> URL {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("chatstore-\(UUID().uuidString)")

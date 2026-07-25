@@ -438,7 +438,7 @@ final class NotesFolderConfigTests: XCTestCase {
     func testDefaultPath() {
         let cfg = NotesFolderConfig(userDefaults: makeUserDefaults())
         let expected = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("LLM IDE", isDirectory: true)
+            .appendingPathComponent("LLM-IDE", isDirectory: true)
         XCTAssertEqual(cfg.currentFolder.path, expected.path)
     }
 
@@ -456,7 +456,7 @@ final class NotesFolderConfigTests: XCTestCase {
             at: URL(fileURLWithPath: "/Users/x/Library/CloudStorage/OneDrive-Personal/Notes")),
             .oneDrive)
         XCTAssertEqual(NotesFolderConfig.detectSyncProvider(
-            at: URL(fileURLWithPath: "/Users/x/Documents/LLM IDE")),
+            at: URL(fileURLWithPath: "/Users/x/Documents/llm-ide")),
             Optional<NotesFolderConfig.SyncProvider>.none)
     }
 
@@ -528,7 +528,7 @@ final class NotesFolderConfig {
 
     func defaultFolder() -> URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("LLM IDE", isDirectory: true)
+            .appendingPathComponent("LLM-IDE", isDirectory: true)
     }
 
     static func detectSyncProvider(at url: URL) -> SyncProvider? {
@@ -1610,7 +1610,7 @@ Run: `cd mac && ./build_app.sh && open mac/LlmIdeMac.app`
 In the app:
 1. Sign in.
 2. Start a recording (mic fallback fine).
-3. Open `~/Documents/LLM IDE/<YYYY>/<MM>/` in Finder — `.partial.md` should appear.
+3. Open `~/Documents/llm-ide/<YYYY>/<MM>/` in Finder — `.partial.md` should appear.
 4. Speak a sentence.
 5. After ~2 seconds, open the partial in TextEdit — caption line should be present.
 6. Stop & Save — partial renames to final, file remains.
@@ -2077,7 +2077,7 @@ struct SidebarView: View {
             Label("Settings", systemImage: "gearshape").tag(ShellState.Section.settings)
         }
         .listStyle(.sidebar)
-        .navigationTitle("LLM IDE")
+        .navigationTitle("LLM-IDE")
     }
 }
 ```
@@ -3358,7 +3358,7 @@ struct NotesFolderSection: View {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
-        panel.message = "Choose where LLM IDE should keep your .md files"
+        panel.message = "Choose where LLM-IDE should keep your .md files"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try NotesFolderConfig().setFolder(url)
@@ -3378,7 +3378,7 @@ Find where `SettingsView.body` declares its `Form` / `List` and add `NotesFolder
 
 - [ ] **Step 3: Manual smoke**
 
-Open Settings → Notes folder. Click Change… → pick `~/Library/Mobile Documents/com~apple~CloudDocs/LLM IDE` (or create it). Sync badge should say "Synced via iCloud Drive". Record a meeting — `.partial.md` appears in the iCloud folder.
+Open Settings → Notes folder. Click Change… → pick `~/Library/Mobile Documents/com~apple~CloudDocs/LLM-IDE` (or create it). Sync badge should say "Synced via iCloud Drive". Record a meeting — `.partial.md` appears in the iCloud folder.
 
 - [ ] **Step 4: Commit**
 

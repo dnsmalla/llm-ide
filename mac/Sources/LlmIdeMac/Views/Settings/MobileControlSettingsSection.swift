@@ -13,10 +13,6 @@ struct MobileControlSettingsSection: View {
     @State private var autoScroll: Bool = true
     @State private var connection = MobileConnectionInfo.current()
 
-    /// Tracks Screen Recording + Accessibility so the panel can show
-    /// granted/needed state and offer one-click "add LLM IDE to the TCC
-    /// list" — screen capture + input injection both need them.
-    @StateObject private var permissions = PermissionsService()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -28,7 +24,7 @@ struct MobileControlSettingsSection: View {
                         Text("Enable Mobile Control")
                             .font(Typography.body)
                             .foregroundStyle(theme.current.text)
-                        Text("iPhone remote desktop + LLM IDE chat via the native server (:3006)")
+                        Text("iPhone companion: chat, explorer, and auto-tasks via native server (:3006)")
                             .font(Typography.caption)
                             .foregroundStyle(theme.current.textMuted)
                     }
@@ -43,10 +39,6 @@ struct MobileControlSettingsSection: View {
                     } else {
                         notReadyBlock
                     }
-
-                    Divider().padding(.vertical, 4)
-
-                    permissionsBlock
 
                     Divider().padding(.vertical, 4)
 
@@ -81,37 +73,12 @@ struct MobileControlSettingsSection: View {
         }
         .onAppear {
             connection = MobileConnectionInfo.current()
-            permissions.refreshAll()
-            if config.mobileControlEnabled { permissions.startPolling() }
-        }
-        .onDisappear {
-            permissions.stopPolling()
-        }
-        .onChange(of: config.mobileControlEnabled) { _, enabled in
-            // Auto-add: toggling Mobile Control on fires the macOS prompts
-            // that add LLM IDE to the Screen Recording + Accessibility
-            // lists, so the user doesn't hunt through System Settings.
-            if enabled {
-                permissions.startPolling()
-                autoPromptPermissionsIfNeeded()
-            } else {
-                permissions.stopPolling()
-            }
         }
         .onChange(of: scenePhase) { _, phase in
             // The user likely just connected Tailscale in another app;
             // re-probe when we regain focus so the IP shows without Refresh.
             if phase == .active { connection = MobileConnectionInfo.current() }
         }
-    }
-
-    /// Refresh permission state and fire the macOS prompts for anything not
-    /// yet granted — auto-adds LLM IDE to the relevant TCC lists. No-op for
-    /// already-granted permissions.
-    private func autoPromptPermissionsIfNeeded() {
-        permissions.refreshAll()
-        if permissions.accessibility != .granted { permissions.promptAccessibility() }
-        if permissions.screenRecording != .granted { permissions.promptScreenRecording() }
     }
 
     // MARK: - Connection info
@@ -156,8 +123,7 @@ struct MobileControlSettingsSection: View {
 
     /// Shown in place of `connectionBlock` when the native server isn't
     /// running. Prevents the old failure mode where IP/Port/PIN/QR stayed
-    /// visible after a bind failure (e.g. port :3006 already taken by the old
-    /// computer-agent) — the user would then try to pair against a dead server
+    /// visible after a bind failure (e.g. port :3006 already taken) — the user
     /// and misread the failure as "wrong PIN". The detailed reason, when there
     /// is one, is surfaced by `lastError` below; this block just steers the
     /// user to Start. The status pill + Start/Stop button remain visible in
@@ -183,7 +149,7 @@ struct MobileControlSettingsSection: View {
     private var hintForNotRunning: String {
         switch mobile.status {
         case .crashed:
-            return "The mobile server isn't running. If port \(MobileControlManager.defaultAgentPort) is already in use (e.g. the old computer-agent), stop that process, then press Start."
+            return "The mobile server isn't running. If port \(MobileControlManager.defaultAgentPort) is already in use, run `lsof -i :3006`, quit the other process, then press Start."
         case .starting:
             return "Starting the mobile server — pairing details will appear here once it's ready."
         case .stopped:
@@ -306,98 +272,6 @@ struct MobileControlSettingsSection: View {
         }
     }
 
-    // MARK: - Permissions block
-
-    /// Screen Recording + Accessibility status with one-click "add LLM IDE
-    /// to the TCC list". The computer-agent can't stream the screen or inject
-    /// input without these. Non-blocking — chat still works without them.
-    private var permissionsBlock: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("macOS Permissions")
-                .font(Typography.section)
-                .foregroundStyle(theme.current.textMuted)
-
-            permissionRow(
-                title: "Screen Recording",
-                detail: "Lets the agent stream your screen to the iPhone.",
-                state: permissions.screenRecording,
-                enable: { permissions.promptScreenRecording() },
-                pane: .screenRecording
-            )
-            permissionRow(
-                title: "Accessibility",
-                detail: "Lets the agent inject mouse + keyboard for remote control.",
-                state: permissions.accessibility,
-                enable: { permissions.promptAccessibility() },
-                pane: .accessibility
-            )
-
-            Text("Grant these to LLM IDE. If you run the agent from your own terminal instead, that terminal needs the grant — then quit and relaunch the app.")
-                .font(Typography.caption)
-                .foregroundStyle(theme.current.textMuted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(8)
-        .background(RoundedRectangle(cornerRadius: 6).fill(theme.current.body.opacity(0.6)))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(theme.current.border.opacity(0.4)))
-    }
-
-    @ViewBuilder
-    private func permissionRow(
-        title: String,
-        detail: String,
-        state: PermissionsService.State,
-        enable: @escaping () -> Void,
-        pane: PermissionsService.SettingsPane
-    ) -> some View {
-        HStack(spacing: Spacing.sm) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(title).font(Typography.body).foregroundStyle(theme.current.text)
-                    permStatusPill(state)
-                }
-                Text(detail)
-                    .font(Typography.caption)
-                    .foregroundStyle(theme.current.textMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
-            if state != .granted {
-                Button("Enable") { enable() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .help("Add LLM IDE to this list, then toggle it on in System Settings")
-            }
-            Button("Open Settings") { permissions.openSystemSettings(pane: pane) }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-        }
-    }
-
-    @ViewBuilder
-    private func permStatusPill(_ state: PermissionsService.State) -> some View {
-        let (label, fg, bg): (String, Color, Color) = {
-            switch state {
-            case .granted: return ("granted",
-                                   theme.current.accent3,
-                                   theme.current.accent3.opacity(theme.current.isDark ? 0.20 : 0.12))
-            case .denied:  return ("needed",
-                                   theme.current.danger,
-                                   theme.current.danger.opacity(theme.current.isDark ? 0.20 : 0.12))
-            case .unknown: return ("unknown",
-                                   theme.current.textMuted,
-                                   theme.current.textMuted.opacity(theme.current.isDark ? 0.18 : 0.10))
-            }
-        }()
-        Text(label)
-            .font(Typography.captionStrong)
-            .foregroundStyle(fg)
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, 2)
-            .background(bg)
-            .clipShape(Capsule())
-    }
-
     // MARK: - Status + actions
 
     private var statusPill: some View {
@@ -428,10 +302,7 @@ struct MobileControlSettingsSection: View {
                 .controlSize(.small)
                 .tint(theme.current.danger)
         default:
-            Button("Start") {
-                autoPromptPermissionsIfNeeded()
-                mobile.start()
-            }
+            Button("Start") { mobile.start() }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
         }
@@ -503,9 +374,9 @@ struct MobileControlSettingsSection: View {
             Text("Features")
                 .font(Typography.section)
                 .foregroundStyle(theme.current.textMuted)
-            featureRow(icon: "app.dashed", title: "Remote Desktop", subtitle: "Screen streaming + touch control")
-            featureRow(icon: "bubble.left.and.bubble.right", title: "LLM IDE Chat", subtitle: "Ask questions from iPhone")
-            featureRow(icon: "person.2", title: "Meeting Agent", subtitle: "AI co-pilot during calls")
+            featureRow(icon: "bubble.left.and.bubble.right", title: "LLM-IDE Chat", subtitle: "Ask questions from iPhone")
+            featureRow(icon: "safari", title: "Explorer", subtitle: "Browse and chat with Mac explorer sessions")
+            featureRow(icon: "bolt.fill", title: "Auto Tasks", subtitle: "Toggle and inspect scheduled auto-code tasks")
         }
     }
 

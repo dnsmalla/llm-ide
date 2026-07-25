@@ -5,7 +5,7 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>$(DEVELOPMENT_LANGUAGE)</string>
   <key>CFBundleDisplayName</key>
-  <string>LLM IDE</string>
+  <string>LLM-IDE</string>
   <key>CFBundleExecutable</key>
   <string>$(EXECUTABLE_NAME)</string>
   <key>CFBundleIdentifier</key>
@@ -44,13 +44,13 @@
     <true/>
   </dict>
   <key>NSLocalNetworkUsageDescription</key>
-  <string>LLM IDE discovers your Mac on the local network to connect automatically.</string>
+  <string>LLM-IDE discovers your Mac on the local network to connect automatically.</string>
   <key>NSCameraUsageDescription</key>
-  <string>LLM IDE uses the camera to scan the pairing QR code shown on your Mac.</string>
+  <string>LLM-IDE uses the camera to scan the pairing QR code shown on your Mac.</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>LLM IDE uses the microphone for voice commands — speak to open apps and type text on your computer.</string>
+  <string>LLM-IDE uses the microphone for voice commands — speak to open apps and type text on your computer.</string>
   <key>NSSpeechRecognitionUsageDescription</key>
-  <string>LLM IDE converts your speech to text on-device to control your computer by voice.</string>
+  <string>LLM-IDE converts your speech to text on-device to control your computer by voice.</string>
   <key>NSBonjourServices</key>
   <array>
     <string>_llmide._tcp</string>

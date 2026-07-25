@@ -30,7 +30,7 @@ final class ProjectMigrator {
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory())
                 .appendingPathComponent("Library/Application Support")
-        return appSupport.appendingPathComponent("LLM IDE")
+        return AppIdentity.applicationSupportRoot()
     }
 
     func runOnce(gitLab: [SavedGitLabProject],

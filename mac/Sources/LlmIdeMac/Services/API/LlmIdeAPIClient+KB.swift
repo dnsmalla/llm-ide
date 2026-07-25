@@ -141,7 +141,7 @@ extension LlmIdeAPIClient {
     }
 
     /// Install (or refresh) the central skills kit into `path`.
-    /// Requires the folder to already be a LLM IDE project
+    /// Requires the folder to already be a LLM-IDE project
     /// (`system/project.json`). Best-effort from the Mac scaffolder —
     /// failures are logged, not fatal to project open.
     func installProjectSkills(path: String,

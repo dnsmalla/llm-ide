@@ -275,21 +275,21 @@ export default function HelpPanel({ onClose }: Props) {
 function OverviewSection() {
   return (
     <div className="help-section">
-      <h3>Welcome to LLM IDE</h3>
+      <h3>Welcome to LLM-IDE</h3>
       <p>
         Meetings are where important things happen &mdash; decisions get made, tasks get assigned, ideas take shape. But
         keeping up with everything while you&apos;re actually <em>in</em> the conversation? That&apos;s almost
-        impossible. That&apos;s exactly why LLM IDE exists.
+        impossible. That&apos;s exactly why LLM-IDE exists.
       </p>
       <p>
-        LLM IDE sits quietly beside your meeting, captures every word, and lets AI do the heavy lifting &mdash;
+        LLM-IDE sits quietly beside your meeting, captures every word, and lets AI do the heavy lifting &mdash;
         summarizing, analyzing, and answering your questions. You focus on the conversation. We take care of the notes.
       </p>
 
       <div className="help-card">
         <h4>Your five-tab workspace</h4>
         <p>
-          LLM IDE is organized into five pages. Each one handles a different part of the meeting workflow. Here&apos;s a
+          LLM-IDE is organized into five pages. Each one handles a different part of the meeting workflow. Here&apos;s a
           quick map:
         </p>
         <div className="help-page-overview">
@@ -355,7 +355,7 @@ function OverviewSection() {
             <div className="help-flow-icon">1</div>
             <div className="help-flow-body">
               <h4>Before the meeting</h4>
-              <p>Make sure the server is running. Open LLM IDE from the toolbar.</p>
+              <p>Make sure the server is running. Open LLM-IDE from the toolbar.</p>
             </div>
           </div>
           <div className="help-flow-arrow">↓</div>
@@ -407,7 +407,7 @@ function GettingStartedSection() {
         <code className="help-code-block">node server.mjs</code>
         <p>
           You should see output like <code>Server running on port 3456</code>. Leave this terminal open &mdash; it needs
-          to stay running while you use LLM IDE.
+          to stay running while you use LLM-IDE.
         </p>
         <Callout title="Good to know">
           Recording works even without the server. So if you forget to start it, you can still capture the meeting and
@@ -426,7 +426,7 @@ function GettingStartedSection() {
           <div className="help-scenario-label">Example</div>
           <p>
             You have a standup at 10am on Google Meet. You click the meeting link, Chrome opens the meeting, and
-            you&apos;re in. That&apos;s all the setup LLM IDE needs.
+            you&apos;re in. That&apos;s all the setup LLM-IDE needs.
           </p>
         </div>
       </div>
@@ -434,7 +434,7 @@ function GettingStartedSection() {
       <div className="help-card">
         <h4>Step 3 &mdash; Open the side panel</h4>
         <p>
-          Click the <strong>LLM IDE icon</strong> in your browser toolbar (it&apos;s in the top-right corner, next to
+          Click the <strong>LLM-IDE icon</strong> in your browser toolbar (it&apos;s in the top-right corner, next to
           your other extensions). A side panel slides open on the right side of your screen, right next to the meeting.
         </p>
         <Callout title="Tip">
@@ -446,7 +446,7 @@ function GettingStartedSection() {
       <div className="help-card">
         <h4>Step 4 &mdash; Press Start</h4>
         <p>
-          Click the big <strong>Start</strong> button at the top. LLM IDE automatically figures out the best way to
+          Click the big <strong>Start</strong> button at the top. LLM-IDE automatically figures out the best way to
           capture your meeting:
         </p>
         <div className="help-compare">
@@ -466,7 +466,7 @@ function GettingStartedSection() {
           </div>
         </div>
         <p className="help-hint">
-          You don&apos;t need to choose &mdash; LLM IDE picks captions mode automatically when available.
+          You don&apos;t need to choose &mdash; LLM-IDE picks captions mode automatically when available.
         </p>
       </div>
 
@@ -562,7 +562,7 @@ function TranscriptPageSection() {
       <div className="help-card">
         <h4>Renaming speakers</h4>
         <p>
-          When LLM IDE uses <strong>mic mode</strong> (no platform captions available), speakers are labeled
+          When LLM-IDE uses <strong>mic mode</strong> (no platform captions available), speakers are labeled
           generically: &ldquo;Speaker 1&rdquo;, &ldquo;Speaker 2&rdquo;, and so on.
         </p>
         <p>
@@ -597,7 +597,7 @@ function TranscriptPageSection() {
       <div className="help-card">
         <h4>Auto-save &amp; manual save</h4>
         <p>
-          When you stop recording, LLM IDE <strong>automatically saves</strong> the transcript to your browser&apos;s
+          When you stop recording, LLM-IDE <strong>automatically saves</strong> the transcript to your browser&apos;s
           local storage. If the browser crashes or you accidentally close the tab, your transcript is safe.
         </p>
         <p>
@@ -613,7 +613,7 @@ function TranscriptPageSection() {
           language, you can enable <strong>bilingual mode</strong> in the language selector above the transcript.
         </p>
         <p>
-          When bilingual mode is active, LLM IDE runs <em>two</em> speech recognizers at the same time &mdash; one for
+          When bilingual mode is active, LLM-IDE runs <em>two</em> speech recognizers at the same time &mdash; one for
           each language. For every sentence, it compares both results and picks the one with higher confidence. The
           winning language is shown as a small badge next to each line so you know which language was detected.
         </p>
@@ -623,7 +623,7 @@ function TranscriptPageSection() {
         <h4>Language selector</h4>
         <p>
           Above the transcript you&apos;ll find dropdown menus to set your <strong>primary language</strong> and
-          (optionally) a <strong>secondary language</strong>. LLM IDE supports 20 languages including Japanese, English,
+          (optionally) a <strong>secondary language</strong>. LLM-IDE supports 20 languages including Japanese, English,
           Chinese, Korean, Hindi, Nepali, Spanish, French, German, Arabic, Thai, and more.
         </p>
         <p className="help-hint">
@@ -727,7 +727,7 @@ function NotesPageSection() {
       <div className="help-card">
         <h4>Export options &mdash; share it your way</h4>
         <p>
-          Below the generated notes, you&apos;ll find a row of export buttons. LLM IDE gives you multiple formats for
+          Below the generated notes, you&apos;ll find a row of export buttons. LLM-IDE gives you multiple formats for
           different needs:
         </p>
         <ul className="help-list">
@@ -1097,7 +1097,7 @@ function SettingsPageSection() {
         <h4>Microphone selection</h4>
         <p>
           If you have multiple audio input devices (e.g., a USB headset, laptop mic, and a webcam mic), this is where
-          you choose which one LLM IDE listens to in <strong>mic mode</strong>.
+          you choose which one LLM-IDE listens to in <strong>mic mode</strong>.
         </p>
         <ul className="help-list">
           <li>
@@ -1205,7 +1205,7 @@ function SettingsPageSection() {
 
       <div className="help-card">
         <h4>Knowledge Base Search &mdash; your meeting memory</h4>
-        <p>This is one of the most powerful features in LLM IDE, and it gets better the more you use it.</p>
+        <p>This is one of the most powerful features in LLM-IDE, and it gets better the more you use it.</p>
         <p>
           Every meeting you record and every set of notes you generate feeds into a{' '}
           <strong>searchable knowledge base</strong>. You can search across:
@@ -1267,14 +1267,14 @@ function PlatformsSection() {
     <div className="help-section">
       <h3>Supported Platforms</h3>
       <p>
-        LLM IDE works with the three most popular meeting platforms, plus a fallback for everything else. Here&apos;s a
+        LLM-IDE works with the three most popular meeting platforms, plus a fallback for everything else. Here&apos;s a
         detailed breakdown of what each platform supports.
       </p>
 
       <div className="help-platform-list">
         <div className="help-card">
           <h4>Google Meet &mdash; Best experience</h4>
-          <p>Google Meet is the flagship platform for LLM IDE. You get the fullest feature set:</p>
+          <p>Google Meet is the flagship platform for LLM-IDE. You get the fullest feature set:</p>
           <ul className="help-list">
             <li>
               <strong>Live captions (CC)</strong> with real speaker names
@@ -1289,13 +1289,13 @@ function PlatformsSection() {
               <strong>Chat injection</strong> &mdash; post AI-generated questions directly into the meeting chat
             </li>
             <li>
-              <strong>CC overlay hiding</strong> &mdash; LLM IDE can hide the platform&apos;s own caption overlay so you
+              <strong>CC overlay hiding</strong> &mdash; LLM-IDE can hide the platform&apos;s own caption overlay so you
               see captions only in the side panel, keeping the video clean
             </li>
           </ul>
           <Callout title="For best results">
             Make sure closed captions are turned on in the meeting. Look for the &ldquo;CC&rdquo; button in the bottom
-            toolbar. LLM IDE will also try to enable CC automatically when you start recording.
+            toolbar. LLM-IDE will also try to enable CC automatically when you start recording.
           </Callout>
         </div>
 
@@ -1341,7 +1341,7 @@ function PlatformsSection() {
         <h4>Everything else &mdash; Microphone fallback</h4>
         <p>
           For platforms without built-in caption support (e.g., phone calls, Slack huddles, Discord, or in-person
-          meetings), LLM IDE switches to <strong>microphone mode</strong>:
+          meetings), LLM-IDE switches to <strong>microphone mode</strong>:
         </p>
         <ul className="help-list">
           <li>Your microphone captures all audio in the room</li>
@@ -1479,7 +1479,7 @@ function TroubleshootingSection() {
         <p>This is the #1 question new users have. Here&apos;s a checklist:</p>
         <ol className="help-steps">
           <li>
-            <strong>Turn on CC in the meeting itself.</strong> LLM IDE reads the platform&apos;s captions &mdash; they
+            <strong>Turn on CC in the meeting itself.</strong> LLM-IDE reads the platform&apos;s captions &mdash; they
             must be enabled first. Look for a &ldquo;CC&rdquo; or &ldquo;Captions&rdquo; button in the meeting toolbar.
           </li>
           <li>
@@ -1514,7 +1514,7 @@ function TroubleshootingSection() {
             Check with <code>lsof -i :3456</code> (Mac/Linux) or <code>netstat -an | findstr 3456</code> (Windows).
           </li>
           <li>
-            <strong>Check your Node version.</strong> Run <code>node --version</code>. LLM IDE requires{' '}
+            <strong>Check your Node version.</strong> Run <code>node --version</code>. LLM-IDE requires{' '}
             <strong>Node.js 20+</strong>.
           </li>
           <li>
@@ -1607,7 +1607,7 @@ function TroubleshootingSection() {
           </li>
           <li>
             <strong>Browser DevTools console</strong> &mdash; Right-click the side panel, choose &ldquo;Inspect,&rdquo;
-            go to the Console tab. Errors prefixed with <code>[LLM IDE]</code> will tell you exactly what failed
+            go to the Console tab. Errors prefixed with <code>[LLM-IDE]</code> will tell you exactly what failed
           </li>
         </ul>
       </div>

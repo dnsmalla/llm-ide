@@ -12,7 +12,7 @@ applies_to: mac
 3. Notarization-capable Apple ID (the email tied to your Developer account), with an app-specific password stored in Keychain via:
 
    ```bash
-   xcrun notarytool store-credentials "LLM IDE-Notarize" \
+   xcrun notarytool store-credentials "LLM-IDE-Notarize" \
        --apple-id you@example.com \
        --team-id ABCDEFG123
    ```
@@ -43,11 +43,11 @@ codesign --force --deep --options runtime --timestamp \
 ```bash
 ditto -c -k --keepParent "$APP_DIR" "$APP_NAME.zip"
 xcrun notarytool submit "$APP_NAME.zip" \
-    --keychain-profile "LLM IDE-Notarize" \
+    --keychain-profile "LLM-IDE-Notarize" \
     --wait
 ```
 
-Successful submission takes 1–15 minutes. If it fails, run `xcrun notarytool log <submission-id> --keychain-profile LLM IDE-Notarize` to see the rejection reason.
+Successful submission takes 1–15 minutes. If it fails, run `xcrun notarytool log <submission-id> --keychain-profile LLM-IDE-Notarize` to see the rejection reason.
 
 ### 4. Staple
 

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Harden the LLM IDE macOS app to production quality by fixing security vulnerabilities, eliminating crashes, closing reliability gaps, and cleaning up code quality issues.
+**Goal:** Harden the LLM-IDE macOS app to production quality by fixing security vulnerabilities, eliminating crashes, closing reliability gaps, and cleaning up code quality issues.
 
 **Architecture:** Three sequential groups — Security & Stability (Group A), Reliability & UX (Group B), Code Quality (Group C). Each group ends with `swift build` + one commit. Groups must be done in order because A1 affects Config.swift which B1 also touches.
 

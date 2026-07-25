@@ -5,7 +5,7 @@ import os.log
 private let configLogger = Logger(subsystem: "com.llmide.macapp", category: "AppConfig")
 
 /// Decode persisted config data, or — on corruption — stash the bad blob
-/// aside (under Application Support/LLM IDE) so the user's settings aren't
+/// aside (under Application Support/llm-ide) so the user's settings aren't
 /// silently lost on the next `defaults.set(...)`, log a warning, clear the
 /// key, and return nil. Mirrors the recovery already used for
 /// `gitLabSavedProjects`.
@@ -17,7 +17,7 @@ private func decodeConfigOrStash<T: Decodable>(
         let ts = Int(Date().timeIntervalSince1970)
         let fm = FileManager.default
         if let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            let dir = support.appendingPathComponent("LLM IDE")
+            let dir = AppIdentity.applicationSupportRoot(fileManager: fm)
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
             let backup = dir.appendingPathComponent("\(key).json.corrupt-\(ts)")
             try? data.write(to: backup, options: .atomic)
@@ -461,13 +461,12 @@ final class AppConfig: ObservableObject {
 
     // MARK: - Mobile Control
 
-    /// Mobile Control enabled — allows iPhone remote desktop + chat via the
-    /// external auto_swift_aicontrol system. When enabled, the Settings UI
-    /// supervises the computer agent like Settings → Backend.
+    /// Mobile Control enabled — iPhone companion (chat / explorer / auto-tasks)
+    /// via the native WebSocket server on :3006.
     @Published var mobileControlEnabled: Bool {
         didSet { defaults.set(mobileControlEnabled, forKey: "mobileControlEnabled") }
     }
-    /// When true and Mobile Control is enabled, start the computer agent on app launch.
+    /// When true and Mobile Control is enabled, start the native server on app launch.
     @Published var mobileControlAutoStart: Bool {
         didSet { defaults.set(mobileControlAutoStart, forKey: "mobileControlAutoStart") }
     }
@@ -597,7 +596,7 @@ final class AppConfig: ObservableObject {
                 let ts = Int(Date().timeIntervalSince1970)
                 let fm = FileManager.default
                 if let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-                    let dir = support.appendingPathComponent("LLM IDE")
+                    let dir = AppIdentity.applicationSupportRoot(fileManager: fm)
                     try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
                     let backup = dir.appendingPathComponent("gitLabSavedProjects.json.corrupt-\(ts)")
                     try? data.write(to: backup, options: .atomic)
@@ -734,7 +733,7 @@ extension AppConfig {
     /// so they get a sensible default.
     static let defaultClonesFallback: URL = FileManager.default
         .homeDirectoryForCurrentUser
-        .appendingPathComponent("Documents/LLM IDE/Clones", isDirectory: true)
+        .appendingPathComponent("Documents/\(AppIdentity.documentsDirName)/Clones", isDirectory: true)
 
     /// Where a no-project repo clone should land. Used by the
     /// GitHub/GitLab clone code as the fallback when no project is

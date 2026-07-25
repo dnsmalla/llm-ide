@@ -21,8 +21,8 @@ struct PairingInfo {
     }
 }
 
-/// Full-screen camera sheet that scans the pairing QR code shown in the
-/// agent's terminal and hands back the connection details.
+/// Full-screen camera sheet that scans the pairing QR from Mac Settings →
+/// Mobile Control and hands back the connection details.
 struct QRScannerSheet: View {
     let onScan: (PairingInfo) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -68,7 +68,7 @@ struct QRScannerSheet: View {
                         RoundedRectangle(cornerRadius: 24)
                             .stroke(Color.white.opacity(0.8), lineWidth: 3)
                             .frame(width: 230, height: 230)
-                        Text("Point at the QR code in the agent's terminal")
+                        Text("Point at the pairing QR in LLM-IDE on your Mac")
                             .font(.system(size: DesignSystem.Typography.subheadline))
                             .foregroundColor(.white.opacity(0.9))
                             .padding(.top, DesignSystem.Spacing.lg)

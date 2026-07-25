@@ -7,7 +7,7 @@
 
 ## Goal
 
-Add a Cursor-style integrated terminal panel to the LLM IDE Mac app: a resizable bottom panel with a real PTY-backed shell, multiple tabs, and a `Ctrl+\`` keyboard shortcut to toggle it.
+Add a Cursor-style integrated terminal panel to the LLM-IDE Mac app: a resizable bottom panel with a real PTY-backed shell, multiple tabs, and a `Ctrl+\`` keyboard shortcut to toggle it.
 
 ## Architecture
 

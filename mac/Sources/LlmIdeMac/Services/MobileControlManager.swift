@@ -86,10 +86,12 @@ final class MobileControlManager {
 
         status = .starting
 
-        // PIN: create-or-read. Falls back to a placeholder only if the
-        // Keychain is unavailable — pairing would then fail loudly at the
-        // device rather than silently storing the wrong secret.
-        let pin = (try? MobilePin.ensure()) ?? MobilePin.read() ?? "000000"
+        guard let pin = (try? MobilePin.ensure()) ?? MobilePin.read() else {
+            lastError = "Couldn't read or create the mobile pairing PIN in Keychain. Quit and relaunch LLM-IDE, then try Start again."
+            append(.stderr, "ERROR: mobile pairing PIN unavailable in Keychain")
+            status = .crashed(exitCode: -1)
+            return
+        }
 
         let name = Self.deviceName()
         let server = MobileWebSocketServer(
@@ -104,10 +106,8 @@ final class MobileControlManager {
         do {
             try server.start()
         } catch {
-            // Actionable message for the common case — port :3006 already
-            // bound, typically by the old Node computer-agent still running.
-            // The underlying error is preserved in parens for diagnostics.
-            lastError = "Couldn't start the mobile server on port \(MobileProtocol.defaultPort) — the port may already be in use (e.g. the old computer-agent still running). Stop the other process, then Start again. (\(error.localizedDescription))"
+            // Actionable message for the common case — port :3006 already bound.
+            lastError = "Couldn't start the mobile server on port \(MobileProtocol.defaultPort) — another process may already be using it. Run `lsof -i :3006`, quit the other process, then press Start again. (\(error.localizedDescription))"
             append(.stderr, "ERROR: \(error.localizedDescription)")
             status = .crashed(exitCode: -1)
             return

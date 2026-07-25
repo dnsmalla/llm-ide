@@ -4,7 +4,7 @@ Auto Tasks is a powerful automation feature that automatically runs code reviews
 
 ## Overview
 
-Auto Tasks enable the LLM IDE to:
+Auto Tasks enable the LLM-IDE to:
 - **Review code** — Analyze commits for quality and best practices
 - **Review documentation** — Check doc completeness and consistency  
 - **Review conflicts** — Detect merge conflicts and issues
@@ -28,7 +28,7 @@ Auto Tasks require one active repository provider. Choose between **GitHub** or 
 
 **Via macOS App:**
 
-1. Open **LLM IDE → Settings** → scroll to "GitHub" or "GitLab" section
+1. Open **LLM-IDE → Settings** → scroll to "GitHub" or "GitLab" section
 2. Enter your:
    - **Organization/Project name** (e.g., `myorg/my-project`)
    - **API Token** (GitHub PAT or GitLab token — kept secure in Keychain)
@@ -49,7 +49,7 @@ Once saved, the other provider automatically deactivates. Only one provider can 
 1. Go to [github.com/settings/tokens](https://github.com/settings/tokens)
 2. Click **Generate new token (classic)**
 3. Select scopes: `repo`, `workflow`
-4. Copy token and paste into LLM IDE Settings
+4. Copy token and paste into LLM-IDE Settings
 
 #### GitLab Setup
 
@@ -63,7 +63,7 @@ Once saved, the other provider automatically deactivates. Only one provider can 
 1. Go to [gitlab.com/-/user_settings/personal_access_tokens](https://gitlab.com/-/user_settings/personal_access_tokens)
 2. Click **Add new token**
 3. Select scopes: `api`, `read_repository`
-4. Copy token and paste into LLM IDE Settings
+4. Copy token and paste into LLM-IDE Settings
 
 ### Step 2: Enable Auto Tasks
 
@@ -194,7 +194,7 @@ When Auto Tasks are enabled, the menu bar shows:
 Click **Reveal Logs** to open the auto-task log folder:
 
 ```
-~/Library/Logs/LLM IDE/
+~/Library/Logs/llm-ide/
 ├── auto-task-review-code.log
 ├── auto-task-review-doc.log
 ├── auto-task-review-conflicts.log
@@ -227,7 +227,7 @@ Each log contains:
 **Cause:** The app might be closed, or the timer didn't start.
 
 **Fix:**
-1. Ensure LLM IDE is open
+1. Ensure LLM-IDE is open
 2. Go to **Settings → Auto Tasks**
 3. Check that **Enabled** is ON
 4. Check the **Run interval** setting (minimum 5 min)
@@ -312,13 +312,13 @@ Auto Tasks can:
 
 Auto Tasks can update task status if you use Linear for issue tracking.
 
-**Requirements:** Linear API token in LLM IDE settings.
+**Requirements:** Linear API token in LLM-IDE settings.
 
 ### Backlog Integration
 
 Auto Tasks can sync with Backlog for Japanese teams.
 
-**Requirements:** Backlog API key in LLM IDE settings.
+**Requirements:** Backlog API key in LLM-IDE settings.
 
 ## Performance Considerations
 

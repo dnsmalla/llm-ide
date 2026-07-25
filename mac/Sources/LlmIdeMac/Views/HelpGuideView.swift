@@ -79,9 +79,9 @@ struct HelpGuideView: View {
 
     private var gettingStartedContent: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
-            helpHeader("Welcome to LLM IDE", icon: "hand.wave", tint: .blue)
+            helpHeader("Welcome to LLM-IDE", icon: "hand.wave", tint: .blue)
 
-            helpParagraph("LLM IDE captures live meeting captions from Zoom and Microsoft Teams, then uses AI to generate structured notes, action items, and summaries — so you can focus on the conversation instead of typing.")
+            helpParagraph("LLM-IDE captures live meeting captions from Zoom and Microsoft Teams, then uses AI to generate structured notes, action items, and summaries — so you can focus on the conversation instead of typing.")
 
             helpCard("How it works", icon: "arrow.triangle.2.circlepath") {
                 helpStep(1, "Open a meeting in Zoom or Teams on your Mac")
@@ -92,7 +92,7 @@ struct HelpGuideView: View {
 
             helpCard("First-time setup", icon: "checkmark.seal") {
                 helpBullet("Grant Accessibility permission so the app can read captions from meeting windows")
-                helpBullet("Sign in with your LLM IDE account (your admin provides the server URL)")
+                helpBullet("Sign in with your LLM-IDE account (your admin provides the server URL)")
                 helpBullet("Create or open a project — this is where your notes will be saved")
             }
 
@@ -141,7 +141,7 @@ struct HelpGuideView: View {
             helpCard("During the session", icon: "text.bubble") {
                 helpBullet("Captions scroll in real time — the app reads them from the meeting window via Accessibility APIs")
                 helpBullet("Speaker names are detected automatically when the platform provides them")
-                helpBullet("You can minimize LLM IDE — capture continues in the background")
+                helpBullet("You can minimize LLM-IDE — capture continues in the background")
             }
 
             helpTip("When the Chrome extension is capturing a web meeting, the Live page mirrors that remote session too — you'll see captions from Google Meet, Teams Web, or Zoom Web in real time.")
@@ -248,7 +248,7 @@ struct HelpGuideView: View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             helpHeader("Issues", icon: "checklist", tint: .purple)
 
-            helpParagraph("A kanban-style board that syncs with your linked GitLab or GitHub repository. View, create, and manage issues without leaving LLM IDE.")
+            helpParagraph("A kanban-style board that syncs with your linked GitLab or GitHub repository. View, create, and manage issues without leaving LLM-IDE.")
 
             helpCard("Features", icon: "rectangle.3.group") {
                 helpBullet("Drag-and-drop columns — To Do, In Progress, Done")
@@ -374,7 +374,7 @@ struct HelpGuideView: View {
 
             helpCard("App settings", icon: "macwindow") {
                 helpBullet("Account — view your profile and sign out")
-                helpBullet("Server — configure which LLM IDE server to connect to")
+                helpBullet("Server — configure which LLM-IDE server to connect to")
                 helpBullet("Backend — choose AI providers and models for note generation")
                 helpBullet("Appearance — switch between light, dark, and system themes")
                 helpBullet("Menu Bar — show or hide the toolbar tools you don't use")
@@ -418,14 +418,14 @@ struct HelpGuideView: View {
 
             helpCard("Captions aren't being captured", icon: "mic.slash") {
                 helpStep(1, "Open System Settings → Privacy & Security → Accessibility")
-                helpStep(2, "Make sure LLM IDE is listed and enabled")
+                helpStep(2, "Make sure LLM-IDE is listed and enabled")
                 helpStep(3, "Restart the meeting app (Zoom/Teams) after granting permission")
                 helpStep(4, "Ensure captions/subtitles are turned on inside the meeting")
             }
 
             helpCard("Can't connect to the server", icon: "wifi.exclamationmark") {
                 helpStep(1, "Check the server URL in Settings → Server")
-                helpStep(2, "Make sure the LLM IDE server is running")
+                helpStep(2, "Make sure the LLM-IDE server is running")
                 helpStep(3, "If using localhost, check that the port matches (default: 3456)")
                 helpStep(4, "Try signing out and signing back in to refresh your token")
             }

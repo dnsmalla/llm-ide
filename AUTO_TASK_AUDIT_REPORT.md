@@ -164,7 +164,7 @@ The **Auto Task** feature (formerly "Auto Code Update") is a sophisticated, well
 ```
 **Status:** ✅ Integrated with `RegressionRunner`
 - ✅ Reads from `system/faults/`
-- ✅ Runs on gitRoot (clone), reads from projectRoot (LLM IDE project)
+- ✅ Runs on gitRoot (clone), reads from projectRoot (LLM-IDE project)
 
 ### Step 8: Knowledge Report (Optional)
 ```swift
@@ -328,7 +328,7 @@ if !autoSteps.createBranch || !autoSteps.autoCommit { skip implementation }
 
 ### 6.1 File Logging
 
-**Path:** `~/Library/Logs/LLM IDE/auto-task-*.log`
+**Path:** `~/Library/Logs/llm-ide/auto-task-*.log`
 
 **Examples:**
 - `auto-task-review-code.log`

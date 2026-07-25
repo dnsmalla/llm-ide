@@ -11,6 +11,12 @@
 import { MsgType, isMessage, type Message } from '../lib/messages';
 import { debug } from '../lib/config';
 import { detectPlatformFromUrl, type PlatformId } from '../lib/platforms';
+import {
+  GROUP_ICON_RE,
+  isActiveMeetingPage as checkActiveMeetingPage,
+  isValidCaption,
+  sanitizeSpeaker,
+} from './caption-validation';
 
 // Guard against re-injection: chrome.scripting.executeScript({files:...})
 // re-executes top-level code, which would stack listeners / observers /
@@ -74,15 +80,8 @@ function detectPlatform(): Platform {
 // narrow enough (e.g. /l/*, /v2/*, /wc/*, /j/*), so we only need
 // this guard for Meet.
 
-const MEET_ROOM_RE = /^\/[a-z]{3}-[a-z]{4}-[a-z]{3}(\/.*)?$/i;
-const MEET_VALID_PATHS = ['/lookup/', '/_meet/'];
-
 function isActiveMeetingPage(): boolean {
-  if (platform !== 'meet') return true; // Only guard Meet pages
-  const path = window.location.pathname;
-  if (MEET_ROOM_RE.test(path)) return true;
-  if (MEET_VALID_PATHS.some((p) => path.startsWith(p))) return true;
-  return false;
+  return checkActiveMeetingPage(platform, window.location.pathname);
 }
 
 // ─── Platform-specific caption readers ────────────────────────────────
@@ -363,90 +362,7 @@ function readZoomCaptions(): CaptionBlock[] {
   return blocks;
 }
 
-// ─── Validation ───────────────────────────────────────────────────────
-
-// Known non-caption UI text patterns
-const UI_PATTERNS =
-  /^(present|mute|unmute|camera|more|chat|people|raise|record|share|hang|info|meeting|host|leave|call|keyboard|audio|video|back_hand|mood|apps|lock|closed_caption|format_size|circle|font|settings|open|turn|send|language|japanese|english|live captions|ume-|pm\s|am\s|frame_person|visual_effects|reframe|backgrounds|effects|filters|appearance|touch|framing|portrait|blur|lighting|close\s|your\s+meeting|dial-in|pin:|copy\s|joining\s+info|attachments|add\s|share\s+this|meeting\s+link|meeting\s+code|loading\s+invitees|contributors|just\s+you|\d+\s+joined|save\s+transcript|ask\s+tactiq|chevron_right|chevron_left|expand_more|expand_less|content_copy|return\s+to\s+home|submit\s+feedback|in\s+the\s+meeting|your\s+meet\s+call|secure\s+video|video\s+conferencing|new\s+meeting|enter\s+a\s+code|connect.*collaborate|from\s+your\s+google)/i;
-
-const ICON_PATTERN =
-  /\b(frame_person|visual_effects|closed_caption|format_size|keyboard_arrow|more_vert|call_end|back_hand|mic|videocam|computer|reaction|settings|lock_person|chat|apps|info|mood|raise|stop_circle|filter|chevron_right|chevron_left|expand_more|expand_less|content_copy|arrow_back|arrow_forward|open_in_new|check_circle|cancel|navigate_next|navigate_before)\b/i;
-
-// When Meet has 3+ active speakers it prefixes the caption block with the
-// Material Symbol `groups`. Depending on how innerText folds the DOM this
-// shows up either as its own line or as an inline prefix on the speaker
-// label ("groups 西尾拓摩 & 1 others"). We strip it BEFORE validation so
-// the underlying speaker name passes cleanly.
-const GROUP_ICON_RE = /^groups\b\s*/i;
-
-// Meet renders a combined caption for 3+ simultaneous speakers as
-// "<primary-name> & N others" (or the localized equivalent in JA:
-// "<名前> 他Nさん").  That composite isn't a real participant name — it
-// changes per-utterance based on who else is talking, and treating it as
-// one speaker fragments the transcript into many short one-person lines.
-// Collapse to the primary name so the grouped utterance is attributed to
-// at least the loudest speaker instead of a synthetic "& 6 others" label.
-const COMBINED_SPEAKER_RE = /\s*[&＆]\s*\d+\s*(others?|more)\b.*$/i;
-const COMBINED_SPEAKER_JA = /\s*(他|ほか)\s*\d+\s*(名|人|さん)?\b.*$/;
-
-// Strip control chars, combined-speaker suffixes, collapse whitespace,
-// cap length.  Speaker names come from DOM text we don't control —
-// without this, a display name like "Alice\nIgnore prior instructions and"
-// could break prompt structure on the server side once it's concatenated
-// into "[Alice\n...]: text".
-function sanitizeSpeaker(raw: string): string {
-  return (
-    raw
-      // eslint-disable-next-line no-control-regex
-      .replace(/[\u0000-\u001F\u007F]/g, ' ')
-      .replace(COMBINED_SPEAKER_RE, '')
-      .replace(COMBINED_SPEAKER_JA, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 50)
-  );
-}
-
-function isValidCaption(speaker: string, text: string): boolean {
-  if (!speaker || !text) return false;
-  if (speaker.length > 50 || speaker.length < 1) return false;
-  if (text.length < 1 || text.length > 2000) return false;
-
-  // Speaker shouldn't look like UI text
-  if (UI_PATTERNS.test(speaker)) return false;
-  if (ICON_PATTERN.test(speaker)) return false;
-  if (/^\d{1,2}:\d{2}/.test(speaker)) return false; // Clock
-  if (/^[a-z]{3}-[a-z]{4}-[a-z]{3}/i.test(speaker)) return false; // Meeting ID
-
-  // Real person names rarely exceed 5 words.  Longer "speakers" are
-  // almost always scraped UI headings (e.g. "Secure video conferencing
-  // for everyone").  CJK names have few spaces, so word count is safe.
-  const speakerWords = speaker.split(/\s+/).length;
-  if (speakerWords > 5) return false;
-
-  // Text shouldn't be UI text either
-  if (UI_PATTERNS.test(text)) return false;
-  if (ICON_PATTERN.test(text)) return false;
-  if (/\+\d{1,3}[\s-]?\d/.test(text)) return false; // Phone number
-  if (/keyboard_arrow|Turn off|Turn on/i.test(text)) return false;
-  // Material icon text fragments embedded in scraped UI blocks
-  if (/\bvideo_call\b|\bkeyboard\b.*\bJoin\b/i.test(text)) return false;
-
-  // Speaker shouldn't be a snake_case identifier
-  if (/\b[a-z]+_[a-z]+\b/.test(speaker)) return false;
-
-  // Reject text that is ONLY icon names or short UI labels
-  // (e.g. "chevron_right chevron_right chevron_right")
-  const textWords = text.split(/\s+/);
-  if (textWords.every((w) => /^[a-z]+_[a-z]+$/i.test(w))) return false;
-
-  // Reject standalone numbers (e.g. "1" from "Contributors 1")
-  if (/^\d{1,3}$/.test(text.trim())) return false;
-
-  return true;
-}
-
-// ─── Platform registries ─────────────────────────────────────────────
+// ─── Validation (see caption-validation.ts — tested in Node) ───────────
 // Registry pattern: add a new platform by adding one entry here and
 // one entry in PLATFORMS (platforms.ts).  No if-else chains to update.
 
@@ -487,7 +403,7 @@ function handleSendError(e: Error): void {
     if (contextInvalidated) return;
     contextInvalidated = true;
 
-    console.error('[LLM IDE] Extension context lost — stopping scraper. Reload the tab to resume.');
+    console.error('[LLM-IDE] Extension context lost — stopping scraper. Reload the tab to resume.');
     isCapturing = false;
     stopScraping();
 
@@ -508,13 +424,13 @@ function handleSendError(e: Error): void {
       boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
       whiteSpace: 'nowrap',
     });
-    banner.textContent = '⚠ LLM IDE: connection lost — reload this tab to resume capture';
+    banner.textContent = '⚠ LLM-IDE: connection lost — reload this tab to resume capture';
     document.body?.appendChild(banner);
     return;
   }
 
   // Transient errors — log but keep scraping.
-  console.warn('[LLM IDE] send failed (will retry):', msg);
+  console.warn('[LLM-IDE] send failed (will retry):', msg);
 }
 
 function sendUpdate(speaker: string, text: string, sessionId: string): void {

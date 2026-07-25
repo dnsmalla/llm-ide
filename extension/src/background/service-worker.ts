@@ -18,7 +18,7 @@ async function openMacAppDeepLink(): Promise<void> {
     const url = `${serverUrl}/launch-app?to=transcript`;
     await chrome.tabs.create({ url, active: false });
   } catch (err) {
-    console.error('[LLM IDE] Failed to open Mac app deep link:', err);
+    console.error('[LLM-IDE] Failed to open Mac app deep link:', err);
   }
 }
 
@@ -77,7 +77,7 @@ async function ensureContentScriptInjected(tabId: number, url: string): Promise<
     await chrome.scripting.executeScript({ target: { tabId }, files });
     return true;
   } catch (err) {
-    console.error('[LLM IDE] Failed to inject content script:', err);
+    console.error('[LLM-IDE] Failed to inject content script:', err);
     return false;
   }
 }
@@ -188,7 +188,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         sendResponse({ ok: true, results });
       } catch (err) {
-        console.error('[LLM IDE] caption scraping dispatch failed:', err);
+        console.error('[LLM-IDE] caption scraping dispatch failed:', err);
         sendResponse({ ok: false, error: String(err) });
       }
     })();

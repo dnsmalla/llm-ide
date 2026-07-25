@@ -1,5 +1,5 @@
 import XCTest
-@testable import LlmIdeMac
+@testable import LlmIdeMacLib
 
 /// ChatSessionStore persistence: list/filter, save/load/delete, legacy migration, scoped clear.
 /// Blocked from CI until `Package.swift` splits app sources into a library target — see

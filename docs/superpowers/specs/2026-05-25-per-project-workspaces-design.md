@@ -6,7 +6,7 @@
 
 ## Why
 
-Today LLM IDE is configured globally: one notes folder, one set of linked
+Today LLM-IDE is configured globally: one notes folder, one set of linked
 repos, one active CLI, one set of plugins enabled. A user with three side
 projects has to switch the GitLab "active" flag, swap notes folder, possibly
 re-enable a different plugin — every time they context-switch.
@@ -32,7 +32,7 @@ Two storage locations:
 | Location | Contents | Rationale |
 |---|---|---|
 | `<projectFolder>/.llmide/project.json` | identity + bundle (see schema below) | Travels with the folder. User can git-track it. Move folder → settings move with it. |
-| `~/Library/Application Support/LLM IDE/projects.json` | recent-projects list, active id, app-wide migration state | App-wide bookkeeping. Survives folder moves. |
+| `~/Library/Application Support/llm-ide/projects.json` | recent-projects list, active id, app-wide migration state | App-wide bookkeeping. Survives folder moves. |
 
 ## Data shapes
 
@@ -42,7 +42,7 @@ Two storage locations:
 {
   "schemaVersion": 1,
   "id": "01HBYZ...",                     // ULID-like, stable
-  "displayName": "LLM IDE Mac",
+  "displayName": "LLM-IDE Mac",
   "createdAt": "2026-05-25T11:00:00Z",
   "settings": {
     "language": "en",
@@ -253,7 +253,7 @@ Touched files (boundaries shift, not full rewrite):
 | Failure | Behavior |
 |---|---|
 | `project.json` corrupt | Archive as `.corrupt.<unix>.json`; offer to reinitialize from defaults (same pattern as `ProcessedActionsRegistry`) |
-| `project.json` schema version newer than client supports | Refuse to load; show "Update LLM IDE to open this project." message |
+| `project.json` schema version newer than client supports | Refuse to load; show "Update LLM-IDE to open this project." message |
 | Folder no longer exists when user clicks recent | Mark recent as `unreachable: true`; offer "Remove from recents" |
 | Folder permission denied | Surface NSError to status bar; allow re-pick |
 | `projects.json` corrupt | Same archive pattern as `project.json` |

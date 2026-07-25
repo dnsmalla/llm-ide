@@ -78,7 +78,7 @@ The install flow in `extension/plugins/installer.mjs` validates only the bundle 
 - zip entries are scanned before extraction and rejected on path traversal, absolute paths, Windows drive escapes, or invalid bundle shape
 - install happens in a temp staging directory and moves into the real plugin directory only after validation succeeds
 
-Once installed and enabled, plugin code runs inside the same Node.js server process as the rest of LLM IDE. That means a malicious plugin can:
+Once installed and enabled, plugin code runs inside the same Node.js server process as the rest of LLM-IDE. That means a malicious plugin can:
 
 - read process environment variables and any secrets reachable from them
 - import server modules directly, including KB/storage helpers

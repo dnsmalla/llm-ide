@@ -157,7 +157,7 @@ Click to expand popover with full details
 
 ```
 Click "Reveal Logs"
-Folder: ~/Library/Logs/LLM IDE/
+Folder: ~/Library/Logs/llm-ide/
 
 Files:
 - auto-task-review-code.log
@@ -259,7 +259,7 @@ Each log contains: timestamps, findings, errors
 - **Rotate tokens** — Every 90 days (both GitHub and GitLab recommend this)
 - **Revoke old tokens** — When you rotate, delete the old one immediately
 - **Never commit tokens** — `.git/config` should never contain tokens
-- **Keychain is safe** — LLM IDE stores tokens in macOS Keychain (encrypted)
+- **Keychain is safe** — LLM-IDE stores tokens in macOS Keychain (encrypted)
 - **Audit logs** — Check GitHub/GitLab activity logs occasionally
 
 ## Links

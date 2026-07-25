@@ -126,7 +126,7 @@ view-layer change consuming data the backend abstraction already exposes.
 
 - Kanban/board view entirely (GitLab's own Issues page doesn't have it here;
   a future "Boards" surface would be a separate spec if ever requested).
-- Renaming the app bundle/module or touching `Application Support/LLM IDE`
+- Renaming the app bundle/module or touching `Application Support/llm-ide`
   storage paths (unrelated, flagged as a separate future task in a prior
   session).
 - Milestone-grouped Gantt rows (structural change) — explicitly deferred;

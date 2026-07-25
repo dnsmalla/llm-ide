@@ -69,8 +69,7 @@ final class NotesFolderConfig {
     }
 
     func defaultFolder() -> URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("LLM IDE", isDirectory: true)
+        AppIdentity.documentsRoot()
     }
 
     static func detectSyncProvider(at url: URL) -> SyncProvider? {

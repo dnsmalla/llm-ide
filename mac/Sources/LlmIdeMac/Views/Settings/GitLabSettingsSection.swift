@@ -405,7 +405,7 @@ struct GitLabSettingsSection: View {
             } else {
                 // Fresh clone — refuses to proceed until the user has
                 // configured Settings → Paths. We used to fall back to
-                // `~/Developer/LLM IDE/`, but that quietly bypassed
+                // `~/Developer/llm-ide/`, but that quietly bypassed
                 // the user's intent and made the "Move to Clones
                 // folder" banner trip later. Production wants the
                 // path setting to be authoritative; no fallback.

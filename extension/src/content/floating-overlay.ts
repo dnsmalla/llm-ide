@@ -1,4 +1,4 @@
-// Floating overlay — injects a minimal "LLM IDE" status pill into the
+// Floating overlay — injects a minimal "LLM-IDE" status pill into the
 // meeting page while recording is active.  Clicking "Open" deep-links to
 // the native Mac app via the service worker (LAUNCH_MAC_APP message,
 // historically called OPEN_POPUP for backwards compat with stored builds).
@@ -21,7 +21,7 @@ window.__llmideFloatingOverlayInjected = true;
 const BAR_ID = 'llmide-bar';
 let barEl: HTMLDivElement | null = null;
 
-// ── LLM IDE Toolbar Icon ───────────────────────────────────────────
+// ── LLM-IDE Toolbar Icon ───────────────────────────────────────────
 // A small cloud icon that appears on the right edge of the screen,
 // styling matching Google Meet's native toolbar. Clicking it opens the app.
 
@@ -91,7 +91,7 @@ function buildBar(): void {
 
   const bar = document.createElement('div');
   bar.id = 'llmide-icon';
-  bar.title = 'Open LLM IDE';
+  bar.title = 'Open LLM-IDE';
 
   // An SVG spark/cloud to closely match the user's screenshot aesthetic
   bar.innerHTML = `

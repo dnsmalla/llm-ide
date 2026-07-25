@@ -1,4 +1,4 @@
-// Install the central skills kit into a LLM IDE project folder.
+// Install the central skills kit into a LLM-IDE project folder.
 //
 // Called from POST /kb/project/install-skills when the Mac app creates a
 // project or rebuilds its folders. Runs the kit's manifest-driven
@@ -6,7 +6,7 @@
 // get the same SKILL.md catalogue as relative symlinks (one physical copy:
 // the pinned `.skills` submodule or resolved central clone).
 //
-// Security: only installs into directories that already carry the LLM IDE
+// Security: only installs into directories that already carry the LLM-IDE
 // project marker (`system/project.json`). Never creates that marker and
 // never writes outside the resolved realpath of the given folder.
 
@@ -89,7 +89,7 @@ export function assertInstallableProjectPath(projectPath) {
   const marker = join(resolved, 'system', 'project.json');
   if (!existsSync(marker)) {
     const err = new Error(
-      'path is not a LLM IDE project (missing system/project.json)');
+      'path is not a LLM-IDE project (missing system/project.json)');
     err.code = 'NOT_A_PROJECT';
     throw err;
   }

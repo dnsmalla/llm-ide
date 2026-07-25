@@ -56,7 +56,7 @@ enum ProjectDocTemplatesSeeder {
     private static let templatesReadme = """
     # Doc Gen Templates
 
-    Each subfolder is one document template for **Doc Gen** in LLM IDE.
+    Each subfolder is one document template for **Doc Gen** in LLM-IDE.
 
     ## Layout
 

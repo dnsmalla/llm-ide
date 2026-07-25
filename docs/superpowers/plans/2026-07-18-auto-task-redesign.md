@@ -413,7 +413,7 @@ At each prompt-task call site (lines 487, 500, 513, 527, 541), add the `task:` a
                 if ok {
                     taskErrors.removeValue(forKey: AutoTask.reviewCode.rawValue)
                 } else {
-                    taskErrors[AutoTask.reviewCode.rawValue] = "Review Code task failed. Check ~/Library/Logs/LLM IDE/auto-task-review-code.log"
+                    taskErrors[AutoTask.reviewCode.rawValue] = "Review Code task failed. Check ~/Library/Logs/llm-ide/auto-task-review-code.log"
                 }
             }
 ```
@@ -564,7 +564,7 @@ Add this method. Each case MOVES the existing block verbatim from `run()` (the `
             taskErrors.removeValue(forKey: task.rawValue)
             logStore.append(task, "— run finished —", level: .info)
         } else {
-            taskErrors[task.rawValue] = "\(task.label) task failed. Check ~/Library/Logs/LLM IDE/auto-task-\(task.logSuffix).log"
+            taskErrors[task.rawValue] = "\(task.label) task failed. Check ~/Library/Logs/llm-ide/auto-task-\(task.logSuffix).log"
             logStore.append(task, "— run failed —", level: .error)
         }
     }
@@ -1137,7 +1137,7 @@ cd mac && ./build_app.sh && open build/Release/LlmIdeMac.app   # (confirm exact 
 Then verify:
 - Auto Task page: select each of the 8 tasks → right pane shows Preview (rendered markdown), Edit (5 prompt tasks) or config (Regression), and a live Log section with Clear.
 - Click ▶ Run on a prompt task → its Log streams lines live, accumulates a second run's lines on a second click.
-- Clear wipes the on-screen log; the `.log` file in `~/Library/Logs/LLM IDE/` is untouched.
+- Clear wipes the on-screen log; the `.log` file in `~/Library/Logs/llm-ide/` is untouched.
 - Menu Bar: Run Now still works (global run); per-task enable toggles still gate the global run.
 - Settings → Auto Tasks: only Enabled / Scan last / Run every / Auto-stash + repo warning remain.
 

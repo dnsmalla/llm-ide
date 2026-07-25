@@ -37,10 +37,10 @@ export DEVELOPER_DIR := $(shell env -u DEVELOPER_DIR xcode-select -p)
 # from the (now Xcode) DEVELOPER_DIR, keeping compiler and SDK from one install.
 export SDKROOT := $(shell DEVELOPER_DIR='$(shell env -u DEVELOPER_DIR xcode-select -p)' xcrun --sdk macosx --show-sdk-path)
 
-# Full Swift test suite for the desktop app (faults model, MemoryStore,
-# RegressionRunner, CSV export, on-disk migration, etc.).
+# Full Swift test suite for the desktop app (ChatSessionStore, etc.).
+# Requires full Xcode — Command Line Tools alone lack the XCTest module.
 test-mac:
-	cd mac && swift build && swift test
+	cd mac && swift build --product LlmIdeMac && swift test
 
 # Pre-upgrade / pre-production regression gate. Runs the Swift suite that
 # guards the fault + regression machinery. Pair with the in-app Regression

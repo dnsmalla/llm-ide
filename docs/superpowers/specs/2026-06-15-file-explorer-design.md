@@ -22,12 +22,12 @@ so the Code Graph artifacts at the repo root flood `git status`.
 
 - Write a marker-guarded block to the **project-root `.gitignore`**:
   - If root `.gitignore` is absent → create it with the block.
-  - If present but the marker (`# >>> LLM IDE managed`) is absent → append the
+  - If present but the marker (`# >>> LLM-IDE managed`) is absent → append the
     block. Never rewrite/clobber the user's existing rules.
   - If the marker is already present → no-op (idempotent).
 - Block contents:
   ```
-  # >>> LLM IDE managed (auto-generated / ephemeral) — safe to edit above
+  # >>> LLM-IDE managed (auto-generated / ephemeral) — safe to edit above
   .code-notes/
   .understand-anything/
   .llmide/cache/
@@ -36,7 +36,7 @@ so the Code Graph artifacts at the repo root flood `git status`.
   .llmide/index.sqlite-shm
   .llmide/index.sqlite-wal
   *.partial.md
-  # <<< LLM IDE managed
+  # <<< LLM-IDE managed
   ```
 - The existing `.llmide/.gitignore` write is removed (superseded).
 - Runs in `scaffold(at:project:)`, so existing projects are cleaned on next

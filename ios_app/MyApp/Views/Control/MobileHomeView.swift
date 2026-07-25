@@ -27,6 +27,10 @@ struct MobileHomeView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
+            if connection.connectionStatus == .connected {
+                connectedHint
+            }
+
             // Error banner — always visible on top when the agent reports a problem.
             if let error = connection.errorMessage {
                 VStack {
@@ -68,6 +72,26 @@ struct MobileHomeView: View {
                 .environmentObject(autoTaskStore)
         }
         .animation(.easeInOut(duration: 0.2), value: autoTaskStore.actionStatus)
+    }
+
+    // MARK: — Connected hint (companion mode — no screen mirror)
+
+    private var connectedHint: some View {
+        VStack(spacing: DesignSystem.Spacing.md) {
+            Image(systemName: "iphone.and.arrow.forward")
+                .font(.system(size: 44))
+                .foregroundColor(DesignSystem.Colors.primary.opacity(0.9))
+            Text("Paired with \(deviceName)")
+                .font(.system(size: DesignSystem.Typography.title2, weight: .semibold))
+                .foregroundColor(.white)
+            Text("Use Chat, Explore, or Auto in the toolbar.\nScreen mirroring is not part of this app — no Mac Screen Recording permission is required on either device for pairing.")
+                .font(.system(size: DesignSystem.Typography.subheadline))
+                .foregroundColor(.white.opacity(0.72))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, DesignSystem.Spacing.xl)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
     }
 
     // MARK: — Error banner
@@ -152,7 +176,6 @@ struct MobileHomeView: View {
                     }
                     Divider()
                     Button("Disconnect", role: .destructive) {
-                        connection.stopViewing()
                         connection.disconnect()
                         connectionStore.clear()
                     }

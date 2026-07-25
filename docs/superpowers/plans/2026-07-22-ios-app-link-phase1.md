@@ -17,7 +17,7 @@
 - SharedProtocol package platforms: `.macOS(.v14)`, `.iOS(.v16)`.
 - SharedProtocol `swift-tools-version`: `5.9`.
 - iOS deployment target: `16.0` (keep). `TARGETED_DEVICE_FAMILY = "1,2"` (keep — iPad stays).
-- iOS bundle id: `com.llmide.mobile`. Display name: `LLM IDE`.
+- iOS bundle id: `com.llmide.mobile`. Display name: `LLM-IDE`.
 - Bonjour service type: `_llmide._tcp` (Info.plist `NSBonjourServices`) and `_llmide._tcp.` (NetServiceBrowser — trailing dot).
 - Default port: `3006`. Heartbeat interval: `10`s. Heartbeat timeout: `25`s.
 - `DEVELOPMENT_TEAM = 9A3YFRQ7SM`, `CODE_SIGN_IDENTITY = "iPhone Developer"` (keep).
@@ -383,7 +383,7 @@ git commit -m "feat(ios): bring the iOS control app into the repo under ios_app/
 - Modify: `ios_app/MyApp/Supporting/Info.plist`
 - Modify: `ios_app/MyApp.xcodeproj/project.pbxproj`
 
-**Interfaces:** none (config). Produces bundle id `com.llmide.mobile`, display name `LLM IDE`, `_llmide._tcp` Bonjour service, llm-ide usage strings.
+**Interfaces:** none (config). Produces bundle id `com.llmide.mobile`, display name `LLM-IDE`, `_llmide._tcp` Bonjour service, llm-ide usage strings.
 
 - [ ] **Step 1: Rebrand the Info.plist display name**
 
@@ -398,7 +398,7 @@ with:
 
 ```xml
   <key>CFBundleDisplayName</key>
-  <string>LLM IDE</string>
+  <string>LLM-IDE</string>
 ```
 
 - [ ] **Step 2: Switch the Bonjour service type in Info.plist**
@@ -430,7 +430,7 @@ In the same file, replace these four strings (each line individually):
 ```
 →
 ```xml
-  <string>LLM IDE discovers your Mac on the local network to connect automatically.</string>
+  <string>LLM-IDE discovers your Mac on the local network to connect automatically.</string>
 ```
 
 ```xml
@@ -438,7 +438,7 @@ In the same file, replace these four strings (each line individually):
 ```
 →
 ```xml
-  <string>LLM IDE uses the camera to scan the pairing QR code shown on your Mac.</string>
+  <string>LLM-IDE uses the camera to scan the pairing QR code shown on your Mac.</string>
 ```
 
 ```xml
@@ -446,7 +446,7 @@ In the same file, replace these four strings (each line individually):
 ```
 →
 ```xml
-  <string>LLM IDE uses the microphone for voice commands — speak to open apps and type text on your computer.</string>
+  <string>LLM-IDE uses the microphone for voice commands — speak to open apps and type text on your computer.</string>
 ```
 
 ```xml
@@ -454,7 +454,7 @@ In the same file, replace these four strings (each line individually):
 ```
 →
 ```xml
-  <string>LLM IDE converts your speech to text on-device to control your computer by voice.</string>
+  <string>LLM-IDE converts your speech to text on-device to control your computer by voice.</string>
 ```
 
 - [ ] **Step 4: Change the bundle id in the Xcode project**

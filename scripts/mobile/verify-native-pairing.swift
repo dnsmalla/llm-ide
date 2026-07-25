@@ -5,7 +5,7 @@
 //  Loopback check for the Phase 2 native Mac WebSocket server.
 //
 //  Prerequisites:
-//    1. LLM IDE Mac app running.
+//    1. LLM-IDE Mac app running.
 //    2. Settings -> Mobile Control -> enable the toggle, then press "Start".
 //       This starts the native server on 127.0.0.1:3006 and advertises
 //       _llmide._tcp over Bonjour. The Settings panel shows the current

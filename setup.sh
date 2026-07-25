@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# LLM IDE Automated Deployment Script
+# LLM-IDE Automated Deployment Script
 # This script handles resolving all dependencies, compiling native binaries,
 # and initializing the Node server seamlessly for the end-user.
 
@@ -11,7 +11,7 @@ REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$REPO_ROOT"
 
 echo "========================================="
-echo "   LLM IDE Extension Initialization   "
+echo "   LLM-IDE Extension Initialization   "
 echo "========================================="
 echo ""
 
@@ -55,12 +55,12 @@ fi
 
 echo ""
 # 4. Verify Claude CLI (required — see docs/decisions/0001-claude-cli-not-api-key.md)
-# LLM IDE shells out to the `claude` CLI authenticated as the user.
+# LLM-IDE shells out to the `claude` CLI authenticated as the user.
 # ANTHROPIC_API_KEY is NOT required and NOT used.
 if ! command -v claude &> /dev/null; then
     echo "❌ Error: the 'claude' CLI is not installed or not on PATH."
     echo ""
-    echo "LLM IDE uses the Claude CLI (authenticated via 'claude login') to talk to the model."
+    echo "LLM-IDE uses the Claude CLI (authenticated via 'claude login') to talk to the model."
     echo "We do NOT use an Anthropic API key."
     echo ""
     echo "Install instructions: https://docs.claude.com/en/docs/claude-code/quickstart"

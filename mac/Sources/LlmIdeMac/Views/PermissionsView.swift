@@ -100,7 +100,7 @@ struct PermissionsView: View {
                     .font(Typography.display)
                     .foregroundStyle(theme.current.text)
             }
-            Text("LLM IDE captures meeting captions locally on your Mac. Grant these permissions in System Settings, then quit and relaunch the app.")
+            Text("LLM-IDE captures meeting captions locally on your Mac. Grant these permissions in System Settings, then quit and relaunch the app.")
                 .font(Typography.body)
                 .foregroundStyle(theme.current.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -113,7 +113,7 @@ struct PermissionsView: View {
             Image(systemName: "info.circle.fill")
                 .font(.system(size: 12))
                 .foregroundStyle(theme.current.accent2)
-            Text("After enabling Accessibility, **quit and relaunch** LLM IDE — macOS caches the trust state per-process, so the running app will keep saying \"needed\" until restart.")
+            Text("After enabling Accessibility, **quit and relaunch** LLM-IDE — macOS caches the trust state per-process, so the running app will keep saying \"needed\" until restart.")
                 .font(Typography.caption)
                 .foregroundStyle(theme.current.textMuted)
                 .fixedSize(horizontal: false, vertical: true)

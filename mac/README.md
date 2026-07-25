@@ -1,6 +1,6 @@
-# LLM IDE — macOS App
+# LLM-IDE — macOS App
 
-> Native SwiftUI client for the LLM IDE system. Captures live captions from Zoom and Microsoft Teams, surfaces the full knowledge base, and adds a native GitLab Issues board and Gantt chart — all backed by the same local server as the Chrome extension.
+> Native SwiftUI client for the LLM-IDE system. Captures live captions from Zoom and Microsoft Teams, surfaces the full knowledge base, and adds a native GitLab Issues board and Gantt chart — all backed by the same local server as the Chrome extension.
 
 [![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue.svg)](#requirements)
 [![Swift](https://img.shields.io/badge/swift-5.9-orange.svg)](#tech-stack)
@@ -30,7 +30,7 @@
 | | |
 |---|---|
 | **OS** | macOS 14 Sonoma or newer |
-| **Backend** | LLM IDE server running at `127.0.0.1:3456` (API v15+) |
+| **Backend** | LLM-IDE server running at `127.0.0.1:3456` (API v15+) |
 | **GitLab** | Personal Access Token with `api` scope (for Issues / Gantt) |
 
 ---

@@ -14,7 +14,7 @@ status: draft
 
 ## Local-first security posture
 
-LLM IDE is designed around a strict local-first principle: **nothing leaves the user's machine unless the user explicitly triggers a delivery action** (opening a pull request, sending an export, or firing an agent skill that reaches an external service). All other data — transcripts, AI outputs, credentials — stays on disk or in memory on the local host.
+LLM-IDE is designed around a strict local-first principle: **nothing leaves the user's machine unless the user explicitly triggers a delivery action** (opening a pull request, sending an export, or firing an agent skill that reaches an external service). All other data — transcripts, AI outputs, credentials — stays on disk or in memory on the local host.
 
 This posture rests on three interlocking controls:
 

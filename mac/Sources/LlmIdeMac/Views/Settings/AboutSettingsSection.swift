@@ -20,7 +20,7 @@ struct AboutSettingsSection: View {
                         .font(Typography.mono)
                         .foregroundStyle(theme.current.text)
                 }
-                SettingsHint("Native macOS client for the LLM IDE backend. Captions captured via Accessibility APIs from Zoom and Teams desktop apps.")
+                SettingsHint("Native macOS client for the LLM-IDE backend. Captions captured via Accessibility APIs from Zoom and Teams desktop apps.")
             }
         }
     }

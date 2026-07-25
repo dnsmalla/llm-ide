@@ -105,7 +105,7 @@ Built by the Mac client, sent in the request body as `agentContext`, inlined int
 - Default branch: main
 
 ## Indexed code repositories (from the user's Library)
-- notes-extension     (path: ~/Developer/LLM IDE/notes-extension)
+- notes-extension     (path: ~/Developer/llm-ide/notes-extension)
 ```
 
 When fields are empty, the block still renders with explicit `(none configured)` markers so the agent can give the user a useful pointer rather than fall apart silently.

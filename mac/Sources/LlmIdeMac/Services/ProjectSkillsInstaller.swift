@@ -1,6 +1,6 @@
 import Foundation
 
-/// Wires the central skills kit into a LLM IDE project folder so Claude,
+/// Wires the central skills kit into a LLM-IDE project folder so Claude,
 /// Cursor, Codex, `.agents`, and Gemini all discover the same SKILL.md
 /// catalogue. Called by `ProjectStore` after scaffolding (or rebuilding) a
 /// project's folders.

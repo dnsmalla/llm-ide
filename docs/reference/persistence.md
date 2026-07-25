@@ -5,7 +5,7 @@ applies_to: server, mac, extension
 
 # Persistence reference
 
-Every persistent store in LLM IDE, with location, schema shape,
+Every persistent store in LLM-IDE, with location, schema shape,
 version mechanism, and migration policy.
 
 If you are renaming or removing a Codable property, jump to the
@@ -28,7 +28,7 @@ Tables: see `docs/explanation/architecture.md` § Storage.
 
 | | |
 |---|---|
-| Location | `~/Library/Application Support/LLM IDE/sessions/<uuid>.json` |
+| Location | `~/Library/Application Support/llm-ide/sessions/<uuid>.json` |
 | Root type | `ChatSession` struct (one file per session) |
 | Version field | `storeVersion: Int` on `ChatSession` (default `1`; absent on legacy files, defaulted in `init(from:)`) |
 | Corrupt files | Renamed `<uuid>.corrupt-<ts>.json` and skipped |
@@ -38,7 +38,7 @@ Tables: see `docs/explanation/architecture.md` § Storage.
 
 | | |
 |---|---|
-| Location | `~/Library/Application Support/LLM IDE/library_items.json` |
+| Location | `~/Library/Application Support/llm-ide/library_items.json` |
 | Root type | `LibraryItemStore.StoreFile { storeVersion: Int, items: [LibraryItem] }` |
 | Version field | `storeVersion: Int = 1` on the envelope |
 | Legacy decode | If the envelope decode fails, the bare `[LibraryItem]` shape is attempted (files written before the envelope existed) |
@@ -59,7 +59,7 @@ Tables: see `docs/explanation/architecture.md` § Storage.
 
 | | |
 |---|---|
-| Location | `~/Library/Application Support/LLM IDE/processed_actions.json` (passed in by `AutoCodeUpdateService`) |
+| Location | `~/Library/Application Support/llm-ide/processed_actions.json` (passed in by `AutoCodeUpdateService`) |
 | Root type | `ProcessedActionsRegistry.RegistryFile { storeVersion: Int, entries: [String: RegistryEntry] }` |
 | Version field | `storeVersion: Int = 1` |
 | Legacy decode | Falls back to bare `[String: RegistryEntry]` dict |

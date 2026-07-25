@@ -231,7 +231,7 @@ Import at top: `import { pkcePair, buildAuthUrl, exchangeCode, fetchEmailAddress
 ```js
   if (method === 'GET' && url.split('?')[0] === '/auth/google/callback') {
     const q = new URL(url, 'http://127.0.0.1').searchParams;
-    const html = (msg) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(`<!doctype html><meta charset=utf-8><body style="font-family:system-ui;padding:2rem"><p>${msg}</p><p>You can close this tab and return to LLM IDE.</p><script>setTimeout(()=>window.close(),1500)</script>`); };
+    const html = (msg) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(`<!doctype html><meta charset=utf-8><body style="font-family:system-ui;padding:2rem"><p>${msg}</p><p>You can close this tab and return to LLM-IDE.</p><script>setTimeout(()=>window.close(),1500)</script>`); };
     const state = q.get('state') || '';
     const st = getState(state);
     if (q.get('error')) { if (st) completeState(state, { status: 'error', message: 'Sign-in cancelled.' }); return html('Sign-in cancelled.'), true; }

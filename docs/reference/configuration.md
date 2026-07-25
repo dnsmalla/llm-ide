@@ -5,7 +5,7 @@ applies_to: server, mac, extension
 
 # Configuration reference
 
-Every configurable setting in LLM IDE, mapped to the store that owns
+Every configurable setting in LLM-IDE, mapped to the store that owns
 it. If you're adding a new setting, use the [decision tree](#where-does-this-go)
 at the bottom to pick where it lives.
 

@@ -7,7 +7,7 @@ applies_to: server, extension, mac
 
 ## Goal
 
-Teach the internal LLM IDE agent a new capability — either a read (server-executed) or a write (client-confirmed).
+Teach the internal LLM-IDE agent a new capability — either a read (server-executed) or a write (client-confirmed).
 
 > **Tool definitions are authored centrally, not here.** The `.md` files in
 > `extension/llm_agent/internal/skills/` (domain tools) and the managed `.md` defs in

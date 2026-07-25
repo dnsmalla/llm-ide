@@ -393,7 +393,7 @@ const CLI_ARG_BUILDERS = {
   // `--system-prompt 'You are a helpful AI assistant.'` replaces Claude Code's
   // default system prompt (which declares "I'm Claude Code operating in this
   // repo…"). Without it the model breaks character — it knows it's Claude Code
-  // and overrides the LLM IDE persona injected via the user-message prompt,
+  // and overrides the LLM-IDE persona injected via the user-message prompt,
   // printing commands to copy-paste instead of calling tools, and narrating its
   // Claude Code identity into replies. The replacement is intentionally minimal:
   // the real system prompt (persona, skills, tool defs) arrives in the user

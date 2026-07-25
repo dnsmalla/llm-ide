@@ -17,7 +17,7 @@ Give each sidebar section that shows chat its **own isolated, persistent convers
   - Doc Gen — `Views/DocGen/DocGenView.swift:47`
 - The active session is a **single global pointer**: `@AppStorage("MEETNOTES_CURRENT_CHAT_SESSION_ID")` at `CodeAssistantPanel.swift:46`. Every panel instance reads/writes the same pointer → same conversation everywhere.
 - `ChatSession` (`Models/ChatSession.swift:8`) — `storeVersion`, `id: UUID`, `title`, `createdAt`, `lastUsedAt`, `history: [CodeAssistTurn]`. Supports many sessions (Cursor-style picker).
-- `ChatSessionStore` (`Services/ChatSessionStore.swift:12`, a static `enum`) persists to `~/Library/Application Support/LLM IDE/sessions/<uuid>.json`, **global** (not keyed by section/project). `wipeAllForFreshLaunch()` (`:111`) is called from `LlmIdeMacApp.init` and **deletes every session on each launch**, so history is effectively ephemeral across restarts.
+- `ChatSessionStore` (`Services/ChatSessionStore.swift:12`, a static `enum`) persists to `~/Library/Application Support/llm-ide/sessions/<uuid>.json`, **global** (not keyed by section/project). `wipeAllForFreshLaunch()` (`:111`) is called from `LlmIdeMacApp.init` and **deletes every session on each launch**, so history is effectively ephemeral across restarts.
 - The panel has a multi-session picker: `sessions: [ChatSession]` state (`:72`), `SessionRow` (`Views/CodeAssistant/SessionRow.swift:10`), and `createNewSession` (`:2598`) / `switchSession` (`:2624`) / `deleteSession` (`:2648`).
 - Lifecycle: `handleOnAppear` (`:292`) resolves the global pointer → loads/mints a session; `handleHistoryChange` (`:324`) → `persistCurrentSession` (`:2565`) writes on every turn.
 - Out of scope (untouched): `AskAgentSheet` (`Views/Shell/AskAgentSheet.swift:11`, separate API, no persistence), `MemoryStore` (repo memory under `<repo>/system/`, not chat history), the menu bar (no chat exists there), mobile chat.
@@ -75,7 +75,7 @@ enum ChatSessionStore {
 }
 ```
 
-- `baseDir` / `sessionsDir` unchanged (`~/Library/Application Support/LLM IDE/sessions/`).
+- `baseDir` / `sessionsDir` unchanged (`~/Library/Application Support/llm-ide/sessions/`).
 - `load(for:)` returns a fresh `ChatSession(scope:)` when no file exists (first open).
 - **Migration:** old UUID-named session files and the legacy `chat-history.json` are **orphaned/ignored** — the new loader only reads `<scope>.json`, and the app already wiped sessions every launch, so there is no real data loss. `migrateLegacy()` (`:130`) is removed. (Optional: a one-time sweep of non-`<scope>` files in `sessions/`; not required for correctness.)
 

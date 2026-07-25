@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Harden the LLM IDE macOS app to production quality by fixing security vulnerabilities, eliminating crashes, closing reliability gaps, and cleaning up code quality issues found in the production-readiness audit.
+**Goal:** Harden the LLM-IDE macOS app to production quality by fixing security vulnerabilities, eliminating crashes, closing reliability gaps, and cleaning up code quality issues found in the production-readiness audit.
 
 **Architecture:** Three sequential groups — Security & Stability first (prevents data leaks and crashes), then Reliability & UX (closes silent failures and UX gaps visible to users), then Code Quality (internal improvements that prevent future regressions). Each group produces a clean commit.
 

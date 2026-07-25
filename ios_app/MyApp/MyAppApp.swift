@@ -16,6 +16,7 @@ struct MyAppApp: App {
         _connectionStore = StateObject(wrappedValue: connectionStore)
 
         let connection = ConnectionService()
+        connection.connectionStore = connectionStore
         _connection = StateObject(wrappedValue: connection)
 
         _llmIdeStore = StateObject(wrappedValue: LlmIdeChatStore(connection: connection))

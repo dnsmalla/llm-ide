@@ -83,7 +83,7 @@ POST /kb/project/install-skills
 ```
 
 The server only installs into folders that already have `system/project.json`
-(the LLM IDE project marker). It runs the same kit `install.sh` so Claude /
+(the LLM-IDE project marker). It runs the same kit `install.sh` so Claude /
 Cursor / Codex / `.agents` / Gemini get relative skill symlinks inside that
 project. Real files the scaffolder wrote (e.g. `.claude/settings.json`,
 hand-authored `CLAUDE.md` without the `llmide:auto` marker) are preserved.

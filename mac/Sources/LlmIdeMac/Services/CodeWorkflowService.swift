@@ -247,11 +247,7 @@ final class CodeWorkflowService: ObservableObject {
         // 2. Set up log file under Application Support
         let logDir: URL
         do {
-            let base = try FileManager.default.url(
-                for: .applicationSupportDirectory, in: .userDomainMask,
-                appropriateFor: nil, create: true)
-            logDir = base
-                .appendingPathComponent("LLM IDE", isDirectory: true)
+            logDir = AppIdentity.applicationSupportRoot()
                 .appendingPathComponent("code-workflow-logs", isDirectory: true)
             try FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
         } catch {
@@ -666,7 +662,7 @@ final class CodeWorkflowService: ObservableObject {
             let comment = """
             Branch `\(branchName)` pushed. Merge request: \(mr.webUrl)
 
-            Changes applied by LLM IDE AI assistant.
+            Changes applied by LLM-IDE AI assistant.
             """
             _ = try? await backend.createNote(projectId: projectId, number: issue.number, body: comment)
             advance()
@@ -701,7 +697,7 @@ final class CodeWorkflowService: ObservableObject {
             let comment = """
             Branch `\(branchName)` pushed. Merge request: \(mr.webUrl)
 
-            Changes applied by LLM IDE AI assistant.
+            Changes applied by LLM-IDE AI assistant.
             """
             _ = try await backend.createNote(projectId: projectId, number: issue.number, body: comment)
             // Close the source issue now that work is committed and an

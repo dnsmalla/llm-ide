@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-/// Creates and maintains the canonical folder tree inside a LLM IDE project.
+/// Creates and maintains the canonical folder tree inside a LLM-IDE project.
 ///
 /// Called on every `ProjectStore.openFolder(at:)` — fully idempotent, so
 /// re-opening an existing project only creates whatever is newly missing.
@@ -15,7 +15,7 @@ import os.log
 /// ├── data/       ← documents, data files, images
 /// ├── notes/      ← notes generated from meetings/email
 /// ├── templates/  ← Doc Gen templates (`<slug>/template.md`)
-/// └── system/     ← LLM IDE managed: settings, faults, graph, index (most git-ignored)
+/// └── system/     ← LLM-IDE managed: settings, faults, graph, index (most git-ignored)
 ///     ├── project.json   ← project metadata (written by ProjectStore)
 ///     ├── sync.json      ← last export info  (git-ignored)
 ///     ├── index.sqlite   ← full-text index   (git-ignored)
@@ -39,11 +39,11 @@ enum ProjectScaffolder {
 
     // MARK: - Public entry point
 
-    /// Validate that `folderURL` is a recognised LLM IDE project folder.
+    /// Validate that `folderURL` is a recognised LLM-IDE project folder.
     ///
     /// A folder is accepted when it satisfies **any** of the following:
     ///
-    /// 1. Already a new-layout LLM IDE project — has `system/project.json`.
+    /// 1. Already a new-layout LLM-IDE project — has `system/project.json`.
     /// 2. Is completely empty — treated as a new project to be scaffolded.
     ///
     /// Anything else (e.g. a Downloads folder, a code repo, an old-layout
@@ -93,7 +93,7 @@ enum ProjectScaffolder {
         //    linked repo, display name) are always reflected.  BUT never clobber
         //    a foreign README: when adopting a cloned code repo as a project, the
         //    repo ships its own README.md.  Only (re)write when the file is absent
-        //    or already LLM IDE-managed (carries the auto marker).
+        //    or already LLM-IDE-managed (carries the auto marker).
         let readmeURL = folderURL.appendingPathComponent("README.md")
         let existingReadme = try? String(contentsOf: readmeURL, encoding: .utf8)
         if existingReadme == nil
@@ -103,7 +103,7 @@ enum ProjectScaffolder {
                 at: readmeURL,
                 content: makeReadme(project: project, folderURL: folderURL))
         } else {
-            log.info("preserving existing non-LLM IDE README at \(folderURL.lastPathComponent, privacy: .public)")
+            log.info("preserving existing non-LLM-IDE README at \(folderURL.lastPathComponent, privacy: .public)")
         }
 
         // 5. .claude directory — project-level agent configuration and instructions
@@ -146,7 +146,7 @@ enum ProjectScaffolder {
     // MARK: - .gitignore
 
     private static let managedGitignoreBlock = """
-    # >>> LLM IDE managed (auto-generated / ephemeral) — edit your own rules above
+    \(AppIdentity.managedBlockOpen) (auto-generated / ephemeral) — edit your own rules above
     system/cache/
     system/index.sqlite
     system/index.sqlite-shm
@@ -154,7 +154,7 @@ enum ProjectScaffolder {
     system/graph/
     system/sync.json
     *.partial.md
-    # Agent skills — relative symlinks into the LLM IDE central kit (.skills).
+    # Agent skills — relative symlinks into the \(AppIdentity.displayName) central kit (.skills).
     # Re-created by New Project / Rebuild missing folders via the local server.
     .claude/skills/
     .claude/rules/
@@ -165,7 +165,7 @@ enum ProjectScaffolder {
     .codex/
     .agents/
     .gemini/
-    # <<< LLM IDE managed
+    \(AppIdentity.managedBlockClose)
     """
 
     /// Ensure the project-root .gitignore contains the managed block. Creates
@@ -176,24 +176,29 @@ enum ProjectScaffolder {
     private static func ensureRootGitignore(at folderURL: URL) {
         let url = folderURL.appendingPathComponent(".gitignore")
         let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-        if existing.contains("# >>> LLM IDE managed") {
+        if AppIdentity.isManagedGitignoreBlockPresent(existing) {
             // Upgrade path: older scaffolds lacked the agent-skills ignores.
             if !existing.contains(".agents/") {
-                let injected = existing.replacingOccurrences(
-                    of: "# <<< LLM IDE managed",
-                    with: """
-                    # Agent skills — relative symlinks into the LLM IDE central kit (.skills).
-                    .claude/skills/
-                    .claude/rules/
-                    .claude/agents
-                    .claude/commands
-                    .claude/prompts
-                    .cursor/
-                    .codex/
-                    .agents/
-                    .gemini/
-                    # <<< LLM IDE managed
-                    """)
+                let closeMarkers = [AppIdentity.managedBlockClose, AppIdentity.legacyManagedBlockClose]
+                var injected = existing
+                for close in closeMarkers where injected.contains(close) {
+                    injected = injected.replacingOccurrences(
+                        of: close,
+                        with: """
+                        # Agent skills — relative symlinks into the \(AppIdentity.displayName) central kit (.skills).
+                        .claude/skills/
+                        .claude/rules/
+                        .claude/agents
+                        .claude/commands
+                        .claude/prompts
+                        .cursor/
+                        .codex/
+                        .agents/
+                        .gemini/
+                        \(close)
+                        """)
+                    break
+                }
                 if injected != existing {
                     do { try injected.write(to: url, atomically: true, encoding: .utf8) }
                     catch { log.error("gitignore upgrade failed: \(error.localizedDescription, privacy: .public)") }
@@ -231,9 +236,9 @@ enum ProjectScaffolder {
         return """
         # \(name)
 
-        > Managed by **LLM IDE** — meeting intelligence & project control.
+        > Managed by **LLM-IDE** — meeting intelligence & project control.
 
-        <!-- llmide:auto — content below is refreshed by LLM IDE on every project open -->
+        <!-- llmide:auto — content below is refreshed by LLM-IDE on every project open -->
 
         ## Project Info
 
@@ -253,7 +258,7 @@ enum ProjectScaffolder {
         ├── data/       ← documents, data files, images
         ├── notes/      ← notes generated from meetings/email
         ├── templates/  ← Doc Gen templates (`<slug>/template.md`)
-        └── system/     ← LLM IDE managed: settings, faults, graph, index (most git-ignored)
+        └── system/     ← LLM-IDE managed: settings, faults, graph, index (most git-ignored)
         ```
 
         ## Meetings
@@ -263,7 +268,7 @@ enum ProjectScaffolder {
         items / decisions / blockers summary, and the full transcript (fenced).
 
         ---
-        *Auto-generated by LLM IDE. Add your own notes ABOVE the `<!-- llmide:auto -->` marker.*
+        *Auto-generated by LLM-IDE. Add your own notes ABOVE the `<!-- llmide:auto -->` marker.*
 
         """
     }
@@ -317,7 +322,7 @@ enum ProjectScaffolder {
         return """
 # \(name)
 
-> Project-specific instructions for LLM IDE agents.
+> Project-specific instructions for LLM-IDE agents.
 >
 > Edit this file to provide context about your project, coding standards,
 > architecture decisions, and any other information that helps agents
@@ -373,7 +378,7 @@ on this project. Keep it concise and focused on actionable context.*
     private static let claudeDirectoryReadme = """
 # .claude Directory
 
-This directory contains project-level configuration and instructions for LLM IDE agents.
+This directory contains project-level configuration and instructions for LLM-IDE agents.
 
 ## Files
 
@@ -385,7 +390,7 @@ This directory contains project-level configuration and instructions for LLM IDE
   Controls which agent features are enabled and how they interact with
   your project.
 
-- **skills/** / **rules/** — Linked from the central LLM IDE skills kit
+- **skills/** / **rules/** — Linked from the central LLM-IDE skills kit
   (Claude / Cursor / Codex share the same kit via sibling tool dirs).
 
 ## Purpose
@@ -396,12 +401,12 @@ allow you to customize agent behavior per project.
 
 ## Global vs Project Settings
 
-- **Global settings** (in LLM IDE app Settings): Apply to all projects
+- **Global settings** (in LLM-IDE app Settings): Apply to all projects
 - **Project settings** (this directory): Override or customize for this
   specific project
 
 ---
-*Part of LLM IDE project structure.*
+*Part of LLM-IDE project structure.*
 """
 
     // MARK: - Root agent entry files
@@ -415,7 +420,7 @@ allow you to customize agent behavior per project.
     /// | `.cursorrules` | Cursor      |
     /// | `GEMINI.md`    | Gemini CLI  |
     ///
-    /// Only creates/refreshes LLM IDE-managed files (absent, or carrying the
+    /// Only creates/refreshes LLM-IDE-managed files (absent, or carrying the
     /// `llmide:auto` marker). Never clobbers a hand-authored entry file.
     private static func ensureAgentEntryFiles(at folderURL: URL, project: Project) {
         let body = makeAgentEntryFile(project: project)
@@ -444,7 +449,7 @@ allow you to customize agent behavior per project.
         return """
         # \(name)
 
-        > Managed by **LLM IDE**. Entry point for Claude Code, Cursor, Codex, and Gemini.
+        > Managed by **LLM-IDE**. Entry point for Claude Code, Cursor, Codex, and Gemini.
         >
         <!-- llmide:auto — refreshed on New Project / Rebuild missing folders -->
 
@@ -463,7 +468,7 @@ allow you to customize agent behavior per project.
         | `data/` | Documents & data files |
         | `notes/` | Generated notes |
         | `templates/` | Doc Gen templates (`<slug>/template.md`) |
-        | `system/` | LLM IDE settings (mostly git-ignored) |
+        | `system/` | LLM-IDE settings (mostly git-ignored) |
 
         ## Skills & rules (all agents)
 
@@ -488,7 +493,7 @@ allow you to customize agent behavior per project.
         3. Keep changes small; put durable conventions into `.claude/project.md`.
 
         ---
-        *Auto-generated by LLM IDE. Edit `.claude/project.md` for lasting notes;
+        *Auto-generated by LLM-IDE. Edit `.claude/project.md` for lasting notes;
         hand-edit this file only if you remove the `llmide:auto` marker.*
         """
     }

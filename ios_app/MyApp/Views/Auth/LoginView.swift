@@ -41,7 +41,7 @@ struct ConnectView: View {
             .padding(DesignSystem.Layout.marginMobile)
         }
         .background(DesignSystem.Colors.background)
-        .navigationTitle("LLM IDE")
+        .navigationTitle("LLM-IDE")
         .navigationBarTitleDisplayMode(.large)
         .onAppear {
             ip  = connectionStore.deviceIP
@@ -78,7 +78,7 @@ struct ConnectView: View {
             Text("Connect to Your Mac")
                 .font(.system(size: DesignSystem.Typography.title, weight: .bold))
                 .foregroundColor(DesignSystem.Colors.textPrimary)
-            Text("Start the agent on your Mac — Macs on this network appear below. On a different network, scan the QR code or enter the IP manually.")
+            Text("Start Mobile Control on your Mac (Settings → Mobile Control), then scan the QR or pick your Mac below.")
                 .font(.system(size: DesignSystem.Typography.body))
                 .foregroundColor(DesignSystem.Colors.textSecondary)
                 .multilineTextAlignment(.center)
@@ -288,7 +288,7 @@ private struct DiscoveredDeviceCard: View {
             if showPINField && !(isKnown && !savedPIN.isEmpty) {
                 Divider().padding(.horizontal, DesignSystem.Spacing.md)
                 HStack(spacing: DesignSystem.Spacing.sm) {
-                    SecureField("PIN from terminal", text: $pinEntry)
+                    SecureField("PIN from Mac Settings", text: $pinEntry)
                         .focused($pinFocused)
                         .keyboardType(.numberPad)
                         .padding(DesignSystem.Spacing.sm)

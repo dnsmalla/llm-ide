@@ -25,6 +25,7 @@
 // The "Check for updates" menu item still works, just produces "no
 // updates available" because the feed is empty.
 
+import AppKit
 import Combine
 import Foundation
 import os.log
@@ -37,6 +38,11 @@ final class UpdateService: ObservableObject {
     // SPUUpdater + SPUStandardUserDriver internally and wires up the
     // menu validation + view-binding plumbing.
     private let controller: SPUStandardUpdaterController
+
+    /// Release builds set `SUFeedURL` in Info.plist (via `Scripts/build.sh`).
+    /// Dev launches (`swift run`, `Scripts/run.sh`) omit it — Sparkle's helper
+    /// cannot start in that bundle layout and shows "Unable to Check For Updates".
+    private(set) var isUpdateFeedConfigured: Bool
 
     /// True when manual checkForUpdates() is currently safe (no
     /// in-flight check). Bound to the menu item's `.disabled(...)`.
@@ -54,15 +60,15 @@ final class UpdateService: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     init() {
-        // startingUpdater: true means Sparkle launches its background
-        // scheduler immediately at construction. Combined with the
-        // `automaticallyChecksForUpdates` user preference, this
-        // starts the once-a-day poll loop without us writing the
-        // timer. updaterDelegate / userDriverDelegate are nil — we
-        // accept the standard user-facing behaviour (modal sheet on
-        // update found, etc.).
+        let feed = Bundle.main.infoDictionary?["SUFeedURL"] as? String
+        isUpdateFeedConfigured = !(feed ?? "").isEmpty
+
+        // Only start Sparkle's background scheduler when a release appcast is
+        // wired. Dev bundles lack both SUFeedURL and the Autoupdate helper
+        // layout Sparkle expects — starting the updater there produces a scary
+        // modal on every manual/automatic check.
         controller = SPUStandardUpdaterController(
-            startingUpdater: true,
+            startingUpdater: isUpdateFeedConfigured,
             updaterDelegate: nil,
             userDriverDelegate: nil
         )
@@ -71,15 +77,31 @@ final class UpdateService: ObservableObject {
         // Combine publisher so SwiftUI views can observe directly.
         controller.updater.publisher(for: \.canCheckForUpdates)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] value in self?.canCheckForUpdates = value }
+            .sink { [weak self] value in
+                guard let self else { return }
+                self.canCheckForUpdates = self.isUpdateFeedConfigured && value
+            }
             .store(in: &cancellables)
 
-        if controller.updater.feedURL?.absoluteString.isEmpty != false {
-            log.info("Sparkle started without SUFeedURL — auto-update inert until the release build wires the appcast.")
+        if !isUpdateFeedConfigured {
+            log.info("Sparkle inactive — no SUFeedURL (expected for dev builds).")
         }
     }
 
     func checkForUpdates() {
+        guard isUpdateFeedConfigured else {
+            let alert = NSAlert()
+            alert.messageText = "Updates Not Available in This Build"
+            alert.informativeText = """
+            You're running a development build of LLM-IDE. Auto-update only works in release builds installed from the DMG.
+
+            To get the latest code, pull from git and rebuild:
+            cd mac && ./Scripts/run.sh
+            """
+            alert.alertStyle = .informational
+            alert.runModal()
+            return
+        }
         // The Standard user driver presents the modal sheet. There's
         // no async return; the user interacts with the sheet and
         // Sparkle drives the download/install on its own.

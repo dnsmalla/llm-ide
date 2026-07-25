@@ -2,7 +2,7 @@ import Foundation
 import os.log
 
 /// Multi-session chat persistence. Each chat is a UUID JSON file under
-/// `~/Library/Application Support/LLM IDE/sessions/<uuid>.json`, tagged with
+/// `~/Library/Application Support/llm-ide/sessions/<uuid>.json`, tagged with
 /// a `ChatScope` for listing and migration. Legacy one-file-per-scope
 /// (`sessions/<scope>.json`) is migrated once on first access. Corrupt files
 /// are renamed `.corrupt-<unix-ts>` and skipped, mirroring the prior
@@ -17,14 +17,7 @@ enum ChatSessionStore {
 
     private static var baseDir: URL? {
         if let override = baseDirectoryOverride { return override }
-        guard let base = try? FileManager.default.url(
-            for: .applicationSupportDirectory, in: .userDomainMask,
-            appropriateFor: nil, create: true) else { return nil }
-        let dir = base.appendingPathComponent("LLM IDE", isDirectory: true)
-        if !FileManager.default.fileExists(atPath: dir.path) {
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
-        return dir
+        return AppIdentity.applicationSupportRoot()
     }
 
     private static var sessionsDir: URL? {

@@ -1,6 +1,6 @@
-# Contributing to LLM IDE
+# Contributing to LLM-IDE
 
-This guide is for engineers landing changes in the LLM IDE
+This guide is for engineers landing changes in the LLM-IDE
 repository. Read it once; refer back when you're unsure where a new
 file belongs.
 

@@ -6,7 +6,7 @@ title: API overview
 
 > Hand-written narrative tour of the API. For per-endpoint detail with schemas, see the [generated reference](index.md) (rendered from `openapi.yaml`).
 
-Human-readable summary of the LLM IDE server API. For the machine-readable spec see [`openapi.yaml`](openapi.yaml).
+Human-readable summary of the LLM-IDE server API. For the machine-readable spec see [`openapi.yaml`](openapi.yaml).
 
 - **Base URL** — `http://127.0.0.1:3456`
 - **Auth** — `Authorization: Bearer <access_token>` for everything except the public routes below

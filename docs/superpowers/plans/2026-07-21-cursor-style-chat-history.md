@@ -326,7 +326,7 @@ final class ChatSessionStoreTests: XCTestCase {
     }
 
     func testMigrateScopeFileOnce() throws {
-        let legacyDir = tmp.appendingPathComponent("LLM IDE/sessions", isDirectory: true)
+        let legacyDir = tmp.appendingPathComponent("LLM-IDE/sessions", isDirectory: true)
         try FileManager.default.createDirectory(at: legacyDir, withIntermediateDirectories: true)
         var legacy = ChatSession(scope: .explorer, title: "Old", history: [])
         // Write as legacy filename with scope stripped from meaning — file name is explorer.json

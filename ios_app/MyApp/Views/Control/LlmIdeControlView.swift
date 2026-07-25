@@ -5,10 +5,9 @@ import PDFKit
 import UniformTypeIdentifiers
 import SharedProtocol
 
-/// Focused chat with the llm-ide agent, driven from the iPhone. Messages
-/// (typed or dictated) go to llm-ide's agent via the Mac agent bridge and the
-/// reply streams back here. App/tab/menu controls live on the remote-desktop
-/// view instead, so you watch the Mac react on the live screen.
+/// Companion chat with the LLM-IDE agent from the iPhone. Messages (typed,
+/// dictated, or with attachments) are proxied through the paired Mac to the
+/// local `:3456` backend; streamed replies land in this transcript.
 struct LlmIdeControlView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var llmIdeStore: LlmIdeChatStore
@@ -45,7 +44,7 @@ struct LlmIdeControlView: View {
             .background(DesignSystem.Colors.background.ignoresSafeArea())
             .animation(.easeInOut(duration: 0.2), value: isConnected)
             .animation(.easeInOut(duration: 0.2), value: connection.errorMessage)
-            .navigationTitle("Chat with LLM IDE")
+            .navigationTitle("Chat with LLM-IDE")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

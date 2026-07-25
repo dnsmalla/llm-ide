@@ -9,7 +9,7 @@ Instead of building duplicate services, we'll use the **existing, production-rea
 - ✅ iOS app with device discovery
 - ✅ Screen capture and streaming
 - ✅ Mouse/keyboard input injection
-- ✅ LLM IDE API integration
+- ✅ LLM-IDE API integration
 - ✅ PIN authentication
 - ✅ Bonjour/mDNS discovery
 
@@ -28,7 +28,7 @@ Instead of building duplicate services, we'll use the **existing, production-rea
 │                                    │                   │
 │                                    ▼                   │
 │                         ┌─────────────────────┐       │
-│                         │  LLM IDE Server     │       │
+│                         │  LLM-IDE Server     │       │
 │                         │  (extension/       │       │
 │                         │   server.mjs)      │       │
 │                         └─────────────────────┘       │
@@ -38,7 +38,7 @@ Instead of building duplicate services, we'll use the **existing, production-rea
 
 ## Quick Start
 
-### 1. Start LLM IDE Server
+### 1. Start LLM-IDE Server
 ```bash
 cd /Users/dinsmallade/llm-ide/extension
 npm install
@@ -73,8 +73,8 @@ Run on physical device (iPhone on same Wi-Fi)
 - **Discovery**: Automatic Bonjour discovery
 - **Authentication**: 6-digit PIN
 
-### ✅ LLM IDE Integration  
-- **Chat**: Ask questions to LLM IDE from iPhone
+### ✅ LLM-IDE Integration  
+- **Chat**: Ask questions to LLM-IDE from iPhone
 - **Code Assist**: Send prompts, view responses
 - **Meeting Agent**: AI assistant during meetings
 - **Image Support**: Send images with prompts
@@ -105,9 +105,9 @@ The iOS app discovers the computer automatically via Bonjour. No manual configur
 
 ## Integration Points
 
-### 1. LLM IDE API Client
+### 1. LLM-IDE API Client
 The existing `llmide-client.ts` provides:
-- **Auth**: Auto login/registration with LLM IDE
+- **Auth**: Auto login/registration with LLM-IDE
 - **Session**: Token management and refresh
 - **Ask**: `/kb/agent/ask` endpoint
 - **History**: Chat history (10 turns)
@@ -159,7 +159,7 @@ The existing `llmide-client.ts` provides:
 - Pinch-to-scroll
 - Keyboard with all modifiers
 
-### ✅ LLM IDE Chat
+### ✅ LLM-IDE Chat
 - Free-text questions
 - Chat history
 - Image attachments
@@ -188,7 +188,7 @@ The existing `llmide-client.ts` provides:
 │       ├── src/
 │       │   ├── index.ts           # Entry point
 │       │   ├── server.ts          # WebSocket server
-│       │   ├── llmide-client.ts   # LLM IDE API client
+│       │   ├── llmide-client.ts   # LLM-IDE API client
 │       │   ├── command-handler.ts # Command routing
 │       │   └── config.ts          # Configuration
 │       ├── package.json
@@ -219,12 +219,12 @@ The existing `llmide-client.ts` provides:
 ### ✅ Local-Only
 - All communication stays on local Wi-Fi
 - No cloud dependencies
-- No external API calls (except LLM IDE server)
+- No external API calls (except LLM-IDE server)
 
 ### ✅ Authentication
 - PIN-based (6-digit)
 - QR code fallback
-- Session tokens (LLM IDE)
+- Session tokens (LLM-IDE)
 
 ### ✅ Permissions
 - Screen Recording (macOS)
@@ -268,7 +268,7 @@ Enable for Terminal or your Node process
 Restart agent
 ```
 
-### "LLM IDE connection failed"
+### "LLM-IDE connection failed"
 ```bash
 # Check server is running
 curl http://127.0.0.1:3456/health
@@ -284,7 +284,7 @@ cat services/computer-agent/.env | grep -E '(EMAIL|PASSWORD)'
 
 ### Start Everything
 ```bash
-# Terminal 1: LLM IDE server
+# Terminal 1: LLM-IDE server
 cd ~/llm-ide/extension && node server.mjs
 
 # Terminal 2: Computer agent
@@ -296,7 +296,7 @@ open -a Xcode ~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/apps/ios/MyApp.
 
 ### Quick Test
 ```bash
-# Test LLM IDE server
+# Test LLM-IDE server
 curl http://127.0.0.1:3456/health
 
 # Test computer agent
@@ -316,7 +316,7 @@ dns-sd -B _aicontrol._tcp local
 
 ### ✅ Complete Feature Set
 - Remote desktop fully functional
-- LLM IDE integration working
+- LLM-IDE integration working
 - Mobile UI polished
 - Settings and preferences
 
@@ -345,7 +345,7 @@ dns-sd -B _aicontrol._tcp local
 
 ### Deployment
 1. ✅ Use existing auto_swift_aicontrol system
-2. ✅ Ensure LLM IDE server runs at localhost:3456
+2. ✅ Ensure LLM-IDE server runs at localhost:3456
 3. ✅ Configure computer agent with correct PIN
 4. ✅ Deploy iOS app to test devices
 5. ✅ Test full integration end-to-end
@@ -364,7 +364,7 @@ dns-sd -B _aicontrol._tcp local
 The existing auto_swift_aicontrol system provides everything needed for mobile control of llm-ide:
 - ✅ Complete computer agent with WebSocket server
 - ✅ Production-ready iOS app with SwiftUI
-- ✅ Full LLM IDE integration via llmide-client
+- ✅ Full LLM-IDE integration via llmide-client
 - ✅ Screen capture and streaming
 - ✅ Input injection and control
 - ✅ Discovery and authentication
@@ -372,7 +372,7 @@ The existing auto_swift_aicontrol system provides everything needed for mobile c
 
 **No new development needed** - just configure and use existing system!
 
-**Compact Integration**: One LLM IDE server, one computer agent, one iOS app - simple and working.
+**Compact Integration**: One LLM-IDE server, one computer agent, one iOS app - simple and working.
 
 ---
 

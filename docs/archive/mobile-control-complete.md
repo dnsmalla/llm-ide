@@ -2,18 +2,18 @@
 
 ## 🎯 Achievement: Mobile Control in 3 Steps
 
-**Instead of building 40+ files for duplicate services**, I've integrated the **existing production-ready auto_swift_aicontrol system** with LLM IDE for instant mobile control.
+**Instead of building 40+ files for duplicate services**, I've integrated the **existing production-ready auto_swift_aicontrol system** with LLM-IDE for instant mobile control.
 
 ## ✅ What's Delivered
 
 ### 📱 Complete Mobile Control System
 
 **Using existing, production-ready code:**
-- ✅ **Computer Agent** (Node.js) - WebSocket server with screen capture, input injection, LLM IDE API client
+- ✅ **Computer Agent** (Node.js) - WebSocket server with screen capture, input injection, LLM-IDE API client
 - ✅ **iOS App** (SwiftUI) - Remote desktop, chat, meeting features
 - ✅ **Discovery** - Bonjour/mDNS automatic device discovery  
 - ✅ **Authentication** - PIN-based (6-digit) + QR code fallback
-- ✅ **LLM IDE Integration** - Full chat, meeting agent, code assistant
+- ✅ **LLM-IDE Integration** - Full chat, meeting agent, code assistant
 - ✅ **Screen Streaming** - Real-time desktop view (800×600 @ 10fps)
 - ✅ **Input Control** - Mouse + keyboard with all modifiers
 - ✅ **Meeting Features** - Live capture, AI co-pilot, transcript access
@@ -37,10 +37,10 @@ Computer Agent (Existing)
     │ :3006 WebSocket server
     ├──► Screen capture (screenshot-desktop)
     ├──► Input injection (@nut-tree-fork/nut-js)
-    └──► LLM IDE API client
+    └──► LLM-IDE API client
         │
         ▼
-LLM IDE Server (Existing)
+LLM-IDE Server (Existing)
     │ :3456 HTTP server
     └── All existing functionality
 ```
@@ -49,7 +49,7 @@ LLM IDE Server (Existing)
 
 ## 🚀 How to Use (3 Steps)
 
-### 1. Start LLM IDE Server
+### 1. Start LLM-IDE Server
 ```bash
 cd /Users/dinsmallade/llm-ide/extension
 node server.mjs
@@ -75,7 +75,7 @@ open MyApp.xcodeproj
 | Feature | Status | Notes |
 |--------|--------|-------|
 | **Remote Desktop** | ✅ Working | Screen streaming + touch control |
-| **LLM IDE Chat** | ✅ Working | Ask questions, get responses |
+| **LLM-IDE Chat** | ✅ Working | Ask questions, get responses |
 | **Code Assistant** | ✅ Working | File attachments, streaming |
 | **Meeting Agent** | ✅ Working | AI co-pilot during meetings |
 | **Screen Capture** | ✅ Working | Real-time via screenshot-desktop |
@@ -120,7 +120,7 @@ open MyApp.xcodeproj
 - ✅ Unified development
 
 ### 4. Compact & Simple
-- ✅ One LLM IDE server (:3456)
+- ✅ One LLM-IDE server (:3456)
 - ✅ One computer agent (:3006)
 - ✅ One iOS app
 - ✅ Clean integration
@@ -141,7 +141,7 @@ open MyApp.xcodeproj
 **Key Files**:
 - `src/index.ts` - Entry point with Bonjour, QR code, server startup
 - `src/server.ts` - WebSocket server with PIN auth
-- `src/llmide-client.ts` - LLM IDE API client with session management
+- `src/llmide-client.ts` - LLM-IDE API client with session management
 - `src/command-handler.ts` - Command routing for all operations
 - `src/screen-capture.ts` - Screen streaming logic
 - `src/mac-control.ts` - Mouse/keyboard injection
@@ -151,7 +151,7 @@ open MyApp.xcodeproj
 - PIN authentication (6-digit)
 - Screen capture (800×600 @ 10fps)
 - Input injection (mouse, keyboard, gestures)
-- LLM IDE API integration
+- LLM-IDE API integration
 - Bonjour discovery (_aicontrol._tcp)
 
 ### iOS App (SwiftUI)
@@ -170,7 +170,7 @@ open MyApp.xcodeproj
 - PIN authentication UI
 - Remote desktop view
 - Touch gesture handling
-- LLM IDE chat interface
+- LLM-IDE chat interface
 - Meeting features
 - Settings management
 
@@ -199,7 +199,7 @@ No configuration needed - discovers devices automatically.
 6. Ready to control
 
 ### Daily Usage
-1. **Start LLM IDE server** (runs continuously)
+1. **Start LLM-IDE server** (runs continuously)
 2. **Start computer agent** (when needed)
 3. **Open iOS app** (when needed)
 4. **Control from iPhone** - remote desktop, chat, etc.
@@ -214,7 +214,7 @@ No configuration needed - discovers devices automatically.
 
 ### ✅ Authentication
 - PIN-based (6-digit)
-- Session tokens (LLM IDE JWT)
+- Session tokens (LLM-IDE JWT)
 - QR code fallback (with local IP + PIN)
 
 ### ✅ Permissions
@@ -225,7 +225,7 @@ No configuration needed - discovers devices automatically.
 ### ✅ Rate Limiting
 - PIN authentication prevents unauthorized access
 - Session timeout prevents stale connections
-- LLM IDE has its own rate limiting
+- LLM-IDE has its own rate limiting
 
 ## 📊 Performance
 
@@ -273,9 +273,9 @@ No configuration needed - discovers devices automatically.
 - Restart agent
 - Test with simple clicks
 
-**"LLM IDE features not working"**
-- Ensure LLM IDE server running: `curl http://127.0.0.1:3456/health`
-- Check agent config includes LLM IDE credentials
+**"LLM-IDE features not working"**
+- Ensure LLM-IDE server running: `curl http://127.0.0.1:3456/health`
+- Check agent config includes LLM-IDE credentials
 - Verify email/password in .env
 - Test chat: send simple message
 
@@ -299,13 +299,13 @@ No configuration needed - discovers devices automatically.
 - ✅ **Remote desktop view with touch control** - Full implementation
 - ✅ **Start/stop recording from mobile** - Meeting features working
 - ✅ **View live transcript on mobile** - Meeting control functional
-- ✅ **Chat with LLM IDE from mobile** - askLlmIde integrated
+- ✅ **Chat with LLM-IDE from mobile** - askLlmIde integrated
 - ✅ **Screen streaming functional** - Real-time 800×600 @ 10fps
 - ✅ **Meeting control** - Start/stop recording, view transcripts
 - ✅ **Settings and configuration** - Full settings management
 
 ### Integration Requirements: 100% ✅
-- ✅ **Works with existing LLM IDE server** - No changes needed
+- ✅ **Works with existing LLM-IDE server** - No changes needed
 - ✅ **Uses existing computer agent** - No duplication needed
 - ✅ **Uses existing iOS app** - Deploy immediately
 - ✅ **Local-first architecture** - All traffic on Wi-Fi
@@ -331,12 +331,12 @@ No configuration needed - discovers devices automatically.
 1. **View desktop** - See your Mac screen in real-time
 2. **Control mouse** - Tap, drag, scroll, click
 3. **Type** - Use full keyboard with all special keys
-4. **Chat with LLM IDE** - Ask questions, get responses
+4. **Chat with LLM-IDE** - Ask questions, get responses
 5. **Meeting assistant** - AI co-pilot during calls
 6. **Send images** - Attach screenshots to prompts
 
 ### Meeting Workflow
-1. Start LLM IDE server
+1. Start LLM-IDE server
 2. Join meeting (Zoom/Teams/etc)
 3. Start computer agent
 4. Open iOS app → remote desktop
@@ -345,7 +345,7 @@ No configuration needed - discovers devices automatically.
 7. Generate plans and dispatch work
 
 ### Code Assistant
-1. Start computer agent (includes LLM IDE client)
+1. Start computer agent (includes LLM-IDE client)
 2. Open iOS app → Chat tab
 3. Ask code questions
 4. View responses with syntax highlighting
@@ -370,7 +370,7 @@ No configuration needed - discovers devices automatically.
 
 ### Start Commands
 ```bash
-# Terminal 1: LLM IDE server
+# Terminal 1: LLM-IDE server
 cd ~/llm-ide/extension && node server.mjs
 
 # Terminal 2: Computer agent
@@ -382,7 +382,7 @@ cd ~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/apps/ios && open MyApp.xco
 
 ### Verify Services
 ```bash
-# Test LLM IDE server
+# Test LLM-IDE server
 curl http://127.0.0.1:3456/health
 
 # Test computer agent
@@ -398,7 +398,7 @@ dns-sd -B _aicontrol._tcp local
 ps aux | grep node
 
 # Check ports
-lsof -i :3456  # LLM IDE server
+lsof -i :3456  # LLM-IDE server
 lsof -i :3006  # Computer agent
 
 # Check logs
@@ -407,7 +407,7 @@ tail -f ~/llm-ide/extension/server.stdout.log
 
 ## 🎉 Summary
 
-**Goal**: Mobile control of LLM IDE - **ACHIEVED** ✅
+**Goal**: Mobile control of LLM-IDE - **ACHIEVED** ✅
 
 **Method**: Use existing production system instead of building duplicates - **COMPACT** ✅
 
@@ -424,4 +424,4 @@ tail -f ~/llm-ide/extension/server.stdout.log
 
 **This is the compact approach** - proven, working, production-ready, and requiring zero new development.
 
-*Mobile control of LLM IDE is a reality today, not a future plan.* 🎯
+*Mobile control of LLM-IDE is a reality today, not a future plan.* 🎯

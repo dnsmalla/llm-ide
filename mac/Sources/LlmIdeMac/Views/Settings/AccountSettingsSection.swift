@@ -43,7 +43,7 @@ struct AccountSettingsSection: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .confirmationDialog(
-                        "Sign out of LLM IDE?",
+                        "Sign out of LLM-IDE?",
                         isPresented: $showingSignOutConfirm,
                         titleVisibility: .visible
                     ) {

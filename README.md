@@ -1,4 +1,4 @@
-# LLM IDE
+# LLM-IDE
 
 > End-to-end AI meeting intelligence — from live transcription to dispatched tickets, draft PRs, and a self-learning knowledge base. Runs entirely on `127.0.0.1`.
 
@@ -10,6 +10,53 @@
 ## What this is
 
 A Chrome extension + native macOS app + local Node server that captures meetings, generates plans, and dispatches the work. Nothing leaves your machine unless you approve a delivery action.
+
+## Architecture (reality check)
+
+Four surfaces share one local backend. All traffic stays on `127.0.0.1` unless you explicitly allow remote bind.
+
+```mermaid
+flowchart TB
+    subgraph ext [Chrome Extension]
+        CC[Caption scraper 800ms]
+        SP[Side panel UI]
+    end
+    subgraph srv [Node Server :3456]
+        KB[(SQLite WAL+FTS5)]
+        AI[Claude CLI orchestration]
+    end
+    subgraph mac [Mac App]
+        AX[AX caption capture]
+        MC[MobileControlManager :3006]
+        API[LlmIdeAPIClient]
+    end
+    subgraph ios [iPhone App]
+        WS[ConnectionService]
+    end
+    CC --> srv
+    SP --> srv
+    AX --> srv
+    WS -->|WebSocket + PIN| MC
+    MC --> API --> srv
+```
+
+| Surface | Role | Default port |
+|---------|------|--------------|
+| Chrome extension | Meet/Teams/Zoom web CC capture + side panel | talks to `:3456` |
+| Node server | Auth, KB, AI orchestration, persistence | `127.0.0.1:3456` |
+| macOS app | Full KB, code assistant, AX capture, mobile server | `:3456` client; `:3006` mobile |
+| iPhone app | Companion — chat, explorer, auto-tasks (no remote desktop) | WebSocket to Mac `:3006` |
+
+Deep dive: [Architecture overview](docs/explanation/architecture.md) · [Engineering invariants](docs/explanation/invariants.md) · [Naming convention](docs/decisions/0016-naming-convention.md)
+
+### Naming
+
+| Context | Form | Example |
+|---------|------|---------|
+| User-visible brand | **LLM-IDE** | menus, extension title, docs |
+| Repo / package slug | **llm-ide** | `github.com/…/llm-ide`, npm package |
+| Code identifiers | **LlmIde** | `LlmIdeMac`, `LlmIdeAPIClient` |
+| Wire / bundle | **llmide** | `com.llmide.macapp`, `llmide://` |
 
 ## Quick Start (3 Minutes)
 
@@ -28,7 +75,7 @@ Then load `extension/dist/` as an unpacked Chrome extension. Full tutorial: [Rec
 
 ### Prerequisites
 
-Before installing LLM IDE, you need:
+Before installing LLM-IDE, you need:
 
 - **macOS 14+** (for native macOS app)
 - **Node.js 20+** - [Download](https://nodejs.org/) (includes npm)
@@ -177,6 +224,9 @@ cd extension && npm test
 cd mac && swift build
 cd mac && swift run LlmIdeMac
 
+# Mac unit tests (requires full Xcode — not Command Line Tools alone)
+cd mac && swift test --filter ChatSessionStoreTests
+
 # Extension development
 cd extension
 npm run dev          # Watch mode with hot reload
@@ -228,7 +278,7 @@ xcode-select --install
 ### ❌ "Chrome extension not updating"
 **Solution:** 
 1. Go to `chrome://extensions`
-2. Click refresh button on LLM IDE extension
+2. Click refresh button on LLM-IDE extension
 3. Hard refresh the page (Cmd+Shift+R)
 
 ### ❌ "Settings/data lost after pull"
@@ -273,16 +323,16 @@ llm-ide/
 
 ## Mobile control
 
-Control LLM IDE from your iPhone using the production-ready auto_swift_aicontrol system:
+Use your iPhone as an LLM-IDE companion via the **native Mac WebSocket server** (no external Node agent):
 
-- **Remote desktop** - View and control your Mac from your iPhone
-- **LLM IDE chat** - Ask questions and get responses on mobile
-- **Meeting assistant** - AI co-pilot during video calls
-- **Screen streaming** - Real-time desktop view (800×600 @ 10fps)
+- **LLM-IDE Chat** — Ask questions from iPhone (streamed via Mac → local server)
+- **Explorer** — Browse and chat with Mac explorer sessions
+- **Auto Tasks** — Toggle and inspect scheduled auto-code tasks
+- **Pairing** — Bonjour discovery, Direct IP + PIN, or QR scan from Mac Settings
 
-📱 **Quick start:** [docs/mobile/quick-start.md](docs/mobile/quick-start.md) - 3-step setup guide
+📱 **Quick start:** [docs/mobile/quick-start.md](docs/mobile/quick-start.md)
 
-**Verify installation:** `./scripts/mobile/verify-mobile-control.sh` - Automated system checks
+**Loopback check:** `swift scripts/mobile/verify-native-pairing.swift` — verifies native server pairing on `127.0.0.1:3006`
 
 ## Documentation
 

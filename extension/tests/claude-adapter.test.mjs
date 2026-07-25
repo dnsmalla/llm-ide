@@ -104,7 +104,7 @@ function makeFakeClaudeWithSkills() {
   return root;
 }
 
-test('importPlugin converts Claude plugin into LLM IDE format', () => {
+test('importPlugin converts Claude plugin into LLM-IDE format', () => {
   const claudeRoot = makeFakeClaudeWithSkills();
   const mnRoot = mkdtempSync(join(tmpdir(), 'mn-plugins-'));
   try {
@@ -123,9 +123,9 @@ test('importPlugin converts Claude plugin into LLM IDE format', () => {
     assert.equal(manifest.name, 'claude-code-review');
     assert.equal(manifest.origin, 'claude');
     assert.equal(manifest.sourcePlugin, 'code-review');
-    // Verify LLM IDE loader can load it
+    // Verify LLM-IDE loader can load it
     const { plugins } = loadPlugins({ pluginDir: mnRoot });
-    assert.ok(plugins.has('claude-code-review'), 'plugin not loaded by LLM IDE loader');
+    assert.ok(plugins.has('claude-code-review'), 'plugin not loaded by LLM-IDE loader');
   } finally {
     rmSync(claudeRoot, { recursive: true, force: true });
     rmSync(mnRoot, { recursive: true, force: true });
@@ -316,7 +316,7 @@ test('imported skills pass skill-loader validation (kind + name injected)', () =
     assert.equal(result.ok, true);
     assert.equal(result.plugin.skillCount, 2);
 
-    // Now run the actual LLM IDE skill-loader on the imported skills
+    // Now run the actual LLM-IDE skill-loader on the imported skills
     const skillsDir = join(mnRoot, 'claude-my-tool', 'skills');
     const loaded = loadSkills(skillsDir);
 

@@ -263,7 +263,7 @@ struct LoginView: View {
                     .font(.system(size: 26, weight: .semibold))
                     .foregroundStyle(theme.current.accent)
             }
-            Text("LLM IDE")
+            Text(L.App.name)
                 .font(Typography.display)
                 .foregroundStyle(theme.current.text)
             Text(mode == .login ? "Sign in to continue" : "Create an account")

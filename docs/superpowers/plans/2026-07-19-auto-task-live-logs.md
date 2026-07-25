@@ -14,7 +14,7 @@
 - **Verify with `swift build` / `swift test`, not SourceKit alone** (SourceKit produces stale errors in this project).
 - **Build/test commands:** `cd mac && swift build` and `cd mac && swift test`. Pre-warm before pushing (pre-push hook runs both).
 - **No new unit tests for `runCLI`/view orchestration** — this codebase unit-tests pure helpers only (`LineAccumulator` is already covered; `TaskLogStoreTests` passes). Subprocess orchestration (`runCLI`) and SwiftUI (`AutoCodeView`) are verified via `swift build` + the manual smoke, matching the prior auto-task redesign's precedent. Do NOT fabricate a Process-based unit test.
-- **The `.log` file stays the permanent record** (`~/Library/Logs/LLM IDE/auto-task-<suffix>.log`, with `rotateLog`). The live buffer is the on-screen view; the file is the tee target.
+- **The `.log` file stays the permanent record** (`~/Library/Logs/llm-ide/auto-task-<suffix>.log`, with `rotateLog`). The live buffer is the on-screen view; the file is the tee target.
 - **Do NOT touch `runCLI(issue:)`** — it stays on the FileHandle (issue runs aren't one of the 8 tasks).
 - **Conventional Commits, one concern per commit.** Suggested branch: `feat/auto-task-live-logs` (from `main`).
 
@@ -308,7 +308,7 @@ Then verify:
 - Open a **prompt task** (e.g. Review Code). The page shows an **Edit | Preview** segmented toggle, default Edit; switching to Preview renders the template markdown live.
 - Click **▶ Run** → the log section shows "**Running Review Code…**" immediately, then the CLI output streams in **line-by-line** as it runs (not a single dump at the end), then a "— run finished —" / "— run failed —" marker.
 - Click **Run Now** in the left pane (global run) → the right pane **auto-follows** each enabled task as it runs; each task's log fills its own section.
-- Clear button still wipes only the on-screen buffer; the `.log` file in `~/Library/Logs/LLM IDE/` keeps the full record.
+- Clear button still wipes only the on-screen buffer; the `.log` file in `~/Library/Logs/llm-ide/` keeps the full record.
 - Structural tasks (Regression / Knowledge / Update Plan Status) show the About/config view with **no** Edit|Preview toggle.
 
 - [ ] **Step 4: Commit smoke-fixes (if any), then ask before pushing**

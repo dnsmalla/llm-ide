@@ -45,7 +45,7 @@ export default function LoginView({ onLogin, onRegister, busy, error, registrati
   return (
     <div className="login-view">
       <header className="login-header">
-        <h1>LLM IDE</h1>
+        <h1>LLM-IDE</h1>
         <p>{mode === 'login' ? 'Sign in to continue' : 'Create an account'}</p>
       </header>
 

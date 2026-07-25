@@ -8,7 +8,7 @@ status: draft
 
 ## Context
 
-LLM IDE has substantial documentation already (the curated `docs/`
+LLM-IDE has substantial documentation already (the curated `docs/`
 Diátaxis tree, ~45 design specs under `docs/superpowers/`, an
 auto-generated 171-file `extension/.code-notes/` code-graph index, and
 per-layer READMEs). What it lacks is a **single coherent doc set that
@@ -29,7 +29,7 @@ in the mkdocs tree.
 ### Why now / the motivating finding
 
 A blueprint-level doc lets an AI produce something *architecturally*
-like LLM IDE but not a faithful reproduction — because the system's
+like LLM-IDE but not a faithful reproduction — because the system's
 behavior lives in details a blueprint omits: the **prompts** (the agent
 *is* its prompts), the **full DDL**, the **wire contracts**, and the
 **exact algorithms** (caption filters, FTS tokenizer, rate-limit

@@ -34,12 +34,12 @@
     let once = try String(contentsOf: root, encoding: .utf8)
     #expect(once.contains("build/"))                 // user rule preserved
     #expect(once.contains(".code-notes/"))           // managed block added
-    #expect(once.contains("# >>> LLM IDE managed"))
+    #expect(once.contains("# >>> LLM-IDE managed"))
 
     // Idempotent: a second scaffold must not duplicate the block.
     try ProjectScaffolder.scaffold(at: tmp, project: sampleProject())
     let twice = try String(contentsOf: root, encoding: .utf8)
-    let occurrences = twice.components(separatedBy: "# >>> LLM IDE managed").count - 1
+    let occurrences = twice.components(separatedBy: "# >>> LLM-IDE managed").count - 1
     #expect(occurrences == 1)
 }
 ```
@@ -53,7 +53,7 @@ Run: `cd /Users/dinesh.malla/llm-ide/mac && GIT_CONFIG_GLOBAL=/dev/null swift bu
 
 ```swift
 private static let managedGitignoreBlock = """
-# >>> LLM IDE managed (auto-generated / ephemeral) — edit your own rules above
+# >>> LLM-IDE managed (auto-generated / ephemeral) — edit your own rules above
 .code-notes/
 .understand-anything/
 .llmide/cache/
@@ -62,7 +62,7 @@ private static let managedGitignoreBlock = """
 .llmide/index.sqlite-shm
 .llmide/index.sqlite-wal
 *.partial.md
-# <<< LLM IDE managed
+# <<< LLM-IDE managed
 """
 
 /// Ensure the project-root .gitignore contains the managed block. Creates
@@ -71,7 +71,7 @@ private static let managedGitignoreBlock = """
 private static func ensureRootGitignore(at folderURL: URL) {
     let url = folderURL.appendingPathComponent(".gitignore")
     let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-    if existing.contains("# >>> LLM IDE managed") { return }
+    if existing.contains("# >>> LLM-IDE managed") { return }
     let combined: String
     if existing.isEmpty {
         combined = managedGitignoreBlock + "\n"

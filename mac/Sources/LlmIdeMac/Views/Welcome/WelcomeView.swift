@@ -31,7 +31,7 @@ struct WelcomeView: View {
                         .font(Typography.caption)
                 }
                 .buttonStyle(.link)
-                .help("How LLM IDE works — capture, notes, projects")
+                .help("How LLM-IDE works — capture, notes, projects")
             }
             .frame(maxWidth: 840)
             .frame(maxWidth: .infinity)
@@ -58,7 +58,7 @@ struct WelcomeView: View {
                     .font(.system(size: 30, weight: .semibold))
                     .foregroundStyle(t.accent)
             }
-            Text("LLM IDE")
+            Text(L.App.name)
                 .font(.system(size: 30, weight: .bold))
                 .foregroundStyle(t.text)
             Text("Meeting intelligence & project control. Each project lives in its own folder — meetings, notes, plans, and code, side by side.")
@@ -79,7 +79,7 @@ struct WelcomeView: View {
                 icon: "folder.badge.plus",
                 tint: t.accent,
                 title: "New Project",
-                subtitle: "Pick an empty folder. LLM IDE sets up the workspace and you start fresh.",
+                subtitle: "Pick an empty folder. LLM-IDE sets up the workspace and you start fresh.",
                 cta: "Choose Folder…",
                 theme: t,
                 action: newProject)
@@ -88,7 +88,7 @@ struct WelcomeView: View {
                 icon: "folder",
                 tint: t.accent2,
                 title: "Open Existing",
-                subtitle: "Resume a LLM IDE project, or adopt a folder you've already cloned.",
+                subtitle: "Resume a LLM-IDE project, or adopt a folder you've already cloned.",
                 cta: "Open Folder…",
                 theme: t,
                 action: openExisting)
@@ -108,7 +108,7 @@ struct WelcomeView: View {
                 Text("What counts as a project folder?")
                     .font(Typography.captionStrong)
                     .foregroundStyle(t.text)
-                Text("A project keeps **meetings/**, **notes/**, and **plans/** together with its own settings. Choose an empty folder to start, an existing project to resume, or a cloned code repo — LLM IDE adds what it needs without overwriting your files.")
+                Text("A project keeps **meetings/**, **notes/**, and **plans/** together with its own settings. Choose an empty folder to start, an existing project to resume, or a cloned code repo — LLM-IDE adds what it needs without overwriting your files.")
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -242,7 +242,7 @@ struct WelcomeView: View {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = "Open Project"
-        panel.message = "Choose a LLM IDE project folder (or a cloned repo) to open."
+        panel.message = "Choose a LLM-IDE project folder (or a cloned repo) to open."
         open(panel)
     }
 

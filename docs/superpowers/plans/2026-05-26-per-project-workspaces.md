@@ -4,7 +4,7 @@
 
 **Goal:** Build per-project workspaces (Phase 1 of the spec) so each opened folder maintains its own settings/state bundle and the app can switch cleanly between them.
 
-**Architecture:** Two-layer storage — `<projectFolder>/.llmide/project.json` travels with the folder, `~/Library/Application Support/LLM IDE/projects.json` tracks recents + active. A new `ProjectStore` becomes the single source of truth for "which project is active"; every existing feature that consults `AppConfig` for project-scoped settings now consults the active Project's bundle. Server-side, `projectId` rides in the existing `meta` JSON column — no schema migration.
+**Architecture:** Two-layer storage — `<projectFolder>/.llmide/project.json` travels with the folder, `~/Library/Application Support/llm-ide/projects.json` tracks recents + active. A new `ProjectStore` becomes the single source of truth for "which project is active"; every existing feature that consults `AppConfig` for project-scoped settings now consults the active Project's bundle. Server-side, `projectId` rides in the existing `meta` JSON column — no schema migration.
 
 **Tech Stack:** Swift 5.9 + SwiftUI (Mac client); Node.js 20+ + better-sqlite3 (server); `node:test` (server tests); Swift Testing (mac tests).
 
@@ -78,7 +78,7 @@ struct ProjectTests {
     @Test func roundTripsCodable() throws {
         let p = Project(
             id: "01HBYZ123",
-            displayName: "LLM IDE Mac",
+            displayName: "LLM-IDE Mac",
             createdAt: Date(timeIntervalSince1970: 1_700_000_000),
             settings: ProjectSettings(
                 language: "en",
@@ -671,7 +671,7 @@ final class ProjectMigrator {
         self.defaults = defaults
         let dir = markerDirectory
             ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-                .appendingPathComponent("LLM IDE")
+                .appendingPathComponent("LLM-IDE")
         self.completionMarker = dir.appendingPathComponent(".project-migration-complete")
     }
 
@@ -886,7 +886,7 @@ struct WelcomeView: View {
     var body: some View {
         let t = theme.current
         VStack(alignment: .leading, spacing: Spacing.lg) {
-            Text("LLM IDE")
+            Text("LLM-IDE")
                 .font(.system(size: 28, weight: .semibold))
                 .foregroundStyle(t.text)
             Text("Open a project folder to get started. Each folder becomes its own workspace.")
@@ -948,7 +948,7 @@ Modify `mac/Sources/LlmIdeMac/LlmIdeMacApp.swift`. Inside the `init()` (after th
 let projectStoreInstance: ProjectStore = {
     let appSupport = FileManager.default
         .urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSHomeDirectory())
-    let stateDir = appSupport.appendingPathComponent("LLM IDE")
+    let stateDir = appSupport.appendingPathComponent("LLM-IDE")
     return ProjectStore(stateDirectory: stateDir, defaults: cfg.defaultProjectSettings)
 }()
 ```
@@ -1838,7 +1838,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 - [ ] **Step 1: Fresh install path**
 
-Wipe `~/Library/Application Support/LLM IDE/projects.json` and `.project-migration-complete` markers. Launch app → Welcome appears. Open Folder → app enters project mode. Quit + relaunch → reopens the same project.
+Wipe `~/Library/Application Support/llm-ide/projects.json` and `.project-migration-complete` markers. Launch app → Welcome appears. Open Folder → app enters project mode. Quit + relaunch → reopens the same project.
 
 - [ ] **Step 2: Switch between projects**
 

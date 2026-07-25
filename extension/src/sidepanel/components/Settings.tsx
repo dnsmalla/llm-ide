@@ -130,7 +130,7 @@ export default function Settings({
       <div className="settings-section">
         <h3 className="settings-heading">About</h3>
         <p className="settings-hint">
-          LLM IDE v{chrome.runtime?.getManifest?.().version || 'development'}
+          LLM-IDE v{chrome.runtime?.getManifest?.().version || 'development'}
           <br />
           Captions and audio stay on your machine. Transcripts are sent only to your local server on{' '}
           <code>127.0.0.1:3456</code>, which uses your own Claude CLI authentication.

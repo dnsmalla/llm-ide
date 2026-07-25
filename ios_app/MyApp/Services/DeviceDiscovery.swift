@@ -8,7 +8,7 @@ struct DiscoveredDevice: Identifiable, Equatable {
     let port: Int
 }
 
-/// Discovers LLM IDE Mac apps on the local network via Bonjour (_llmide._tcp).
+/// Discovers LLM-IDE Mac apps on the local network via Bonjour (_llmide._tcp).
 @MainActor
 final class DeviceDiscovery: NSObject, ObservableObject {
     @Published var devices: [DiscoveredDevice] = []

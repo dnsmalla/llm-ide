@@ -1,7 +1,13 @@
 # iOS App ↔ Mac App — Native Link & Control
 
+> **Superseded (2026-07):** Remote desktop / screen streaming / input injection
+> (Goals 3–5 below, Phases 4–5) were **cancelled**. The shipped product is
+> **companion mode** only — Chat, Explore, and Auto over the native `:3006`
+> WebSocket. See `docs/mobile/quick-start.md` for the current model. This doc
+> remains as historical design context.
+
 **Date:** 2026-07-22
-**Status:** Design (pending approval)
+**Status:** Superseded — companion mode shipped; remote desktop cancelled
 **Scope:** Bring the iOS remote-control app into the repo under `ios_app/`, rebrand it to llm-ide, and make the macOS app the native control server the iPhone pairs with — replacing the external Node "computer-agent" middleman.
 
 ---
@@ -10,7 +16,7 @@
 
 ### Goals
 1. Move the existing iOS app (currently `~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/apps/ios`) into this repo under `ios_app/`.
-2. Rebrand the iOS app to llm-ide (display name "LLM IDE", bundle id `com.llmide.mobile`, llm-ide theme).
+2. Rebrand the iOS app to llm-ide (display name "LLM-IDE", bundle id `com.llmide.mobile`, llm-ide theme).
 3. Port the Mac-side agent responsibilities (WebSocket server, Bonjour discovery, PIN auth, screen capture, input injection, llm-ide proxy) **into the Mac app itself as native Swift** — no Node process.
 4. Establish a **shared protocol package** consumed by both the Mac and iOS targets so the wire format cannot drift.
 5. Deliver two control surfaces on the iPhone: **remote desktop** (screen + input) **and** dedicated llm-ide controls (chat, deep links, app/menu control).
@@ -122,7 +128,7 @@ Binary JPEG frames are raw bytes (detected by JPEG magic prefix) and are **not**
 Every Mac-native responsibility has a direct Swift replacement (ScreenCaptureKit, CGEvent, Network.framework, NetService), so nothing requires the Node process.
 
 ### 4.3 iOS app changes
-- **Rebrand**: bundle id → `com.llmide.mobile`, display name "LLM IDE", theme tokens → llm-ide colors; signing team unchanged.
+- **Rebrand**: bundle id → `com.llmide.mobile`, display name "LLM-IDE", theme tokens → llm-ide colors; signing team unchanged.
 - **Consume `SharedProtocol`**: `ControlService`'s hand-rolled message dictionaries become the shared `Codable` types — same wire format, far less drift.
 - **Discovery**: Bonjour service type → `_llmide._tcp` (one constant, sourced from the package).
 - **Transport**: unchanged — still `ws://<ip>:<port>/ws?pin=`. Because the protocol is identical, `RemoteDesktopView`, `LlmIdeControlView`, gestures, voice, and QR pairing keep working.
@@ -148,7 +154,7 @@ Every Mac-native responsibility has a direct Swift replacement (ScreenCaptureKit
 2. Sent as a text frame → `MobileCommandRouter` decodes → `MobileInputInjector` scales normalized coords to real screen dims, fires matching `CGEvent`(s).
 3. Sticky modifiers and named keys handled in the injector (parity with current nut-js behavior).
 
-### 5.4 LLM IDE commands (iPhone → Mac → :3456, reply streamed back)
+### 5.4 LLM-IDE commands (iPhone → Mac → :3456, reply streamed back)
 1. iPhone sends `LlmIdeChat` (or `LlmIdeDeepLink`, `LaunchApp`, `MenuClick`).
 2. `MobileCommandRouter` → for chat, calls existing `LlmIdeAPIClient` (Mac app already authenticates to `:3456`); reply streamed back as `Output{stream, done}` chunks.
 3. Deep links and app/menu control go through `NSWorkspace` / `osascript` — same actions the Node agent performed, now native.
