@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 200" role="img" aria-label="LLM-IDE data flow">
+  <rect width="880" height="200" rx="12" fill="#0f1419"/>
+  <text x="440" y="28" text-anchor="middle" fill="#e5e7eb" font-family="system-ui,sans-serif" font-size="16" font-weight="700">Capture ’ understand ’ act ’ learn</text>
+
+  <g font-family="system-ui,sans-serif" font-size="12" fill="#111827">
+    <rect x="24" y="52" width="120" height="56" rx="8" fill="#dbeafe"/>
+    <text x="84" y="76" text-anchor="middle" font-weight="600">Capture</text>
+    <text x="84" y="94" text-anchor="middle" font-size="10">meet · email · slack</text>
+
+    <rect x="168" y="52" width="120" height="56" rx="8" fill="#e0e7ff"/>
+    <text x="228" y="76" text-anchor="middle" font-weight="600">Library</text>
+    <text x="228" y="94" text-anchor="middle" font-size="10">notes · FTS5</text>
+
+    <rect x="312" y="52" width="120" height="56" rx="8" fill="#d1fae5"/>
+    <text x="372" y="76" text-anchor="middle" font-weight="600">Plan</text>
+    <text x="372" y="94" text-anchor="middle" font-size="10">tasks · risks</text>
+
+    <rect x="456" y="52" width="120" height="56" rx="8" fill="#fef3c7"/>
+    <text x="516" y="76" text-anchor="middle" font-weight="600">Automate</text>
+    <text x="516" y="94" text-anchor="middle" font-size="10">auto tasks · codegen</text>
+
+    <rect x="600" y="52" width="120" height="56" rx="8" fill="#fce7f3"/>
+    <text x="660" y="76" text-anchor="middle" font-weight="600">Dispatch</text>
+    <text x="660" y="94" text-anchor="middle" font-size="10">PR · tickets · slack</text>
+
+    <rect x="744" y="52" width="112" height="56" rx="8" fill="#f3f4f6"/>
+    <text x="800" y="76" text-anchor="middle" font-weight="600">Outcomes</text>
+    <text x="800" y="94" text-anchor="middle" font-size="10">poll · replan</text>
+  </g>
+
+  <path d="M144 80 H168 M288 80 H312 M432 80 H456 M576 80 H600 M720 80 H744" stroke="#6b7280" stroke-width="2" marker-end="url(#a)"/>
+  <defs><marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#6b7280"/></marker></defs>
+
+  <text x="440" y="150" text-anchor="middle" fill="#9ca3af" font-family="system-ui,sans-serif" font-size="11">Claude CLI + optional vaulted API keys · guardrails before every delivery · all on localhost</text>
+  <text x="440" y="172" text-anchor="middle" fill="#6b7280" font-family="system-ui,sans-serif" font-size="10">Mac: full UI · iPhone: Explorer + Auto Tasks + Chat (Mac executes) · Extension: meeting capture + side panel</text>
+</svg>

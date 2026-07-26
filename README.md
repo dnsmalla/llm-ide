@@ -11,6 +11,61 @@
 
 A Chrome extension + native macOS app + local Node server that captures meetings, generates plans, and dispatches the work. Nothing leaves your machine unless you approve a delivery action.
 
+## System at a glance
+
+**Library is the hub.** Every source (meetings, email, Slack, files) lands in the knowledge base. From there you search, plan, automate, visualize, and dispatch — all on `127.0.0.1`.
+
+<p align="center">
+  <img src="docs/assets/system-map.svg" alt="LLM-IDE system map: Library hub with Sources, Automation, and Visualize &amp; control" width="920"/>
+</p>
+
+<p align="center">
+  <img src="docs/assets/data-flow.svg" alt="LLM-IDE pipeline: Capture → Library → Plan → Automate → Dispatch → Outcomes" width="860"/>
+</p>
+
+| Pillar | What you get | Mac | Extension | iPhone |
+|--------|----------------|-----|-----------|--------|
+| **Sources** | Meet · Teams · Zoom · live mic · **Email** · **Slack** → notes in Library | ✅ full ingest | ✅ web CC capture | — |
+| **Library** | Unified notes, code, data, plugins · FTS5 search · re-summarize | ✅ hub | ✅ meetings | — |
+| **Automation** | **Auto Tasks**: review code/doc/conflicts, regression, doc & knowledge gen, issue/plan updates | ✅ run + configure | — | ✅ monitor + run |
+| **Code** | Explorer chat, codegen, workflows, guardrails, PR/ticket dispatch | ✅ | — | ✅ Explorer |
+| **Visualize** | **Code graph**, **Issues**, **Gantt**, **Visual**, conflicts, regression panel | ✅ | — | — |
+| **Control** | Source control, search, live session, settings, mobile pairing | ✅ | side panel | companion |
+
+```mermaid
+flowchart LR
+  subgraph sources [Sources]
+    M[Meet Teams Zoom]
+    E[Email]
+    S[Slack]
+    L[Live mic]
+  end
+  LIB[(Library + KB)]
+  subgraph auto [Automation]
+    AT[Auto Tasks]
+    RC[Review conflicts]
+    RG[Regression]
+    CG[Code generation]
+  end
+  subgraph viz [Visualize and control]
+    G[Code graph]
+    I[Issues]
+    GN[Gantt]
+    V[Visual]
+    EX[Explorer]
+  end
+  M --> LIB
+  E --> LIB
+  S --> LIB
+  L --> LIB
+  LIB --> AT & EX & G & I & GN
+  AT --> RC & RG & CG
+```
+
+**Auto Tasks (scheduled on Mac, mirror on iPhone):** review code · review doc · review conflicts · regression sweep · generate documentation · generate knowledge · update issues · update plan status.
+
+**Integrations (opt-in dispatch):** GitHub · GitLab · Backlog · Linear · Slack webhooks.
+
 ## Architecture (reality check)
 
 Four surfaces share one local backend. All traffic stays on `127.0.0.1` unless you explicitly allow remote bind.
