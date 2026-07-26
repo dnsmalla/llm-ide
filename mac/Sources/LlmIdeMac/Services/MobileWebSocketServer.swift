@@ -17,6 +17,8 @@ final class MobileWebSocketServer: @unchecked Sendable {
     private let validatePin: (String) -> Bool
     private let onInbound: InboundHandler
     private let onLog: (String) -> Void
+    private let onClientPaired: () -> Void
+    private let onClientDisconnected: () -> Void
     private let queue = DispatchQueue(label: "llmide.mobile.ws")
     /// Shared decoder for inbound `Pairing`/`Heartbeat` frames. `JSONDecoder`
     /// is thread-safe for independent `decode(_:)` calls; all access here runs
@@ -31,12 +33,16 @@ final class MobileWebSocketServer: @unchecked Sendable {
     init(port: Int, deviceName: String,
          validatePin: @escaping (String) -> Bool,
          onInbound: @escaping InboundHandler,
-         onLog: @escaping (String) -> Void) {
+         onLog: @escaping (String) -> Void,
+         onClientPaired: @escaping () -> Void = {},
+         onClientDisconnected: @escaping () -> Void = {}) {
         self.port = port
         self.deviceName = deviceName
         self.validatePin = validatePin
         self.onInbound = onInbound
         self.onLog = onLog
+        self.onClientPaired = onClientPaired
+        self.onClientDisconnected = onClientDisconnected
     }
 
     func start() throws {
@@ -94,6 +100,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
                 self?.receive()
             case .failed, .cancelled:
                 self?.onLog("Client disconnected")
+                self?.onClientDisconnected()
                 self?.client = nil
                 self?.paired = false
             default:
@@ -125,6 +132,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
         if validatePin(pairing.pin) {
             paired = true
             onLog("Client paired")
+            onClientPaired()
             Task { await self.send(Connected(deviceName: deviceName)) }
         } else {
             // Diagnostic: show the received candidate's shape (not its value)

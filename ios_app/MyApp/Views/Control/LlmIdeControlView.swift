@@ -57,6 +57,16 @@ struct LlmIdeControlView: View {
                     } label: { Image(systemName: "trash") }
                     .disabled(llmIdeStore.llmIdeMessages.isEmpty)
                 }
+                if llmIdeStore.isStreaming {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(role: .destructive) {
+                            llmIdeStore.cancelStreaming()
+                            haptic(.medium)
+                        } label: {
+                            Image(systemName: "stop.fill")
+                        }
+                    }
+                }
             }
             .onChange(of: speech.transcript) { newValue in
                 if speech.isListening { inputText = newValue }

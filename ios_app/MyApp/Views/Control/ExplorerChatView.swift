@@ -19,6 +19,8 @@ struct ExplorerChatView: View {
     @State private var showFilePicker: Bool = false
     @State private var showMacSearch: Bool = false
     @State private var showMacSkills: Bool = false
+    @State private var renameSessionId: String?
+    @State private var renameTitle: String = ""
     @FocusState private var isInputFocused: Bool
 
     private var isConnected: Bool { connection.connectionStatus == .connected }
@@ -51,6 +53,16 @@ struct ExplorerChatView: View {
                         explorerStore.exploreListSessions()
                     } label: { Image(systemName: "sidebar.left") }
                 }
+                if explorerStore.isStreaming {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(role: .destructive) {
+                            explorerStore.cancelStreaming()
+                            haptic(.medium)
+                        } label: {
+                            Image(systemName: "stop.fill")
+                        }
+                    }
+                }
             }
         }
         .sheet(isPresented: $showSessionPicker) {
@@ -67,6 +79,19 @@ struct ExplorerChatView: View {
                 .environmentObject(explorerStore)
         }
         .onAppear { explorerStore.exploreListSessions() }
+        .alert("Rename session", isPresented: Binding(
+            get: { renameSessionId != nil },
+            set: { if !$0 { renameSessionId = nil } }
+        )) {
+            TextField("Title", text: $renameTitle)
+            Button("Save") {
+                if let id = renameSessionId {
+                    explorerStore.exploreRenameSession(id, title: renameTitle)
+                }
+                renameSessionId = nil
+            }
+            Button("Cancel", role: .cancel) { renameSessionId = nil }
+        }
         .fileImporter(isPresented: $showFilePicker,
                       allowedContentTypes: [.pdf, .plainText, .text]) { result in
             switch result {
@@ -146,6 +171,14 @@ struct ExplorerChatView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                renameSessionId = session.id
+                renameTitle = session.title.isEmpty ? "" : session.title
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+        }
     }
 
     // MARK: — Chat transcript

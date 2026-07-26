@@ -165,6 +165,17 @@ final class ExplorerChatStore: ObservableObject {
                 exploreCurrent = ExploreCurrentSession(id: created.sessionId, title: "New session", history: [])
                 exploreListSessions()   // refresh the sidebar list
             }
+        case "explore_session_renamed":
+            if let renamed = try? JSONDecoder().decode(ExploreSessionRenamed.self, from: data) {
+                if let idx = exploreSessions.firstIndex(where: { $0.id == renamed.sessionId }) {
+                    let old = exploreSessions[idx]
+                    exploreSessions[idx] = ExploreSessionSummary(
+                        id: old.id, title: renamed.title, lastUsedAt: old.lastUsedAt)
+                }
+                if exploreCurrent?.id == renamed.sessionId {
+                    exploreCurrent?.title = renamed.title
+                }
+            }
         default:
             break
         }
@@ -211,5 +222,16 @@ final class ExplorerChatStore: ObservableObject {
             removeTrailingEmptyAssistant(&current.history)
             exploreCurrent = current
         }
+    }
+
+    /// Cancel the in-flight explore chat turn on the Mac.
+    func cancelStreaming() {
+        guard let commandId = exploreCommandIds.first else { return }
+        connection?.sendEncodable(ExploreCancel(commandId: commandId))
+    }
+
+    /// Rename an explorer session on the Mac.
+    func exploreRenameSession(_ sessionId: String, title: String) {
+        connection?.sendEncodable(ExploreRenameSession(sessionId: sessionId, title: title))
     }
 }

@@ -23,6 +23,8 @@ public struct AutoTaskState: Codable, Equatable {
     public let masterEnabled: Bool
     public let isRunning: Bool
     public let currentTask: String?
+    /// Live step label from the Mac runner (e.g. "Extracting actions from meeting notes").
+    public let currentStep: String?
     public let statusMessage: String?
     public let lastRunDate: Double?
     public let createdCount: Int
@@ -30,12 +32,13 @@ public struct AutoTaskState: Codable, Equatable {
     public let failedCount: Int
     public let tasks: [AutoTaskInfo]
 
-    public init(masterEnabled: Bool, isRunning: Bool, currentTask: String?, statusMessage: String?,
-                lastRunDate: Double?, createdCount: Int, implementedCount: Int, failedCount: Int,
-                tasks: [AutoTaskInfo]) {
+    public init(masterEnabled: Bool, isRunning: Bool, currentTask: String?, currentStep: String?,
+                statusMessage: String?, lastRunDate: Double?, createdCount: Int,
+                implementedCount: Int, failedCount: Int, tasks: [AutoTaskInfo]) {
         self.masterEnabled = masterEnabled
         self.isRunning = isRunning
         self.currentTask = currentTask
+        self.currentStep = currentStep
         self.statusMessage = statusMessage
         self.lastRunDate = lastRunDate
         self.createdCount = createdCount
@@ -44,7 +47,7 @@ public struct AutoTaskState: Codable, Equatable {
         self.tasks = tasks
     }
     private enum CodingKeys: String, CodingKey {
-        case type, masterEnabled, isRunning, currentTask, statusMessage, lastRunDate
+        case type, masterEnabled, isRunning, currentTask, currentStep, statusMessage, lastRunDate
         case createdCount, implementedCount, failedCount, tasks
     }
 }

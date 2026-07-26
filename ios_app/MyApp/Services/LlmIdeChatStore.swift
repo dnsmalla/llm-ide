@@ -63,6 +63,12 @@ final class LlmIdeChatStore: ObservableObject {
         llmIdeMessages.removeAll()
     }
 
+    /// Cancel the in-flight llm-ide chat turn on the Mac.
+    func cancelStreaming() {
+        guard let commandId = llmIdeCommandIds.first else { return }
+        connection?.sendEncodable(LlmIdeCancel(commandId: commandId))
+    }
+
     // MARK: — Inbound (called by ConnectionService.receiveMessage dispatch)
 
     func ownsCommand(_ id: String) -> Bool { llmIdeCommandIds.contains(id) }

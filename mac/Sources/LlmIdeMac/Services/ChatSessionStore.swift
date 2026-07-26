@@ -29,6 +29,9 @@ enum ChatSessionStore {
         return dir
     }
 
+    /// Explorer session JSON directory — watched for mobile push sync.
+    static var explorerSessionsDirectory: URL? { sessionsDir }
+
     private static func fileURL(for id: UUID) -> URL? {
         sessionsDir?.appendingPathComponent("\(id.uuidString).json")
     }

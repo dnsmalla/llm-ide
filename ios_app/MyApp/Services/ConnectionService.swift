@@ -100,6 +100,7 @@ final class ConnectionService: ObservableObject {
     weak var llmIdeStore: LlmIdeChatStore?
     weak var explorerStore: ExplorerChatStore?
     weak var autoTaskStore: AutoTaskStore?
+    weak var macStatusStore: MacStatusStore?
     /// Set at app launch so `Connected.deviceName` can update persisted pairing info.
     weak var connectionStore: ConnectionStore?
 
@@ -294,7 +295,7 @@ final class ConnectionService: ObservableObject {
             // `ContentView` routes back to `ConnectView` for a fresh entry.
             connectionStore?.clearSavedPIN()
             disconnect(clearDirect: true)
-        case "explore_session_list", "explore_session_history", "explore_session_created":
+        case "explore_session_list", "explore_session_history", "explore_session_created", "explore_session_renamed":
             explorerStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "explore_search_reply":
             if let reply = try? JSONDecoder().decode(ExploreSearchReply.self, from: data) {
@@ -306,6 +307,8 @@ final class ConnectionService: ObservableObject {
             }
         case "auto_task_state", "auto_task_history_reply", "auto_task_ack":
             autoTaskStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
+        case "mac_status":
+            macStatusStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "output":
             let commandId = json["commandId"] as? String
             if let payload = json["payload"] as? [String: Any] {
@@ -316,8 +319,14 @@ final class ConnectionService: ObservableObject {
             }
         case "error":
             if let err = try? JSONDecoder().decode(CommandError.self, from: data) {
-                errorMessage = err.message
                 let cid = err.commandId
+                if err.message != "Cancelled" {
+                    if let cid, cid.hasPrefix("auto_task") {
+                        autoTaskStore?.handleCommandError(err.message, commandId: cid)
+                    } else {
+                        errorMessage = err.message
+                    }
+                }
                 if let cid, llmIdeStore?.ownsCommand(cid) == true {
                     llmIdeStore?.handleChatError(commandId: cid)
                 } else if let cid, explorerStore?.ownsCommand(cid) == true {

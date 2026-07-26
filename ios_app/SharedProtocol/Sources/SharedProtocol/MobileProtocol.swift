@@ -46,6 +46,16 @@ public enum MobileProtocol {
         public static let exploreSearchReply = "explore_search_reply"
         public static let exploreSearchSkills = "explore_search_skills"
         public static let exploreSkillListReply = "explore_skill_list_reply"
+        public static let exploreCancel = "explore_cancel"
+        public static let exploreRenameSession = "explore_rename_session"
+        public static let exploreSessionRenamed = "explore_session_renamed"
+
+        // MARK: llm-ide chat control
+        public static let llmIdeCancel = "llmide_cancel"
+
+        // MARK: Mac status snapshot
+        public static let macStatusList = "mac_status_list"
+        public static let macStatus = "mac_status"
 
         // MARK: Auto-task channel
         public static let autoTaskList = "auto_task_list"

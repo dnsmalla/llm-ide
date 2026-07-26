@@ -10,6 +10,7 @@ struct MobileHomeView: View {
     @EnvironmentObject var llmIdeStore: LlmIdeChatStore
     @EnvironmentObject var explorerStore: ExplorerChatStore
     @EnvironmentObject var autoTaskStore: AutoTaskStore
+    @EnvironmentObject var macStatusStore: MacStatusStore
     @EnvironmentObject var connectionStore: ConnectionStore
 
     @State private var showSettings: Bool = false
@@ -84,11 +85,62 @@ struct MobileHomeView: View {
                     .foregroundColor(DesignSystem.Colors.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                macStatusStrip
                 autoTaskSummaryCard
                 exploreSummaryCard
-                primaryActions
+                chatAction
             }
             .padding(DesignSystem.Spacing.md)
+        }
+    }
+
+    private var macStatusStrip: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
+            HStack(spacing: DesignSystem.Spacing.sm) {
+                statusDot("Backend", up: macStatusStore.macStatus?.backendUp == true)
+                statusDot("Mobile", up: macStatusStore.macStatus?.mobileControlUp == true)
+                Spacer()
+            }
+            if let status = macStatusStore.macStatus {
+                if let project = status.projectName, !project.isEmpty {
+                    Text(project)
+                        .font(.system(size: DesignSystem.Typography.subheadline, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.textPrimary)
+                        .lineLimit(1)
+                }
+                HStack(spacing: DesignSystem.Spacing.sm) {
+                    if let branch = status.gitBranch, !branch.isEmpty {
+                        Label(branch, systemImage: "arrow.triangle.branch")
+                            .font(.system(size: DesignSystem.Typography.caption))
+                            .foregroundColor(DesignSystem.Colors.textSecondary)
+                            .lineLimit(1)
+                    }
+                    if let ws = status.workspacePath, !ws.isEmpty {
+                        Text(ws)
+                            .font(.system(size: DesignSystem.Typography.caption, design: .monospaced))
+                            .foregroundColor(DesignSystem.Colors.textTertiary)
+                            .lineLimit(1)
+                    }
+                }
+            } else {
+                Text("Loading Mac status…")
+                    .font(.system(size: DesignSystem.Typography.caption))
+                    .foregroundColor(DesignSystem.Colors.textTertiary)
+            }
+        }
+        .padding(DesignSystem.Spacing.md)
+        .background(DesignSystem.Colors.surfaceSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM))
+    }
+
+    private func statusDot(_ label: String, up: Bool) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(up ? DesignSystem.Colors.success : DesignSystem.Colors.danger)
+                .frame(width: 7, height: 7)
+            Text(label)
+                .font(.system(size: DesignSystem.Typography.caption, weight: .medium))
+                .foregroundColor(DesignSystem.Colors.textSecondary)
         }
     }
 
@@ -126,6 +178,16 @@ struct MobileHomeView: View {
                     Text("Current: \(label)")
                         .font(.system(size: DesignSystem.Typography.caption))
                         .foregroundColor(DesignSystem.Colors.textTertiary)
+                }
+
+                if let step = state.currentStep, !step.isEmpty, state.isRunning {
+                    HStack(alignment: .top, spacing: 6) {
+                        ProgressView().scaleEffect(0.65)
+                        Text(step)
+                            .font(.system(size: DesignSystem.Typography.caption))
+                            .foregroundColor(DesignSystem.Colors.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             } else {
                 Text("Loading auto-task state from Mac…")
@@ -200,17 +262,9 @@ struct MobileHomeView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM))
     }
 
-    private var primaryActions: some View {
-        VStack(spacing: DesignSystem.Spacing.sm) {
-            Button { showExplore = true } label: {
-                featureRow(icon: "sidebar.left", title: "Explore", subtitle: "Chat with Mac explorer sessions")
-            }
-            Button { showAutoTask = true } label: {
-                featureRow(icon: "bolt.fill", title: "Auto Tasks", subtitle: "Run and monitor scheduled tasks")
-            }
-            Button { showLlmIde = true } label: {
-                featureRow(icon: "bubble.left.and.text.bubble.right", title: "Chat", subtitle: "Ask LLM-IDE questions")
-            }
+    private var chatAction: some View {
+        Button { showLlmIde = true } label: {
+            featureRow(icon: "bubble.left.and.text.bubble.right", title: "Chat", subtitle: "Ask LLM-IDE questions")
         }
     }
 
@@ -255,8 +309,8 @@ struct MobileHomeView: View {
 
     private func refreshMacData() {
         guard isConnected else { return }
-        autoTaskStore.autoTaskList()
-        autoTaskStore.autoTaskHistory()
+        macStatusStore.requestMacStatus()
+        autoTaskStore.refreshAll()
         explorerStore.exploreListSessions()
     }
 

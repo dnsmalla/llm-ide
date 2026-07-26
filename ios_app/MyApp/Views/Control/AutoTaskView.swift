@@ -41,14 +41,12 @@ struct AutoTaskView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        autoTaskStore.autoTaskList()
-                        autoTaskStore.autoTaskHistory()
+                        autoTaskStore.refreshAll()
                     } label: { Image(systemName: "arrow.clockwise") }
                 }
             }
             .onAppear {
-                autoTaskStore.autoTaskList()
-                autoTaskStore.autoTaskHistory()
+                autoTaskStore.refreshAll()
             }
         }
     }
@@ -58,6 +56,24 @@ struct AutoTaskView: View {
     private var headerSection: some View {
         Section {
             VStack(spacing: DesignSystem.Spacing.md) {
+                if let err = autoTaskStore.lastError {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(DesignSystem.Colors.danger)
+                        Text(err)
+                            .font(.system(size: DesignSystem.Typography.footnote))
+                            .foregroundColor(DesignSystem.Colors.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        Button { autoTaskStore.clearError() } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(DesignSystem.Colors.textTertiary)
+                        }
+                    }
+                }
+
                 // Master enable + running badge
                 HStack(spacing: DesignSystem.Spacing.sm) {
                     Toggle(isOn: masterBinding) {
@@ -83,6 +99,10 @@ struct AutoTaskView: View {
                             .foregroundColor(DesignSystem.Colors.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                }
+
+                if state?.isRunning == true {
+                    executionPanel
                 }
 
                 // Counts
@@ -119,6 +139,36 @@ struct AutoTaskView: View {
             }
             .padding(.vertical, 4)
         }
+    }
+
+    /// Live execution mirror — step + current task while Mac runs.
+    private var executionPanel: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
+            HStack(spacing: 6) {
+                ProgressView().scaleEffect(0.75)
+                Text("Running on Mac")
+                    .font(.system(size: DesignSystem.Typography.subheadline, weight: .semibold))
+                    .foregroundColor(DesignSystem.Colors.primary)
+            }
+            if let step = state?.currentStep, !step.isEmpty {
+                Text(step)
+                    .font(.system(size: DesignSystem.Typography.body))
+                    .foregroundColor(DesignSystem.Colors.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let current = state?.currentTask,
+                      let label = state?.tasks.first(where: { $0.id == current })?.label {
+                Text(label)
+                    .font(.system(size: DesignSystem.Typography.body))
+                    .foregroundColor(DesignSystem.Colors.textPrimary)
+            }
+            Text("Execution happens on your Mac — this screen shows live progress.")
+                .font(.system(size: DesignSystem.Typography.caption))
+                .foregroundColor(DesignSystem.Colors.textTertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(DesignSystem.Spacing.sm)
+        .background(DesignSystem.Colors.primary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusS))
     }
 
     /// Master enable is server-owned; the toggle sends the request and the
@@ -184,6 +234,11 @@ struct AutoTaskView: View {
     private func taskRow(_ task: AutoTaskInfo) -> some View {
         VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
             HStack(spacing: DesignSystem.Spacing.sm) {
+                Image(systemName: taskIcon(task.id))
+                    .font(.system(size: 16))
+                    .foregroundColor(DesignSystem.Colors.primary)
+                    .frame(width: 22)
+
                 Toggle(isOn: taskBinding(task)) {
                     Text(task.label)
                         .font(.system(size: DesignSystem.Typography.body))
@@ -195,18 +250,28 @@ struct AutoTaskView: View {
                     autoTaskStore.autoTaskRun(task.id)
                     haptic(.light)
                 } label: {
-                    Image(systemName: "play.circle")
+                    Image(systemName: state?.currentTask == task.id && state?.isRunning == true
+                          ? "ellipsis.circle" : "play.circle")
                         .font(.system(size: 22))
                         .foregroundColor(connection.connectionStatus == .connected
                             ? DesignSystem.Colors.primary
                             : DesignSystem.Colors.textTertiary)
                 }
                 .buttonStyle(.plain)
-                .disabled(!isConnected)
+                .disabled(!isConnected || state?.isRunning == true)
 
-                if state?.currentTask == task.id {
+                if state?.currentTask == task.id, state?.isRunning == true {
                     ProgressView().scaleEffect(0.7)
                 }
+            }
+
+            if state?.currentTask == task.id,
+               let step = state?.currentStep, !step.isEmpty,
+               state?.isRunning == true {
+                Text(step)
+                    .font(.system(size: DesignSystem.Typography.footnote))
+                    .foregroundColor(DesignSystem.Colors.primary)
+                    .padding(.leading, 30)
             }
 
             if let err = task.lastError, !err.isEmpty {
@@ -329,4 +394,19 @@ struct AutoTaskView: View {
     }
 
     // MARK: — Helpers
+
+    /// SF Symbol names aligned with the Mac `AutoTask.icon` mapping.
+    private func taskIcon(_ id: String) -> String {
+        switch id {
+        case "reviewCode":        return "checkmark.shield"
+        case "reviewDoc":         return "doc.text.magnifyingglass"
+        case "reviewConflicts":   return "exclamationmark.triangle"
+        case "regression":        return "arrow.uturn.backward.circle"
+        case "generateKnowledge": return "brain"
+        case "generateDoc":       return "wand.and.stars"
+        case "updateIssues":      return "checklist"
+        case "updatePlanStatus":  return "chart.bar.doc.horizontal"
+        default:                  return "bolt.fill"
+        }
+    }
 }

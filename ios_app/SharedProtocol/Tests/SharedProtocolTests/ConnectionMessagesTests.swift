@@ -220,6 +220,7 @@ final class ConnectionMessagesTests: XCTestCase {
             masterEnabled: true,
             isRunning: true,
             currentTask: "github_sync",
+            currentStep: "Extracting actions from meeting notes",
             statusMessage: "Syncing commits...",
             lastRunDate: 1_700_000_000,
             createdCount: 10,
@@ -233,6 +234,7 @@ final class ConnectionMessagesTests: XCTestCase {
         XCTAssertEqual(decoded.masterEnabled, true)
         XCTAssertEqual(decoded.isRunning, true)
         XCTAssertEqual(decoded.currentTask, "github_sync")
+        XCTAssertEqual(decoded.currentStep, "Extracting actions from meeting notes")
         XCTAssertEqual(decoded.statusMessage, "Syncing commits...")
         XCTAssertEqual(decoded.lastRunDate, 1_700_000_000)
         XCTAssertEqual(decoded.createdCount, 10)
@@ -281,5 +283,36 @@ final class ConnectionMessagesTests: XCTestCase {
         XCTAssertEqual(decoded.entries[1].actionText, "Synced commits")
         XCTAssertEqual(decoded.entries[1].status, "failed")
         XCTAssertEqual(decoded.entries[1].lastUpdated, 1_700_000_100)
+    }
+
+    // MARK: - Phase A: mac status, cancel, rename
+
+    func testMacStatusRoundTrips() throws {
+        let original = MacStatus(
+            projectName: "llm-ide",
+            gitBranch: "main",
+            workspacePath: "~/code/llm-ide",
+            backendUp: true,
+            mobileControlUp: true
+        )
+        let decoded = try roundTrip(original)
+        XCTAssertEqual(decoded.type, "mac_status")
+        XCTAssertEqual(decoded.projectName, "llm-ide")
+        XCTAssertEqual(decoded.gitBranch, "main")
+        XCTAssertTrue(decoded.backendUp)
+    }
+
+    func testExploreCancelRoundTrips() throws {
+        let original = ExploreCancel(commandId: "cmd-1")
+        let decoded = try roundTrip(original)
+        XCTAssertEqual(decoded.type, "explore_cancel")
+        XCTAssertEqual(decoded.commandId, "cmd-1")
+    }
+
+    func testExploreRenameSessionRoundTrips() throws {
+        let original = ExploreRenameSession(sessionId: "abc", title: "Refactor auth")
+        let decoded = try roundTrip(original)
+        XCTAssertEqual(decoded.type, "explore_rename_session")
+        XCTAssertEqual(decoded.title, "Refactor auth")
     }
 }

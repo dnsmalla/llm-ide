@@ -7,6 +7,7 @@ struct MyAppApp: App {
     @StateObject private var llmIdeStore: LlmIdeChatStore
     @StateObject private var explorerStore: ExplorerChatStore
     @StateObject private var autoTaskStore: AutoTaskStore
+    @StateObject private var macStatusStore: MacStatusStore
 
     init() {
         // ConnectionService is created first; each feature store is wired to it
@@ -22,6 +23,7 @@ struct MyAppApp: App {
         _llmIdeStore = StateObject(wrappedValue: LlmIdeChatStore(connection: connection))
         _explorerStore = StateObject(wrappedValue: ExplorerChatStore(connection: connection))
         _autoTaskStore = StateObject(wrappedValue: AutoTaskStore(connection: connection))
+        _macStatusStore = StateObject(wrappedValue: MacStatusStore(connection: connection))
     }
 
     var body: some Scene {
@@ -32,6 +34,7 @@ struct MyAppApp: App {
                 .environmentObject(llmIdeStore)
                 .environmentObject(explorerStore)
                 .environmentObject(autoTaskStore)
+                .environmentObject(macStatusStore)
         }
     }
 }

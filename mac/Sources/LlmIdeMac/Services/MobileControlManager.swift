@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import Observation
 import SharedProtocol
@@ -56,6 +57,8 @@ final class MobileControlManager {
     /// same model/provider and agent context as the desktop Explorer panel.
     var config: AppConfig?
     var projectStore: ProjectStore?
+    /// Local Node backend supervisor — used for `mac_status` snapshots.
+    var backendManager: BackendManager?
 
     /// Persisted `@file` / `/skill` browse indexes under Application Support settings/.
     let exploreIndex = MobileExploreIndexStore()
@@ -63,7 +66,15 @@ final class MobileControlManager {
     private var server: MobileWebSocketServer?
     private var advertiser: MobileBonjourAdvertiser?
     private var workspaceWatcher: RepoFileWatcher?
+    private var sessionDirectoryWatcher: RepoFileWatcher?
     private let maxLogLines = 5_000
+
+    /// True after a client completes PIN pairing; cleared on disconnect.
+    private var mobileClientPaired = false
+    private var mobilePushCancellables = Set<AnyCancellable>()
+    private var mobileInflightTasks: [String: Task<Void, Never>] = [:]
+    /// Commands the iPhone cancelled — late HTTP replies must not persist or stream.
+    private var mobileCancelledCommandIds = Set<String>()
 
     /// Shared decoder reused across every `handleInbound` case. `JSONDecoder`
     /// is thread-safe for independent `decode(_:)` calls and this manager is
@@ -121,6 +132,12 @@ final class MobileControlManager {
             onInbound: { [weak self] data in Task { @MainActor in self?.handleInbound(data) } },
             onLog: { [weak self] line in
                 Task { @MainActor [weak self] in self?.append(.info, line) }
+            },
+            onClientPaired: { [weak self] in
+                Task { @MainActor [weak self] in self?.onMobileClientPaired() }
+            },
+            onClientDisconnected: { [weak self] in
+                Task { @MainActor [weak self] in self?.onMobileClientDisconnected() }
             }
         )
         do {
@@ -140,8 +157,10 @@ final class MobileControlManager {
 
         status = .running
         startWorkspaceWatcher()
+        startSessionDirectoryWatcher()
         exploreIndex.bootstrapFromDisk()
         refreshExploreIndexes(force: false)
+        installMobilePushObservers()
     }
 
     /// Rebuild workspace + skill JSON indexes when the project changes or the
@@ -198,6 +217,10 @@ final class MobileControlManager {
     func stop() {
         workspaceWatcher?.stop()
         workspaceWatcher = nil
+        sessionDirectoryWatcher?.stop()
+        sessionDirectoryWatcher = nil
+        mobilePushCancellables.removeAll()
+        onMobileClientDisconnected()
         server?.stop()
         server = nil
         advertiser?.stop()
@@ -239,8 +262,14 @@ final class MobileControlManager {
             // Phase 3/4 chat proxy — must keep working alongside explorer ops.
             if let chat = try? decoder.decode(LlmIdeChat.self, from: data) {
                 append(.info, "Chat: \(chat.text.prefix(40))")
-                Task { await handleChat(chat) }
+                registerMobileInflightTask(commandId: chat.commandId) {
+                    await self.handleChat(chat)
+                }
             }
+        case MobileProtocol.Tag.llmIdeCancel:
+            handleLlmIdeCancel(data: data)
+        case MobileProtocol.Tag.macStatusList:
+            Task { await handleMacStatusList() }
         case let t where t.hasPrefix("explore_"):
             handleExplore(type: t, data: data)
         case let t where t.hasPrefix("auto_task_"):
@@ -303,8 +332,14 @@ final class MobileControlManager {
         case MobileProtocol.Tag.exploreChat:
             if let chat = try? decoder.decode(ExploreChat.self, from: data) {
                 append(.info, "Explore chat in \(chat.sessionId.prefix(8))")
-                Task { await handleExploreChat(chat) }
+                registerMobileInflightTask(commandId: chat.commandId) {
+                    await self.handleExploreChat(chat)
+                }
             }
+        case MobileProtocol.Tag.exploreCancel:
+            handleExploreCancel(data: data)
+        case MobileProtocol.Tag.exploreRenameSession:
+            handleExploreRenameSession(data: data)
         case MobileProtocol.Tag.exploreSearchFiles:
             if let req = try? decoder.decode(ExploreSearchFiles.self, from: data) {
                 handleExploreSearch(req)
@@ -368,25 +403,11 @@ final class MobileControlManager {
             // deps are @MainActor like this manager, so the reads below are
             // isolation-safe. Missing wiring → a CommandError so the phone
             // shows a concrete reason instead of an unanswered request.
-            guard let ac = autoCode, let s = autoTaskSettings else {
+            guard let state = buildAutoTaskState() else {
                 replyNotConfigured(commandId: "auto_task", logLabel: "auto_task_list")
                 return
             }
-            let infos = AutoTask.allCases.map { t in
-                AutoTaskInfo(id: t.rawValue, label: t.label,
-                             enabled: s.isEnabled(task: t),
-                             lastError: ac.taskErrors[t.rawValue])
-            }
-            let state = AutoTaskState(masterEnabled: s.enabled,
-                                      isRunning: ac.isRunning,
-                                      currentTask: ac.currentTask?.rawValue,
-                                      statusMessage: ac.statusMessage,
-                                      lastRunDate: ac.lastRunDate?.timeIntervalSince1970,
-                                      createdCount: ac.createdCount,
-                                      implementedCount: ac.implementedCount,
-                                      failedCount: ac.failedCount,
-                                      tasks: infos)
-            append(.info, "Auto-task state: \(ac.isRunning ? "running" : "idle"), master=\(s.enabled)")
+            append(.info, "Auto-task state: \(state.isRunning ? "running" : "idle"), master=\(state.masterEnabled)")
             reply(state)
         case MobileProtocol.Tag.autoTaskToggle:
             // Flip the master enable (task == nil) or a single per-task flag.
@@ -401,7 +422,7 @@ final class MobileControlManager {
                     autoTaskSettings?.enabled = m.enabled
                     append(.info, "Auto-task master=\(m.enabled)")
                 }
-                reply(AutoTaskAck(ok: true, message: nil))
+                replyAutoTaskStateOrAck()
             }
         case MobileProtocol.Tag.autoTaskRun:
             // Trigger a global run (task == nil) or a single per-task manual
@@ -420,7 +441,7 @@ final class MobileControlManager {
                     ac.runNow()
                     append(.info, "Auto-task run now")
                 }
-                reply(AutoTaskAck(ok: true, message: nil))
+                replyAutoTaskStateOrAck()
             }
         case MobileProtocol.Tag.autoTaskStop:
             // `cancel()` is @MainActor-sync: cancels the in-flight `runTask`
@@ -428,7 +449,7 @@ final class MobileControlManager {
             // via `?` (no wiring → ack still replies, phone doesn't hang).
             autoCode?.cancel()
             append(.info, "Auto-task stop")
-            reply(AutoTaskAck(ok: true, message: nil))
+            replyAutoTaskStateOrAck()
         case MobileProtocol.Tag.autoTaskHistory:
             // Snapshot the processed-actions registry. `allEntries` is
             // @Published on AutoCodeUpdateService (a cached copy of
@@ -462,9 +483,13 @@ final class MobileControlManager {
         let message = Self.messageWithFiles(chat.text, files: chat.files)
         do {
             let reply = try await api.askAgent(message: message, history: history, images: images)
+            guard !isMobileCommandCancelled(chat.commandId) else { return }
             await server?.send(Output(commandId: chat.commandId,
                                       payload: OutputPayload(stream: reply, done: true)))
+        } catch is CancellationError {
+            append(.info, "llmide_chat cancelled: \(chat.commandId.prefix(8))")
         } catch {
+            guard !isMobileCommandCancelled(chat.commandId) else { return }
             append(.stderr, "askAgent failed: \(error.localizedDescription)")
             lastError = error.localizedDescription
             await server?.send(CommandError(commandId: chat.commandId, message: error.localizedDescription))
@@ -533,15 +558,17 @@ final class MobileControlManager {
                 skills: skillIds,
                 agentContext: agentContext,
                 onProgress: { [weak self] label in
-                    guard let self else { return }
+                    guard let self, !self.isMobileCommandCancelled(commandId) else { return }
                     append(.info, "code-assist: \(label)")
                     Task {
+                        guard !self.isMobileCommandCancelled(commandId) else { return }
                         await self.server?.send(Output(
                             commandId: commandId,
                             payload: OutputPayload(stream: label, done: false)))
                     }
                 }
             )
+            guard !isMobileCommandCancelled(chat.commandId) else { return }
             // Persist user + assistant turns into the Mac session (keeps phone
             // & Mac in sync). The upfront guard above already rejected stale
             // sessions; this re-load is a race fallback for the window between
@@ -555,7 +582,10 @@ final class MobileControlManager {
             }
             await server?.send(Output(commandId: chat.commandId,
                                       payload: OutputPayload(stream: resp.reply, done: true)))
+        } catch is CancellationError {
+            append(.info, "explore_chat cancelled: \(chat.commandId.prefix(8))")
         } catch {
+            guard !isMobileCommandCancelled(chat.commandId) else { return }
             append(.stderr, "code-assist failed: \(error.localizedDescription)")
             lastError = error.localizedDescription
             await server?.send(CommandError(commandId: chat.commandId, message: error.localizedDescription))
@@ -607,6 +637,193 @@ final class MobileControlManager {
     private func replyNotConfigured(commandId: String, logLabel: String) {
         append(.stderr, "\(logLabel): Auto-tasks not configured")
         reply(CommandError(commandId: commandId, message: "Auto-tasks not configured"))
+    }
+
+    /// Build the wire snapshot the iPhone mirrors. Returns nil when the Auto
+    /// Task stack isn't wired (previews / tests).
+    private func buildAutoTaskState() -> AutoTaskState? {
+        guard let ac = autoCode, let s = autoTaskSettings else { return nil }
+        let infos = AutoTask.allCases.map { t in
+            AutoTaskInfo(id: t.rawValue, label: t.label,
+                         enabled: s.isEnabled(task: t),
+                         lastError: ac.taskErrors[t.rawValue])
+        }
+        return AutoTaskState(masterEnabled: s.enabled,
+                             isRunning: ac.isRunning,
+                             currentTask: ac.currentTask?.rawValue,
+                             currentStep: ac.currentStep,
+                             statusMessage: ac.statusMessage,
+                             lastRunDate: ac.lastRunDate?.timeIntervalSince1970,
+                             createdCount: ac.createdCount,
+                             implementedCount: ac.implementedCount,
+                             failedCount: ac.failedCount,
+                             tasks: infos)
+    }
+
+    /// After run/stop/toggle the phone needs a fresh snapshot — not just a bare
+    /// ack — so execution status mirrors the Mac without a manual refresh.
+    private func replyAutoTaskStateOrAck() {
+        if let state = buildAutoTaskState() {
+            reply(state)
+        } else {
+            reply(AutoTaskAck(ok: true, message: nil))
+        }
+    }
+
+    // MARK: - Phase A: mobile push sync, cancel, status, rename
+
+    /// Subscribe to Mac-side Auto Task + explorer session changes and push
+    /// snapshots to a paired iPhone without waiting for a pull request.
+    func installMobilePushObservers() {
+        mobilePushCancellables.removeAll()
+        guard let ac = autoCode else { return }
+
+        ac.objectWillChange
+            .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.pushAutoTaskStateIfPaired() }
+            .store(in: &mobilePushCancellables)
+
+        autoTaskSettings?.objectWillChange
+            .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.pushAutoTaskStateIfPaired() }
+            .store(in: &mobilePushCancellables)
+
+        projectStore?.objectWillChange
+            .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                Task { await self?.pushMacStatusIfPaired() }
+            }
+            .store(in: &mobilePushCancellables)
+    }
+
+    /// Push a fresh Mac status snapshot when backend or project context changes.
+    func onMacEnvironmentChanged() {
+        Task { await pushMacStatusIfPaired() }
+    }
+
+    private func onMobileClientPaired() {
+        mobileClientPaired = true
+        pushAutoTaskStateIfPaired()
+        pushExploreSessionListIfPaired()
+        Task { await pushMacStatusIfPaired() }
+    }
+
+    private func onMobileClientDisconnected() {
+        mobileClientPaired = false
+        mobileCancelledCommandIds.removeAll()
+        for task in mobileInflightTasks.values { task.cancel() }
+        mobileInflightTasks.removeAll()
+    }
+
+    private func pushAutoTaskStateIfPaired() {
+        guard mobileClientPaired, let state = buildAutoTaskState() else { return }
+        reply(state)
+    }
+
+    private func pushExploreSessionListIfPaired() {
+        guard mobileClientPaired else { return }
+        let rows = ChatSessionStore.list(for: .explorer).map {
+            ExploreSessionSummary(id: $0.id.uuidString,
+                                  title: $0.title,
+                                  lastUsedAt: $0.lastUsedAt.timeIntervalSince1970)
+        }
+        reply(ExploreSessionList(sessions: rows))
+    }
+
+    private func pushMacStatusIfPaired() async {
+        guard mobileClientPaired else { return }
+        if let status = await buildMacStatus() {
+            await server?.send(status)
+        }
+    }
+
+    private func startSessionDirectoryWatcher() {
+        sessionDirectoryWatcher?.stop()
+        sessionDirectoryWatcher = nil
+        guard case .running = status,
+              let dir = ChatSessionStore.explorerSessionsDirectory else { return }
+        sessionDirectoryWatcher = RepoFileWatcher(repoRoot: dir, debounce: 1.0) { [weak self] in
+            Task { @MainActor in self?.pushExploreSessionListIfPaired() }
+        }
+    }
+
+    private func registerMobileInflightTask(commandId: String,
+                                          operation: @escaping () async -> Void) {
+        mobileInflightTasks[commandId]?.cancel()
+        mobileCancelledCommandIds.remove(commandId)
+        mobileInflightTasks[commandId] = Task {
+            defer { mobileInflightTasks.removeValue(forKey: commandId) }
+            await operation()
+        }
+    }
+
+    private func cancelMobileInflightTask(commandId: String) {
+        mobileCancelledCommandIds.insert(commandId)
+        mobileInflightTasks[commandId]?.cancel()
+        mobileInflightTasks.removeValue(forKey: commandId)
+        reply(CommandError(commandId: commandId, message: "Cancelled"))
+    }
+
+    private func isMobileCommandCancelled(_ commandId: String) -> Bool {
+        mobileCancelledCommandIds.contains(commandId)
+    }
+
+    private func handleLlmIdeCancel(data: Data) {
+        guard let m = try? decoder.decode(LlmIdeCancel.self, from: data) else { return }
+        append(.info, "llmide_cancel \(m.commandId.prefix(8))")
+        cancelMobileInflightTask(commandId: m.commandId)
+    }
+
+    private func handleExploreCancel(data: Data) {
+        guard let m = try? decoder.decode(ExploreCancel.self, from: data) else { return }
+        append(.info, "explore_cancel \(m.commandId.prefix(8))")
+        cancelMobileInflightTask(commandId: m.commandId)
+    }
+
+    private func handleExploreRenameSession(data: Data) {
+        guard let m = try? decoder.decode(ExploreRenameSession.self, from: data),
+              let sid = UUID(uuidString: m.sessionId),
+              var session = ChatSessionStore.load(id: sid),
+              session.scope == .explorer else {
+            reply(CommandError(commandId: "explore_rename", message: "Session not found on Mac"))
+            return
+        }
+        let trimmed = m.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        session.title = trimmed.isEmpty ? "Untitled" : trimmed
+        ChatSessionStore.save(session)
+        append(.info, "Explore rename: \(sid.uuidString.prefix(8)) → \(session.title.prefix(30))")
+        reply(ExploreSessionRenamed(sessionId: sid.uuidString, title: session.title))
+        pushExploreSessionListIfPaired()
+    }
+
+    private func handleMacStatusList() async {
+        if let status = await buildMacStatus() {
+            await server?.send(status)
+        } else {
+            reply(CommandError(commandId: "mac_status", message: "Mac status unavailable"))
+        }
+    }
+
+    private func buildMacStatus() async -> MacStatus? {
+        let projectName = projectStore?.activeProject?.bundle.displayName
+        var gitBranch: String?
+        var workspacePath: String?
+        if let config, let projectStore {
+            let ctx = await MobileExploreBridge.buildAgentContext(
+                config: config, projectStore: projectStore, sessionId: nil)
+            gitBranch = ctx.currentBranch
+            workspacePath = ctx.workspaceRoot
+        }
+        let backendUp = await BackendManager.probeHealth()
+        let mobileControlUp: Bool = {
+            if case .running = status { return true }
+            return false
+        }()
+        return MacStatus(projectName: projectName,
+                         gitBranch: gitBranch,
+                         workspacePath: workspacePath,
+                         backendUp: backendUp,
+                         mobileControlUp: mobileControlUp)
     }
 }
 

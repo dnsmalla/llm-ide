@@ -21,6 +21,7 @@
 		A7B80010CC00000000000003 /* LlmIdeChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B80010CC00000000000004 /* LlmIdeChatStore.swift */; };
 		A7B80010CC00000000000005 /* ExplorerChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B80010CC00000000000006 /* ExplorerChatStore.swift */; };
 		A7B80010CC00000000000007 /* AutoTaskStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B80010CC00000000000008 /* AutoTaskStore.swift */; };
+		A7B80010CC00000000000009 /* MacStatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B80010CC0000000000000A /* MacStatusStore.swift */; };
 		AC1BAD40D67DE71FEE09690F /* HelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A36F27BA352AF7FF9AA51012 /* HelpView.swift */; };
 		B6CF935AF507506E25C1EA4A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 995B956852311CF170F73894 /* ContentView.swift */; };
 		D3D6F9A8DB516321EA005C39 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA5ED588DFDB7A34E47E6C36 /* Assets.xcassets */; };
@@ -53,6 +54,7 @@
 		A7B80010CC00000000000004 /* LlmIdeChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlmIdeChatStore.swift; sourceTree = "<group>"; };
 		A7B80010CC00000000000006 /* ExplorerChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorerChatStore.swift; sourceTree = "<group>"; };
 		A7B80010CC00000000000008 /* AutoTaskStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTaskStore.swift; sourceTree = "<group>"; };
+		A7B80010CC0000000000000A /* MacStatusStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacStatusStore.swift; sourceTree = "<group>"; };
 		95A7138E88C6309A4CC79A8F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		995B956852311CF170F73894 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A36F27BA352AF7FF9AA51012 /* HelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpView.swift; sourceTree = "<group>"; };
@@ -177,6 +179,7 @@
 				A7B80010CC00000000000004 /* LlmIdeChatStore.swift */,
 				A7B80010CC00000000000006 /* ExplorerChatStore.swift */,
 				A7B80010CC00000000000008 /* AutoTaskStore.swift */,
+				A7B80010CC0000000000000A /* MacStatusStore.swift */,
 				F1E2D3C4B5A607890F1E2D02 /* DeviceDiscovery.swift */,
 			);
 			path = Services;
@@ -285,6 +288,7 @@
 				A7B80010CC00000000000003 /* LlmIdeChatStore.swift in Sources */,
 				A7B80010CC00000000000005 /* ExplorerChatStore.swift in Sources */,
 				A7B80010CC00000000000007 /* AutoTaskStore.swift in Sources */,
+				A7B80010CC00000000000009 /* MacStatusStore.swift in Sources */,
 				F1E2D3C4B5A607890F1E2D01 /* DeviceDiscovery.swift in Sources */,
 				86D51A8F64D3F1F7AF72109E /* DesignSystem.swift in Sources */,
 				AC1BAD40D67DE71FEE09690F /* HelpView.swift in Sources */,

@@ -152,6 +152,8 @@ public struct LlmIdeMacApp: App {
         mobileControl.autoTaskSettings = autoTaskSettingsInstance
         mobileControl.config = cfg
         mobileControl.projectStore = projectStoreInstance
+        mobileControl.backendManager = backend
+        mobileControl.installMobilePushObservers()
     }
 
     public var body: some Scene {
@@ -278,9 +280,13 @@ public struct LlmIdeMacApp: App {
                     projectStore.syncLinkedRepoFromConfig(config)
                     if config.mobileControlEnabled {
                         mobileControl.onWorkspaceChanged()
+                        mobileControl.onMacEnvironmentChanged()
                     }
                 }
                 .onChange(of: backend.status) { _, newStatus in
+                    if config.mobileControlEnabled {
+                        mobileControl.onMacEnvironmentChanged()
+                    }
                     if case .running = newStatus, config.mobileControlEnabled {
                         mobileControl.onBackendReady()
                     }
