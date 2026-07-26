@@ -105,7 +105,19 @@ final class MobileControlManager {
         let server = MobileWebSocketServer(
             port: MobileProtocol.defaultPort,
             deviceName: name,
-            validatePin: { candidate in candidate == pin },
+            validatePin: { candidate in
+                // The PIN is always 6 digits (`%06d`), but a user typing on a
+                // phone number pad often omits leading zeros (e.g. "42" for
+                // "000042"). Left-zero-pad an all-ASCII-digit candidate of
+                // ≤6 chars before comparing so that omission still matches,
+                // without weakening the check for any other input.
+                let isAllDigits = !candidate.isEmpty
+                    && candidate.allSatisfy { ("0"..."9").contains($0) }
+                let normalized = (candidate.count <= 6 && isAllDigits)
+                    ? String(repeating: "0", count: 6 - candidate.count) + candidate
+                    : candidate
+                return normalized == pin
+            },
             onInbound: { [weak self] data in Task { @MainActor in self?.handleInbound(data) } },
             onLog: { [weak self] line in
                 Task { @MainActor [weak self] in self?.append(.info, line) }

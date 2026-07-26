@@ -26,11 +26,7 @@ final class ProjectMigrator {
     }
 
     private static func defaultMarkerDirectory() -> URL {
-        let appSupport = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory())
-                .appendingPathComponent("Library/Application Support")
-        return AppIdentity.applicationSupportRoot()
+        AppIdentity.applicationSupportRoot()
     }
 
     func runOnce(gitLab: [SavedGitLabProject],

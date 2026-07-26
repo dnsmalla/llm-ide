@@ -68,7 +68,7 @@ struct MobileHomeView: View {
                 .environmentObject(autoTaskStore)
         }
         .onAppear { refreshMacData() }
-        .onChange(of: connection.connectionStatus) { _, status in
+        .onChange(of: connection.connectionStatus) { status in
             if status == .connected { refreshMacData() }
         }
         .animation(.easeInOut(duration: 0.2), value: autoTaskStore.actionStatus)

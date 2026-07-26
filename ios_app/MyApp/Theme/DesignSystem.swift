@@ -54,6 +54,7 @@ public struct DesignSystem {
         public static let largeTitle: CGFloat = 34
         public static let title: CGFloat = 28
         public static let title2: CGFloat = 22
+        public static let title3: CGFloat = 20
         public static let headline: CGFloat = 17
         public static let body: CGFloat = 16
         public static let callout: CGFloat = 15

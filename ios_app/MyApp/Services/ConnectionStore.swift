@@ -41,6 +41,19 @@ final class ConnectionStore: ObservableObject {
         PinKeychain.save(pin)
     }
 
+    /// Clear only the saved PIN — keep IP/port/name so the Mac is still
+    /// recognized. Called when the server rejects the PIN (`auth_failed`):
+    /// without this, a stale PIN persisted across a Mac PIN change (reinstall,
+    /// Keychain reset, update) is re-sent on every auto-connect and manual
+    /// pre-fill, trapping the user in a "Wrong PIN" loop they can't escape
+    /// (`ContentView` keeps routing to `MobileHomeView` because `hasDevice`
+    /// stays true). Clearing the PIN flips `hasDevice` to false so the user
+    /// lands on `ConnectView` and re-enters the current PIN.
+    func clearSavedPIN() {
+        devicePIN = ""
+        PinKeychain.delete()
+    }
+
     func updateDeviceName(_ name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }

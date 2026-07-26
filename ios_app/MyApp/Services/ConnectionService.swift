@@ -288,6 +288,11 @@ final class ConnectionService: ObservableObject {
             // Wrong PIN — reconnecting with the same PIN is pointless.
             errorMessage = "Wrong PIN. Check the 6-digit code in LLM-IDE → Settings → Mobile Control on your Mac."
             directPIN = nil
+            // Drop the persisted PIN too: if it's stale (Mac changed its PIN
+            // across a reinstall/update), auto-connect and manual pre-fill
+            // would otherwise re-send it forever. Clears `hasDevice` so
+            // `ContentView` routes back to `ConnectView` for a fresh entry.
+            connectionStore?.clearSavedPIN()
             disconnect(clearDirect: true)
         case "explore_session_list", "explore_session_history", "explore_session_created":
             explorerStore?.handleInbound(type: json["type"] as? String ?? "", data: data)

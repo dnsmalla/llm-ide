@@ -127,7 +127,12 @@ final class MobileWebSocketServer: @unchecked Sendable {
             onLog("Client paired")
             Task { await self.send(Connected(deviceName: deviceName)) }
         } else {
-            onLog("Wrong PIN — rejecting")
+            // Diagnostic: show the received candidate's shape (not its value)
+            // so a lingering mismatch — typo, non-digit, wrong length — is
+            // visible in the Mobile Control log pane without leaking the PIN.
+            let received = pairing.pin
+            let digits = !received.isEmpty && received.allSatisfy { ("0"..."9").contains($0) }
+            onLog("Wrong PIN — rejecting (received \(received.count) char\(received.count == 1 ? "" : "s")\(digits ? ", all digits" : ", has non-digits"))")
             closeWithAuthFailure()
         }
     }

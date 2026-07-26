@@ -16,7 +16,7 @@ private func decodeConfigOrStash<T: Decodable>(
     } catch {
         let ts = Int(Date().timeIntervalSince1970)
         let fm = FileManager.default
-        if let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+        if fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first != nil {
             let dir = AppIdentity.applicationSupportRoot(fileManager: fm)
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
             let backup = dir.appendingPathComponent("\(key).json.corrupt-\(ts)")
@@ -595,7 +595,7 @@ final class AppConfig: ObservableObject {
                 // next mutation that triggers `defaults.set(...)`.
                 let ts = Int(Date().timeIntervalSince1970)
                 let fm = FileManager.default
-                if let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+                if fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first != nil {
                     let dir = AppIdentity.applicationSupportRoot(fileManager: fm)
                     try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
                     let backup = dir.appendingPathComponent("gitLabSavedProjects.json.corrupt-\(ts)")
