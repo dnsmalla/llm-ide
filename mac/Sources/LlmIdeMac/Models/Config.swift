@@ -83,6 +83,10 @@ struct SavedEmailSource: Codable, Equatable {
 
     init() {}
 
+    enum CodingKeys: String, CodingKey {
+        case displayName, host, port, secure, user, authMethod, mailbox, lookbackDays, enabled, unreadOnly, markRead, fromFilter
+    }
+
     /// Tolerant decoder: every field falls back to its default when absent,
     /// so adding fields over time never invalidates a previously-saved
     /// source (synthesized Codable would otherwise throw on a missing key).
@@ -128,6 +132,10 @@ struct SavedSlackSource: Codable, Equatable {
 
     init() {}
 
+    enum CodingKeys: String, CodingKey {
+        case displayName, channels, lookbackDays, enabled
+    }
+
     /// Tolerant decoder — every field falls back to its default when absent.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -156,6 +164,10 @@ struct SavedBoxSource: Codable, Equatable {
     var enabled: Bool = true
 
     init() {}
+
+    enum CodingKeys: String, CodingKey {
+        case displayName, clientId, subjectType, subjectId, folderId, folderName, enabled
+    }
 
     /// Tolerant decoder — every field falls back to its default when absent.
     init(from decoder: Decoder) throws {
