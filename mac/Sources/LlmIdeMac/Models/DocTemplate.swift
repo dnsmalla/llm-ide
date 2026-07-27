@@ -47,6 +47,17 @@ struct DocTemplate: Identifiable, Codable, Equatable {
         isProjectTemplate = try c.decodeIfPresent(Bool.self, forKey: .isProjectTemplate) ?? false
     }
 
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(sections, forKey: .sections)
+        try c.encodeIfPresent(rawContent, forKey: .rawContent)
+        try c.encode(isBuiltin, forKey: .isBuiltin)
+        try c.encodeIfPresent(folderName, forKey: .folderName)
+        try c.encode(isProjectTemplate, forKey: .isProjectTemplate)
+    }
+
     /// Default templates seeded into every project's `templates/<slug>/template.md`.
     struct SeedDefinition {
         let id: UUID

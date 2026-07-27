@@ -50,11 +50,16 @@ final class LlmIdeChatStore: ObservableObject {
         let chatImages = images.map { ChatImage(mediaType: $0.mediaType, data: $0.data.base64EncodedString()) }
         let chat = LlmIdeChat(commandId: id, text: text, history: history, images: chatImages, files: files)
         // Encode error path preserved exactly from pre-refactor (tear down).
-        if let data = try? JSONEncoder().encode(chat),
-           let str = String(data: data, encoding: .utf8) {
-            connection?.sendTextFrame(str)
-        } else {
-            connection?.errorMessage = "Failed to encode chat message"
+        do {
+            let data = try JSONEncoder().encode(chat)
+            if let str = String(data: data, encoding: .utf8) {
+                connection?.sendTextFrame(str)
+            } else {
+                connection?.errorMessage = "Failed to encode chat message: UTF-8 conversion failed"
+                connection?.disconnect()
+            }
+        } catch {
+            connection?.errorMessage = "Failed to encode chat message: \(error.localizedDescription)"
             connection?.disconnect()
         }
     }

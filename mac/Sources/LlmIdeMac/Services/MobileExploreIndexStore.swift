@@ -31,6 +31,15 @@ struct MobileWorkspaceIndexFile: Codable, Equatable {
         entries = try c.decode([MobileWorkspaceIndexEntry].self, forKey: .entries)
         truncated = try c.decodeIfPresent(Bool.self, forKey: .truncated) ?? false
     }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(version, forKey: .version)
+        try c.encode(updatedAt, forKey: .updatedAt)
+        try c.encode(workspaceRoot, forKey: .workspaceRoot)
+        try c.encode(entries, forKey: .entries)
+        try c.encode(truncated, forKey: .truncated)
+    }
 }
 
 struct MobileWorkspaceIndexEntry: Codable, Equatable {

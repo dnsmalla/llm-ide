@@ -101,6 +101,22 @@ struct SavedEmailSource: Codable, Equatable {
         markRead     = try c.decodeIfPresent(Bool.self, forKey: .markRead) ?? true
         fromFilter   = try c.decodeIfPresent(String.self, forKey: .fromFilter) ?? ""
     }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(displayName, forKey: .displayName)
+        try c.encode(host, forKey: .host)
+        try c.encode(port, forKey: .port)
+        try c.encode(secure, forKey: .secure)
+        try c.encode(user, forKey: .user)
+        try c.encode(authMethod, forKey: .authMethod)
+        try c.encode(mailbox, forKey: .mailbox)
+        try c.encode(lookbackDays, forKey: .lookbackDays)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encode(unreadOnly, forKey: .unreadOnly)
+        try c.encode(markRead, forKey: .markRead)
+        try c.encode(fromFilter, forKey: .fromFilter)
+    }
 }
 
 struct SavedSlackSource: Codable, Equatable {
@@ -119,6 +135,14 @@ struct SavedSlackSource: Codable, Equatable {
         channels     = try c.decodeIfPresent([String].self, forKey: .channels) ?? []
         lookbackDays = try c.decodeIfPresent(Int.self, forKey: .lookbackDays) ?? 7
         enabled      = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(displayName, forKey: .displayName)
+        try c.encode(channels, forKey: .channels)
+        try c.encode(lookbackDays, forKey: .lookbackDays)
+        try c.encode(enabled, forKey: .enabled)
     }
 }
 
@@ -143,6 +167,17 @@ struct SavedBoxSource: Codable, Equatable {
         folderId    = try c.decodeIfPresent(String.self, forKey: .folderId) ?? ""
         folderName  = try c.decodeIfPresent(String.self, forKey: .folderName) ?? ""
         enabled     = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(displayName, forKey: .displayName)
+        try c.encode(clientId, forKey: .clientId)
+        try c.encode(subjectType, forKey: .subjectType)
+        try c.encode(subjectId, forKey: .subjectId)
+        try c.encode(folderId, forKey: .folderId)
+        try c.encode(folderName, forKey: .folderName)
+        try c.encode(enabled, forKey: .enabled)
     }
 }
 

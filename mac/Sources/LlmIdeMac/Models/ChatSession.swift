@@ -51,4 +51,15 @@ struct ChatSession: Identifiable, Codable, Equatable {
         self.lastUsedAt = try c.decode(Date.self, forKey: .lastUsedAt)
         self.history = try c.decode([LlmIdeAPIClient.CodeAssistTurn].self, forKey: .history)
     }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(storeVersion, forKey: .storeVersion)
+        try c.encode(id, forKey: .id)
+        try c.encode(scope, forKey: .scope)
+        try c.encode(title, forKey: .title)
+        try c.encode(createdAt, forKey: .createdAt)
+        try c.encode(lastUsedAt, forKey: .lastUsedAt)
+        try c.encode(history, forKey: .history)
+    }
 }

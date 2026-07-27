@@ -73,6 +73,13 @@ extension LlmIdeAPIClient {
             self.promptSuffix = try c.decodeIfPresent(String.self, forKey: .promptSuffix)
             self.autoDispatch = (try? c.decodeIfPresent(Bool.self, forKey: .autoDispatch)) ?? false
         }
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encodeIfPresent(name, forKey: .name)
+            try c.encodeIfPresent(promptSuffix, forKey: .promptSuffix)
+            try c.encode(autoDispatch, forKey: .autoDispatch)
+        }
     }
     struct AgentPersonaWrap: Codable { let persona: AgentPersona? }
 

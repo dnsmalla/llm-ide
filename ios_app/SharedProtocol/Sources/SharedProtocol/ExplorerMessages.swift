@@ -96,4 +96,16 @@ public struct ExploreChat: Codable, Equatable {
         refs = try c.decodeIfPresent([ExploreWorkspaceRef].self, forKey: .refs) ?? []
         skills = try c.decodeIfPresent([ExploreSkillRef].self, forKey: .skills) ?? []
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(type, forKey: .type)
+        try c.encode(sessionId, forKey: .sessionId)
+        try c.encode(commandId, forKey: .commandId)
+        try c.encode(text, forKey: .text)
+        try c.encode(history, forKey: .history)
+        try c.encode(files, forKey: .files)
+        try c.encode(refs, forKey: .refs)
+        try c.encode(skills, forKey: .skills)
+    }
 }

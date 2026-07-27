@@ -73,7 +73,11 @@ final class MobileWebSocketServer: @unchecked Sendable {
     /// send are dispatched onto `queue` so `client`/`paired` stay race-free.
     func send(_ message: some Encodable) async {
         guard let data = try? JSONEncoder().encode(message),
-              let string = String(data: data, encoding: .utf8) else { return }
+              let string = String(data: data, encoding: .utf8) else {
+            let type = String(describing: type(of: message))
+            onLog("Mobile WS send: encode failed for \(type)")
+            return
+        }
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             queue.async { [weak self] in
                 guard let self, let client = self.client, self.paired else {

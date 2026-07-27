@@ -265,6 +265,9 @@ final class MobileControlManager {
                 registerMobileInflightTask(commandId: chat.commandId) {
                     await self.handleChat(chat)
                 }
+            } else {
+                let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
+                append(.stderr, "llmide_chat decode failed: \(preview)")
             }
         case MobileProtocol.Tag.llmIdeCancel:
             handleLlmIdeCancel(data: data)
@@ -335,6 +338,9 @@ final class MobileControlManager {
                 registerMobileInflightTask(commandId: chat.commandId) {
                     await self.handleExploreChat(chat)
                 }
+            } else {
+                let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
+                append(.stderr, "explore_chat decode failed: \(preview)")
             }
         case MobileProtocol.Tag.exploreCancel:
             handleExploreCancel(data: data)
@@ -343,10 +349,16 @@ final class MobileControlManager {
         case MobileProtocol.Tag.exploreSearchFiles:
             if let req = try? decoder.decode(ExploreSearchFiles.self, from: data) {
                 handleExploreSearch(req)
+            } else {
+                let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
+                append(.stderr, "explore_search_files decode failed: \(preview)")
             }
         case MobileProtocol.Tag.exploreSearchSkills:
             if let req = try? decoder.decode(ExploreSearchSkills.self, from: data) {
                 Task { await handleExploreSearchSkills(req) }
+            } else {
+                let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
+                append(.stderr, "explore_search_skills decode failed: \(preview)")
             }
         default:
             append(.info, "Unhandled explore type: \(type)")
@@ -423,6 +435,9 @@ final class MobileControlManager {
                     append(.info, "Auto-task master=\(m.enabled)")
                 }
                 replyAutoTaskStateOrAck()
+            } else {
+                let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
+                append(.stderr, "auto_task_toggle decode failed: \(preview)")
             }
         case MobileProtocol.Tag.autoTaskRun:
             // Trigger a global run (task == nil) or a single per-task manual
@@ -442,6 +457,9 @@ final class MobileControlManager {
                     append(.info, "Auto-task run now")
                 }
                 replyAutoTaskStateOrAck()
+            } else {
+                let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
+                append(.stderr, "auto_task_run decode failed: \(preview)")
             }
         case MobileProtocol.Tag.autoTaskStop:
             // `cancel()` is @MainActor-sync: cancels the in-flight `runTask`
