@@ -340,7 +340,7 @@ struct CodeAssistantPanel: View {
                 : config.defaultModelId
         }
         if selectedProvider.isEmpty {
-            selectedProvider = config.activeCLI
+            selectedProvider = config.activeCLI.isEmpty ? "anthropic" : config.activeCLI
         }
         _ = ChatSessionStore.migrateScopeFileIfNeeded(for: scope)
         refreshSessions()
