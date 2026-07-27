@@ -162,7 +162,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
     }
 }
 
-struct AIModel: Identifiable, Hashable {
+struct AIModel: Identifiable, Hashable, Codable {
     let id: String
     let displayName: String
 }

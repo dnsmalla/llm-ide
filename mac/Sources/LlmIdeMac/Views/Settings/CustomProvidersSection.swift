@@ -88,7 +88,7 @@ private struct ProviderRow: View {
 
     var body: some View {
         HStack(spacing: Spacing.sm) {
-            Toggle(isOn: Binding(
+            Toggle("", isOn: Binding(
                 get: { provider.isEnabled },
                 set: { _ in onToggle(provider) }
             ))
@@ -152,7 +152,7 @@ private struct AddProviderSheet: View {
         VStack(spacing: Spacing.md) {
             HStack {
                 Text(provider == nil ? "Add Custom Provider" : "Edit Provider")
-                    .font(Typography.title3)
+                    .font(Typography.title)
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .buttonStyle(.borderless)

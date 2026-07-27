@@ -56,7 +56,7 @@ extension CustomProvider {
     }
 
     private static func syncToBackend(_ providers: [CustomProvider]) {
-        guard let serverURL = try? AppConfig.shared.serverURL.asURL() else { return }
+        guard let serverURL = URL(string: AppConfig.shared.serverURL) else { return }
 
         let url = serverURL.appendingPathComponent("/kb/custom-providers")
         var request = URLRequest(url: url)

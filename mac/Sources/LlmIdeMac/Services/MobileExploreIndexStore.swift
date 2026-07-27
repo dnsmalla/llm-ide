@@ -23,6 +23,10 @@ struct MobileWorkspaceIndexFile: Codable, Equatable {
         self.truncated = truncated
     }
 
+    enum CodingKeys: String, CodingKey {
+        case version, updatedAt, workspaceRoot, entries, truncated
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version = try c.decode(Int.self, forKey: .version)
