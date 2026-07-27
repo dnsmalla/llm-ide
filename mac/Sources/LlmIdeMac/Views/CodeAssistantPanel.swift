@@ -115,10 +115,15 @@ struct CodeAssistantPanel: View {
     /// (e.g. an image or binary). Prevents the silent drop on the Visual page.
     @State var attachNotice: String?
     @State private var selectedModel: String = ""
+    /// Current provider: either an AICliTool rawValue ("anthropic"/"openai"/...)
+    /// or "custom:uuid" for a user-registered custom provider.
+    @State private var selectedProvider: String = ""
     /// Live provider models, keyed by provider id ("openai"/"google"/...).
     /// Populated from the provider's models endpoint; falls back to the
     /// built-in AICliTool.models list when empty (no key / fetch failed).
     @State private var liveModels: [String: [AIModel]] = [:]
+    /// Custom providers loaded from UserDefaults, refreshed on panel appear.
+    @State private var customProviders: [CustomProvider] = []
     /// User-added model ids, keyed by provider id, JSON in AppStorage. Lets
     /// the user run a model the built-in/live lists don't include (e.g. a
     /// brand-new release) — it's sent as-is and routed by id prefix.
@@ -328,10 +333,14 @@ struct CodeAssistantPanel: View {
     // MARK: - Event Handlers
 
     private func handleOnAppear() {
+        customProviders = CustomProvider.loadAll()
         if selectedModel.isEmpty {
             selectedModel = config.defaultModelId.isEmpty
                 ? AICliTool.claudeCode.defaultModelId
                 : config.defaultModelId
+        }
+        if selectedProvider.isEmpty {
+            selectedProvider = config.activeCLI
         }
         _ = ChatSessionStore.migrateScopeFileIfNeeded(for: scope)
         refreshSessions()
@@ -1792,22 +1801,36 @@ struct CodeAssistantPanel: View {
     /// vertically (one glyph per line).  The chips truncate via
     /// `.lineLimit(1)` as a belt-and-braces guard.
     private var modelPickerChips: some View {
-        let cli = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
+        let currentTool = AICliTool(rawValue: selectedProvider) ?? .claudeCode
+        let isCustom = selectedProvider.starts(with: "custom:")
+        let currentProvider = isCustom
+            ? customProviders.first(where: { "custom:\($0.id)" == selectedProvider })
+            : nil
+
         return HStack(spacing: 6) {
             // Provider chip — a menu to switch among the direct-API providers
-            // (Claude / OpenAI / Gemini). Switching resets the model to that
-            // provider's default. A provider without a configured key surfaces
-            // a clear "add a key in Settings" error on send.
+            // (Claude / OpenAI / Gemini) and custom providers.
             Menu {
+                // Built-in tools
                 ForEach(AICliTool.selectable) { tool in
-                    Button { switchProvider(tool) } label: {
+                    Button { switchProvider(.builtIn(tool)) } label: {
                         Label(tool.displayName, systemImage: tool.icon)
                     }
                 }
+                if !customProviders.isEmpty {
+                    Divider()
+                    // Custom providers
+                    ForEach(customProviders) { provider in
+                        Button { switchProvider(.custom(provider)) } label: {
+                            Label(provider.name, systemImage: "network")
+                        }
+                    }
+                }
             } label: {
+                let label = currentProvider?.name ?? currentTool.displayName
                 Chip(
-                    icon: cli.icon,
-                    label: isCompact ? "" : cli.displayName,
+                    icon: isCustom ? "network" : currentTool.icon,
+                    label: isCompact ? "" : label,
                     trailing: "chevron.down",
                     compact: isCompact
                 )
@@ -1819,21 +1842,26 @@ struct CodeAssistantPanel: View {
             // Model picker. Truncate label aggressively when compact so
             // the chip stays one capsule wide instead of wrapping.
             Menu {
-                ForEach(modelsFor(cli)) { model in
+                ForEach(modelsForCurrentProvider()) { model in
                     Button(model.displayName) { selectedModel = model.id }
                 }
-                Divider()
-                Button("Add model…") { newModelId = ""; showAddModel = true }
+                if !isCustom {
+                    Divider()
+                    Button("Add model…") { newModelId = ""; showAddModel = true }
+                }
             } label: {
+                let displayName = isCustom
+                    ? (customProviders.first(where: { "custom:\($0.id)" == selectedProvider })?.models.first(where: { $0.id == selectedModel })?.displayName ?? selectedModel)
+                    : currentModelDisplayName(for: currentTool)
                 Chip(
                     icon: nil,
-                    label: isCompact ? shortModelLabel(for: cli) : currentModelDisplayName(for: cli),
+                    label: isCompact ? String(displayName.prefix(6)) : displayName,
                     trailing: "chevron.down",
                     compact: isCompact
                 )
             }
             .menuStyle(.borderlessButton)
-            .help(currentModelDisplayName(for: cli))
+            .help("Select model")
             .fixedSize()
         }
         .alert("Add a model", isPresented: $showAddModel) {
@@ -1892,6 +1920,23 @@ struct CodeAssistantPanel: View {
             ?? selectedModel
     }
 
+    /// Models for the currently selected provider (built-in or custom).
+    private func modelsForCurrentProvider() -> [AIModel] {
+        if selectedProvider.starts(with: "custom:") {
+            // Custom provider: return its models list
+            if let custom = customProviders.first(where: { "custom:\($0.id)" == selectedProvider }) {
+                return custom.models
+            }
+            return []
+        } else {
+            // Built-in provider
+            if let cli = AICliTool(rawValue: selectedProvider) {
+                return modelsFor(cli)
+            }
+            return []
+        }
+    }
+
     /// Models to offer for a provider: the live list when we've fetched one,
     /// otherwise the built-in static list (keeps the picker populated when no
     /// key is set or the fetch failed), plus any user-added custom ids.
@@ -1930,14 +1975,24 @@ struct CodeAssistantPanel: View {
         liveModels[cli.provider] = ids.map { AIModel(id: $0, displayName: $0) }
     }
 
-    /// Switch the active model provider (Claude / OpenAI / Gemini) and reset
-    /// the selected model to that provider's default. The model id flows to
-    /// the backend, which routes it to the right provider API.
-    private func switchProvider(_ tool: AICliTool) {
-        config.activeCLI = tool.rawValue
-        config.defaultModelId = tool.defaultModelId
-        selectedModel = tool.defaultModelId
-        Task { await loadModels(for: tool) }
+    /// Switch the active model provider and reset the selected model.
+    private func switchProvider(_ provider: ProviderSwitch) {
+        switch provider {
+        case .builtIn(let tool):
+            selectedProvider = tool.rawValue
+            selectedModel = tool.defaultModelId
+            config.activeCLI = tool.rawValue
+            config.defaultModelId = tool.defaultModelId
+            Task { await loadModels(for: tool) }
+        case .custom(let customProvider):
+            selectedProvider = "custom:\(customProvider.id)"
+            selectedModel = customProvider.models.first?.id ?? ""
+        }
+    }
+
+    enum ProviderSwitch {
+        case builtIn(AICliTool)
+        case custom(CustomProvider)
     }
 
     /// Single source of truth for composer text-area height.  Caps
@@ -2588,7 +2643,15 @@ struct CodeAssistantPanel: View {
         attachments: [LlmIdeAPIClient.CodeAttachment],
         skills: [String] = [],
     ) async throws -> LlmIdeAPIClient.CodeAssistResponse {
-        let provider = (AICliTool(rawValue: config.activeCLI) ?? .claudeCode).provider
+        // Determine provider string: custom:uuid for custom providers, or built-in tool provider
+        let provider: String
+        if selectedProvider.starts(with: "custom:") {
+            // For custom providers, send the full custom:uuid identifier
+            provider = selectedProvider
+        } else {
+            // For built-in providers, use the provider string from the AICliTool
+            provider = (AICliTool(rawValue: selectedProvider) ?? .claudeCode).provider
+        }
         let model = selectedModel.isEmpty ? nil : selectedModel
         let ctx = await buildAgentContext()
         do {

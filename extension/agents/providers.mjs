@@ -312,8 +312,10 @@ export async function completeViaApi(provider, { apiKey, model, prompt, maxToken
   const adapter = resolveAdapter(provider);
   if (!adapter) throw new Error(`completeViaApi: unsupported provider '${provider}'`);
   if (!apiKey) throw new Error(`completeViaApi: no API key for ${provider}`);
-  // SSRF guard for the custom OpenAI-compatible endpoint before any fetch.
-  if (provider === 'custom' && baseUrl) await assertSafeBaseUrlResolved(baseUrl);
+  // SSRF guard for the custom/OpenAI-compatible endpoint before any fetch.
+  if ((provider === 'custom' || provider?.startsWith('custom:')) && baseUrl) {
+    await assertSafeBaseUrlResolved(baseUrl);
+  }
   let lastErr;
   let fellBack = false;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {

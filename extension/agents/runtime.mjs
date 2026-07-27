@@ -9,6 +9,7 @@ import { redactWithKey } from '../core/redact-secrets.mjs';
 import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS, spawnCli, minimalCliEnv } from './providers.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 import { recordUsage, flagQuota, resolveModel as resolveUsageModel, recordRateLimits } from '../kb/usage.mjs';
+import { getCustomProvider } from '../server/custom-providers.mjs';
 
 // Best-effort metering wrappers — a ledger write or quota flag must NEVER throw
 // into a live model call. Used across the Anthropic HTTP, CLI, and provider
@@ -151,6 +152,19 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
     throw new Error('Image input requires an Anthropic API key configured for this account (Settings → Model Providers).');
   }
   if (provider !== 'anthropic') {
+    // Handle custom:uuid providers first
+    if (typeof provider === 'string' && provider.startsWith('custom:')) {
+      const customProvider = getCustomProvider(provider);
+      if (!customProvider) {
+        throw new Error(`Custom provider ${provider} not found. Register it in Settings → Model Providers.`);
+      }
+      const key = getSecret(getDb(), userId, customProvider.vaultKey);
+      if (!key) {
+        throw new Error(`No API key configured for ${customProvider.name}. Add one in Settings → Model Providers.`);
+      }
+      return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl: customProvider.baseURL, signal, meter, tools });
+    }
+
     const key = providerApiKey(userId, provider);
     if (key) {
       if (provider === 'custom') {

@@ -47,9 +47,33 @@ extension CustomProvider {
         do {
             let data = try JSONEncoder().encode(providers)
             UserDefaults.standard.set(data, forKey: defaultsKey)
+
+            // Sync to backend
+            syncToBackend(providers)
         } catch {
             // Silent fail — validation happened in UI
         }
+    }
+
+    private static func syncToBackend(_ providers: [CustomProvider]) {
+        guard let serverURL = try? AppConfig.shared.serverURL.asURL() else { return }
+
+        let url = serverURL.appendingPathComponent("/kb/custom-providers")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 5
+
+        do {
+            let body = ["providers": providers]
+            request.httpBody = try JSONEncoder().encode(body)
+        } catch {
+            return
+        }
+
+        URLSession.shared.dataTask(with: request) { _, _, _ in
+            // Fire-and-forget: backend is now in sync
+        }.resume()
     }
 
     func save() {
