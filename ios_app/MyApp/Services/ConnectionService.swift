@@ -214,7 +214,11 @@ final class ConnectionService: ObservableObject {
     func sendEncodable<T: Encodable>(_ payload: T) {
         guard connectionStatus == .connected,
               let data = try? JSONEncoder().encode(payload),
-              let str = String(data: data, encoding: .utf8) else { return }
+              let str = String(data: data, encoding: .utf8) else {
+            print("❌ sendEncodable failed: status=\(connectionStatus), encode=\(data != nil)")
+            return
+        }
+        print("📤 sendEncodable: \(str.prefix(80))...")
         sendTextFrame(str)
     }
 
@@ -222,10 +226,17 @@ final class ConnectionService: ObservableObject {
     /// both dict-based messages (`sendRaw`) and Codable-encoded frames
     /// (`Pairing`, `LlmIdeChat`, `ExploreChat`).
     func sendTextFrame(_ string: String) {
-        guard let task = webSocketTask else { return }
+        guard let task = webSocketTask else {
+            print("❌ sendTextFrame: no webSocketTask")
+            return
+        }
+        print("📤 Sending \(string.count) bytes via WebSocket")
         task.send(.string(string)) { [weak self] err in
             if let err {
+                print("❌ WebSocket send error: \(err.localizedDescription)")
                 Task { @MainActor in self?.errorMessage = err.localizedDescription }
+            } else {
+                print("✅ Message sent successfully")
             }
         }
     }
@@ -273,8 +284,13 @@ final class ConnectionService: ObservableObject {
     /// checks its own commandId set, so a reply lands in exactly one surface.
     private func handleMessage(_ str: String) {
         guard let data = str.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        switch json["type"] as? String ?? "" {
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            print("❌ handleMessage: invalid JSON: \(str.prefix(100))")
+            return
+        }
+        let type = json["type"] as? String ?? ""
+        print("📨 iOS received type='\(type)': \(str.prefix(100))...")
+        switch type {
         case "connected":
             connectionStatus = .connected
             errorMessage = nil

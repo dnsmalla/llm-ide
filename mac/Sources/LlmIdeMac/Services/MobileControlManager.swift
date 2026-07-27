@@ -257,6 +257,10 @@ final class MobileControlManager {
             return
         }
 
+        // Debug: Log all received message types
+        let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
+        append(.info, "📨 Received type='\(env.type)' data: \(preview)")
+
         switch env.type {
         case MobileProtocol.Tag.llmIdeChat:
             // Phase 3/4 chat proxy — must keep working alongside explorer ops.
@@ -288,6 +292,7 @@ final class MobileControlManager {
     /// monolithic `handleInbound` switch; the shared `decoder`, `reply(_:)`,
     /// and `append(_:_:)` helpers are unchanged. Mirrors the iOS receive loop.
     private func handleExplore(type: String, data: Data) {
+        append(.info, "🔍 handleExplore type='\(type)'")
         switch type {
         case MobileProtocol.Tag.exploreListSessions:
             // `ChatSessionStore` is Mac-local JSON keyed by `ChatScope.explorer`.

@@ -117,7 +117,14 @@ final class MobileWebSocketServer: @unchecked Sendable {
     private func receive() {
         guard let client else { return }
         client.receiveMessage { [weak self] data, _, _, error in
-            guard let self, let data, error == nil else { return }
+            guard let self, let data, error == nil else {
+                if let error {
+                    self?.onLog("❌ Receive error: \(error.localizedDescription)")
+                }
+                return
+            }
+            let preview = String(data: data, encoding: .utf8)?.prefix(60) ?? "<binary>"
+            self.onLog("📥 Received \(data.count) bytes: \(preview)")
             if !self.paired {
                 self.handlePairing(data: data)
             } else {
@@ -167,6 +174,8 @@ final class MobileWebSocketServer: @unchecked Sendable {
             Task { await self.send(HeartbeatAck(ts: Date().timeIntervalSince1970)) }
             return
         }
+        let preview = String(data: data, encoding: .utf8)?.prefix(80) ?? "<binary>"
+        onLog("📨 routeInbound: forwarding message (\(data.count) bytes): \(preview)")
         onInbound(data)
     }
 }
