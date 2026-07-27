@@ -60,6 +60,7 @@ final class ExplorerChatStore: ObservableObject {
     func exploreListSessions() {
         guard connection?.sendEncodable(ExploreListSessions()) == true else {
             cancelSessionPrep(message: "Not connected to your Mac — wait for Live status, then try again.")
+            return
         }
     }
 
@@ -69,6 +70,7 @@ final class ExplorerChatStore: ObservableObject {
         guard connection?.sendEncodable(ExploreLoadSession(sessionId: id)) == true else {
             loadingSessionId = nil
             cancelSessionPrep(message: "Not connected to your Mac — wait for Live status, then try again.")
+            return
         }
     }
 
