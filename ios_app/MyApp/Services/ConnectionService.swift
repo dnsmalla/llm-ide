@@ -212,10 +212,13 @@ final class ConnectionService: ObservableObject {
     /// chat senders (`sendLlmideChat`/`sendExploreChat`) keep their own error
     /// handling and use `sendTextFrame` directly.
     func sendEncodable<T: Encodable>(_ payload: T) {
-        guard connectionStatus == .connected,
-              let data = try? JSONEncoder().encode(payload),
+        guard connectionStatus == .connected else {
+            print("❌ sendEncodable failed: not connected (status=\(connectionStatus))")
+            return
+        }
+        guard let data = try? JSONEncoder().encode(payload),
               let str = String(data: data, encoding: .utf8) else {
-            print("❌ sendEncodable failed: status=\(connectionStatus), encode=\(data != nil)")
+            print("❌ sendEncodable failed: encoding error")
             return
         }
         print("📤 sendEncodable: \(str.prefix(80))...")
