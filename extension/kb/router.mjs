@@ -27,6 +27,7 @@ import { summarizeTranscript } from '../agents/summarize.mjs';
 import { classifyEmail } from '../agents/email-classify.mjs';
 import { runClaude } from '../agents/runtime.mjs';
 import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatModels, customBaseUrl } from '../agents/providers.mjs';
+import { handleCustomProvidersSync, syncCustomProviders } from '../server/custom-providers.mjs';
 import { iterateUserMeetings } from './exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../agents/email-source.mjs';
@@ -128,6 +129,12 @@ export async function handleKB(req, res) {
       } catch (err) {
         sendJSON(res, 200, { models: [], detail: String(err?.message || err).slice(0, 200) });
       }
+      return true;
+    }
+
+    // Sync custom providers from Mac app
+    if (req.method === 'POST' && url === '/kb/custom-providers') {
+      await handleCustomProvidersSync(req, res);
       return true;
     }
 
