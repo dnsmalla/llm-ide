@@ -164,25 +164,33 @@ final class AutoCodeUpdateService: ObservableObject {
 
     /// Start a run through a stored, cancellable Task. Used by the timer and
     /// the Run Now button so an in-flight run can be stopped via `cancel()`.
-    /// No-op if a run is already in flight.
-    func runNow() {
-        guard runTask == nil else { return }
+    /// Returns false when a run is already scheduled or in flight.
+    @discardableResult
+    func runNow() -> Bool {
+        guard runTask == nil else { return false }
         runTask = Task { [weak self] in
             await self?.run()
             self?.runTask = nil
         }
+        return true
     }
 
     /// Per-task manual run (the ▶ button on a task's page). Runs JUST that one
     /// task body, ignoring its enable checkbox. Shares the `runTask` re-entrancy
     /// guard with `runNow()` so a global run and a per-task run can't overlap.
-    func runSingle(_ task: AutoTask) {
-        guard runTask == nil else { return }
+    @discardableResult
+    func runSingle(_ task: AutoTask) -> Bool {
+        guard runTask == nil else { return false }
         runTask = Task { [weak self] in
             await self?.runOne(task)
             self?.runTask = nil
         }
+        return true
     }
+
+    /// True while a run Task is queued or executing (including the gap before
+    /// `isRunning` flips true). Used by mobile control to reject duplicate runs.
+    var hasScheduledRun: Bool { runTask != nil }
 
     /// Resolve backend/project once, then run a single task body.
     private func runOne(_ task: AutoTask) async {

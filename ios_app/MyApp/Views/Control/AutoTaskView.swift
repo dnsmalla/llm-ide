@@ -65,6 +65,9 @@ struct AutoTaskView: View {
                     .environmentObject(connection)
                     .environmentObject(autoTaskStore)
             }
+            .onChange(of: autoTaskStore.isRunLogPresented) { presented in
+                if !presented { autoTaskStore.stopLogPolling() }
+            }
         }
     }
 

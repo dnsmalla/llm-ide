@@ -460,14 +460,25 @@ final class MobileControlManager {
                 return
             }
             if let m = try? decoder.decode(AutoTaskRun.self, from: data) {
+                let started: Bool
                 if let raw = m.task, let t = AutoTask(rawValue: raw) {
-                    ac.runSingle(t)
-                    append(.info, "Auto-task run single: \(t.rawValue)")
+                    started = ac.runSingle(t)
+                    if started {
+                        append(.info, "Auto-task run single: \(t.rawValue)")
+                    }
                 } else {
-                    ac.runNow()
-                    append(.info, "Auto-task run now")
+                    started = ac.runNow()
+                    if started {
+                        append(.info, "Auto-task run now")
+                    }
                 }
-                replyAutoTaskStateOrAck()
+                if started {
+                    replyAutoTaskStateOrAck()
+                } else {
+                    append(.info, "Auto-task run ignored — already running on Mac")
+                    reply(AutoTaskAck(ok: false,
+                                      message: "Auto Tasks is already running on your Mac. Tap Stop first."))
+                }
             } else {
                 let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
                 append(.stderr, "auto_task_run decode failed: \(preview)")
@@ -491,12 +502,12 @@ final class MobileControlManager {
             append(.info, "Auto-task history: \(entries.count) entries")
             reply(AutoTaskHistoryReply(entries: entries))
         case MobileProtocol.Tag.autoTaskLogsList:
-            guard let logs = buildAutoTaskLogsReply() else {
+            if let logs = buildAutoTaskLogsReply() {
+                append(.info, "Auto-task logs: \(logs.tasks.count) task buffer(s), \(logs.tasks.reduce(0) { $0 + $1.lines.count }) line(s)")
+                reply(logs)
+            } else {
                 replyNotConfigured(commandId: "auto_task_logs", logLabel: "auto_task_logs_list")
-                return
             }
-            append(.info, "Auto-task logs: \(logs.tasks.count) task buffer(s)")
-            reply(logs)
         default:
             append(.info, "Unhandled auto-task type: \(type)")
         }
@@ -685,7 +696,7 @@ final class MobileControlManager {
                          lastError: ac.taskErrors[t.rawValue])
         }
         return AutoTaskState(masterEnabled: s.enabled,
-                             isRunning: ac.isRunning,
+                             isRunning: ac.isRunning || ac.hasScheduledRun,
                              currentTask: ac.currentTask?.rawValue,
                              currentStep: ac.currentStep,
                              statusMessage: ac.statusMessage,
@@ -729,9 +740,8 @@ final class MobileControlManager {
     /// snapshots to a paired iPhone without waiting for a pull request.
     func installMobilePushObservers() {
         mobilePushCancellables.removeAll()
-        guard let ac = autoCode else { return }
 
-        ac.objectWillChange
+        autoCode?.objectWillChange
             .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.pushAutoTaskStateIfPaired() }
             .store(in: &mobilePushCancellables)

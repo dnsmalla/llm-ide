@@ -78,15 +78,9 @@ struct ExplorerChatView: View {
             macSkillSearchSheet
                 .environmentObject(explorerStore)
         }
-        .onAppear {
-            explorerStore.refreshIfConnected()
-            explorerStore.prepareSessionIfNeeded()
-        }
+        .onAppear { explorerStore.prepareSessionIfNeeded() }
         .onChange(of: connection.connectionStatus) { status in
-            if status == .connected {
-                explorerStore.refreshIfConnected()
-                explorerStore.prepareSessionIfNeeded()
-            }
+            if status == .connected { explorerStore.prepareSessionIfNeeded() }
         }
         .alert("Rename session", isPresented: Binding(
             get: { renameSessionId != nil },

@@ -212,8 +212,12 @@ final class ConnectionService: ObservableObject {
     /// chat senders (`sendLlmideChat`/`sendExploreChat`) keep their own error
     /// handling and use `sendTextFrame` directly.
     @discardableResult
-    func sendEncodable<T: Encodable>(_ payload: T, userFacing: Bool = false) -> Bool {
-        guard connectionStatus == .connected else {
+    func sendEncodable<T: Encodable>(
+        _ payload: T,
+        userFacing: Bool = false,
+        onSendFailure: ((String) -> Void)? = nil
+    ) -> Bool {
+        guard connectionStatus == .connected, webSocketTask != nil else {
             print("❌ sendEncodable failed: not connected (status=\(connectionStatus))")
             if userFacing {
                 errorMessage = connectionStatus == .connecting
@@ -231,23 +235,35 @@ final class ConnectionService: ObservableObject {
             return false
         }
         print("📤 sendEncodable: \(str.prefix(80))...")
-        sendTextFrame(str)
+        sendTextFrame(str, userFacing: userFacing, onSendFailure: onSendFailure)
         return true
     }
 
     /// Send a pre-encoded JSON string over the WebSocket. Single send path for
     /// both dict-based messages (`sendRaw`) and Codable-encoded frames
     /// (`Pairing`, `LlmIdeChat`, `ExploreChat`).
-    func sendTextFrame(_ string: String) {
+    func sendTextFrame(
+        _ string: String,
+        userFacing: Bool = false,
+        onSendFailure: ((String) -> Void)? = nil
+    ) {
         guard let task = webSocketTask else {
             print("❌ sendTextFrame: no webSocketTask")
+            if userFacing {
+                errorMessage = "Not connected to your Mac — reconnect from Settings."
+            }
             return
         }
         print("📤 Sending \(string.count) bytes via WebSocket")
         task.send(.string(string)) { [weak self] err in
             if let err {
                 print("❌ WebSocket send error: \(err.localizedDescription)")
-                Task { @MainActor in self?.errorMessage = err.localizedDescription }
+                Task { @MainActor in
+                    guard let self else { return }
+                    let message = "Couldn't reach your Mac — check the connection and try again."
+                    if userFacing { self.errorMessage = message }
+                    onSendFailure?(message)
+                }
             } else {
                 print("✅ Message sent successfully")
             }
@@ -354,6 +370,8 @@ final class ConnectionService: ObservableObject {
                 if err.message != "Cancelled" {
                     if let cid, cid.hasPrefix("auto_task") {
                         autoTaskStore?.handleCommandError(err.message, commandId: cid)
+                    } else if let cid, cid.hasPrefix("explore_") {
+                        explorerStore?.handleSessionCommandError(err.message, commandId: cid)
                     } else {
                         errorMessage = err.message
                     }

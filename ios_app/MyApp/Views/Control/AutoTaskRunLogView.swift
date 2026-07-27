@@ -14,7 +14,10 @@ struct AutoTaskRunLogView: View {
     private var state: AutoTaskState? { autoTaskStore.autoTaskState }
     private var isRunning: Bool { state?.isRunning == true }
 
-    private var taskGroups: [AutoTaskTaskLogs] { autoTaskStore.autoTaskLogGroups }
+    private var taskGroups: [AutoTaskTaskLogs] {
+        if !autoTaskStore.autoTaskLogGroups.isEmpty { return autoTaskStore.autoTaskLogGroups }
+        return (state?.tasks ?? []).map { AutoTaskTaskLogs(id: $0.id, label: $0.label, lines: []) }
+    }
 
     private var selectedGroup: AutoTaskTaskLogs? {
         if !selectedTaskId.isEmpty,
@@ -46,7 +49,10 @@ struct AutoTaskRunLogView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button("Back") { dismiss() }
+                Button("Back") {
+                    autoTaskStore.dismissRunLog()
+                    dismiss()
+                }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 if isRunning {
@@ -67,11 +73,10 @@ struct AutoTaskRunLogView: View {
         }
         .onAppear {
             syncSelectedTask()
-            autoTaskStore.autoTaskLogsList()
-            autoTaskStore.startLogPollingIfNeeded()
+            autoTaskStore.runLogViewDidAppear()
         }
         .onDisappear {
-            autoTaskStore.stopLogPolling()
+            autoTaskStore.runLogViewDidDisappear()
         }
         .onChange(of: state?.currentTask) { _ in syncSelectedTask() }
         .onChange(of: autoTaskStore.autoTaskLogGroups.map(\.id)) { _ in syncSelectedTask() }
@@ -173,11 +178,7 @@ struct AutoTaskRunLogView: View {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     if let group = selectedGroup {
                         if group.lines.isEmpty {
-                            Text("No log lines yet for \(group.label).")
-                                .font(.system(size: DesignSystem.Typography.footnote))
-                                .foregroundColor(DesignSystem.Colors.textTertiary)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(.top, 40)
+                            emptyLogState(for: group)
                         } else {
                             ForEach(group.lines) { line in
                                 logLineRow(line).id(line.id)
@@ -217,6 +218,28 @@ struct AutoTaskRunLogView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 2)
+    }
+
+    private func emptyLogState(for group: AutoTaskTaskLogs) -> some View {
+        VStack(spacing: DesignSystem.Spacing.sm) {
+            if state?.currentTask == group.id, isRunning, let step = state?.currentStep, !step.isEmpty {
+                HStack(alignment: .top, spacing: 8) {
+                    ProgressView().scaleEffect(0.75)
+                    Text(step)
+                        .font(.system(size: DesignSystem.Typography.body))
+                        .foregroundColor(DesignSystem.Colors.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Text(isRunning
+                 ? "Waiting for log lines from your Mac…"
+                 : "No log lines yet for \(group.label).")
+                .font(.system(size: DesignSystem.Typography.footnote))
+                .foregroundColor(DesignSystem.Colors.textTertiary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.top, 40)
     }
 
     private func syncSelectedTask() {

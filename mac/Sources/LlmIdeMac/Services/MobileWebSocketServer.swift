@@ -87,6 +87,8 @@ final class MobileWebSocketServer: @unchecked Sendable {
                 let context = NWConnection.ContentContext(identifier: "msg", metadata: [metadata])
                 client.send(content: string.data(using: .utf8), contentContext: context,
                             isComplete: true, completion: .contentProcessed { _ in })
+                let preview = String(string.prefix(80))
+                self.onLog("📤 Sent \(string.count) bytes: \(preview)")
                 cont.resume()
             }
         }

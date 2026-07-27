@@ -39,6 +39,10 @@ final class ExplorerChatStore: ObservableObject {
         let skills: [ExploreSkillRef]
     }
     private var pendingSend: PendingExploreSend?
+    /// Session id whose history load is in flight (dedupes parallel load requests).
+    private var loadingSessionId: String?
+    private var sessionPrepGeneration: Int = 0
+    private var sessionPrepTimeoutTask: Task<Void, Never>?
 
     weak var connection: ConnectionService?
 
@@ -55,8 +59,7 @@ final class ExplorerChatStore: ObservableObject {
     /// in `exploreSessions` via the `explore_session_list` handler.
     func exploreListSessions() {
         guard connection?.sendEncodable(ExploreListSessions()) == true else {
-            isPreparingSession = false
-            return
+            cancelSessionPrep(message: "Not connected to your Mac — wait for Live status, then try again.")
         }
     }
 
@@ -64,8 +67,8 @@ final class ExplorerChatStore: ObservableObject {
     /// `explore_session_history`.
     func exploreLoadSession(_ id: String) {
         guard connection?.sendEncodable(ExploreLoadSession(sessionId: id)) == true else {
-            isPreparingSession = false
-            return
+            loadingSessionId = nil
+            cancelSessionPrep(message: "Not connected to your Mac — wait for Live status, then try again.")
         }
     }
 
@@ -74,10 +77,11 @@ final class ExplorerChatStore: ObservableObject {
     /// the session list.
     func exploreNewSession() {
         guard connection?.sendEncodable(ExploreNewSession()) == true else {
-            isPreparingSession = false
+            cancelSessionPrep(message: "Not connected to your Mac — wait for Live status, then try again.")
             return
         }
-        isPreparingSession = true
+        loadingSessionId = nil
+        beginSessionPrep()
     }
 
     /// Delete a session on the Mac and refresh the list.
@@ -175,9 +179,12 @@ final class ExplorerChatStore: ObservableObject {
             if let list = try? JSONDecoder().decode(ExploreSessionList.self, from: data) {
                 exploreSessions = list.sessions
                 ensureActiveSession(from: list.sessions)
+            } else {
+                cancelSessionPrep(message: "Couldn't read the session list from your Mac — try again.")
             }
         case "explore_session_history":
             if let hist = try? JSONDecoder().decode(ExploreSessionHistory.self, from: data) {
+                loadingSessionId = nil
                 exploreCurrent = ExploreCurrentSession(
                     id: hist.sessionId,
                     title: hist.title,
@@ -185,15 +192,22 @@ final class ExplorerChatStore: ObservableObject {
                         ChatMessage(role: $0.role == "assistant" ? .assistant : .user, text: $0.content)
                     }
                 )
-                isPreparingSession = false
+                completeSessionPrep()
                 flushPendingSend()
+            } else {
+                loadingSessionId = nil
+                cancelSessionPrep(message: "Couldn't load that session from your Mac — creating a new one.")
+                exploreNewSession()
             }
         case "explore_session_created":
             if let created = try? JSONDecoder().decode(ExploreSessionCreated.self, from: data) {
+                loadingSessionId = nil
                 exploreCurrent = ExploreCurrentSession(id: created.sessionId, title: "New session", history: [])
-                isPreparingSession = false
+                completeSessionPrep()
                 flushPendingSend()
                 exploreListSessions()   // refresh the sidebar list
+            } else {
+                cancelSessionPrep(message: "Couldn't start a new session on your Mac — try again.")
             }
         case "explore_session_renamed":
             if let renamed = try? JSONDecoder().decode(ExploreSessionRenamed.self, from: data) {
@@ -265,9 +279,27 @@ final class ExplorerChatStore: ObservableObject {
         connection?.sendEncodable(ExploreRenameSession(sessionId: sessionId, title: title), userFacing: true)
     }
 
+    /// Mac explore session ops failed (load/list/new) — recover or surface the error.
+    func handleSessionCommandError(_ message: String, commandId: String?) {
+        guard let commandId, commandId.hasPrefix("explore_") else { return }
+        loadingSessionId = nil
+        if commandId == "explore_load" {
+            // Stale or missing session on disk — start fresh instead of spinning forever.
+            connection?.errorMessage = message
+            if exploreCurrent == nil {
+                exploreNewSession()
+            } else {
+                completeSessionPrep()
+            }
+            return
+        }
+        cancelSessionPrep(message: message)
+    }
+
     /// Refresh sessions when the sheet opens or the connection becomes Live.
     func refreshIfConnected() {
         guard connection?.connectionStatus == .connected else { return }
+        guard !isPreparingSession else { return }
         exploreListSessions()
     }
 
@@ -276,7 +308,7 @@ final class ExplorerChatStore: ObservableObject {
     func prepareSessionIfNeeded() {
         guard connection?.connectionStatus == .connected else { return }
         guard exploreCurrent == nil, !isPreparingSession, !isStreaming else { return }
-        isPreparingSession = true
+        beginSessionPrep()
         exploreListSessions()
     }
 
@@ -300,13 +332,42 @@ final class ExplorerChatStore: ObservableObject {
     /// without an extra "Browse sessions" step.
     private func ensureActiveSession(from sessions: [ExploreSessionSummary]) {
         guard exploreCurrent == nil, !isStreaming else { return }
-        isPreparingSession = true
+        guard loadingSessionId == nil else { return }
         if let latest = sessions.max(by: { $0.lastUsedAt < $1.lastUsedAt }) {
+            beginSessionPrep()
+            loadingSessionId = latest.id
             exploreLoadSession(latest.id)
         } else if connection?.connectionStatus == .connected {
             exploreNewSession()
         } else {
-            isPreparingSession = false
+            cancelSessionPrep(message: "Not connected to your Mac — wait for Live status, then try again.")
         }
+    }
+
+    private func beginSessionPrep() {
+        isPreparingSession = true
+        sessionPrepGeneration &+= 1
+        let generation = sessionPrepGeneration
+        sessionPrepTimeoutTask?.cancel()
+        sessionPrepTimeoutTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            guard !Task.isCancelled, generation == sessionPrepGeneration else { return }
+            guard isPreparingSession, exploreCurrent == nil else { return }
+            loadingSessionId = nil
+            cancelSessionPrep(message: "Timed out waiting for your Mac — tap Browse sessions or try again.")
+        }
+    }
+
+    private func completeSessionPrep() {
+        sessionPrepGeneration &+= 1
+        sessionPrepTimeoutTask?.cancel()
+        sessionPrepTimeoutTask = nil
+        isPreparingSession = false
+    }
+
+    private func cancelSessionPrep(message: String) {
+        completeSessionPrep()
+        loadingSessionId = nil
+        connection?.errorMessage = message
     }
 }
