@@ -160,9 +160,9 @@ private struct AddProviderSheet: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.md) {
-                    LabeledInput("Provider Name", text: $name, placeholder: "GLM, Ollama, etc.")
-                    LabeledInput("API Base URL", text: $baseURL, placeholder: "https://api.example.com/v1")
-                    LabeledInput("Description", text: $description, placeholder: "Zhipu GLM 4 (optional)")
+                    LabeledInput(label: "Provider Name", text: $name, placeholder: "GLM, Ollama, etc.")
+                    LabeledInput(label: "API Base URL", text: $baseURL, placeholder: "https://api.example.com/v1")
+                    LabeledInput(label: "Description", text: $description, placeholder: "Zhipu GLM 4 (optional)")
 
                     Toggle("OpenAI-Compatible API", isOn: $isOpenAICompatible)
                         .font(Typography.body)
