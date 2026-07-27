@@ -56,6 +56,7 @@ final class ExplorerChatStore: ObservableObject {
     func exploreListSessions() {
         guard connection?.sendEncodable(ExploreListSessions()) == true else {
             isPreparingSession = false
+            return
         }
     }
 
@@ -64,6 +65,7 @@ final class ExplorerChatStore: ObservableObject {
     func exploreLoadSession(_ id: String) {
         guard connection?.sendEncodable(ExploreLoadSession(sessionId: id)) == true else {
             isPreparingSession = false
+            return
         }
     }
 
