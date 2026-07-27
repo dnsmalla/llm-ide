@@ -43,6 +43,7 @@ final class ExplorerChatStore: ObservableObject {
     private var loadingSessionId: String?
     private var sessionPrepGeneration: Int = 0
     private var sessionPrepTimeoutTask: Task<Void, Never>?
+    private var streamTimeoutTask: Task<Void, Never>?
 
     weak var connection: ConnectionService?
 
@@ -118,6 +119,7 @@ final class ExplorerChatStore: ObservableObject {
         )
         exploreCurrent?.history = messages
         isStreaming = true
+        startStreamTimeout(for: id)
         let chat = ExploreChat(sessionId: sessionId, commandId: id, text: text,
                                history: chatHistory, files: files, refs: refs, skills: skills)
         if let data = try? JSONEncoder().encode(chat),
@@ -256,12 +258,14 @@ final class ExplorerChatStore: ObservableObject {
             exploreCurrent = current
         }
         if done {
+            streamTimeoutTask?.cancel()
             isStreaming = false
             if let id = commandId { exploreCommandIds.remove(id) }
         }
     }
 
     func handleChatError(commandId: String? = nil) {
+        streamTimeoutTask?.cancel()
         isStreaming = false
         if let commandId { exploreCommandIds.remove(commandId) }
         if var current = exploreCurrent {
@@ -371,5 +375,18 @@ final class ExplorerChatStore: ObservableObject {
         completeSessionPrep()
         loadingSessionId = nil
         connection?.errorMessage = message
+    }
+
+    private func startStreamTimeout(for commandId: String) {
+        streamTimeoutTask?.cancel()
+        streamTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 120_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            guard self.exploreCommandIds.contains(commandId) else { return }
+            self.connection?.errorMessage =
+                "Timed out waiting for your Mac — check LLM-IDE backend and Mobile Control log."
+            self.handleChatError(commandId: commandId)
+            self.connection?.sendEncodable(ExploreCancel(commandId: commandId))
+        }
     }
 }

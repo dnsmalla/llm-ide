@@ -131,7 +131,11 @@ final class MobileControlManager {
                     : candidate
                 return normalized == pin
             },
-            onInbound: { [weak self] data in Task { @MainActor in self?.handleInbound(data) } },
+            onInbound: { [weak self] data in
+                Task(priority: .userInitiated) { @MainActor in
+                    self?.handleInbound(data)
+                }
+            },
             onLog: { [weak self] line in
                 Task { @MainActor [weak self] in self?.append(.info, line) }
             },
@@ -667,13 +671,18 @@ final class MobileControlManager {
 
     // MARK: - Reply helpers
 
-    /// Fire-and-forget encode + send to the active client. Collapses the
-    /// `Task { await server?.send(...) }` pattern that previously peppered
-    /// `handleInbound` (a non-async context). Sites already inside an `async`
-    /// function (`handleChat`/`handleExploreChat`) call `await server?.send`
-    /// directly — this helper would only double-wrap them in a stray `Task`.
+    /// Fire-and-forget encode + send to the active client. Uses a detached
+    /// send task so replies are not queued behind long-running @MainActor work
+    /// (Auto Task CLI, code-assist streams) — heartbeats bypass MainActor and
+    /// were the only reliable round-trip when the main queue was busy.
     private func reply(_ message: some Encodable) {
-        Task { await server?.send(message) }
+        guard let server else {
+            append(.stderr, "Mobile reply dropped — WebSocket server not running")
+            return
+        }
+        Task.detached(priority: .userInitiated) {
+            await server.send(message)
+        }
     }
 
     /// Auto-tasks dependency (`autoCode`/`autoTaskSettings`) isn't wired —
@@ -822,11 +831,13 @@ final class MobileControlManager {
     }
 
     private func registerMobileInflightTask(commandId: String,
-                                          operation: @escaping () async -> Void) {
+                                          operation: @escaping @MainActor () async -> Void) {
         mobileInflightTasks[commandId]?.cancel()
         mobileCancelledCommandIds.remove(commandId)
-        mobileInflightTasks[commandId] = Task {
-            defer { mobileInflightTasks.removeValue(forKey: commandId) }
+        let cid = commandId
+        mobileInflightTasks[cid] = Task.detached(priority: .userInitiated) { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.mobileInflightTasks.removeValue(forKey: cid) }
             await operation()
         }
     }

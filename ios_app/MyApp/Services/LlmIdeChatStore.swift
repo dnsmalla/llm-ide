@@ -17,6 +17,7 @@ final class LlmIdeChatStore: ObservableObject {
 
     /// Command ids whose streamed reply belongs to this transcript.
     private var llmIdeCommandIds: Set<String> = []
+    private var streamTimeoutTask: Task<Void, Never>?
 
     weak var connection: ConnectionService?
 
@@ -50,6 +51,7 @@ final class LlmIdeChatStore: ObservableObject {
             imageData: images.first?.data
         )
         isStreaming = true
+        startStreamTimeout(for: id)
         let chatImages = images.map { ChatImage(mediaType: $0.mediaType, data: $0.data.base64EncodedString()) }
         let chat = LlmIdeChat(commandId: id, text: text, history: history, images: chatImages, files: files)
         // Encode error path preserved exactly from pre-refactor (tear down).
@@ -59,10 +61,12 @@ final class LlmIdeChatStore: ObservableObject {
                 connection?.sendTextFrame(str)
             } else {
                 connection?.errorMessage = "Failed to encode chat message: UTF-8 conversion failed"
+                handleChatError(commandId: id)
                 connection?.disconnect()
             }
         } catch {
             connection?.errorMessage = "Failed to encode chat message: \(error.localizedDescription)"
+            handleChatError(commandId: id)
             connection?.disconnect()
         }
     }
@@ -121,6 +125,7 @@ final class LlmIdeChatStore: ObservableObject {
             }
         }
         if done {
+            streamTimeoutTask?.cancel()
             isStreaming = false
             if let id = commandId { llmIdeCommandIds.remove(id) }
             loadSharedHistory()
@@ -128,8 +133,22 @@ final class LlmIdeChatStore: ObservableObject {
     }
 
     func handleChatError(commandId: String? = nil) {
+        streamTimeoutTask?.cancel()
         isStreaming = false
         if let commandId { llmIdeCommandIds.remove(commandId) }
         removeTrailingEmptyAssistant(&llmIdeMessages)
+    }
+
+    private func startStreamTimeout(for commandId: String) {
+        streamTimeoutTask?.cancel()
+        streamTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 120_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            guard self.llmIdeCommandIds.contains(commandId) else { return }
+            self.connection?.errorMessage =
+                "Timed out waiting for your Mac — check LLM-IDE backend and Mobile Control log."
+            self.handleChatError(commandId: commandId)
+            self.connection?.sendEncodable(LlmIdeCancel(commandId: commandId))
+        }
     }
 }
