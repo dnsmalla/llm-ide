@@ -552,8 +552,7 @@ final class MobileControlManager {
         }
         let agentMessage = MobileWorkspaceSearch.promptWithRefs(chat.text, refs: chat.refs)
         let (skillMessage, skillIds) = MobileSkillCatalog.resolveMessage(agentMessage, skills: chat.skills)
-        let (model, provider) = config.map { MobileExploreBridge.modelAndProvider(config: $0) }
-            ?? (nil as String?, nil as String?)
+        let (model, provider) = MobileExploreBridge.modelAndProvider(config: config)
         let agentContext: AgentContext?
         if let config, let projectStore {
             agentContext = await MobileExploreBridge.buildAgentContext(

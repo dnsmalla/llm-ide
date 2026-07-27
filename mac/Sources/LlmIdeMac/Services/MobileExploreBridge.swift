@@ -7,7 +7,11 @@ import SharedProtocol
 @MainActor
 enum MobileExploreBridge {
 
-    static func modelAndProvider(config: AppConfig) -> (model: String?, provider: String?) {
+    static func modelAndProvider(config: AppConfig?) -> (model: String?, provider: String?) {
+        guard let config else {
+            // When config is unavailable (early app init), default to Claude
+            return (nil, AICliTool.claudeCode.provider)
+        }
         let cli = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
         let model = config.defaultModelId.isEmpty ? nil : config.defaultModelId
         return (model, cli.provider)
