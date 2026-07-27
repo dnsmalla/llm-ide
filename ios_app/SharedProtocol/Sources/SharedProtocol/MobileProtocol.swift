@@ -52,6 +52,10 @@ public enum MobileProtocol {
 
         // MARK: llm-ide chat control
         public static let llmIdeCancel = "llmide_cancel"
+        public static let llmIdeChatHistoryList = "llmide_chat_history_list"
+        public static let llmIdeChatHistoryReply = "llmide_chat_history_reply"
+        public static let llmIdeChatHistoryClear = "llmide_chat_history_clear"
+        public static let llmIdeChatHistoryClearAck = "llmide_chat_history_clear_ack"
 
         // MARK: Mac status snapshot
         public static let macStatusList = "mac_status_list"
@@ -66,5 +70,7 @@ public enum MobileProtocol {
         public static let autoTaskAck = "auto_task_ack"
         public static let autoTaskHistory = "auto_task_history"
         public static let autoTaskHistoryReply = "auto_task_history_reply"
+        public static let autoTaskLogsList = "auto_task_logs_list"
+        public static let autoTaskLogsReply = "auto_task_logs_reply"
     }
 }

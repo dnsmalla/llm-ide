@@ -211,18 +211,28 @@ final class ConnectionService: ObservableObject {
     /// programming error; the caller's local state is unaffected). Streaming-
     /// chat senders (`sendLlmideChat`/`sendExploreChat`) keep their own error
     /// handling and use `sendTextFrame` directly.
-    func sendEncodable<T: Encodable>(_ payload: T) {
+    @discardableResult
+    func sendEncodable<T: Encodable>(_ payload: T, userFacing: Bool = false) -> Bool {
         guard connectionStatus == .connected else {
             print("❌ sendEncodable failed: not connected (status=\(connectionStatus))")
-            return
+            if userFacing {
+                errorMessage = connectionStatus == .connecting
+                    ? "Still connecting to your Mac — wait for Live status, then try again."
+                    : "Not connected to your Mac — reconnect from Settings."
+            }
+            return false
         }
         guard let data = try? JSONEncoder().encode(payload),
               let str = String(data: data, encoding: .utf8) else {
             print("❌ sendEncodable failed: encoding error")
-            return
+            if userFacing {
+                errorMessage = "Couldn't encode the request — try again."
+            }
+            return false
         }
         print("📤 sendEncodable: \(str.prefix(80))...")
         sendTextFrame(str)
+        return true
     }
 
     /// Send a pre-encoded JSON string over the WebSocket. Single send path for
@@ -324,10 +334,12 @@ final class ConnectionService: ObservableObject {
             if let reply = try? JSONDecoder().decode(ExploreSkillListReply.self, from: data) {
                 explorerStore?.handleSkillSearchReply(reply)
             }
-        case "auto_task_state", "auto_task_history_reply", "auto_task_ack":
+        case "auto_task_state", "auto_task_history_reply", "auto_task_ack", "auto_task_logs_reply":
             autoTaskStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "mac_status":
             macStatusStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
+        case "llmide_chat_history_reply", "llmide_chat_history_clear_ack":
+            llmIdeStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "output":
             let commandId = json["commandId"] as? String
             if let payload = json["payload"] as? [String: Any] {

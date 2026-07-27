@@ -62,3 +62,32 @@ public struct CommandError: Codable, Equatable {
     public init(commandId: String?, message: String) { self.commandId = commandId; self.message = message }
     private enum CodingKeys: String, CodingKey { case type, commandId, message }
 }
+
+// MARK: - llm-chat history sync (Mac sheet + iPhone Chat tab)
+
+public struct LlmIdeChatHistoryList: Codable, Equatable {
+    public let type = MobileProtocol.Tag.llmIdeChatHistoryList
+    public let limit: Int?
+    public init(limit: Int? = 50) { self.limit = limit }
+    private enum CodingKeys: String, CodingKey { case type, limit }
+}
+
+public struct LlmIdeChatHistoryReply: Codable, Equatable {
+    public let type = MobileProtocol.Tag.llmIdeChatHistoryReply
+    public let messages: [ChatTurn]
+    public init(messages: [ChatTurn]) { self.messages = messages }
+    private enum CodingKeys: String, CodingKey { case type, messages }
+}
+
+public struct LlmIdeChatHistoryClear: Codable, Equatable {
+    public let type = MobileProtocol.Tag.llmIdeChatHistoryClear
+    public init() {}
+    private enum CodingKeys: String, CodingKey { case type }
+}
+
+public struct LlmIdeChatHistoryClearAck: Codable, Equatable {
+    public let type = MobileProtocol.Tag.llmIdeChatHistoryClearAck
+    public let ok: Bool
+    public init(ok: Bool) { self.ok = ok }
+    private enum CodingKeys: String, CodingKey { case type, ok }
+}

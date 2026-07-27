@@ -1,16 +1,10 @@
 import SwiftUI
 import os.log
 
-/// Global "Ask the Agent" sheet. Opened via Cmd-Shift-A or the
-/// AgentStatusBadge's chat button. Top section mirrors the badge
-/// popover (status + dispatch/stop). Bottom is a real chat transcript
-/// against /kb/agent/ask, which uses the user's persona so the
-/// agent answers in its meeting voice. Conversation history lives
-/// in-sheet — closing the sheet drops it on purpose (this is a
-/// quick check-in tool, not a long-running chat thread).
-struct AskAgentSheet: View {
+/// Global LLM Chat sheet — same `/kb/agent/ask` transcript the iPhone uses via
+/// `llmide_chat`. History is server-persisted so Mac and iPhone stay in sync.
+struct LlmChatSheet: View {
     let api: LlmIdeAPIClient
-    @EnvironmentObject var runs: AgentRunsStore
     @EnvironmentObject var theme: ThemeStore
     @Environment(\.dismiss) private var dismiss
 
@@ -18,18 +12,14 @@ struct AskAgentSheet: View {
     @State private var draft: String = ""
     @State private var sending = false
     @State private var lastError: String?
-    @State private var dispatching = false
-    @State private var stopping = false
     @State private var loadingHistory = false
     @State private var confirmingClear = false
     @FocusState private var inputFocused: Bool
-    private let log = Logger(subsystem: "com.llmide.macapp", category: "AskAgentSheet")
+    private let log = Logger(subsystem: "com.llmide.macapp", category: "LlmChatSheet")
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            Divider()
-            statusStrip
             Divider()
             transcriptView
             Divider()
@@ -38,7 +28,9 @@ struct AskAgentSheet: View {
         .frame(minWidth: 520, idealWidth: 580, minHeight: 480, idealHeight: 560)
         .onAppear {
             inputFocused = true
-            Task { await runs.refresh() }
+            Task { await loadHistory() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .llmChatTranscriptChanged)) { _ in
             Task { await loadHistory() }
         }
         .confirmationDialog(
@@ -51,23 +43,23 @@ struct AskAgentSheet: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the saved Ask-the-Agent transcript from the server. Dispatched agent runs are unaffected.")
+            Text("This removes the shared LLM Chat transcript from the server. iPhone and Mac will both start fresh.")
         }
     }
 
     private var header: some View {
         HStack {
-            Image(systemName: "sparkle")
-                .foregroundStyle(.purple)
-            Text("Ask the agent")
+            Image(systemName: "bubble.left.and.text.bubble.right")
+                .foregroundStyle(theme.current.accent)
+            Text("llm-chat")
                 .font(.headline)
             if loadingHistory {
                 ProgressView().controlSize(.small)
             }
             Spacer()
-            // Clear is destructive — gated behind a confirmation
-            // dialog. Disabled when there's nothing to clear so the
-            // button doesn't look interactive on a fresh sheet.
+            Text("Synced with iPhone")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Button {
                 confirmingClear = true
             } label: {
@@ -79,34 +71,6 @@ struct AskAgentSheet: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-    }
-
-    private var statusStrip: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(runs.hasRunning ? theme.current.success : theme.current.textMuted)
-                .frame(width: 8, height: 8)
-            Text(runs.hasRunning ? "Agent is running on \(runs.runningCount) session\(runs.runningCount == 1 ? "" : "s")" : "Agent is idle")
-                .font(.callout)
-            Spacer()
-            Button {
-                Task { await dispatch() }
-            } label: {
-                if dispatching { ProgressView().controlSize(.small) }
-                else { Label("Dispatch", systemImage: "play.fill") }
-            }
-            .disabled(dispatching || runs.hasRunning)
-
-            Button(role: .destructive) {
-                Task { await stopAll() }
-            } label: {
-                if stopping { ProgressView().controlSize(.small) }
-                else { Label("Stop all", systemImage: "stop.fill") }
-            }
-            .disabled(stopping || !runs.hasRunning)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
     }
 
     private var transcriptView: some View {
@@ -148,7 +112,7 @@ struct AskAgentSheet: View {
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Ask the agent anything about the current meeting or project.")
+            Text("Ask LLM-IDE anything. Messages here are shared with the iPhone Chat tab.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Text("Examples:")
@@ -156,9 +120,9 @@ struct AskAgentSheet: View {
                 .foregroundStyle(.secondary)
                 .padding(.top, 6)
             Group {
-                examplePrompt("What persona are you using right now?")
-                examplePrompt("Summarise what you'd watch for in a kickoff meeting.")
-                examplePrompt("Give me three follow-up questions for a status review.")
+                examplePrompt("Summarize my last meeting notes.")
+                examplePrompt("What should I follow up on this week?")
+                examplePrompt("Explain the active project's architecture.")
             }
         }
     }
@@ -185,11 +149,11 @@ struct AskAgentSheet: View {
 
     private func bubble(for msg: LlmIdeAPIClient.AgentAskMessage) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: msg.role == .user ? "person.fill" : "sparkle")
-                .foregroundStyle(msg.role == .user ? Color.accentColor : .purple)
+            Image(systemName: msg.role == .user ? "person.fill" : "bubble.left.fill")
+                .foregroundStyle(msg.role == .user ? Color.accentColor : theme.current.accent)
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 2) {
-                Text(msg.role == .user ? "You" : "Agent")
+                Text(msg.role == .user ? "You" : "LLM-IDE")
                     .font(.caption.bold())
                     .foregroundStyle(.secondary)
                 Text(msg.content)
@@ -200,13 +164,13 @@ struct AskAgentSheet: View {
             Spacer(minLength: 0)
         }
         .padding(10)
-        .background(msg.role == .user ? Color.accentColor.opacity(0.08) : Color.purple.opacity(0.06))
+        .background(msg.role == .user ? Color.accentColor.opacity(0.08) : theme.current.accent.opacity(0.08))
         .cornerRadius(8)
     }
 
     private var inputRow: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField("Ask the agent…", text: $draft, axis: .vertical)
+            TextField("Message llm-chat…", text: $draft, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...4)
                 .focused($inputFocused)
@@ -245,19 +209,14 @@ struct AskAgentSheet: View {
         do {
             let reply = try await api.askAgent(message: text, history: transcript.dropLast().map { $0 })
             transcript.append(.init(role: .assistant, content: reply))
+            NotificationCenter.default.post(name: .llmChatTranscriptChanged, object: nil)
         } catch {
-            // Roll the user's prompt back into the draft so they can
-            // edit and retry — losing their typing on failure is
-            // annoying.
             lastError = error.localizedDescription
             transcript.removeLast()
             draft = text
         }
     }
 
-    /// Fetch persisted Ask-the-Agent transcript and seed the
-    /// in-memory list. Failure is non-fatal — the sheet still works
-    /// fresh; we just lose continuity for this open.
     private func loadHistory() async {
         loadingHistory = true
         defer { loadingHistory = false }
@@ -269,53 +228,18 @@ struct AskAgentSheet: View {
                 return LlmIdeAPIClient.AgentAskMessage(role: role, content: item.content)
             }
         } catch {
-            log.error("Failed to load Ask Agent history: \(error.localizedDescription, privacy: .public)")
-            lastError = "Could not load saved conversation: \(error.localizedDescription)"
-            return
+            log.error("Failed to load LLM Chat history: \(error.localizedDescription, privacy: .public)")
+            lastError = "Could not load shared conversation: \(error.localizedDescription)"
         }
     }
 
-    /// Wipe server-side history and the in-memory list. Confirmation
-    /// already happened in the parent dialog before this fires.
     private func clearHistory() async {
         do {
             _ = try await api.clearAgentAskHistory()
             transcript.removeAll()
+            NotificationCenter.default.post(name: .llmChatTranscriptChanged, object: nil)
         } catch {
             lastError = error.localizedDescription
-        }
-    }
-
-    private func dispatch() async {
-        dispatching = true
-        lastError = nil
-        defer { dispatching = false }
-        do {
-            _ = try await api.dispatchAgent()
-            await runs.refresh()
-        } catch {
-            lastError = error.localizedDescription
-        }
-    }
-
-    private func stopAll() async {
-        stopping = true
-        lastError = nil
-        defer { stopping = false }
-        var failedRuns = 0
-        for run in runs.runs {
-            do {
-                _ = try await api.stopAgent(sessionId: run.sessionId)
-            } catch {
-                failedRuns += 1
-                log.error("Failed to stop agent run \(run.sessionId, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            }
-        }
-        await runs.refresh()
-        if failedRuns > 0 {
-            lastError = failedRuns == 1
-                ? "Failed to stop 1 agent run. Check the backend logs and try again."
-                : "Failed to stop \(failedRuns) agent runs. Check the backend logs and try again."
         }
     }
 }

@@ -78,7 +78,10 @@ struct ExplorerChatView: View {
             macSkillSearchSheet
                 .environmentObject(explorerStore)
         }
-        .onAppear { explorerStore.exploreListSessions() }
+        .onAppear { explorerStore.refreshIfConnected() }
+        .onChange(of: connection.connectionStatus) { status in
+            if status == .connected { explorerStore.refreshIfConnected() }
+        }
         .alert("Rename session", isPresented: Binding(
             get: { renameSessionId != nil },
             set: { if !$0 { renameSessionId = nil } }
@@ -139,7 +142,7 @@ struct ExplorerChatView: View {
                     Button("Done") { showSessionPicker = false }
                 }
             }
-            .onAppear { explorerStore.exploreListSessions() }
+            .onAppear { explorerStore.refreshIfConnected() }
         }
     }
 
@@ -412,8 +415,12 @@ struct ExplorerChatView: View {
         let files = pendingFiles
         let refs = pendingRefs
         let skills = pendingSkills
-        guard (!text.isEmpty || !files.isEmpty || !refs.isEmpty || !skills.isEmpty),
-              let id = explorerStore.exploreCurrent?.id else { return }
+        guard (!text.isEmpty || !files.isEmpty || !refs.isEmpty || !skills.isEmpty) else { return }
+        guard let id = explorerStore.exploreCurrent?.id else {
+            explorerStore.refreshIfConnected()
+            connection.errorMessage = "Loading explorer session from your Mac — try again in a moment."
+            return
+        }
         let prompt: String
         if text.isEmpty, !skills.isEmpty {
             prompt = "Run the selected Mac skill(s)."

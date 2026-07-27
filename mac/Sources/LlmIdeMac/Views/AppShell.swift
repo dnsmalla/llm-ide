@@ -24,7 +24,7 @@ struct AppShell: View {
     /// the Library header matches every other section (no title-bar toggle).
     @State private var libraryTreeVisible = true
     @AppStorage("MEETNOTES_LEGACY_PROMPT_SUPPRESSED") private var legacyPromptSuppressed = false
-    @State private var showAskAgentSheet = false
+    @State private var showLlmChatSheet = false
     /// Cached "auto-dispatch when capture starts" flag from the user's
     /// persona. Refreshed on login, on settings save, and lazily on
     /// the capture-started transition if we've never loaded it.
@@ -52,20 +52,20 @@ struct AppShell: View {
             // NOTE: the terminal dock lives INSIDE the editor (detail) column —
             // see splitContent() — so it spans only the editor area and not the
             // activity rail / file-tree, VS Code style.
-            StatusBar(api: api)
+            StatusBar()
         }
         // ShellState lives at the AppShell root so siblings of the
-        // active-project body (Welcome, StatusBar, the Ask sheet)
+        // active-project body (Welcome, StatusBar, the LLM Chat sheet)
         // can all see it. Previously this lived only on
-        // existingShellContent — StatusBar's AgentStatusBadge then
+        // existingShellContent — StatusBar's LlmChatStatusBadge then
         // crashed post-login because it reads @Environment(ShellState).
         .environment(shell)
         .environment(terminalPanelState)
-        .sheet(isPresented: $showAskAgentSheet) {
-            AskAgentSheet(api: api)
+        .sheet(isPresented: $showLlmChatSheet) {
+            LlmChatSheet(api: api)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .openAskAgentSheet)) { _ in
-            showAskAgentSheet = true
+        .onReceive(NotificationCenter.default.publisher(for: .openLlmChatSheet)) { _ in
+            showLlmChatSheet = true
         }
         // When the Chrome extension finalizes a live session, auto-generate
         // a note file — same as CaptionScraper does for AX-captured sessions.

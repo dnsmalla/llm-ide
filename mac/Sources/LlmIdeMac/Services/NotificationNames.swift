@@ -29,12 +29,15 @@ extension Notification.Name {
     /// and scrolls its ScrollView to that anchor on next render.
     static let scrollSettingsToCard = Notification.Name("scrollSettingsToCard")
 
-    // MARK: - Agent
+    // MARK: - LLM Chat (Mac sheet + iPhone llmide_chat)
 
-    /// Open the global "Ask the agent" sheet. Posted by Cmd-Shift-A
-    /// and by the chat button inside the badge popover. Observed by
-    /// AppShell, which owns the sheet so it survives section changes.
-    static let openAskAgentSheet = Notification.Name("openAskAgentSheet")
+    /// Open the global llm-chat sheet. Posted by the status-bar chip and
+    /// ⌘⇧L. Observed by AppShell.
+    static let openLlmChatSheet = Notification.Name("openLlmChatSheet")
+
+    /// Posted after a message is persisted via `/kb/agent/ask` (Mac sheet
+    /// send or iPhone `llmide_chat` proxy). LlmChatSheet reloads history.
+    static let llmChatTranscriptChanged = Notification.Name("llmChatTranscriptChanged")
 
     // MARK: - Library / meetings
 

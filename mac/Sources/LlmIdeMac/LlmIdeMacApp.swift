@@ -44,7 +44,6 @@ public struct LlmIdeMacApp: App {
     @StateObject private var logStore: TaskLogStore
     @StateObject private var updateService = UpdateService()
     @StateObject private var projectStore: ProjectStore
-    @StateObject private var agentRuns: AgentRunsStore
     @StateObject private var graphAutoUpdater: GraphAutoUpdater
     @StateObject private var graphSessionStore = GraphSessionStore()
     @State private var backend = BackendManager()
@@ -122,8 +121,6 @@ public struct LlmIdeMacApp: App {
         self._autoCodeUpdate = StateObject(wrappedValue: autoCode)
         self._logStore = StateObject(wrappedValue: taskLogStore)
         self._projectStore = StateObject(wrappedValue: projectStoreInstance)
-        let runs = AgentRunsStore(api: client)
-        self._agentRuns = StateObject(wrappedValue: runs)
         let autoUpdater = GraphAutoUpdater(projectStore: projectStoreInstance,
                                            intervalMinutes: cfg.graphAutoUpdateMinutes)
         self._graphAutoUpdater = StateObject(wrappedValue: autoUpdater)
@@ -150,6 +147,7 @@ public struct LlmIdeMacApp: App {
         // them keeps Settings, the Menu bar, and the scheduler in sync.
         mobileControl.autoCode = autoCode
         mobileControl.autoTaskSettings = autoTaskSettingsInstance
+        mobileControl.logStore = taskLogStore
         mobileControl.config = cfg
         mobileControl.projectStore = projectStoreInstance
         mobileControl.backendManager = backend
@@ -182,7 +180,6 @@ public struct LlmIdeMacApp: App {
                 .environmentObject(logStore)
                 .environmentObject(updateService)
                 .environmentObject(projectStore)
-                .environmentObject(agentRuns)
                 .environmentObject(graphAutoUpdater)
                 .environmentObject(graphSessionStore)
                 .environment(backend)
@@ -341,15 +338,12 @@ public struct LlmIdeMacApp: App {
             CommandGroup(after: .windowList) {
                 Button("Quick Switch Project…") { quickSwitcherShown = true }
                     .keyboardShortcut("p", modifiers: .command)
-                // Global "Ask the Agent" — opens the AskAgentSheet
-                // owned by AppShell, regardless of which section is
-                // active. Posts a notification rather than mutating
-                // state directly because the App scene has no direct
-                // handle on AppShell's @State.
-                Button("Ask the Agent…") {
-                    NotificationCenter.default.post(name: .openAskAgentSheet, object: nil)
+                // Global llm-chat — opens the LlmChatSheet owned by
+                // AppShell, regardless of which section is active.
+                Button("LLM Chat…") {
+                    NotificationCenter.default.post(name: .openLlmChatSheet, object: nil)
                 }
-                .keyboardShortcut("a", modifiers: [.command, .shift])
+                .keyboardShortcut("l", modifiers: [.command, .shift])
             }
         }
 

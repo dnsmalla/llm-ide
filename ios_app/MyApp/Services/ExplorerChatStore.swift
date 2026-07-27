@@ -76,7 +76,10 @@ final class ExplorerChatStore: ObservableObject {
     func sendExploreChat(_ text: String, sessionId: String,
                          files: [ChatFileText] = [], refs: [ExploreWorkspaceRef] = [],
                          skills: [ExploreSkillRef] = []) {
-        guard connection?.connectionStatus == .connected else { return }
+        guard connection?.connectionStatus == .connected else {
+            connection?.errorMessage = "Not connected to your Mac — wait for Live status, then try again."
+            return
+        }
         if exploreCurrent == nil {
             exploreCurrent = ExploreCurrentSession(id: sessionId, title: "Session", history: [])
         }
@@ -151,6 +154,7 @@ final class ExplorerChatStore: ObservableObject {
         case "explore_session_list":
             if let list = try? JSONDecoder().decode(ExploreSessionList.self, from: data) {
                 exploreSessions = list.sessions
+                ensureActiveSession(from: list.sessions)
             }
         case "explore_session_history":
             if let hist = try? JSONDecoder().decode(ExploreSessionHistory.self, from: data) {
@@ -234,6 +238,23 @@ final class ExplorerChatStore: ObservableObject {
 
     /// Rename an explorer session on the Mac.
     func exploreRenameSession(_ sessionId: String, title: String) {
-        connection?.sendEncodable(ExploreRenameSession(sessionId: sessionId, title: title))
+        connection?.sendEncodable(ExploreRenameSession(sessionId: sessionId, title: title), userFacing: true)
+    }
+
+    /// Refresh sessions when the sheet opens or the connection becomes Live.
+    func refreshIfConnected() {
+        guard connection?.connectionStatus == .connected else { return }
+        exploreListSessions()
+    }
+
+    /// Pick the most recent Mac session (or create one) so the send button works
+    /// without an extra "Browse sessions" step.
+    private func ensureActiveSession(from sessions: [ExploreSessionSummary]) {
+        guard exploreCurrent == nil, !isStreaming else { return }
+        if let latest = sessions.max(by: { $0.lastUsedAt < $1.lastUsedAt }) {
+            exploreLoadSession(latest.id)
+        } else if connection?.connectionStatus == .connected {
+            exploreNewSession()
+        }
     }
 }

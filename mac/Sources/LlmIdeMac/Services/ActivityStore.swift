@@ -44,7 +44,7 @@ struct ActivityItem: Identifiable {
 /// badge and popover share one source of truth without hammering the
 /// server.
 ///
-/// Mirrors the `AgentRunsStore` idiom: holds a weak reference to
+/// Mirrors the polling-store idiom: holds a weak reference to
 /// `LlmIdeAPIClient`, uses its typed `get`/`post` helpers, and runs a
 /// cancellable `Task`-based poll loop.  Fire-and-forget mutations
 /// (`report`, `markSeen`) never throw into the caller.
@@ -78,7 +78,7 @@ final class ActivityStore {
 
     // MARK: - Lifecycle
 
-    /// Attach the API client (called after login, like `AgentRunsStore.attach`).
+    /// Attach the API client (called after login).
     func attach(api: LlmIdeAPIClient) {
         self.api = api
         start()
@@ -101,7 +101,7 @@ final class ActivityStore {
 
     /// Fetch new items since `lastId`, prepend them, and update
     /// `lastId` + `unreadCount`.  Errors are swallowed — the next
-    /// tick retries automatically (mirrors `AgentRunsStore` idiom).
+    /// tick retries automatically on the next poll interval.
     func refresh() async {
         guard let api else { return }
         do {

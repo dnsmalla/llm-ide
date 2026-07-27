@@ -111,3 +111,52 @@ public struct AutoTaskHistoryReply: Codable, Equatable {
     }
     private enum CodingKeys: String, CodingKey { case type, entries }
 }
+
+// MARK: - Auto-task live logs (mirrors Mac TaskLogStore)
+
+public struct AutoTaskLogLine: Codable, Equatable, Identifiable {
+    public let id: String
+    public let timestamp: Double
+    public let level: String
+    public let text: String
+
+    public init(id: String, timestamp: Double, level: String, text: String) {
+        self.id = id
+        self.timestamp = timestamp
+        self.level = level
+        self.text = text
+    }
+}
+
+public struct AutoTaskTaskLogs: Codable, Equatable, Identifiable {
+    public let id: String
+    public let label: String
+    public let lines: [AutoTaskLogLine]
+
+    public init(id: String, label: String, lines: [AutoTaskLogLine]) {
+        self.id = id
+        self.label = label
+        self.lines = lines
+    }
+}
+
+/// iPhone → Mac: request a snapshot of per-task live logs.
+public struct AutoTaskLogsList: Codable, Equatable {
+    public let type = MobileProtocol.Tag.autoTaskLogsList
+    public init() {}
+    private enum CodingKeys: String, CodingKey { case type }
+}
+
+/// Mac → iPhone: full per-task log snapshot (pushed on change + on request).
+public struct AutoTaskLogsReply: Codable, Equatable {
+    public let type = MobileProtocol.Tag.autoTaskLogsReply
+    /// Which task is running right now on the Mac (mirrors `AutoTaskState.currentTask`).
+    public let currentTask: String?
+    public let tasks: [AutoTaskTaskLogs]
+
+    public init(currentTask: String?, tasks: [AutoTaskTaskLogs]) {
+        self.currentTask = currentTask
+        self.tasks = tasks
+    }
+    private enum CodingKeys: String, CodingKey { case type, currentTask, tasks }
+}

@@ -285,6 +285,23 @@ final class ConnectionMessagesTests: XCTestCase {
         XCTAssertEqual(decoded.entries[1].lastUpdated, 1_700_000_100)
     }
 
+    func testAutoTaskLogsReplyRoundTrips() throws {
+        let lines = [
+            AutoTaskLogLine(id: "a1", timestamp: 1_700_000_000, level: "info", text: "Running Review Code…"),
+            AutoTaskLogLine(id: "a2", timestamp: 1_700_000_001, level: "error", text: "CLI failed")
+        ]
+        let original = AutoTaskLogsReply(
+            currentTask: "reviewCode",
+            tasks: [AutoTaskTaskLogs(id: "reviewCode", label: "Review Code", lines: lines)]
+        )
+        let decoded = try roundTrip(original)
+        XCTAssertEqual(decoded.type, "auto_task_logs_reply")
+        XCTAssertEqual(decoded.currentTask, "reviewCode")
+        XCTAssertEqual(decoded.tasks.count, 1)
+        XCTAssertEqual(decoded.tasks[0].lines.count, 2)
+        XCTAssertEqual(decoded.tasks[0].lines[1].level, "error")
+    }
+
     // MARK: - Phase A: mac status, cancel, rename
 
     func testMacStatusRoundTrips() throws {
@@ -314,5 +331,15 @@ final class ConnectionMessagesTests: XCTestCase {
         let decoded = try roundTrip(original)
         XCTAssertEqual(decoded.type, "explore_rename_session")
         XCTAssertEqual(decoded.title, "Refactor auth")
+    }
+
+    func testLlmIdeChatHistoryReplyRoundTrips() throws {
+        let original = LlmIdeChatHistoryReply(messages: [
+            ChatTurn(role: "user", content: "hi"),
+            ChatTurn(role: "assistant", content: "hello")
+        ])
+        let decoded = try roundTrip(original)
+        XCTAssertEqual(decoded.type, "llmide_chat_history_reply")
+        XCTAssertEqual(decoded.messages.count, 2)
     }
 }

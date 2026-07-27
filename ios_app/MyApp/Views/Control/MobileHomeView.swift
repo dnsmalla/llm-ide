@@ -189,6 +189,16 @@ struct MobileHomeView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+
+                Button {
+                    autoTaskStore.openRunLog(focusTask: state.currentTask)
+                    showAutoTask = true
+                } label: {
+                    Label("View live log", systemImage: "doc.text")
+                        .font(.system(size: DesignSystem.Typography.footnote, weight: .semibold))
+                }
+                .buttonStyle(.bordered)
+                .tint(DesignSystem.Colors.primary)
             } else {
                 Text("Loading auto-task state from Mac…")
                     .font(.system(size: DesignSystem.Typography.subheadline))
@@ -264,7 +274,7 @@ struct MobileHomeView: View {
 
     private var chatAction: some View {
         Button { showLlmIde = true } label: {
-            featureRow(icon: "bubble.left.and.text.bubble.right", title: "Chat", subtitle: "Ask LLM-IDE questions")
+            featureRow(icon: "bubble.left.and.text.bubble.right", title: "llm-chat", subtitle: "Shared chat with your Mac")
         }
     }
 

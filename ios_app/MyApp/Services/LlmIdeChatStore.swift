@@ -38,7 +38,10 @@ final class LlmIdeChatStore: ObservableObject {
     func sendLlmideChat(_ text: String,
                         images: [(data: Data, mediaType: String)] = [],
                         files: [ChatFileText] = []) {
-        guard connection?.connectionStatus == .connected else { return }
+        guard connection?.connectionStatus == .connected else {
+            connection?.errorMessage = "Not connected to your Mac — wait for Live status, then try again."
+            return
+        }
         // Show only the first attached image as a thumbnail in the local bubble.
         let (id, history) = mintStreamingTurn(
             messages: &llmIdeMessages,
@@ -64,8 +67,14 @@ final class LlmIdeChatStore: ObservableObject {
         }
     }
 
+    /// Load the shared server transcript (same history as Mac llm-chat sheet).
+    func loadSharedHistory() {
+        connection?.sendEncodable(LlmIdeChatHistoryList(limit: 50))
+    }
+
     func clearLlmIdeChat() {
         llmIdeMessages.removeAll()
+        connection?.sendEncodable(LlmIdeChatHistoryClear(), userFacing: true)
     }
 
     /// Cancel the in-flight llm-ide chat turn on the Mac.
@@ -75,6 +84,24 @@ final class LlmIdeChatStore: ObservableObject {
     }
 
     // MARK: — Inbound (called by ConnectionService.receiveMessage dispatch)
+
+    func handleInbound(type: String, data: Data) {
+        switch type {
+        case "llmide_chat_history_reply":
+            if let reply = try? JSONDecoder().decode(LlmIdeChatHistoryReply.self, from: data),
+               !isStreaming {
+                llmIdeMessages = reply.messages.map {
+                    ChatMessage(role: $0.role == "assistant" ? .assistant : .user, text: $0.content)
+                }
+            }
+        case "llmide_chat_history_clear_ack":
+            if (try? JSONDecoder().decode(LlmIdeChatHistoryClearAck.self, from: data))?.ok == true {
+                llmIdeMessages.removeAll()
+            }
+        default:
+            break
+        }
+    }
 
     func ownsCommand(_ id: String) -> Bool { llmIdeCommandIds.contains(id) }
 
@@ -96,6 +123,7 @@ final class LlmIdeChatStore: ObservableObject {
         if done {
             isStreaming = false
             if let id = commandId { llmIdeCommandIds.remove(id) }
+            loadSharedHistory()
         }
     }
 

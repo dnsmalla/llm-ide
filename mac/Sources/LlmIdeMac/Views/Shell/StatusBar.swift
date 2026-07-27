@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct StatusBar: View {
-    let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var projectStore: ProjectStore
     @EnvironmentObject var session: SessionStore
@@ -16,7 +15,7 @@ struct StatusBar: View {
 
     var body: some View {
         // The bar is always visible IF the user is signed in — the
-        // agent badge needs to be reachable from any screen
+        // llm-chat chip needs to be reachable from any screen
         // (including Welcome, where there's no active project).
         // Pre-login (LoginView) we hide it; the chrome would just
         // be empty noise next to a centered auth form.
@@ -33,7 +32,7 @@ struct StatusBar: View {
             Spacer()
             terminalToggleButton
             ActivityBell()
-            AgentStatusBadge(api: api)
+            LlmChatStatusBadge()
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 4)

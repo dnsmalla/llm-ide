@@ -44,7 +44,7 @@ struct LlmIdeControlView: View {
             .background(DesignSystem.Colors.background.ignoresSafeArea())
             .animation(.easeInOut(duration: 0.2), value: isConnected)
             .animation(.easeInOut(duration: 0.2), value: connection.errorMessage)
-            .navigationTitle("Chat with LLM-IDE")
+            .navigationTitle("llm-chat")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -73,6 +73,10 @@ struct LlmIdeControlView: View {
             }
             .onChange(of: speech.errorMessage) { msg in
                 if let msg { connection.errorMessage = msg }
+            }
+            .onAppear { llmIdeStore.loadSharedHistory() }
+            .onChange(of: connection.connectionStatus) { status in
+                if status == .connected { llmIdeStore.loadSharedHistory() }
             }
             .photosPicker(isPresented: $showPhotoPicker, selection: $pickedItems,
                           maxSelectionCount: maxImages, matching: .images)

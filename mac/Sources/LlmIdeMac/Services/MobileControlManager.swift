@@ -50,6 +50,8 @@ final class MobileControlManager {
     /// Both are optional so this manager can still be constructed in previews
     /// / tests without the full Auto Task stack.
     var autoCode: AutoCodeUpdateService?
+    /// Per-task live logs — same store the Mac Auto Tasks page observes.
+    var logStore: TaskLogStore?
     /// Set by the app at launch; the single source of truth for master +
     /// per-task enables, mutated by `auto_task_toggle`.
     var autoTaskSettings: AutoTaskSettings?
@@ -275,6 +277,10 @@ final class MobileControlManager {
             }
         case MobileProtocol.Tag.llmIdeCancel:
             handleLlmIdeCancel(data: data)
+        case MobileProtocol.Tag.llmIdeChatHistoryList:
+            Task { await handleLlmIdeChatHistoryList(data: data) }
+        case MobileProtocol.Tag.llmIdeChatHistoryClear:
+            Task { await handleLlmIdeChatHistoryClear() }
         case MobileProtocol.Tag.macStatusList:
             Task { await handleMacStatusList() }
         case let t where t.hasPrefix("explore_"):
@@ -484,6 +490,13 @@ final class MobileControlManager {
             }
             append(.info, "Auto-task history: \(entries.count) entries")
             reply(AutoTaskHistoryReply(entries: entries))
+        case MobileProtocol.Tag.autoTaskLogsList:
+            guard let logs = buildAutoTaskLogsReply() else {
+                replyNotConfigured(commandId: "auto_task_logs", logLabel: "auto_task_logs_list")
+                return
+            }
+            append(.info, "Auto-task logs: \(logs.tasks.count) task buffer(s)")
+            reply(logs)
         default:
             append(.info, "Unhandled auto-task type: \(type)")
         }
@@ -509,6 +522,7 @@ final class MobileControlManager {
             guard !isMobileCommandCancelled(chat.commandId) else { return }
             await server?.send(Output(commandId: chat.commandId,
                                       payload: OutputPayload(stream: reply, done: true)))
+            NotificationCenter.default.post(name: .llmChatTranscriptChanged, object: nil)
         } catch is CancellationError {
             append(.info, "llmide_chat cancelled: \(chat.commandId.prefix(8))")
         } catch {
@@ -687,9 +701,26 @@ final class MobileControlManager {
     private func replyAutoTaskStateOrAck() {
         if let state = buildAutoTaskState() {
             reply(state)
+            pushAutoTaskLogsIfPaired()
         } else {
             reply(AutoTaskAck(ok: true, message: nil))
         }
+    }
+
+    /// Build the wire snapshot of per-task live logs for the iPhone run screen.
+    private func buildAutoTaskLogsReply() -> AutoTaskLogsReply? {
+        guard let logStore else { return nil }
+        let current = autoCode?.currentTask?.rawValue
+        let tasks = AutoTask.allCases.map { task in
+            let lines = logStore.lines(for: task).map { line in
+                AutoTaskLogLine(id: line.id.uuidString,
+                                timestamp: line.timestamp.timeIntervalSince1970,
+                                level: line.level.rawValue,
+                                text: line.text)
+            }
+            return AutoTaskTaskLogs(id: task.rawValue, label: task.label, lines: lines)
+        }
+        return AutoTaskLogsReply(currentTask: current, tasks: tasks)
     }
 
     // MARK: - Phase A: mobile push sync, cancel, status, rename
@@ -710,6 +741,11 @@ final class MobileControlManager {
             .sink { [weak self] _ in self?.pushAutoTaskStateIfPaired() }
             .store(in: &mobilePushCancellables)
 
+        logStore?.objectWillChange
+            .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.pushAutoTaskLogsIfPaired() }
+            .store(in: &mobilePushCancellables)
+
         projectStore?.objectWillChange
             .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
             .sink { [weak self] _ in
@@ -726,6 +762,7 @@ final class MobileControlManager {
     private func onMobileClientPaired() {
         mobileClientPaired = true
         pushAutoTaskStateIfPaired()
+        pushAutoTaskLogsIfPaired()
         pushExploreSessionListIfPaired()
         Task { await pushMacStatusIfPaired() }
     }
@@ -740,6 +777,11 @@ final class MobileControlManager {
     private func pushAutoTaskStateIfPaired() {
         guard mobileClientPaired, let state = buildAutoTaskState() else { return }
         reply(state)
+    }
+
+    private func pushAutoTaskLogsIfPaired() {
+        guard mobileClientPaired, let logs = buildAutoTaskLogsReply() else { return }
+        reply(logs)
     }
 
     private func pushExploreSessionListIfPaired() {
@@ -794,6 +836,36 @@ final class MobileControlManager {
         guard let m = try? decoder.decode(LlmIdeCancel.self, from: data) else { return }
         append(.info, "llmide_cancel \(m.commandId.prefix(8))")
         cancelMobileInflightTask(commandId: m.commandId)
+    }
+
+    private func handleLlmIdeChatHistoryList(data: Data) async {
+        guard let api else {
+            reply(CommandError(commandId: "llmide_chat_history", message: "Backend not configured"))
+            return
+        }
+        struct LimitEnvelope: Decodable { let limit: Int? }
+        let limit = (try? decoder.decode(LimitEnvelope.self, from: data))?.limit ?? 50
+        do {
+            let items = try await api.listAgentAskHistory(limit: limit)
+            let messages = items.map { ChatTurn(role: $0.role, content: $0.content) }
+            reply(LlmIdeChatHistoryReply(messages: messages))
+        } catch {
+            reply(CommandError(commandId: "llmide_chat_history", message: error.localizedDescription))
+        }
+    }
+
+    private func handleLlmIdeChatHistoryClear() async {
+        guard let api else {
+            reply(CommandError(commandId: "llmide_chat_history_clear", message: "Backend not configured"))
+            return
+        }
+        do {
+            _ = try await api.clearAgentAskHistory()
+            reply(LlmIdeChatHistoryClearAck(ok: true))
+            NotificationCenter.default.post(name: .llmChatTranscriptChanged, object: nil)
+        } catch {
+            reply(CommandError(commandId: "llmide_chat_history_clear", message: error.localizedDescription))
+        }
     }
 
     private func handleExploreCancel(data: Data) {

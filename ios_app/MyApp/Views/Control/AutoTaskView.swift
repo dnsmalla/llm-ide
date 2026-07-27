@@ -31,6 +31,15 @@ struct AutoTaskView: View {
             .listStyle(.insetGrouped)
             .background(DesignSystem.Colors.background.ignoresSafeArea())
             .scrollContentBackground(.hidden)
+            .overlay(alignment: .top) {
+                if !isConnected {
+                    StatusBanner(.connection(isConnecting: connection.connectionStatus == .connecting))
+                        .padding(.top, DesignSystem.Spacing.sm)
+                } else if let err = connection.errorMessage {
+                    StatusBanner(.error(message: err) { connection.errorMessage = nil })
+                        .padding(.top, DesignSystem.Spacing.sm)
+                }
+            }
             .animation(.easeInOut(duration: 0.2), value: state?.isRunning)
             .animation(.easeInOut(duration: 0.2), value: connection.errorMessage)
             .navigationTitle("Auto Tasks")
@@ -47,6 +56,14 @@ struct AutoTaskView: View {
             }
             .onAppear {
                 autoTaskStore.refreshAll()
+            }
+            .onChange(of: connection.connectionStatus) { status in
+                if status == .connected { autoTaskStore.refreshAll() }
+            }
+            .navigationDestination(isPresented: $autoTaskStore.isRunLogPresented) {
+                AutoTaskRunLogView()
+                    .environmentObject(connection)
+                    .environmentObject(autoTaskStore)
             }
         }
     }
@@ -136,6 +153,12 @@ struct AutoTaskView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(state?.masterEnabled != true)
                 }
+                if state?.masterEnabled != true {
+                    Text("Turn on the master switch above to run tasks from iPhone.")
+                        .font(.system(size: DesignSystem.Typography.caption))
+                        .foregroundColor(DesignSystem.Colors.textTertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .padding(.vertical, 4)
         }
@@ -161,9 +184,19 @@ struct AutoTaskView: View {
                     .font(.system(size: DesignSystem.Typography.body))
                     .foregroundColor(DesignSystem.Colors.textPrimary)
             }
-            Text("Execution happens on your Mac — this screen shows live progress.")
+            Text("Execution happens on your Mac — tap below for the full live log.")
                 .font(.system(size: DesignSystem.Typography.caption))
                 .foregroundColor(DesignSystem.Colors.textTertiary)
+            Button {
+                autoTaskStore.openRunLog(focusTask: state?.currentTask)
+                haptic(.light)
+            } label: {
+                Label("View live log", systemImage: "doc.text")
+                    .font(.system(size: DesignSystem.Typography.footnote, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(DesignSystem.Colors.primary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(DesignSystem.Spacing.sm)
@@ -287,6 +320,13 @@ struct AutoTaskView: View {
             }
         }
         .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if state?.currentTask == task.id, state?.isRunning == true {
+                autoTaskStore.openRunLog(focusTask: task.id)
+                haptic(.light)
+            }
+        }
     }
 
     /// Per-task enable is server-owned; sends the toggle and the refreshed
