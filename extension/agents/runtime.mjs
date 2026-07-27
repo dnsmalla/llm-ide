@@ -6,7 +6,7 @@ import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
-import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS, spawnCli, minimalCliEnv } from './providers.mjs';
+import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS, spawnCli, minimalCliEnv, formatCliSpawnError } from './providers.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 import { recordUsage, flagQuota, resolveModel as resolveUsageModel, recordRateLimits } from '../kb/usage.mjs';
 import { getCustomProvider } from '../server/custom-providers.mjs';
@@ -418,7 +418,7 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
       if (err.code === 'ENOENT') {
         throw new Error('Claude CLI not found. Install: npm install -g @anthropic-ai/claude-code');
       }
-      const e = new Error(`Claude error: ${redactKey(err.stderr?.slice(0, 200) || err.message, apiKey)}`);
+      const e = new Error(`Claude error: ${formatCliSpawnError(err, { bin: err.bin || 'claude', apiKey })}`);
       e.overloaded = isCliOverloaded(err.stderr) || isCliOverloaded(err.stdout);
       lastError = e;
       if (e.overloaded && attempt < RETRY_DELAYS_MS.length) {

@@ -78,9 +78,15 @@ struct ExplorerChatView: View {
             macSkillSearchSheet
                 .environmentObject(explorerStore)
         }
-        .onAppear { explorerStore.refreshIfConnected() }
+        .onAppear {
+            explorerStore.refreshIfConnected()
+            explorerStore.prepareSessionIfNeeded()
+        }
         .onChange(of: connection.connectionStatus) { status in
-            if status == .connected { explorerStore.refreshIfConnected() }
+            if status == .connected {
+                explorerStore.refreshIfConnected()
+                explorerStore.prepareSessionIfNeeded()
+            }
         }
         .alert("Rename session", isPresented: Binding(
             get: { renameSessionId != nil },
@@ -201,6 +207,15 @@ struct ExplorerChatView: View {
                         ForEach(current.history) { msg in
                             ChatBubble(message: msg).id(msg.id)
                         }
+                    } else if explorerStore.isPreparingSession {
+                        VStack(spacing: DesignSystem.Spacing.sm) {
+                            ProgressView()
+                            Text("Starting session on your Mac…")
+                                .font(.system(size: DesignSystem.Typography.callout, weight: .medium))
+                                .foregroundColor(DesignSystem.Colors.textSecondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 60)
                     } else {
                         noSessionState
                     }
@@ -257,7 +272,7 @@ struct ExplorerChatView: View {
             Divider()
             ChatInputBar(
                 text: $inputText,
-                placeholder: hasSession ? "Message explorer" : "Select a session first",
+                placeholder: inputPlaceholder,
                 canSend: canSend,
                 isFocused: $isInputFocused,
                 onSend: send
@@ -405,7 +420,13 @@ struct ExplorerChatView: View {
     private var canSend: Bool {
         let hasBody = !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || !pendingFiles.isEmpty || !pendingRefs.isEmpty || !pendingSkills.isEmpty
-        return hasBody && isConnected && hasSession && !explorerStore.isStreaming
+        return hasBody && isConnected && !explorerStore.isStreaming
+    }
+
+    private var inputPlaceholder: String {
+        if explorerStore.isPreparingSession { return "Starting session…" }
+        if hasSession { return "Message explorer" }
+        return isConnected ? "Message explorer" : "Connect to your Mac first"
     }
 
     // MARK: — Actions
@@ -416,11 +437,6 @@ struct ExplorerChatView: View {
         let refs = pendingRefs
         let skills = pendingSkills
         guard (!text.isEmpty || !files.isEmpty || !refs.isEmpty || !skills.isEmpty) else { return }
-        guard let id = explorerStore.exploreCurrent?.id else {
-            explorerStore.refreshIfConnected()
-            connection.errorMessage = "Loading explorer session from your Mac — try again in a moment."
-            return
-        }
         let prompt: String
         if text.isEmpty, !skills.isEmpty {
             prompt = "Run the selected Mac skill(s)."
@@ -430,6 +446,16 @@ struct ExplorerChatView: View {
             prompt = "Review the attached file(s)."
         } else {
             prompt = text
+        }
+        guard let id = explorerStore.exploreCurrent?.id else {
+            explorerStore.queueSendWhenReady(text: prompt, files: files, refs: refs, skills: skills)
+            inputText = ""
+            pendingFiles = []
+            pendingRefs = []
+            pendingSkills = []
+            isInputFocused = false
+            haptic(.light)
+            return
         }
         explorerStore.sendExploreChat(prompt, sessionId: id, files: files, refs: refs, skills: skills)
         inputText = ""

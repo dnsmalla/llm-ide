@@ -231,18 +231,24 @@ export async function handleAgentRoutes(req, res, ctx) {
     }
     prompt += `User: ${message || '(see attached image)'}\nAssistant:`;
 
+    // Persist the user turn before Claude runs so Mac llm-chat and iPhone
+    // history sync while the reply is still in flight.
+    try {
+      kb.appendAgentAskMessage(userId, { role: 'user', content: message || '[image]' });
+    } catch (err) {
+      process.stderr.write(`[kb/agent/ask] user history append failed: ${err?.message || err}\n`);
+    }
+
     try {
       const result = await runClaude(prompt, { userId, images });
       const reply = (result || '').trim();
-      // Persist the round-trip so the sheet can resume next open.
-      // Append failure is non-fatal — the user already has the reply
+      // Assistant append is non-fatal — the user already has the reply
       // in this response; missing it in history is a degradation,
       // not a 5xx-worthy outcome.
       try {
-        kb.appendAgentAskMessage(userId, { role: 'user',      content: message || '[image]' });
         kb.appendAgentAskMessage(userId, { role: 'assistant', content: reply });
       } catch (err) {
-        process.stderr.write(`[kb/agent/ask] history append failed: ${err?.message || err}\n`);
+        process.stderr.write(`[kb/agent/ask] assistant history append failed: ${err?.message || err}\n`);
       }
       sendJSON(res, 200, { reply });
     } catch (err) {

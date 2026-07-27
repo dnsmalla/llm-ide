@@ -164,7 +164,7 @@ struct LlmIdeControlView: View {
             }
             ChatInputBar(
                 text: $inputText,
-                placeholder: speech.isListening ? "Listening…" : "Message llm-ide",
+                placeholder: speech.isListening ? "Listening…" : "Message llm-chat",
                 canSend: canSend,
                 isFocused: $isInputFocused,
                 onSend: send

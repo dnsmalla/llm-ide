@@ -11,7 +11,7 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
-const { resolveProvider, providerApiKey, completeViaApi, verifyProvider, cliInvocation, listProviderModels, chatModels, customBaseUrl, spawnCli, runViaCli, anthropicWebCliArgs } =
+const { resolveProvider, providerApiKey, completeViaApi, verifyProvider, cliInvocation, listProviderModels, chatModels, customBaseUrl, spawnCli, runViaCli, anthropicWebCliArgs, formatCliSpawnError } =
   await import('../agents/providers.mjs');
 
 function mockFetch(handler) {
@@ -234,6 +234,26 @@ test('chatModels: google keeps gemini-*, drops embeddings', () => {
 
 test('chatModels: anthropic keeps claude-* only', () => {
   assert.deepEqual(chatModels('anthropic', ['claude-sonnet-4-6', 'whatever']), ['claude-sonnet-4-6']);
+});
+
+test('formatCliSpawnError: not-logged-in stdout never leaks argv prompt', () => {
+  const err = {
+    code: 1,
+    message: 'Command failed: claude --strict-mcp-config -p ' + 'x'.repeat(500),
+    stdout: 'Not logged in · Please run /login\n',
+    stderr: '',
+    bin: 'claude',
+  };
+  const msg = formatCliSpawnError(err, { bin: 'claude' });
+  assert.match(msg, /not logged in/i);
+  assert.doesNotMatch(msg, /Command failed/);
+  assert.doesNotMatch(msg, /x{10}/);
+});
+
+test('formatCliSpawnError: empty streams falls back to actionable hint', () => {
+  const msg = formatCliSpawnError({ code: 1, message: 'Command failed: claude -p huge', stdout: '', stderr: '' }, { bin: 'claude' });
+  assert.match(msg, /claude login|API key/i);
+  assert.doesNotMatch(msg, /Command failed/);
 });
 
 test('cliInvocation: standard non-interactive form per provider', () => {

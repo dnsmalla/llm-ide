@@ -14,6 +14,7 @@ struct LlmChatSheet: View {
     @State private var lastError: String?
     @State private var loadingHistory = false
     @State private var confirmingClear = false
+    @State private var historyRefreshTask: Task<Void, Never>?
     @FocusState private var inputFocused: Bool
     private let log = Logger(subsystem: "com.llmide.macapp", category: "LlmChatSheet")
 
@@ -29,6 +30,16 @@ struct LlmChatSheet: View {
         .onAppear {
             inputFocused = true
             Task { await loadHistory() }
+            historyRefreshTask = Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    await loadHistory()
+                }
+            }
+        }
+        .onDisappear {
+            historyRefreshTask?.cancel()
+            historyRefreshTask = nil
         }
         .onReceive(NotificationCenter.default.publisher(for: .llmChatTranscriptChanged)) { _ in
             Task { await loadHistory() }
@@ -218,6 +229,7 @@ struct LlmChatSheet: View {
     }
 
     private func loadHistory() async {
+        guard !sending else { return }
         loadingHistory = true
         defer { loadingHistory = false }
         do {

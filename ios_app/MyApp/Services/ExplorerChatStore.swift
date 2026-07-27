@@ -15,6 +15,8 @@ final class ExplorerChatStore: ObservableObject {
     /// True while a streamed reply for THIS surface is in flight. Replaces the
     /// pre-refactor shared `llmStreaming` flag.
     @Published var isStreaming: Bool = false
+    /// True while waiting for Mac to return a session id / history (auto-provision).
+    @Published var isPreparingSession: Bool = false
     /// Mac workspace filename search (for @file / @folder picker).
     @Published var workspaceMatches: [ExploreWorkspaceEntry] = []
     @Published var workspaceSearchRoot: String?
@@ -30,6 +32,14 @@ final class ExplorerChatStore: ObservableObject {
     /// to overlapping done/stream frames.
     private var exploreCommandIds: Set<String> = []
 
+    private struct PendingExploreSend {
+        let text: String
+        let files: [ChatFileText]
+        let refs: [ExploreWorkspaceRef]
+        let skills: [ExploreSkillRef]
+    }
+    private var pendingSend: PendingExploreSend?
+
     weak var connection: ConnectionService?
 
     init(connection: ConnectionService) {
@@ -44,20 +54,28 @@ final class ExplorerChatStore: ObservableObject {
     /// Ask the Mac for the current list of explorer-chat sessions. Reply lands
     /// in `exploreSessions` via the `explore_session_list` handler.
     func exploreListSessions() {
-        connection?.sendEncodable(ExploreListSessions())
+        guard connection?.sendEncodable(ExploreListSessions()) == true else {
+            isPreparingSession = false
+        }
     }
 
     /// Load a session's full history into `exploreCurrent`. Reply arrives via
     /// `explore_session_history`.
     func exploreLoadSession(_ id: String) {
-        connection?.sendEncodable(ExploreLoadSession(sessionId: id))
+        guard connection?.sendEncodable(ExploreLoadSession(sessionId: id)) == true else {
+            isPreparingSession = false
+        }
     }
 
     /// Create a new session on the Mac. Reply (`explore_session_created`)
     /// resets `exploreCurrent` to the new id with empty history and refreshes
     /// the session list.
     func exploreNewSession() {
-        connection?.sendEncodable(ExploreNewSession())
+        guard connection?.sendEncodable(ExploreNewSession()) == true else {
+            isPreparingSession = false
+            return
+        }
+        isPreparingSession = true
     }
 
     /// Delete a session on the Mac and refresh the list.
@@ -165,10 +183,14 @@ final class ExplorerChatStore: ObservableObject {
                         ChatMessage(role: $0.role == "assistant" ? .assistant : .user, text: $0.content)
                     }
                 )
+                isPreparingSession = false
+                flushPendingSend()
             }
         case "explore_session_created":
             if let created = try? JSONDecoder().decode(ExploreSessionCreated.self, from: data) {
                 exploreCurrent = ExploreCurrentSession(id: created.sessionId, title: "New session", history: [])
+                isPreparingSession = false
+                flushPendingSend()
                 exploreListSessions()   // refresh the sidebar list
             }
         case "explore_session_renamed":
@@ -247,14 +269,42 @@ final class ExplorerChatStore: ObservableObject {
         exploreListSessions()
     }
 
+    /// Auto-select or create a Mac session so the send button works without
+    /// opening "Browse sessions" first.
+    func prepareSessionIfNeeded() {
+        guard connection?.connectionStatus == .connected else { return }
+        guard exploreCurrent == nil, !isPreparingSession, !isStreaming else { return }
+        isPreparingSession = true
+        exploreListSessions()
+    }
+
+    /// Queue a send until `exploreCurrent` is ready (auto-provision path).
+    func queueSendWhenReady(text: String, files: [ChatFileText] = [],
+                            refs: [ExploreWorkspaceRef] = [],
+                            skills: [ExploreSkillRef] = []) {
+        pendingSend = PendingExploreSend(text: text, files: files, refs: refs, skills: skills)
+        prepareSessionIfNeeded()
+        if exploreCurrent != nil { flushPendingSend() }
+    }
+
+    private func flushPendingSend() {
+        guard let pending = pendingSend, let id = exploreCurrent?.id else { return }
+        pendingSend = nil
+        sendExploreChat(pending.text, sessionId: id, files: pending.files,
+                        refs: pending.refs, skills: pending.skills)
+    }
+
     /// Pick the most recent Mac session (or create one) so the send button works
     /// without an extra "Browse sessions" step.
     private func ensureActiveSession(from sessions: [ExploreSessionSummary]) {
         guard exploreCurrent == nil, !isStreaming else { return }
+        isPreparingSession = true
         if let latest = sessions.max(by: { $0.lastUsedAt < $1.lastUsedAt }) {
             exploreLoadSession(latest.id)
         } else if connection?.connectionStatus == .connected {
             exploreNewSession()
+        } else {
+            isPreparingSession = false
         }
     }
 }

@@ -555,6 +555,35 @@ export function spawnCli(provider, prompt, { env, timeoutMs = CLI_TIMEOUT_MS, si
   });
 }
 
+/**
+ * Turn a raw execFile rejection from spawnCli into a short, user-safe message.
+ * Node's default err.message embeds the ENTIRE argv (including the prompt),
+ * which must never reach the UI — it looks like a shell injection failure and
+ * hides the real cause (usually "not logged in" on stdout).
+ */
+export function formatCliSpawnError(err, { bin = 'claude', apiKey, provider = 'anthropic' } = {}) {
+  const stdout = String(err?.stdout || '').trim();
+  const stderr = String(err?.stderr || '').trim();
+  const combined = `${stdout}\n${stderr}`.trim();
+  const providerLabel = provider === 'anthropic' ? 'Anthropic' : String(provider || 'model');
+
+  if (/not logged in|please run \/login/i.test(combined)) {
+    return `${bin} is not logged in. Run \`claude login\` in Terminal, or add a ${providerLabel} API key in LLM IDE → Settings → Model Providers.`;
+  }
+  if (err?.code === 'ENOENT') {
+    return `${bin} CLI not found. Install it and run \`claude login\`, or add a ${providerLabel} API key in Settings → Model Providers.`;
+  }
+  if (err?.killed || /ETIMEDOUT|timed out/i.test(combined)) {
+    return `${bin} timed out. Try again or add a ${providerLabel} API key in Settings → Model Providers.`;
+  }
+  if (combined) {
+    return redactWithKey(combined.slice(0, 300), apiKey);
+  }
+  // Never surface err.message — it contains the full command + prompt.
+  const exit = typeof err?.code === 'number' ? err.code : '?';
+  return `${bin} failed (exit ${exit}). Run \`claude login\` or add a ${providerLabel} API key in Settings → Model Providers.`;
+}
+
 /** Run a prompt through the provider's logged-in CLI, returning stdout. */
 export function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS } = {}) {
   const cfg = PROVIDERS[provider];
@@ -576,7 +605,7 @@ export function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS } = {})
       if (err.code === 'ENOENT') {
         throw new Error(`${bin} CLI not found — install it and log in, or add an API key in Settings → Model Providers.`);
       }
-      throw new Error(`${bin} error: ${String(err.stderr || err.message || '').slice(0, 200)}`);
+      throw new Error(formatCliSpawnError(err, { bin, provider }));
     },
   );
 }
