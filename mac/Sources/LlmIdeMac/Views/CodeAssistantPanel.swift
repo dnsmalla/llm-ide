@@ -1801,8 +1801,8 @@ struct CodeAssistantPanel: View {
     /// vertically (one glyph per line).  The chips truncate via
     /// `.lineLimit(1)` as a belt-and-braces guard.
     private var modelPickerChips: some View {
-        let currentTool = AICliTool(rawValue: selectedProvider) ?? .claudeCode
         let isCustom = selectedProvider.starts(with: "custom:")
+        let currentTool = !isCustom ? (AICliTool(rawValue: selectedProvider) ?? .claudeCode) : .claudeCode
         let currentProvider = isCustom
             ? customProviders.first(where: { "custom:\($0.id)" == selectedProvider })
             : nil
