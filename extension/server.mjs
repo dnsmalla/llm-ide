@@ -7,7 +7,6 @@ import fs from 'fs';
 import { handleKB } from './kb/router.mjs';
 import { handleAIRoutes } from './server/ai-routes.mjs';
 import { handleExportRoutes } from './server/export-routes.mjs';
-import { syncCustomProviders } from './server/custom-providers.mjs';
 
 import { logger, newRequestId } from './core/logger.mjs';
 import { authenticate, requireAdmin } from './server/auth.mjs';

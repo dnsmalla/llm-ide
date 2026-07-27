@@ -27,7 +27,7 @@ import { summarizeTranscript } from '../agents/summarize.mjs';
 import { classifyEmail } from '../agents/email-classify.mjs';
 import { runClaude } from '../agents/runtime.mjs';
 import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatModels, customBaseUrl } from '../agents/providers.mjs';
-import { handleCustomProvidersSync, syncCustomProviders } from '../server/custom-providers.mjs';
+import { handleCustomProvidersSync } from '../server/custom-providers.mjs';
 import { iterateUserMeetings } from './exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../agents/email-source.mjs';
