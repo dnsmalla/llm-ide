@@ -40,6 +40,7 @@ export const PROVIDERS = {
   openai:    { vaultKey: 'openai.apiKey',    env: 'OPENAI_API_KEY',      cli: 'codex'  },
   google:    { vaultKey: 'google.apiKey',    env: 'GOOGLE_API_KEY',      cli: 'gemini' },
   deepseek:  { vaultKey: 'deepseek.apiKey',  env: 'DEEPSEEK_API_KEY',    cli: null     },
+  glm:       { vaultKey: 'glm.apiKey',       env: 'GLM_API_KEY',         cli: null     },
   // Generic OpenAI-compatible endpoint — covers OpenRouter, Ollama/LM Studio
   // (local), Mistral, Together, etc. The base URL is user-supplied
   // (vault `custom.baseUrl`); it is NOT id-prefix routable, so callers must
@@ -149,6 +150,8 @@ export function customBaseUrl(userId) {
 // anthropic, the historical default.
 export function resolveProvider(model) {
   const m = typeof model === 'string' ? model.trim().toLowerCase() : '';
+  // Custom provider ID format: custom:uuid
+  if (/^custom:/.test(m)) return m;
   if (/^claude[-/]/.test(m)) return 'anthropic';
   if (/^(gpt[-_]|o\d|chatgpt|codex|text-davinci)/.test(m)) return 'openai';
   if (/^(gemini[-/]|models\/gemini)/.test(m)) return 'google';
@@ -288,13 +291,25 @@ async function callGoogle({ apiKey, model, prompt, maxTokens, signal }) {
 const API_ADAPTERS = { openai: callOpenAI, google: callGoogle, deepseek: callOpenAI, custom: callOpenAI };
 
 /**
+ * Custom provider routing: custom:uuid format holds the user-registered provider ID.
+ * Resolve to the base adapter (currently all custom providers use OpenAI-compatible format).
+ */
+function resolveAdapter(provider) {
+  if (provider?.startsWith('custom:')) {
+    // User-registered custom provider — use OpenAI-compatible adapter
+    return callOpenAI;
+  }
+  return API_ADAPTERS[provider];
+}
+
+/**
  * Run a prompt against a non-Anthropic provider over HTTP, with jittered
  * retry on transient status codes. Anthropic stays in runtime.mjs (its
  * prompt-caching / overflow handling is provider-specific). Throws on a
  * non-transient error or after exhausting retries.
  */
 export async function completeViaApi(provider, { apiKey, model, prompt, maxTokens = 8192, signal, baseUrl, meter, tools } = {}) {
-  const adapter = API_ADAPTERS[provider];
+  const adapter = resolveAdapter(provider);
   if (!adapter) throw new Error(`completeViaApi: unsupported provider '${provider}'`);
   if (!apiKey) throw new Error(`completeViaApi: no API key for ${provider}`);
   // SSRF guard for the custom OpenAI-compatible endpoint before any fetch.

@@ -44,6 +44,18 @@ struct BackendSettingsSection: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                         .disabled(!pathsDirty)
+                    if case .running = backend.status {
+                        Button("Kill & Restart") {
+                            backend.killExternalListener(port: 3456)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                backend.start(nodePath: config.backendNodePath,
+                                            workingDirectory: config.backendWorkingDir)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(theme.current.warning)
+                    }
                     actionButton
                 }
 

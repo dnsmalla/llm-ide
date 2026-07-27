@@ -471,6 +471,11 @@ final class BackendManager {
     /// ANY node process matching that pattern anywhere on the system —
     /// catastrophic for users running unrelated node servers. We now use
     /// `lsof -ti :<port>` to find the listener PID(s) and kill only those.
+    /// Public instance method to kill external listeners on a port (used by UI).
+    func killExternalListener(port: Int) {
+        Self.killExternalListener(port: port)
+    }
+
     nonisolated static func killExternalListener(port: Int) {
         // 1. Find PIDs listening on the port.
         let lsof = Process()

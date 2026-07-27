@@ -10,6 +10,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
     case copilot    = "copilot"
     case gemini     = "gemini"
     case deepseek   = "deepseek"
+    case glm        = "glm"
     case custom     = "custom"
 
     var id: String { rawValue }
@@ -22,7 +23,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
     /// running Claude. Cursor/Copilot stay hidden — they're editor tools, not
     /// direct API endpoints, so routing their gpt ids to the OpenAI API would
     /// misrepresent the source.
-    static var selectable: [AICliTool] { [.claudeCode, .openai, .gemini, .deepseek, .custom] }
+    static var selectable: [AICliTool] { [.claudeCode, .openai, .gemini, .deepseek, .glm, .custom] }
 
     /// Backend provider id this tool's models route to.
     var provider: String {
@@ -31,6 +32,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .openai, .copilot:      return "openai"
         case .gemini:                return "google"
         case .deepseek:              return "deepseek"
+        case .glm:                   return "glm"
         case .custom:                return "custom"
         case .cursor:                return "anthropic" // mixed; not selectable
         }
@@ -43,6 +45,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case "openai":    return "openai.apiKey"
         case "google":    return "google.apiKey"
         case "deepseek":  return "deepseek.apiKey"
+        case "glm":       return "glm.apiKey"
         case "custom":    return "custom.apiKey"
         default:          return nil
         }
@@ -56,6 +59,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .copilot:    return "GitHub Copilot"
         case .gemini:     return "Gemini"
         case .deepseek:   return "DeepSeek"
+        case .glm:        return "GLM"
         case .custom:     return "Custom"
         }
     }
@@ -68,6 +72,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .copilot:    return "chevron.left.forwardslash.chevron.right"
         case .gemini:     return "sparkles"
         case .deepseek:   return "brain.head.profile"
+        case .glm:        return "atom"
         case .custom:     return "network"
         }
     }
@@ -80,6 +85,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .copilot:    return "GitHub's AI coding assistant"
         case .gemini:     return "Google Gemini models (API key)"
         case .deepseek:   return "DeepSeek Chat and Reasoner models (API key)"
+        case .glm:        return "Zhipu GLM models (API key)"
         case .custom:     return "Any OpenAI-compatible endpoint (OpenRouter, Ollama, …)"
         }
     }
@@ -123,6 +129,13 @@ enum AICliTool: String, CaseIterable, Identifiable {
                 AIModel(id: "deepseek-chat",              displayName: "DeepSeek Chat"),
                 AIModel(id: "deepseek-reasoner",          displayName: "DeepSeek Reasoner"),
             ]
+        case .glm:
+            return [
+                AIModel(id: "glm-4-plus",                 displayName: "GLM-4 Plus"),
+                AIModel(id: "glm-4",                      displayName: "GLM-4"),
+                AIModel(id: "glm-4-vision",               displayName: "GLM-4 Vision"),
+                AIModel(id: "glm-3.5-turbo",              displayName: "GLM-3.5 Turbo"),
+            ]
         case .custom:
             // No built-in ids — the endpoint's models come from live discovery
             // (/kb/providers/models) or "Add model…".
@@ -143,6 +156,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .copilot:    return "gh copilot"
         case .gemini:     return "gemini"
         case .deepseek:   return ""   // no CLI subscription mode
+        case .glm:        return ""   // no CLI subscription mode
         case .custom:     return ""   // no CLI subscription mode
         }
     }
@@ -151,4 +165,74 @@ enum AICliTool: String, CaseIterable, Identifiable {
 struct AIModel: Identifiable, Hashable {
     let id: String
     let displayName: String
+}
+
+// MARK: - Custom Provider Support
+
+extension AICliTool {
+    /// All available providers: built-in + custom registered providers.
+    static var allProviders: [ProviderInfo] {
+        let builtin: [ProviderInfo] = [
+            ProviderInfo(type: .builtin(.claudeCode), displayName: "Claude", icon: "terminal.fill"),
+            ProviderInfo(type: .builtin(.openai), displayName: "OpenAI", icon: "cpu"),
+            ProviderInfo(type: .builtin(.gemini), displayName: "Gemini", icon: "sparkles"),
+            ProviderInfo(type: .builtin(.deepseek), displayName: "DeepSeek", icon: "brain.head.profile"),
+            ProviderInfo(type: .builtin(.custom), displayName: "Custom", icon: "network"),
+        ]
+        let custom = CustomProvider.loadAll()
+            .filter { $0.isEnabled }
+            .map { cp in
+                ProviderInfo(type: .custom(cp), displayName: cp.name, icon: "atom")
+            }
+        return builtin + custom
+    }
+
+    /// Get models for a provider (builtin or custom).
+    static func models(for provider: ProviderInfo) -> [AIModel] {
+        switch provider.type {
+        case .builtin(let tool):
+            return tool.models
+        case .custom(let custom):
+            return custom.models
+        }
+    }
+}
+
+/// Unified provider reference: either a built-in AICliTool or a CustomProvider.
+struct ProviderInfo: Identifiable {
+    enum ProviderType {
+        case builtin(AICliTool)
+        case custom(CustomProvider)
+    }
+
+    let type: ProviderType
+    let displayName: String
+    let icon: String
+
+    var id: String {
+        switch type {
+        case .builtin(let tool):
+            return "builtin:\(tool.rawValue)"
+        case .custom(let custom):
+            return "custom:\(custom.id)"
+        }
+    }
+
+    var provider: String {
+        switch type {
+        case .builtin(let tool):
+            return tool.provider
+        case .custom(let custom):
+            return "custom:\(custom.id)"
+        }
+    }
+
+    var vaultKey: String? {
+        switch type {
+        case .builtin(let tool):
+            return tool.vaultKey
+        case .custom(let custom):
+            return custom.apiKey
+        }
+    }
 }

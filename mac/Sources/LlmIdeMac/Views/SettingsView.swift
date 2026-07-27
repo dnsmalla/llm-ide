@@ -29,6 +29,7 @@ struct SettingsView: View {
                         UpdatesSettingsSection()
                         AboutSettingsSection()
                         MobileControlSettingsSection()
+                        CustomProvidersSection()
                     }
 
                     // Project-scoped settings — only visible when a project is

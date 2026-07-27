@@ -52,6 +52,17 @@ struct MobileControlSettingsSection: View {
                     HStack(spacing: Spacing.sm) {
                         statusPill
                         Spacer()
+                        if case .running = mobile.status {
+                            Button("Kill & Restart") {
+                                mobile.stop()
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                    mobile.start()
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .tint(theme.current.warning)
+                        }
                         actionButton
                     }
 
