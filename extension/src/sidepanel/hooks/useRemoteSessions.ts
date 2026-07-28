@@ -31,65 +31,34 @@ export function useRemoteSessions() {
 
   useEffect(() => {
     let active = true;
-    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    let reconnectAttempts = 0;
-    async function connect() {
-      try {
-        const url = await getServerUrl();
-        const res = await authFetch(`${url}/kb/live/sessions/stream`);
-        if (!res.ok || !res.body || !active) return;
+    // Poll the JSON list endpoint on a short cadence. An SSE stream at
+    // /kb/live/sessions/stream was attempted, but the server never implemented
+    // one — its GET /kb/live/sessions prefix-match returned one-shot JSON, so
+    // the reader parsed JSON as SSE, never saw a `data:` frame, and reconnected
+    // forever (RemoteSessionBanner never got data). Polling is simpler and
+    // fully covers a discovery banner's needs.
+    const loop = async () => {
+      if (!active) return;
+      await refresh();
+      if (active) timer = setTimeout(loop, 4000);
+    };
 
-        reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        reconnectAttempts = 0;
+    loop();
 
-        setLoading(false);
-
-        while (active) {
-          if (!reader) break;
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          let newlineIdx;
-          while ((newlineIdx = buffer.indexOf('\n\n')) >= 0) {
-            const chunk = buffer.slice(0, newlineIdx).trim();
-            buffer = buffer.slice(newlineIdx + 2);
-            if (chunk.startsWith('data: ')) {
-              try {
-                const payload = JSON.parse(chunk.slice(6));
-                if (active) setSessions(payload.sessions || []);
-              } catch {
-                /* ignore parse errors */
-              }
-            }
-          }
-        }
-      } catch {
-        reconnectAttempts += 1;
-      } finally {
-        if (active) {
-          const delay = Math.min(3000 * Math.pow(2, reconnectAttempts - 1), 30_000);
-          setTimeout(() => {
-            if (active) connect();
-          }, delay);
-        }
-      }
-    }
-
-    connect();
+    // Refresh immediately when the panel becomes visible again.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loop();
+    };
+    document.addEventListener('visibilitychange', onVisible);
 
     return () => {
       active = false;
-      try {
-        reader?.cancel().catch(() => {});
-      } catch {
-        /* reader already closed */
-      }
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
     };
-  }, []);
+  }, [refresh]);
 
   return { sessions, loading, refresh };
 }

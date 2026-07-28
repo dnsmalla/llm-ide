@@ -83,8 +83,11 @@ export async function handleLiveRoutes(req, res, ctx) {
     return true;
   }
 
-  // GET /kb/live/sessions
-  if (req.method === 'GET' && url.startsWith('/kb/live/sessions')) {
+  // GET /kb/live/sessions — exact match. (Prefix-matching here previously
+  // shadowed /kb/live/sessions/stream — a GET that the client once opened as
+  // SSE — returning one-shot JSON for it. Exact-match keeps the list endpoint
+  // precise and lets any /stream suffix fall through to the SSE handler below.)
+  if (req.method === 'GET' && url === '/kb/live/sessions') {
     sendJSON(res, 200, { sessions: listActiveSessions(userId) });
     return true;
   }
