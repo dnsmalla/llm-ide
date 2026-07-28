@@ -197,9 +197,27 @@ final class MobileWebSocketServer: @unchecked Sendable {
         }
     }
 
+    /// True only for a genuine `Heartbeat` frame.
+    ///
+    /// Decodes the `{type}` envelope and compares it to the heartbeat tag — NOT
+    /// `decode(Heartbeat.self)`. Like every SharedProtocol `let type = "…"`
+    /// struct with a synthesized `init(from:)`, `Heartbeat` reads `type` on
+    /// decode without VALIDATING it, so `decode(Heartbeat.self)` succeeds for
+    /// ANY JSON that has a `type` field and would swallow every chat / explorer
+    /// / auto-task frame as a heartbeat (the live bug: Mac showed nothing, no
+    /// reply, every surface, iPhone spun to timeout). `handleInbound` avoids
+    /// the same gotcha by dispatching on an envelope `{type}` + `switch`.
+    static func isHeartbeatFrame(_ data: Data) -> Bool {
+        struct Envelope: Decodable { let type: String }
+        guard let env = try? JSONDecoder().decode(Envelope.self, from: data) else { return false }
+        return env.type == MobileProtocol.Tag.heartbeat
+    }
+
     private func routeInbound(data: Data) {
         // Heartbeat is handled here; everything else is forwarded to the manager.
-        if (try? decoder.decode(Heartbeat.self, from: data)) != nil {
+        // Use the envelope `type` via `isHeartbeatFrame` — never
+        // `decode(Heartbeat.self)`, which greedily matches every typed frame.
+        if Self.isHeartbeatFrame(data) {
             Task { await self.send(HeartbeatAck(ts: Date().timeIntervalSince1970)) }
             return
         }
