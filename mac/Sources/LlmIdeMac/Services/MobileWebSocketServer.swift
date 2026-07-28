@@ -19,6 +19,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
     private let onLog: (String) -> Void
     private let onClientPaired: () -> Void
     private let onClientDisconnected: () -> Void
+    private let onBindFailed: (Error) -> Void
     private let queue = DispatchQueue(label: "llmide.mobile.ws")
     /// Shared decoder for inbound `Pairing`/`Heartbeat` frames. `JSONDecoder`
     /// is thread-safe for independent `decode(_:)` calls; all access here runs
@@ -35,7 +36,8 @@ final class MobileWebSocketServer: @unchecked Sendable {
          onInbound: @escaping InboundHandler,
          onLog: @escaping (String) -> Void,
          onClientPaired: @escaping () -> Void = {},
-         onClientDisconnected: @escaping () -> Void = {}) {
+         onClientDisconnected: @escaping () -> Void = {},
+         onBindFailed: @escaping (Error) -> Void = { _ in }) {
         self.port = port
         self.deviceName = deviceName
         self.validatePin = validatePin
@@ -43,6 +45,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
         self.onLog = onLog
         self.onClientPaired = onClientPaired
         self.onClientDisconnected = onClientDisconnected
+        self.onBindFailed = onBindFailed
     }
 
     func start() throws {
@@ -53,9 +56,33 @@ final class MobileWebSocketServer: @unchecked Sendable {
         params.defaultProtocolStack.applicationProtocols.insert(opts, at: 0)
         let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: UInt16(port))!)
         listener.newConnectionHandler = { [weak self] conn in self?.handle(conn) }
+        listener.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
+            switch state {
+            case .ready:
+                // Bind succeeded. Logging "listening" only here (not right
+                // after start()) because the socket bind resolves
+                // asynchronously — logging earlier would falsely report up.
+                self.onLog("WebSocket listening on :\(self.port)")
+            case .failed(let error):
+                // Bind failures — most often EADDRINUSE (another process
+                // squatting on the port, e.g. the retired computer-agent) —
+                // arrive HERE asynchronously, not as a throw from start().
+                // Surface it so the manager can crash with the actionable
+                // `lsof -i :3006` hint instead of silently reporting
+                // `.running` (root cause of the "Wrong PIN" misdiagnosis).
+                self.onLog("❌ Listener failed on :\(self.port) — \(error.localizedDescription)")
+                self.listener = nil
+                self.onBindFailed(error)
+            case .cancelled:
+                // Intentional stop() — not a failure.
+                break
+            default:
+                break
+            }
+        }
         self.listener = listener          // assign BEFORE start
         listener.start(queue: queue)
-        onLog("WebSocket listening on :\(port)")
     }
 
     func stop() {

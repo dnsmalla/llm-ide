@@ -144,15 +144,19 @@ final class MobileControlManager {
             },
             onClientDisconnected: { [weak self] in
                 Task { @MainActor [weak self] in self?.onMobileClientDisconnected() }
+            },
+            onBindFailed: { [weak self] error in
+                Task { @MainActor [weak self] in self?.reportMobileBindFailure(error) }
             }
         )
         do {
             try server.start()
         } catch {
-            // Actionable message for the common case — port :3006 already bound.
-            lastError = "Couldn't start the mobile server on port \(MobileProtocol.defaultPort) — another process may already be using it. Run `lsof -i :3006`, quit the other process, then press Start again. (\(error.localizedDescription))"
-            append(.stderr, "ERROR: \(error.localizedDescription)")
-            status = .crashed(exitCode: -1)
+            // Sync init-time failure (e.g. invalid NWParameters). The common
+            // port-in-use case is ASYNC (NWListener delivers EADDRINUSE via
+            // `.failed`), handled by `onBindFailed` above — this covers
+            // anything `NWListener(...)` throws at construction.
+            reportMobileBindFailure(error)
             return
         }
         self.server = server
@@ -232,6 +236,21 @@ final class MobileControlManager {
         advertiser?.stop()
         advertiser = nil
         status = .stopped
+    }
+
+    /// Report that the native WebSocket listener could not bind. The common
+    /// case is EADDRINUSE — another process (e.g. the retired computer-agent)
+    /// is squatting on `:3006`. `start()` cannot catch this synchronously
+    /// because `NWListener` delivers the bind failure asynchronously via
+    /// `.failed`; the server surfaces it through `onBindFailed`. Tear down
+    /// whatever `start()` optimistically stood up and crash loudly with the
+    /// actionable `lsof -i :3006` hint instead of a silent, phantom `.running`
+    /// — the root cause of the "Wrong PIN" misdiagnosis on the phone.
+    private func reportMobileBindFailure(_ error: Error) {
+        lastError = "Couldn't start the mobile server on port \(MobileProtocol.defaultPort) — another process may already be using it. Run `lsof -i :3006`, quit the other process, then press Start again. (\(error.localizedDescription))"
+        append(.stderr, "ERROR: mobile server bind failed: \(error.localizedDescription)")
+        stop()                              // idempotent: stops server/advertiser/watchers
+        status = .crashed(exitCode: -1)     // stop() sets .stopped; override to .crashed
     }
 
     func clearLog() {
