@@ -328,13 +328,31 @@ struct TranscriptView: View {
     @ViewBuilder
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("No captions yet.")
-                .font(Typography.bodyStrong)
-                .foregroundStyle(theme.current.textMuted)
-            Text("Start recording from the Chrome extension on Meet / Teams web, or click Start in this app while Zoom or Teams desktop has captions enabled.")
-                .font(Typography.caption)
-                .foregroundStyle(theme.current.textMuted)
-                .fixedSize(horizontal: false, vertical: true)
+            if capture.permissionLost {
+                Text("Accessibility permission was lost.")
+                    .font(Typography.bodyStrong)
+                    .foregroundStyle(theme.current.danger)
+                Text("Re-grant it in System Settings → Privacy & Security → Accessibility, then start recording again.")
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if capture.isRunning && capture.noSourceDetected {
+                Text("Recording — but no captions detected yet.")
+                    .font(Typography.bodyStrong)
+                    .foregroundStyle(theme.current.warning)
+                Text("Turn on captions in your meeting (Meet / Teams / Zoom) so LLM-IDE can read them.")
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("No captions yet.")
+                    .font(Typography.bodyStrong)
+                    .foregroundStyle(theme.current.textMuted)
+                Text("Start recording from the Chrome extension on Meet / Teams web, or click Start in this app while Zoom or Teams desktop has captions enabled.")
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.top, 24)
     }

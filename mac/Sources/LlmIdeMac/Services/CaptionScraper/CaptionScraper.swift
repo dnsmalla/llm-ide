@@ -58,6 +58,11 @@ final class CaptionOrchestrator: ObservableObject {
     /// like "Captions paused — Accessibility was revoked.  Re-grant
     /// in System Settings to resume."  Cleared on the next start().
     @Published private(set) var permissionLost: Bool = false
+    /// True when recording has run for a few seconds with no caption source
+    /// found (captions panel not open / not visible to AX). The transcript
+    /// pane surfaces this so the user doesn't stare at a silent red indicator
+    /// and a zero count with no explanation.
+    @Published private(set) var noSourceDetected: Bool = false
 
     enum IngestStatus: Equatable {
         case idle
@@ -101,6 +106,7 @@ final class CaptionOrchestrator: ObservableObject {
         guard !isRunning else { return }
         isRunning = true
         permissionLost = false
+        noSourceDetected = false
         // Mint a fresh session id every time recording starts.  Mirrors
         // the Chrome extension's `m-<base36-time>-<random>` shape so
         // the server treats both clients identically.
@@ -271,10 +277,18 @@ final class CaptionOrchestrator: ObservableObject {
         let scraper = scrapers.first(where: { $0.isAvailable() })
         guard let scraper else {
             activeSource = .unknown
+            // After a short grace period, flag that no caption source is
+            // visible to AX (captions not enabled/open in the meeting) so the
+            // transcript pane can say so instead of looking silently empty.
+            if captions.isEmpty, let started = startedAt,
+               Date().timeIntervalSince(started) > 8 {
+                noSourceDetected = true
+            }
             return
         }
         if activeSource != scraper.source {
             activeSource = scraper.source
+            noSourceDetected = false
             log.info("active scraper: \(scraper.source.rawValue, privacy: .public)")
         }
 
@@ -311,6 +325,7 @@ final class CaptionOrchestrator: ObservableObject {
         // after scheduling.
         if sawNew {
             lastNewCaptionAt = now
+            noSourceDetected = false
             if isIdlePolling { setPollCadence(idle: false) }
         } else if !isIdlePolling, now.timeIntervalSince(lastNewCaptionAt) > idleAfter {
             setPollCadence(idle: true)
