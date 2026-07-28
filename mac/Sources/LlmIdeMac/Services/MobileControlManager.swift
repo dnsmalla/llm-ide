@@ -386,6 +386,10 @@ final class MobileControlManager {
             } else {
                 let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
                 append(.stderr, "explore_search_files decode failed: \(preview)")
+                // Reply with an error so the phone clears its search spinner —
+                // it only resets isSearchingWorkspace on a search reply.
+                reply(ExploreSearchReply(workspaceRoot: nil, matches: [],
+                                         error: "Invalid file-search request from phone."))
             }
         case MobileProtocol.Tag.exploreSearchSkills:
             if let req = try? decoder.decode(ExploreSearchSkills.self, from: data) {
@@ -393,6 +397,8 @@ final class MobileControlManager {
             } else {
                 let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
                 append(.stderr, "explore_search_skills decode failed: \(preview)")
+                reply(ExploreSkillListReply(matches: [],
+                                            error: "Invalid skill-search request from phone."))
             }
         default:
             append(.info, "Unhandled explore type: \(type)")
@@ -472,6 +478,8 @@ final class MobileControlManager {
             } else {
                 let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
                 append(.stderr, "auto_task_toggle decode failed: \(preview)")
+                reply(CommandError(commandId: "auto_task_toggle",
+                                   message: "Invalid auto-task toggle request from phone."))
             }
         case MobileProtocol.Tag.autoTaskRun:
             // Trigger a global run (task == nil) or a single per-task manual
@@ -505,6 +513,8 @@ final class MobileControlManager {
             } else {
                 let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
                 append(.stderr, "auto_task_run decode failed: \(preview)")
+                reply(CommandError(commandId: "auto_task_run",
+                                   message: "Invalid auto-task run request from phone."))
             }
         case MobileProtocol.Tag.autoTaskStop:
             // `cancel()` is @MainActor-sync: cancels the in-flight `runTask`
@@ -881,7 +891,10 @@ final class MobileControlManager {
     }
 
     private func handleLlmIdeCancel(data: Data) {
-        guard let m = try? decoder.decode(LlmIdeCancel.self, from: data) else { return }
+        guard let m = try? decoder.decode(LlmIdeCancel.self, from: data) else {
+            append(.stderr, "llmide_cancel decode failed")
+            return
+        }
         append(.info, "llmide_cancel \(m.commandId.prefix(8))")
         cancelMobileInflightTask(commandId: m.commandId)
     }
@@ -917,7 +930,10 @@ final class MobileControlManager {
     }
 
     private func handleExploreCancel(data: Data) {
-        guard let m = try? decoder.decode(ExploreCancel.self, from: data) else { return }
+        guard let m = try? decoder.decode(ExploreCancel.self, from: data) else {
+            append(.stderr, "explore_cancel decode failed")
+            return
+        }
         append(.info, "explore_cancel \(m.commandId.prefix(8))")
         cancelMobileInflightTask(commandId: m.commandId)
     }
