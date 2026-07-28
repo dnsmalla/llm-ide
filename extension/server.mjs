@@ -215,7 +215,12 @@ function setCORS(req, res) {
     res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
-  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+  // Advertise the mutating verbs too: several routes are PATCH/DELETE/PUT-only
+  // (chat sessions, issue-schedule, usage/limits, personas). Without these, a
+  // browser/extension-origin preflight rejects them. The origin allowlist above
+  // is unchanged — this only permits methods for already-allowed origins.
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Max-Age', '600');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Request-ID');
   res.setHeader('Access-Control-Expose-Headers', 'X-Request-ID');
   // Security headers — minimal but meaningful for an API server.
