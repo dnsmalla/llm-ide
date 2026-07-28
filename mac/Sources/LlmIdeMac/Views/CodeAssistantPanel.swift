@@ -166,8 +166,6 @@ struct CodeAssistantPanel: View {
     @StateObject private var session = CodeAssistantSession()
     /// Cursor-style "/" (command/skill) + "@" (file) autocomplete for the input.
     @StateObject private var completion = CompletionController()
-    /// Web search enhancement: history and caching
-    @StateObject private var webSearch = WebSearchService()
     /// Voice input service — SFSpeechRecognizer + mic tap for freeform dictation
     @State var voiceService = VoiceInputService()
     /// Voice UI state — recording, interim text, errors
