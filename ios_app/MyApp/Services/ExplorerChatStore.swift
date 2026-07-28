@@ -124,11 +124,9 @@ final class ExplorerChatStore: ObservableObject {
                                history: chatHistory, files: files, refs: refs, skills: skills)
         if let data = try? JSONEncoder().encode(chat),
            let str = String(data: data, encoding: .utf8) {
-            print("📤 Sending ExploreChat: \(str.prefix(150))...")
             connection?.sendTextFrame(str)
         } else {
             connection?.errorMessage = "Failed to encode explore chat message"
-            print("❌ Failed to encode ExploreChat")
         }
     }
 
