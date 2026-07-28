@@ -246,6 +246,17 @@ export async function handlePlanningRoutes(req, res, ctx) {
       });
       sendJSON(res, 200, result);
     } catch (err) {
+      // Roll back the consumed review so the failure is visible and
+      // recoverable — otherwise it stays 'executed' (falsely) and the CAS
+      // above already consumed the 'approved' slot, so the dispatch can't be
+      // retried. Mirrors /kb/review/approve's own failure handling. Only
+      // non-preview dispatch consumes a review.
+      if (target !== 'preview' && body.reviewId) {
+        kb.setReviewStatus(userId, String(body.reviewId), {
+          status: 'failed',
+          result: { error: err.message || 'Dispatch failed' },
+        });
+      }
       sendJSON(res, 400, { error: { code: 'DISPATCH_FAILED', message: err.message || 'Dispatch failed' } });
     }
     return true;
