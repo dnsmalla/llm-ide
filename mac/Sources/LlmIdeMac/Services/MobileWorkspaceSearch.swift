@@ -92,7 +92,7 @@ enum MobileWorkspaceSearch {
 
     // MARK: - Path safety
 
-    static func resolveURL(path: String, under root: URL) -> URL? {
+    private static func resolveURL(path: String, under root: URL) -> URL? {
         let cleaned = path.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard !cleaned.isEmpty, !cleaned.contains("..") else { return nil }
