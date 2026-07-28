@@ -246,6 +246,19 @@ struct CodeAssistantPanel: View {
             .onChange(of: history) { oldValue, newValue in
                 handleHistoryChange(oldValue: oldValue, newValue: newValue)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .explorerChatTranscriptChanged)) { note in
+                // An iPhone explore_chat persisted a turn to this session —
+                // reload so the Mac panel shows it (and so the panel's own
+                // persistCurrentChat can't clobber it with a stale in-memory
+                // copy). The explorer-panel twin of LlmChatSheet's
+                // .llmChatTranscriptChanged handling.
+                guard let sid = note.object as? String, sid == currentSessionIDString,
+                      let uid = UUID(uuidString: sid),
+                      let session = ChatSessionStore.load(id: uid),
+                      session.scope == scope else { return }
+                history = session.history
+                rebuildSentPrompts(from: session.history)
+            }
             .onChange(of: config.activeCLI) { _, _ in
                 selectedModel = config.defaultModelId
             }

@@ -39,6 +39,12 @@ extension Notification.Name {
     /// send or iPhone `llmide_chat` proxy). LlmChatSheet reloads history.
     static let llmChatTranscriptChanged = Notification.Name("llmChatTranscriptChanged")
 
+    /// Posted after a mobile `explore_chat` turn is persisted to a Mac explorer
+    /// session. `object` is the session UUID string; `CodeAssistantPanel`
+    /// observes it to reload the open chat so iPhone-originated turns appear on
+    /// the Mac (the explorer-panel twin of `llmChatTranscriptChanged`).
+    static let explorerChatTranscriptChanged = Notification.Name("explorerChatTranscriptChanged")
+
     // MARK: - Library / meetings
 
     /// Posted by LibraryRow when the user requests an action on a
