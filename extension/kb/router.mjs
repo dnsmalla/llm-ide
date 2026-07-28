@@ -192,7 +192,7 @@ export async function handleKB(req, res) {
         : 20;
       
       // Search for tickets matching the filter criteria
-      const allTickets = kb.search(userId, { kind: 'ticket', limit: 1000 });
+      const allTickets = kb.search(userId, { kind: 'ticket', limit: 1000, maxCap: 1000 });
       
       // Filter by provider, repo, and state
       const filtered = allTickets.filter(t => {

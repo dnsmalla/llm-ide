@@ -146,10 +146,13 @@ export {
 // entities, sources, plans, plan_tasks, outcomes) so an FTS hit that
 // matches the index but belongs to another user won't survive
 // hydration.
-export function search(userId, { q, kind, limit = 20, projectId } = {}) {
+export function search(userId, { q, kind, limit = 20, projectId, maxCap = 100 } = {}) {
   requireUser(userId);
   const db = getDb();
-  const cap = Math.max(1, Math.min(100, Number(limit) || 20));
+  // `maxCap` lets a caller that needs a fuller corpus (e.g. /kb/issues, which
+  // pulls the whole ticket set to filter by provider/repo/state) raise the
+  // safety ceiling above the default 100 without unbounded result hydration.
+  const cap = Math.max(1, Math.min(maxCap, Number(limit) || 20));
 
   // Plain "list everything" path — used by the History pane when the search
   // box is empty.  We don't hit FTS at all so empty queries are O(rows).
