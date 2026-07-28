@@ -48,7 +48,7 @@ struct HelpView: View {
                         • Mobile Control must show Running on the Mac (Settings → Mobile Control).
                         • Same Wi-Fi or Tailscale; guest/corporate Wi-Fi often blocks Bonjour — use Direct IP + PIN.
                         • Wrong PIN? Copy it again from Mac Settings → Mobile Control.
-                        • Port :3006 busy? Stop any old computer-agent process: lsof -i :3006
+                        • Port :3006 busy? Another process may be using it — on the Mac run `lsof -i :3006`, quit it, then restart Mobile Control.
                         """
                     )
                 }
