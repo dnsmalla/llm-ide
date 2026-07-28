@@ -2132,14 +2132,13 @@ struct CodeAssistantPanel: View {
             let ancestor = commonAncestor(items.map { $0.path })
             return .init(name: folder, path: ancestor.isEmpty ? nil : homeRelativePath(ancestor))
         }
-        // NOTE: `recentIssues` is still populated by the issue-polling
-        // flow that reads `config.gitLabSavedProjects.first(where: { $0.isActive })`
-        // (see refreshRecentIssuesOnce and call sites around lines 197/306/
-        // 358/720/1214). If the legacy GitLab "active" project diverges from
-        // `projectStore.activeProject.linkedRepo`, the agent sees a mismatched
-        // (activeProject, recentIssues) pair. Acceptable for Phase 1 because
-        // most users will run the migrator and end up consistent; rewiring
-        // the polling sites is tracked as a Phase 2 follow-up.
+        // NOTE: `recentIssues` is populated by the issue-polling flow
+        // (refreshRecentIssuesOnce) which reads the legacy Settings-active
+        // project (config.gitLabSavedProjects / gitHubSavedRepos). When that
+        // diverges from the workspace's linkedRepo (the activeProject above),
+        // refreshRecentIssuesOnce now clears recentIssues rather than serving
+        // another project's issues. Fetching issues for the workspace-linkedRepo
+        // project itself (GitLab URL→id resolution) is the remaining Phase 2 work.
         // The folder open in the Explorer — the server scopes its read-only
         // file tools (list-files / read-file) to this root + the indexed repos,
         // so "find the README and review it" can resolve a real file.
@@ -2213,9 +2212,20 @@ struct CodeAssistantPanel: View {
 
     func refreshRecentIssuesOnce() async {
         // Determine the active project and its provider
-        guard let activeProject = Self.deriveActiveProject(from: projectStore.activeProject)
-            ?? Self.deriveActiveProject(fromConfig: config),
+        let workspaceProject = Self.deriveActiveProject(from: projectStore.activeProject)
+        let configProject = Self.deriveActiveProject(fromConfig: config)
+        guard let activeProject = workspaceProject ?? configProject,
               let provider = activeProject.provider else {
+            recentIssues = []
+            return
+        }
+        // If the workspace's linkedRepo is the active project and it isn't the
+        // same as the legacy Settings-active project, the config-based fetch
+        // below would hand the agent a DIFFERENT project's issues (mismatched
+        // context). Clear rather than serve wrong data; resolving the workspace
+        // GitLab URL→id for a proper fetch is the remaining Phase 2 work.
+        if let workspaceProject, let configProject,
+           workspaceProject.url != configProject.url {
             recentIssues = []
             return
         }
