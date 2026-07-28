@@ -1,5 +1,5 @@
 import XCTest
-@testable import SharedProtocol
+import SharedProtocol
 
 final class ConnectionMessagesTests: XCTestCase {
     private func roundTrip<T: Codable & Equatable>(_ value: T) throws -> T {

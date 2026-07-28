@@ -218,7 +218,6 @@ final class ConnectionService: ObservableObject {
         onSendFailure: ((String) -> Void)? = nil
     ) -> Bool {
         guard connectionStatus == .connected, webSocketTask != nil else {
-            print("❌ sendEncodable failed: not connected (status=\(connectionStatus))")
             if userFacing {
                 errorMessage = connectionStatus == .connecting
                     ? "Still connecting to your Mac — wait for Live status, then try again."
@@ -228,13 +227,11 @@ final class ConnectionService: ObservableObject {
         }
         guard let data = try? JSONEncoder().encode(payload),
               let str = String(data: data, encoding: .utf8) else {
-            print("❌ sendEncodable failed: encoding error")
             if userFacing {
                 errorMessage = "Couldn't encode the request — try again."
             }
             return false
         }
-        print("📤 sendEncodable: \(str.prefix(80))...")
         sendTextFrame(str, userFacing: userFacing, onSendFailure: onSendFailure)
         return true
     }
@@ -248,24 +245,19 @@ final class ConnectionService: ObservableObject {
         onSendFailure: ((String) -> Void)? = nil
     ) {
         guard let task = webSocketTask else {
-            print("❌ sendTextFrame: no webSocketTask")
             if userFacing {
                 errorMessage = "Not connected to your Mac — reconnect from Settings."
             }
             return
         }
-        print("📤 Sending \(string.count) bytes via WebSocket")
         task.send(.string(string)) { [weak self] err in
             if let err {
-                print("❌ WebSocket send error: \(err.localizedDescription)")
                 Task { @MainActor in
                     guard let self else { return }
                     let message = "Couldn't reach your Mac — check the connection and try again."
                     if userFacing { self.errorMessage = message }
                     onSendFailure?(message)
                 }
-            } else {
-                print("✅ Message sent successfully")
             }
         }
     }
@@ -314,11 +306,9 @@ final class ConnectionService: ObservableObject {
     private func handleMessage(_ str: String) {
         guard let data = str.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            print("❌ handleMessage: invalid JSON: \(str.prefix(100))")
             return
         }
         let type = json["type"] as? String ?? ""
-        print("📨 iOS received type='\(type)': \(str.prefix(100))...")
         switch type {
         case "connected":
             connectionStatus = .connected

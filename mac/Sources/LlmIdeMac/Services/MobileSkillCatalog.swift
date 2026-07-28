@@ -49,20 +49,6 @@ enum MobileSkillCatalog {
         return entries
     }
 
-    static func search(query: String, api: LlmIdeAPIClient, limit: Int = defaultLimit) async -> [ExploreSkillEntry] {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return [] }
-        let all = await buildEntries(api: api)
-        let cap = min(max(limit, 1), 80)
-        return all.filter { entry in
-            entry.name.lowercased().contains(q)
-                || entry.description.lowercased().contains(q)
-                || entry.id.lowercased().contains(q)
-        }
-        .prefix(cap)
-        .map { $0 }
-    }
-
     /// Split selected skills into library ids (server channel) and directive prefixes.
     static func resolveMessage(_ text: String, skills: [ExploreSkillRef]) -> (message: String, skillIds: [String]) {
         let directives = skills.filter { $0.kind == "directive" }.compactMap(\.directive)

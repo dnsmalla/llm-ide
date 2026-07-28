@@ -292,11 +292,6 @@ final class AutoTaskStore: ObservableObject {
         }
     }
 
-    /// Show task tabs immediately (before the Mac log snapshot arrives).
-    func seedLogGroupsFromStateIfNeeded() {
-        seedLogGroupsFromState()
-    }
-
     private func seedLogGroupsFromState() {
         guard let tasks = autoTaskState?.tasks, !tasks.isEmpty else { return }
         if autoTaskLogGroups.isEmpty {

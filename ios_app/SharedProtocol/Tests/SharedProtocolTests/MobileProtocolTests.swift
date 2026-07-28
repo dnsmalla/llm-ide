@@ -1,5 +1,5 @@
 import XCTest
-@testable import SharedProtocol
+import SharedProtocol
 
 final class MobileProtocolTests: XCTestCase {
     func testServiceTypeMatchesLlmIde() {
