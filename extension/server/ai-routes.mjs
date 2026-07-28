@@ -585,6 +585,17 @@ export async function handleAIRoutes(req, res) {
       Spanish: { conflict: 'Conflictos', confirm: 'Requiere confirmación', explain: 'Requiere más detalle' },
       French: { conflict: 'Conflits', confirm: 'À confirmer', explain: 'À préciser' },
       German: { conflict: 'Konflikte', confirm: 'Zu bestätigen', explain: 'Zu erläutern' },
+      Hindi: { conflict: 'विरोधाभास', confirm: 'पुष्टि आवश्यक', explain: 'अधिक स्पष्टीकरण आवश्यक' },
+      Nepali: { conflict: 'विरोधाभास', confirm: 'पुष्टि आवश्यक', explain: 'थप स्पष्टीकरण आवश्यक' },
+      'Brazilian Portuguese': { conflict: 'Conflitos', confirm: 'Requer confirmação', explain: 'Requer mais detalhes' },
+      Italian: { conflict: 'Conflitti', confirm: 'Da confermare', explain: 'Da chiarire' },
+      Russian: { conflict: 'Противоречия', confirm: 'Требует подтверждения', explain: 'Требует уточнения' },
+      Arabic: { conflict: 'تعارضات', confirm: 'بحاجة إلى تأكيد', explain: 'بحاجة إلى مزيد من التوضيح' },
+      Thai: { conflict: 'ความขัดแย้ง', confirm: 'ต้องได้รับการยืนยัน', explain: 'ต้องมีคำอธิบายเพิ่มเติม' },
+      Vietnamese: { conflict: 'Xung đột', confirm: 'Cần xác nhận', explain: 'Cần giải thích thêm' },
+      Indonesian: { conflict: 'Konflik', confirm: 'Perlu dikonfirmasi', explain: 'Perlu penjelasan lebih lanjut' },
+      Malay: { conflict: 'Konflik', confirm: 'Perlu disahkan', explain: 'Perlu penjelasan lanjutan' },
+      Filipino: { conflict: 'Mga salungatan', confirm: 'Kailangang kumpirmahin', explain: 'Kailangan ng karagdagang paliwanag' },
     };
     const defaultHeadings = { conflict: 'Conflicts', confirm: 'Needs confirmation', explain: 'Needs more explanation' };
     const headings = (lang.name && HEADING_LABELS[lang.name]) || defaultHeadings;
