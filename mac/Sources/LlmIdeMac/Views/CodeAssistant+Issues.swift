@@ -90,10 +90,4 @@ extension CodeAssistantPanel {
             return .failure(error.localizedDescription)
         }
     }
-
-    func confirmListIssues(_ args: ListIssuesSheetArgs) {
-        showingListIssuesSheet = false
-        pendingTool = nil
-        // No synthetic turn — list-issues is purely for the agent's context
-    }
 }

@@ -3,30 +3,6 @@ import SwiftUI
 extension CodeAssistantPanel {
     // Note: branchSheetContext @State property is in the main file
 
-    private var showingCreateBranchSheetContent: some View {
-        Group {
-            if let pt = pendingTool, let args = pt.createBranchArgs {
-                BranchCreationSheet(
-                    initialArgs: BranchCreationSheet.CreateBranchArgs(
-                        branch: args.branch,
-                        startPoint: args.startPoint
-                    ),
-                    currentBranch: branchSheetContext?.currentBranch,
-                    onConfirm: { editedArgs in
-                        await confirmBranchCreation(editedArgs)
-                    }
-                )
-            } else {
-                VStack(spacing: 12) {
-                    Text("Branch creation unavailable.")
-                        .font(.system(size: 13))
-                    Button("Close") { showingCreateBranchSheet = false }
-                }
-                    .padding(20)
-            }
-        }
-    }
-
     // MARK: - Branch creation
 
     func confirmBranchCreation(_ args: BranchCreationSheet.Args) async -> BranchCreationSheet.ConfirmResult {

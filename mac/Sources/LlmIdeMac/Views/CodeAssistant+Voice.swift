@@ -113,13 +113,4 @@ extension CodeAssistantPanel {
             }
         }
     }
-
-    // MARK: - Keyboard Shortcuts
-
-    /// Register keyboard shortcuts: Cmd+M for voice, Alt+arrows for mobile.
-    func setupKeyboardShortcuts() {
-        // Note: SwiftUI's .keyboardShortcut modifier is used on buttons (see voiceControlButton).
-        // For modifier combinations (Alt+arrows), we need NSEvent monitoring in the sheet/panel.
-        // This is handled via the parent view's event handlers in CodeAssistantPanel.
-    }
 }

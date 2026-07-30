@@ -1910,20 +1910,6 @@ struct CodeAssistantPanel: View {
         .help(editMode.help)
         .fixedSize()
     }
-
-    /// Aggressive truncation for the model label in compact panels —
-    /// "Sonnet 4.6" → "S4.6", "Opus 4.7" → "O4.7". Keeps the chip on
-    /// a single short capsule instead of clipping mid-glyph.
-    private func shortModelLabel(for cli: AICliTool) -> String {
-        let full = currentModelDisplayName(for: cli)
-        // Match a leading word + trailing number/version (e.g. "Sonnet 4.6").
-        let parts = full.split(separator: " ")
-        if parts.count >= 2, let first = parts.first?.first {
-            return "\(first)\(parts.dropFirst().joined())"
-        }
-        return String(full.prefix(6))
-    }
-
     private func currentModelDisplayName(for cli: AICliTool) -> String {
         let models = modelsFor(cli)
         return models.first(where: { $0.id == selectedModel })?.displayName
