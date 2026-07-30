@@ -10,6 +10,32 @@ enum KeychainStore {
     private static let legacyService = "com.meetnotes.macapp"
     private static let log = Logger(subsystem: "com.llmide.macapp", category: "Keychain")
 
+    /// In-memory cache for the current app session. Keychain reads can trigger
+    /// a macOS password dialog (especially after ad-hoc re-signs); we read once
+    /// at launch and serve from RAM until the process exits.
+    private static var sessionCache: [String: String] = [:]
+    private static var sessionMisses: Set<String> = []
+    private static let cacheLock = NSLock()
+
+    // MARK: - Session warm-up
+
+    /// Prefetch the secrets this process needs so keychain UI appears at most
+    /// once per item during launch, not on every Settings refresh or API call.
+    static func warmSessionCache(refreshTokenHost: String, gitLabHost: String) {
+        _ = loadToken(host: refreshTokenHost)
+        _ = loadGitLabToken(host: gitLabHost)
+        _ = loadGitHubToken()
+        MobilePin.warmCache()
+    }
+
+    private static func clearSessionCache() {
+        cacheLock.lock()
+        sessionCache.removeAll(keepingCapacity: false)
+        sessionMisses.removeAll(keepingCapacity: false)
+        cacheLock.unlock()
+        MobilePin.clearSessionCache()
+    }
+
     // MARK: - JWT refresh token (existing pattern placeholder)
 
     static func saveToken(_ token: String, host: String) {
@@ -76,6 +102,7 @@ enum KeychainStore {
         if status != errSecSuccess && status != errSecItemNotFound {
             log.error("KeychainStore.logout failed: OSStatus \(status, privacy: .public)")
         }
+        clearSessionCache()
         // Wipe the saved-projects list so the next user of this Mac
         // can't see what repos the previous user had connected.
         AppConfig.shared.gitLabSavedProjects = []
@@ -86,6 +113,11 @@ enum KeychainStore {
 
     @discardableResult
     private static func save(_ value: String, account: String) -> Bool {
+        cacheLock.lock()
+        sessionCache[account] = value
+        sessionMisses.remove(account)
+        cacheLock.unlock()
+
         guard let data = value.data(using: .utf8) else { return false }
         // Update-in-place first, add only if absent. The old delete-then-add
         // had a window where a failed SecItemAdd left the account with NO
@@ -113,16 +145,36 @@ enum KeychainStore {
     }
 
     private static func load(account: String) -> String? {
-        if let v = load(account: account, service: service) { return v }
+        cacheLock.lock()
+        if let cached = sessionCache[account] {
+            cacheLock.unlock()
+            return cached
+        }
+        if sessionMisses.contains(account) {
+            cacheLock.unlock()
+            return nil
+        }
+        cacheLock.unlock()
+
+        if let v = loadFromKeychain(account: account, service: service) {
+            cacheLock.lock()
+            sessionCache[account] = v
+            cacheLock.unlock()
+            return v
+        }
         // Fallback: migrate a value stored under the old MeetNotes service id.
-        if let legacy = load(account: account, service: legacyService) {
+        if let legacy = loadFromKeychain(account: account, service: legacyService) {
             save(legacy, account: account)   // copy forward under the new id
             return legacy
         }
+
+        cacheLock.lock()
+        sessionMisses.insert(account)
+        cacheLock.unlock()
         return nil
     }
 
-    private static func load(account: String, service: String) -> String? {
+    private static func loadFromKeychain(account: String, service: String) -> String? {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
@@ -137,6 +189,11 @@ enum KeychainStore {
     }
 
     private static func delete(account: String) {
+        cacheLock.lock()
+        sessionCache.removeValue(forKey: account)
+        sessionMisses.insert(account)
+        cacheLock.unlock()
+
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,

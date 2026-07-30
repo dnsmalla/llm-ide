@@ -61,6 +61,9 @@ public struct LlmIdeMacApp: App {
         // SwiftUI requires it.  The API client needs SessionStore
         // so it can mint authorization headers from the live token.
         let cfg = AppConfig.shared
+        KeychainStore.warmSessionCache(
+            refreshTokenHost: cfg.serverURL,
+            gitLabHost: cfg.gitLabBaseURL)
         let store = SessionStore(server: cfg.serverURL)
         let client = LlmIdeAPIClient(baseURL: cfg.serverURL, sessionStore: store)
         // Honour the user's Capture → poll-interval setting (stored in ms).

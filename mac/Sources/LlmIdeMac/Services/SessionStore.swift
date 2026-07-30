@@ -28,17 +28,18 @@ final class SessionStore: ObservableObject {
     private var refreshTask: Task<Bool, Never>?
     private var refreshSlot: UInt64 = 0
     private let host: String
+    /// Snapshot taken once at init so launch gating doesn't re-query Keychain.
+    private let storedSessionAtLaunch: Bool
 
     var isAuthenticated: Bool { accessToken != nil && user != nil }
 
-    /// Whether a refresh token is persisted — i.e. there's a session worth
-    /// waiting for the backend to come up to restore on launch. When false,
-    /// the launch path skips the backend-readiness wait and shows login
-    /// immediately (LoginView auto-retries once the backend reports `.running`).
-    var hasStoredSession: Bool { KeychainStore.loadToken(host: host) != nil }
+    /// Whether a refresh token was persisted at app launch — used to decide
+    /// whether to wait for the backend on cold start. Does not re-read Keychain.
+    var hasStoredSession: Bool { storedSessionAtLaunch }
 
     init(server: String) {
         self.host = server
+        self.storedSessionAtLaunch = KeychainStore.loadToken(host: server) != nil
     }
 
     func bootstrap(api: LlmIdeAPIClient) async {

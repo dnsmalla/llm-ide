@@ -20,6 +20,22 @@ enum MobilePin {
     static let account = "mobile::pin"
     private static let log = Logger(subsystem: "com.llmide.macapp", category: "MobilePin")
 
+    /// Cached for the app session so Settings refresh / scene-phase probes
+    /// don't re-hit the Keychain (and re-prompt for the login password).
+    private static var sessionPin: String?
+    private static let cacheLock = NSLock()
+
+    /// Load the PIN into the session cache. Called from `KeychainStore.warmSessionCache`.
+    static func warmCache() {
+        _ = read()
+    }
+
+    static func clearSessionCache() {
+        cacheLock.lock()
+        sessionPin = nil
+        cacheLock.unlock()
+    }
+
     /// Returns the stored PIN, generating and persisting a fresh one on first call.
     static func ensure() throws -> String {
         if let existing = read() { return existing }
@@ -28,6 +44,13 @@ enum MobilePin {
 
     /// Reads the stored PIN, or nil if none.
     static func read() -> String? {
+        cacheLock.lock()
+        if let cached = sessionPin {
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
+
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
@@ -37,8 +60,13 @@ enum MobilePin {
         ]
         var result: AnyObject?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+              let data = result as? Data,
+              let pin = String(data: data, encoding: .utf8) else { return nil }
+
+        cacheLock.lock()
+        sessionPin = pin
+        cacheLock.unlock()
+        return pin
     }
 
     /// Generates a new random 6-digit PIN, overwrites any stored PIN, returns it.
@@ -48,6 +76,9 @@ enum MobilePin {
         let n = Int.random(in: 0...999_999, using: &rng)
         let pin = String(format: "%06d", n)
         try write(pin)
+        cacheLock.lock()
+        sessionPin = pin
+        cacheLock.unlock()
         return pin
     }
 
