@@ -58,6 +58,12 @@ final class AutoCodeUpdateService: ObservableObject {
     /// `weak var config` pattern on `RegressionRunner`.
     weak var activity: ActivityStore?
 
+    /// Notes folder + indexer for the Source Update pipeline task. Wired from
+    /// `AppShell` when `AppEnvironment` is created for the active project.
+    weak var environment: AppEnvironment?
+
+    private let repoManager = RepoManager()
+
     private var timer: Timer?
     /// Test/observability hook: true while the auto-run timer is armed.
     var isAutoTimerArmed: Bool { timer != nil }
@@ -202,67 +208,94 @@ final class AutoCodeUpdateService: ObservableObject {
             currentStep = nil
             lastRunDate = Date()
         }
-        guard let resolved = resolveBackendAndProject() else {
-            let reason = lastResolveDiagnosis ?? "No linked repo — configure in GitLab or GitHub settings"
-            statusMessage = "No linked repo"
-            logStore.append(task, "⚠ \(reason)", level: .error)
-            return
-        }
         guard let logDir = logsDirectory() else {
             statusMessage = "Logs directory unavailable"
             return
         }
-        await runTaskBody(task, resolved: resolved, logDir: logDir)
+        if task.requiresLinkedRepo {
+            guard let resolved = resolveBackendAndProject() else {
+                let reason = lastResolveDiagnosis ?? "No linked repo — configure in GitLab or GitHub settings"
+                statusMessage = "No linked repo"
+                logStore.append(task, "⚠ \(reason)", level: .error)
+                taskErrors[task.rawValue] = reason
+                return
+            }
+            await runTaskBody(task, resolved: resolved, logDir: logDir)
+        } else {
+            await runTaskBody(task, resolved: nil, logDir: logDir)
+        }
         statusMessage = "\(task.label) — done"
     }
 
     /// Run a single task body. Called by the orchestrator `run()` (enabled
     /// tasks) and by `runOne(_:)` (per-task manual run). Each case logs a start
     /// marker and routes its output into `logStore[task]`.
-    private func runTaskBody(_ task: AutoTask, resolved: ResolvedRepo, logDir: URL) async {
+    private func runTaskBody(_ task: AutoTask, resolved: ResolvedRepo?, logDir: URL) async {
         logStore.append(task, "Running \(task.label)…")
         currentTask = task
         defer { currentTask = nil }
         switch task {
-        case .reviewCode:
-            currentStep = "Running Review Code"
-            let ok = await runCLI(prompt: config.autoTaskTemplateReviewCode,
-                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix,
-                                  logDir: logDir, task: task)
-            finishPromptTask(task, ok: ok)
-        case .reviewDoc:
-            currentStep = "Running Review Doc"
-            let ok = await runCLI(prompt: config.autoTaskTemplateReviewDoc,
-                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix,
-                                  logDir: logDir, task: task)
-            finishPromptTask(task, ok: ok)
-        case .reviewConflicts:
-            currentStep = "Running Review Conflicts"
-            let ok = await runCLI(prompt: config.autoTaskTemplateReviewConflicts,
-                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix,
-                                  logDir: logDir, task: task)
-            finishPromptTask(task, ok: ok)
-        case .generateDoc:
-            currentStep = "Generating Documentation"
-            let ok = await runCLI(prompt: config.autoTaskTemplateGenerateDoc,
-                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix,
-                                  logDir: logDir, task: task)
-            finishPromptTask(task, ok: ok)
-        case .updateIssues:
-            currentStep = "Updating Issues"
-            let ok = await runCLI(prompt: config.autoTaskTemplateUpdateIssues,
-                                  localPath: resolved.gitRoot, logSuffix: task.logSuffix,
-                                  logDir: logDir, task: task)
-            finishPromptTask(task, ok: ok)
-        case .regression:
-            currentStep = "Running Regression sweep"
-            await runRegressionSweep(projectRoot: resolved.projectRoot, gitRoot: resolved.gitRoot)
-        case .generateKnowledge:
-            currentStep = "Reviewing Knowledge"
-            reportKnowledge(projectRoot: resolved.projectRoot)
-        case .updatePlanStatus:
-            currentStep = "Refreshing Plan statuses"
-            await refreshPlanStatuses(projectRoot: resolved.projectRoot)
+        case .sourceUpdate:
+            currentStep = "Updating sources"
+            await runSourceUpdate()
+        default:
+            guard let resolved else {
+                logStore.append(task, "⚠ No linked repo", level: .error)
+                taskErrors[task.rawValue] = lastResolveDiagnosis ?? "No linked repo"
+                return
+            }
+            switch task {
+            case .sourcesToIssue:
+                currentStep = "Creating issues from notes"
+                await runSourcesToIssue(resolved: resolved)
+            case .implementIssues:
+                currentStep = "Implementing pending issues"
+                await runImplementIssues(resolved: resolved, logDir: logDir)
+            case .reviewMerge:
+                currentStep = "Pushing branches and opening MRs"
+                await runReviewMerge(resolved: resolved)
+            case .reviewCode:
+                currentStep = "Running Review Code"
+                let ok = await runCLI(prompt: config.autoTaskTemplateReviewCode,
+                                      localPath: resolved.gitRoot, logSuffix: task.logSuffix,
+                                      logDir: logDir, task: task)
+                finishPromptTask(task, ok: ok)
+            case .reviewDoc:
+                currentStep = "Running Review Doc"
+                let ok = await runCLI(prompt: config.autoTaskTemplateReviewDoc,
+                                      localPath: resolved.gitRoot, logSuffix: task.logSuffix,
+                                      logDir: logDir, task: task)
+                finishPromptTask(task, ok: ok)
+            case .reviewConflicts:
+                currentStep = "Running Review Conflicts"
+                let ok = await runCLI(prompt: config.autoTaskTemplateReviewConflicts,
+                                      localPath: resolved.gitRoot, logSuffix: task.logSuffix,
+                                      logDir: logDir, task: task)
+                finishPromptTask(task, ok: ok)
+            case .generateDoc:
+                currentStep = "Generating Documentation"
+                let ok = await runCLI(prompt: config.autoTaskTemplateGenerateDoc,
+                                      localPath: resolved.gitRoot, logSuffix: task.logSuffix,
+                                      logDir: logDir, task: task)
+                finishPromptTask(task, ok: ok)
+            case .updateIssues:
+                currentStep = "Updating Issues"
+                let ok = await runCLI(prompt: config.autoTaskTemplateUpdateIssues,
+                                      localPath: resolved.gitRoot, logSuffix: task.logSuffix,
+                                      logDir: logDir, task: task)
+                finishPromptTask(task, ok: ok)
+            case .regression:
+                currentStep = "Running Regression sweep"
+                await runRegressionSweep(projectRoot: resolved.projectRoot, gitRoot: resolved.gitRoot)
+            case .generateKnowledge:
+                currentStep = "Reviewing Knowledge"
+                reportKnowledge(projectRoot: resolved.projectRoot)
+            case .updatePlanStatus:
+                currentStep = "Refreshing Plan statuses"
+                await refreshPlanStatuses(projectRoot: resolved.projectRoot)
+            default:
+                break
+            }
         }
     }
 
@@ -344,47 +377,128 @@ final class AutoCodeUpdateService: ObservableObject {
             }
         }
 
-        // Resolve the active backend + project. Supports both GitLab and
-        // GitHub via the RepoBackend protocol — precedence matches
-        // `AppConfig.activeRepoLocalURL` (GitLab first, then GitHub).
-        guard let resolved = resolveBackendAndProject() else {
-            let reason = lastResolveDiagnosis ?? "No linked repo — configure in GitLab or GitHub settings"
-            statusMessage = "No linked repo"
-            setError(reason)
-            return
-        }
-        let client = resolved.client
-        let autoSteps = Self.allowedAutoSteps(config: config, provider: client.kind)
-        let projectId = resolved.projectId
-        // Git ops + agent cwd run in the working tree; faults/index live at
-        // the project root. These differ in the clone-into-code model.
-        let capturedGitRoot = resolved.gitRoot
+        let enabledOrder: [AutoTask] = [
+            .sourceUpdate, .sourcesToIssue, .implementIssues, .reviewMerge,
+            .reviewCode, .reviewDoc, .reviewConflicts,
+            .updateIssues, .updatePlanStatus, .generateDoc,
+            .regression, .generateKnowledge,
+        ]
 
-        // Opt-in: stash uncommitted changes up front so the dirty-tree guard
-        // doesn't skip every task. Restored in the defer above. Default off.
-        // The git work runs off the main actor (subprocess calls block).
-        if autoTaskSettings.autoStash {
-            let path = capturedGitRoot
+        let needsRepo = enabledOrder.contains { isTaskEnabled($0) && $0.requiresLinkedRepo }
+        let resolved: ResolvedRepo? = needsRepo ? resolveBackendAndProject() : nil
+
+        if needsRepo && resolved == nil {
+            let reason = lastResolveDiagnosis ?? "No linked repo — configure in GitLab or GitHub settings"
+            setError(reason)
+        }
+
+        // Opt-in: stash uncommitted changes so the dirty-tree guard doesn't
+        // skip implement/review tasks. Restored in the defer above.
+        if autoTaskSettings.autoStash, let gitRoot = resolved?.gitRoot {
             let stashResult: (didStash: Bool, branch: String?) = await Task.detached {
-                guard !Self.isWorkingTreeClean(at: path) else { return (false, nil) }
-                let branch = Self.currentBranch(at: path)
-                return (Self.stashPush(at: path), branch)
+                guard !Self.isWorkingTreeClean(at: gitRoot) else { return (false, nil) }
+                let branch = Self.currentBranch(at: gitRoot)
+                return (Self.stashPush(at: gitRoot), branch)
             }.value
             if stashResult.didStash {
                 didStash = true
                 stashBranch = stashResult.branch
-                stashPath = capturedGitRoot
+                stashPath = gitRoot
             }
         }
 
-        // Resolve the notes folder (meetings/ when a project is active)
-        let notesFolderURL = NotesFolderConfig().currentFolder
+        guard let logDir = logsDirectory() else {
+            statusMessage = "Logs directory unavailable"
+            return
+        }
 
-        currentStep = "Extracting actions from meeting notes"
-        // 1. Extract actions from recent notes.
-        // The SQLite index lives at <projectRoot>/system/index.sqlite (via
-        // ProjectLayout.indexDB) when a project is open, matching what
-        // AppEnvironment constructs — both always agree on the file location.
+        for task in enabledOrder where isTaskEnabled(task) {
+            if Task.isCancelled { break }
+            await runTaskBody(task, resolved: resolved, logDir: logDir)
+        }
+
+        let parts: [String] = [
+            createdCount > 0 ? "\(createdCount) created" : nil,
+            implementedCount > 0 ? "\(implementedCount) implemented" : nil,
+            failedCount > 0 ? "\(failedCount) failed" : nil,
+        ].compactMap { $0 }
+
+        if Task.isCancelled {
+            statusMessage = parts.isEmpty ? "Cancelled" : "Cancelled · " + parts.joined(separator: " · ")
+        } else if parts.isEmpty {
+            statusMessage = resolved == nil && needsRepo ? "No linked repo" : "Done — nothing to do"
+        } else {
+            statusMessage = parts.joined(separator: " · ")
+        }
+        allEntries = registry.allEntries()
+    }
+
+    // MARK: - Pipeline task bodies
+
+    /// Fetch configured email/Slack sources into the meeting library.
+    private func runSourceUpdate() async {
+        let key = AutoTask.sourceUpdate.rawValue
+        guard let api else {
+            taskErrors[key] = "Source update skipped — no API client wired."
+            logStore.append(.sourceUpdate, "Skipped — no API client.", level: .error)
+            return
+        }
+        guard let env = environment else {
+            taskErrors[key] = "Source update skipped — open a project first."
+            logStore.append(.sourceUpdate, "Skipped — no project environment.", level: .error)
+            return
+        }
+        let service = SourceIngestService(
+            api: api,
+            config: config,
+            root: env.notesConfig.currentFolder,
+            notesOutputFolder: env.notesOutputFolder,
+            indexer: env.indexer)
+        var importedTotal = 0
+        var failures: [String] = []
+        for source in SourceRegistry.fetchSources {
+            if Task.isCancelled { break }
+            logStore.append(.sourceUpdate, "Fetching \(source.displayName)…")
+            switch await service.importSource(id: source.id) {
+            case .imported(let n, let more, let oversize):
+                importedTotal += n
+                var line = "Imported \(n) from \(source.displayName)."
+                if more > 0 { line += " \(more) more pending." }
+                if oversize > 0 { line += " \(oversize) skipped (too large)." }
+                logStore.append(.sourceUpdate, line)
+            case .none:
+                logStore.append(.sourceUpdate, "No new \(source.displayName) items.")
+            case .noSource:
+                logStore.append(.sourceUpdate, "\(source.displayName) not configured.")
+            case .failure(let msg, let partial):
+                if partial > 0 { importedTotal += partial }
+                failures.append("\(source.displayName): \(msg)")
+                logStore.append(.sourceUpdate, "\(source.displayName) failed: \(msg)", level: .error)
+            }
+        }
+        if importedTotal > 0 {
+            logStore.append(.sourceUpdate, "Re-indexed library after import.")
+        }
+        if failures.isEmpty {
+            taskErrors.removeValue(forKey: key)
+        } else {
+            taskErrors[key] = failures.joined(separator: " · ")
+        }
+        logStore.append(.sourceUpdate, "— run finished —")
+    }
+
+    /// Extract action items from recent notes and create upstream issues.
+    private func runSourcesToIssue(resolved: ResolvedRepo) async {
+        let key = AutoTask.sourcesToIssue.rawValue
+        let client = resolved.client
+        let autoSteps = Self.allowedAutoSteps(config: config, provider: client.kind)
+        guard autoSteps.createIssue else {
+            taskErrors[key] = "Issue creation not allowed — enable Create issue in repo allow-list."
+            logStore.append(.sourcesToIssue, "Skipped — create issue not allowed.", level: .error)
+            return
+        }
+
+        let notesFolderURL = NotesFolderConfig().currentFolder
         let indexRoot = projectStore?.activeProject
             .map { URL(fileURLWithPath: $0.localPath) } ?? notesFolderURL
         let indexURL = ProjectLayout(root: indexRoot).indexDB
@@ -392,8 +506,8 @@ final class AutoCodeUpdateService: ObservableObject {
         do {
             index = try MeetingIndex(url: indexURL)
         } catch {
-            statusMessage = "Could not open meeting index"
-            lastError = "Meeting index unavailable: \(error.localizedDescription)"
+            taskErrors[key] = "Meeting index unavailable: \(error.localizedDescription)"
+            logStore.append(.sourcesToIssue, taskErrors[key]!, level: .error)
             return
         }
 
@@ -401,13 +515,11 @@ final class AutoCodeUpdateService: ObservableObject {
         do {
             rows = try index.list()
         } catch {
-            log.error("Failed to list meeting index rows: \(error.localizedDescription, privacy: .public)")
-            statusMessage = "Could not read meeting index"
-            lastError = "Meeting index read failed: \(error.localizedDescription)"
+            taskErrors[key] = "Meeting index read failed: \(error.localizedDescription)"
+            logStore.append(.sourcesToIssue, taskErrors[key]!, level: .error)
             return
         }
-        // Lookback: by age (last N days) or by count (last N meetings).
-        // startedAt is epoch MILLISECONDS.
+
         let sortedRows = rows.sorted { $0.startedAt > $1.startedAt }
         let recentRows: [MeetingIndex.Row]
         if autoTaskSettings.lookbackByDays {
@@ -418,47 +530,36 @@ final class AutoCodeUpdateService: ObservableObject {
         }
 
         if recentRows.isEmpty {
-            statusMessage = autoTaskSettings.lookbackByDays
-                ? "No notes found in the last \(max(1, autoTaskSettings.lookbackDays)) days"
-                : "No notes found in your library"
+            let msg = autoTaskSettings.lookbackByDays
+                ? "No notes in the last \(max(1, autoTaskSettings.lookbackDays)) days."
+                : "No notes in lookback window."
+            logStore.append(.sourcesToIssue, msg)
+            taskErrors.removeValue(forKey: key)
             return
         }
 
         let actions = NoteActionExtractor.extract(from: recentRows, notesRoot: notesFolderURL)
         let newActions = actions.filter { !registry.isKnown(id: $0.id) }
-
-        if newActions.isEmpty && registry.pendingEntries().isEmpty {
-            let lookbackDesc = autoTaskSettings.lookbackByDays
-                ? "last \(max(1, autoTaskSettings.lookbackDays)) days"
-                : "last \(autoTaskSettings.lookbackMeetingCount) notes"
-            statusMessage = "No new action items found in your \(lookbackDesc) (meetings, emails, or Slack)"
+        if newActions.isEmpty {
+            logStore.append(.sourcesToIssue, "No new action items to file as issues.")
+            taskErrors.removeValue(forKey: key)
             return
         }
 
-        currentStep = "Fetching existing issues"
-        // 2. Fetch existing issues from the active backend. We paginate
-        // until a page returns < 100 items (the cap most backends honor)
-        // or we hit a soft ceiling so a runaway project can't pin the
-        // run forever. State `.all` gives us both open + closed so the
-        // dedupe step below also catches issues someone already closed.
         let existingIssues: [RepoIssue]
         do {
-            existingIssues = try await fetchAllIssues(client: client, projectId: projectId)
+            existingIssues = try await fetchAllIssues(client: client, projectId: resolved.projectId)
         } catch {
-            log.error("Failed to fetch issues from \(client.kind.displayName, privacy: .public): \(error)")
-            statusMessage = "\(client.kind.displayName) error: \(error.localizedDescription)"
+            taskErrors[key] = "\(client.kind.displayName) error: \(error.localizedDescription)"
+            logStore.append(.sourcesToIssue, taskErrors[key]!, level: .error)
             return
         }
 
         let normalizedExistingTitles = Set(existingIssues.map { NoteActionExtractor.normalize($0.title) })
-
-        currentStep = "Creating new issues from meeting notes"
-        // 3. Create issues for genuinely new actions (allow-list gated)
-        for action in newActions where autoSteps.createIssue {
+        for action in newActions {
             if Task.isCancelled { break }
             let normalized = NoteActionExtractor.normalize(action.text)
             if normalizedExistingTitles.contains(normalized) {
-                // Already exists upstream — register as done, skip
                 registry.register(action: action, issueIid: nil)
                 registry.markDone(id: action.id)
                 continue
@@ -468,9 +569,10 @@ final class AutoCodeUpdateService: ObservableObject {
                     title: action.text,
                     body: "Action item from meeting: \(action.meetingTitle)"
                 )
-                let created = try await client.createIssue(projectId: projectId, payload: payload)
+                let created = try await client.createIssue(projectId: resolved.projectId, payload: payload)
                 registry.register(action: action, issueIid: created.number)
                 createdCount += 1
+                logStore.append(.sourcesToIssue, "Created issue #\(created.number): \(created.title)")
                 activity?.report(
                     kind: .issueCreated,
                     title: "Issue created — \(created.title)",
@@ -479,66 +581,72 @@ final class AutoCodeUpdateService: ObservableObject {
                 )
             } catch {
                 log.error("Failed to create issue for action \(action.id): \(error)")
+                logStore.append(.sourcesToIssue, "Failed to create issue: \(error.localizedDescription)", level: .error)
             }
         }
+        taskErrors.removeValue(forKey: key)
+        logStore.append(.sourcesToIssue, "— run finished —")
+    }
 
-        currentStep = "Implementing pending issues"
-        // 4. Implement pending entries via CLI subprocess (branch + commit),
-        // but only when both branch-cut and auto-commit are allowed. Steps 5–8
-        // (status, regression sweep, knowledge review) are independent and must
-        // still run when only the write steps are disallowed.
-        let pending: [ProcessedActionsRegistry.RegistryEntry]
-        if autoSteps.createBranch, autoSteps.autoCommit {
-            pending = registry.pendingEntries()
-        } else {
-            log.info("auto_code_skip_implement reason=allowlist provider=\(client.kind.rawValue, privacy: .public) branch=\(autoSteps.createBranch, privacy: .public) commit=\(autoSteps.autoCommit, privacy: .public)")
-            pending = []
+    /// Run the CLI against pending registry entries (local fix branches).
+    private func runImplementIssues(resolved: ResolvedRepo, logDir: URL) async {
+        let key = AutoTask.implementIssues.rawValue
+        let client = resolved.client
+        let autoSteps = Self.allowedAutoSteps(config: config, provider: client.kind)
+        let capturedGitRoot = resolved.gitRoot
+
+        guard autoSteps.createBranch, autoSteps.autoCommit else {
+            log.info("auto_code_skip_implement reason=allowlist provider=\(client.kind.rawValue, privacy: .public)")
+            logStore.append(.implementIssues, "Skipped — branch/commit not allowed by repo allow-list.")
+            taskErrors[key] = "Implement skipped — enable Create branch + Auto-commit in allow-list."
+            return
         }
 
-        // Capture the base branch once. Each issue is cut from base so the
-        // fix branches don't chain (issue B branching off issue A's fix/…).
+        let pending = registry.pendingEntries()
+        if pending.isEmpty {
+            logStore.append(.implementIssues, "No pending issues to implement.")
+            taskErrors.removeValue(forKey: key)
+            return
+        }
+
+        let existingIssues: [RepoIssue]
+        do {
+            existingIssues = try await fetchAllIssues(client: client, projectId: resolved.projectId)
+        } catch {
+            taskErrors[key] = "Could not fetch issues: \(error.localizedDescription)"
+            logStore.append(.implementIssues, taskErrors[key]!, level: .error)
+            return
+        }
+
         let baseBranch = await Task.detached { Self.currentBranch(at: capturedGitRoot) }.value
         for entry in pending {
             if Task.isCancelled { break }
             guard let number = entry.issueIid else { continue }
 
-            // Look up in existing issues first; fall back to a direct fetch
             let issue: RepoIssue
             if let found = existingIssues.first(where: { $0.number == number }) {
                 issue = found
             } else {
                 do {
-                    issue = try await client.getIssue(projectId: projectId, number: number)
+                    issue = try await client.getIssue(projectId: resolved.projectId, number: number)
                 } catch {
                     log.error("Failed to fetch issue \(number, privacy: .public): \(error.localizedDescription, privacy: .public)")
                     registry.markFailed(id: entry.actionId)
                     failedCount += 1
+                    logStore.append(.implementIssues, "Issue #\(number): fetch failed.", level: .error)
                     continue
                 }
             }
 
             registry.markImplementing(id: entry.actionId)
+            logStore.append(.implementIssues, "Implementing issue #\(number)…")
 
-            guard let logDir = logsDirectory() else {
-                log.error("logsDirectory unavailable, skipping CLI for issue \(number)")
-                registry.markFailed(id: entry.actionId)
-                failedCount += 1
-                continue
-            }
-            // Reset to base before each issue so its fix branch is cut from
-            // base, not from the previous issue's fix branch. No-op on the
-            // first iteration. The tree is clean here (the previous CLI
-            // committed its work; runCLI re-verifies before editing). If the
-            // checkout fails we must NOT proceed — the run would chain onto
-            // the previous issue's fix branch and the rescue (which only fires
-            // on `branchAfter == base`) wouldn't catch it. Skip instead.
             if let base = baseBranch {
                 let switched = await Task.detached { Self.checkout(base, at: capturedGitRoot) }.value
                 if !switched {
-                    let msg = "Issue #\(number): couldn't switch to base branch \(base) before implementing — skipped to avoid committing onto another branch."
-                    lastError = msg
+                    let msg = "Issue #\(number): couldn't switch to base branch \(base)."
                     taskErrors["#\(number)"] = msg
-                    log.error("auto_code_base_checkout_failed issue=\(number, privacy: .public) base=\(base, privacy: .public)")
+                    logStore.append(.implementIssues, msg, level: .error)
                     registry.markFailed(id: entry.actionId)
                     failedCount += 1
                     continue
@@ -546,85 +654,160 @@ final class AutoCodeUpdateService: ObservableObject {
             }
             let baseSha = await Task.detached { Self.headSha(at: capturedGitRoot) }.value
 
-            let succeeded = await runCLI(
-                issue: issue,
-                localPath: capturedGitRoot,
-                logDir: logDir
-            )
-
-            // Exit 0 alone does NOT mean work was done — a model that no-ops
-            // still exits 0. Verify a commit actually landed (HEAD advanced
-            // past base) before marking the issue implemented.
+            let succeeded = await runCLI(issue: issue, localPath: capturedGitRoot, logDir: logDir)
             let headAfter = await Task.detached { Self.headSha(at: capturedGitRoot) }.value
             let committed = succeeded && headAfter != nil && headAfter != baseSha
 
             if committed {
-                // Safety: if the CLI committed onto the base branch instead of
-                // cutting a fix branch, move the commit onto a fix branch and
-                // rewind base — so base isn't polluted and the next issue
-                // doesn't chain off it.
                 let branchAfter = await Task.detached { Self.currentBranch(at: capturedGitRoot) }.value
                 if let base = baseBranch, let baseSha, branchAfter == base {
                     let rescue = "fix/\(number)-auto"
-                    let ok = await Task.detached {
+                    _ = await Task.detached {
                         Self.rescueCommitToBranch(rescue, base: base, baseSha: baseSha, at: capturedGitRoot)
                     }.value
-                    if !ok {
-                        log.error("auto_code_rescue_failed issue=\(number, privacy: .public) — commit left on base branch \(base, privacy: .public)")
-                    }
                 }
-                // The fix is committed to a LOCAL branch only — never pushed
-                // automatically. The commit already exists, so a failed
-                // reviewer note must NOT flip this to "failed" (that would
-                // re-run the issue and collide with the existing fix branch).
                 registry.markDone(id: entry.actionId)
                 implementedCount += 1
-                do {
-                    _ = try await client.createNote(
-                        projectId: projectId,
-                        number: number,
-                        body: "A fix branch was prepared locally by Auto Code Update and is awaiting human review before push. The issue stays open until reviewed."
-                    )
-                } catch {
-                    log.error("Failed to add review note to issue \(number): \(error) — implementation already committed locally")
+                logStore.append(.implementIssues, "Issue #\(number): fix committed locally on fix branch.")
+                if config.isAllowed(.commentIssue, provider: client.kind) {
+                    do {
+                        _ = try await client.createNote(
+                            projectId: resolved.projectId,
+                            number: number,
+                            body: "A fix branch was prepared locally by Auto Tasks and is awaiting human review before push."
+                        )
+                    } catch {
+                        log.error("Failed to add review note to issue \(number): \(error)")
+                    }
                 }
             } else {
                 if succeeded {
-                    log.error("auto_code_no_commit issue=\(number, privacy: .public) — CLI exited 0 but produced no commit")
-                    taskErrors["#\(number)"] = "Issue #\(number): the CLI finished but made no commit — nothing was implemented."
+                    taskErrors["#\(number)"] = "Issue #\(number): CLI finished but made no commit."
+                    logStore.append(.implementIssues, taskErrors["#\(number)"]!, level: .error)
                 }
                 registry.markFailed(id: entry.actionId)
                 failedCount += 1
             }
         }
+        taskErrors.removeValue(forKey: key)
+        logStore.append(.implementIssues, "— run finished —")
+    }
 
-        // 5. Update status
-        let parts: [String] = [
-            createdCount > 0 ? "\(createdCount) created" : nil,
-            implementedCount > 0 ? "\(implementedCount) implemented" : nil,
-            failedCount > 0 ? "\(failedCount) failed" : nil,
-        ].compactMap { $0 }
+    /// Push local fix/* branches and open MR/PRs. Conservative: never auto-merge.
+    private func runReviewMerge(resolved: ResolvedRepo) async {
+        let key = AutoTask.reviewMerge.rawValue
+        let client = resolved.client
+        let gitRoot = resolved.gitRoot
+        let repoURL = URL(fileURLWithPath: gitRoot)
 
-        // 6. Run each enabled task body, in left-pane order.
-        let enabledOrder: [AutoTask] = [
-            .reviewCode, .reviewDoc, .reviewConflicts,
-            .updateIssues, .updatePlanStatus, .generateDoc,
-            .regression, .generateKnowledge
-        ]
-        if !Task.isCancelled, let logDir = logsDirectory() {
-            for task in enabledOrder where isTaskEnabled(task) {
-                if Task.isCancelled { break }
-                await runTaskBody(task, resolved: resolved, logDir: logDir)
+        guard config.isAllowed(.push, provider: client.kind) else {
+            taskErrors[key] = "Push not allowed — enable Push in repo allow-list."
+            logStore.append(.reviewMerge, taskErrors[key]!, level: .error)
+            return
+        }
+        guard config.isAllowed(.createPR, provider: client.kind) else {
+            taskErrors[key] = "MR/PR creation not allowed — enable Create PR/MR in allow-list."
+            logStore.append(.reviewMerge, taskErrors[key]!, level: .error)
+            return
+        }
+
+        let token = gitPushToken(for: client.kind)
+        guard !token.isEmpty else {
+            taskErrors[key] = "Missing \(client.kind.displayName) token for push."
+            logStore.append(.reviewMerge, taskErrors[key]!, level: .error)
+            return
+        }
+
+        let branches = await Task.detached { Self.localBranches(prefix: "fix/", at: gitRoot) }.value
+        if branches.isEmpty {
+            logStore.append(.reviewMerge, "No local fix/* branches to push.")
+            taskErrors.removeValue(forKey: key)
+            return
+        }
+
+        let defaultBranch = await Task.detached { Self.defaultBranch(at: gitRoot) }.value
+        let openMRs: [RepoMergeRequest]
+        do {
+            openMRs = try await client.listOpenMergeRequests(projectId: resolved.projectId)
+        } catch {
+            taskErrors[key] = "Could not list open MRs: \(error.localizedDescription)"
+            logStore.append(.reviewMerge, taskErrors[key]!, level: .error)
+            return
+        }
+
+        var pushed = 0
+        var opened = 0
+        var failures: [String] = []
+        for branch in branches {
+            if Task.isCancelled { break }
+            if openMRs.contains(where: { $0.sourceBranch == branch }) {
+                logStore.append(.reviewMerge, "Skip \(branch) — MR already open.")
+                continue
+            }
+
+            do {
+                try await repoManager.push(at: repoURL, branch: branch, token: token,
+                                           backend: pushBackend(for: client.kind))
+                pushed += 1
+                logStore.append(.reviewMerge, "Pushed \(branch).")
+            } catch {
+                let msg = "Push failed for \(branch): \(error.localizedDescription)"
+                failures.append(msg)
+                logStore.append(.reviewMerge, msg, level: .error)
+                continue
+            }
+
+            let title: String
+            if let num = Self.issueNumber(fromFixBranch: branch) {
+                title = "Fix #\(num) (auto task)"
+            } else {
+                title = branch
+            }
+
+            do {
+                let payload = RepoMergeRequestPayload(
+                    title: title,
+                    description: "Auto Tasks pushed branch `\(branch)` for review. Merge manually when ready.",
+                    sourceBranch: branch,
+                    targetBranch: defaultBranch
+                )
+                let mr = try await client.createMergeRequest(projectId: resolved.projectId, payload: payload)
+                opened += 1
+                logStore.append(.reviewMerge, "Opened MR !\(mr.number): \(mr.webUrl)")
+
+                if let num = Self.issueNumber(fromFixBranch: branch),
+                   config.isAllowed(.commentIssue, provider: client.kind) {
+                    let comment = "Branch `\(branch)` pushed. Merge request: \(mr.webUrl)"
+                    _ = try? await client.createNote(projectId: resolved.projectId, number: num, body: comment)
+                }
+            } catch {
+                let msg = "MR creation failed for \(branch): \(error.localizedDescription)"
+                failures.append(msg)
+                logStore.append(.reviewMerge, msg, level: .error)
             }
         }
 
-        // A user-initiated stop wins over the normal summary.
-        if Task.isCancelled {
-            statusMessage = parts.isEmpty ? "Cancelled" : "Cancelled · " + parts.joined(separator: " · ")
+        logStore.append(.reviewMerge, "Pushed \(pushed), opened \(opened) MR(s). Human merge required.")
+        if failures.isEmpty {
+            taskErrors.removeValue(forKey: key)
         } else {
-            statusMessage = parts.isEmpty ? "Done — nothing to do" : parts.joined(separator: " · ")
+            taskErrors[key] = failures.joined(separator: " · ")
         }
-        allEntries = registry.allEntries()
+        logStore.append(.reviewMerge, "— run finished —")
+    }
+
+    private func gitPushToken(for kind: RepoBackendKind) -> String {
+        switch kind {
+        case .gitlab: return config.gitLabToken
+        case .github: return config.gitHubToken
+        }
+    }
+
+    private func pushBackend(for kind: RepoBackendKind) -> RepoManager.Backend {
+        switch kind {
+        case .gitlab: return .gitlab
+        case .github: return .github
+        }
     }
 
     /// True when the user's per-task enable checkbox is on for `task`. Drives
@@ -632,6 +815,10 @@ final class AutoCodeUpdateService: ObservableObject {
     /// ignore this — they run the task regardless).
     private func isTaskEnabled(_ task: AutoTask) -> Bool {
         switch task {
+        case .sourceUpdate:      return autoTaskSettings.runSourceUpdate
+        case .sourcesToIssue:    return autoTaskSettings.runSourcesToIssue
+        case .implementIssues:   return autoTaskSettings.runImplementIssues
+        case .reviewMerge:       return autoTaskSettings.runReviewMerge
         case .reviewCode:        return autoTaskSettings.runReviewCode
         case .reviewDoc:         return autoTaskSettings.runReviewDoc
         case .reviewConflicts:   return autoTaskSettings.runReviewConflicts
@@ -788,6 +975,41 @@ final class AutoCodeUpdateService: ObservableObject {
         let r = git(["rev-parse", "--abbrev-ref", "HEAD"], at: localPath)
         let b = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
         return (r.code == 0 && !b.isEmpty && b != "HEAD") ? b : nil
+    }
+
+    /// Local branch names under `refs/heads/<prefix>…`.
+    nonisolated static func localBranches(prefix: String, at localPath: String) -> [String] {
+        let r = git(["for-each-ref", "--format=%(refname:short)", "refs/heads/\(prefix)"], at: localPath)
+        guard r.code == 0 else { return [] }
+        return r.out.split(separator: "\n")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted()
+    }
+
+    /// Best-effort default branch for MR target (origin/HEAD → main).
+    nonisolated static func defaultBranch(at localPath: String) -> String {
+        let r = git(["symbolic-ref", "refs/remotes/origin/HEAD"], at: localPath)
+        if r.code == 0 {
+            let ref = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let last = ref.split(separator: "/").last, !last.isEmpty {
+                return String(last)
+            }
+        }
+        for candidate in ["main", "master"] {
+            let check = git(["show-ref", "--verify", "--quiet", "refs/heads/\(candidate)"], at: localPath)
+            if check.code == 0 { return candidate }
+        }
+        return "main"
+    }
+
+    /// Parse issue number from `fix/<n>-…` branch names.
+    nonisolated static func issueNumber(fromFixBranch branch: String) -> Int? {
+        guard branch.hasPrefix("fix/") else { return nil }
+        let rest = branch.dropFirst(4)
+        let digits = rest.prefix(while: { $0.isNumber })
+        guard !digits.isEmpty else { return nil }
+        return Int(digits)
     }
 
     /// The commit SHA at HEAD, or nil if it can't be read.

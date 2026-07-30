@@ -4,6 +4,7 @@ struct AutoCodeSettingsSection: View {
     @EnvironmentObject private var autoTaskSettings: AutoTaskSettings
     @EnvironmentObject private var autoCodeUpdate: AutoCodeUpdateService
     @EnvironmentObject var theme: ThemeStore
+    @EnvironmentObject var projectStore: ProjectStore
     @Environment(ShellState.self) private var shell
 
     private let lookbackOptions = [1, 3, 5, 10, 20]
@@ -24,6 +25,8 @@ struct AutoCodeSettingsSection: View {
     var body: some View {
         SettingsSectionCard(icon: "arrow.triangle.2.circlepath.circle", title: "Auto Tasks") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
+
+                statusSummary
 
                 // Row 1: Enabled toggle
                 Toggle(isOn: Binding(
@@ -105,6 +108,15 @@ struct AutoCodeSettingsSection: View {
                     .foregroundStyle(theme.current.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
 
+                if projectStore.activeProject != nil {
+                    Button("Open Auto Tasks page") {
+                        shell.section = .autoCode
+                    }
+                    .font(Typography.caption)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(theme.current.accent)
+                }
+
                 // Warning hint when no usable repo target is configured.
                 if !hasLinkedRepo {
                     VStack(alignment: .leading, spacing: 6) {
@@ -127,6 +139,47 @@ struct AutoCodeSettingsSection: View {
 
     private var hasLinkedRepo: Bool {
         autoCodeUpdate.resolveBackendAndProject() != nil
+    }
+
+    private var statusSummary: some View {
+        HStack(spacing: Spacing.sm) {
+            Circle()
+                .fill(statusColour)
+                .frame(width: 8, height: 8)
+            Text(statusLine)
+                .font(Typography.caption)
+                .foregroundStyle(theme.current.textMuted)
+            Spacer()
+            if let last = autoCodeUpdate.lastRunDate {
+                Text("Last run \(last.formatted(date: .abbreviated, time: .shortened))")
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var statusLine: String {
+        if autoCodeUpdate.isRunning || autoCodeUpdate.hasScheduledRun {
+            if let task = autoCodeUpdate.currentTask {
+                return "Running — \(task.label)"
+            }
+            return "Running"
+        }
+        if autoTaskSettings.enabled {
+            return "Scheduled — every \(intervalLabel(autoTaskSettings.intervalMinutes))"
+        }
+        return "Off"
+    }
+
+    private var statusColour: Color {
+        if autoCodeUpdate.isRunning || autoCodeUpdate.hasScheduledRun {
+            return theme.current.accent
+        }
+        if autoTaskSettings.enabled {
+            return theme.current.accent3
+        }
+        return theme.current.textMuted
     }
 
 }

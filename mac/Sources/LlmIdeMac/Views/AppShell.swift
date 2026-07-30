@@ -13,10 +13,14 @@ struct AppShell: View {
     @EnvironmentObject var templateStore: DocTemplateStore
     @EnvironmentObject var graphAutoUpdater: GraphAutoUpdater
     @EnvironmentObject var graphSessionStore: GraphSessionStore
+    @EnvironmentObject var autoCodeUpdate: AutoCodeUpdateService
     @State private var shell = ShellState()
     @State private var itemStore = LibraryItemStore()
     @State private var appEnv: AppEnvironment?
     @State private var envInitError: String?
+    /// Standalone AppEnvironment for Settings on the Welcome screen (no project).
+    @State private var welcomeEnv: AppEnvironment?
+    @State private var welcomeEnvError: String?
     @State private var pendingOrphan: PartialRecovery.Orphan?
     @State private var recoveryError: String?
     @State private var showLegacyPrompt = false
@@ -37,7 +41,7 @@ struct AppShell: View {
         VStack(spacing: 0) {
             Group {
                 if projectStore.activeProject == nil {
-                    WelcomeView()
+                    welcomeShell
                 } else {
                     existingShellContent
                 }
@@ -66,6 +70,30 @@ struct AppShell: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openLlmChatSheet)) { _ in
             showLlmChatSheet = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
+            shell.section = .settings
+            if projectStore.activeProject == nil {
+                initWelcomeEnv()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openSection)) { note in
+            if let raw = note.object as? String,
+               let target = ShellState.Section(rawValue: raw) {
+                shell.section = target
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
+        .onAppear { applyDeepLink(deepLink.pendingEvent?.tab) }
+        .onChange(of: deepLink.pendingEvent) { _, new in applyDeepLink(new?.tab) }
+        .onChange(of: shell.section) { _, section in
+            guard projectStore.activeProject == nil else { return }
+            if section == .settings {
+                initWelcomeEnv()
+            } else if section != .explorer {
+                // Without a project only Welcome (.explorer) and Settings are valid.
+                shell.section = .explorer
+            }
         }
         // When the Chrome extension finalizes a live session, auto-generate
         // a note file — same as CaptionScraper does for AX-captured sessions.
@@ -115,6 +143,62 @@ struct AppShell: View {
         // Prefer the active Source Control repo so the terminal's git matches
         // the SCM panel; fall back to the active project folder, then home.
         WorkspaceRoot.resolveOrHome(config: config, projectStore: projectStore)
+    }
+
+    /// Welcome screen with optional App-scoped Settings (no project required).
+    @ViewBuilder
+    private var welcomeShell: some View {
+        Group {
+            if shell.section == .settings {
+                if let env = welcomeEnv {
+                    SettingsView(api: api)
+                        .environment(env)
+                } else if let err = welcomeEnvError {
+                    ContentUnavailableView {
+                        Label("Couldn't Open Notes Folder", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(err)
+                    } actions: {
+                        Button("Retry") {
+                            welcomeEnvError = nil
+                            initWelcomeEnv()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                } else {
+                    ProgressView("Loading settings…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .task { initWelcomeEnv() }
+                }
+            } else {
+                WelcomeView()
+            }
+        }
+        .toolbar {
+            if shell.section == .settings {
+                ToolbarItem(placement: .navigation) {
+                    Button { shell.section = .explorer } label: {
+                        Label("Projects", systemImage: "house")
+                    }
+                    .help("Back to projects")
+                    .accessibilityLabel("Back to projects")
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                HeaderAccountMenu()
+            }
+        }
+    }
+
+    /// AppEnvironment for Connections / email ingest when no project is open.
+    private func initWelcomeEnv() {
+        guard welcomeEnv == nil else { return }
+        do {
+            welcomeEnv = try AppEnvironment(indexRootURL: nil)
+            welcomeEnvError = nil
+        } catch {
+            welcomeEnvError = error.localizedDescription
+        }
     }
 
     /// Lazy persona-flag load. We avoid the network on every render —
@@ -257,25 +341,6 @@ struct AppShell: View {
         .task(id: projectStore.activeProject?.localPath) {
             indexActiveProjectCode()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
-            shell.section = .settings
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openSection)) { note in
-            // Posted from MenuBarMenu with the target section's
-            // rawValue as the object. Activates the app so the
-            // user lands inside the right tab from one click.
-            if let raw = note.object as? String,
-               let target = ShellState.Section(rawValue: raw) {
-                shell.section = target
-                NSApp.activate(ignoringOtherApps: true)
-            }
-        }
-        .onAppear { applyDeepLink(deepLink.pendingEvent?.tab) }
-        // Observe the full Event so identical successive deep links
-        // (same `tab`) still trigger the handler — `Event.id` differs
-        // per click. The previous `pendingTab` observation only fired
-        // when the tab string changed, missing repeats.
-        .onChange(of: deepLink.pendingEvent) { _, new in applyDeepLink(new?.tab) }
         // Auto-jump to Live when EITHER source goes from idle to active.
         .onChange(of: capture.isRunning) { old, new in
             handleLiveEdge(wasActive: old, isActive: new)
@@ -493,6 +558,7 @@ struct AppShell: View {
             let indexRoot = projectStore.activeProject
                 .map { URL(fileURLWithPath: $0.localPath) }
             self.appEnv = try AppEnvironment(indexRootURL: indexRoot)
+            autoCodeUpdate.environment = self.appEnv
             // Populate the NOTES and MEETINGS sections from the bound project's
             // meetings/ and notes/ folders. Run OFF the main thread
             // (rescanAsync) so a large project's directory walk doesn't freeze
@@ -509,6 +575,7 @@ struct AppShell: View {
         // its fd; the new env opens a fresh sqlite handle against the
         // new path on init.
         appEnv?.indexer.stopWatching()
+        autoCodeUpdate.environment = nil
         appEnv = nil
         envInitError = nil
         initEnv()

@@ -29,19 +29,16 @@ struct SettingsView: View {
                         UpdatesSettingsSection()
                         AboutSettingsSection()
                         MobileControlSettingsSection()
+                        PreferencesSettingsSection(api: api)
+                        AutoCodeSettingsSection()
+                        ProvidersSettingsSection(api: api)
                         CustomProvidersSection()
                     }
 
                     // Project-scoped settings — only visible when a project is
-                    // active. Welcome screen suppresses Settings entry anyway,
-                    // but defensive: if a user lands here via deep-link with
-                    // no active project, they only see the App group.
+                    // active. Without a project the Welcome shell shows App
+                    // settings only (via welcomeShell + standalone AppEnvironment).
                     if let activeId = projectStore.activeProject?.bundle.id {
-                        // Single id-modified wrapper so all Project-scoped
-                        // sections re-mount on project switch. Without this,
-                        // @State that lives on SettingsView (prefsLanguage)
-                        // bleeds across projects — A's language briefly
-                        // shows in B's Preferences card on switch.
                         VStack(alignment: .leading, spacing: Spacing.lg) {
                             Group {
                                 Divider().padding(.vertical, Spacing.md)
@@ -51,11 +48,6 @@ struct SettingsView: View {
                                 PathsSettingsSection()
                                 GitLabSettingsSection()
                                 GitHubSettingsSection()
-                                ProvidersSettingsSection(api: api)
-                                PreferencesSettingsSection(api: api)
-                            }
-                            Group {
-                                AutoCodeSettingsSection()
                                 GraphMemorySettingsSection()
                             }
                         }

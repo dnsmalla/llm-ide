@@ -462,6 +462,9 @@ final class AppConfig: ObservableObject {
     /// (`fixed` → `open`). Default OFF: the verdict is a heuristic
     /// text comparison, so the run reports drift but never mutates
     /// files unless the user opts in.
+    /// Legacy mirrors of regression keys owned by `AutoTaskSettings`. Kept so
+    /// older builds and `defaultProjectSettings` snapshots stay compatible; UI
+    /// and runners read/write via `AutoTaskSettings` (single source of truth).
     @Published var regressionAutoReopen: Bool {
         didSet { defaults.set(regressionAutoReopen, forKey: "regressionAutoReopen") }
     }
@@ -495,16 +498,6 @@ final class AppConfig: ObservableObject {
     // Must be `system`, not `system/faults`, or faults double-nest to
     // `system/faults/faults`. Mirrors ProjectLayout.memorySubdir.
     static let defaultMemorySubdir = ProjectLayout.memorySubdir
-
-    // ── Auto Code Update ──────────────────────────────────────────────
-    /// Default meeting-count lookback, projected into `defaultProjectSettings`
-    /// as the per-project `regressionLookbackCount` for newly-materialised
-    /// projects. The live Auto Tasks state (enabled, cadence, lookback mode,
-    /// per-task toggles, auto-stash) lives on `AutoTaskSettings` — the single
-    /// source of truth shared by the Menu bar, Settings, and the Auto Tasks page.
-    @Published var autoCodeUpdateLookbackCount: Int {
-        didSet { defaults.set(autoCodeUpdateLookbackCount, forKey: "autoCodeUpdateLookbackCount") }
-    }
 
     // MARK: - Mobile Control
 
@@ -696,7 +689,6 @@ final class AppConfig: ObservableObject {
         } else {
             self.boxSource = nil
         }
-        self.autoCodeUpdateLookbackCount = defaults.object(forKey: "autoCodeUpdateLookbackCount") as? Int ?? 5
         self.mobileControlEnabled = defaults.object(forKey: "mobileControlEnabled") as? Bool ?? false
         self.mobileControlAutoStart = defaults.object(forKey: "mobileControlAutoStart") as? Bool ?? true
         self.autoTaskTemplateReviewCode = defaults.string(forKey: "autoTaskTemplateReviewCode") ?? Self.defaultTemplateReviewCode
@@ -789,26 +781,20 @@ extension AppConfig {
 }
 
 extension AppConfig {
-    /// Snapshot of current AppConfig values projected into a
-    /// ProjectSettings shape. Used by ProjectStore.openFolder when
-    /// it materialises `<folder>/system/project.json` for the
-    /// first time. After Phase 1, AppConfig retains these fields
-    /// for back-compat but project-scoped call sites consult the
-    /// active Project's bundle instead.
+    /// Snapshot projected into `project.json` when a folder is first opened.
+    /// Used by `ProjectStore.openFolder` on first materialisation.
     ///
-    /// Note: AppConfig has no global `prefsLanguage` field — the
-    /// SettingsView seeds language locally from the backend's
-    /// /api/prefs endpoint. We default `language` to "" here, which
-    /// matches that view's initial state and means "use the meeting's
-    /// own language" downstream.
-    var defaultProjectSettings: ProjectSettings {
+    /// `regressionLookbackCount` is seeded from `AutoTaskSettings.lookbackMeetingCount`
+    /// at app launch — the live lookback lives on `AutoTaskSettings`, not here.
+    /// `language` defaults to "" (server-synced prefs drive LLM output language).
+    func defaultProjectSettings(regressionLookbackCount: Int = 5) -> ProjectSettings {
         ProjectSettings(
             language: "",                   // no global field — see note above
             activeCLI: activeCLI,
             linkedRepo: nil,                // user picks via Settings on first run
             notesFolderRelative: nil,
             enabledPlugins: [],
-            regressionLookbackCount: autoCodeUpdateLookbackCount,
+            regressionLookbackCount: regressionLookbackCount,
             agentPersona: nil,
             docTemplatesActive: [])
     }

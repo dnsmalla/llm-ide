@@ -9,9 +9,10 @@ struct CustomProvidersSection: View {
     var body: some View {
         SettingsSectionCard(icon: "atom", title: "Custom Providers") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                Text("Add custom LLM providers (GLM, Ollama, OpenRouter, etc.)")
+                Text("Add named LLM providers (GLM, Ollama, OpenRouter, etc.) for the Code Assistant composer.")
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
+                SettingsHint("For Anthropic, OpenAI, Gemini, and a single shared custom endpoint, use Model Providers above. This section is for multiple named providers with their own model lists.")
 
                 if providers.isEmpty {
                     VStack(alignment: .center, spacing: Spacing.sm) {

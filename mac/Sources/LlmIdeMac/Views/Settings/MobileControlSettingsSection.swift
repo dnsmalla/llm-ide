@@ -93,6 +93,13 @@ struct MobileControlSettingsSection: View {
             // re-probe when we regain focus so the IP shows without Refresh.
             if phase == .active { connection = MobileConnectionInfo.current() }
         }
+        .onChange(of: config.mobileControlEnabled) { _, enabled in
+            if enabled {
+                mobile.start()
+            } else {
+                mobile.stop()
+            }
+        }
     }
 
     // MARK: - Connection info

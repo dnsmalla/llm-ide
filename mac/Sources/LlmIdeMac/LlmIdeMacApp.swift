@@ -73,8 +73,11 @@ public struct LlmIdeMacApp: App {
         let registryURL = appSupportBase.appendingPathComponent("processed-actions.json")
         let registry = ProcessedActionsRegistry(storeURL: registryURL)
         let projectStoreStateDir = appSupportBase
-        let projectStoreInstance = ProjectStore(stateDirectory: projectStoreStateDir,
-                                                 defaults: cfg.defaultProjectSettings)
+        let autoTaskSettingsInstance = AutoTaskSettings()
+        let projectStoreInstance = ProjectStore(
+            stateDirectory: projectStoreStateDir,
+            defaults: cfg.defaultProjectSettings(
+                regressionLookbackCount: autoTaskSettingsInstance.lookbackMeetingCount))
         // Wire ProjectStore into the API client so write endpoints
         // (currently /kb/ingest) can stamp `projectId` onto payloads
         // without every caller having to thread it through.
@@ -83,7 +86,6 @@ public struct LlmIdeMacApp: App {
         // /kb/project/:id/export on close without threading the client
         // through every call site.
         projectStoreInstance._apiClient = client
-        let autoTaskSettingsInstance = AutoTaskSettings()
         let taskLogStore = TaskLogStore()
         // `backend: nil` ⇒ auto-resolve from the active project's `linkedRepo`,
         // which supports BOTH GitLab and GitHub (set by syncLinkedRepoFromConfig).

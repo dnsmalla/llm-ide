@@ -56,7 +56,14 @@ extension Project.LoadError: Equatable {
     }
 }
 
-/// Per-project settings bundle.
+/// Per-project settings bundle stored in `system/project.json`.
+///
+/// Several fields are legacy snapshots written at project creation and are
+/// not read at runtime — live values live elsewhere:
+/// - `activeCLI`, `regressionLookbackCount` → `AppConfig` / `AutoTaskSettings`
+/// - `language` → server-synced prefs (`PreferencesSettingsSection`)
+/// - `agentPersona` → server agent persona API
+/// - `enabledPlugins` → Library plugin install state (future)
 struct ProjectSettings: Codable, Equatable {
     var language: String
     var activeCLI: String

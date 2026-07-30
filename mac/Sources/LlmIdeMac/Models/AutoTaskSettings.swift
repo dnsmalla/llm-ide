@@ -112,7 +112,35 @@ final class AutoTaskSettings: ObservableObject {
             save("autoCodeRunUpdatePlanStatus", runUpdatePlanStatus)
         }
     }
-    
+
+    @Published var runSourceUpdate: Bool {
+        didSet(oldValue) {
+            guard oldValue != runSourceUpdate else { return }
+            save("autoCodeRunSourceUpdate", runSourceUpdate)
+        }
+    }
+
+    @Published var runSourcesToIssue: Bool {
+        didSet(oldValue) {
+            guard oldValue != runSourcesToIssue else { return }
+            save("autoCodeRunSourcesToIssue", runSourcesToIssue)
+        }
+    }
+
+    @Published var runImplementIssues: Bool {
+        didSet(oldValue) {
+            guard oldValue != runImplementIssues else { return }
+            save("autoCodeRunImplementIssues", runImplementIssues)
+        }
+    }
+
+    @Published var runReviewMerge: Bool {
+        didSet(oldValue) {
+            guard oldValue != runReviewMerge else { return }
+            save("autoCodeRunReviewMerge", runReviewMerge)
+        }
+    }
+
     @Published var regressionAttemptRepair: Bool {
         didSet(oldValue) {
             guard oldValue != regressionAttemptRepair else { return }
@@ -138,6 +166,10 @@ final class AutoTaskSettings: ObservableObject {
     
     var enabledTasks: [String] {
         var tasks: [String] = []
+        if runSourceUpdate { tasks.append("Source Update") }
+        if runSourcesToIssue { tasks.append("Sources → Issue") }
+        if runImplementIssues { tasks.append("Implement Issues") }
+        if runReviewMerge { tasks.append("Review & Merge") }
         if runReviewCode { tasks.append("Review Code") }
         if runReviewDoc { tasks.append("Review Doc") }
         if runReviewConflicts { tasks.append("Review Conflicts") }
@@ -157,6 +189,10 @@ final class AutoTaskSettings: ObservableObject {
     /// `isTaskEnabled(_:)` on `AutoCodeUpdateService`.
     func isEnabled(task: AutoTask) -> Bool {
         switch task {
+        case .sourceUpdate:      return runSourceUpdate
+        case .sourcesToIssue:    return runSourcesToIssue
+        case .implementIssues:   return runImplementIssues
+        case .reviewMerge:       return runReviewMerge
         case .reviewCode:        return runReviewCode
         case .reviewDoc:         return runReviewDoc
         case .reviewConflicts:   return runReviewConflicts
@@ -174,6 +210,10 @@ final class AutoTaskSettings: ObservableObject {
     /// toggle would — no silent bypass of the single source of truth.
     func setEnabled(_ value: Bool, task: AutoTask) {
         switch task {
+        case .sourceUpdate:      runSourceUpdate = value
+        case .sourcesToIssue:    runSourcesToIssue = value
+        case .implementIssues:   runImplementIssues = value
+        case .reviewMerge:       runReviewMerge = value
         case .reviewCode:        runReviewCode = value
         case .reviewDoc:         runReviewDoc = value
         case .reviewConflicts:   runReviewConflicts = value
@@ -235,7 +275,11 @@ final class AutoTaskSettings: ObservableObject {
         self.runGenerateDoc = defaults.object(forKey: "autoCodeRunGenerateDoc") as? Bool ?? true
         self.runUpdateIssues = defaults.object(forKey: "autoCodeRunUpdateIssues") as? Bool ?? false
         self.runUpdatePlanStatus = defaults.object(forKey: "autoCodeRunUpdatePlanStatus") as? Bool ?? false
-        
+        self.runSourceUpdate = defaults.object(forKey: "autoCodeRunSourceUpdate") as? Bool ?? false
+        self.runSourcesToIssue = defaults.object(forKey: "autoCodeRunSourcesToIssue") as? Bool ?? true
+        self.runImplementIssues = defaults.object(forKey: "autoCodeRunImplementIssues") as? Bool ?? true
+        self.runReviewMerge = defaults.object(forKey: "autoCodeRunReviewMerge") as? Bool ?? false
+
         self.regressionAttemptRepair = defaults.object(forKey: "regressionAttemptRepair") as? Bool ?? false
         self.regressionAutoReopen = defaults.object(forKey: "regressionAutoReopen") as? Bool ?? false
         let savedTimeout = defaults.double(forKey: "regressionVerifyTimeout")
@@ -301,7 +345,19 @@ final class AutoTaskSettings: ObservableObject {
         
         let newRunUpdatePlanStatus = defaults.object(forKey: "autoCodeRunUpdatePlanStatus") as? Bool ?? false
         if newRunUpdatePlanStatus != runUpdatePlanStatus { runUpdatePlanStatus = newRunUpdatePlanStatus }
-        
+
+        let newRunSourceUpdate = defaults.object(forKey: "autoCodeRunSourceUpdate") as? Bool ?? false
+        if newRunSourceUpdate != runSourceUpdate { runSourceUpdate = newRunSourceUpdate }
+
+        let newRunSourcesToIssue = defaults.object(forKey: "autoCodeRunSourcesToIssue") as? Bool ?? true
+        if newRunSourcesToIssue != runSourcesToIssue { runSourcesToIssue = newRunSourcesToIssue }
+
+        let newRunImplementIssues = defaults.object(forKey: "autoCodeRunImplementIssues") as? Bool ?? true
+        if newRunImplementIssues != runImplementIssues { runImplementIssues = newRunImplementIssues }
+
+        let newRunReviewMerge = defaults.object(forKey: "autoCodeRunReviewMerge") as? Bool ?? false
+        if newRunReviewMerge != runReviewMerge { runReviewMerge = newRunReviewMerge }
+
         let newRegressionAttemptRepair = defaults.object(forKey: "regressionAttemptRepair") as? Bool ?? false
         if newRegressionAttemptRepair != regressionAttemptRepair { regressionAttemptRepair = newRegressionAttemptRepair }
         
@@ -327,6 +383,10 @@ final class AutoTaskSettings: ObservableObject {
         runGenerateDoc = true
         runUpdateIssues = false
         runUpdatePlanStatus = false
+        runSourceUpdate = false
+        runSourcesToIssue = true
+        runImplementIssues = true
+        runReviewMerge = false
         regressionAttemptRepair = false
         regressionAutoReopen = false
         regressionVerifyTimeout = 120
@@ -335,7 +395,10 @@ final class AutoTaskSettings: ObservableObject {
                     "autoCodeLookbackDays", "autoCodeIntervalMinutes", "autoCodeAutoStash",
                     "autoCodeRunReviewCode", "autoCodeRunReviewDoc", "autoCodeRunReviewConflicts",
                     "autoCodeRunRegression", "autoCodeRunGenerateKnowledge", "autoCodeRunGenerateDoc",
-                    "autoCodeRunUpdateIssues", "autoCodeRunUpdatePlanStatus", "regressionAttemptRepair",
+                    "autoCodeRunUpdateIssues", "autoCodeRunUpdatePlanStatus",
+                    "autoCodeRunSourceUpdate", "autoCodeRunSourcesToIssue",
+                    "autoCodeRunImplementIssues", "autoCodeRunReviewMerge",
+                    "regressionAttemptRepair",
                     "regressionAutoReopen", "regressionVerifyTimeout"]
         for key in keys {
             defaults.removeObject(forKey: key)

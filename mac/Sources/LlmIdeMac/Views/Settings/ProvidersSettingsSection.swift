@@ -60,7 +60,7 @@ struct ProvidersSettingsSection: View {
     var body: some View {
         SettingsSectionCard(icon: "key.horizontal", title: "Model Providers") {
             VStack(alignment: .leading, spacing: Spacing.md) {
-                SettingsHint("Pick the default provider (◉) and model for new Code & Doc Review chats, and add each provider's credentials. A key runs over the fast HTTP API; with no key, “Check CLI” uses your logged-in CLI (subscription). Keys are stored in the server vault — never on disk here. You can also switch provider/model live in the chat composer.")
+                SettingsHint("Pick the default provider (◉) and model for new Code & Doc Review chats, and add each provider's credentials. A key runs over the fast HTTP API; with no key, “Check CLI” uses your logged-in CLI (subscription). Keys are stored in the server vault — never on disk here. You can also switch provider/model live in the chat composer. For multiple named providers (GLM, Ollama, …), see Custom Providers below.")
                 ForEach(providers) { providerRow($0) }
             }
         }

@@ -21,6 +21,7 @@ struct RegressionView: View {
 
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
+    @EnvironmentObject var autoTaskSettings: AutoTaskSettings
     @EnvironmentObject var projectStore: ProjectStore
 
     @StateObject private var runner: RegressionRunner
@@ -140,10 +141,10 @@ struct RegressionView: View {
     private func runSelected() async {
         guard let repo = activeRepoRoot else { return }
         let only = checked.isEmpty ? nil : checked
-        runner.applyTimeout(config.regressionVerifyTimeout)
+        runner.applyTimeout(autoTaskSettings.regressionVerifyTimeout)
         await runner.run(faultsRoot: repo, gitRoot: activeGitRoot, only: only,
-                         autoReopen: config.regressionAutoReopen,
-                         attemptRepair: config.regressionAttemptRepair)
+                         autoReopen: autoTaskSettings.regressionAutoReopen,
+                         attemptRepair: autoTaskSettings.regressionAttemptRepair)
     }
 
     private func markFixed(_ url: URL) async {
@@ -417,6 +418,7 @@ private struct RegressionDetailPane: View {
 
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
+    @EnvironmentObject var autoTaskSettings: AutoTaskSettings
 
     var body: some View {
         let t = theme.current
@@ -442,7 +444,7 @@ private struct RegressionDetailPane: View {
             .controlSize(.small)
             .disabled(running || !hasRepo)
 
-            Toggle(isOn: $config.regressionAutoReopen) {
+            Toggle(isOn: $autoTaskSettings.regressionAutoReopen) {
                 Text("Auto-reopen regressed")
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
@@ -452,13 +454,23 @@ private struct RegressionDetailPane: View {
             .disabled(running)
             .help("When on, a regressed verdict flips the fault back to “open” on disk. Off (default) reports drift without modifying any files — the verdict is a heuristic text comparison.")
 
+            Toggle(isOn: $autoTaskSettings.regressionAttemptRepair) {
+                Text("Attempt repair")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+            }
+            .toggleStyle(.checkbox)
+            .controlSize(.small)
+            .disabled(running)
+            .help("When on, regressed command faults get an automatic repair pass before re-verify.")
+
             Button("Export pack…") { exportPack() }
                 .buttonStyle(.bordered).controlSize(.small).disabled(running || !hasRepo)
             Button("Import pack…") { importPack() }
                 .buttonStyle(.bordered).controlSize(.small).disabled(running || !hasRepo)
             HStack(spacing: 4) {
                 Text("timeout").font(Typography.caption).foregroundStyle(t.textMuted)
-                TextField("120", value: $config.regressionVerifyTimeout, format: .number)
+                TextField("120", value: $autoTaskSettings.regressionVerifyTimeout, format: .number)
                     .frame(width: 50).textFieldStyle(.roundedBorder)
             }
 

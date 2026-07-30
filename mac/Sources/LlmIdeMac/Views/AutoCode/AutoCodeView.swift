@@ -73,6 +73,17 @@ struct AutoCodeView: View {
 
             // Task type rows - organized by category
             VStack(spacing: 0) {
+                // Pipeline Tasks
+                taskCategoryHeader("Pipeline Tasks")
+                taskRow(.sourceUpdate,    label: "Source Update",    icon: "tray.and.arrow.down",
+                        enabled: $autoTaskSettings.runSourceUpdate)
+                taskRow(.sourcesToIssue,  label: "Sources → Issue", icon: "arrow.right.doc.on.clipboard",
+                        enabled: $autoTaskSettings.runSourcesToIssue)
+                taskRow(.implementIssues, label: "Implement Issues", icon: "hammer",
+                        enabled: $autoTaskSettings.runImplementIssues)
+                taskRow(.reviewMerge,     label: "Review & Merge",   icon: "arrow.triangle.merge",
+                        enabled: $autoTaskSettings.runReviewMerge)
+
                 // Review Tasks
                 taskCategoryHeader("Review Tasks")
                 taskRow(.reviewCode,      label: "Review Code",      icon: "checkmark.shield",
@@ -488,6 +499,14 @@ struct AutoCodeView: View {
 // MARK: - AutoTask enum
 
 enum AutoTask: String, CaseIterable, Identifiable {
+    /// Fetch email + Slack into the meeting library and re-index.
+    case sourceUpdate
+    /// Extract action items from recent notes and create upstream issues.
+    case sourcesToIssue
+    /// Run the CLI against pending registry entries (local fix branches).
+    case implementIssues
+    /// Push local fix/* branches and open MR/PRs (no auto-merge).
+    case reviewMerge
     case reviewCode
     case reviewDoc
     case reviewConflicts
@@ -514,6 +533,10 @@ enum AutoTask: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
+        case .sourceUpdate:      return "Source Update"
+        case .sourcesToIssue:    return "Sources → Issue"
+        case .implementIssues:   return "Implement Issues"
+        case .reviewMerge:       return "Review & Merge"
         case .reviewCode:        return "Review Code"
         case .reviewDoc:         return "Review Doc"
         case .reviewConflicts:   return "Review Conflicts"
@@ -527,6 +550,10 @@ enum AutoTask: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
+        case .sourceUpdate:      return "tray.and.arrow.down"
+        case .sourcesToIssue:    return "arrow.right.doc.on.clipboard"
+        case .implementIssues:   return "hammer"
+        case .reviewMerge:       return "arrow.triangle.merge"
         case .reviewCode:        return "checkmark.shield"
         case .reviewDoc:         return "doc.text.magnifyingglass"
         case .reviewConflicts:   return "exclamationmark.triangle"
@@ -541,6 +568,10 @@ enum AutoTask: String, CaseIterable, Identifiable {
     /// Log-file suffix used by `runCLI(prompt:)`, `logTail`, and error hints.
     var logSuffix: String {
         switch self {
+        case .sourceUpdate:      return "source-update"
+        case .sourcesToIssue:    return "sources-to-issue"
+        case .implementIssues:   return "implement-issues"
+        case .reviewMerge:       return "review-merge"
         case .reviewCode:        return "review-code"
         case .reviewDoc:         return "review-doc"
         case .reviewConflicts:   return "review-conflicts"
@@ -568,7 +599,18 @@ enum AutoTask: String, CaseIterable, Identifiable {
         case .updateIssues:    return Binding(get: { config.autoTaskTemplateUpdateIssues },
                                               set: { config.autoTaskTemplateUpdateIssues = $0 })
         case .updatePlanStatus: return nil
-        case .regression, .generateKnowledge: return nil
+        case .sourceUpdate, .sourcesToIssue, .implementIssues, .reviewMerge,
+             .regression, .generateKnowledge: return nil
+        }
+    }
+
+    /// Pipeline + maintenance tasks that run without an editable prompt.
+    var isStructural: Bool {
+        switch self {
+        case .reviewCode, .reviewDoc, .reviewConflicts, .generateDoc, .updateIssues:
+            return false
+        default:
+            return true
         }
     }
 
@@ -580,7 +622,16 @@ enum AutoTask: String, CaseIterable, Identifiable {
         case .generateDoc:     config.autoTaskTemplateGenerateDoc = AppConfig.defaultTemplateGenerateDoc
         case .updateIssues:    config.autoTaskTemplateUpdateIssues = AppConfig.defaultTemplateUpdateIssues
         case .updatePlanStatus: break       // no template to reset
-        case .regression, .generateKnowledge: break       // no template to reset
+        case .sourceUpdate, .sourcesToIssue, .implementIssues, .reviewMerge,
+             .regression, .generateKnowledge: break
+        }
+    }
+
+    /// True when the task needs a linked git clone + repo token (not source ingest).
+    var requiresLinkedRepo: Bool {
+        switch self {
+        case .sourceUpdate: return false
+        default:            return true
         }
     }
 }
@@ -605,6 +656,38 @@ private extension AutoCodeView {
     /// Static markdown shown as the "preview" for structural (non-template) tasks.
     func aboutMarkdown(for task: AutoTask) -> String {
         switch task {
+        case .sourceUpdate:
+            return """
+            # Source Update
+
+            Fetches configured email and Slack sources into the meeting library and
+            re-indexes notes. Requires a project open (for the notes folder + indexer).
+            Configure sources under Settings → Connections.
+            """
+        case .sourcesToIssue:
+            return """
+            # Sources → Issue
+
+            Scans recent meeting notes (lookback window from schedule settings), extracts
+            action items, and creates upstream GitHub/GitLab issues. Requires Create issue
+            in the repo allow-list.
+            """
+        case .implementIssues:
+            return """
+            # Implement Issues
+
+            Runs the CLI against pending entries in the processed-actions registry — typically
+            local `fix/*` branches. Requires Create branch and Auto-commit in the
+            repo allow-list.
+            """
+        case .reviewMerge:
+            return """
+            # Review & Merge
+
+            Pushes local `fix/*` branches and opens MR/PRs for human review. Never auto-merges.
+            Requires Push and Create PR/MR in the repo allow-list. Issue comments
+            (when enabled) require Comment on issue.
+            """
         case .regression:
             return """
             # Regression
@@ -658,7 +741,8 @@ private extension AutoCodeView {
                         .frame(width: 60).textFieldStyle(.roundedBorder)
                 }
             }
-        case .generateKnowledge, .updatePlanStatus:
+        case .generateKnowledge, .updatePlanStatus,
+             .sourceUpdate, .sourcesToIssue, .implementIssues, .reviewMerge:
             Text("Nothing to configure — see the description above.")
                 .font(Typography.caption)
                 .foregroundStyle(theme.current.textMuted)

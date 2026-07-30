@@ -441,6 +441,10 @@ struct AutoTaskView: View {
     /// SF Symbol names aligned with the Mac `AutoTask.icon` mapping.
     private func taskIcon(_ id: String) -> String {
         switch id {
+        case "sourceUpdate":      return "tray.and.arrow.down"
+        case "sourcesToIssue":    return "arrow.right.doc.on.clipboard"
+        case "implementIssues":   return "hammer"
+        case "reviewMerge":       return "arrow.triangle.merge"
         case "reviewCode":        return "checkmark.shield"
         case "reviewDoc":         return "doc.text.magnifyingglass"
         case "reviewConflicts":   return "exclamationmark.triangle"
