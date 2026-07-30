@@ -4,17 +4,6 @@ import Foundation
 
 extension LlmIdeAPIClient {
 
-    struct Outcome: Codable, Identifiable {
-        let id: Int
-        let provider: String
-        let ref: String
-        let state: String
-        let isTerminal: Bool
-        let meta: AnyCodable?
-        let observedAt: String
-    }
-    struct OutcomesWrap: Codable { let outcomes: [Outcome] }
-
     struct OutcomeRefreshSummary: Codable {
         let pollCount: Int
         let pollErroredCount: Int
@@ -51,13 +40,6 @@ extension LlmIdeAPIClient {
     }
 
     // --- Export methods ----------------------------------------------
-
-    /// Returns the chronological outcome rows for a single task — newest
-    /// first.  Used by PlanView to render the per-task state chip.
-    func listOutcomesForTask(taskId: String) async throws -> [Outcome] {
-        let r: OutcomesWrap = try await get("/kb/outcomes/task/\(percentEncoded(taskId))", authenticated: true)
-        return r.outcomes
-    }
 
     func refreshOutcomes(taskIds: [String]? = nil, creds: [String: String]? = nil)
     async throws -> OutcomeRefreshSummary {

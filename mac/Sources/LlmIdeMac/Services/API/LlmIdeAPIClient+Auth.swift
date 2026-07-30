@@ -12,23 +12,6 @@ extension LlmIdeAPIClient {
     }
     struct UserPrefsWrap: Codable { let prefs: UserPrefs }
 
-    struct UserRepo: Codable, Identifiable {
-        let path: String
-        let label: String?
-        let addedAt: String?
-        var id: String { path }
-    }
-    struct UserReposWrap: Codable { let repos: [UserRepo] }
-
-    struct SecretKey: Codable {
-        let key: String
-        let updatedAt: String?
-    }
-    struct SecretsListResponse: Codable {
-        let secrets: [SecretKey]
-        let available: [String]
-    }
-
     // --- Auth methods -------------------------------------------------
 
     func login(email: String, password: String) async throws -> SessionResponse {
@@ -52,11 +35,6 @@ extension LlmIdeAPIClient {
     func setUserPrefs(_ patch: UserPrefs) async throws -> UserPrefs {
         let r: UserPrefsWrap = try await put("/auth/me/prefs", body: patch, authenticated: true)
         return r.prefs
-    }
-
-    func listUserRepos() async throws -> [UserRepo] {
-        let r: UserReposWrap = try await get("/auth/me/repos", authenticated: true)
-        return r.repos
     }
 
     /// Register a local repo path on the user's allow-list. Required before
@@ -84,10 +62,6 @@ extension LlmIdeAPIClient {
     func connectGit(path: String, replace: Bool = true) async throws -> ConnectGitResult {
         struct Req: Encodable { let path: String; let replace: Bool }
         return try await post("/kb/connect-git", body: Req(path: path, replace: replace), authenticated: true)
-    }
-
-    func listSecretKeys() async throws -> SecretsListResponse {
-        try await get("/auth/me/secrets", authenticated: true)
     }
 
     // MARK: - Plugins

@@ -83,37 +83,6 @@ extension LlmIdeAPIClient {
     }
     struct AgentPersonaWrap: Codable { let persona: AgentPersona? }
 
-    struct AgentFeedbackByVerdict: Decodable, Equatable {
-        let useful: Int
-        let noise: Int
-        let later: Int
-    }
-    struct AgentFeedbackAvgScore: Decodable, Equatable {
-        let useful: Double?
-        let noise: Double?
-        let later: Double?
-    }
-    struct AgentFeedbackStats: Decodable, Equatable {
-        let total: Int
-        let byVerdict: AgentFeedbackByVerdict
-        let usefulRate: Double?
-        let avgScore: AgentFeedbackAvgScore
-        let sinceDays: Int
-    }
-
-    /// Per-plan-task useful-rate breakdown.  Drives the per-task
-    /// chip on PlanView.  Only tasks with at least one feedback
-    /// entry come back.
-    struct AgentFeedbackByTaskItem: Decodable, Equatable, Identifiable {
-        let planTaskId: String
-        let total: Int
-        let byVerdict: AgentFeedbackByVerdict
-        let usefulRate: Double?
-        let avgScoreUseful: Double?
-        let avgScoreNoise: Double?
-        var id: String { planTaskId }
-    }
-
     // --- Agent methods -----------------------------------------------
 
     /// Attach the server-side question loop to one of the user's
@@ -212,17 +181,6 @@ extension LlmIdeAPIClient {
                                      body: Req(message: message, history: wireHistory, image: wireImages),
                                      authenticated: true)
         return r.reply
-    }
-
-    func getAgentFeedbackStats(sinceDays: Int = 30) async throws -> AgentFeedbackStats {
-        try await get("/kb/agent/feedback/stats?sinceDays=\(sinceDays)", authenticated: true)
-    }
-
-    func getAgentFeedbackByTask(sinceDays: Int = 30) async throws -> [AgentFeedbackByTaskItem] {
-        struct Wrap: Decodable { let tasks: [AgentFeedbackByTaskItem] }
-        let r: Wrap = try await get("/kb/agent/feedback/by-task?sinceDays=\(sinceDays)",
-                                    authenticated: true)
-        return r.tasks
     }
 
     // MARK: - Skill catalog ──────────────────────────────────────────────
