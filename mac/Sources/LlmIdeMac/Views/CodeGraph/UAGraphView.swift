@@ -203,9 +203,6 @@ struct UAGraphView: View {
     private func cachedGraph(_ m: Mode) -> CGData? {
         graphSessionStore.entry(repo: graphRepoRoot, mode: m.rawValue)?.graph
     }
-    private func cachedChunks(_ m: Mode) -> [MemoryChunk] {
-        graphSessionStore.entry(repo: graphRepoRoot, mode: m.rawValue)?.chunks ?? []
-    }
     private func cacheGraph(_ m: Mode, _ graph: CGData,
                             chunks: [MemoryChunk]? = nil, docCount: Int? = nil,
                             fingerprint: String? = nil) {
@@ -1224,31 +1221,6 @@ struct UAGraphView: View {
 
     // (selectionFooter removed — superseded by the permanent detailPanel
     //  in the bottom half of the canvas split.)
-
-    // MARK: - Bindings & grouping
-
-    /// Resolves a List-row id to the node in the *currently rendered*
-    /// graph. If the user picks a symbol while showSymbols is off, we
-    /// auto-flip it so the centre-on-select animation has something to
-    /// land on — otherwise the symbol wouldn't be in displayData.
-    private var nodeSelectionBinding: Binding<String?> {
-        Binding(
-            get: { selectedNode?.id },
-            set: { newID in
-                guard let id = newID,
-                      let node = fullData.nodes.first(where: { $0.id == id }) else {
-                    selectedNode = nil; return
-                }
-                if !showSymbols, node.kind == .symbol { showSymbols = true }
-                selectedNode = node
-            }
-        )
-    }
-
-    private var groupedChunks: [(doc: String, chunks: [MemoryChunk])] {
-        let groups = Dictionary(grouping: memoryChunks, by: \.docTitle)
-        return groups.keys.sorted().map { ($0, groups[$0] ?? []) }
-    }
 
     // MARK: - Actions
 

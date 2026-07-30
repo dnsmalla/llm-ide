@@ -29,10 +29,6 @@ struct BoxSourceSheet: View {
         isEditing = existing != nil
     }
 
-    /// Test only makes sense once we have a client secret to authenticate with.
-    private var canTest: Bool {
-        !clientSecret.isEmpty && !testing
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

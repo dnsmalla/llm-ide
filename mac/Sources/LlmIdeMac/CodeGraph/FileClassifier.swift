@@ -13,27 +13,9 @@ import GraphKit
 /// `FileStructureExtractor.codeExtensions`; MemoryGenerator exposes its own
 /// supported doc extensions).
 enum FileClassifier {
-    enum Kind: Equatable { case code, doc, other }
 
     /// Doc extensions handled by InfiniteBrain's memory generator.
     static let docExtensions: Set<String> = MemoryGenerator.supportedExtensions
-
-    /// Code extensions = GraphKit's structural set + the Python extension the
-    /// scanner adds (`StructureScanner` unions `"py"`) — MINUS anything we treat
-    /// as a doc. GraphKit's structural set includes `"md"` (it can pull headings
-    /// out of markdown), but markdown is a *doc*: it belongs to InfiniteBrain,
-    /// not the code graph. Subtracting `docExtensions` keeps `kind()` (which
-    /// checks code first) from misrouting markdown to the code track.
-    static let codeExtensions: Set<String> =
-        FileStructureExtractor.codeExtensions.union(["py"]).subtracting(docExtensions)
-
-    /// Classify a single file by its (lowercased) extension.
-    static func kind(of url: URL) -> Kind {
-        let ext = url.pathExtension.lowercased()
-        if docExtensions.contains(ext) { return .doc }
-        if codeExtensions.contains(ext) { return .code }
-        return .other
-    }
 
     /// Remove code-track markdown from a code graph.
     ///
@@ -81,17 +63,4 @@ enum FileClassifier {
         return (code, doc)
     }
 
-    /// Partition a flat file list into code / doc URLs, dropping everything else.
-    static func partition(_ files: [URL]) -> (code: [URL], doc: [URL]) {
-        var code: [URL] = []
-        var doc: [URL] = []
-        for f in files {
-            switch kind(of: f) {
-            case .code:  code.append(f)
-            case .doc:   doc.append(f)
-            case .other: break
-            }
-        }
-        return (code, doc)
-    }
 }
