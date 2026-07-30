@@ -69,45 +69,45 @@ struct AutoCodeView: View {
             .padding(.vertical, 10)
             .background(theme.current.surface)
 
+            // Filter — when on, off-task rows (and empty category headers)
+            // are hidden so the page focuses on the active set. Toggle off
+            // to see and re-enable every task.
+            Toggle(isOn: $autoTaskSettings.showOnlyEnabledTasks) {
+                Text("Show only enabled")
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(theme.current.surface)
+
             Divider()
 
-            // Task type rows - organized by category
+            // Task rows, organized by category. When "Show only enabled" is on,
+            // off-task rows are filtered out and empty category headers hidden.
             VStack(spacing: 0) {
-                // Pipeline Tasks
-                taskCategoryHeader("Pipeline Tasks")
-                taskRow(.sourceUpdate,    label: "Source Update",    icon: "tray.and.arrow.down",
-                        enabled: $autoTaskSettings.runSourceUpdate)
-                taskRow(.sourcesToIssue,  label: "Sources → Issue", icon: "arrow.right.doc.on.clipboard",
-                        enabled: $autoTaskSettings.runSourcesToIssue)
-                taskRow(.implementIssues, label: "Implement Issues", icon: "hammer",
-                        enabled: $autoTaskSettings.runImplementIssues)
-                taskRow(.reviewMerge,     label: "Review & Merge",   icon: "arrow.triangle.merge",
-                        enabled: $autoTaskSettings.runReviewMerge)
-
-                // Review Tasks
-                taskCategoryHeader("Review Tasks")
-                taskRow(.reviewCode,      label: "Review Code",      icon: "checkmark.shield",
-                        enabled: $autoTaskSettings.runReviewCode)
-                taskRow(.reviewDoc,       label: "Review Doc",       icon: "doc.text.magnifyingglass",
-                        enabled: $autoTaskSettings.runReviewDoc)
-                taskRow(.reviewConflicts, label: "Review Conflicts", icon: "exclamationmark.triangle",
-                        enabled: $autoTaskSettings.runReviewConflicts)
-
-                // Automation Tasks
-                taskCategoryHeader("Automation Tasks")
-                taskRow(.updateIssues,    label: "Update Issues",      icon: "checklist",
-                        enabled: $autoTaskSettings.runUpdateIssues)
-                taskRow(.updatePlanStatus, label: "Update Plan Status",  icon: "chart.bar.doc.horizontal",
-                        enabled: $autoTaskSettings.runUpdatePlanStatus)
-                taskRow(.generateDoc,     label: "Generate Documentation", icon: "wand.and.stars",
-                        enabled: $autoTaskSettings.runGenerateDoc)
-
-                // Maintenance Tasks
-                taskCategoryHeader("Maintenance Tasks")
-                taskRow(.regression,      label: "Regression",       icon: "arrow.uturn.backward.circle",
-                        enabled: $autoTaskSettings.runRegression)
-                taskRow(.generateKnowledge, label: "Knowledge",       icon: "brain",
-                        enabled: $autoTaskSettings.runGenerateKnowledge)
+                if visibleTasks.isEmpty {
+                    Text("No enabled tasks — turn off \"Show only enabled\" to manage all tasks.")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(Self.taskGroups) { group in
+                        let visible = group.tasks.filter { isTaskVisible($0) }
+                        if !visible.isEmpty {
+                            taskCategoryHeader(group.title)
+                            ForEach(visible, id: \.self) { task in
+                                taskRow(task, label: task.label, icon: task.icon,
+                                        enabled: taskEnabledBinding(task))
+                            }
+                        }
+                    }
+                }
             }
             .padding(.vertical, 4)
 
@@ -181,6 +181,45 @@ struct AutoCodeView: View {
             .padding(12)
         }
         .background(theme.current.surface)
+    }
+
+    // MARK: - Task filtering
+
+    /// Category groupings shown in the left pane (order = display order).
+    private struct TaskGroup: Identifiable {
+        let id: String
+        let title: String
+        let tasks: [AutoTask]
+    }
+    private static let taskGroups: [TaskGroup] = [
+        .init(id: "pipeline", title: "Pipeline Tasks",
+              tasks: [.sourceUpdate, .sourcesToIssue, .implementIssues, .reviewMerge]),
+        .init(id: "review", title: "Review Tasks",
+              tasks: [.reviewCode, .reviewDoc, .reviewConflicts]),
+        .init(id: "automation", title: "Automation Tasks",
+              tasks: [.updateIssues, .updatePlanStatus, .generateDoc]),
+        .init(id: "maintenance", title: "Maintenance Tasks",
+              tasks: [.regression, .generateKnowledge]),
+    ]
+
+    /// A task is visible unless the filter is on AND the task is disabled.
+    private func isTaskVisible(_ task: AutoTask) -> Bool {
+        !autoTaskSettings.showOnlyEnabledTasks || autoTaskSettings.isEnabled(task: task)
+    }
+
+    /// All tasks that pass the current filter (drives the empty-state check).
+    private var visibleTasks: [AutoTask] {
+        AutoTask.allCases.filter { isTaskVisible($0) }
+    }
+
+    /// Generic per-task enable binding, routed through AutoTaskSettings so a
+    /// toggle flips the right `run*` flag (and persists) exactly like the old
+    /// hand-written `$autoTaskSettings.runX` bindings did.
+    private func taskEnabledBinding(_ task: AutoTask) -> Binding<Bool> {
+        Binding(
+            get: { autoTaskSettings.isEnabled(task: task) },
+            set: { autoTaskSettings.setEnabled($0, task: task) }
+        )
     }
 
     @ViewBuilder

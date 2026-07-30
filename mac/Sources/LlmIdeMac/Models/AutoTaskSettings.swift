@@ -161,7 +161,17 @@ final class AutoTaskSettings: ObservableObject {
             save("regressionVerifyTimeout", regressionVerifyTimeout)
         }
     }
-    
+
+    /// When on, the Auto Tasks page (and the mobile mirror) hide tasks whose
+    /// per-task enable flag is off, so only the active set is shown. Default
+    /// off = today's "show every task" behavior. Flip off to manage all tasks.
+    @Published var showOnlyEnabledTasks: Bool {
+        didSet(oldValue) {
+            guard oldValue != showOnlyEnabledTasks else { return }
+            save("autoCodeShowOnlyEnabledTasks", showOnlyEnabledTasks)
+        }
+    }
+
     // MARK: - Computed Properties
     
     var enabledTasks: [String] {
@@ -284,7 +294,9 @@ final class AutoTaskSettings: ObservableObject {
         self.regressionAutoReopen = defaults.object(forKey: "regressionAutoReopen") as? Bool ?? false
         let savedTimeout = defaults.double(forKey: "regressionVerifyTimeout")
         self.regressionVerifyTimeout = savedTimeout > 0 ? savedTimeout : 120
-        
+
+        self.showOnlyEnabledTasks = defaults.object(forKey: "autoCodeShowOnlyEnabledTasks") as? Bool ?? false
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(userDefaultsDidChange),
@@ -366,6 +378,9 @@ final class AutoTaskSettings: ObservableObject {
         
         let newRegressionVerifyTimeout = max(1.0, defaults.double(forKey: "regressionVerifyTimeout") > 0 ? defaults.double(forKey: "regressionVerifyTimeout") : 120)
         if newRegressionVerifyTimeout != regressionVerifyTimeout { regressionVerifyTimeout = newRegressionVerifyTimeout }
+
+        let newShowOnlyEnabledTasks = defaults.object(forKey: "autoCodeShowOnlyEnabledTasks") as? Bool ?? false
+        if newShowOnlyEnabledTasks != showOnlyEnabledTasks { showOnlyEnabledTasks = newShowOnlyEnabledTasks }
     }
     
     func resetToDefaults() {

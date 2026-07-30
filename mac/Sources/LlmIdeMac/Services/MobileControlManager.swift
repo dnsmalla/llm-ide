@@ -736,11 +736,14 @@ final class MobileControlManager {
     /// Task stack isn't wired (previews / tests).
     private func buildAutoTaskState() -> AutoTaskState? {
         guard let ac = autoCode, let s = autoTaskSettings else { return nil }
-        let infos = AutoTask.allCases.map { t in
+        let allInfos = AutoTask.allCases.map { t in
             AutoTaskInfo(id: t.rawValue, label: t.label,
                          enabled: s.isEnabled(task: t),
                          lastError: ac.taskErrors[t.rawValue])
         }
+        // Mirror the Mac "Show only enabled" filter: when on, the phone sees
+        // only the active task set (re-enabling a hidden task is done on Mac).
+        let infos = s.showOnlyEnabledTasks ? allInfos.filter { $0.enabled } : allInfos
         return AutoTaskState(masterEnabled: s.enabled,
                              isRunning: ac.isRunning || ac.hasScheduledRun,
                              currentTask: ac.currentTask?.rawValue,
