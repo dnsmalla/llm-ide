@@ -377,11 +377,6 @@ final class AppConfig: ObservableObject {
         }
     }
 
-    /// Clear the provider preference and allow both providers to have active repos.
-    func clearProviderPreference() {
-        preferredRepoProvider = nil
-    }
-
     /// Which provider owns the cloned repo at `root`, matched by saved clone
     /// `localPath`. Both sides are standardized (symlink/`..`/trailing-slash
     /// normalized) so a stored path that differs only textually from `root`

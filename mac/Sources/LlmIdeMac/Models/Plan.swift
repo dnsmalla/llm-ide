@@ -5,17 +5,6 @@ import Foundation
 /// a backend that gains new values doesn't break the decoder — unknown
 /// values fall through to nil.
 
-enum TaskStatus: String, Codable {
-    case planned = "planned"
-    case inProgress = "in_progress"
-    case done = "done"
-    case blocked = "blocked"
-}
-
-enum RiskLevel: String, Codable {
-    case low, med, high
-}
-
 struct CodeRef: Codable, Identifiable, Equatable {
     var id: String { ref ?? title }
     let ref: String?
@@ -35,14 +24,11 @@ struct PlanTask: Codable, Identifiable, Equatable {
     let due: String?            // YYYY-MM-DD or nil
     let estimateDays: Double?
     let dependsOn: [String]
-    let status: String          // raw — UI maps to TaskStatus when valid
-    let risk: String?           // raw — UI maps to RiskLevel when valid
+    let status: String          // raw status string from the backend
+    let risk: String?           // raw risk string from the backend
     let riskReason: String?
     let files: [CodeRef]
     let meta: [String: AnyCodable]?
-
-    var resolvedStatus: TaskStatus { TaskStatus(rawValue: status) ?? .planned }
-    var resolvedRisk: RiskLevel? { risk.flatMap(RiskLevel.init(rawValue:)) }
 }
 
 struct Plan: Codable, Identifiable, Equatable {

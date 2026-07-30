@@ -383,40 +383,4 @@ final class AutoTaskSettings: ObservableObject {
         if newShowOnlyEnabledTasks != showOnlyEnabledTasks { showOnlyEnabledTasks = newShowOnlyEnabledTasks }
     }
     
-    func resetToDefaults() {
-        enabled = false
-        lookbackByDays = false
-        lookbackMeetingCount = 5
-        lookbackDays = 7
-        intervalMinutes = 60
-        autoStash = false
-        runReviewCode = true
-        runReviewDoc = true
-        runReviewConflicts = false
-        runRegression = false
-        runGenerateKnowledge = true
-        runGenerateDoc = true
-        runUpdateIssues = false
-        runUpdatePlanStatus = false
-        runSourceUpdate = false
-        runSourcesToIssue = true
-        runImplementIssues = true
-        runReviewMerge = false
-        regressionAttemptRepair = false
-        regressionAutoReopen = false
-        regressionVerifyTimeout = 120
-        
-        let keys = ["autoCodeUpdateEnabled", "autoCodeLookbackByDays", "autoCodeUpdateLookbackCount",
-                    "autoCodeLookbackDays", "autoCodeIntervalMinutes", "autoCodeAutoStash",
-                    "autoCodeRunReviewCode", "autoCodeRunReviewDoc", "autoCodeRunReviewConflicts",
-                    "autoCodeRunRegression", "autoCodeRunGenerateKnowledge", "autoCodeRunGenerateDoc",
-                    "autoCodeRunUpdateIssues", "autoCodeRunUpdatePlanStatus",
-                    "autoCodeRunSourceUpdate", "autoCodeRunSourcesToIssue",
-                    "autoCodeRunImplementIssues", "autoCodeRunReviewMerge",
-                    "regressionAttemptRepair",
-                    "regressionAutoReopen", "regressionVerifyTimeout"]
-        for key in keys {
-            defaults.removeObject(forKey: key)
-        }
-    }
 }
