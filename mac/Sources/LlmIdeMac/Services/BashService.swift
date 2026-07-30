@@ -74,24 +74,6 @@ final class BashService: Sendable {
         }
     }
 
-    /// Execute multiple commands in sequence (like a script)
-    @MainActor
-    func executeScript(_ commands: [String], workingDirectory: String? = nil) async -> [ExecutionResult] {
-        var results: [ExecutionResult] = []
-
-        for command in commands {
-            let result = await execute(command, workingDirectory: workingDirectory)
-            results.append(result)
-
-            // Stop on first error
-            if !result.isSuccess {
-                break
-            }
-        }
-
-        return results
-    }
-
     /// Validate a command for basic safety
     func validateCommand(_ command: String) -> Bool {
         // Basic validation - prevent obvious dangerous operations

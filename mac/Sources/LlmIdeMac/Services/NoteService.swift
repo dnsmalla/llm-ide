@@ -411,15 +411,3 @@ public final class NoteService: Sendable {
     }
 }
 
-// MARK: - Errors
-
-enum NoteError: LocalizedError {
-    case noteNotFound(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .noteNotFound(let id):
-            return "Note not found: \(id)"
-        }
-    }
-}

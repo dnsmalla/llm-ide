@@ -17,10 +17,6 @@ final class SearchService {
     /// Build the regex driving both find and replace. Plain queries are escaped;
     /// `wholeWord` wraps `\b…\b`; `regex` is taken verbatim. Case-insensitive
     /// unless `caseSensitive`. Returns nil for an invalid regex pattern.
-    func makeRegex(query: String, options: SearchOptions) -> NSRegularExpression? {
-        Self.makeRegex(query: query, options: options)
-    }
-
     nonisolated static func makeRegex(query: String, options: SearchOptions) -> NSRegularExpression? {
         var pattern = options.regex ? query : NSRegularExpression.escapedPattern(for: query)
         // Group before adding word boundaries so alternation in a regex query

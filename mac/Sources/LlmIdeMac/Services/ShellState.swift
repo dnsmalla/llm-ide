@@ -67,7 +67,6 @@ final class ShellState {
 
     var section: Section = .explorer
     var librarySelection: LibrarySelection?
-    var libraryFilter: String = ""
 
     var selectedMeetingId: String? {
         get { if case .meeting(let id) = librarySelection { return id }; return nil }
@@ -79,11 +78,6 @@ final class ShellState {
     /// clears it), so the action works even when that meeting's detail pane
     /// isn't open yet — surviving the async mount a notification can't.
     var pendingResummarizeMeetingId: String?
-
-    var selectedFileURL: URL? {
-        if case .file(let url) = librarySelection { return url }
-        return nil
-    }
 }
 
 extension ShellState.Section {
