@@ -8,12 +8,19 @@ import SwiftUI
 struct PanelSectionTabs: View {
     @Environment(ShellState.self) private var shell
     @EnvironmentObject private var theme: ThemeStore
+    @EnvironmentObject private var config: AppConfig
 
     private static let tabs: [ShellState.Section] = [.explorer, .sourceControl, .search]
 
+    /// The panel switcher respects the sidebar hide list, so Explorer / Source
+    /// Control / Search can each be hidden from here too.
+    private var visibleTabs: [ShellState.Section] {
+        Self.tabs.filter { !config.hiddenSidebarSections.contains($0.rawValue) }
+    }
+
     var body: some View {
         HStack(spacing: 4) {
-            ForEach(Self.tabs, id: \.self) { tab($0) }
+            ForEach(visibleTabs, id: \.self) { tab($0) }
         }
     }
 

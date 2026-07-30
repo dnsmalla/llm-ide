@@ -557,6 +557,16 @@ final class AppConfig: ObservableObject {
         }
     }
 
+    /// The section the Home toolbar button opens — a `ShellState.Section`
+    /// rawValue, default `.explorer`. Sanitized on read so a stale value from
+    /// an enum-rename refactor falls back to Explorer. Hidden landings are
+    /// substituted by `AppShell.effectiveHome()`.
+    @Published var homeSection: String {
+        didSet {
+            defaults.set(homeSection, forKey: "homeSection")
+        }
+    }
+
     /// Internal so tests can construct an AppConfig over an isolated
     /// `UserDefaults(suiteName:)` and not pollute the production
     /// defaults. Production code uses the `shared` singleton.
@@ -715,6 +725,9 @@ final class AppConfig: ObservableObject {
         } else {
             self.hiddenSidebarSections = []
         }
+
+        let homeRaw = defaults.object(forKey: "homeSection") as? String ?? ShellState.Section.explorer.rawValue
+        self.homeSection = ShellState.Section(rawValue: homeRaw) != nil ? homeRaw : ShellState.Section.explorer.rawValue
     }
 
     /// Validates the server URL before persisting it.  Only localhost /

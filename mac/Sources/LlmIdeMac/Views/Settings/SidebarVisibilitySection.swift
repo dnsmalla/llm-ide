@@ -17,6 +17,19 @@ struct SidebarVisibilitySection: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, Spacing.xs)
 
+                // Home landing — where the toolbar Home button goes. If the
+                // chosen section is hidden, effectiveHome() falls back to Library.
+                Picker("Home opens", selection: Binding(
+                    get: { config.homeSection },
+                    set: { config.homeSection = $0 }
+                )) {
+                    ForEach(ShellState.Section.allCases.filter { $0 != .settings && $0 != .live }, id: \.self) { section in
+                        Text(section.label).tag(section.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+                .padding(.bottom, Spacing.sm)
+
                 // Avoid recomputing .last per row; clearer and cheaper.
                 let hideable = ShellState.Section.userHideable
                 let last = hideable.last

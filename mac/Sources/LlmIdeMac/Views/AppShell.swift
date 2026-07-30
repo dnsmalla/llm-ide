@@ -397,6 +397,14 @@ struct AppShell: View {
         }
     }
 
+    /// Where the Home button goes. With no project open it's always Explorer
+    /// (the Welcome screen lives there); with a project it's the user's chosen
+    /// landing, falling back to Library if that section is hidden.
+    private func effectiveHome() -> ShellState.Section {
+        if projectStore.activeProject == nil { return .explorer }
+        return .resolveHome(config.homeSection, hidden: config.hiddenSidebarSections)
+    }
+
     @ViewBuilder
     private func splitContent() -> some View {
         // Title bar holds the named tool buttons (trailing) and the account
@@ -414,11 +422,11 @@ struct AppShell: View {
         // switcher, so from a tool section (Issues, Gantt, …) this is the way
         // back without hunting for the switcher.
         ToolbarItem(placement: .navigation) {
-            Button { shell.section = .explorer } label: {
+            Button { shell.section = effectiveHome() } label: {
                 Label("Home", systemImage: "house")
             }
-            .help("Home — Explorer")
-            .accessibilityLabel("Home — Explorer")
+            .help("Home")
+            .accessibilityLabel("Home")
         }
         // One group of named tool buttons. AppKit moves whichever don't fit
         // into the native `»` overflow menu. (ForEach can't emit individual

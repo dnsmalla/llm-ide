@@ -56,6 +56,16 @@ final class ShellState {
         static let userHideable: [Section] = [
             .explorer, .search, .conflicts, .sourceControl, .issues, .gantt, .visual, .docGen, .autoCode, .codeGraph, .regression
         ]
+
+        /// Resolve the effective Home landing: the chosen section if it's a real
+        /// case and not currently hidden, else `.library` (always visible —
+        /// Library isn't in `userHideable`). Pure so the shell and tests share
+        /// one definition of "where Home goes."
+        static func resolveHome(_ rawValue: String, hidden: Set<String>) -> Section {
+            guard let chosen = Section(rawValue: rawValue),
+                  !hidden.contains(chosen.rawValue) else { return .library }
+            return chosen
+        }
     }
 
     enum LibrarySelection: Hashable {
