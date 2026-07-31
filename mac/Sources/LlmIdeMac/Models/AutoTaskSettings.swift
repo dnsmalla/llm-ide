@@ -14,7 +14,12 @@ import SwiftUI
 final class AutoTaskSettings: ObservableObject {
     
     // MARK: - Published State
-    
+
+    static let defaultCron = "0 * * * *"   // hourly; used for fresh installs
+
+    private static func cronKey(_ task: AutoTask) -> String { "autoCodeCron.\(task.rawValue)" }
+    private static func nextFireKey(_ task: AutoTask) -> String { "autoCodeNextFireAt.\(task.rawValue)" }
+
     @Published var enabled: Bool {
         didSet(oldValue) {
             guard oldValue != enabled else { return }
@@ -235,6 +240,32 @@ final class AutoTaskSettings: ObservableObject {
         }
     }
 
+    func cron(for task: AutoTask) -> String {
+        defaults.string(forKey: Self.cronKey(task)) ?? Self.defaultCron
+    }
+    func setCron(_ value: String, for task: AutoTask) {
+        guard CronExpression.parse(value) != nil else { return }   // refuse invalid
+        defaults.set(value, forKey: Self.cronKey(task))
+        recomputeNextFire(for: task, now: Date())
+        objectWillChange.send()   // notify the UI
+    }
+    func nextFireAt(for task: AutoTask) -> Date? {
+        let t = defaults.double(forKey: Self.nextFireKey(task))
+        return t > 0 ? Date(timeIntervalSince1970: t) : nil
+    }
+    func setNextFireAt(_ date: Date?, for task: AutoTask) {
+        if let date { defaults.set(date.timeIntervalSince1970, forKey: Self.nextFireKey(task)) }
+        else { defaults.removeObject(forKey: Self.nextFireKey(task)) }
+    }
+    /// Recompute the next fire strictly after `now`. No-op if cron is invalid.
+    func recomputeNextFire(for task: AutoTask, now: Date) {
+        guard let expr = CronExpression.parse(cron(for: task)),
+              let next = expr.nextFire(after: now, now: now) else {
+            setNextFireAt(nil, for: task); return
+        }
+        setNextFireAt(next, for: task)
+    }
+
     var menuBarSummary: String {
         guard enabled else { return "Auto Tasks: Disabled" }
         let count = enabledTasks.count
@@ -259,7 +290,18 @@ final class AutoTaskSettings: ObservableObject {
             return "every \(h) hour\(h == 1 ? "" : "s")"
         }
     }
-    
+
+    /// Map the legacy shared interval (minutes) to a per-task cron seed.
+    static func cronFromInterval(_ minutes: Int?) -> String {
+        guard let minutes else { return defaultCron }
+        switch minutes {
+        case ..<60:  return "*/\(max(1, minutes)) * * * *"
+        case 60:     return "0 * * * *"
+        case 1440:   return "0 0 * * *"
+        default:     return "0 */\(max(1, minutes / 60)) * * *"
+        }
+    }
+
     // MARK: - Private State
     
     private let defaults: UserDefaults
@@ -296,6 +338,18 @@ final class AutoTaskSettings: ObservableObject {
         self.regressionVerifyTimeout = savedTimeout > 0 ? savedTimeout : 120
 
         self.showOnlyEnabledTasks = defaults.object(forKey: "autoCodeShowOnlyEnabledTasks") as? Bool ?? false
+
+        // --- Per-task cron migration / seeding ---
+        let legacyInterval = defaults.object(forKey: "autoCodeIntervalMinutes") as? Int
+        for task in AutoTask.allCases {
+            if defaults.string(forKey: Self.cronKey(task)) == nil {
+                let seeded = Self.cronFromInterval(legacyInterval)
+                defaults.set(seeded, forKey: Self.cronKey(task))
+            }
+            if nextFireAt(for: task) == nil {
+                recomputeNextFire(for: task, now: Date())
+            }
+        }
 
         NotificationCenter.default.addObserver(
             self,
