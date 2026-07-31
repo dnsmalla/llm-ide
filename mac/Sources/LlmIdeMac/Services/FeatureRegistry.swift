@@ -1,19 +1,19 @@
 import SwiftUI
 import Combine
 
-public protocol AppModule {
+protocol AppModule {
     var feature: AppFeature { get }
     func start(environment: AppEnvironment)
     func stop(environment: AppEnvironment)
 }
 
 @MainActor
-public final class FeatureRegistry: ObservableObject {
-    public static let shared = FeatureRegistry()
+final class FeatureRegistry: ObservableObject {
+    static let shared = FeatureRegistry()
     
     @AppStorage("active_features_json") private var activeFeaturesJSON: String = ""
-    @Published public private(set) var activeFeatures: Set<AppFeature> = Set(AppFeature.allCases)
-    @Published public private(set) var currentPreset: ProfilePreset = .fullPower
+    @Published private(set) var activeFeatures: Set<AppFeature> = Set(AppFeature.allCases)
+    @Published private(set) var currentPreset: ProfilePreset = .fullPower
     
     private var modules: [AppFeature: AppModule] = [:]
     
@@ -21,22 +21,22 @@ public final class FeatureRegistry: ObservableObject {
         loadSavedFeatures()
     }
     
-    public func register(module: AppModule) {
+    func register(module: AppModule) {
         modules[module.feature] = module
     }
     
-    public func isEnabled(_ feature: AppFeature) -> Bool {
+    func isEnabled(_ feature: AppFeature) -> Bool {
         return activeFeatures.contains(feature)
     }
     
-    public func applyPreset(_ preset: ProfilePreset, environment: AppEnvironment) {
+    func applyPreset(_ preset: ProfilePreset, environment: AppEnvironment) {
         self.currentPreset = preset
         if preset != .custom {
             updateFeatureSet(preset.features, environment: environment)
         }
     }
     
-    public func updateFeatureSet(_ newFeatures: Set<AppFeature>, environment: AppEnvironment) {
+    func updateFeatureSet(_ newFeatures: Set<AppFeature>, environment: AppEnvironment) {
         var validated = newFeatures
         for feature in newFeatures {
             validated.formUnion(feature.requiredDependencies)

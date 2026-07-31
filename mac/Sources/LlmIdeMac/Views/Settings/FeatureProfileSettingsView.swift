@@ -2,7 +2,7 @@ import SwiftUI
 
 struct FeatureProfileSettingsView: View {
     @ObservedObject var registry = FeatureRegistry.shared
-    @EnvironmentObject var environment: AppEnvironment
+    @Environment(AppEnvironment.self) private var environment
     
     var body: some View {
         Form {
