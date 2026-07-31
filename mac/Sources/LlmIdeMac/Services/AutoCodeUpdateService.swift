@@ -33,7 +33,10 @@ final class AutoCodeUpdateService: ObservableObject {
     // MARK: - Dependencies
 
     private let config: AppConfig
-    private let autoTaskSettings: AutoTaskSettings
+    /// Internal-visible for tests (`dueTasks`/`realignNextFire` are unit-tested
+    /// in isolation). The Settings UI already reads this; only `private` was
+    /// dropped — no other change.
+    let autoTaskSettings: AutoTaskSettings
     /// Optional override for tests / dependency injection. When nil (the
     /// normal app wiring) the service resolves a fresh RepoBackend each
     /// run via `resolveBackendAndProject()` so live token / active-repo
@@ -67,11 +70,7 @@ final class AutoCodeUpdateService: ObservableObject {
     private var timer: Timer?
     /// Test/observability hook: true while the auto-run timer is armed.
     var isAutoTimerArmed: Bool { timer != nil }
-    /// Floor for the configurable cadence so a 0/garbage value can't spin
-    /// the timer hot.
-    private static let minIntervalMinutes = 5
     private var cancellable: AnyCancellable?
-    private var intervalCancellable: AnyCancellable?
     /// The in-flight run, so it can be cancelled (Stop button / timer
     /// shutdown). nil when no run is active.
     private var runTask: Task<Void, Never>?
@@ -119,15 +118,6 @@ final class AutoCodeUpdateService: ObservableObject {
                 self.isEnabled = value
                 if value { self.start() } else { self.stop() }
             }
-        // Reschedule the timer when the user changes the cadence — but only
-        // while a timer is live (i.e. auto-tasks are enabled). dropFirst so
-        // the initial value doesn't reschedule before start() runs.
-        intervalCancellable = autoTaskSettings.$intervalMinutes
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard let self, self.timer != nil else { return }
-                self.scheduleTimer()
-            }
     }
 
     /// Backwards-compat init for callers still passing a GitLabClient.
@@ -156,15 +146,15 @@ final class AutoCodeUpdateService: ObservableObject {
         scheduleTimer()
     }
 
-    /// (Re)create the repeating timer at the user's configured cadence.
-    /// Invalidates any existing timer first, so it's safe to call on an
-    /// interval change.
+    /// Arm the 60s cron-evaluation tick. Each tick runs every task whose
+    /// `nextFireAt` is due, then realigns its next fire to the future.
+    /// The cadence is per-task cron (`AutoTaskSettings.cron`), NOT a shared
+    /// interval — this timer just wakes the scheduler once a minute to check.
     private func scheduleTimer() {
         timer?.invalidate()
-        let minutes = max(Self.minIntervalMinutes, autoTaskSettings.intervalMinutes)
-        timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(minutes * 60), repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             guard let self else { return }
-            Task { @MainActor in self.runNow() }
+            Task { @MainActor in self.runDue(now: Date()) }
         }
     }
 
@@ -189,6 +179,46 @@ final class AutoCodeUpdateService: ObservableObject {
         guard runTask == nil else { return false }
         runTask = Task { [weak self] in
             await self?.runOne(task)
+            self?.runTask = nil
+        }
+        return true
+    }
+
+    // MARK: - Cron-driven scheduling
+
+    /// Tasks whose next fire is at or before `now` (and are enabled). Pure read —
+    /// does not mutate state or run anything. `now` is injected for tests.
+    func dueTasks(now: Date = Date()) -> [AutoTask] {
+        guard autoTaskSettings.enabled else { return [] }
+        return AutoTask.allCases.filter { task in
+            guard autoTaskSettings.isEnabled(task: task),
+                  let next = autoTaskSettings.nextFireAt(for: task) else { return false }
+            return now >= next
+        }
+    }
+
+    /// Advance a task's nextFireAt to the first fire strictly after `now`
+    /// (catch up once → realign to the future). Testable seam.
+    func realignNextFire(for task: AutoTask, now: Date) {
+        guard let expr = CronExpression.parse(autoTaskSettings.cron(for: task)),
+              let next = expr.nextFire(after: now, now: now) else {
+            autoTaskSettings.setNextFireAt(nil, for: task); return
+        }
+        autoTaskSettings.setNextFireAt(next, for: task)
+    }
+
+    /// Run every task due at `now`, once, then realign each. Shares the
+    /// `runTask` re-entrancy guard with `runNow()`/`runSingle(_:)`. Each due
+    /// task's nextFireAt is realigned BEFORE its body runs so a slow run can't
+    /// cause a double-fire on the next tick. Returns false when nothing is due
+    /// or a run is already in flight.
+    @discardableResult
+    func runDue(now: Date = Date()) -> Bool {
+        let due = dueTasks(now: now)
+        guard !due.isEmpty, runTask == nil else { return false }
+        for task in due { realignNextFire(for: task, now: now) }   // realign BEFORE running
+        runTask = Task { [weak self] in
+            for task in due { await self?.runOne(task) }
             self?.runTask = nil
         }
         return true
