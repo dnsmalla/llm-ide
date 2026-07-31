@@ -220,7 +220,7 @@ final class CaptionOrchestrator: ObservableObject {
                 Task.detached(priority: .background) { [api] in
                     // Build the .docx output path before entering the service.
                     let notesDir = root.deletingLastPathComponent()
-                        .appendingPathComponent("notes", isDirectory: true)
+                        .appendingPathComponent("llm-doc", isDirectory: true)
                     let dateSlug = AppDateFormatter.dateHourMinuteLocal(summarizeFM.startedAt)
                     let docxURL  = notesDir.appendingPathComponent(
                         "\(dateSlug)-\(String(sessionId.prefix(8)))-meeting-notes.docx")

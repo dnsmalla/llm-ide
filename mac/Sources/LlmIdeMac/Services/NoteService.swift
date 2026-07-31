@@ -16,11 +16,42 @@ import os.log
 
 // MARK: - Types
 
-/// Note type classification
-public enum NoteType: String, Codable, Sendable {
-    case meeting
-    case email
-    case document
+/// Note type classification. Extensible: legacy sources use the static
+/// constants (`.meeting`, `.email`, `.document`); new Source Connectors
+/// construct from their manifest `noteType` string, e.g. `NoteType("slack")`.
+/// On disk the legacy 3 keep their plural directories; new types use the
+/// raw value as the directory name.
+public struct NoteType: RawRepresentable, Codable, Sendable, Hashable {
+    public let rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
+    public init(_ raw: String) { self.rawValue = raw }
+
+    public static let meeting = NoteType(rawValue: "meeting")
+    public static let email = NoteType(rawValue: "email")
+    public static let document = NoteType(rawValue: "document")
+
+    /// Directory name under `llm-doc/`. Legacy 3 map to their existing plural
+    /// dirs so already-written notes stay put; everything else uses rawValue.
+    public var directoryName: String {
+        switch rawValue {
+        case "meeting": return "meetings"
+        case "email": return "emails"
+        case "document": return "documents"
+        default: return rawValue
+        }
+    }
+
+    /// Inverse of `directoryName`: build a `NoteType` from a directory name
+    /// found under `llm-doc/`, mapping the legacy plural dirs back to their
+    /// canonical singular rawValue so existing notes keep their identity.
+    public init(directoryName: String) {
+        switch directoryName {
+        case "meetings": self = .meeting
+        case "emails": self = .email
+        case "documents": self = .document
+        default: self.init(rawValue: directoryName)
+        }
+    }
 }
 
 /// Unified note metadata
@@ -138,9 +169,9 @@ public final class NoteService: Sendable {
 
     // MARK: - Paths
 
-    /// Root directory for all generated notes: <repoRoot>/notes/
+    /// Root directory for all generated notes: <repoRoot>/llm-doc/
     public var notesRoot: URL {
-        repoRoot.appendingPathComponent("notes", isDirectory: true)
+        repoRoot.appendingPathComponent("llm-doc", isDirectory: true)
     }
 
     /// Directory for generated meeting notes: notesRoot/meetings/
@@ -165,14 +196,7 @@ public final class NoteService: Sendable {
 
     /// Get the appropriate subdirectory for a note type
     public func getDirForType(_ type: NoteType) -> URL {
-        switch type {
-        case .meeting:
-            return meetingsDir
-        case .email:
-            return emailsDir
-        case .document:
-            return documentsDir
-        }
+        notesRoot.appendingPathComponent(type.directoryName, isDirectory: true)
     }
 
     /// Get month folder path (YYYY/MM/) for a given date
@@ -321,13 +345,20 @@ public final class NoteService: Sendable {
         try saveIndex(index)
     }
 
-    /// Rebuild the entire index by scanning the notes directory.
+    /// Rebuild the entire index by scanning the notes directory. Discovers
+    /// every type subdirectory (legacy plural + new connector dirs) rather
+    /// than a hardcoded list.
     public func rebuildIndex() async throws -> NoteIndex {
         var notes: [NoteMetadata] = []
 
-        // Scan all note types
-        for type in [NoteType.meeting, .email, .document] {
-            let typeDir = getDirForType(type)
+        try? FileManager.default.createDirectory(at: notesRoot, withIntermediateDirectories: true)
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: notesRoot, includingPropertiesForKeys: [.isDirectoryKey]) else {
+            return NoteIndex()
+        }
+        let typeDirs = contents.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+        for typeDir in typeDirs {
+            let type = NoteType(directoryName: typeDir.lastPathComponent)
             let typeNotes = try await scanTypeDirectory(type: type, dir: typeDir)
             notes.append(contentsOf: typeNotes)
         }
@@ -337,7 +368,6 @@ public final class NoteService: Sendable {
             updated: ISO8601DateFormatter().string(from: Date()),
             notes: notes
         )
-
         try saveIndex(index)
         return index
     }

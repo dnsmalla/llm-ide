@@ -91,7 +91,7 @@ struct PathsSettingsSection: View {
                              url: L.codeDir, note: "Code files", accent: t.textMuted)
             projectFolderRow(label: "data/", icon: "tablecells",
                              url: L.dataDir, note: "Documents, data, images", accent: t.textMuted)
-            projectFolderRow(label: "notes/", icon: "note.text",
+            projectFolderRow(label: "llm-doc/", icon: "note.text",
                              url: L.notesDir, note: "Generated notes", accent: t.textMuted)
             projectFolderRow(label: "templates/", icon: "doc.badge.gearshape",
                              url: L.templatesDir, note: "Doc Gen templates", accent: t.textMuted)

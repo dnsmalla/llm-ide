@@ -16,7 +16,7 @@ enum ProjectPaths {
         switch category {
         case .code:     return "code"
         case .data:     return "data"
-        case .notes:    return "notes"
+        case .notes:    return "llm-doc"
         case .meetings: return "source"
         }
     }

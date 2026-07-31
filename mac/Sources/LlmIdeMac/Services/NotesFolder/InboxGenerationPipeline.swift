@@ -4,14 +4,15 @@ import CryptoKit
 
 /// One parsed raw item recovered from an `InboxStore` file, plus the raw
 /// file's SHA-256 content hash — the dedup key `InboxGenerationPipeline`
-/// checks against notes already generated.
+/// checks against notes already generated. `headers` is the full `Key: Value`
+/// block (source-defined: email→From/Subject, slack→Channel/User/Ts, …);
+/// `Date:` is always present and parsed into `date`.
 struct RawInboxItem {
     let url: URL
-    let from: String
-    let subject: String
     let date: Date
     let body: String
     let hash: String
+    let headers: [String: String]
 }
 
 /// Generic "scan a raw-capture folder, skip what's already been turned into
@@ -64,23 +65,24 @@ enum InboxGenerationPipeline {
         return (processed, failures)
     }
 
-    /// Parses the `From:`/`Subject:`/`Date:` header block written by
-    /// `InboxStore.write`. Returns nil if the headers, the blank-line
-    /// separator, or the date can't be parsed — the caller records this
-    /// as a failure rather than silently dropping the file.
+    /// Parses the `Key: Value` header block written by `InboxStore.write`.
+    /// Returns nil if the blank-line separator or the `Date:` header can't be
+    /// parsed — the caller records this as a failure rather than silently
+    /// dropping the file.
     private static func parse(file: URL, data: Data, hash: String) -> RawInboxItem? {
         guard let text = String(data: data, encoding: .utf8) else { return nil }
         guard let sep = text.range(of: "\n\n") else { return nil }
         let header = String(text[text.startIndex..<sep.lowerBound])
         let body = String(text[sep.upperBound...])
 
-        var from = "", subject = "", dateStr = ""
+        var headers: [String: String] = [:]
         for line in header.split(separator: "\n", omittingEmptySubsequences: false) {
-            if line.hasPrefix("From: ") { from = String(line.dropFirst("From: ".count)) }
-            else if line.hasPrefix("Subject: ") { subject = String(line.dropFirst("Subject: ".count)) }
-            else if line.hasPrefix("Date: ") { dateStr = String(line.dropFirst("Date: ".count)) }
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let key = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
+            let value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+            headers[key] = value
         }
-        guard let date = AppDateFormatter.parseISO(dateStr) else { return nil }
-        return RawInboxItem(url: file, from: from, subject: subject, date: date, body: body, hash: hash)
+        guard let dateStr = headers["Date"], let date = AppDateFormatter.parseISO(dateStr) else { return nil }
+        return RawInboxItem(url: file, date: date, body: body, hash: hash, headers: headers)
     }
 }

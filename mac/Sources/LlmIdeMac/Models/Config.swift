@@ -429,6 +429,22 @@ final class AppConfig: ObservableObject {
         }
     }
 
+    /// Per-project base path under which all Source Connectors store their
+    /// data (`<root>/<inboxFolder>/`, `<root>/llm-doc/<noteType>/`). Optional
+    /// override: when `nil` (the default) `SourceContext.sourceConnectorRoot`
+    /// falls back to the per-project `root` the ingest service is constructed
+    /// with — i.e. today's behavior. Setting it relocates connector data only.
+    /// The UI picker lands in Plan B.
+    @Published var sourceConnectorRootOverride: URL? {
+        didSet {
+            if let url = sourceConnectorRootOverride {
+                defaults.set(url.path, forKey: "sourceConnectorRootOverride")
+            } else {
+                defaults.removeObject(forKey: "sourceConnectorRootOverride")
+            }
+        }
+    }
+
     // ── Regression check (Phase D) ────────────────────────────────────
     /// Short app version (CFBundleShortVersionString) at the time of
     /// the last app launch. Arms the manual regression-run button
@@ -693,6 +709,11 @@ final class AppConfig: ObservableObject {
             self.boxSource = decoded
         } else {
             self.boxSource = nil
+        }
+        if let path = defaults.string(forKey: "sourceConnectorRootOverride"), !path.isEmpty {
+            self.sourceConnectorRootOverride = URL(fileURLWithPath: path)
+        } else {
+            self.sourceConnectorRootOverride = nil
         }
         self.mobileControlEnabled = defaults.object(forKey: "mobileControlEnabled") as? Bool ?? false
         self.mobileControlAutoStart = defaults.object(forKey: "mobileControlAutoStart") as? Bool ?? true

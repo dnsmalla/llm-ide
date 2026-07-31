@@ -21,7 +21,8 @@ struct SourceIngestService {
     let indexer: FolderIndexer
 
     private var context: SourceContext {
-        SourceContext(api: api, config: config, root: root, notesOutputFolder: notesOutputFolder)
+        SourceContext(api: api, config: config, root: root, notesOutputFolder: notesOutputFolder,
+                      sourceConnectorRoot: config.sourceConnectorRootOverride)
     }
 
     /// Fetch + ingest a single source by id (used by the Sources card, which
