@@ -75,7 +75,7 @@ InboxStore + InboxGenerationPipeline + NoteWriter  (shared, header/type-agnostic
 <sourceConnectorRoot>/
 ├── SlackInbox/YYYY/MM/<stamp>-<channel>-<ts>.txt   ← raw (inboxFolder from manifest)
 ├── EmailInbox/YYYY/MM/...
-└── notes/
+└── llm-doc/
     ├── slack/YYYY/MM/...md                          ← noteType from manifest
     └── email/YYYY/MM/...
 ```
@@ -83,7 +83,7 @@ InboxStore + InboxGenerationPipeline + NoteWriter  (shared, header/type-agnostic
 **Connect lifecycle (new).** Enabling/saving a Source Connector in settings (and, idempotently, on app launch for already-enabled connectors) calls `SourceConnector.ensureSetup(at: sourceConnectorRoot)`, which:
 
 1. `mkdir -p` the source inbox folder (`<root>/<inboxFolder>/`).
-2. `mkdir -p` the notes folder (`<root>/notes/<noteType>/`).
+2. `mkdir -p` the notes folder (`<root>/llm-doc/<noteType>/`).
 3. (Optionally) calls the manifest's `test` endpoint to validate auth before marking the connector "Connected".
 
 This guarantees the folders exist from the moment a connector is connected — fixing the "no folders in sources/notes" regression. Folder creation is idempotent and cheap, so it's safe to repeat on every launch.
