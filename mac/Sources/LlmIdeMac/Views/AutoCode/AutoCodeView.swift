@@ -358,6 +358,14 @@ struct AutoCodeView: View {
             .padding(.vertical, 14)
             .background(theme.current.surface)
 
+            // Per-task cron schedule + next-fire, bound to this task. Lives in
+            // the header block so each task's editor shows its own schedule next
+            // to the Run button (the page's `autoTaskSettings` is the source).
+            CronField(task: task, settings: autoTaskSettings)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 8)
+                .background(theme.current.surface)
+
             Divider()
 
             // Edit | Preview toggle (prompt tasks), or structural config.
