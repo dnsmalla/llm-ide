@@ -29,6 +29,27 @@ struct SourceContext {
     let root: URL
     /// `<project>/notes/` — where the AI `.docx` note is written.
     let notesOutputFolder: URL
+    /// Base path for all Source Connectors (`<root>/<inboxFolder>/`,
+    /// `<root>/llm-doc/<noteType>/`). Defaults to `root` when the project has
+    /// not set a `sourceConnectorRootOverride`, so connectors colocate with
+    /// the existing per-project notes root unless explicitly relocated.
+    let sourceConnectorRoot: URL
+    /// Test/override seam for the Source Connector classify POST. nil in
+    /// production (the engine uses `api.postClassification`). The end-to-end
+    /// engine test injects a closure so it never hits the network and never
+    /// force-casts `LlmIdeAPIClient`. See T9 Resolution 3.
+    let classify: ((String, [String: String]) async throws -> SourceConnectorClassification)?
+
+    init(api: LlmIdeAPIClient, config: AppConfig, root: URL,
+         notesOutputFolder: URL, sourceConnectorRoot: URL? = nil,
+         classify: ((String, [String: String]) async throws -> SourceConnectorClassification)? = nil) {
+        self.api = api
+        self.config = config
+        self.root = root
+        self.notesOutputFolder = notesOutputFolder
+        self.sourceConnectorRoot = sourceConnectorRoot ?? root
+        self.classify = classify
+    }
 }
 
 /// A unified input source. Metadata classifies files and drives the Library
