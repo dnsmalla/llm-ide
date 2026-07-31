@@ -16,11 +16,30 @@ import os.log
 
 // MARK: - Types
 
-/// Note type classification
-public enum NoteType: String, Codable, Sendable {
-    case meeting
-    case email
-    case document
+/// Note type classification. Extensible: legacy sources use the static
+/// constants (`.meeting`, `.email`, `.document`); new Source Connectors
+/// construct from their manifest `noteType` string, e.g. `NoteType("slack")`.
+/// On disk the legacy 3 keep their plural directories; new types use the
+/// raw value as the directory name.
+public struct NoteType: RawRepresentable, Codable, Sendable, Hashable {
+    public let rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
+    public init(_ raw: String) { self.rawValue = raw }
+
+    public static let meeting = NoteType(rawValue: "meeting")
+    public static let email = NoteType(rawValue: "email")
+    public static let document = NoteType(rawValue: "document")
+
+    /// Directory name under `llm-doc/`. Legacy 3 map to their existing plural
+    /// dirs so already-written notes stay put; everything else uses rawValue.
+    public var directoryName: String {
+        switch rawValue {
+        case "meeting": return "meetings"
+        case "email": return "emails"
+        case "document": return "documents"
+        default: return rawValue
+        }
+    }
 }
 
 /// Unified note metadata
@@ -165,14 +184,7 @@ public final class NoteService: Sendable {
 
     /// Get the appropriate subdirectory for a note type
     public func getDirForType(_ type: NoteType) -> URL {
-        switch type {
-        case .meeting:
-            return meetingsDir
-        case .email:
-            return emailsDir
-        case .document:
-            return documentsDir
-        }
+        notesRoot.appendingPathComponent(type.directoryName, isDirectory: true)
     }
 
     /// Get month folder path (YYYY/MM/) for a given date
