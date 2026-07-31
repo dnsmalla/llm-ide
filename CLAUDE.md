@@ -57,6 +57,9 @@ node --test tests/auth-routes.test.mjs
 # macOS app tests (swift-testing)
 cd mac && swift test                              # All tests
 swift test --filter testAuthFlow                  # Filter by test name
+
+# Mac↔iOS shared wire types (swift-testing in a standalone SPM package)
+make test-shared-protocol                         # builds + tests ios_app/SharedProtocol
 ```
 
 ## Architecture Overview
@@ -76,13 +79,15 @@ LLM-IDE is a **local-first AI meeting intelligence system** comprising four surf
 4. **Action**: `/kb/generate-code` produces guardrail-scanned diffs; approval dispatches to GitHub/GitLab/Backlog/Linear
 5. **Outcome**: Polling writes results back to `outcomes` table for future planning context
 
+**The Library is the hub, not just meetings.** Non-meeting sources (Email, Slack, Box/documents, repos) also land in the KB as searchable notes. Ingestion is unified through `extension/kb/sources.mjs`, with per-source adapters in `extension/connectors/` (e.g. `box.mjs`). Two patterns: **Pattern A** (index into `sources` + scheduled re-fetch, e.g. Box) vs **Pattern B** (fetch-only → note, forward into a folder). Box is the reference connector when adding a new source.
+
 ### Key Architectural Decisions
 
 - **Claude CLI default** — Users authenticate via `claude login`; optional per-user API keys stored in encrypted vault
 - **Pure Node HTTP** — No framework (Express/Fastify); reduces dependency surface
 - **SQLite WAL+FTS5** — Single database per install, full-text search across meetings/code/tickets
 - **Per-user tenancy** — Every owned row carries `user_id`; FTS5 hits are hydrated with user-scoped queries
-- **Append-only migrations** — Numbered SQL migrations under `extension/kb/migrations/` (0001–0022)
+- **Append-only migrations** — Numbered SQL migrations under `extension/kb/migrations/` (0001–0024)
 
 ## Project Structure
 
@@ -93,11 +98,13 @@ llm-ide/
 ├── extension/           # Chrome extension + local server
 │   ├── core/            # Framework-free primitives (config, utils, errors, logger)
 │   ├── server/          # HTTP server (no framework), routing, middleware
-│   ├── kb/              # SQLite knowledge base, migrations, FTS5
+│   ├── kb/              # SQLite knowledge base, migrations, FTS5; sources.mjs = source hub
 │   ├── agents/          # Server pipeline agents (planner, risk, codegen, …) — not skills
 │   ├── llm_agent/       # Claude CLI orchestrator + synced agent-tool defs
-│   ├── connectors/      # Outbound integrations (GitHub, GitLab, Backlog, Linear, Slack)
+│   ├── connectors/      # Outbound dispatch (GitHub/GitLab/Backlog/Linear/Slack) + source adapters (box, git, issues, qa)
+│   ├── graphkit/        # Code-graph engine (graph.mjs, layouts, 2D/3D renderers, memory-writer)
 │   ├── guardrails/      # Secret/PII/destructive-op pattern scanners
+│   ├── plugins/         # Extension plugin loader/installer (claude-adapter, loader, installer, state)
 │   ├── src/             # React UI (side panel, popup, content scripts)
 │   ├── tests/           # Node test runner (tests/**/*.test.{ts,mjs})
 │   └── server.mjs       # Server entry point
@@ -133,13 +140,15 @@ loads the same kit. Agent-loop tool **definitions** still sync with
 Strict layering rule — arrows indicate "imports":
 
 ```
-core  ←  kb  ←  server  ←  agents / llm_agent / connectors / guardrails
+core  ←  kb  ←  server  ←  agents / llm_agent / connectors / guardrails / graphkit / plugins
 ```
 
 - **`core/`** — Framework-free primitives only (Node built-ins + 3rd-party libs)
 - **`server/`** — HTTP routing, request pipeline (CORS → JWT → rate-limit → route)
-- **`kb/`** — SQLite access, every state-mutating helper takes `userId` first
+- **`kb/`** — SQLite access, every state-mutating helper takes `userId` first; `sources.mjs` owns the non-meeting source hub
 - **`agents/`** — Markdown skill files with frontmatter (`name`, `description`, `tools`, `applies_to`)
+- **`graphkit/`** — Code-graph primitives (graph model, layouts, memory writer); consumed by `agents/planner.mjs` + `agents/code-sync.mjs`, rendered by the Mac app
+- **`plugins/`** — Discovers/loads/install extension plugins; `claude-adapter.mjs` bridges the plugin tool surface to the agent runtime
 
 ## Critical Invariants
 
@@ -314,8 +323,13 @@ Comprehensive docs at https://grid-devs.gitlab.io/personal/dinesh/notes-extensio
 - **System architecture** — [`docs/explanation/architecture.md`](docs/explanation/architecture.md)
 - **Engineering invariants** — [`docs/explanation/invariants.md`](docs/explanation/invariants.md)
 - **API reference** — [`docs/reference/api/overview.md`](docs/reference/api/overview.md)
-- **Decisions** — [`docs/decisions/`](docs/decisions/) (ADRs 0001–0015)
+- **Decisions** — [`docs/decisions/`](docs/decisions/) (ADRs 0001–0016)
 - **How-to guides** — [`docs/how-to/`](docs/how-to/)
+
+### Other root-level guides
+
+- [`AGENTS.md`](AGENTS.md) — redirect; points agents at `invariants.md` (do-not-regress list) and `docs/decisions/`
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) / [`FIRST_TIME_SETUP.md`](FIRST_TIME_SETUP.md) / [`CHANGELOG.md`](CHANGELOG.md) — contributor + setup context
 
 ## Branch + Commit Conventions
 
