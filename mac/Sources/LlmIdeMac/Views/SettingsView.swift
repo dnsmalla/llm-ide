@@ -20,6 +20,7 @@ struct SettingsView: View {
                             .font(Typography.title)
                             .foregroundStyle(theme.current.textMuted)
                         AccountSettingsSection()
+                        FeatureProfileSettingsView() // <-- ADDED: System Feature Minimizer section
                         RecordingSettingsSection(api: api)
                         ServerSettingsSection()
                         BackendSettingsSection()
