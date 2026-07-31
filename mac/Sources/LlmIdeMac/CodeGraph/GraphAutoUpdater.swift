@@ -51,9 +51,9 @@ final class GraphAutoUpdater: ObservableObject {
     nonisolated private static let log = Logger(subsystem: "com.llmide.macapp",
                                                 category: "GraphAutoUpdater")
 
-    init(projectStore: ProjectStore, intervalMinutes: Int = 15) {
+    init(projectStore: ProjectStore, tickMinutes: Int = 15) {
         self.projectStore = projectStore
-        self.intervalSeconds = TimeInterval(max(5, intervalMinutes) * 60)
+        self.intervalSeconds = TimeInterval(max(5, tickMinutes) * 60)
     }
 
     /// Change the regen cadence live (from Settings → Graph & Memory).

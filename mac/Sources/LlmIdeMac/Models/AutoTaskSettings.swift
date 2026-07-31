@@ -47,14 +47,7 @@ final class AutoTaskSettings: ObservableObject {
             save("autoCodeLookbackDays", lookbackDays)
         }
     }
-    
-    @Published var intervalMinutes: Int {
-        didSet(oldValue) {
-            guard oldValue != intervalMinutes else { return }
-            save("autoCodeIntervalMinutes", intervalMinutes)
-        }
-    }
-    
+
     @Published var autoStash: Bool {
         didSet(oldValue) {
             guard oldValue != autoStash else { return }
@@ -279,17 +272,6 @@ final class AutoTaskSettings: ObservableObject {
             return "Last \(lookbackMeetingCount) meeting\(lookbackMeetingCount == 1 ? "" : "s")"
         }
     }
-    
-    var intervalDescription: String {
-        switch intervalMinutes {
-        case ..<60:  return "every \(intervalMinutes) min"
-        case 60:     return "every hour"
-        case 1440:   return "every 24 hours"
-        default:
-            let h = intervalMinutes / 60
-            return "every \(h) hour\(h == 1 ? "" : "s")"
-        }
-    }
 
     /// Map the legacy shared interval (minutes) to a per-task cron seed.
     static func cronFromInterval(_ minutes: Int?) -> String {
@@ -316,7 +298,6 @@ final class AutoTaskSettings: ObservableObject {
         self.lookbackByDays = defaults.object(forKey: "autoCodeLookbackByDays") as? Bool ?? false
         self.lookbackMeetingCount = defaults.object(forKey: "autoCodeUpdateLookbackCount") as? Int ?? 5
         self.lookbackDays = defaults.object(forKey: "autoCodeLookbackDays") as? Int ?? 7
-        self.intervalMinutes = defaults.object(forKey: "autoCodeIntervalMinutes") as? Int ?? 60
         self.autoStash = defaults.object(forKey: "autoCodeAutoStash") as? Bool ?? false
         
         self.runReviewCode = defaults.object(forKey: "autoCodeRunReviewCode") as? Bool ?? true
@@ -381,10 +362,7 @@ final class AutoTaskSettings: ObservableObject {
         
         let newLookbackDays = defaults.object(forKey: "autoCodeLookbackDays") as? Int ?? 7
         if newLookbackDays != lookbackDays { lookbackDays = newLookbackDays }
-        
-        let newIntervalMinutes = defaults.object(forKey: "autoCodeIntervalMinutes") as? Int ?? 60
-        if newIntervalMinutes != intervalMinutes { intervalMinutes = newIntervalMinutes }
-        
+
         let newAutoStash = defaults.object(forKey: "autoCodeAutoStash") as? Bool ?? false
         if newAutoStash != autoStash { autoStash = newAutoStash }
         

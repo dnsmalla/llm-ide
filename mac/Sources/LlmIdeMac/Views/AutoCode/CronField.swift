@@ -23,7 +23,7 @@ struct CronField: View {
                     .onSubmit { commit() }
                     .onAppear { draft = settings.cron(for: task) }
                 if let next = settings.nextFireAt(for: task) {
-                    Text("next: \(Self.fireFormatter.string(from: next))")
+                    Text("next: \(AutoTask.fireFormatter.string(from: next))")
                         .font(.caption2)
                         .foregroundStyle(theme.current.textMuted)
                 } else {
@@ -47,11 +47,4 @@ struct CronField: View {
         if CronExpression.parse(draft) != nil { settings.setCron(draft, for: task) }
         else { draft = settings.cron(for: task) }   // revert
     }
-
-    static let fireFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale.current
-        f.dateFormat = "EEE HH:mm"
-        return f
-    }()
 }

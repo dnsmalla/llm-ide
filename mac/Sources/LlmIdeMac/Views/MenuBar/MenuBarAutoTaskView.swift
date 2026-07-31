@@ -44,7 +44,7 @@ struct MenuBarAutoTaskView: View {
                     Image(systemName: "timer")
                         .font(.caption2)
                         .foregroundStyle(theme.current.textMuted)
-                    Text("Every \(autoTaskSettings.intervalDescription)")
+                    Text(nextFireLabel)
                         .font(.caption2)
                         .foregroundStyle(theme.current.textMuted)
                 }
@@ -125,6 +125,17 @@ struct MenuBarAutoTaskView: View {
         }
         .padding(12)
         .frame(width: 280)
+    }
+
+    /// Soonest upcoming fire across all enabled tasks; empty when none are
+    /// scheduled (disabled master switch or no upcoming fire).
+    private var nextFireLabel: String {
+        let upcoming = AutoTask.allCases
+            .filter { autoTaskSettings.isEnabled(task: $0) }
+            .compactMap { autoTaskSettings.nextFireAt(for: $0) }
+            .sorted()
+        guard let soonest = upcoming.first else { return "No tasks scheduled" }
+        return "Next: \(AutoTask.fireFormatter.string(from: soonest))"
     }
 
     @ViewBuilder

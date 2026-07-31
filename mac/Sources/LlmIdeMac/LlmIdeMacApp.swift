@@ -127,7 +127,7 @@ public struct LlmIdeMacApp: App {
         self._logStore = StateObject(wrappedValue: taskLogStore)
         self._projectStore = StateObject(wrappedValue: projectStoreInstance)
         let autoUpdater = GraphAutoUpdater(projectStore: projectStoreInstance,
-                                           intervalMinutes: cfg.graphAutoUpdateMinutes)
+                                           tickMinutes: cfg.graphAutoUpdateMinutes)
         self._graphAutoUpdater = StateObject(wrappedValue: autoUpdater)
         let activity = ActivityStore(api: client)
         activity.start()

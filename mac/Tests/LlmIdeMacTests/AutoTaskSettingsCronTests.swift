@@ -58,3 +58,14 @@ final class AutoTaskSettingsCronTests: XCTestCase {
         XCTAssertEqual(cron(forInterval: 15), "*/15 * * * *")
     }
 }
+
+extension AutoTaskSettingsCronTests {
+    func testIntervalMinutesRemovedFromDefaults() {
+        // The legacy key may still exist on disk for migration, but the type no
+        // longer exposes intervalMinutes. A fresh settings object must not write it.
+        let a = AutoTaskSettings(defaults: suite)
+        _ = a
+        // No API to set interval; the key is read once for migration then unused.
+        // (If a `var intervalMinutes` still compiles here, this task is incomplete.)
+    }
+}

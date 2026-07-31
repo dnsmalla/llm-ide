@@ -578,6 +578,14 @@ enum AutoTask: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Shared "EEE HH:mm" formatter for next-fire timestamps (CronField + menu bar).
+    static let fireFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale.current
+        f.dateFormat = "EEE HH:mm"
+        return f
+    }()
+
     var label: String {
         switch self {
         case .sourceUpdate:      return "Source Update"
