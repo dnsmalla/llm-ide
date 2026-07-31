@@ -4,6 +4,7 @@ private struct RecoveryTimeoutError: Error {}
 
 struct AppShell: View {
     let api: LlmIdeAPIClient
+    @ObservedObject var registry = FeatureRegistry.shared
     @EnvironmentObject var deepLink: DeepLinkRouter
     @EnvironmentObject var capture: CaptionOrchestrator
     @EnvironmentObject var liveMirror: LiveSessionMirror
@@ -66,7 +67,11 @@ struct AppShell: View {
         .environment(shell)
         .environment(terminalPanelState)
         .sheet(isPresented: $showLlmChatSheet) {
-            LlmChatSheet(api: api)
+            if registry.isEnabled(.agentChat) {
+                LlmChatSheet(api: api)
+            } else {
+                DisabledFeaturePlaceholderView(featureName: "AI Agent Chat")
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openLlmChatSheet)) { _ in
             showLlmChatSheet = true
@@ -84,7 +89,12 @@ struct AppShell: View {
                 NSApp.activate(ignoringOtherApps: true)
             }
         }
-        .onAppear { applyDeepLink(deepLink.pendingEvent?.tab) }
+        .onAppear {
+            applyDeepLink(deepLink.pendingEvent?.tab)
+            if let env = appEnv {
+                env.syncServiceLifecycles()
+            }
+        }
         .onChange(of: deepLink.pendingEvent) { _, new in applyDeepLink(new?.tab) }
         .onChange(of: shell.section) { _, section in
             guard projectStore.activeProject == nil else { return }
@@ -122,8 +132,10 @@ struct AppShell: View {
                 // Compare by character rather than keyCode so the shortcut works
                 // on all keyboard layouts (keyCode 50 is layout-specific to US).
                 if event.charactersIgnoringModifiers == "`" && event.modifierFlags.contains(.control) {
-                    Task { @MainActor in
-                        terminalPanelState.toggle(projectDirectory: projectDirectory)
+                    if registry.isEnabled(.terminal) {
+                        Task { @MainActor in
+                            terminalPanelState.toggle(projectDirectory: projectDirectory)
+                        }
                     }
                     return nil // consume the event
                 }
@@ -284,10 +296,12 @@ struct AppShell: View {
         // already has a generated graph (first generation stays manual).
         // Idempotent; re-runs on project open/switch + a periodic timer.
         .task {
-            // Wire the session store so background runs surface in the Code
-            // Graph view, then begin auto-maintaining the graph.
-            graphAutoUpdater.sessionStore = graphSessionStore
-            graphAutoUpdater.start()
+            if registry.isEnabled(.codeGraph3D) {
+                // Wire the session store so background runs surface in the Code
+                // Graph view, then begin auto-maintaining the graph.
+                graphAutoUpdater.sessionStore = graphSessionStore
+                graphAutoUpdater.start()
+            }
         }
         // Tie the auto-updater to the auth/session lifecycle: AppShell is only
         // mounted while signed in (ContentView swaps in LoginView on logout), so
@@ -393,6 +407,17 @@ struct AppShell: View {
     private var toolSections: [ShellState.Section] {
         Self.toolOrder.filter { section in
             if section == .live { return liveActive }
+            
+            // Map ShellState section to AppFeature
+            switch section {
+            case .codeGraph:  if !registry.isEnabled(.codeGraph3D) { return false }
+            case .autoCode:    if !registry.isEnabled(.autoTasks)   { return false }
+            case .issues, .gantt: if !registry.isEnabled(.ganttIssues) { return false }
+            case .docGen:      if !registry.isEnabled(.docGen)      { return false }
+            case .explorer:    if !registry.isEnabled(.fileExplorer) { return false }
+            default: break
+            }
+            
             return !config.hiddenSidebarSections.contains(section.rawValue)
         }
     }
@@ -472,7 +497,9 @@ struct AppShell: View {
                         .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                TerminalPanelView(projectDirectory: projectDirectory)
+                if registry.isEnabled(.terminal) {
+                    TerminalPanelView(projectDirectory: projectDirectory)
+                }
             }
         } else {
             VStack(spacing: 0) {
@@ -481,7 +508,7 @@ struct AppShell: View {
                 // Explorer embeds the terminal INSIDE its editor column (right
                 // of the file tree), so skip the shared full-width dock there.
                 // Every other section gets the dock here, spanning the section.
-                if shell.section != .explorer {
+                if shell.section != .explorer && registry.isEnabled(.terminal) {
                     TerminalPanelView(projectDirectory: projectDirectory)
                 }
             }
@@ -509,16 +536,46 @@ struct AppShell: View {
         switch section {
         case .library:   LibraryDetailView(api: api)
         case .live:      TranscriptView(api: api)
-        case .explorer:  ExplorerView(api: api)
+        case .explorer:
+            if registry.isEnabled(.fileExplorer) {
+                ExplorerView(api: api)
+            } else {
+                DisabledFeaturePlaceholderView(featureName: "File Explorer")
+            }
         case .search:    SearchView(api: api)
         case .conflicts: ReviewView(api: api, config: .conflicts)
         case .sourceControl: SourceControlView(api: api)
-        case .issues:    issuesRoute
-        case .gantt:     ganttRoute
+        case .issues:
+            if registry.isEnabled(.ganttIssues) {
+                issuesRoute
+            } else {
+                DisabledFeaturePlaceholderView(featureName: "Issue Board")
+            }
+        case .gantt:
+            if registry.isEnabled(.ganttIssues) {
+                ganttRoute
+            } else {
+                DisabledFeaturePlaceholderView(featureName: "Gantt Timeline")
+            }
         case .visual:    VisualView(api: api)
-        case .docGen:    DocGenView(api: api)
-        case .autoCode:  AutoCodeView(api: api)
-        case .codeGraph: UAGraphView()
+        case .docGen:
+            if registry.isEnabled(.docGen) {
+                DocGenView(api: api)
+            } else {
+                DisabledFeaturePlaceholderView(featureName: "Document Generator")
+            }
+        case .autoCode:
+            if registry.isEnabled(.autoTasks) {
+                AutoCodeView(api: api)
+            } else {
+                DisabledFeaturePlaceholderView(featureName: "Auto Tasks")
+            }
+        case .codeGraph:
+            if registry.isEnabled(.codeGraph3D) {
+                UAGraphView()
+            } else {
+                DisabledFeaturePlaceholderView(featureName: "3D Code Graph")
+            }
         case .regression: RegressionView(api: api)
         case .settings:  SettingsView(api: api)
         }
@@ -567,6 +624,7 @@ struct AppShell: View {
                 .map { URL(fileURLWithPath: $0.localPath) }
             self.appEnv = try AppEnvironment(indexRootURL: indexRoot)
             autoCodeUpdate.environment = self.appEnv
+            self.appEnv?.syncServiceLifecycles()
             // Populate the NOTES and MEETINGS sections from the bound project's
             // meetings/ and notes/ folders. Run OFF the main thread
             // (rescanAsync) so a large project's directory walk doesn't freeze
@@ -990,5 +1048,20 @@ struct AppShell: View {
     }
 }
 
-// Notification.Name extensions moved to Services/NotificationNames.swift
-
+struct DisabledFeaturePlaceholderView: View {
+    let featureName: String
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 32))
+                .foregroundColor(.secondary)
+            Text("\(featureName) is currently disabled")
+                .font(.headline)
+            Text("You can re-enable this feature in System Feature Minimizer Settings.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
