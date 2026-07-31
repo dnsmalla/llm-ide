@@ -32,7 +32,7 @@ enum ProjectScaffolder {
 
     // Directories that must exist under every project root.
     static let requiredDirectories = [
-        "source", "code", "data", "notes", "templates",
+        "source", "code", "data", "llm-doc", "templates",
         "system", "system/faults", "system/graph", "system/cache",
         ".claude",
     ]
@@ -83,7 +83,7 @@ enum ProjectScaffolder {
         ensureRootGitignore(at: folderURL)
 
         // 3. .gitkeep markers so empty directories survive `git add .`
-        for dir in ["notes", "data"] {
+        for dir in ["llm-doc", "data"] {
             writeIfAbsent(
                 at: folderURL.appendingPathComponent("\(dir)/.gitkeep"),
                 content: "")

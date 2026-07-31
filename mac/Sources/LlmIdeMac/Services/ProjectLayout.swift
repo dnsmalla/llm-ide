@@ -6,7 +6,7 @@ import Foundation
 ///
 /// ```
 /// <root>/
-/// ├── source/   code/   data/   notes/   templates/   ← user content
+/// ├── source/   code/   data/   llm-doc/   templates/   ← user content
 /// └── system/                              ← generated / system data
 ///     ├── project.json  (marker + settings)
 ///     ├── faults/   graph/   cache/
@@ -19,7 +19,7 @@ struct ProjectLayout {
     var sourceDir: URL { root.appendingPathComponent("source", isDirectory: true) }
     var codeDir:   URL { root.appendingPathComponent("code", isDirectory: true) }
     var dataDir:   URL { root.appendingPathComponent("data", isDirectory: true) }
-    var notesDir:  URL { root.appendingPathComponent("notes", isDirectory: true) }
+    var notesDir:  URL { root.appendingPathComponent("llm-doc", isDirectory: true) }
     /// Doc Gen templates — one subfolder per template (`templates/<slug>/template.md`).
     var templatesDir: URL { root.appendingPathComponent("templates", isDirectory: true) }
 
@@ -51,6 +51,6 @@ struct ProjectLayout {
         ("source", .meetings),
         ("code",   .code),
         ("data",   .data),
-        ("notes",  .notes),
+        ("llm-doc",  .notes),
     ]
 }

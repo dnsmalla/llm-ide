@@ -138,9 +138,9 @@ public final class NoteService: Sendable {
 
     // MARK: - Paths
 
-    /// Root directory for all generated notes: <repoRoot>/notes/
+    /// Root directory for all generated notes: <repoRoot>/llm-doc/
     public var notesRoot: URL {
-        repoRoot.appendingPathComponent("notes", isDirectory: true)
+        repoRoot.appendingPathComponent("llm-doc", isDirectory: true)
     }
 
     /// Directory for generated meeting notes: notesRoot/meetings/

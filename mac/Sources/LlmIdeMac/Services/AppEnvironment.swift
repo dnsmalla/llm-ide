@@ -8,7 +8,7 @@ final class AppEnvironment {
     let index: MeetingIndex
     let indexer: FolderIndexer
     /// The active project root, if any.  Stored at init time so that
-    /// `notesOutputFolder` can return `<projectRoot>/notes/` when a project
+    /// `notesOutputFolder` can return `<projectRoot>/llm-doc/` when a project
     /// is open instead of deriving the path from `meetingsFolder`.
     public let projectRoot: URL?
 
@@ -21,6 +21,11 @@ final class AppEnvironment {
     init(indexRootURL: URL? = nil) throws {
         let config = NotesFolderConfig()
         let folder = config.currentFolder
+        // One-time rename of any legacy `notes/` → `llm-doc/` under the notes
+        // root and the project root, before the indexer scans, so existing
+        // generated notes are picked up at their new location.
+        NotesToLlmDocMigration.run(in: folder)
+        if let project = indexRootURL { NotesToLlmDocMigration.run(in: project) }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         // Place the SQLite index at <indexRoot>/system/index.sqlite.
         // When a project is open indexRootURL is the project root, so the
@@ -78,9 +83,9 @@ final class AppEnvironment {
 
     /// The folder where formatted meeting notes (NOTES section) are written.
     ///
-    /// - When a project is active this is `<projectRoot>/notes/` — the
+    /// - When a project is active this is `<projectRoot>/llm-doc/` — the
     ///   canonical, scaffolded location that the Library's NOTES scan covers.
-    /// - When no project is active it falls back to a `notes/` folder under
+    /// - When no project is active it falls back to a `llm-doc/` folder under
     ///   the notes-config default root. In practice `AppEnvironment` is only
     ///   constructed with an active project (the shell shows WelcomeView
     ///   otherwise), so this branch is purely defensive.
