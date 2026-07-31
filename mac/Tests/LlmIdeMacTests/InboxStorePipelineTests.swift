@@ -1,0 +1,90 @@
+import XCTest
+@testable import LlmIdeMacLib
+
+final class InboxStorePipelineTests: XCTestCase {
+    func testInboxStoreWritesArbitraryHeadersAndBody() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("inbox-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let url = try InboxStore(root: tmp).write(
+            headers: ["Channel": "#team", "User": "alice", "Ts": "1700000000.0001",
+                      "Date": "2026-07-31T09:00:00Z"],
+            body: "hello world",
+            slug: "team-1700000000.0001")
+        let contents = try String(contentsOf: url, encoding: .utf8)
+        // Headers come from a [String:String] (unordered); assert each header
+        // line is present rather than its position. The blank-line separator
+        // + body suffix is locked by the hasSuffix check below.
+        XCTAssertTrue(contents.contains("Channel: #team\n"))
+        XCTAssertTrue(contents.contains("User: alice\n"))
+        XCTAssertTrue(contents.contains("Date: 2026-07-31T09:00:00Z\n"))
+        XCTAssertTrue(contents.hasSuffix("\n\nhello world"))
+        XCTAssertTrue(url.lastPathComponent.hasPrefix("20"))            // YYYY stamp
+        XCTAssertTrue(url.lastPathComponent.contains("team-1700000000")) // slug present
+    }
+}
+
+extension InboxStorePipelineTests {
+    func testPipelineParsesArbitraryHeadersAndDedupsByHash() async throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pipe-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        try InboxStore(root: tmp).write(
+            headers: ["Channel": "#team", "User": "alice", "Date": "2026-07-31T09:00:00Z"],
+            body: "standup", slug: "team-a")
+        try InboxStore(root: tmp).write(
+            headers: ["From": "boss@x", "Subject": "hi", "Date": "2026-07-31T10:00:00Z"],
+            body: "email body", slug: "email-hi")
+
+        var seen: [[String: String]] = []
+        let result = await InboxGenerationPipeline.run(
+            inboxRoot: tmp, knownHashes: []) { item in
+                seen.append(item.headers)
+            }
+        XCTAssertEqual(result.processed, 2)
+        XCTAssertEqual(result.failures, [])
+        XCTAssertEqual(seen.count, 2)
+        XCTAssertEqual(seen.compactMap { $0["Channel"] }, ["#team"])
+        XCTAssertEqual(seen.compactMap { $0["From"] }, ["boss@x"])
+    }
+
+    func testPipelineSkipsItemsWhoseHashIsKnown() async throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pipe-dedup-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try InboxStore(root: tmp).write(
+            headers: ["Channel": "#team", "Date": "2026-07-31T09:00:00Z"],
+            body: "once", slug: "team-x")
+
+        var hash = ""
+        _ = await InboxGenerationPipeline.run(inboxRoot: tmp, knownHashes: []) { item in hash = item.hash }
+
+        var calls = 0
+        let result = await InboxGenerationPipeline.run(inboxRoot: tmp, knownHashes: [hash]) { _ in calls += 1 }
+        XCTAssertEqual(result.processed, 0)
+        XCTAssertEqual(calls, 0)
+    }
+}
+
+import Foundation
+extension InboxStorePipelineTests {
+    /// Email's routeDecision is pure — lock its behavior so the signature
+    /// change in saveRaw/generateNote can't silently alter routing.
+    func testEmailRouteDecisionUnchanged() {
+        let worthy = LlmIdeAPIClient.EmailClassification(
+            category: "work", noteWorthy: true, summary: "s", todos: [])
+        let notWorthy = LlmIdeAPIClient.EmailClassification(
+            category: "newsletter", noteWorthy: false, summary: "s", todos: [])
+
+        XCTAssertEqual(EmailSource.routeDecision(from: "noreply@x.com", classification: worthy),
+                       .skipped(category: "bulk"))
+        XCTAssertEqual(EmailSource.routeDecision(from: "alice@x.com", classification: worthy),
+                       .note(worthy))
+        XCTAssertEqual(EmailSource.routeDecision(from: "alice@x.com", classification: notWorthy),
+                       .skipped(category: "newsletter"))
+        XCTAssertEqual(EmailSource.routeDecision(from: "alice@x.com", classification: nil, classifyFailed: true),
+                       .skipped(category: "unclassified"))
+    }
+}

@@ -79,7 +79,11 @@ struct EmailSource: InputSource {
     @MainActor
     private func saveRaw(from msg: EmailMessage, inboxRoot: URL) throws {
         let startedAt = AppDateFormatter.parseISO(msg.date) ?? Date()
-        try InboxStore(root: inboxRoot).write(from: msg.from, date: startedAt, subject: msg.subject, body: msg.text)
+        try InboxStore(root: inboxRoot).write(
+            headers: ["From": msg.from, "Subject": msg.subject,
+                      "Date": AppDateFormatter.isoString(startedAt)],
+            body: msg.text,
+            slug: InboxStore.slugify(msg.subject.isEmpty ? "email" : msg.subject))
     }
 
     /// The write action chosen for a classified email (pure, unit-testable).
@@ -105,15 +109,16 @@ struct EmailSource: InputSource {
     /// entirely, same as before this pipeline split.
     @MainActor
     private static func generateNote(item: RawInboxItem, writer: EmailNoteWriter, ctx: SourceContext) async throws {
-        // Build raw file path for tracking (relative from repo root)
+        let from = item.headers["From"] ?? ""
+        let subject = item.headers["Subject"] ?? ""
         let rawFileName = item.url.lastPathComponent
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy/MM"
         let monthPath = dateFormatter.string(from: item.date)
         let rawFile = "EmailInbox/\(monthPath)/\(rawFileName)"
 
-        if EmailFileStore.isBulkSender(item.from) {
-            _ = try await writer.writeSkipped(from: item.from, date: item.date, subject: item.subject,
+        if EmailFileStore.isBulkSender(from) {
+            _ = try await writer.writeSkipped(from: from, date: item.date, subject: subject,
                                        category: "bulk", originalBody: item.body, sourceHash: item.hash, rawFile: rawFile)
             return
         }
@@ -122,18 +127,18 @@ struct EmailSource: InputSource {
         var failed = false
         do {
             classification = try await ctx.api.classifyEmail(
-                subject: item.subject, from: item.from,
+                subject: subject, from: from,
                 date: AppDateFormatter.isoString(item.date), body: item.body)
         } catch {
             failed = true
         }
 
-        switch routeDecision(from: item.from, classification: classification, classifyFailed: failed) {
+        switch routeDecision(from: from, classification: classification, classifyFailed: failed) {
         case .note(let c):
-            _ = try await writer.writeNote(from: item.from, date: item.date, subject: item.subject,
+            _ = try await writer.writeNote(from: from, date: item.date, subject: subject,
                                     classification: c, originalBody: item.body, sourceHash: item.hash, rawFile: rawFile)
         case .skipped(let category):
-            _ = try await writer.writeSkipped(from: item.from, date: item.date, subject: item.subject,
+            _ = try await writer.writeSkipped(from: from, date: item.date, subject: subject,
                                        category: category, originalBody: item.body, sourceHash: item.hash, rawFile: rawFile)
         }
     }
