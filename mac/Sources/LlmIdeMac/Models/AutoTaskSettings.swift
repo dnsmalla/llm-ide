@@ -249,6 +249,7 @@ final class AutoTaskSettings: ObservableObject {
     func setNextFireAt(_ date: Date?, for task: AutoTask) {
         if let date { defaults.set(date.timeIntervalSince1970, forKey: Self.nextFireKey(task)) }
         else { defaults.removeObject(forKey: Self.nextFireKey(task)) }
+        objectWillChange.send()
     }
     /// Recompute the next fire strictly after `now`. No-op if cron is invalid.
     func recomputeNextFire(for task: AutoTask, now: Date) {
