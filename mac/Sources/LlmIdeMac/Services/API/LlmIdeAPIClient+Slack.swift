@@ -48,3 +48,12 @@ extension LlmIdeAPIClient {
                                     authenticated: true)
     }
 }
+
+extension LlmIdeAPIClient {
+    /// Generic classify POST for any Source Connector: sends the adapter-built
+    /// field map and decodes the shared classification shape.
+    func postClassification(path: String, body: [String: String]) async throws -> SourceConnectorClassification {
+        struct Req: Encodable { let body: [String: String] }
+        return try await post(path, body: Req(body: body), authenticated: true)
+    }
+}
