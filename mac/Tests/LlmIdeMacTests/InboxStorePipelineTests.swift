@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import LlmIdeMacLib
 
@@ -13,12 +14,15 @@ final class InboxStorePipelineTests: XCTestCase {
             body: "hello world",
             slug: "team-1700000000.0001")
         let contents = try String(contentsOf: url, encoding: .utf8)
-        // Headers come from a [String:String] (unordered); assert each header
-        // line is present rather than its position. The blank-line separator
-        // + body suffix is locked by the hasSuffix check below.
-        XCTAssertTrue(contents.contains("Channel: #team\n"))
-        XCTAssertTrue(contents.contains("User: alice\n"))
-        XCTAssertTrue(contents.contains("Date: 2026-07-31T09:00:00Z\n"))
+        // `InboxStore.write` sorts headers by key, so output is byte-stable
+        // (Channel < Date < Ts < User). Lock the sorted order + the blank-line
+        // separator so the dedup hash invariant can't silently regress.
+        let expectedPrefix = "Channel: #team\n"
+            + "Date: 2026-07-31T09:00:00Z\n"
+            + "Ts: 1700000000.0001\n"
+            + "User: alice\n\n"
+        XCTAssertTrue(contents.hasPrefix(expectedPrefix),
+                      "header block must be key-sorted; got:\n\(contents)")
         XCTAssertTrue(contents.hasSuffix("\n\nhello world"))
         XCTAssertTrue(url.lastPathComponent.hasPrefix("20"))            // YYYY stamp
         XCTAssertTrue(url.lastPathComponent.contains("team-1700000000")) // slug present
@@ -68,7 +72,6 @@ extension InboxStorePipelineTests {
     }
 }
 
-import Foundation
 extension InboxStorePipelineTests {
     /// Email's routeDecision is pure — lock its behavior so the signature
     /// change in saveRaw/generateNote can't silently alter routing.

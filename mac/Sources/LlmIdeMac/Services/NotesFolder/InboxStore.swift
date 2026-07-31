@@ -17,7 +17,12 @@ struct InboxStore {
     /// requires a `Date:` header (ISO-8601) to recover the item date.
     @discardableResult
     func write(headers: [String: String], body: String, slug: String) throws -> URL {
-        let headerBlock = headers.map { "\($0.key): \($0.value)" }.joined(separator: "\n")
+        // Sort by key so the serialized bytes — and therefore the SHA-256 content
+        // hash `InboxGenerationPipeline` uses for dedup — are byte-stable across
+        // process lifetimes (Swift `Dictionary` iteration order is randomized).
+        let headerBlock = headers.sorted(by: { $0.key < $1.key })
+            .map { "\($0.key): \($0.value)" }
+            .joined(separator: "\n")
         let contents = "\(headerBlock)\n\n\(body)"
         let date = (headers["Date"].flatMap { AppDateFormatter.parseISO($0) }) ?? Date()
         let folder = monthFolder(for: date)
