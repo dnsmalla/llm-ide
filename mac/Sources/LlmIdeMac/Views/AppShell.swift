@@ -96,6 +96,9 @@ struct AppShell: View {
             }
         }
         .onChange(of: deepLink.pendingEvent) { _, new in applyDeepLink(new?.tab) }
+        .onChange(of: registry.activeFeatures) { _, _ in
+            reconcileSectionAfterFeatureChange()
+        }
         .onChange(of: shell.section) { _, section in
             guard projectStore.activeProject == nil else { return }
             if section == .settings {
@@ -420,6 +423,26 @@ struct AppShell: View {
             
             return !config.hiddenSidebarSections.contains(section.rawValue)
         }
+    }
+
+    /// Maps a shell section to the feature flag that gates it, if any.
+    private func featureForSection(_ section: ShellState.Section) -> AppFeature? {
+        switch section {
+        case .codeGraph: return .codeGraph3D
+        case .autoCode: return .autoTasks
+        case .issues, .gantt: return .ganttIssues
+        case .docGen: return .docGen
+        case .explorer, .sourceControl, .search: return .fileExplorer
+        default: return nil
+        }
+    }
+
+    /// If the user disables the feature for the current section, navigate away.
+    private func reconcileSectionAfterFeatureChange() {
+        guard let feature = featureForSection(shell.section),
+              !registry.isEnabled(feature) else { return }
+        // Library is always available and not feature-gated.
+        shell.section = .library
     }
 
     /// Where the Home button goes. With no project open it's always Explorer

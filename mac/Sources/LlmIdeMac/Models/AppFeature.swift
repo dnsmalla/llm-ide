@@ -36,6 +36,37 @@ public enum AppFeature: String, CaseIterable, Codable, Identifiable {
         default:           return []
         }
     }
+
+    var systemImage: String {
+        switch self {
+        case .codeEditor:   return "chevron.left.forwardslash.chevron.right"
+        case .fileExplorer: return "folder"
+        case .agentChat:    return "bubble.left.and.bubble.right"
+        case .codeGraph3D:  return "cube.transparent"
+        case .ganttIssues:  return "calendar"
+        case .terminal:     return "terminal"
+        case .docGen:       return "doc.text"
+        case .mobileSync:   return "iphone"
+        case .autoTasks:    return "arrow.triangle.2.circlepath.circle"
+        }
+    }
+
+    /// Drop features whose dependencies are not satisfied (e.g. disabling File
+    /// Explorer also disables Code Graph, Gantt, and DocGen).
+    static func validated(_ features: Set<AppFeature>) -> Set<AppFeature> {
+        var validated = features
+        var changed = true
+        while changed {
+            changed = false
+            for feature in AppFeature.allCases where validated.contains(feature) {
+                if !feature.requiredDependencies.isSubset(of: validated) {
+                    validated.remove(feature)
+                    changed = true
+                }
+            }
+        }
+        return validated
+    }
 }
 
 public enum ProfilePreset: String, CaseIterable, Identifiable {

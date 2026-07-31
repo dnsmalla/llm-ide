@@ -30,18 +30,27 @@ final class FeatureRegistry: ObservableObject {
     }
     
     func applyPreset(_ preset: ProfilePreset, environment: AppEnvironment) {
-        self.currentPreset = preset
+        currentPreset = preset
         if preset != .custom {
-            updateFeatureSet(preset.features, environment: environment)
+            updateFeatureSet(preset.features, environment: environment, markCustom: false)
         }
     }
     
-    func updateFeatureSet(_ newFeatures: Set<AppFeature>, environment: AppEnvironment) {
+    func updateFeatureSet(
+        _ newFeatures: Set<AppFeature>,
+        environment: AppEnvironment,
+        markCustom: Bool = true
+    ) {
         var validated = newFeatures
         for feature in newFeatures {
             validated.formUnion(feature.requiredDependencies)
         }
-        
+        validated = AppFeature.validated(validated)
+
+        if markCustom, currentPreset != .custom {
+            currentPreset = .custom
+        }
+
         guard validated != activeFeatures else { return }
         
         let disabled = activeFeatures.subtracting(validated)
