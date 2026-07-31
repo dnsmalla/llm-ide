@@ -60,7 +60,12 @@ final class SourceConnector: InputSource {
                 return .failure(error.localizedDescription, imported: 0)
             }
         }
-        try? await adapter.markSeen(ctx, batch: batch, drained: batch.drained)
+        var markSeenFailures: [String] = []
+        do {
+            try await adapter.markSeen(ctx, batch: batch, drained: batch.drained)
+        } catch {
+            markSeenFailures.append("markSeen: \(error.localizedDescription)")
+        }
 
         // Notes land at `<sourceConnectorRoot>/llm-doc/<noteType>/` — the
         // same folder `ensureSetup` pre-created.
@@ -73,11 +78,9 @@ final class SourceConnector: InputSource {
                                             adapter: adapter, manifest: self.manifest)
             }
 
-        if !batch.failures.isEmpty {
-            return .failure(batch.failures.joined(separator: "; "), imported: processed)
-        }
-        if !failures.isEmpty {
-            return .failure(failures.joined(separator: "; "), imported: processed)
+        let allFailures = batch.failures + markSeenFailures + failures
+        if !allFailures.isEmpty {
+            return .failure(allFailures.joined(separator: "; "), imported: processed)
         }
         if processed == 0 { return .none }
         return .imported(processed, moreAvailable: batch.overCap, oversize: 0)
@@ -108,7 +111,9 @@ final class SourceConnector: InputSource {
         let emojiOnly = manifest.noiseFilter?.skipEmojiOnly ?? false
         let isNoise = text.trimmingCharacters(in: .whitespacesAndNewlines).count < max(1, minLength)
             || (emojiOnly && Self.isEmojiOnly(text))
-        let title = item.headers["Subject"] ?? item.headers.values.first ?? manifest.displayName
+        let title = item.headers["Subject"]
+            ?? item.headers.sorted(by: { $0.key < $1.key }).first?.value
+            ?? manifest.displayName
 
         if isNoise {
             _ = try await writer.writeSkipped(headers: item.headers, title: title, date: item.date,
@@ -148,7 +153,6 @@ final class SourceConnector: InputSource {
         return trimmed.unicodeScalars.allSatisfy {
             $0.properties.generalCategory == .modifierSymbol
             || $0.properties.generalCategory == .otherSymbol
-            || $0.properties.generalCategory == .surrogate
         }
     }
 }

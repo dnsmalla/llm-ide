@@ -27,10 +27,7 @@ final class SourceConnectorEngineTests: XCTestCase {
 @MainActor
 extension SourceConnectorEngineTests {
     final class FakeAdapter: SourceConnectorAdapter {
-        var classified: [RawInboxItem] = []
-        var fetchCalls = 0
         func fetch(_ ctx: SourceContext) async throws -> SourceConnectorFetchBatch {
-            fetchCalls += 1
             return SourceConnectorFetchBatch(items: [
                 .init(fields: ["Channel": "#team", "User": "alice", "Ts": "1", "Date": "2026-07-31T09:00:00Z"],
                       body: "ship it")
@@ -38,7 +35,7 @@ extension SourceConnectorEngineTests {
         }
         func markSeen(_ ctx: SourceContext, batch: SourceConnectorFetchBatch, drained: Bool) async throws {}
         func classifyRequest(from item: RawInboxItem) -> ClassifyRequest {
-            classified.append(item); return ClassifyRequest(body: ["text": item.body])
+            ClassifyRequest(body: ["text": item.body])
         }
     }
 

@@ -38,11 +38,7 @@ struct SourceConnectorManifest: Codable, Equatable {
             case string, stringList, int, toggle, secret, select
         }
 
-        // Synthesized Codable does NOT honor the `= false` default when a key
-        // is missing in the JSON — it throws `keyNotFound`. The bundled
-        // manifests legitimately omit `required` on optional fields, so we
-        // decode it leniently. (Providing init(from:) disables synthesized
-        // encode(to:), so both are spelled out below.)
+        // Custom Codable: decode leniently (decodeIfPresent ?? false for `required`); encode the full set.
         private enum CodingKeys: String, CodingKey {
             case key, label, type, required, `default`
         }
