@@ -40,6 +40,18 @@ public struct NoteType: RawRepresentable, Codable, Sendable, Hashable {
         default: return rawValue
         }
     }
+
+    /// Inverse of `directoryName`: build a `NoteType` from a directory name
+    /// found under `llm-doc/`, mapping the legacy plural dirs back to their
+    /// canonical singular rawValue so existing notes keep their identity.
+    public init(directoryName: String) {
+        switch directoryName {
+        case "meetings": self = .meeting
+        case "emails": self = .email
+        case "documents": self = .document
+        default: self.init(rawValue: directoryName)
+        }
+    }
 }
 
 /// Unified note metadata
@@ -333,13 +345,20 @@ public final class NoteService: Sendable {
         try saveIndex(index)
     }
 
-    /// Rebuild the entire index by scanning the notes directory.
+    /// Rebuild the entire index by scanning the notes directory. Discovers
+    /// every type subdirectory (legacy plural + new connector dirs) rather
+    /// than a hardcoded list.
     public func rebuildIndex() async throws -> NoteIndex {
         var notes: [NoteMetadata] = []
 
-        // Scan all note types
-        for type in [NoteType.meeting, .email, .document] {
-            let typeDir = getDirForType(type)
+        try? FileManager.default.createDirectory(at: notesRoot, withIntermediateDirectories: true)
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: notesRoot, includingPropertiesForKeys: [.isDirectoryKey]) else {
+            return NoteIndex()
+        }
+        let typeDirs = contents.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+        for typeDir in typeDirs {
+            let type = NoteType(directoryName: typeDir.lastPathComponent)
             let typeNotes = try await scanTypeDirectory(type: type, dir: typeDir)
             notes.append(contentsOf: typeNotes)
         }
@@ -349,7 +368,6 @@ public final class NoteService: Sendable {
             updated: ISO8601DateFormatter().string(from: Date()),
             notes: notes
         )
-
         try saveIndex(index)
         return index
     }
