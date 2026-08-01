@@ -16,6 +16,11 @@ struct ContentView: View {
             if session.bootstrapping {
                 ProgressView("Connecting…")
                     .foregroundStyle(theme.current.text)
+            } else if session.unreachable {
+                // Saved login exists but the launch refresh failed transiently
+                // (backend unreachable). Keep the token and offer retry instead
+                // of forcing a re-login. See SessionStore.performLaunchRefresh.
+                ReconnectView(api: api)
             } else if !session.isAuthenticated {
                 LoginView(api: api)
             } else {

@@ -24,6 +24,13 @@ final class SessionStore: ObservableObject {
     @Published private(set) var bootstrapping: Bool = true
     @Published private(set) var lastError: String?
 
+    /// True when a refresh token exists but the launch refresh failed for a
+    /// *transient* reason (backend unreachable / timeout / 5xx) — i.e. the
+    /// saved login is probably still valid, so we keep it and offer retry
+    /// instead of forcing a re-login. Cleared on success, on a definitive
+    /// auth rejection, and on manual sign-out. Drives the Reconnect screen.
+    @Published private(set) var unreachable: Bool = false
+
     private let log = Logger(subsystem: "com.llmide.macapp", category: "Session")
     private var refreshTask: Task<Bool, Never>?
     private var refreshSlot: UInt64 = 0
@@ -43,21 +50,60 @@ final class SessionStore: ObservableObject {
     }
 
     func bootstrap(api: LlmIdeAPIClient) async {
+        await performLaunchRefresh(api: api)
+    }
+
+    /// Re-run the launch refresh from the Reconnect screen (the user tapped
+    /// Retry, or the backend just came back online). Re-enters the
+    /// `bootstrapping` UI while the refresh is in flight so the spinner shows
+    /// instead of a stale error.
+    func reconnect(api: LlmIdeAPIClient) async {
+        bootstrapping = true
+        unreachable = false
+        await performLaunchRefresh(api: api)
+    }
+
+    /// Single source of truth for the launch-time refresh. Replaces the old
+    /// `bootstrap` that wiped the Keychain token on ANY failure — including a
+    /// transient "backend not reachable" — which auto-logged-out users on
+    /// every slow cold start. Now: keep the token and surface a retry screen
+    /// unless the server *definitively* rejected the token (401/403).
+    private func performLaunchRefresh(api: LlmIdeAPIClient) async {
         guard let stored = KeychainStore.loadToken(host: host) else {
-            await MainActor.run { self.bootstrapping = false }
+            // No saved login → login screen (via `!isAuthenticated`). Never
+            // set `unreachable`: there is nothing to reconnect with.
+            unreachable = false
+            bootstrapping = false
             return
         }
-        // A refresh token exists — try to exchange it for a fresh access token.
-        let session = try? await api.refresh(refreshToken: stored)
-        await MainActor.run {
-            if let session {
-                self.adopt(session: session)
+        do {
+            let session = try await api.refresh(refreshToken: stored)
+            adopt(session: session)
+            unreachable = false
+        } catch {
+            if Self.isDefinitiveAuthRejection(error) {
+                // Server confirmed the token is invalid/expired/disabled —
+                // wipe it and show login.
+                clear()
+                unreachable = false
             } else {
-                // Refresh failed (expired or server unreachable) — clear and show login.
-                KeychainStore.deleteToken(host: self.host)
+                // Transient (can't reach host, timeout, 5xx, …): keep the
+                // token and offer retry. The login is most likely still valid
+                // once the backend is back. Do NOT clear.
+                log.warning("Launch refresh transient failure: \(error.localizedDescription, privacy: .public)")
+                unreachable = true
             }
-            self.bootstrapping = false
         }
+        bootstrapping = false
+    }
+
+    /// Only a real HTTP 401/403 from `/auth/refresh` means the token is
+    /// definitively dead (expired/revoked/disabled). Everything else —
+    /// `.network` (host down / timeout), `.http(5xx)`, `.decoding`, … — is a
+    /// transient failure that must NOT log the user out. Pure + testable.
+    nonisolated static func isDefinitiveAuthRejection(_ error: Error) -> Bool {
+        guard case .http(let status, _, _, _) = error as? APIError else { return false }
+        return status == 401 || status == 403
     }
 
     @MainActor
@@ -99,10 +145,15 @@ final class SessionStore: ObservableObject {
                     await MainActor.run { self.adopt(session: session) }
                     return true
                 } catch {
-                    let msg = error.localizedDescription
+                    let definitive = Self.isDefinitiveAuthRejection(error)
                     await MainActor.run {
-                        self.log.warning("Refresh failed: \(msg, privacy: .public)")
-                        self.clear()
+                        self.log.warning("Refresh \(definitive ? "rejected" : "transient failure"): \(error.localizedDescription, privacy: .public)")
+                        // Only wipe the session on a definitive rejection
+                        // (401/403). A transient network/timeout failure must
+                        // NOT log the user out mid-session — they stay signed
+                        // in (token retained) and the failing request surfaces
+                        // an error; it recovers once the backend is back.
+                        if definitive { self.clear() }
                     }
                     return false
                 }

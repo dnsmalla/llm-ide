@@ -252,7 +252,13 @@ public struct LlmIdeMacApp: App {
                         // so skip the wait and paint login immediately — it
                         // auto-retries when the backend reports `.running`.
                         if session.hasStoredSession {
-                            await Self.awaitBackendReady(timeoutSec: 3)
+                            // 8 s gives a slow cold start a fairer shot. A
+                            // too-short wait is no longer fatal — it leads to
+                            // the Reconnect screen (which auto-retries) rather
+                            // than a forced re-login — but avoiding the
+                            // first-frame bounce is still nicer. BackendManager
+                            // itself allows up to 20 s for a spawn to answer.
+                            await Self.awaitBackendReady(timeoutSec: 8)
                         }
                     }
                     if config.mobileControlEnabled, config.mobileControlAutoStart {
