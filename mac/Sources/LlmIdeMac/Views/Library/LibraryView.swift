@@ -243,7 +243,7 @@ struct LibraryView: View {
         Section {
             if sectionExpanded(sectionId(category)).wrappedValue {
                 if items.isEmpty {
-                    emptyRow("No \(category.rawValue.lowercased()) files yet")
+                    emptyRow("No \(category.sectionTitle.lowercased()) files yet")
                 } else {
                     OutlineGroup(CodeEntry.build(from: items), children: \.children) { entry in
                         codeEntryRow(entry, tint: theme.current.tint(for: category))
@@ -288,7 +288,7 @@ struct LibraryView: View {
             let sortedFolders = folderGroups.keys.sorted()
 
             if sectionItems.isEmpty {
-                emptyRow("No \(category.rawValue.lowercased()) files yet")
+                emptyRow("No \(category.sectionTitle.lowercased()) files yet")
             } else {
                 // Loose files (imported individually)
                 ForEach(looseFiles) { item in
@@ -489,7 +489,7 @@ struct LibraryView: View {
         .padding(.bottom, 3)
     }
 
-    /// File-tree section header (Sources/Code/Data/Notes): unified header with
+    /// File-tree section header (Sources/Code/Data/LLM Doc): unified header with
     /// the category's palette tint and the "Add File / Add Folder" menu.
     private func sectionHeader(_ category: LibraryItem.Category, count: Int) -> some View {
         unifiedSectionHeader(
@@ -567,7 +567,7 @@ struct LibraryView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
-        panel.message = "Choose files to add to \(category.rawValue)"
+        panel.message = "Choose files to add to \(category.sectionTitle)"
         panel.prompt = "Add"
         guard panel.runModal() == .OK else { return }
         for url in panel.urls { itemStore.add(url: url, category: category) }
@@ -578,7 +578,7 @@ struct LibraryView: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.message = "Choose a folder — all files inside will be added to \(category.rawValue)"
+        panel.message = "Choose a folder — all files inside will be added to \(category.sectionTitle)"
         panel.prompt = "Add Folder"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         itemStore.addFolder(url: url, category: category)

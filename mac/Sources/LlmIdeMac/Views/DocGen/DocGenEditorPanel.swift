@@ -189,7 +189,7 @@ struct DocGenEditorPanel: View {
                         Text("No sources selected")
                             .font(.callout.weight(.medium))
                             .foregroundStyle(.secondary)
-                        Text("Check files from Notes or Data in the left panel.")
+                        Text("Check files from LLM Doc or Data in the left panel.")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
@@ -258,7 +258,7 @@ struct DocGenEditorPanel: View {
                 stepRow(
                     number: "2",
                     title: "Select sources",
-                    detail: "Check files from Notes or Data on the left",
+                    detail: "Check files from LLM Doc or Data on the left",
                     done: !vm.selectedSources.isEmpty)
                 stepRow(
                     number: "3",

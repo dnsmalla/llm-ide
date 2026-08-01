@@ -170,7 +170,7 @@ struct AppShell: View {
                         .environment(env)
                 } else if let err = welcomeEnvError {
                     ContentUnavailableView {
-                        Label("Couldn't Open Notes Folder", systemImage: "exclamationmark.triangle")
+                        Label("Couldn't Open LLM Doc Folder", systemImage: "exclamationmark.triangle")
                     } description: {
                         Text(err)
                     } actions: {
@@ -245,7 +245,7 @@ struct AppShell: View {
                     .environment(appEnv)
             } else if let err = envInitError {
                 ContentUnavailableView {
-                    Label("Couldn't Open Notes Folder", systemImage: "exclamationmark.triangle")
+                    Label("Couldn't Open LLM Doc Folder", systemImage: "exclamationmark.triangle")
                 } description: {
                     Text(err)
                 } actions: {

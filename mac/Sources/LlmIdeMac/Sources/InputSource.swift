@@ -27,7 +27,7 @@ struct SourceContext {
     let config: AppConfig
     /// Notes-folder root for `MeetingFileStore`.
     let root: URL
-    /// `<project>/notes/` — where the AI `.docx` note is written.
+    /// `<project>/llm-doc/` — where the AI `.docx` note is written.
     let notesOutputFolder: URL
     /// Base path for all Source Connectors (`<root>/<inboxFolder>/`,
     /// `<root>/llm-doc/<noteType>/`). Defaults to `root` when the project has

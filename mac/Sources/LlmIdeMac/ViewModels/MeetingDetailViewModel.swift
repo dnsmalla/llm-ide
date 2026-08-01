@@ -58,7 +58,7 @@ final class MeetingDetailViewModel {
         let dateSlug = AppDateFormatter.dateHourMinuteLocal(fm.startedAt)
         let stem     = fileURL.deletingPathExtension().lastPathComponent.prefix(8)
         // root is the project's source/ folder; its parent is the project
-        // root, so notes land in the canonical <projectRoot>/notes/.
+        // root, so notes land in the canonical <projectRoot>/llm-doc/.
         let notesDir = ProjectLayout(root: root.deletingLastPathComponent()).notesDir
         let docxURL  = notesDir.appendingPathComponent("\(dateSlug)-\(stem)-meeting-notes.docx")
 

@@ -2,7 +2,7 @@
 //
 // Architecture:
 // - Raw data stays in source folders (meetings/, EmailInbox/, Documents/)
-// - Generated notes go to unified notes/ folder (notes/meetings/, notes/emails/, notes/documents/)
+// - Generated notes go to the unified llm-doc/ folder (llm-doc/meetings/, llm-doc/emails/, llm-doc/documents/)
 // - Each generated note tracks its source file
 //
 // This service provides a unified interface for:

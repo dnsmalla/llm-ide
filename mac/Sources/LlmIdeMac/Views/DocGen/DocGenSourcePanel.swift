@@ -165,18 +165,18 @@ struct DocGenSourcePanel: View {
         .animation(.easeInOut(duration: 0.1), value: selected)
     }
 
-    // MARK: - Notes section
+    // MARK: - LLM Doc section
 
     private var notesSection: some View {
         let items = itemStore.items(for: .notes)
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
-                sectionHeader(title: "Notes", icon: "note.text", color: .blue)
+                sectionHeader(title: "LLM Doc", icon: "note.text", color: .blue)
                 Spacer()
             }
 
             if items.isEmpty {
-                emptyHint("No notes in Library yet")
+                emptyHint("No LLM Docs in Library yet")
             } else {
                 ForEach(items) { item in
                     fileRow(item: item, iconColor: .blue)
@@ -231,7 +231,7 @@ struct DocGenSourcePanel: View {
             Image(systemName: "books.vertical")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
-            Text("Add notes, data, or sources from the Library")
+            Text("Add LLM Docs, data, or sources from the Library")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()

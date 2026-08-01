@@ -48,11 +48,16 @@ struct LibraryItem: Identifiable, Codable, Hashable {
 
         /// Display title for the Library section header. `.meetings` is
         /// presented as "Sources" — it now holds captured meetings plus
-        /// ingested mail (and, later, Slack). The Codable `rawValue` stays
-        /// "Meetings" so persisted items and the `meetings/` folder scan are
-        /// unaffected.
+        /// ingested mail (and, later, Slack). `.notes` is presented as
+        /// "LLM Doc" (its on-disk folder is `llm-doc/`). The Codable
+        /// `rawValue` stays "Meetings"/"Notes" so persisted items and the
+        /// folder scan are unaffected — only the displayed label changes.
         var sectionTitle: String {
-            self == .meetings ? "Sources" : rawValue
+            switch self {
+            case .meetings: return "Sources"
+            case .notes:    return "LLM Doc"
+            default:        return rawValue
+            }
         }
 
         var icon: String {

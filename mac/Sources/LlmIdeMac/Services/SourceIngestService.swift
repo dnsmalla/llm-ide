@@ -14,7 +14,7 @@ struct SourceIngestService {
     let config: AppConfig
     /// Notes-folder root for `MeetingFileStore`.
     let root: URL
-    /// `<project>/notes/` — where the AI `.docx` note is written.
+    /// `<project>/llm-doc/` — where the AI `.docx` note is written.
     let notesOutputFolder: URL
     /// Forces the Library SQLite index to pick up new files immediately
     /// rather than waiting for the kqueue watcher tick.

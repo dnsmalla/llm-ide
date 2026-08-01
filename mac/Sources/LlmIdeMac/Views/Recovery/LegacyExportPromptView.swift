@@ -11,7 +11,7 @@ struct LegacyExportPromptView: View {
                 .font(.largeTitle).foregroundStyle(.tint)
             Text("Export legacy meetings?")
                 .font(.title2.weight(.semibold))
-            Text("Meetings stored from before the new file-based system can be exported to your Notes folder as .md files. This runs once.")
+            Text("Meetings stored from before the new file-based system can be exported to your LLM Doc folder as .md files. This runs once.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 400)

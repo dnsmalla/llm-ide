@@ -130,7 +130,7 @@ struct SummarySections: View {
                     .padding(.top, 6)
             }
         } label: {
-            disclosureLabel(icon: "doc.text", title: "Full Notes")
+            disclosureLabel(icon: "doc.text", title: "Full LLM Doc")
         }
 
         // Transcript — collapsible with copy button
