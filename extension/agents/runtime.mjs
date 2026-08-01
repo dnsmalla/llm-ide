@@ -6,10 +6,9 @@ import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
-import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS, spawnCli, minimalCliEnv, formatCliSpawnError } from './providers.mjs';
+import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS, spawnCli, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch } from './providers.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 import { recordUsage, flagQuota, resolveModel as resolveUsageModel, recordRateLimits } from '../kb/usage.mjs';
-import { getCustomProvider } from '../server/custom-providers.mjs';
 
 // Best-effort metering wrappers — a ledger write or quota flag must NEVER throw
 // into a live model call. Used across the Anthropic HTTP, CLI, and provider
@@ -152,17 +151,14 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
     throw new Error('Image input requires an Anthropic API key configured for this account (Settings → Model Providers).');
   }
   if (provider !== 'anthropic') {
-    // Handle custom:uuid providers first
+    // User-registered custom:<uuid> provider — resolve key + baseUrl via the
+    // shared resolver (single source of truth with route.mjs's native loop).
+    // The resolver also covers disabled/not-found/no-key with a surfacable
+    // message, and degrades a bad vault key to no_key instead of throwing.
     if (typeof provider === 'string' && provider.startsWith('custom:')) {
-      const customProvider = getCustomProvider(provider);
-      if (!customProvider) {
-        throw new Error(`Custom provider ${provider} not found. Register it in Settings → Model Providers.`);
-      }
-      const key = getSecret(getDb(), userId, customProvider.vaultKey);
-      if (!key) {
-        throw new Error(`No API key configured for ${customProvider.name}. Add one in Settings → Model Providers.`);
-      }
-      return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl: customProvider.baseURL, signal, meter, tools });
+      const r = resolveCustomProviderDispatch(provider, userId);
+      if (r.error) throw new Error(r.message);
+      return completeViaApi(provider, { apiKey: r.apiKey, model, prompt, maxTokens: resolvedMaxTokens, baseUrl: r.baseUrl, signal, meter, tools });
     }
 
     const key = providerApiKey(userId, provider);

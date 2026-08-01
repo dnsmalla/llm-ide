@@ -47,33 +47,17 @@ extension CustomProvider {
         do {
             let data = try JSONEncoder().encode(providers)
             UserDefaults.standard.set(data, forKey: defaultsKey)
-
-            // Sync to backend
-            syncToBackend(providers)
+            // NOTE: backend registry sync is intentionally NOT done here. This
+            // static, model-layer method has no access to the session access
+            // token, and a bare URLSession POST to /kb/custom-providers (which
+            // sits behind the global `authenticate` middleware) silently 401'd
+            // — so the registry was never populated and custom providers never
+            // resolved at code-assist time. Sync is driven from the view layer
+            // (CustomProvidersSection) via LlmIdeAPIClient.syncCustomProviders,
+            // which injects the Bearer token.
         } catch {
             // Silent fail — validation happened in UI
         }
-    }
-
-    private static func syncToBackend(_ providers: [CustomProvider]) {
-        guard let serverURL = URL(string: AppConfig.shared.serverURL) else { return }
-
-        let url = serverURL.appendingPathComponent("/kb/custom-providers")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 5
-
-        do {
-            let body = ["providers": providers]
-            request.httpBody = try JSONEncoder().encode(body)
-        } catch {
-            return
-        }
-
-        URLSession.shared.dataTask(with: request) { _, _, _ in
-            // Fire-and-forget: backend is now in sync
-        }.resume()
     }
 
     func save() {

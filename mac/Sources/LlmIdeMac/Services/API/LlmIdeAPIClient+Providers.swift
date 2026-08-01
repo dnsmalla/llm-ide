@@ -43,4 +43,21 @@ extension LlmIdeAPIClient {
         let r: Resp = try await get("/auth/me/secrets", authenticated: true)
         return Set(r.secrets.map(\.key))
     }
+
+    /// Push the locally-persisted custom providers into the backend's in-memory
+    /// registry (POST /kb/custom-providers). The registry is the only place
+    /// that maps a `custom:<id>` provider id → baseURL + vault key, and it is
+    /// lost on server restart — so this is re-sent whenever the Custom
+    /// Providers section appears and after every add/edit/delete/toggle.
+    ///
+    /// Authenticated: the route is behind the global `authenticate` middleware,
+    /// so an unauthenticated POST 401s and the provider silently never
+    /// resolves at code-assist time. Call sites fire-and-forget (best-effort).
+    func syncCustomProviders(_ providers: [CustomProvider]) async throws {
+        struct Req: Encodable { let providers: [CustomProvider] }
+        struct Ack: Decodable { let success: Bool?; let count: Int? }
+        let _: Ack = try await post("/kb/custom-providers",
+                                    body: Req(providers: providers),
+                                    authenticated: true)
+    }
 }

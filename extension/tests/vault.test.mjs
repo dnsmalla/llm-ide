@@ -41,6 +41,35 @@ test('slack.botToken is an allowed vault key and round-trips', () => {
   assert.equal(getSecret(db, userId, 'slack.botToken'), 'xoxb-abc-123');
 });
 
+// User-registered custom LLM providers (Settings → Custom Providers) store
+// their per-provider API key under a dynamic `custom.<id>.apiKey` path, where
+// <id> is the provider's stable UUID (lowercased). The vault must allow this
+// whole namespace (not just the single generic `custom.apiKey`), or the key
+// can't be stored/read and the provider silently never works.
+test('custom.<id>.apiKey (dynamic namespace) is allowed and round-trips', () => {
+  const db = secretsDb();
+  const userId = 'user-custom-1';
+  const key = 'custom.e621e1f8-c36c-495a-bc93-6e1f4f8b7b2f.apiKey';
+  assert.doesNotThrow(() => setSecret(db, userId, key, 'sk-glm-xyz'));
+  assert.equal(getSecret(db, userId, key), 'sk-glm-xyz');
+});
+
+test('custom.<id>.apiKey charset gate is tight', () => {
+  const db = secretsDb();
+  const userId = 'user-custom-2';
+  // Names with spaces / uppercase / extra segments must NOT be accepted —
+  // the Mac derives the key from a lowercased UUID, so anything else is a bug.
+  for (const bad of [
+    'custom.My Provider.apiKey',   // space (unsanitised name)
+    'custom.GLM.apiKey',           // uppercase
+    'custom..apiKey',              // empty slug
+    'custom.foo.bar.apiKey',       // extra segment
+    'custom.evil.baseUrl',         // wrong suffix (baseUrl rides the registry, not the vault)
+  ]) {
+    assert.throws(() => setSecret(db, userId, bad, 'x'), { message: /Unknown vault key/ }, `expected ${bad} to be rejected`);
+  }
+});
+
 test('encrypt/decrypt roundtrips for the same user', () => {
   const blob = encrypt('user-1', 'super-secret-token');
   assert.ok(Buffer.isBuffer(blob));

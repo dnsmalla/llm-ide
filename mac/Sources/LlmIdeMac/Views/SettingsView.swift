@@ -33,7 +33,7 @@ struct SettingsView: View {
                         PreferencesSettingsSection(api: api)
                         AutoCodeSettingsSection()
                         ProvidersSettingsSection(api: api)
-                        CustomProvidersSection()
+                        CustomProvidersSection(api: api)
                     }
 
                     // Project-scoped settings — only visible when a project is

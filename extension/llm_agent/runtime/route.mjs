@@ -25,7 +25,7 @@ import { tasks } from './handlers/session-tasks.mjs';
 import { redactFence } from './redaction.mjs';
 import { logger } from '../../core/logger.mjs';
 import { GLOBAL_HANDLER_NAMES } from './global-handlers.mjs';
-import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider } from '../../agents/providers.mjs';
+import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider, resolveCustomProviderDispatch, assertSafeBaseUrlResolved } from '../../agents/providers.mjs';
 import { skillsToOpenAITools } from './openai-tools.mjs';
 
 // Re-exported for the HTTP routes that historically imported these
@@ -298,17 +298,43 @@ export async function handleCodeAssist({
   }
 
   // Native tool-calling loop for OpenAI-compatible providers (deepseek/openai/
-  // custom). They speak the OpenAI function-calling API, so use the proper
-  // messages-based loop (Cursor/OpenAI pattern: results fed back as native
-  // `tool` messages, natural termination) instead of the text-fence loop, which
-  // those models don't follow and which loops when results come back as fences.
+  // custom) AND user-registered custom:<uuid> providers. They speak the OpenAI
+  // function-calling API, so use the proper messages-based loop (Cursor/OpenAI
+  // pattern: results fed back as native `tool` messages, natural termination)
+  // instead of the text-fence loop, which those models don't follow and which
+  // loops when results come back as fences.
   const NATIVE_PROVIDERS = new Set(['deepseek', 'openai', 'custom']);
   const effProvider = (typeof provider === 'string' && provider) || resolveProvider(model);
-  const nativeKey = NATIVE_PROVIDERS.has(effProvider) ? providerApiKey(userId, effProvider) : null;
+
+  // Resolve credentials for the native loop. Built-in native providers read
+  // their key via the vault/env helpers; a user-registered custom:<uuid>
+  // provider resolves through the registry + vault (resolveCustomProviderDispatch
+  // throws a surfacable message if it isn't registered / has no key). Without
+  // this branch a custom:<uuid> provider was silently dropped — nativeKey was
+  // null and the request fell back to the Anthropic runAgentLoop below.
+  let customResolved = null; // { apiKey, baseUrl, name } for custom:<uuid>
+  let nativeKey = null;
+  if (typeof effProvider === 'string' && effProvider.startsWith('custom:')) {
+    const r = resolveCustomProviderDispatch(effProvider, userId);
+    if (r.error) throw new Error(r.message);
+    customResolved = r;
+    nativeKey = r.apiKey;
+  } else if (NATIVE_PROVIDERS.has(effProvider)) {
+    nativeKey = providerApiKey(userId, effProvider);
+  }
+
   let out;
   if (nativeKey && typeof model === 'string' && model) {
-    const nativeBaseUrl = effProvider === 'custom' ? customBaseUrl(userId)
+    const nativeBaseUrl = customResolved
+      ? customResolved.baseUrl.replace(/\/+$/, '')
+      : effProvider === 'custom' ? customBaseUrl(userId)
       : effProvider === 'deepseek' ? 'https://api.deepseek.com' : undefined;
+    // SSRF guard once, before the loop. The native loop calls callOpenAI
+    // directly (not completeViaApi), so a user-supplied custom base URL must be
+    // checked here — this also closes a pre-existing gap for the generic
+    // 'custom' provider, whose customBaseUrl() only applies the literal-IP check
+    // (not the DNS-resolution check).
+    if (nativeBaseUrl) await assertSafeBaseUrlResolved(nativeBaseUrl);
     out = await runNativeAgentLoop({
       systemPrompt: NATIVE_SYSTEM_PROMPT,
       userMessage: composedUserMessage,

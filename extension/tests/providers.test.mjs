@@ -11,8 +11,34 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
-const { resolveProvider, providerApiKey, completeViaApi, verifyProvider, cliInvocation, listProviderModels, chatModels, customBaseUrl, spawnCli, runViaCli, anthropicWebCliArgs, formatCliSpawnError } =
+const { resolveProvider, providerApiKey, completeViaApi, verifyProvider, cliInvocation, listProviderModels, chatModels, customBaseUrl, spawnCli, runViaCli, anthropicWebCliArgs, formatCliSpawnError, resolveCustomProviderDispatch } =
   await import('../agents/providers.mjs');
+const { setSecret } = await import('../server/vault.mjs');
+const { syncCustomProviders } = await import('../server/custom-providers.mjs');
+import Database from 'better-sqlite3';
+
+// In-memory secrets store for resolver tests (same schema as the vault).
+function secretsDb() {
+  const db = new Database(':memory:');
+  db.exec(`
+    CREATE TABLE user_secrets (
+      user_id TEXT NOT NULL,
+      secret_key TEXT NOT NULL,
+      ciphertext BLOB NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, secret_key)
+    )
+  `);
+  return db;
+}
+
+// Register one custom provider in the in-memory registry. Returns the
+// `custom:<id>` key. Callers MUST clear the registry (syncCustomProviders([]))
+// in teardown — it is process-global.
+function registerCustom({ id = 'abc', name = 'GLM', baseURL = 'https://api.example.com/v1', vaultKey = 'custom.abc-123.apiKey', isEnabled = true } = {}) {
+  syncCustomProviders([{ id, name, baseURL, apiKey: vaultKey, models: [], isOpenAICompatible: true, isEnabled }]);
+  return `custom:${id}`;
+}
 
 function mockFetch(handler) {
   const original = globalThis.fetch;
@@ -354,4 +380,58 @@ test('completeViaApi: a rate-limit 429 (no quota marker) IS retried', async () =
     assert.equal(out, 'ok');
     assert.equal(calls, 2);
   } finally { restore(); }
+});
+
+// ── resolveCustomProviderDispatch: custom:<uuid> credential resolution ────
+// The single source of truth both dispatch paths use to turn a registered
+// custom provider id into an {apiKey, baseUrl}. A failure must return a
+// surfacable {error,message}, never throw into the model call.
+
+test('resolveCustomProviderDispatch: returns apiKey+baseUrl for a registered, keyed provider', () => {
+  const db = secretsDb();
+  const pid = registerCustom();
+  try {
+    setSecret(db, 'user-1', 'custom.abc-123.apiKey', 'sk-glm-test');
+    const r = resolveCustomProviderDispatch(pid, 'user-1', db);
+    assert.equal(r.error, undefined);
+    assert.equal(r.apiKey, 'sk-glm-test');
+    assert.equal(r.baseUrl, 'https://api.example.com/v1');
+    assert.equal(r.name, 'GLM');
+  } finally { syncCustomProviders([]); }
+});
+
+test('resolveCustomProviderDispatch: {error:"not_found"} for an unregistered custom:uuid', () => {
+  try {
+    const r = resolveCustomProviderDispatch('custom:bogus', 'user-1', secretsDb());
+    assert.equal(r.error, 'not_found');
+    assert.match(r.message, /not found/);
+  } finally { syncCustomProviders([]); }
+});
+
+test('resolveCustomProviderDispatch: {error:"no_key"} when no secret is stored', () => {
+  const pid = registerCustom();
+  try {
+    const r = resolveCustomProviderDispatch(pid, 'user-1', secretsDb()); // no setSecret
+    assert.equal(r.error, 'no_key');
+    assert.match(r.message, /No API key configured for GLM/);
+  } finally { syncCustomProviders([]); }
+});
+
+test('resolveCustomProviderDispatch: {error:"disabled"} when isEnabled is false', () => {
+  const pid = registerCustom({ isEnabled: false });
+  try {
+    const r = resolveCustomProviderDispatch(pid, 'user-1', secretsDb());
+    assert.equal(r.error, 'disabled');
+    assert.match(r.message, /disabled/);
+  } finally { syncCustomProviders([]); }
+});
+
+test('resolveCustomProviderDispatch: a non-allowlisted vault key degrades to {error:"no_key"}, not a throw', () => {
+  // The resolver must swallow a vault error so a misconfigured key never throws
+  // into the model call. 'custom.NotAllowed.apiKey' fails the charset gate.
+  const pid = registerCustom({ vaultKey: 'custom.NotAllowed.apiKey' });
+  try {
+    const r = resolveCustomProviderDispatch(pid, 'user-1', secretsDb());
+    assert.equal(r.error, 'no_key');
+  } finally { syncCustomProviders([]); }
 });

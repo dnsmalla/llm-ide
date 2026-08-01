@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct CustomProvidersSection: View {
+    let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
     @State private var providers = CustomProvider.loadAll()
     @State private var showAddSheet = false
@@ -45,29 +46,43 @@ struct CustomProvidersSection: View {
         }
         .sheet(isPresented: $showAddSheet) {
             AddProviderSheet(
+                api: api,
                 provider: nil,
                 onSave: { provider in
                     provider.save()
                     providers = CustomProvider.loadAll()
+                    syncAll()
                     showAddSheet = false
                 }
             )
         }
         .sheet(item: $editingProvider) { provider in
             AddProviderSheet(
+                api: api,
                 provider: provider,
                 onSave: { updated in
                     updated.save()
                     providers = CustomProvider.loadAll()
+                    syncAll()
                     editingProvider = nil
                 }
             )
+        }
+        // The backend keeps the custom-provider registry in MEMORY (lost on
+        // server restart). Re-push the locally-persisted providers whenever
+        // this section appears so a restarted server repopulates the registry
+        // without the user having to re-save each provider.
+        .task {
+            let all = CustomProvider.loadAll()
+            providers = all
+            syncAll()   // repopulate the backend registry (lost on server restart)
         }
     }
 
     private func deleteProvider(_ provider: CustomProvider) {
         provider.delete()
         providers = CustomProvider.loadAll()
+        syncAll()
     }
 
     private func toggleProvider(_ provider: CustomProvider) {
@@ -75,6 +90,17 @@ struct CustomProvidersSection: View {
         updated.isEnabled.toggle()
         updated.save()
         providers = CustomProvider.loadAll()
+        syncAll()
+    }
+
+    /// Re-push every locally-persisted custom provider into the backend
+    /// registry (POST /kb/custom-providers, authenticated) so a `custom:<id>`
+    /// selection actually resolves at code-assist time. Fire-and-forget: a
+    /// transient failure (e.g. auth drift) must not block the UI; the next
+    /// mutation or section re-appearance retries.
+    private func syncAll() {
+        let all = CustomProvider.loadAll()
+        Task { try? await api.syncCustomProviders(all) }
     }
 }
 
@@ -130,6 +156,7 @@ private struct ProviderRow: View {
 // MARK: - Add/Edit Sheet
 
 private struct AddProviderSheet: View {
+    let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
     @Environment(\.dismiss) var dismiss
 
@@ -139,8 +166,10 @@ private struct AddProviderSheet: View {
     @State private var isOpenAICompatible = true
     @State private var models: [AIModel] = []
     @State private var modelInput = ""
+    @State private var apiKeyInput = ""
     @State private var error: String?
     @State private var isTesting = false
+    @State private var isSaving = false
 
     let provider: CustomProvider?
     let onSave: (CustomProvider) -> Void
@@ -164,6 +193,19 @@ private struct AddProviderSheet: View {
                     LabeledInput(label: "Provider Name", text: $name, placeholder: "GLM, Ollama, etc.")
                     LabeledInput(label: "API Base URL", text: $baseURL, placeholder: "https://api.example.com/v1")
                     LabeledInput(label: "Description", text: $description, placeholder: "Zhipu GLM 4 (optional)")
+
+                    // The provider's API key, stored in the server vault under
+                    // `custom.<id>.apiKey`. On edit the field is blank (secrets
+                    // are write-only — leave blank to keep the existing key).
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("API Key")
+                            .font(Typography.caption)
+                            .foregroundStyle(theme.current.textMuted)
+                        SecureField(provider == nil ? "sk-…" : "Enter a new key to replace (leave blank to keep)",
+                                    text: $apiKeyInput)
+                            .textFieldStyle(.roundedBorder)
+                            .font(Typography.mono)
+                    }
 
                     Toggle("OpenAI-Compatible API", isOn: $isOpenAICompatible)
                         .font(Typography.body)
@@ -219,10 +261,10 @@ private struct AddProviderSheet: View {
 
                         Spacer()
 
-                        Button("Save") { save() }
+                        Button("Save") { Task { await save() } }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
-                            .disabled(!canSave)
+                            .disabled(!canSave || isSaving)
                     }
                 }
                 .padding(Spacing.md)
@@ -252,9 +294,24 @@ private struct AddProviderSheet: View {
         isTesting = true
         error = nil
 
-        // Simple test: try to fetch models endpoint
-        var request = URLRequest(url: URL(string: baseURL.appending("/models"))!)
-        request.timeoutInterval = 5
+        // Probe {baseURL}/models WITH the entered API key as a Bearer header.
+        // OpenAI-compatible providers (Z.AI GLM, OpenRouter, …) reject an
+        // unauthenticated /models with 401, so without the key "Test
+        // Connection" reported a bogus failure even for a valid setup. Also
+        // validate the URL up front — the old force-unwrap crashed on a typo.
+        let trimmedBase = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = trimmedBase.hasSuffix("/") ? String(trimmedBase.dropLast()) : trimmedBase
+        guard let url = URL(string: normalized + "/models") else {
+            isTesting = false
+            error = "Invalid base URL"
+            return
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 8
+        let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isOpenAICompatible && !key.isEmpty {
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
 
         URLSession.shared.dataTask(with: request) { _, response, err in
             DispatchQueue.main.async {
@@ -271,18 +328,29 @@ private struct AddProviderSheet: View {
         .resume()
     }
 
-    private func save() {
-        let vaultKey = "custom.\(name.lowercased()).apiKey"
+    private func save() async {
+        isSaving = true
+        defer { isSaving = false }
         var newProvider = CustomProvider(
             name: name,
             baseURL: baseURL,
-            apiKey: vaultKey,
+            apiKey: "",   // set below from the stable id
             models: models,
             isOpenAICompatible: isOpenAICompatible,
             description: description
         )
         if let provider = provider {
-            newProvider.id = provider.id
+            newProvider.id = provider.id   // keep id on edit
+        }
+        // Vault key derived from the provider's STABLE UUID id (not the name):
+        // survives renames, avoids charset/collision bugs, and matches the
+        // backend allowlist regex /^custom\.[a-z0-9-]+\.apiKey$/.
+        newProvider.apiKey = "custom.\(newProvider.id.lowercased()).apiKey"
+        // Store the key in the server vault first (best-effort — a network
+        // failure must not block persisting the provider itself).
+        let trimmedKey = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedKey.isEmpty {
+            try? await api.setSecret(key: newProvider.apiKey, value: trimmedKey)
         }
         onSave(newProvider)
     }

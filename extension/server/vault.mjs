@@ -150,12 +150,24 @@ const ALLOWED_KEYS = new Set([
   'google.email.refreshToken',
 ]);
 
+// Dynamic namespace for user-registered custom LLM providers (Settings →
+// Custom Providers). Each provider stores its API key under
+// `custom.<id>.apiKey`, where <id> is the provider's stable UUID (lowercased
+// → [a-z0-9-]). The generic single-endpoint provider keeps its own fixed
+// `custom.apiKey`/`custom.baseUrl` entries above; this namespace is for the
+// many named providers (GLM, Ollama, OpenRouter, …). The base URL is NOT
+// stored here — it rides the registry sync (custom-providers.mjs) — so only
+// the apiKey suffix is allowed.
+const CUSTOM_PROVIDER_KEY_RE = /^custom\.[a-z0-9-]+\.apiKey$/;
+
 function ensureAllowed(key) {
   // This one stays in the open: callers (auth-routes) already enumerate
   // the allowed keys in the same response when this fires, so the name
   // isn't sensitive. Use a vanilla Error so the existing validation
   // pathway in auth-routes keeps surfacing "Unknown vault key" verbatim.
-  if (!ALLOWED_KEYS.has(key)) throw new Error(`Unknown vault key: ${key}`);
+  if (ALLOWED_KEYS.has(key)) return;
+  if (typeof key === 'string' && CUSTOM_PROVIDER_KEY_RE.test(key)) return;
+  throw new Error(`Unknown vault key: ${key}`);
 }
 
 export function setSecret(db, userId, key, value) {

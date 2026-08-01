@@ -11,6 +11,7 @@
 import { execFile } from 'node:child_process';
 import { lookup } from 'node:dns/promises';
 import { getSecret } from '../server/vault.mjs';
+import { getCustomProvider } from '../server/custom-providers.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
@@ -169,6 +170,37 @@ export function providerApiKey(userId, provider) {
     try { key = getSecret(getDb(), userId, cfg.vaultKey) || null; } catch { key = null; }
   }
   return key || process.env[cfg.env] || null;
+}
+
+// Resolve a user-registered `custom:<uuid>` provider for dispatch: look it up
+// in the in-memory registry, then read its API key from the vault. This is the
+// SINGLE source of truth used by both dispatch paths — the Code Assistant
+// native tool-loop (llm_agent/runtime/route.mjs) and the legacy single-shot
+// `runClaude` path (agents/runtime.mjs) — so they can't drift.
+//
+// Returns `{ apiKey, baseUrl, name }` on success, or `{ error, message }`
+// (error ∈ 'not_found' | 'disabled' | 'no_key'); the caller surfaces `message`.
+// `db` defaults to the live DB; tests pass an in-memory store. A vault read
+// failure (e.g. a key that somehow isn't allow-listed) degrades to `no_key`
+// rather than throwing into the model call.
+export function resolveCustomProviderDispatch(provider, userId, db = getDb()) {
+  const cp = getCustomProvider(provider);
+  if (!cp) {
+    return { error: 'not_found',
+      message: `Custom provider ${provider} not found. Register it in Settings → Model Providers.` };
+  }
+  if (cp.isEnabled === false) {
+    return { error: 'disabled',
+      message: `${cp.name} is disabled. Enable it in Settings → Model Providers.` };
+  }
+  let apiKey = null;
+  try { apiKey = userId ? getSecret(db, userId, cp.vaultKey) || null : null; }
+  catch { /* non-allowlisted/corrupt → treat as no key */ }
+  if (!apiKey) {
+    return { error: 'no_key',
+      message: `No API key configured for ${cp.name}. Add one in Settings → Model Providers.` };
+  }
+  return { apiKey, baseUrl: cp.baseURL, name: cp.name };
 }
 
 // ── HTTP completion ───────────────────────────────────────────────────
