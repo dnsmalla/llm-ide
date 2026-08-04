@@ -228,95 +228,142 @@ struct ChatMessageList: View {
         return s.count > 160 ? String(s.prefix(160)) + "…" : s
     }
 
+    /// Tool-call acknowledgments (issue created, file updated, git op
+    /// result, bash output, …) are appended as role: .user turns — the
+    /// agent needs to see them as real conversation context, and the wire
+    /// format the server round-trips only distinguishes user/assistant, so
+    /// changing that isn't worth the risk for a display-only concern. Every
+    /// one of them already starts with "(" — a convention that predates
+    /// this check (see CodeAssistant+Issues/PR/Git/Bash.swift and
+    /// CodeAssistantPanel+Session.swift) — so detecting it by content works
+    /// correctly whether the turn just arrived live or was reloaded from a
+    /// saved session, unlike an id-keyed flag (CodeAssistTurn's decoder
+    /// mints a fresh id on every decode, so an id-based tag can't survive
+    /// a session switch or relaunch).
+    private func isToolNotice(_ turn: LlmIdeAPIClient.CodeAssistTurn) -> Bool {
+        turn.role == .user && turn.content.hasPrefix("(")
+    }
+
+    private func toolNoticeIcon(_ content: String) -> (name: String, color: Color) {
+        if content.contains("failed") || content.contains("skipped") {
+            return ("exclamationmark.triangle.fill", theme.current.warning)
+        }
+        return ("checkmark.circle.fill", theme.current.success)
+    }
+
+    @ViewBuilder
+    private func toolNoticeView(_ turn: LlmIdeAPIClient.CodeAssistTurn) -> some View {
+        let (icon, color) = toolNoticeIcon(turn.content)
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 10))
+                .foregroundStyle(color)
+            Text(turn.content.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? turn.content)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(theme.current.textMuted)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(theme.current.surface2)
+        .clipShape(Capsule())
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
     @ViewBuilder
     private func turnView(_ turn: LlmIdeAPIClient.CodeAssistTurn) -> some View {
-        let isUser = turn.role == .user
-        HStack(alignment: .top, spacing: Spacing.sm) {
-            if isUser { Spacer(minLength: 40) }
-            VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-                Text(isUser ? "You" : "Claude")
-                    .font(Typography.caption)
-                    .foregroundStyle(theme.current.textMuted)
-                if isUser {
-                    // User input is plain text — render verbatim (no markdown).
-                    Text(turn.content)
-                        .font(.system(size: 12))
-                        .foregroundStyle(theme.current.text)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: 720, alignment: .trailing)
-                        .padding(10)
-                        .background(theme.current.accent.opacity(0.14))
-                        .cornerRadius(8)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else if isAssistantExpanded(turn) {
-                    // Expanded assistant reply — full markdown render (web view).
-                    VStack(alignment: .leading, spacing: 4) {
-                        SelfSizingMarkdownView(
-                            markdown: displayedContent(for: turn),
-                            isDark: theme.current.isDark
-                        ) { h in
-                            if bubbleHeights[turn.id] != h { bubbleHeights[turn.id] = h }
-                        }
-                        .frame(maxWidth: 720, alignment: .leading)
-                        .frame(height: max(bubbleHeights[turn.id] ?? 24, 24))
-                        // Older expanded replies can be collapsed again; the
-                        // latest stays open and shows no collapse control.
-                        if turn.id != lastAssistantTurnId {
-                            Button { expandedTurns.remove(turn.id) } label: {
-                                Label("Collapse", systemImage: "chevron.up")
-                                    .font(Typography.caption)
-                                    .foregroundStyle(theme.current.textMuted)
+        if isToolNotice(turn) {
+            toolNoticeView(turn)
+        } else {
+            let isUser = turn.role == .user
+            HStack(alignment: .top, spacing: Spacing.sm) {
+                if isUser { Spacer(minLength: 40) }
+                VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
+                    Text(isUser ? "You" : "Claude")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                    if isUser {
+                        // User input is plain text — render verbatim (no markdown).
+                        Text(turn.content)
+                            .font(.system(size: 12))
+                            .foregroundStyle(theme.current.text)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: 720, alignment: .trailing)
+                            .padding(10)
+                            .background(theme.current.accent.opacity(0.14))
+                            .cornerRadius(8)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if isAssistantExpanded(turn) {
+                        // Expanded assistant reply — full markdown render (web view).
+                        VStack(alignment: .leading, spacing: 4) {
+                            SelfSizingMarkdownView(
+                                markdown: displayedContent(for: turn),
+                                isDark: theme.current.isDark
+                            ) { h in
+                                if bubbleHeights[turn.id] != h { bubbleHeights[turn.id] = h }
                             }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .frame(maxWidth: 720, alignment: .leading)
-                    .padding(10)
-                    .background(theme.current.surface)
-                    .cornerRadius(8)
-                } else {
-                    // Collapsed older reply — lightweight text preview, NO web
-                    // view (keeps a long chat short and avoids one WKWebView per
-                    // old reply). Tap to expand into the full render.
-                    Button {
-                        expandedTurns.insert(turn.id)
-                    } label: {
-                        HStack(alignment: .top, spacing: 6) {
-                            Text(markdownPreview(turn.content))
-                                .font(.system(size: 12))
-                                .foregroundStyle(theme.current.textMuted)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                            Spacer(minLength: 4)
-                            Image(systemName: "chevron.down")
-                                .font(.caption2)
-                                .foregroundStyle(theme.current.textMuted)
+                            .frame(maxWidth: 720, alignment: .leading)
+                            .frame(height: max(bubbleHeights[turn.id] ?? 24, 24))
+                            // Older expanded replies can be collapsed again; the
+                            // latest stays open and shows no collapse control.
+                            if turn.id != lastAssistantTurnId {
+                                Button { expandedTurns.remove(turn.id) } label: {
+                                    Label("Collapse", systemImage: "chevron.up")
+                                        .font(Typography.caption)
+                                        .foregroundStyle(theme.current.textMuted)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                         .frame(maxWidth: 720, alignment: .leading)
                         .padding(10)
                         .background(theme.current.surface)
                         .cornerRadius(8)
-                        .contentShape(Rectangle())
+                    } else {
+                        // Collapsed older reply — lightweight text preview, NO web
+                        // view (keeps a long chat short and avoids one WKWebView per
+                        // old reply). Tap to expand into the full render.
+                        Button {
+                            expandedTurns.insert(turn.id)
+                        } label: {
+                            HStack(alignment: .top, spacing: 6) {
+                                Text(markdownPreview(turn.content))
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(theme.current.textMuted)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                                Spacer(minLength: 4)
+                                Image(systemName: "chevron.down")
+                                    .font(.caption2)
+                                    .foregroundStyle(theme.current.textMuted)
+                            }
+                            .frame(maxWidth: 720, alignment: .leading)
+                            .padding(10)
+                            .background(theme.current.surface)
+                            .cornerRadius(8)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Show full reply")
                     }
-                    .buttonStyle(.plain)
-                    .help("Show full reply")
-                }
-                if !isUser, activeRepoRoot != nil {
-                    Button {
-                        reportingFault = CodeAssistantPanel.FaultReportContext(
-                            prompt: prevUserPrompt(before: turn) ?? "",
-                            response: turn.content
-                        )
-                    } label: {
-                        Label("Report this", systemImage: "ant")
-                            .font(Typography.caption)
-                            .foregroundStyle(theme.current.textMuted)
+                    if !isUser, activeRepoRoot != nil {
+                        Button {
+                            reportingFault = CodeAssistantPanel.FaultReportContext(
+                                prompt: prevUserPrompt(before: turn) ?? "",
+                                response: turn.content
+                            )
+                        } label: {
+                            Label("Report this", systemImage: "ant")
+                                .font(Typography.caption)
+                                .foregroundStyle(theme.current.textMuted)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Save this answer as a fault report")
                     }
-                    .buttonStyle(.plain)
-                    .help("Save this answer as a fault report")
                 }
+                if !isUser { Spacer(minLength: 40) }
             }
-            if !isUser { Spacer(minLength: 40) }
         }
     }
 
@@ -326,7 +373,12 @@ struct ChatMessageList: View {
     private func prevUserPrompt(before turn: LlmIdeAPIClient.CodeAssistTurn) -> String? {
         guard let idx = history.firstIndex(where: { $0.id == turn.id }) else { return nil }
         for i in stride(from: idx - 1, through: 0, by: -1) {
-            if history[i].role == .user { return history[i].content }
+            let candidate = history[i]
+            // Skip tool-notices (role: .user but synthetic, see isToolNotice) —
+            // a fault report should quote what the human actually typed, not
+            // a "(executed create-issue → ...)" acknowledgment that happened
+            // to be the nearest .user-role turn.
+            if candidate.role == .user && !isToolNotice(candidate) { return candidate.content }
         }
         return nil
     }
