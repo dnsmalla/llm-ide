@@ -61,6 +61,34 @@ test('indexScip replace clears prior scip rows + graph but keeps chunks', async 
   assert.equal(scipCount, 4);
 });
 
+test('indexScip replace clears the OLD graph (not a merge) — proves clearCodeGraph ran', async () => {
+  // After the prior tests, REPO's graph holds the 4-node sample fixture.
+  // Re-ingest with a DIFFERENT 2-node fixture and assert the snapshot reflects
+  // ONLY the new nodes/edges — if clearCodeGraph were a no-op, we'd see 6 nodes.
+  const fixture2 = {
+    documents: [{
+      relative_path: 'src/only.ts',
+      symbols: [
+        { symbol: 'scip-typescript npm src only Alpha()', display_name: 'Alpha', relationships: [] },
+        { symbol: 'scip-typescript npm src only Beta()', display_name: 'Beta', relationships: [
+          { symbol: 'scip-typescript npm src only Alpha()', is_reference: true },
+        ] },
+      ],
+      occurrences: [
+        { symbol: 'scip-typescript npm src only Alpha()', symbol_roles: 1, range: [1, 0, 3], enclosing_range: [1, 0, 2, 1] },
+        { symbol: 'scip-typescript npm src only Beta()', symbol_roles: 1, range: [5, 0, 4], enclosing_range: [5, 0, 7, 1] },
+      ],
+    }],
+  };
+  const fakeLoad2 = async () => fixture2;
+  const res = await indexScip(U, REPO, 'ignored.scip', { replace: true, load: fakeLoad2 });
+  assert.equal(res.nodes, 2, 'new fixture has 2 nodes');
+  const snap = db.getCodeGraphSnapshot(U, REPO);
+  assert.equal(snap.nodes.length, 2, 'graph holds ONLY the 2 new nodes, not a merge with old 4');
+  const titles = snap.nodes.map((n) => n.title).sort();
+  assert.deepEqual(titles, ['Alpha', 'Beta'], 'new graph reflects the replaced node set');
+});
+
 test('cleanup', () => {
   db.closeDb();
   try { fs.rmSync(REPO, { recursive: true, force: true }); } catch { /* ignore */ }
