@@ -15,6 +15,9 @@ struct ChatMessageList: View {
     @Binding var error: String?
     @Binding var draft: String
     @Binding var expandedTurns: Set<UUID>
+    /// Typewriter-reveal state — see CodeAssistantPanel.revealAssistantReply.
+    @Binding var revealingTurnID: UUID?
+    @Binding var revealedCount: Int
     @Binding var bubbleHeights: [UUID: CGFloat]
     @Binding var reportingFault: CodeAssistantPanel.FaultReportContext?
     /// Resolved project root — governs whether "Report this" is shown.
@@ -193,6 +196,17 @@ struct ChatMessageList: View {
         turn.id == lastAssistantTurnId || expandedTurns.contains(turn.id)
     }
 
+    /// The text to actually render for an assistant turn: truncated to
+    /// `revealedCount` while this turn is the one being typewriter-revealed
+    /// (see CodeAssistantPanel.revealAssistantReply), full content
+    /// otherwise — including once the reveal finishes, and always for
+    /// history loaded from a saved session (which never sets
+    /// `revealingTurnID` in the first place).
+    private func displayedContent(for turn: LlmIdeAPIClient.CodeAssistTurn) -> String {
+        guard turn.id == revealingTurnID else { return turn.content }
+        return String(turn.content.prefix(revealedCount))
+    }
+
     /// A short plain-text preview of a markdown reply for the collapsed state —
     /// strips common markdown so the bubble reads cleanly without a web view.
     private func markdownPreview(_ content: String) -> String {
@@ -230,7 +244,7 @@ struct ChatMessageList: View {
                     // Expanded assistant reply — full markdown render (web view).
                     VStack(alignment: .leading, spacing: 4) {
                         SelfSizingMarkdownView(
-                            markdown: turn.content,
+                            markdown: displayedContent(for: turn),
                             isDark: theme.current.isDark
                         ) { h in
                             if bubbleHeights[turn.id] != h { bubbleHeights[turn.id] = h }

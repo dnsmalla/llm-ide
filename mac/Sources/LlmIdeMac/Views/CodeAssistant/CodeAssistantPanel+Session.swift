@@ -134,7 +134,9 @@ extension CodeAssistantPanel {
             )
             // If Stop fired during the await, don't append the (now-unwanted) reply.
             try Task.checkCancellation()
-            history.append(.init(role: .assistant, content: resp.reply))
+            let assistantTurn = LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: resp.reply)
+            history.append(assistantTurn)
+            revealAssistantReply(assistantTurn)
             self.pendingTool = resp.pendingTool
             // Update task list display
             if let newTasks = resp.tasks {
@@ -409,7 +411,9 @@ extension CodeAssistantPanel {
                 history: recent,
                 attachments: [],
             )
-            history.append(.init(role: .assistant, content: resp.reply))
+            let assistantTurn = LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: resp.reply)
+            history.append(assistantTurn)
+            revealAssistantReply(assistantTurn)
             self.pendingTool = resp.pendingTool
         } catch {
             self.error = error.localizedDescription
@@ -478,6 +482,46 @@ extension CodeAssistantPanel {
         busy = false
         queued.removeAll()
         expandedTurns.removeAll()
+        revealTask?.cancel()
+        revealTask = nil
+        revealingTurnID = nil
+        revealedCount = 0
+    }
+
+    /// Typewriter-reveals `turn`'s content instead of popping it in all at
+    /// once. The server already returns the complete reply in a single
+    /// `done` event (see codeAssistRoundTrip) — this is purely a client-side
+    /// presentation touch, not real token streaming, so `history` always
+    /// holds the true, complete text throughout (nothing here ever risks
+    /// persisting a half-revealed reply).
+    ///
+    /// Step count is fixed (not duration) so the reveal self-scales: short
+    /// replies finish quickly (they run out of content before using all the
+    /// steps), long replies are capped at a bounded number of steps so they
+    /// neither drag out nor multiply SelfSizingMarkdownView's per-change
+    /// WKWebView reload any more than necessary.
+    func revealAssistantReply(_ turn: LlmIdeAPIClient.CodeAssistTurn) {
+        revealTask?.cancel()
+        let total = turn.content.count
+        guard total > 0 else { revealingTurnID = nil; revealedCount = 0; return }
+        revealingTurnID = turn.id
+        revealedCount = 0
+        let steps = min(total, 28)
+        let charsPerStep = max(1, Int((Double(total) / Double(steps)).rounded(.up)))
+        // `self` here is the CodeAssistantPanel struct, not a class — captured
+        // as a value copy, no retain cycle possible, so no [weak self]. Its
+        // @State properties still write through to the real shared storage.
+        revealTask = Task { @MainActor in
+            var shown = 0
+            while shown < total {
+                try? await Task.sleep(nanoseconds: 20_000_000) // ~20ms/step
+                if Task.isCancelled { return }
+                shown = min(shown + charsPerStep, total)
+                self.revealedCount = shown
+            }
+            guard !Task.isCancelled else { return }
+            self.revealingTurnID = nil
+        }
     }
 
     /// Reset all composer + agent transient state for a freshly created,

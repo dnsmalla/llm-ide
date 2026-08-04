@@ -157,6 +157,13 @@ struct CodeAssistantPanel: View {
     /// "latest is always open" rule (see isAssistantExpanded), this collapses
     /// older replies to a lightweight text preview so a long chat stays short.
     @State var expandedTurns: Set<UUID> = []
+    /// Typewriter-reveal state for the assistant turn currently "arriving" —
+    /// the server sends the full reply in one shot, so this is a purely
+    /// client-side presentation touch (see revealAssistantReply), not real
+    /// token streaming. nil once nothing is revealing.
+    @State var revealingTurnID: UUID?
+    @State var revealedCount: Int = 0
+    @State var revealTask: Task<Void, Never>?
     @State var reportingFault: FaultReportContext?
     /// How file-edit tool calls are accepted. Persisted across launches.
     /// `.review` (default) shows the confirmation card + popup; `.auto`
@@ -326,6 +333,8 @@ struct CodeAssistantPanel: View {
                 error: $error,
                 draft: $draft,
                 expandedTurns: $expandedTurns,
+                revealingTurnID: $revealingTurnID,
+                revealedCount: $revealedCount,
                 bubbleHeights: $bubbleHeights,
                 reportingFault: $reportingFault,
                 activeRepoRoot: activeRepoRoot,
