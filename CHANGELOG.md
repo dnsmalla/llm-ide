@@ -5,6 +5,12 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- SCIP code-graph ingestion: `POST /kb/ingest-scip` consumes a Sourcegraph `.scip`
+  index (via the local `scip` CLI) into per-user symbol FTS rows + a node/edge graph,
+  giving code-sync compiler-derived relationship grounding. Server API version 21.
+
 ## [1.0.0] - 2026-07-02
 
 ### Added
