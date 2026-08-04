@@ -164,6 +164,9 @@ struct CodeAssistantPanel: View {
     @State var revealingTurnID: UUID?
     @State var revealedCount: Int = 0
     @State var revealTask: Task<Void, Never>?
+    /// Filter text for the session-picker popover. Reset whenever the
+    /// popover closes so it never opens pre-filtered from a prior search.
+    @State var sessionSearchQuery: String = ""
     @State var reportingFault: FaultReportContext?
     /// How file-edit tool calls are accepted. Persisted across launches.
     /// `.review` (default) shows the confirmation card + popup; `.auto`

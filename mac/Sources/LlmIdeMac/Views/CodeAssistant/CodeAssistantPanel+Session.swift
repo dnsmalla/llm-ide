@@ -464,6 +464,18 @@ extension CodeAssistantPanel {
         sessions = ChatSessionStore.list(for: scope)
     }
 
+    /// Renames a saved chat. Safe from being clobbered later:
+    /// persistCurrentChat's auto-title-from-first-message logic only fires
+    /// when the title is still "New chat"/empty, so any other title —
+    /// including a manual rename — is left alone on every later save.
+    func renameSession(_ id: UUID, to newTitle: String) {
+        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, var session = ChatSessionStore.load(id: id) else { return }
+        session.title = String(trimmed.prefix(60))
+        ChatSessionStore.save(session)
+        refreshSessions()
+    }
+
     /// Mirror `currentSessionIDString` to UserDefaults so the current chat
     /// survives relaunch.
     func rememberCurrentPointer() {

@@ -34,6 +34,7 @@ extension CodeAssistantPanel {
             // Refresh the list every time the popover opens so the
             // ordering reflects the latest `lastUsedAt`.
             refreshSessions()
+            sessionSearchQuery = ""
             showingSessionPicker.toggle()
         } label: {
             HStack(spacing: 4) {
@@ -70,8 +71,30 @@ extension CodeAssistantPanel {
         return s.title.isEmpty ? "New chat" : s.title
     }
 
+    /// Sessions shown in the popover: the 20 most recent by default, or —
+    /// while actively searching — every session (across the full history,
+    /// not just that recent window) whose title matches.
+    var filteredSessions: [ChatSession] {
+        let q = sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return Array(sessions.prefix(20)) }
+        return sessions.filter { ($0.title.isEmpty ? "New chat" : $0.title).lowercased().contains(q) }
+    }
+
     var sessionPickerPopover: some View {
         VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.current.textMuted)
+                TextField("Search chats", text: $sessionSearchQuery)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            Divider()
+
             Button {
                 showingSessionPicker = false
                 createNewSession()
@@ -92,8 +115,9 @@ extension CodeAssistantPanel {
 
             Divider()
 
-            if sessions.isEmpty {
-                Text("No saved chats yet.")
+            let shown = filteredSessions
+            if shown.isEmpty {
+                Text(sessions.isEmpty ? "No saved chats yet." : "No chats match “\(sessionSearchQuery)”.")
                     .font(.system(size: 11))
                     .foregroundStyle(theme.current.textMuted)
                     .padding(.horizontal, 12)
@@ -101,7 +125,7 @@ extension CodeAssistantPanel {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(sessions.prefix(20))) { session in
+                        ForEach(shown) { session in
                             SessionRow(
                                 session: session,
                                 isActive: session.id.uuidString == currentSessionIDString,
@@ -111,6 +135,9 @@ extension CodeAssistantPanel {
                                 },
                                 onDelete: {
                                     deleteSession(session.id)
+                                },
+                                onRename: { newTitle in
+                                    renameSession(session.id, to: newTitle)
                                 }
                             )
                             .environmentObject(theme)
