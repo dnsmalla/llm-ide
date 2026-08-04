@@ -425,6 +425,12 @@ export function safeParseMeta(s) {
 // Phase-3 external source ingestion lives in sources.mjs.
 export { ingestSources, deleteSourcesByPrefix } from './sources.mjs';
 
+// SCIP code-graph node+edge store + multi-hop traversal (migration 0025).
+export {
+  writeCodeGraph, clearCodeGraph, deleteScipSources, expandSymbols,
+  findCodeSymbolIds, hydrateSymbols, getCodeGraphSnapshot,
+} from './code-graph.mjs';
+
 // Random id helper. Exported so the extracted helper modules
 // (reviews.mjs, plans.mjs) can mint plan/task/review ids without
 // duplicating the CSPRNG + base64url plumbing.
