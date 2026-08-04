@@ -11,7 +11,7 @@ process.env.NODE_ENV = 'test';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tmpDb = path.join(__dirname, '_code-sync-expand-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
-for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) { try { fs.rmSync(f, { force: true }); } catch {} }
+for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) { try { fs.rmSync(f, { force: true }); } catch { /* ignore */ } }
 
 const db = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
@@ -63,5 +63,5 @@ test('codeSync with no graph returns empty symbols (no regression)', () => {
 
 test('cleanup', () => {
   db.closeDb();
-  for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) { try { fs.rmSync(f, { force: true }); } catch {} }
+  for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) { try { fs.rmSync(f, { force: true }); } catch { /* ignore */ } }
 });

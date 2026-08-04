@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
@@ -12,7 +11,7 @@ process.env.NODE_ENV = 'test';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tmpDb = path.join(__dirname, '_code-graph-store-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
-for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) { try { fs.rmSync(f, { force: true }); } catch {} }
+for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) { try { fs.rmSync(f, { force: true }); } catch { /* ignore */ } }
 
 const db = await import('../kb/db.mjs');
 const { ingestSources } = await import('../kb/sources.mjs');
@@ -90,5 +89,5 @@ test('user scoping: a second user cannot see the first user graph', () => {
 
 test('cleanup', () => {
   db.closeDb();
-  for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) { try { fs.rmSync(f, { force: true }); } catch {} }
+  for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) { try { fs.rmSync(f, { force: true }); } catch { /* ignore */ } }
 });

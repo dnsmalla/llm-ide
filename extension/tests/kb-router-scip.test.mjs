@@ -23,7 +23,7 @@ const users = await import('../server/users.mjs');
 
 function resetDb() {
   db.closeDb();
-  for (const f of [tmpDb, `${tmpDb}-shm`, `${tmpDb}-wal`]) { try { fs.rmSync(f, { force: true }); } catch {} }
+  for (const f of [tmpDb, `${tmpDb}-shm`, `${tmpDb}-wal`]) { try { fs.rmSync(f, { force: true }); } catch { /* ignore */ } }
   db.getDb();
 }
 function makeReq({ method, url, body, userId }) {
@@ -82,11 +82,11 @@ test('POST /kb/ingest-scip 400 SCIP_INDEX_FAILED when scip cannot read the index
     assert.equal(res.statusCode, 400);
     assert.equal(JSON.parse(res._body).error.code, 'SCIP_INDEX_FAILED');
   } finally {
-    try { fs.rmSync(tmpRepo, { recursive: true, force: true }); } catch {}
+    try { fs.rmSync(tmpRepo, { recursive: true, force: true }); } catch { /* ignore */ }
   }
 });
 
 test('cleanup', () => {
   db.closeDb();
-  for (const f of [tmpDb, `${tmpDb}-shm`, `${tmpDb}-wal`]) { try { fs.rmSync(f, { force: true }); } catch {} }
+  for (const f of [tmpDb, `${tmpDb}-shm`, `${tmpDb}-wal`]) { try { fs.rmSync(f, { force: true }); } catch { /* ignore */ } }
 });
