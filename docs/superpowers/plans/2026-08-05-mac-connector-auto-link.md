@@ -2,133 +2,41 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make Email/Box/Slack in the Mac app auto-link with zero credential re-entry on re-login/rebuild/reinstall (same Mac) by making the Connections cards + source sheets vault-aware — they query `GET /auth/me/secrets` (set keys, no values) and reflect Connected/Credentials-needed/Not-configured status.
+**Goal:** Make Email/Box/Slack in the Mac app auto-link with zero credential re-entry on re-login/rebuild/reinstall (same Mac) by making the Connections cards + source sheets vault-aware — they query the existing `configuredSecretKeys()` (set keys, no values) and reflect Connected/Credentials-needed/Not-configured status.
 
-**Architecture:** A new `SourceLinkStore` (ObservableObject) holds the set of vault secret keys currently saved, refreshed via a new `LlmIdeAPIClient.fetchSecretKeys()`. The three Connections cards + their sheets observe it; the badge becomes vault-aware (`linked` = local config + vault secret), and each sheet shows a "✓ Saved in vault" hint and refreshes after any save/disconnect/test. Secrets stay server-side (no keychain change).
+**Architecture:** A new `SourceLinkStore` (ObservableObject) holds the set of vault secret keys currently saved, refreshed via the **existing** `LlmIdeAPIClient.configuredSecretKeys()` (`GET /auth/me/secrets` → `Set<String>`). The three Connections cards + their sheets observe it; the badge becomes vault-aware (`linked` = local config + vault secret), and each sheet shows a "✓ Saved in vault" hint and refreshes after any save/disconnect/test. Secrets stay server-side (no keychain change, no new API method).
 
 **Tech Stack:** Swift 6 (v5 mode), SwiftUI (macOS 14), XCTest, no new dependencies.
 
 ## Global Constraints
 
-- **Secrets stay in the server vault.** Do NOT add connector credentials to `KeychainStore` or any on-device store. The Mac only ever learns which vault keys are *set* (never values) via `GET /auth/me/secrets` → `{ secrets: [{key, updatedAt}], available: [...] }`.
-- **userId/tenant scope is implicit** — the vault is per authenticated user; the endpoint is `authenticated: true`.
-- **`updatedAt` is a SQLite-format string** (`"YYYY-MM-DD HH:MM:SS"` UTC). We only need presence, so decode it as `String?` and do not parse it.
+- **Secrets stay in the server vault.** Do NOT add connector credentials to `KeychainStore` or any on-device store. The Mac only ever learns which vault keys are *set* (never values) via the **existing** `LlmIdeAPIClient.configuredSecretKeys()` (`LlmIdeAPIClient+Providers.swift:40`) → `GET /auth/me/secrets`. **Do not add a second endpoint caller** — reuse it.
+- **userId/tenant scope is implicit** — the vault is per authenticated user; the call is authenticated.
 - **Vault key names are exact:** Email → `email.imapPassword` **or** `google.email.refreshToken`; Box → `box.clientSecret`; Slack → `slack.botToken`.
-- **Follow existing patterns:** `LlmIdeAPIClient` uses `get<T>(path, authenticated:)`; ObservableObject stores use `@StateObject` in `LlmIdeMacApp` + `.environmentObject(...)` on `ContentView` (mirror `GraphSessionStore`); tests are XCTest with `@testable import LlmIdeMacLib`, run via `swift test --filter LlmIdeMacTests.<Class>` from `mac/`.
+- **Follow existing patterns:** ObservableObject stores use `@StateObject` in `LlmIdeMacApp` + `.environmentObject(...)` on `ContentView` (mirror `GraphSessionStore`); tests are XCTest with `@testable import LlmIdeMacLib`, run via `swift test --filter LlmIdeMacTests.<Class>` from `mac/`.
 - **`AppConfig.emailSource/slackSource/boxSource` are `@Published var … : Saved…Source?`** — `!= nil` means "configured"; `?.enabled == true` means "enabled".
 - **Badge type is `SourceBadgeTone`** (`.positive` / `.neutral` / `.accent`) from `Views/Sources/InputSourceCard.swift`.
-- **Conventional Commits**, one concern per commit. Do not modify the server (the endpoint already exists).
+- **Conventional Commits**, one concern per commit. Do not modify the server or `LlmIdeAPIClient` (reuse `configuredSecretKeys()` as-is).
 
 ## File Structure
 
-- **Create** `mac/Sources/LlmIdeMac/Services/API/LlmIdeAPIClient+Secrets.swift` — `fetchSecretKeys()` + response types.
-- **Create** `mac/Sources/LlmIdeMac/Services/SourceLinkStore.swift` — vault-aware link state.
+- **Create** `mac/Sources/LlmIdeMac/Services/SourceLinkStore.swift` — vault-aware link state, reusing `configuredSecretKeys()`.
 - **Modify** `mac/Sources/LlmIdeMac/LlmIdeMacApp.swift` — `@StateObject` + `.environmentObject` + refresh on login.
 - **Modify** `mac/Sources/LlmIdeMac/Views/Settings/ConnectionsSettingsSection.swift` — observe store, vault-aware card badges, `.task` refresh, `.environmentObject` on the 3 sheets.
 - **Modify** `mac/Sources/LlmIdeMac/Views/Sources/EmailSourceSheet.swift`, `BoxSourceSheet.swift`, `SlackSourceSheet.swift` — observe store, "✓ Saved in vault" hint, refresh after save/disconnect/test.
-- **Create** tests: `mac/Tests/LlmIdeMacTests/SecretKeysResponseTests.swift`, `SourceLinkStoreTests.swift`.
+- **Create** `mac/Tests/LlmIdeMacTests/SourceLinkStoreTests.swift`.
 
 ---
 
-### Task 1: `LlmIdeAPIClient.fetchSecretKeys()` + response types
-
-**Files:**
-- Create: `mac/Sources/LlmIdeMac/Services/API/LlmIdeAPIClient+Secrets.swift`
-- Test: `mac/Tests/LlmIdeMacTests/SecretKeysResponseTests.swift`
-
-**Interfaces:**
-- Produces: `LlmIdeAPIClient.fetchSecretKeys() async throws -> SecretKeysResponse`, where `SecretKeysResponse { secrets: [SecretKeyInfo], available: [String] }` and `SecretKeyInfo { key: String, updatedAt: String? }`. Consumed by Task 2.
-
-- [ ] **Step 1: Write the failing test**
-
-Create `mac/Tests/LlmIdeMacTests/SecretKeysResponseTests.swift`:
-
-```swift
-import XCTest
-@testable import LlmIdeMacLib
-
-final class SecretKeysResponseTests: XCTestCase {
-    func testDecodesSetKeysWithoutValues() throws {
-        let json = """
-        { "secrets": [
-            { "key": "slack.botToken", "updatedAt": "2026-08-04 12:34:56" },
-            { "key": "email.imapPassword", "updatedAt": "2026-08-04 12:00:00" }
-          ],
-          "available": ["slack.botToken", "email.imapPassword", "box.clientSecret"] }
-        """.data(using: .utf8)!
-        let resp = try JSONDecoder().decode(LlmIdeAPIClient.SecretKeysResponse.self, from: json)
-        XCTAssertEqual(Set(resp.secrets.map(\.key)), ["slack.botToken", "email.imapPassword"])
-        XCTAssertEqual(resp.secrets.first?.updatedAt, "2026-08-04 12:34:56")
-        XCTAssertTrue(resp.available.contains("box.clientSecret"))
-    }
-
-    func testEmptySecretsDecodes() throws {
-        let json = #"{"secrets":[],"available":["slack.botToken"]}"#.data(using: .utf8)!
-        let resp = try JSONDecoder().decode(LlmIdeAPIClient.SecretKeysResponse.self, from: json)
-        XCTAssertTrue(resp.secrets.isEmpty)
-    }
-}
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `cd mac && swift test --filter LlmIdeMacTests.SecretKeysResponseTests`
-Expected: FAIL — `SecretKeysResponse` is not defined (compile error).
-
-- [ ] **Step 3: Write the implementation**
-
-Create `mac/Sources/LlmIdeMac/Services/API/LlmIdeAPIClient+Secrets.swift`:
-
-```swift
-import Foundation
-
-extension LlmIdeAPIClient {
-    /// One entry in the user's vault key set (no value — only presence).
-    struct SecretKeyInfo: Decodable {
-        let key: String
-        /// SQLite `datetime('now')` string ("YYYY-MM-DD HH:MM:SS" UTC). We only
-        /// need presence, so it is kept as an optional string and otherwise unused.
-        let updatedAt: String?
-    }
-
-    /// `GET /auth/me/secrets` envelope: the keys currently set for this user
-    /// plus the full allowlist. Drives `SourceLinkStore` link state.
-    struct SecretKeysResponse: Decodable {
-        let secrets: [SecretKeyInfo]
-        let available: [String]
-    }
-
-    /// The set of vault secret keys currently saved for the authenticated user
-    /// (values never leave the server). Used to mark Email/Box/Slack auto-linked.
-    func fetchSecretKeys() async throws -> SecretKeysResponse {
-        try await get("/auth/me/secrets", authenticated: true)
-    }
-}
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `cd mac && swift test --filter LlmIdeMacTests.SecretKeysResponseTests`
-Expected: PASS (2 tests).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add mac/Sources/LlmIdeMac/Services/API/LlmIdeAPIClient+Secrets.swift mac/Tests/LlmIdeMacTests/SecretKeysResponseTests.swift
-git commit -m "feat(mac): LlmIdeAPIClient.fetchSecretKeys reads vault key set"
-```
-
----
-
-### Task 2: `SourceLinkStore` (vault-aware link state)
+### Task 1: `SourceLinkStore` (vault-aware link state)
 
 **Files:**
 - Create: `mac/Sources/LlmIdeMac/Services/SourceLinkStore.swift`
 - Test: `mac/Tests/LlmIdeMacTests/SourceLinkStoreTests.swift`
 
 **Interfaces:**
-- Consumes: `LlmIdeAPIClient.fetchSecretKeys()` (Task 1).
-- Produces: `SourceLinkStore` (ObservableObject, `@MainActor`) with `SourceKind {email,box,slack}`, `LinkState {linked,credentialsNeeded,notConfigured}`, `presentKeys: Set<String>`, `lastRefreshFailed: Bool`, `refresh(api:)`, `hasSecret(_:)`, `linkState(_:configured:)`, plus static pure forms `hasSecret(_:presentKeys:)` / `linkState(_:configured:presentKeys:)` for testing. Consumed by Tasks 3 & 4.
+- Consumes: `LlmIdeAPIClient.configuredSecretKeys() async throws -> Set<String>` (existing, `LlmIdeAPIClient+Providers.swift:40`).
+- Produces: `SourceLinkStore` (ObservableObject, `@MainActor`) with `SourceKind {email,box,slack}`, `LinkState {linked,credentialsNeeded,notConfigured}`, `presentKeys: Set<String>`, `lastRefreshFailed: Bool`, `refresh(api:)`, `hasSecret(_:)`, `linkState(_:configured:)`, plus static pure forms `hasSecret(_:presentKeys:)` / `linkState(_:configured:presentKeys:)` for testing. Consumed by Tasks 2 & 3.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -178,11 +86,12 @@ import Foundation
 
 /// Vault-aware connection status for the Mac's source connectors (Email/Box/
 /// Slack). Holds the set of vault secret keys currently saved (refreshed from
-/// `GET /auth/me/secrets` — never the values) and derives each source's link
-/// state from that + the local `AppConfig` source config. Drives the
-/// "Connected ✓" badge on the Connections cards and the "✓ Saved in vault"
-/// hint in the source sheets, so re-login / rebuild / reinstall on the same
-/// Mac re-links with zero credential re-entry.
+/// the existing `LlmIdeAPIClient.configuredSecretKeys()` — `GET /auth/me/
+/// secrets`, never the values) and derives each source's link state from that
+/// + the local `AppConfig` source config. Drives the "Connected ✓" badge on
+/// the Connections cards and the "✓ Saved in vault" hint in the source sheets,
+/// so re-login / rebuild / reinstall on the same Mac re-links with zero
+/// credential re-entry.
 @MainActor
 final class SourceLinkStore: ObservableObject {
 
@@ -235,12 +144,12 @@ final class SourceLinkStore: ObservableObject {
         Self.linkState(kind, configured: configured, presentKeys: presentKeys)
     }
 
-    /// Refresh `presentKeys` from the server. On failure, keeps the last-known
-    /// set and sets `lastRefreshFailed` (never wipes to empty).
+    /// Refresh `presentKeys` from the server (reuses the existing
+    /// `configuredSecretKeys()` — no new endpoint caller). On failure, keeps
+    /// the last-known set and sets `lastRefreshFailed` (never wipes to empty).
     func refresh(api: LlmIdeAPIClient) async {
         do {
-            let resp = try await api.fetchSecretKeys()
-            presentKeys = Set(resp.secrets.map(\.key))
+            presentKeys = try await api.configuredSecretKeys()
             lastRefreshFailed = false
         } catch {
             lastRefreshFailed = true
@@ -263,14 +172,14 @@ git commit -m "feat(mac): SourceLinkStore vault-aware connection state"
 
 ---
 
-### Task 3: Wire `SourceLinkStore` into the app + vault-aware card badges
+### Task 2: Wire `SourceLinkStore` into the app + vault-aware card badges
 
 **Files:**
 - Modify: `mac/Sources/LlmIdeMac/LlmIdeMacApp.swift`
 - Modify: `mac/Sources/LlmIdeMac/Views/Settings/ConnectionsSettingsSection.swift`
 
 **Interfaces:**
-- Consumes: `SourceLinkStore` (Task 2).
+- Consumes: `SourceLinkStore` (Task 1).
 - Produces: a `SourceLinkStore` `@StateObject` injected as an `@EnvironmentObject`; refreshed on login; the three Connections cards show vault-aware badges.
 
 - [ ] **Step 1: Register the store in `LlmIdeMacApp`**
@@ -372,7 +281,7 @@ Expected: `Build of product 'LlmIdeMac' complete!` with no errors.
 - [ ] **Step 5: Run the unit tests (no regression)**
 
 Run: `cd mac && swift test --filter LlmIdeMacTests 2>&1 | tail -8`
-Expected: all tests PASS, including the new `SecretKeysResponseTests` and `SourceLinkStoreTests`.
+Expected: all tests PASS, including `SourceLinkStoreTests`.
 
 - [ ] **Step 6: Commit**
 
@@ -383,7 +292,7 @@ git commit -m "feat(mac): vault-aware Connected badges on source cards"
 
 ---
 
-### Task 4: "✓ Saved in vault" sheet hints + refresh after save/disconnect/test
+### Task 3: "✓ Saved in vault" sheet hints + refresh after save/disconnect/test
 
 **Files:**
 - Modify: `mac/Sources/LlmIdeMac/Views/Settings/ConnectionsSettingsSection.swift` (inject store into the 3 sheets)
@@ -392,7 +301,7 @@ git commit -m "feat(mac): vault-aware Connected badges on source cards"
 - Modify: `mac/Sources/LlmIdeMac/Views/Sources/SlackSourceSheet.swift`
 
 **Interfaces:**
-- Consumes: `SourceLinkStore` (Task 2).
+- Consumes: `SourceLinkStore` (Task 1).
 - Produces: each sheet shows a "✓ Saved in vault — leave blank to keep" hint when its secret is present, and refreshes the store after any vault mutation.
 
 - [ ] **Step 1: Inject the store into the three sheet presentations**
@@ -566,7 +475,7 @@ git commit -m "feat(mac): source sheets show saved-in-vault hint + refresh link 
 
 ---
 
-### Task 5: Regression — build, test, manual verification
+### Task 4: Regression — build, test, manual verification
 
 **Files:** none (verification only).
 
@@ -578,7 +487,7 @@ Expected: `Build of product 'LlmIdeMac' complete!`
 - [ ] **Step 2: Full Mac test suite**
 
 Run: `cd mac && swift test 2>&1 | tail -10`
-Expected: all tests PASS (including the 2 new test files). No regressions in the existing `LlmIdeMacTests`.
+Expected: all tests PASS (including `SourceLinkStoreTests`). No regressions in the existing `LlmIdeMacTests`.
 
 - [ ] **Step 3: Sanity-run the app**
 
@@ -615,6 +524,6 @@ git commit -am "fix(mac): <specific tweak from regression>"
 
 ## Notes / Out of scope
 
-- **No server change** — `GET /auth/me/secrets` already returns the set-key list.
+- **No server change** and **no new API client method** — `GET /auth/me/secrets` is already wrapped by `LlmIdeAPIClient.configuredSecretKeys()` (`LlmIdeAPIClient+Providers.swift:40`), which `SourceLinkStore` reuses. (An earlier draft of this plan added a duplicate `fetchSecretKeys()`; it was dropped as redundant.)
 - **No keychain change** — connector secrets stay server-side; `KeychainStore` is unaffected.
 - **Deferred (per spec):** cross-device auto-link (syncing non-secret config to the server); unifying the three sheets via `SourceConnectorManifest`; resurfacing Connections out of Settings; OAuth for Box/Slack; auto-fetch on launch.
