@@ -13,6 +13,7 @@ import { AppError, sendError } from '../core/errors.mjs';
 
 const BUDGETS_POST = new Map([
   ['/kb/ingest',              60_000],
+  ['/kb/ingest-scip',        120_000],  // scip print subprocess: bounded by loadScipIndex kill timer (120s)
   ['/kb/delete',              30_000],
   ['/kb/dispatch',            60_000],
   ['/kb/providers/verify',    30_000],

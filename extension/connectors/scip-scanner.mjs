@@ -153,7 +153,11 @@ export function loadScipIndex(scipPath) {
     let out = '';
     let err = '';
     let settled = false;
-    const settle = (fn) => { if (!settled) { settled = true; fn(); } };
+    // Kill the subprocess if it runs past 120s so a wedged `scip` CLI can't
+    // hold the route indefinitely (route-timeout maps /kb/ingest-scip to 120s).
+    const timer = setTimeout(() => child.kill('SIGTERM'), 120_000);
+    if (typeof timer.unref === 'function') timer.unref();
+    const settle = (fn) => { if (!settled) { settled = true; clearTimeout(timer); fn(); } };
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (c) => { out += c; });

@@ -7,7 +7,7 @@
 
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { ingestSources } from '../kb/db.mjs';
+import { getDb, ingestSources } from '../kb/db.mjs';
 import { writeCodeGraph, clearCodeGraph, deleteScipSources } from '../kb/code-graph.mjs';
 import { loadScipIndex, parseScipJson } from './scip-scanner.mjs';
 
@@ -22,10 +22,6 @@ export async function indexScip(userId, repoPath, scipPath, opts = {}) {
   const cg = parseScipJson(await load(scipPath));
 
   const replace = opts.replace !== false;
-  if (replace) {
-    deleteScipSources(userId, repoId);
-    clearCodeGraph(userId, repoId);
-  }
 
   const items = [];
   let i = 0;
@@ -48,7 +44,18 @@ export async function indexScip(userId, repoPath, scipPath, opts = {}) {
     i += 1;
   }
 
-  const written = ingestSources(userId, items);
-  const graph = writeCodeGraph(userId, repoId, cg);
-  return { repo: repoId, symbols: written, nodes: graph.nodes, edges: graph.edges };
+  // One outer transaction wraps the replace-deletes AND the new writes so a
+  // failure mid-ingest rolls back the deletes too — no partial state where
+  // old SCIP data is gone and new data is absent. better-sqlite3 nests the
+  // per-helper transactions (deleteScipSources/clearCodeGraph/ingestSources/
+  // writeCodeGraph) as savepoints; an outer throw rolls all of them back.
+  return getDb().transaction(() => {
+    if (replace) {
+      deleteScipSources(userId, repoId);
+      clearCodeGraph(userId, repoId);
+    }
+    const written = ingestSources(userId, items);
+    const graph = writeCodeGraph(userId, repoId, cg);
+    return { repo: repoId, symbols: written, nodes: graph.nodes, edges: graph.edges };
+  })();
 }
