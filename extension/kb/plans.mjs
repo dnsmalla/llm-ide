@@ -84,10 +84,10 @@ export function savePlan(userId, plan) {
     const insTask = db.prepare(`
       INSERT INTO plan_tasks (
         id, plan_id, user_id, position, milestone, title, description, owner, due,
-        estimate_days, depends_on, status, risk, risk_reason, files, meta
+        estimate_days, depends_on, status, risk, risk_reason, files, symbols, meta
       ) VALUES (
         @id, @plan_id, @user_id, @position, @milestone, @title, @description, @owner, @due,
-        @estimate_days, @depends_on, @status, @risk, @risk_reason, @files, @meta
+        @estimate_days, @depends_on, @status, @risk, @risk_reason, @files, @symbols, @meta
       )
     `);
     tasks.forEach((t, idx) => {
@@ -111,6 +111,7 @@ export function savePlan(userId, plan) {
         risk,
         risk_reason: t.riskReason ? String(t.riskReason).slice(0, 1000) : null,
         files: safeJSONStringify(Array.isArray(t.files) ? t.files : []),
+        symbols: safeJSONStringify(Array.isArray(t.symbols) ? t.symbols : []),
         meta: safeJSONStringify(t.meta || {}),
       });
     });
@@ -144,6 +145,7 @@ export function getPlan(userId, planId) {
     risk: t.risk,
     riskReason: t.risk_reason,
     files: safeParseMeta(t.files) || [],
+    symbols: safeParseMeta(t.symbols) || [],
     meta: safeParseMeta(t.meta),
   }));
   return {
@@ -343,6 +345,7 @@ export function getTaskById(userId, taskId) {
     risk: t.risk,
     riskReason: t.risk_reason,
     files: safeParseMeta(t.files) || [],
+    symbols: safeParseMeta(t.symbols) || [],
     meta: safeParseMeta(t.meta),
   };
 }
