@@ -6,6 +6,10 @@ enum MarkdownRenderer {
     /// `compact` tunes the body chrome for embedding inside a chat bubble
     /// (transparent background, tight padding, no max-width centering, first/
     /// last block margins collapsed) vs. a full-page document preview.
+    ///
+    /// Code blocks are syntax-highlighted via the same vendored highlight.js
+    /// + Atom One theme used by `HljsWebView` (file/diff previews) — inlined
+    /// here too so this stays offline-safe, and get a copy button.
     static func html(for markdown: String, isDark: Bool, compact: Bool = false) -> String {
         let bg             = isDark ? "#1e1e1e" : "#ffffff"
         let fg             = isDark ? "#d4d4d4" : "#1a1a1a"
@@ -42,6 +46,8 @@ enum MarkdownRenderer {
             .replacingOccurrences(of: "{{bodyMaxWidth}}", with: bodyMaxWidth)
             .replacingOccurrences(of: "{{bodyMargin}}", with: bodyMargin)
             .replacingOccurrences(of: "{{bodyFontSize}}", with: bodyFontSize)
+            .replacingOccurrences(of: "{{hljsCSS}}", with: Hljs.themeCSS(isDark: isDark))
+            .replacingOccurrences(of: "{{hljsJS}}", with: Hljs.js)
             .replacingOccurrences(of: "{{content}}", with: escaped)
     }
 
@@ -52,6 +58,7 @@ enum MarkdownRenderer {
     <meta charset="utf-8">
     <meta name="color-scheme" content="{{colorScheme}}">
     <style>
+    {{hljsCSS}}
     * { box-sizing: border-box; }
     html, body { margin: 0; }
     body { font-family: -apple-system, 'Helvetica Neue', sans-serif; font-size: {{bodyFontSize}};
@@ -66,8 +73,19 @@ enum MarkdownRenderer {
     p  { margin: 0 0 14px; }
     a  { color: {{link}}; text-decoration: none; }
     a:hover { text-decoration: underline; }
-    pre { background: {{codeBg}}; border: 1px solid {{border}}; border-radius: 8px;
-          padding: 14px 16px; overflow-x: auto; margin: 14px 0; }
+    .code-block { background: {{codeBg}}; border: 1px solid {{border}}; border-radius: 8px;
+                  margin: 14px 0; overflow: hidden; }
+    .code-block-header { display: flex; align-items: center; justify-content: space-between;
+                  padding: 5px 8px 5px 12px; border-bottom: 1px solid {{border}};
+                  font-family: 'SF Mono', Menlo, Monaco, monospace; font-size: 11px; color: {{blockquoteColor}}; }
+    .code-block-lang { text-transform: lowercase; letter-spacing: 0.02em; }
+    .copy-btn { background: transparent; border: 1px solid {{border}}; border-radius: 5px;
+                padding: 3px 9px; font-size: 11px; font-family: -apple-system, sans-serif;
+                color: {{fg}}; opacity: 0.75; cursor: pointer; }
+    .copy-btn:hover { opacity: 1; background: {{border}}; }
+    .copy-btn.copied { color: #3fb950; border-color: #3fb950; opacity: 1; }
+    .code-block pre { margin: 0; padding: 12px 14px; overflow-x: auto; background: transparent; }
+    .code-block pre code.hljs { padding: 0; background: transparent; }
     code { font-family: 'SF Mono', Menlo, Monaco, monospace; font-size: 12.5px; }
     p > code, li > code, td > code, th > code { background: {{codeBg}}; padding: 2px 5px; border-radius: 4px; }
     blockquote { border-left: 3px solid {{border}}; margin: 0 0 14px; padding: 4px 16px;
@@ -84,13 +102,24 @@ enum MarkdownRenderer {
     <body>
     <div id="content"></div>
     <script>
+    {{hljsJS}}
+    </script>
+    <script>
     const raw = `{{content}}`;
     function parseMarkdown(text) {
       let html = text;
       const codeBlocks = [];
       html = html.replace(/```(\\w*)\\n?([\\s\\S]*?)```/g, (_, lang, code) => {
         const idx = codeBlocks.length;
-        codeBlocks.push('<pre><code>' + escHtml(code.trimEnd()) + '</code></pre>');
+        const langAttr = lang ? ' class="language-' + lang + '"' : '';
+        const langLabel = lang ? '<span class="code-block-lang">' + lang + '</span>' : '<span></span>';
+        codeBlocks.push(
+          '<div class="code-block">' +
+          '<div class="code-block-header">' + langLabel +
+          '<button class="copy-btn" onclick="copyCodeBlock(this)">Copy</button></div>' +
+          '<pre><code' + langAttr + '>' + escHtml(code.trimEnd()) + '</code></pre>' +
+          '</div>'
+        );
         return '\\x00CODE' + idx + '\\x00';
       });
       html = html.replace(/^(?:---|-{3,}|\\*{3,})$/gm, '<hr>');
@@ -163,6 +192,20 @@ enum MarkdownRenderer {
     function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     function escAttr(s) { return escHtml(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
     document.getElementById('content').innerHTML = parseMarkdown(raw);
+    if (window.hljs) {
+      document.querySelectorAll('.code-block pre code').forEach((el) => { try { hljs.highlightElement(el); } catch (e) {} });
+    }
+    function copyCodeBlock(btn) {
+      const block = btn.closest('.code-block');
+      const code = block && block.querySelector('code');
+      if (!code) return;
+      navigator.clipboard.writeText(code.textContent).then(() => {
+        const prev = btn.textContent;
+        btn.textContent = 'Copied';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = prev; btn.classList.remove('copied'); }, 1500);
+      }).catch(() => {});
+    }
     </script>
     </body>
     </html>
