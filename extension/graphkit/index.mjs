@@ -8,7 +8,7 @@
 // and the graphify-out/ directory layout are implementation details
 // behind this surface.
 
-export { findRelatedCode, findGraphContext, rollupCodeRefs } from './graph.mjs';
+export { findRelatedCode, findGraphContext, rollupCodeRefs, findRelatedSymbols } from './graph.mjs';
 export { renderGraphifyMemory, buildAllowedRoots, resolveAllowedRepoRoot } from './memory.mjs';
 export {
   readChatMemoryFacts,

@@ -4,7 +4,7 @@
 // consumer previously re-implemented.
 
 import path from 'node:path';
-import { findContext, userRepoAllowlist } from '../kb/db.mjs';
+import { findContext, userRepoAllowlist, findCodeSymbolIds, expandSymbols, hydrateSymbols } from '../kb/db.mjs';
 
 /** Repo allow-list for a user, never throwing — graph queries must not
  *  crash if the allow-list read fails; they just lose absolute refs. */
@@ -75,4 +75,33 @@ export function findRelatedCode(userId, query, limit = 5) {
  */
 export function findGraphContext(userId, query, limit = 5) {
   return findContext(userId, query, limit);
+}
+
+/**
+ * Compiler-derived symbol grounding for a free-text query. Seeds from symbol
+ * titles/docs that match the query, expands `hops` over the code graph
+ * (implements/references/imports), and hydrates to located symbols. Returns []
+ * when no SCIP graph is present, so callers (code-sync) degrade gracefully.
+ *
+ * Seeding is token-aware: a free-text task query like "Fix the Button
+ * component" is split on whitespace and each token is probed (plus the whole
+ * query, to preserve exact-phrase matches). findCodeSymbolIds uses a single
+ * substring LIKE, so a raw multi-word query would otherwise miss a symbol
+ * titled just "Button".
+ */
+export function findRelatedSymbols(userId, query, { hops = 1, limit = 10 } = {}) {
+  if (!query) return [];
+  const candidates = [...new Set(
+    [query, ...String(query).split(/\s+/).filter((t) => t.length >= 2)],
+  )];
+  const seedSet = new Set();
+  for (const q of candidates) {
+    for (const id of findCodeSymbolIds(userId, q, limit)) seedSet.add(id);
+    if (seedSet.size >= limit) break;
+  }
+  const seeds = [...seedSet].slice(0, limit);
+  if (seeds.length === 0) return [];
+  const expanded = expandSymbols(userId, seeds, { hops });
+  const ids = [...new Set([...seeds, ...expanded])];
+  return hydrateSymbols(userId, ids);
 }
