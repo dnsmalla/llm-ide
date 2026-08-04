@@ -32,7 +32,7 @@ const HOST = config.host;
 // Bump whenever the HTTP surface changes so the extension can detect
 // a stale server process ("you installed the new client but forgot to
 // restart node server.mjs") and surface a clear message.
-const SERVER_API_VERSION = 20;
+const SERVER_API_VERSION = 21;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -51,6 +51,7 @@ const ENDPOINTS = [
   '/kb/system/status',
   '/kb/delete',
   '/kb/connect-git',
+  '/kb/ingest-scip',
   '/kb/connect-github-issues',
   '/kb/connect-tickets-json',
   '/kb/connect-qa',

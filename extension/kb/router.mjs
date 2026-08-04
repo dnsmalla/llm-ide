@@ -5,6 +5,7 @@
 
 import * as kb from './db.mjs';
 import { indexLocalRepo } from '../connectors/git.mjs';
+import { indexScip } from '../connectors/scip.mjs';
 import { indexGithubIssues, indexTicketsJson } from '../connectors/issues.mjs';
 import { indexJUnit } from '../connectors/qa.mjs';
 import { indexBoxFolder, boxTest } from '../connectors/box.mjs';
@@ -361,6 +362,29 @@ export async function handleKB(req, res) {
         sendJSON(res, 200, { ok: true, ...result });
       } catch (err) {
         sendJSON(res, 400, { error: { code: 'GIT_INDEX_FAILED', message: err.message } });
+      }
+      return true;
+    }
+
+    if (req.method === 'POST' && url === '/kb/ingest-scip') {
+      const body = parseJSON(await readBody(req));
+      if (!body?.repoPath || typeof body.repoPath !== 'string' ||
+          !body?.scipPath || typeof body.scipPath !== 'string') {
+        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'repoPath and scipPath are required' } });
+        return true;
+      }
+      const nodePath = await import('node:path');
+      const normalized = nodePath.resolve(body.repoPath);
+      const allowlist = kb.userRepoAllowlist(userId);
+      if (!allowlist.includes(normalized)) {
+        sendJSON(res, 403, { error: { code: 'PATH_NOT_APPROVED', message: 'Repo path is not on your allow-list' } });
+        return true;
+      }
+      try {
+        const result = await indexScip(userId, normalized, body.scipPath, { replace: body.replace !== false });
+        sendJSON(res, 200, { ok: true, ...result });
+      } catch (err) {
+        sendJSON(res, 400, { error: { code: 'SCIP_INDEX_FAILED', message: err.message } });
       }
       return true;
     }
