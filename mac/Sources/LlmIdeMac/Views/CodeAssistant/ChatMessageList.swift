@@ -62,6 +62,7 @@ struct ChatMessageList: View {
                         ForEach(history) { turn in
                             turnView(turn)
                                 .id(turn.id)
+                                .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .bottom)))
                             if let pt = pendingTool,
                                turn.id == history.last?.id,
                                turn.role == .assistant {
@@ -99,6 +100,7 @@ struct ChatMessageList: View {
                                     }
                                 }
                                 .padding(.top, 4)
+                                .transition(.opacity)
                             }
                         }
                         if busy {
@@ -110,12 +112,18 @@ struct ChatMessageList: View {
                             }
                             .padding(.top, 4)
                             .id("typing-indicator")
+                            .transition(.opacity)
                         }
                         if let err = error {
                             errorBubble(err)
+                                .transition(.opacity)
                         }
                     }
                     .padding(Spacing.md)
+                    .animation(.easeOut(duration: 0.22), value: history.count)
+                    .animation(.easeOut(duration: 0.2), value: pendingTool?.name)
+                    .animation(.easeOut(duration: 0.18), value: busy)
+                    .animation(.easeOut(duration: 0.2), value: error)
                 }
                 .onChange(of: history.count) { _, _ in
                     if let last = history.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }

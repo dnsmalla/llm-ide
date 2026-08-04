@@ -13,11 +13,11 @@ extension CodeAssistantPanel {
                     // Recording state: animated waveform
                     Label("Recording", systemImage: "waveform")
                         .symbolEffect(.pulse, options: .speed(1.5))
-                        .foregroundColor(.red)
+                        .foregroundColor(theme.current.danger)
                 } else {
                     // Idle state: microphone icon
                     Image(systemName: "mic.fill")
-                        .foregroundColor(.gray)
+                        .foregroundColor(theme.current.textMuted)
                 }
             }
             .frame(minWidth: 44, minHeight: 44)
@@ -34,15 +34,13 @@ extension CodeAssistantPanel {
             HStack {
                 Image(systemName: "waveform")
                     .symbolEffect(.variableColor.iterative.reversing, options: .speed(1.5))
-                    .foregroundColor(.red)
+                    .foregroundColor(theme.current.danger)
                 Text("Listening... (Cmd+M to stop)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(Typography.caption)
+                    .foregroundColor(theme.current.textMuted)
                 Spacer()
             }
-            .padding(8)
-            .background(Color(.controlBackgroundColor))
-            .cornerRadius(6)
+            .card(padding: Spacing.sm, radius: Radius.sm)
             .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
@@ -53,18 +51,16 @@ extension CodeAssistantPanel {
         if !voiceState.interimText.isEmpty {
             HStack {
                 Text(voiceState.interimText)
-                    .font(.body)
-                    .foregroundColor(.secondary)
+                    .font(Typography.body)
+                    .foregroundColor(theme.current.textMuted)
                     .italic()
                 Text("|")
-                    .foregroundColor(.blue)
+                    .foregroundColor(theme.current.accent)
                     .opacity(0.6)
                     .animation(.easeInOut(duration: 0.5).repeatForever(), value: voiceState.interimText)
                 Spacer()
             }
-            .padding(8)
-            .background(Color(.controlBackgroundColor))
-            .cornerRadius(6)
+            .card(padding: Spacing.sm, radius: Radius.sm)
             .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
@@ -75,20 +71,18 @@ extension CodeAssistantPanel {
         if let error = voiceState.error {
             HStack {
                 Image(systemName: "exclamationmark.circle.fill")
-                    .foregroundColor(.orange)
+                    .foregroundColor(theme.current.danger)
                 Text(error)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(Typography.caption)
+                    .foregroundColor(theme.current.textMuted)
                 Spacer()
                 Button(action: { voiceState.error = nil }) {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.gray)
+                        .foregroundColor(theme.current.textMuted)
                 }
                 .buttonStyle(.plain)
             }
-            .padding(8)
-            .background(Color(.controlBackgroundColor))
-            .cornerRadius(6)
+            .card(padding: Spacing.sm, radius: Radius.sm)
             .transition(.move(edge: .top).combined(with: .opacity))
         }
     }

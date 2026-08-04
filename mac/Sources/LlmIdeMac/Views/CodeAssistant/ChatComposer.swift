@@ -383,7 +383,7 @@ extension CodeAssistantPanel {
                     agentIsAutonomous = false
                 }) {
                     Label("Stop", systemImage: "stop.circle.fill")
-                        .foregroundColor(.red)
+                        .foregroundColor(theme.current.danger)
                 }
                 .buttonStyle(.borderless)
                 .help("Stop autonomous agent")
@@ -752,10 +752,10 @@ extension CodeAssistantPanel {
 
     func agentTaskColor(_ status: String) -> Color {
         switch status {
-        case "completed": return .green
-        case "in_progress": return .blue
-        case "skipped": return .secondary
-        default: return .secondary
+        case "completed": return theme.current.success
+        case "in_progress": return theme.current.info
+        case "skipped": return theme.current.textMuted
+        default: return theme.current.textMuted
         }
     }
 

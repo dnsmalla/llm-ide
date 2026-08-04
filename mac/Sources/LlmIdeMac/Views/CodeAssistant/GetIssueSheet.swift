@@ -58,7 +58,7 @@ struct GetIssueSheet: View {
                                     .foregroundStyle(.secondary)
                                 Text(issue.webUrl)
                                     .font(.system(size: 11))
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(theme.current.info)
                             }
                         }
                         HStack(spacing: 6) {

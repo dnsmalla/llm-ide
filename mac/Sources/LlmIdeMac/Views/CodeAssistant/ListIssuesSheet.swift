@@ -150,13 +150,14 @@ struct ListIssuesSheet: View {
 
     struct IssueRow: View {
         let issue: RepoIssue
+        @EnvironmentObject var theme: ThemeStore
 
         var body: some View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top) {
                     Text("#\(issue.number)")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(theme.current.info)
 
                     Text(issue.title)
                         .font(.system(size: 13, weight: .medium))

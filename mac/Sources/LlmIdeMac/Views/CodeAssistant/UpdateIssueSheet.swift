@@ -92,7 +92,7 @@ struct UpdateIssueSheet: View {
                 if let error = errorMessage {
                     Text(error)
                         .font(.system(size: 11))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(theme.current.danger)
                 }
 
                 Spacer()
