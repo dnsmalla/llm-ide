@@ -1,0 +1,146 @@
+import SwiftUI
+
+extension CodeAssistantPanel {
+
+    // MARK: - Header
+
+    var header: some View {
+        HStack(spacing: 10) {
+            if !isVeryCompact {
+                SectionLabel(isCompact ? "AI" : "Code Assistant", size: 12, tracking: 0.8)
+                    .lineLimit(1)
+            }
+            // Session counter only when we have horizontal room to spare.
+            if !isCompact, !history.isEmpty || !attachments.isEmpty {
+                Text("·")
+                    .foregroundStyle(theme.current.textMuted.opacity(0.5))
+                Text("\(history.count) turn\(history.count == 1 ? "" : "s")  \(attachments.count) file\(attachments.count == 1 ? "" : "s")")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(theme.current.textMuted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            sessionDropdownButton
+            clearChatButton
+        }
+        .padding(.horizontal, isVeryCompact ? 6 : Spacing.md)
+        .padding(.vertical, 8)
+    }
+
+    /// Cursor-style chat-list dropdown: shows the current session's
+    /// title and opens a popover with recent sessions + "New chat".
+    var sessionDropdownButton: some View {
+        Button {
+            // Refresh the list every time the popover opens so the
+            // ordering reflects the latest `lastUsedAt`.
+            refreshSessions()
+            showingSessionPicker.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.system(size: 10, weight: .medium))
+                if !isVeryCompact {
+                    Text(currentSessionTitle)
+                        .font(.system(size: 11))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .medium))
+            }
+            .padding(.horizontal, isVeryCompact ? 4 : 8)
+            .padding(.vertical, 4)
+            .foregroundStyle(theme.current.textMuted)
+            .frame(maxWidth: isCompact ? 90 : 220, alignment: .trailing)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Switch chat session")
+        .accessibilityLabel("Switch chat session")
+        .popover(isPresented: $showingSessionPicker, arrowEdge: .top) {
+            sessionPickerPopover
+        }
+    }
+
+    var currentSessionTitle: String {
+        guard let cur = UUID(uuidString: currentSessionIDString),
+              let s = sessions.first(where: { $0.id == cur }) else {
+            return "New chat"
+        }
+        return s.title.isEmpty ? "New chat" : s.title
+    }
+
+    var sessionPickerPopover: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                showingSessionPicker = false
+                createNewSession()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .medium))
+                    Text("New chat")
+                        .font(.system(size: 12, weight: .medium))
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.current.text)
+
+            Divider()
+
+            if sessions.isEmpty {
+                Text("No saved chats yet.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.current.textMuted)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(sessions.prefix(20))) { session in
+                            SessionRow(
+                                session: session,
+                                isActive: session.id.uuidString == currentSessionIDString,
+                                onSelect: {
+                                    showingSessionPicker = false
+                                    switchSession(to: session.id)
+                                },
+                                onDelete: {
+                                    deleteSession(session.id)
+                                }
+                            )
+                            .environmentObject(theme)
+                        }
+                    }
+                }
+                .frame(maxHeight: 320)
+            }
+        }
+        .frame(width: 320)
+    }
+
+    /// Header button: delete the current chat (mints a fresh empty one if
+    /// it was the last remaining session for this scope).
+    var clearChatButton: some View {
+        Button {
+            clearCurrentChat()
+        } label: {
+            Image(systemName: "trash")
+                .font(.system(size: 11, weight: .medium))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .foregroundStyle(theme.current.textMuted)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Delete current chat")
+        .accessibilityLabel("Delete current chat")
+        .disabled(history.isEmpty && sessions.count <= 1)
+    }
+
+
+}
