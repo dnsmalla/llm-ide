@@ -77,6 +77,14 @@ export function findGraphContext(userId, query, limit = 5) {
   return findContext(userId, query, limit);
 }
 
+// Stop-words filtered from multi-word task-title tokens before graph seeding.
+// These are common English filler / generic dev words that, if probed first,
+// would fill the seed cap before a meaningful token (e.g. "Button") is tried.
+const SEED_STOP_WORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'for', 'to', 'of', 'in', 'on', 'at', 'by',
+  'with', 'fix', 'component', 'this', 'that',
+]);
+
 /**
  * Compiler-derived symbol grounding for a free-text query. Seeds from symbol
  * titles/docs that match the query, expands `hops` over the code graph
@@ -87,13 +95,17 @@ export function findGraphContext(userId, query, limit = 5) {
  * component" is split on whitespace and each token is probed (plus the whole
  * query, to preserve exact-phrase matches). findCodeSymbolIds uses a single
  * substring LIKE, so a raw multi-word query would otherwise miss a symbol
- * titled just "Button".
+ * titled just "Button". Tokens are filtered to length ≥ 3, de-stop-worded,
+ * and probed longest-first so specific tokens (e.g. "Authentication") win
+ * before generic ones (e.g. "handler") fill the seed cap.
  */
 export function findRelatedSymbols(userId, query, { hops = 1, limit = 10 } = {}) {
   if (!query) return [];
-  const candidates = [...new Set(
-    [query, ...String(query).split(/\s+/).filter((t) => t.length >= 2)],
-  )];
+  const tokens = String(query)
+    .split(/\s+/)
+    .filter((t) => t.length >= 3 && !SEED_STOP_WORDS.has(t.toLowerCase()))
+    .sort((a, b) => b.length - a.length);
+  const candidates = [...new Set([query, ...tokens])];
   const seedSet = new Set();
   for (const q of candidates) {
     for (const id of findCodeSymbolIds(userId, q, limit)) seedSet.add(id);
@@ -103,5 +115,7 @@ export function findRelatedSymbols(userId, query, { hops = 1, limit = 10 } = {})
   if (seeds.length === 0) return [];
   const expanded = expandSymbols(userId, seeds, { hops });
   const ids = [...new Set([...seeds, ...expanded])];
-  return hydrateSymbols(userId, ids);
+  // Cap the hydrated result so a hub seed (one symbol referenced by many) can't
+  // blow past `limit` after expand.
+  return hydrateSymbols(userId, ids).slice(0, limit);
 }

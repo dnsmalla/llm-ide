@@ -91,14 +91,26 @@ export function expandSymbols(userId, seedIds, { hops = 1, edgeKinds = DEFAULT_E
   return out;
 }
 
-/** Seed symbol ids whose title or doc matches a free-text query. */
+// TODO scale: findCodeSymbolIds uses a leading-% LIKE on code_graph_nodes, which
+// can't use the (user_id, title) index and scans the table per token. For large
+// indexes, seeding should query the FTS5 `sources` table (where meta.source='scip'
+// + meta.symbol_id already live) instead of scanning code_graph_nodes.
+/**
+ * Seed symbol ids whose title or doc matches a free-text query. LIKE wildcards
+ * (`%` `_` `\`) in the query are escaped so a literal underscore in a symbol
+ * name (e.g. `my_func`) doesn't match every character.
+ */
 export function findCodeSymbolIds(userId, query, limit = 10) {
   requireUser(userId);
   if (!query) return [];
-  const like = `%${query}%`;
+  const escaped = String(query)
+    .replace(/\\/g, '\\\\')
+    .replace(/%/g, '\\%')
+    .replace(/_/g, '\\_');
+  const like = `%${escaped}%`;
   const rows = getDb().prepare(
     `SELECT symbol_id FROM code_graph_nodes
-     WHERE user_id=? AND (title LIKE ? OR doc LIKE ?)
+     WHERE user_id=? AND (title LIKE ? ESCAPE '\\' OR doc LIKE ? ESCAPE '\\')
      LIMIT ?`,
   ).all(userId, like, like, limit);
   return rows.map((r) => r.symbol_id);
