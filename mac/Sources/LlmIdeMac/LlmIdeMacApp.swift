@@ -46,6 +46,7 @@ public struct LlmIdeMacApp: App {
     @StateObject private var projectStore: ProjectStore
     @StateObject private var graphAutoUpdater: GraphAutoUpdater
     @StateObject private var graphSessionStore = GraphSessionStore()
+    @StateObject private var sourceLinkStore = SourceLinkStore()
     @State private var backend = BackendManager()
     @State private var mobileControl = MobileControlManager()
     @State private var quickSwitcherShown = false
@@ -187,6 +188,7 @@ public struct LlmIdeMacApp: App {
                 .environmentObject(projectStore)
                 .environmentObject(graphAutoUpdater)
                 .environmentObject(graphSessionStore)
+                .environmentObject(sourceLinkStore)
                 .environment(backend)
                 .environment(mobileControl)
                 .environment(activityStore)
@@ -274,7 +276,12 @@ public struct LlmIdeMacApp: App {
                 // would just 401 in a loop; when signed in, we want
                 // immediate visibility of any active extension session.
                 .onChange(of: session.isAuthenticated) { _, authed in
-                    if authed { liveMirror.start() } else { liveMirror.stop() }
+                    if authed {
+                        liveMirror.start()
+                        Task { await sourceLinkStore.refresh(api: api) }
+                    } else {
+                        liveMirror.stop()
+                    }
                 }
                 // Keep the active project's `linkedRepo` bound to the
                 // currently-active saved repo whenever the active project

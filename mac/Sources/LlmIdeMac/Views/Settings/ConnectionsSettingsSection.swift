@@ -19,6 +19,7 @@ struct ConnectionsSettingsSection: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var theme: ThemeStore
+    @EnvironmentObject var sourceLinks: SourceLinkStore
     @Environment(AppEnvironment.self) private var env
 
     /// Persisted per-section like `SettingsSectionCard`, so it survives launches.
@@ -93,6 +94,7 @@ struct ConnectionsSettingsSection: View {
                 // Only runs when a source is configured + enabled. `.task`
                 // auto-cancels when the view disappears.
                 .task {
+                    await sourceLinks.refresh(api: api)
                     if config.emailSource?.enabled == true { await runImport() }
                     if config.slackSource?.enabled == true { await runSlackImport() }
                 }
@@ -187,12 +189,13 @@ struct ConnectionsSettingsSection: View {
     private var emailCard: some View {
         let configured = config.emailSource != nil
         let enabled = config.emailSource?.enabled == true
+        let badge = linkBadge(.email, configured: configured, enabled: enabled)
         return InputSourceCard(
             icon: "envelope",
             title: "Email",
             subtitle: "Fetch messages and turn them into notes",
-            badgeText: !configured ? "Not set up" : (enabled ? "Connected" : "Paused"),
-            badgeTone: !configured ? .accent : (enabled ? .positive : .neutral)
+            badgeText: badge.text,
+            badgeTone: badge.tone
         ) {
             if let s = config.emailSource {
                 Text(s.user.isEmpty ? (s.displayName.isEmpty ? "Configured" : s.displayName) : s.user)
@@ -235,12 +238,13 @@ struct ConnectionsSettingsSection: View {
     private var slackCard: some View {
         let configured = config.slackSource != nil
         let enabled = config.slackSource?.enabled == true
+        let badge = linkBadge(.slack, configured: configured, enabled: enabled)
         return InputSourceCard(
             icon: "number",
             title: "Slack",
             subtitle: "Fetch messages and turn them into notes",
-            badgeText: !configured ? "Not set up" : (enabled ? "Connected" : "Paused"),
-            badgeTone: !configured ? .accent : (enabled ? .positive : .neutral)
+            badgeText: badge.text,
+            badgeTone: badge.tone
         ) {
             if let s = config.slackSource {
                 Text(s.displayName.isEmpty ? "Configured" : s.displayName)
@@ -283,12 +287,13 @@ struct ConnectionsSettingsSection: View {
     private var boxCard: some View {
         let configured = config.boxSource != nil
         let enabled = config.boxSource?.enabled == true
+        let badge = linkBadge(.box, configured: configured, enabled: enabled)
         return InputSourceCard(
             icon: "doc.text",
             title: "Box",
             subtitle: "Index documents from a Box folder",
-            badgeText: !configured ? "Not set up" : (enabled ? "Connected" : "Paused"),
-            badgeTone: !configured ? .accent : (enabled ? .positive : .neutral)
+            badgeText: badge.text,
+            badgeTone: badge.tone
         ) {
             if let s = config.boxSource {
                 Text(s.displayName.isEmpty ? (s.folderName.isEmpty ? "Configured" : s.folderName) : s.displayName)
@@ -327,6 +332,17 @@ struct ConnectionsSettingsSection: View {
     }
 
     // MARK: - Helpers
+
+    /// Vault-aware card badge: reflects whether the source's secret is in the
+    /// vault, not just whether local config exists.
+    private func linkBadge(_ kind: SourceLinkStore.SourceKind, configured: Bool, enabled: Bool) -> (text: String, tone: SourceBadgeTone) {
+        if sourceLinks.lastRefreshFailed { return ("—", .neutral) }
+        switch sourceLinks.linkState(kind, configured: configured) {
+        case .notConfigured:     return ("Not set up", .accent)
+        case .credentialsNeeded: return ("Credentials needed", .accent)
+        case .linked:            return enabled ? ("Connected ✓", .positive) : ("Paused", .neutral)
+        }
+    }
 
     /// Run the email import flow and reflect the outcome on the card.
     private func runImport() async {
