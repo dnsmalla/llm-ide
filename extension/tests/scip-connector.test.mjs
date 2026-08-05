@@ -89,6 +89,32 @@ test('indexScip replace clears the OLD graph (not a merge) — proves clearCodeG
   assert.deepEqual(titles, ['Alpha', 'Beta'], 'new graph reflects the replaced node set');
 });
 
+test('replace on a repo with an underscore in its path does not delete a sibling repo\'s scip rows', async () => {
+  // Regression for the LIKE-wildcard escaping bug: repoA's path contains `_`,
+  // which without ESCAPE would match ANY character at that position — including
+  // repoB, whose path is identical except for that one character.
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'scip-sibling-'));
+  const repoA = path.join(base, 'my_app');
+  const repoB = path.join(base, 'myXapp');
+  fs.mkdirSync(repoA);
+  fs.mkdirSync(repoB);
+  try {
+    await indexScip(U, repoA, 'ignored.scip', { load: fakeLoad });
+    await indexScip(U, repoB, 'ignored.scip', { load: fakeLoad });
+    assert.equal(db.getCodeGraphSnapshot(U, repoB).nodes.length, 4, 'repoB graph seeded');
+
+    await indexScip(U, repoA, 'ignored.scip', { replace: true, load: fakeLoad });
+
+    const repoBScipRows = db.getDb().prepare(
+      "SELECT ref FROM sources WHERE user_id=? AND ref LIKE ? AND meta LIKE '%\"source\":\"scip\"%'",
+    ).all(U, `${repoB}${path.sep}%`);
+    assert.equal(repoBScipRows.length, 4, 'repoB scip rows survive repoA replace');
+    assert.equal(db.getCodeGraphSnapshot(U, repoB).nodes.length, 4, 'repoB graph untouched');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test('cleanup', () => {
   db.closeDb();
   try { fs.rmSync(REPO, { recursive: true, force: true }); } catch { /* ignore */ }

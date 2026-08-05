@@ -55,14 +55,19 @@ export function clearCodeGraph(userId, repoId) {
  * Delete only SCIP-sourced `sources` rows for a repo — must NOT touch the augment
  * line-chunks. deleteSourcesByPrefix keys on ref-prefix alone and would wipe chunks
  * too, so this is a direct meta-filtered DELETE.
+ *
+ * LIKE wildcards in repoId are escaped so a literal `_` in a repo path (e.g.
+ * /x/my_repo/) doesn't match ANY character and take out a sibling repo's rows
+ * (e.g. /x/myXrepo/) — same fix as deleteSourcesByPrefix in sources.mjs.
  */
 export function deleteScipSources(userId, repoId) {
   requireUser(userId);
   const db = getDb();
+  const escaped = String(repoId).replace(/[\\%_]/g, (c) => `\\${c}`);
   const info = db.prepare(
     `DELETE FROM sources
-     WHERE user_id=? AND ref LIKE ? AND meta LIKE '%"source":"scip"%'`,
-  ).run(userId, `${repoId}${path.sep}%`);
+     WHERE user_id=? AND ref LIKE ? ESCAPE '\\' AND meta LIKE '%"source":"scip"%'`,
+  ).run(userId, `${escaped}${path.sep}%`);
   return info.changes;
 }
 
@@ -116,13 +121,18 @@ export function findCodeSymbolIds(userId, query, limit = 10) {
   return rows.map((r) => r.symbol_id);
 }
 
-/** Hydrate symbol ids to node rows for agent context. */
+/**
+ * Hydrate symbol ids to node rows for agent context. Includes repo_id
+ * (alongside the relative source_file) so callers can resolve the absolute
+ * on-disk path — e.g. codegen.mjs uses it to confirm which FTS-matched file
+ * a task's compiler-derived symbols actually touch.
+ */
 export function hydrateSymbols(userId, symbolIds) {
   requireUser(userId);
   if (!Array.isArray(symbolIds) || symbolIds.length === 0) return [];
   const place = symbolIds.map(() => '?').join(',');
   return getDb().prepare(
-    `SELECT symbol_id, title, kind, source_file, line FROM code_graph_nodes
+    `SELECT symbol_id, title, kind, repo_id, source_file, line FROM code_graph_nodes
      WHERE user_id=? AND symbol_id IN (${place})`,
   ).all(userId, ...symbolIds);
 }
