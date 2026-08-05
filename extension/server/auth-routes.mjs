@@ -18,6 +18,12 @@ import {
   pkcePair, buildAuthUrl, exchangeCode, fetchEmailAddress,
   putState, getState, completeState, takeStatus,
 } from '../agents/google-oauth.mjs';
+import {
+  buildAuthUrl as buildSlackAuthUrl, exchangeCode as exchangeSlackCode,
+  putState as putSlackState, getState as getSlackState,
+  completeState as completeSlackState, takeStatus as takeSlackStatus,
+} from '../agents/slack-oauth.mjs';
+import { listUserConversations } from '../agents/slack-source.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
 
 // Map any error (including VaultError) to a client-safe message.
@@ -147,7 +153,10 @@ export function isAuthRoute(url) {
       || path === '/auth/me/claude-plugins/updates'
       || path === '/auth/google/start'
       || path === '/auth/google/callback'
-      || path === '/auth/google/status';
+      || path === '/auth/google/status'
+      || path === '/auth/slack/start'
+      || path === '/auth/slack/callback'
+      || path === '/auth/slack/status';
 }
 
 export async function handleAuth(req, res, { db, logger, requestId }) {
@@ -348,6 +357,45 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     return;
   }
 
+  // ---- Slack Connect callback (public) --------------------------------
+  //
+  // GET /auth/slack/callback?code=...&state=...
+  //   Slack redirects the user's browser here after consent — no bearer
+  //   token on this request, so it stays public (allow-listed in
+  //   server/auth.mjs PUBLIC_PATHS). Unlike Google, LLM-IDE owns the Slack
+  //   App itself: client id/secret come from config (env vars), never from
+  //   the vault or the query string.
+  if (method === 'GET' && url.split('?')[0] === '/auth/slack/callback') {
+    const q = new URL(url, 'http://127.0.0.1').searchParams;
+    const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    const html = (msg) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(`<!doctype html><meta charset=utf-8><body style="font-family:system-ui;padding:2rem"><p>${escHtml(msg)}</p><p>You can close this tab and return to LLM-IDE.</p><script>setTimeout(()=>window.close(),1500)</script>`); };
+    const state = q.get('state') || '';
+    const st = getSlackState(state);
+    if (q.get('error')) { if (st) completeSlackState(state, { status: 'error', message: 'Sign-in cancelled.' }); html('Sign-in cancelled.'); return; }
+    if (!st) { html('This sign-in link has expired — start again from the app.'); return; }
+    if (st.status !== 'pending') { html('This sign-in link has already been used — start again from the app.'); return; }
+    try {
+      const redirectUri = 'http://127.0.0.1:' + config.port + '/auth/slack/callback';
+      const tok = await exchangeSlackCode({
+        clientId: config.slackClientId, clientSecret: config.slackClientSecret,
+        code: q.get('code') || '', redirectUri,
+      });
+      setSecret(db, st.userId, 'slack.userToken', tok.accessToken);
+      // Prefetch the channel list so the Mac sheet renders the checklist
+      // immediately. Fail-soft: listUserConversations never throws (it
+      // degrades to {channels: [], complete: false}), so a transient Slack
+      // hiccup here never fails the connect itself — the sheet's "Refresh
+      // channels" retries later.
+      const { channels } = await listUserConversations({ token: tok.accessToken });
+      completeSlackState(state, { status: 'complete', teamName: tok.teamName, channels });
+      html('Connected to Slack.');
+    } catch (e) {
+      completeSlackState(state, { status: 'error', message: redactWithKey(e.message, config.slackClientSecret) });
+      html('Connection failed: ' + redactWithKey(e.message, config.slackClientSecret));
+    }
+    return;
+  }
+
   // ---- Authenticated -------------------------------------------------
   // Guard placed here — immediately after the last public route block —
   // so every route below this point is guaranteed to have req.user set.
@@ -418,6 +466,34 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     const s = getState(state);
     if (s && s.userId !== req.user.id) { send(res, 403, { error: { code: 'FORBIDDEN', message: 'not your sign-in' } }); return; }
     send(res, 200, takeStatus(state));
+    return;
+  }
+
+  // ---- Slack Connect: start + status (authed) --------------------------
+  //
+  // POST /auth/slack/start
+  //   LLM-IDE owns a single hosted Slack App — nothing to paste. Returns
+  //   503 if the operator hasn't configured LLMIDE_SLACK_CLIENT_ID/SECRET.
+  if (method === 'POST' && url === '/auth/slack/start') {
+    if (!config.slackClientId || !config.slackClientSecret) {
+      send(res, 503, { error: { code: 'CONFIG_MISSING', message: "Slack connect isn't set up on this server yet." } });
+      return;
+    }
+    const state = crypto.randomBytes(24).toString('base64url');
+    putSlackState(state, { userId: req.user.id });
+    const redirectUri = 'http://127.0.0.1:' + config.port + '/auth/slack/callback';
+    send(res, 200, { authUrl: buildSlackAuthUrl({ clientId: config.slackClientId, redirectUri, state }), state });
+    return;
+  }
+
+  // GET /auth/slack/status?state=...
+  //   Polled by the client while the browser tab is open. Ownership check:
+  //   only the user who initiated the flow may read its status.
+  if (method === 'GET' && url.split('?')[0] === '/auth/slack/status') {
+    const state = new URL(url, 'http://127.0.0.1').searchParams.get('state') || '';
+    const s = getSlackState(state);
+    if (s && s.userId !== req.user.id) { send(res, 403, { error: { code: 'FORBIDDEN', message: 'not your sign-in' } }); return; }
+    send(res, 200, takeSlackStatus(state));
     return;
   }
 
