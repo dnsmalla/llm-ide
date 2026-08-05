@@ -58,6 +58,7 @@ extension LlmIdeAPIClient {
     }
 }
 
+// MARK: - Hosted OAuth connect (one-click "Connect Slack")
 extension LlmIdeAPIClient {
 
     /// One channel/group the connected Slack user already belongs to.
@@ -71,7 +72,9 @@ extension LlmIdeAPIClient {
     struct SlackConnectStartResult: Decodable { let authUrl: String; let state: String }
 
     /// Result of `/auth/slack/status` — `status` is one of
-    /// pending|complete|error; `teamName` populates once complete. No
+    /// pending|complete|error|unknown (unknown = expired/never-existed state,
+    /// OR a terminal status that was already read once — the server's state
+    /// store is single-use); `teamName` populates once complete. No
     /// `channels` here — the server's OAuth callback deliberately doesn't
     /// prefetch channels (it would block the public redirect page for up
     /// to 90s under Slack rate-limiting); callers fetch the channel list
@@ -97,12 +100,19 @@ extension LlmIdeAPIClient {
         return try await get("/auth/slack/status?state=\(encoded)", authenticated: true)
     }
 
+    /// Result of `/kb/slack/conversations`. `complete == false` means the list
+    /// was cut short (Slack rate-limited, hit the page cap, or the request
+    /// timed out) — the UI should say so rather than presenting a truncated
+    /// set as if it were the user's full channel list.
+    struct SlackConversationsResult: Decodable {
+        let channels: [SlackConversation]
+        let complete: Bool
+    }
+
     /// Channels/groups the connected Slack user belongs to, for the
     /// "Connect Slack" checklist. Requires slack.userToken or slack.botToken
     /// to already be saved.
-    func fetchSlackConversations() async throws -> [SlackConversation] {
-        struct Resp: Decodable { let channels: [SlackConversation] }
-        let r: Resp = try await get("/kb/slack/conversations", authenticated: true)
-        return r.channels
+    func fetchSlackConversations() async throws -> SlackConversationsResult {
+        try await get("/kb/slack/conversations", authenticated: true)
     }
 }
