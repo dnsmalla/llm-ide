@@ -21,6 +21,13 @@ struct ExplorerView: View {
     @State private var tabs: [URL] = []
     @State private var activeTab: URL?
 
+    // File-op prompt state: a create/rename sheet, a delete confirmation, and
+    // an inline error for the sheet / an alert for delete failures.
+    @State private var filePrompt: FilePrompt?
+    @State private var fileOpError: String?
+    @State private var pendingDelete: URL?
+    @State private var deleteError: String?
+
     // Git status decorations for the file tree (VS Code-style coloring).
     @State private var decorations = GitStatusStore()
     @Environment(\.controlActiveState) private var controlActiveState
@@ -110,6 +117,39 @@ struct ExplorerView: View {
         }
         .firstLaunchOpenChat(flagKey: "DID_AUTO_OPEN_EXPLORE_CHAT_V1",
                              width: $chatPanelWidth, visible: $chatVisible)
+        .sheet(item: $filePrompt) { prompt in
+            FileNamePromptSheet(mode: prompt.mode, initialName: prompt.initialName,
+                                error: $fileOpError) { name in
+                do {
+                    try performFileOp(prompt, name)
+                    filePrompt = nil
+                    fileOpError = nil
+                } catch {
+                    fileOpError = (error as? ExplorerFileError)?.errorDescription ?? error.localizedDescription
+                }
+            } onCancel: {
+                filePrompt = nil
+                fileOpError = nil
+            }
+        }
+        .confirmationDialog(
+            pendingDelete.map { "Move “\($0.lastPathComponent)” to the Trash?" } ?? "",
+            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Move to Trash", role: .destructive) {
+                if let url = pendingDelete { delete(url) }
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: {
+            Text("You can undo this in Finder.")
+        }
+        .alert("Couldn’t complete the operation",
+               isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
+            Button("OK", role: .cancel) { deleteError = nil }
+        } message: {
+            Text(deleteError ?? "")
+        }
         }
     }
 
@@ -143,20 +183,43 @@ struct ExplorerView: View {
     @ViewBuilder
     private var treePane: some View {
         if let root {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(children(of: root)) { node in
-                        treeRow(node, depth: 0)
+            VStack(spacing: 0) {
+                treeToolbar(root: root)
+                Divider()
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(children(of: root)) { node in
+                            treeRow(node, depth: 0)
+                        }
                     }
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.vertical, 6)
-                .padding(.horizontal, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(NSColor.windowBackgroundColor))
             }
-            .background(Color(NSColor.windowBackgroundColor))
         } else {
             emptyState
         }
+    }
+
+    private func treeToolbar(root: URL) -> some View {
+        HStack(spacing: 2) {
+            Button { filePrompt = .newFile(in: root) } label: {
+                Image(systemName: "doc.badge.plus")
+            }
+            .buttonStyle(.borderless).help("New File")
+            Button { filePrompt = .newFolder(in: root) } label: {
+                Image(systemName: "folder.badge.plus")
+            }
+            .buttonStyle(.borderless).help("New Folder")
+            Button { refreshAll() } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless).help("Refresh")
+            Spacer()
+        }
+        .padding(.horizontal, 6).padding(.vertical, 4)
     }
 
     /// Recursive row: a folder toggles expansion (and renders its children
@@ -194,6 +257,11 @@ struct ExplorerView: View {
         .buttonStyle(.plain)
         .help(node.name)
         .contextMenu {
+            Button("New File") { filePrompt = .newFile(in: node.url) }
+            Button("New Folder") { filePrompt = .newFolder(in: node.url) }
+            Button("Rename") { filePrompt = .rename(url: node.url) }
+            Button("Delete") { pendingDelete = node.url }
+            Divider()
             Button("Reveal in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([node.url])
             }
@@ -219,6 +287,11 @@ struct ExplorerView: View {
         )
         .help(node.name)
         .contextMenu {
+            Button("New File") { filePrompt = .newFile(in: node.url.deletingLastPathComponent()) }
+            Button("New Folder") { filePrompt = .newFolder(in: node.url.deletingLastPathComponent()) }
+            Button("Rename") { filePrompt = .rename(url: node.url) }
+            Button("Delete") { pendingDelete = node.url }
+            Divider()
             Button("Reveal in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([node.url])
             }
@@ -290,5 +363,80 @@ struct ExplorerView: View {
     private func open(_ url: URL) {
         if !tabs.contains(url) { tabs.append(url) }
         activeTab = url
+    }
+
+    /// Run a create/rename op, then refresh the affected folder + git
+    /// decorations. Throws up to the sheet handler so a bad name surfaces inline.
+    private func performFileOp(_ prompt: FilePrompt, _ name: String) throws {
+        switch prompt.mode {
+        case .newFile:
+            let url = try ExplorerFileOps.createFile(in: prompt.dir, name: name)
+            invalidate(prompt.dir); expand(prompt.dir); open(url)
+        case .newFolder:
+            _ = try ExplorerFileOps.createFolder(in: prompt.dir, name: name)
+            invalidate(prompt.dir); expand(prompt.dir)
+        case .rename:
+            guard let url = prompt.url else { return }
+            let new = try ExplorerFileOps.rename(url, to: name)
+            invalidate(url.deletingLastPathComponent())
+            tabs = tabs.map { $0 == url ? new : $0 }
+            if activeTab == url { activeTab = new }
+        }
+        Task { await decorations.refresh(root: root) }
+    }
+
+    /// Delete (trash) a file/folder, close tabs under it, refresh.
+    private func delete(_ url: URL) {
+        do {
+            try ExplorerFileOps.trash(url)
+            invalidate(url.deletingLastPathComponent())
+            tabs.removeAll { $0 == url || $0.path.hasPrefix(url.path + "/") }
+            if let active = activeTab, active == url || active.path.hasPrefix(url.path + "/") {
+                activeTab = tabs.last
+            }
+            Task { await decorations.refresh(root: root) }
+        } catch {
+            deleteError = (error as? ExplorerFileError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// Drop the cached children of `dir` so the next render re-enumerates.
+    private func invalidate(_ dir: URL) {
+        childrenCache.removeValue(forKey: dir.path)
+    }
+
+    /// Ensure `dir` is expanded and its children are loaded.
+    private func expand(_ dir: URL) {
+        if childrenCache[dir.path] == nil {
+            childrenCache[dir.path] = FileSystemTree.children(of: dir)
+        }
+        expanded.insert(dir.path)
+    }
+
+    /// Full tree + git refresh (toolbar Refresh).
+    private func refreshAll() {
+        childrenCache.removeAll()
+        Task { await decorations.refresh(root: root) }
+    }
+
+    private struct FilePrompt: Identifiable {
+        // Alias the sheet's Mode so prompt.mode is directly assignable to
+        // FileNamePromptSheet(mode:) — same cases, single source of truth.
+        typealias Mode = FileNamePromptSheet.Mode
+        let mode: Mode
+        let dir: URL
+        let url: URL?
+        let initialName: String
+        var id: String { "\(mode):\(url?.path ?? dir.path)" }
+
+        static func newFile(in dir: URL) -> FilePrompt {
+            FilePrompt(mode: .newFile, dir: dir, url: nil, initialName: "")
+        }
+        static func newFolder(in dir: URL) -> FilePrompt {
+            FilePrompt(mode: .newFolder, dir: dir, url: nil, initialName: "")
+        }
+        static func rename(url: URL) -> FilePrompt {
+            FilePrompt(mode: .rename, dir: url.deletingLastPathComponent(), url: url, initialName: url.lastPathComponent)
+        }
     }
 }
