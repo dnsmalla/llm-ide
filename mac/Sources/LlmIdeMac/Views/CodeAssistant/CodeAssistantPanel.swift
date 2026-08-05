@@ -157,10 +157,10 @@ struct CodeAssistantPanel: View {
     /// "latest is always open" rule (see isAssistantExpanded), this collapses
     /// older replies to a lightweight text preview so a long chat stays short.
     @State var expandedTurns: Set<UUID> = []
-    /// Typewriter-reveal state for the assistant turn currently "arriving" —
-    /// the server sends the full reply in one shot, so this is a purely
-    /// client-side presentation touch (see revealAssistantReply), not real
-    /// token streaming. nil once nothing is revealing.
+    /// The assistant turn currently receiving live text — real token
+    /// streaming from the server's SSE `chunk` events, mutated in place via
+    /// CodeAssistantPanel+Session's beginStreamingTurn/appendStreamedChunk/
+    /// finishStreamingTurn. nil once nothing is streaming.
     @State var revealingTurnID: UUID?
     @State var revealedCount: Int = 0
     /// Filter text for the session-picker popover. Reset whenever the

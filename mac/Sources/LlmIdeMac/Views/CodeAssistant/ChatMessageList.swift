@@ -15,7 +15,9 @@ struct ChatMessageList: View {
     @Binding var error: String?
     @Binding var draft: String
     @Binding var expandedTurns: Set<UUID>
-    /// Typewriter-reveal state — see CodeAssistantPanel.revealAssistantReply.
+    /// Live-streaming state — the turn currently receiving chunks, and how
+    /// much of its content to show. See CodeAssistantPanel+Session's
+    /// beginStreamingTurn/appendStreamedChunk/finishStreamingTurn.
     @Binding var revealingTurnID: UUID?
     @Binding var revealedCount: Int
     @Binding var bubbleHeights: [UUID: CGFloat]
@@ -205,9 +207,9 @@ struct ChatMessageList: View {
     }
 
     /// The text to actually render for an assistant turn: truncated to
-    /// `revealedCount` while this turn is the one being typewriter-revealed
-    /// (see CodeAssistantPanel.revealAssistantReply), full content
-    /// otherwise — including once the reveal finishes, and always for
+    /// `revealedCount` while this turn is the one actively streaming (see
+    /// CodeAssistantPanel+Session's appendStreamedChunk), full content
+    /// otherwise — including once streaming finishes, and always for
     /// history loaded from a saved session (which never sets
     /// `revealingTurnID` in the first place).
     private func displayedContent(for turn: LlmIdeAPIClient.CodeAssistTurn) -> String {
