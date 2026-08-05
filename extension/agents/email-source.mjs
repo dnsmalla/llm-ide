@@ -17,6 +17,7 @@ import dns from 'node:dns/promises';
 import net from 'node:net';
 import { refreshAccessToken } from './google-oauth.mjs';
 import { getSecret } from '../server/vault.mjs';
+import { config } from '../core/config.mjs';
 
 // Cap on the plaintext body we return per message. A summarizer fed a
 // multi-megabyte newsletter wastes tokens and time; 20k chars is plenty
@@ -186,9 +187,14 @@ async function makeClient({ host, port, secure, user, password, accessToken }) {
 // refresh token. Access tokens are short-lived (~1hr) so we always refresh
 // rather than caching — the token endpoint call is cheap and this keeps us
 // from ever holding a stale/expired token across requests.
+// Prefer the user's own stored OAuth client (BYO — Google requires the SAME
+// client that minted a refresh token to be used when refreshing it, this is
+// not a preference), falling back to the server's hosted client for users
+// who connected via the hosted "Connect Google" flow and never had per-user
+// client fields written.
 export async function getGoogleAccessToken(db, userId) {
-  const clientId = getSecret(db, userId, 'google.email.clientId');
-  const clientSecret = getSecret(db, userId, 'google.email.clientSecret');
+  const clientId = getSecret(db, userId, 'google.email.clientId') || config.googleClientId;
+  const clientSecret = getSecret(db, userId, 'google.email.clientSecret') || config.googleClientSecret;
   const refreshToken = getSecret(db, userId, 'google.email.refreshToken');
   if (!refreshToken) throw new Error('Not signed in to Google — use Sign in with Google.');
   const { accessToken } = await refreshAccessToken({ clientId, clientSecret, refreshToken });
