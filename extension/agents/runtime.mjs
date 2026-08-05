@@ -6,7 +6,7 @@ import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
-import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS, spawnCli, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch } from './providers.mjs';
+import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS, spawnCli, spawnCliStream, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch } from './providers.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 import { recordUsage, flagQuota, resolveModel as resolveUsageModel, recordRateLimits } from '../kb/usage.mjs';
 
@@ -542,6 +542,63 @@ export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheT
 
   // Should not reach here, but just in case.
   return fallbackBuffered();
+}
+
+/**
+ * Provider-agnostic streaming entry point for a single "final answer" model
+ * call (used by /code-assist's synthesis turn — NOT the agent loop's
+ * intermediate delegate/tool-call turns, which stay on plain `runClaude`).
+ * Tries, in order:
+ *   1. Direct Anthropic API streaming (`runClaudeStream`, unchanged — already
+ *      streams for real when a personal API key is configured).
+ *   2. CLI incremental streaming (`spawnCliStream`) for the resolved provider.
+ *   3. Fully-buffered `runClaude`, delivered as ONE `onChunk` call — the
+ *      guaranteed fallback, so this function can never be worse than the
+ *      pre-streaming behavior.
+ * Images or any provider `runClaude` itself routes to a non-Anthropic HTTP
+ * API (custom/deepseek) skip straight to the buffered path — those cases
+ * don't need real-time streaming for this feature and reusing `runClaude`'s
+ * already-hardened routing avoids duplicating its retry/fallback logic.
+ *
+ * `_testSpawnCliStream`/`_testRunClaude` are test seams only — real callers
+ * never pass them; production code always uses the real `spawnCliStream`/
+ * `runClaude`.
+ */
+export async function streamModelReply(prompt, {
+  userId, model, maxTokens, cacheTranscript, onChunk, signal,
+  provider: explicitProvider, images, tools,
+  _testSpawnCliStream, _testRunClaude,
+} = {}) {
+  const runBuffered = _testRunClaude || runClaude;
+  const doSpawnCliStream = _testSpawnCliStream || spawnCliStream;
+
+  if (Array.isArray(images) && images.length > 0) {
+    const text = await runBuffered(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, tools });
+    if (typeof onChunk === 'function') onChunk(text);
+    return text;
+  }
+
+  const { provider, apiKey } = resolveClaudeCall({ userId, model, provider: explicitProvider });
+
+  if (provider === 'anthropic' && apiKey) {
+    // Direct-API path already streams for real — unmodified.
+    return runClaudeStream(prompt, { userId, model, maxTokens, cacheTranscript, onChunk, signal, provider: explicitProvider });
+  }
+
+  if (provider === 'anthropic' || provider === 'openai' || provider === 'google') {
+    try {
+      const env = minimalCliEnv(provider === 'anthropic' && apiKey ? { ANTHROPIC_API_KEY: apiKey } : {});
+      const { stdoutText } = await doSpawnCliStream(provider, prompt, { env, signal, onChunk });
+      return stdoutText;
+    } catch (err) {
+      log.warn('streamModelReply CLI stream failed, falling back to buffered', { provider, error: err?.message });
+      // Fall through to the buffered path below.
+    }
+  }
+
+  const text = await runBuffered(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, tools });
+  if (typeof onChunk === 'function') onChunk(text);
+  return text;
 }
 
 /** Parse an Anthropic SSE stream and call onChunk for each text delta. */
