@@ -11,7 +11,7 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
-const { resolveProvider, providerApiKey, completeViaApi, verifyProvider, cliInvocation, listProviderModels, chatModels, customBaseUrl, spawnCli, runViaCli, anthropicWebCliArgs, formatCliSpawnError, resolveCustomProviderDispatch } =
+const { resolveProvider, providerApiKey, completeViaApi, callOpenAI, verifyProvider, cliInvocation, listProviderModels, chatModels, customBaseUrl, spawnCli, runViaCli, anthropicWebCliArgs, formatCliSpawnError, resolveCustomProviderDispatch } =
   await import('../agents/providers.mjs');
 const { setSecret } = await import('../server/vault.mjs');
 const { syncCustomProviders } = await import('../server/custom-providers.mjs');
@@ -124,6 +124,35 @@ test('completeViaApi: throws on a non-transient 401 (no retry)', async () => {
       /HTTP 401/,
     );
     assert.equal(calls, 1);
+  } finally { restore(); }
+});
+
+test('callOpenAI: empty/absent model throws a clear error before any fetch (no opaque provider 1211)', async () => {
+  // Regression for the iPhone-chat GLM "Unknown Model" (code 1211): the phone
+  // forwarded provider="custom" with an empty model, runClaude → completeViaApi
+  // → callOpenAI dropped the undefined `model` via JSON.stringify, so the
+  // request reached GLM with NO model field → HTTP 400 code 1211. The guard
+  // must turn that into a loud, actionable error and never hit the network.
+  let fetched = false;
+  const restore = mockFetch(async () => { fetched = true; return jsonRes(200, { choices: [{ message: { content: 'x' } }] }); });
+  try {
+    await assert.rejects(() => callOpenAI({ apiKey: 'k', model: undefined, prompt: 'hi' }), /No model id provided/);
+    await assert.rejects(() => callOpenAI({ apiKey: 'k', model: '', prompt: 'hi' }), /No model id provided/);
+    await assert.rejects(() => callOpenAI({ apiKey: 'k', model: '   ', prompt: 'hi' }), /No model id provided/);
+    assert.equal(fetched, false, 'guard must throw before any network call');
+  } finally { restore(); }
+});
+
+test('completeViaApi: empty model surfaces the same clear error (covers the runClaude/askAgent path)', async () => {
+  // runClaude forwards provider+model into completeViaApi for non-Anthropic
+  // providers. An empty model must fail clearly here too, not become an opaque
+  // 1211 downstream. Uses the openai adapter (no custom baseUrl → no SSRF/DNS).
+  const restore = mockFetch(async () => jsonRes(200, { choices: [{ message: { content: 'x' } }] }));
+  try {
+    await assert.rejects(
+      () => completeViaApi('openai', { apiKey: 'k', model: undefined, prompt: 'hi' }),
+      /No model id provided/,
+    );
   } finally { restore(); }
 });
 

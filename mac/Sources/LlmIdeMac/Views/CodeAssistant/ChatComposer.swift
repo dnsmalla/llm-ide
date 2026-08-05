@@ -455,7 +455,21 @@ extension CodeAssistantPanel {
             // the chip stays one capsule wide instead of wrapping.
             Menu {
                 ForEach(modelsForCurrentProvider()) { model in
-                    Button(model.displayName) { selectedModel = model.id }
+                    Button(model.displayName) {
+                        selectedModel = model.id
+                        // Persist the pick so surfaces that read AppConfig —
+                        // notably the iPhone chat proxy (MobileExploreBridge
+                        // reads config.defaultModelId) — forward the actually-
+                        // selected model instead of the stale tool default
+                        // (empty for the generic Custom tool). Without this the
+                        // phone sent provider with no model → GLM "Unknown
+                        // Model". Skip custom:<uuid> providers: those aren't
+                        // represented by config.activeCLI (mobile proxy support
+                        // is built-in providers only).
+                        if !selectedProvider.starts(with: "custom:") {
+                            config.defaultModelId = model.id
+                        }
+                    }
                 }
                 if !isCustom {
                     Divider()
@@ -565,6 +579,12 @@ extension CodeAssistantPanel {
             customModelsRaw = s
         }
         selectedModel = id
+        // Persist so the iPhone chat proxy forwards this model too (see the
+        // model-picker Button above). addCustomModel is only reachable from the
+        // built-in "Add model…" alert, so selectedProvider is a built-in tool.
+        if !selectedProvider.starts(with: "custom:") {
+            config.defaultModelId = id
+        }
     }
 
     /// Fetch the provider's live chat models (best-effort; silent on failure).
