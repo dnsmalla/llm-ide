@@ -504,39 +504,93 @@ extension CodeAssistantPanel {
         revealedCount = 0
     }
 
-    /// Typewriter-reveals `turn`'s content instead of popping it in all at
-    /// once. The server already returns the complete reply in a single
-    /// `done` event (see codeAssistRoundTrip) — this is purely a client-side
-    /// presentation touch, not real token streaming, so `history` always
-    /// holds the true, complete text throughout (nothing here ever risks
-    /// persisting a half-revealed reply).
-    ///
-    /// Step count is fixed (not duration) so the reveal self-scales: short
-    /// replies finish quickly (they run out of content before using all the
-    /// steps), long replies are capped at a bounded number of steps so they
-    /// neither drag out nor multiply SelfSizingMarkdownView's per-change
-    /// WKWebView reload any more than necessary.
-    func revealAssistantReply(_ turn: LlmIdeAPIClient.CodeAssistTurn) {
-        revealTask?.cancel()
-        let total = turn.content.count
-        guard total > 0 else { revealingTurnID = nil; revealedCount = 0; return }
+    /// Begin a new streaming assistant turn: appends a placeholder turn to
+    /// `history` and marks it as the one `appendStreamedChunk` will mutate.
+    /// The append happens with `suppressHistoryAnnounce` set so the
+    /// length-triggered VoiceOver announcement in `handleHistoryChange`
+    /// doesn't fire on an empty placeholder — `finishStreamingTurn` fires the
+    /// real announcement itself, once, with the complete text.
+    @MainActor
+    func beginStreamingTurn() -> UUID {
+        let turn = LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: "")
+        suppressHistoryAnnounce = true
+        history.append(turn)
+        suppressHistoryAnnounce = false
         revealingTurnID = turn.id
         revealedCount = 0
-        let steps = min(total, 28)
-        let charsPerStep = max(1, Int((Double(total) / Double(steps)).rounded(.up)))
-        // `self` here is the CodeAssistantPanel struct, not a class — captured
-        // as a value copy, no retain cycle possible, so no [weak self]. Its
-        // @State properties still write through to the real shared storage.
-        revealTask = Task { @MainActor in
-            var shown = 0
-            while shown < total {
-                try? await Task.sleep(nanoseconds: 20_000_000) // ~20ms/step
-                if Task.isCancelled { return }
-                shown = min(shown + charsPerStep, total)
-                self.revealedCount = shown
+        return turn.id
+    }
+
+    /// Append `text` to the streaming turn identified by `id`. `revealedCount`
+    /// tracks the turn's current length so `ChatMessageList.displayedContent`
+    /// (which truncates to `revealedCount` characters for whichever turn
+    /// matches `revealingTurnID`) shows the growing content as it arrives —
+    /// the same read path the old fixed-schedule reveal used, now driven by
+    /// real chunk arrival instead of an artificial timer.
+    @MainActor
+    func appendStreamedChunk(_ id: UUID, _ text: String) {
+        guard let idx = history.firstIndex(where: { $0.id == id }) else { return }
+        history[idx].content += text
+        revealedCount = history[idx].content.count
+    }
+
+    /// Finalize a streaming turn: fires the VoiceOver announcement exactly
+    /// once (with the complete final text), applies `pendingTool`/
+    /// `agentPendingTasks`/auto-continue exactly as `runTurn` did before this
+    /// refactor, and — when `stopped` — leaves whatever partial text already
+    /// streamed in place, tagged as stopped, instead of discarding it.
+    @MainActor
+    func finishStreamingTurn(
+        _ id: UUID,
+        pendingTool: PendingTool?,
+        tasks: [AgentTask]?,
+        continueNeeded: Bool?,
+        usage: LlmIdeAPIClient.CodeAssistResponse.Usage?,
+        stopped: Bool,
+    ) {
+        revealingTurnID = nil
+        revealedCount = 0
+        if let idx = history.firstIndex(where: { $0.id == id }) {
+            if stopped {
+                if !history[idx].content.isEmpty {
+                    history[idx].content += "\n\n_(stopped)_"
+                }
             }
-            guard !Task.isCancelled else { return }
-            self.revealingTurnID = nil
+            let text = String(history[idx].content.prefix(200))
+            if !text.isEmpty {
+                NSAccessibility.post(
+                    element: NSApp as Any,
+                    notification: .announcementRequested,
+                    userInfo: [
+                        .announcement: text,
+                        .priority: NSAccessibilityPriorityLevel.high.rawValue,
+                    ]
+                )
+            }
+        }
+        guard !stopped else { return }
+        self.pendingTool = pendingTool
+        if let newTasks = tasks {
+            agentPendingTasks = newTasks
+        }
+        if continueNeeded == true && !agentStopRequested {
+            agentIsAutonomous = true
+            let scheduledEpoch = sessionEpoch
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                guard self.sessionEpoch == scheduledEpoch else { return }
+                guard !self.agentStopRequested else {
+                    self.agentIsAutonomous = false
+                    return
+                }
+                self.startTurn("Continue working on your pending tasks.")
+            }
+        } else {
+            agentIsAutonomous = false
+            agentStopRequested = false
+        }
+        if let u = usage {
+            lastMemoryTokens = u.memoryApproxTokens
+            lastMemoryHasChat = u.memoryHasChatMemory ?? false
         }
     }
 
