@@ -167,7 +167,13 @@ struct EmailSourceSheet: View {
                                 if isEditing {
                                     SettingsHint("Leave the password blank to keep the current one.")
                                 }
-                                SettingsHint("Gmail: enable 2-Step Verification, then create an App Password (myaccount.google.com → Security → App passwords).")
+                                SettingsHint("Gmail: enable 2-Step Verification, then create an App Password — name it something like \"LLM-IDE\" and paste the 16-character code above.")
+                                Button("Open Google App Passwords…") {
+                                    if let u = URL(string: "https://myaccount.google.com/apppasswords") {
+                                        NSWorkspace.shared.open(u)
+                                    }
+                                }
+                                .buttonStyle(.link)
                             } else {
                                 field("Client ID") {
                                     TextField("xxxx.apps.googleusercontent.com", text: $clientId)
