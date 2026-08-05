@@ -49,7 +49,8 @@
 - Test: `extension/tests/slack-oauth.test.mjs`
 
 **Interfaces:**
-- Produces: `buildAuthUrl({clientId, redirectUri, state})`, `exchangeCode({clientId, clientSecret, code, redirectUri}) -> {accessToken, team}`, `putState/getState/completeState/takeStatus` (state store, mirrors `agents/google-oauth.mjs`'s but with no PKCE verifier and carrying `team`/`channels` instead of `email`).
+- Produces: `buildAuthUrl({clientId, redirectUri, state})`, `exchangeCode({clientId, clientSecret, code, redirectUri}) -> {accessToken, teamName}`, `putState/getState/completeState/takeStatus` (state store, mirrors `agents/google-oauth.mjs`'s but with no PKCE verifier and carrying `teamName`/`channels` instead of `email`).
+- **Post-review update:** Task 1's code quality review renamed `team` → `teamName` (avoids colliding with `slack-source.mjs`'s existing `team` = team **ID** convention) and split the token-exchange error into two branches (transport/API failure vs. missing `authed_user`, with a message naming the real cause). The code blocks below in Tasks 3/5 already reflect `teamName`.
 - Consumed by: Task 3 (`auth-routes.mjs`).
 
 - [ ] **Step 1: Write the failing test**
@@ -312,6 +313,8 @@ git commit -m "feat(server): slack.userToken vault key + hosted Slack app config
 - Produces: `POST /auth/slack/start` (authed), `GET /auth/slack/callback` (public), `GET /auth/slack/status` (authed).
 
 > **Note on ordering:** `listUserConversations` is implemented in Task 4, but the callback route calls it. Task 3's tests stub the channel-listing behavior at the HTTP level (via `global.fetch`), so this task does not require Task 4 to exist first — the import is added now and Task 4 fills in the function body. If running tasks out of order, complete Task 4 before Task 3 to avoid a temporarily-missing export; the steps below assume in-order execution and import a not-yet-defined-until-Task-4 export, which is fine because Task 4 lands before this task's tests run in the full regression pass (Task 7). To keep each task's own test run green in isolation, do Task 4 before Task 3 if executing out of order.
+>
+> **Post-review update:** Task 4's code quality review changed `listUserConversations({token})`'s return shape from a bare `[{id,name}]` array to `{ channels: [{id,name}], complete: boolean }` (so a partial/failed fetch is distinguishable from "zero channels"). The callback code below already reflects this (`const { channels } = await listUserConversations(...)`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -547,7 +550,7 @@ test('full flow: start -> callback (token exchange + channel prefetch) -> status
   assert.equal(status.statusCode, 200, status._body);
   const statusBody = status.json();
   assert.equal(statusBody.status, 'complete');
-  assert.equal(statusBody.team, 'Acme');
+  assert.equal(statusBody.teamName, 'Acme');
   assert.deepEqual(statusBody.channels, [{ id: 'C1', name: 'general' }]);
 });
 
@@ -682,8 +685,8 @@ Immediately after the existing Google callback block (the block ending `if (q.ge
       // immediately. Fail-soft: listUserConversations never throws (it
       // degrades to []), so a transient Slack hiccup here never fails the
       // connect itself — the sheet's "Refresh channels" retries later.
-      const channels = await listUserConversations({ token: tok.accessToken });
-      completeSlackState(state, { status: 'complete', team: tok.team, channels });
+      const { channels } = await listUserConversations({ token: tok.accessToken });
+      completeSlackState(state, { status: 'complete', teamName: tok.teamName, channels });
       html('Connected to Slack.');
     } catch (e) {
       completeSlackState(state, { status: 'error', message: redactWithKey(e.message, config.slackClientSecret) });
@@ -751,7 +754,7 @@ git commit -m "feat(server): /auth/slack/{start,callback,status} hosted OAuth ro
 - Modify: `extension/server.mjs`
 
 **Interfaces:**
-- Produces: `listUserConversations({token}) -> [{id, name}]` (exported from `slack-source.mjs`); `GET /kb/slack/conversations` (authed); `resolveSlackToken(userId)` (local to `kb/router.mjs`, prefers `slack.userToken` over `slack.botToken`).
+- Produces: `listUserConversations({token}) -> {channels: [{id, name}], complete: boolean}` (exported from `slack-source.mjs`; post-review the return shape gained `complete` so a partial/failed fetch is distinguishable from "zero channels" — see the note in Task 3); `GET /kb/slack/conversations` (authed); `resolveSlackToken(userId)` (module-scope in `kb/router.mjs`, prefers `slack.userToken` over `slack.botToken`).
 - Consumes: existing `slackCall` helper (already in `slack-source.mjs`), `getSecret` (existing import in `kb/router.mjs`).
 
 - [ ] **Step 1: Write the failing tests**
@@ -1104,11 +1107,15 @@ extension LlmIdeAPIClient {
     struct SlackConnectStartResult: Decodable { let authUrl: String; let state: String }
 
     /// Result of `/auth/slack/status` — `status` is one of
-    /// pending|complete|error; `team`/`channels` populate once complete.
+    /// pending|complete|error; `teamName` populates once complete. No
+    /// `channels` here (post-review, Task 3 dropped the channel prefetch
+    /// from the OAuth callback — it was blocking the public redirect page
+    /// for up to 90s under Slack rate-limiting); callers fetch the channel
+    /// list separately via `fetchSlackConversations()` right after seeing
+    /// `status == "complete"`.
     struct SlackConnectStatusResult: Decodable {
         let status: String
-        let team: String?
-        let channels: [SlackConversation]?
+        let teamName: String?
         let message: String?
     }
 
@@ -1216,6 +1223,7 @@ struct SlackSourceSheet: View {
 
     @State private var selectedChannelIds: Set<String>
     @State private var availableChannels: [LlmIdeAPIClient.SlackConversation] = []
+    @State private var channelsIncomplete = false
     @State private var loadingChannels = false
     @State private var connecting = false
     @State private var connectError: String?
@@ -1371,6 +1379,8 @@ struct SlackSourceSheet: View {
         }
         if availableChannels.isEmpty && !loadingChannels {
             SettingsHint("Couldn't load channels — tap Refresh channels to try again.")
+        } else if channelsIncomplete {
+            SettingsHint("Showing \(availableChannels.count) channels — the list may be incomplete (large workspace or Slack rate limit). Tap Refresh channels to try again.")
         }
         VStack(alignment: .leading, spacing: 4) {
             ForEach(availableChannels) { ch in
@@ -1420,7 +1430,7 @@ struct SlackSourceSheet: View {
                 let s = try await api.slackConnectStatus(state: r.state)
                 if s.status == "complete" {
                     await sourceLinks.refresh(api: api)
-                    availableChannels = s.channels ?? []
+                    await loadChannels()
                     selectedChannelIds = Set(availableChannels.map(\.id))
                     return
                 }
@@ -1441,9 +1451,12 @@ struct SlackSourceSheet: View {
         loadingChannels = true
         defer { loadingChannels = false }
         do {
-            availableChannels = try await api.fetchSlackConversations()
+            let result = try await api.fetchSlackConversations()
+            availableChannels = result.channels
+            channelsIncomplete = !result.complete
         } catch {
             availableChannels = []
+            channelsIncomplete = false
         }
     }
 
