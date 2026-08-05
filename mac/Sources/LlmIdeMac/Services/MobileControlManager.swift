@@ -656,7 +656,14 @@ final class MobileControlManager {
                             commandId: commandId,
                             payload: OutputPayload(stream: label, done: false)))
                     }
-                }
+                },
+                // The iPhone companion's chat proxy has no incremental-render
+                // path (its UI only ever showed progress labels, then the
+                // complete reply) — out of scope for the Mac Code Assistant
+                // streaming feature. No-op keeps this surface's behavior
+                // exactly as it was; resp.reply below still carries the full
+                // text via the terminal `done` event either way.
+                onChunk: { _ in }
             )
             guard !isMobileCommandCancelled(chat.commandId) else { return }
             // Append the ASSISTANT reply (the user turn was persisted above,
