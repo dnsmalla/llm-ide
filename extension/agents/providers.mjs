@@ -454,6 +454,32 @@ const CLI_ARG_BUILDERS = {
 };
 
 /**
+ * Parse ONE line of `claude --output-format stream-json --include-partial-messages`
+ * NDJSON output. Returns `{ delta: string }` for a text delta, `{ result: string,
+ * isError: boolean }` for the terminal summary line, or `{}` for anything else
+ * (system/init, rate_limit_event, the full accumulated `assistant` message —
+ * already covered by the deltas — content_block_start/stop, message_start/stop).
+ * Never throws: a malformed or non-JSON line is silently ignored (the CLI's own
+ * stderr carries real errors; a stray stdout line must not crash the parser).
+ */
+export function parseClaudeStreamJSON(line) {
+  const trimmed = line.trim();
+  if (!trimmed) return {};
+  let obj;
+  try { obj = JSON.parse(trimmed); } catch { return {}; }
+  if (obj?.type === 'stream_event'
+      && obj.event?.type === 'content_block_delta'
+      && obj.event.delta?.type === 'text_delta'
+      && typeof obj.event.delta.text === 'string') {
+    return { delta: obj.event.delta.text };
+  }
+  if (obj?.type === 'result' && typeof obj.result === 'string') {
+    return { result: obj.result, isError: obj.is_error === true };
+  }
+  return {};
+}
+
+/**
  * Argv for driving the Claude CLI with exactly one built-in web tool enabled
  * (`WebSearch` or `WebFetch`) — the "like Claude Code" web path that uses the
  * user's subscription login and needs no API key. Pass to `spawnCli('anthropic',
