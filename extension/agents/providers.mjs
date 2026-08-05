@@ -638,10 +638,12 @@ const STREAM_ARG_EXTRAS = {
  * actually stream." Uses the same concurrency gate (`cliSemaphore`) as
  * `spawnCli` so streaming spawns count against the same cap.
  *
- * Returns `{ stdoutText, stderr, bin }` — `stdoutText` is the FULL
- * concatenated text (every delta joined, or the parser's own final `result`
- * when present and non-empty), so callers get the same "complete text at the
- * end" guarantee `spawnCli`/`runClaude` already provide.
+ * Returns `{ stdoutText, stderr, bin }` — for a caller that supplied
+ * `onChunk`, `stdoutText` is the sum of every delivered delta (the
+ * streaming case — the whole point of this function). For a caller with NO
+ * `onChunk` (rare), `stdoutText` is the parser's own authoritative final
+ * `result` text when one was reported, so a non-streaming caller still gets
+ * the CLI's own canonical answer rather than a delta-reconstruction.
  *
  * `binOverride`/`argsOverride` are test seams only (real callers never pass
  * them) — they let tests run a fast, deterministic `node -e "..."` child
@@ -693,8 +695,9 @@ export function spawnCliStream(provider, prompt, {
 
       child.stderr?.on('data', (buf) => { stderrBuf += buf.toString('utf8'); });
 
+      let timedOut = false;
       const timer = timeoutMs > 0 ? setTimeout(() => {
-        if (!settled) child.kill();
+        if (!settled) { timedOut = true; child.kill(); }
       }, timeoutMs) : null;
 
       const onAbort = () => { if (!settled) child.kill(); };
@@ -710,7 +713,7 @@ export function spawnCliStream(provider, prompt, {
         reject(err);
       });
 
-      child.on('close', (code) => {
+      child.on('close', (code, exitSignal) => {
         if (settled) return;
         settled = true;
         if (timer) clearTimeout(timer);
@@ -719,20 +722,39 @@ export function spawnCliStream(provider, prompt, {
           reject(Object.assign(new Error('spawnCliStream: aborted'), { name: 'AbortError', bin: inv.bin }));
           return;
         }
-        if (parser && !stdoutText && !parsedResult) {
-          if (code !== 0) {
-            reject(Object.assign(new Error(`${inv.bin} exited ${code}`), { stderr: stderrBuf, bin: inv.bin }));
-            return;
-          }
-        }
-        if (parser && !onChunk && parsedResult?.result) {
-          stdoutText = parsedResult.result;
-        } else if (!parser && typeof onChunk === 'function' && stdoutText) {
-          onChunk(stdoutText);
+        if (timedOut) {
+          reject(Object.assign(new Error(`${inv.bin} timed out after ${timeoutMs}ms`), { stderr: stderrBuf, bin: inv.bin }));
+          return;
         }
         if (parsedResult?.isError) {
           reject(Object.assign(new Error(`${inv.bin} reported an error result`), { stderr: stderrBuf, bin: inv.bin }));
           return;
+        }
+        // Any non-zero exit is a real failure UNLESS the parser already gave
+        // us an authoritative clean result (isError:false) — a CLI's own
+        // "this succeeded" signal takes precedence over an incidental
+        // non-zero exit code from unrelated cleanup. This check is
+        // deliberately NOT gated on `parser` or `stdoutText` — a no-parser
+        // provider that exits non-zero must reject just as much as a parsed
+        // one, and a parsed provider that streamed some deltas then crashed
+        // before a terminal result line must reject too, not resolve with
+        // truncated text as if it were complete.
+        const hasCleanResult = parser && parsedResult && !parsedResult.isError;
+        if (code !== 0 && !hasCleanResult) {
+          reject(Object.assign(
+            new Error(`${inv.bin} exited ${code}${exitSignal ? ` (signal ${exitSignal})` : ''}`),
+            { stderr: stderrBuf, bin: inv.bin },
+          ));
+          return;
+        }
+        if (parser && !onChunk && parsedResult?.result) {
+          // Caller didn't ask for incremental chunks (rare) — deliver the
+          // parser's authoritative final text.
+          stdoutText = parsedResult.result;
+        } else if (!parser && typeof onChunk === 'function' && stdoutText) {
+          // No-parser fallback: nothing was delivered incrementally above —
+          // hand the whole buffered text to onChunk now, once.
+          onChunk(stdoutText);
         }
         resolve({ stdoutText, stderr: stderrBuf, bin: inv.bin });
       });

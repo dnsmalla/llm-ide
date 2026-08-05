@@ -92,3 +92,60 @@ test('spawnCliStream kills the child process when the signal aborts mid-stream',
   await assert.rejects(runPromise, /aborted/i);
   assert.deepEqual(chunks, ['partial']);
 });
+
+test('spawnCliStream rejects on non-zero exit even for a provider with no parser', async () => {
+  const chunks = [];
+  await assert.rejects(
+    spawnCliStream('unknown-provider-xyz', 'ignored', {
+      onChunk: (text) => chunks.push(text),
+      binOverride: process.execPath,
+      argsOverride: ['-e', `process.stdout.write('partial output'); process.exit(1);`],
+    }),
+    /exited 1/,
+  );
+});
+
+test('spawnCliStream rejects when the parsed provider crashes mid-stream before a terminal result line', async () => {
+  const chunks = [];
+  await assert.rejects(
+    spawnCliStream('anthropic', 'ignored', {
+      onChunk: (text) => chunks.push(text),
+      binOverride: process.execPath,
+      argsOverride: ['-e', `
+        process.stdout.write('{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"partial answer"}}}\\n');
+        process.exit(1); // crashes before ever writing a "result" line
+      `],
+    }),
+    /exited 1/,
+  );
+  assert.deepEqual(chunks, ['partial answer'], 'the delta that arrived before the crash should still have been delivered');
+});
+
+test('spawnCliStream rejects with a clear message when the internal timeout fires', async () => {
+  const chunks = [];
+  await assert.rejects(
+    spawnCliStream('anthropic', 'ignored', {
+      onChunk: (text) => chunks.push(text),
+      timeoutMs: 100,
+      binOverride: process.execPath,
+      argsOverride: ['-e', `setTimeout(() => {}, 5000);`], // hangs well past the 100ms timeout
+    }),
+    /timed out after 100ms/,
+  );
+});
+
+test('spawnCliStream still resolves normally when the parser reports a clean result even with a non-zero exit code', async () => {
+  // Defensive edge case: some CLIs exit non-zero for benign reasons (e.g. a
+  // shutdown-hook warning) even after successfully emitting a clean result.
+  const chunks = [];
+  const result = await spawnCliStream('anthropic', 'ignored', {
+    onChunk: (text) => chunks.push(text),
+    binOverride: process.execPath,
+    argsOverride: ['-e', `
+      process.stdout.write('{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}}\\n');
+      process.stdout.write('{"type":"result","result":"Hello","is_error":false}\\n');
+      process.exitCode = 1;
+    `],
+  });
+  assert.equal(result.stdoutText, 'Hello');
+});
