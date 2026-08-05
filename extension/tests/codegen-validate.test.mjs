@@ -3,7 +3,7 @@
 // and committed in the auto-PR flow would be a corruption bug).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validate, MAX_FILE_BYTES } from '../agents/codegen.mjs';
+import { validate, selectRelevantFiles, MAX_FILE_BYTES } from '../agents/codegen.mjs';
 
 test('validate passes normal file content through untouched', () => {
   const content = 'export const x = 1;\n';
@@ -54,4 +54,37 @@ test('validate flags the oversize test file too, not just src files', () => {
     () => validate({ summary: 's', files: [], tests: [{ path: 'a.test.ts', content: big }] }),
     /a\.test\.ts/,
   );
+});
+
+// selectRelevantFiles — narrows FTS-matched candidates to symbol-confirmed
+// ones (token reduction) without ever handing codegen a truncated file body.
+test('selectRelevantFiles narrows to the symbol-confirmed subset', () => {
+  const files = [
+    { ref: '/repo/src/a.ts', title: 'a.ts' },
+    { ref: '/repo/src/b.ts', title: 'b.ts' },
+    { ref: '/repo/src/unrelated.ts', title: 'unrelated.ts' },
+  ];
+  const symbols = [
+    { repo_id: '/repo', source_file: 'src/a.ts', title: 'Foo' },
+    { repo_id: '/repo', source_file: 'src/b.ts', title: 'Bar' },
+  ];
+  const out = selectRelevantFiles(files, symbols);
+  assert.deepEqual(out.map((f) => f.ref).sort(), ['/repo/src/a.ts', '/repo/src/b.ts']);
+});
+
+test('selectRelevantFiles falls back to the full FTS list when no symbols are present (no SCIP graph yet)', () => {
+  const files = [{ ref: '/repo/src/a.ts' }, { ref: '/repo/src/b.ts' }];
+  assert.deepEqual(selectRelevantFiles(files, []), files);
+  assert.deepEqual(selectRelevantFiles(files, undefined), files);
+});
+
+test('selectRelevantFiles falls back to the full FTS list when symbols confirm none of them', () => {
+  const files = [{ ref: '/repo/src/a.ts' }, { ref: '/repo/src/b.ts' }];
+  const symbols = [{ repo_id: '/other-repo', source_file: 'src/z.ts', title: 'Zed' }];
+  assert.deepEqual(selectRelevantFiles(files, symbols), files);
+});
+
+test('selectRelevantFiles handles empty/malformed input without throwing', () => {
+  assert.deepEqual(selectRelevantFiles(undefined, undefined), []);
+  assert.deepEqual(selectRelevantFiles([{ ref: '/a.ts' }], [{ title: 'no repo_id or source_file' }]), [{ ref: '/a.ts' }]);
 });

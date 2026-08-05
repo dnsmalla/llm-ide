@@ -38,6 +38,31 @@ function readFileSafely(absPath, maxBytes = MAX_FILE_BYTES) {
   }
 }
 
+/**
+ * Narrow the FTS-matched candidate files (`task.files`, keyword search —
+ * noisy) down to the ones compiler-derived symbol grounding (`task.symbols`,
+ * SCIP graph — precise) actually confirms this task touches. Cuts token
+ * spend by dropping irrelevant FTS hits rather than truncating any single
+ * file's content, so the full-file "modify" contract in buildPrompt/validate
+ * is unaffected. Falls back to the full FTS candidate list whenever symbol
+ * grounding is absent (no SCIP index for this repo) or confirms nothing
+ * (SCIP graph doesn't cover these particular hits, e.g. non-code files) —
+ * never returns fewer files than the caller had reason to expect context for.
+ */
+export function selectRelevantFiles(files, symbols) {
+  const all = Array.isArray(files) ? files : [];
+  const syms = Array.isArray(symbols) ? symbols : [];
+  if (syms.length === 0) return all;
+  const confirmedPaths = new Set(
+    syms
+      .filter((s) => s?.repo_id && s?.source_file)
+      .map((s) => path.join(s.repo_id, s.source_file)),
+  );
+  if (confirmedPaths.size === 0) return all;
+  const confirmed = all.filter((f) => f?.ref && confirmedPaths.has(f.ref));
+  return confirmed.length > 0 ? confirmed : all;
+}
+
 function buildPrompt({ task, plan, lang, filesCtx }) {
   const refsBlock = filesCtx.length === 0
     ? '(no related files were retrieved from the KB code index)'
@@ -142,7 +167,8 @@ export async function generateCodeForTask(userId, { taskId, language, includeFil
   // is false (huge plans, slow networks), we just pass the title list.
   const filesCtx = [];
   if (includeFileContext) {
-    for (const f of (task.files || []).slice(0, 5)) {
+    const candidateFiles = selectRelevantFiles(task.files, task.symbols);
+    for (const f of candidateFiles.slice(0, 5)) {
       if (!f?.ref) continue;
       const content = readFileSafely(f.ref);
       if (!content) continue;
