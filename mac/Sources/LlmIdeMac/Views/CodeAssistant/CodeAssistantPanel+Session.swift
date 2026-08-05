@@ -515,7 +515,7 @@ extension CodeAssistantPanel {
         let turn = LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: "")
         suppressHistoryAnnounce = true
         history.append(turn)
-        suppressHistoryAnnounce = false
+        DispatchQueue.main.async { suppressHistoryAnnounce = false }
         revealingTurnID = turn.id
         revealedCount = 0
         return turn.id
