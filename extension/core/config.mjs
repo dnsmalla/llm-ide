@@ -157,6 +157,16 @@ export const config = Object.freeze({
   slackClientId:     envStr('LLMIDE_SLACK_CLIENT_ID'),
   slackClientSecret: envStr('LLMIDE_SLACK_CLIENT_SECRET'),
 
+  // Gmail hosted OAuth app (agents/google-oauth.mjs). LLM-IDE owns ONE
+  // Google Cloud OAuth client (Testing-mode) — these are the app's own
+  // client id/secret, never per-user, never in the vault. Optional:
+  // /auth/google/start falls back to per-request BYO credentials (the
+  // existing bring-your-own path) when unset, and returns a clear
+  // "not configured" error only if BOTH the request has no BYO body
+  // AND this is unset.
+  googleClientId:     envStr('LLMIDE_GOOGLE_CLIENT_ID'),
+  googleClientSecret: envStr('LLMIDE_GOOGLE_CLIENT_SECRET'),
+
   // JWT rotation support
   jwtSecretPrevious: _jwtSecretPrevious || null,
 

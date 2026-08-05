@@ -13,7 +13,7 @@ import {
   changePassword, findUserById, login, logout, logoutAll, refreshSession, registerUser,
   createPasswordResetToken, consumePasswordResetToken,
 } from './users.mjs';
-import { listSecretKeys, getSecret, setSecret, VAULT_KEYS, isVaultError } from './vault.mjs';
+import { listSecretKeys, setSecret, VAULT_KEYS, isVaultError } from './vault.mjs';
 import {
   pkcePair, buildAuthUrl, exchangeCode, fetchEmailAddress,
   putState, getState, completeState, takeStatus,
@@ -336,9 +336,10 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   //   Google redirects the user's browser here after consent — there is
   //   no Authorization header on this request, so it must stay public
   //   (also allow-listed in server/auth.mjs PUBLIC_PATHS). The state
-  //   token (minted by POST /auth/google/start) carries the userId and
-  //   PKCE verifier; we look up the user's own clientId/clientSecret
-  //   from the vault rather than trusting anything in the query string.
+  //   token (minted by POST /auth/google/start) carries the userId, PKCE
+  //   verifier, and the already-resolved clientId/clientSecret (BYO or
+  //   hosted) — never re-derived here, so this code path is identical
+  //   for both.
   if (method === 'GET' && url.split('?')[0] === '/auth/google/callback') {
     const q = new URL(url, 'http://127.0.0.1').searchParams;
     const state = q.get('state') || '';
@@ -346,8 +347,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     if (q.get('error')) { if (st) completeState(state, { status: 'error', message: 'Sign-in cancelled.' }); oauthCallbackHtml(res, 'Sign-in cancelled.'); return; }
     if (!st) { oauthCallbackHtml(res, 'This sign-in link has expired — start again from the app.'); return; }
     if (st.status !== 'pending') { oauthCallbackHtml(res, 'This sign-in link has already been used — start again from the app.'); return; }
-    const clientId = getSecret(db, st.userId, 'google.email.clientId');
-    const clientSecret = getSecret(db, st.userId, 'google.email.clientSecret');
+    const { clientId, clientSecret } = st;
     try {
       const redirectUri = 'http://127.0.0.1:' + config.port + '/auth/google/callback';
       const tok = await exchangeCode({ clientId, clientSecret, code: q.get('code') || '', verifier: st.verifier, redirectUri });
@@ -447,22 +447,46 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
 
   // ---- Google Sign-In: start + status (authed) ------------------------
   //
-  // POST /auth/google/start { clientId, clientSecret }
-  //   Persists the user's own OAuth client credentials to the vault,
-  //   mints a PKCE pair + one-time state token, and returns the Google
-  //   consent URL for the client to open in a browser.
+  // POST /auth/google/start { clientId?, clientSecret? }
+  //   Both fields present → bring-your-own: persists the user's own OAuth
+  //   client credentials to the vault, exactly as before. Both absent →
+  //   hosted: LLM-IDE's own Testing-mode Google Cloud OAuth client (env
+  //   vars), nothing to paste, 503 if the operator hasn't configured it.
+  //   Either way, the resolved clientId/clientSecret are carried in the
+  //   state entry itself so the callback below never needs to re-derive
+  //   them (uniform code path for both BYO and hosted).
   if (method === 'POST' && url === '/auth/google/start') {
     let body;
     try { body = await readJson(req, bodyLimit); }
     catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
-    const clientId = (body.clientId || '').trim();
-    const clientSecret = (body.clientSecret || '').trim();
-    if (!clientId || !clientSecret) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'clientId and clientSecret are required' } }); return; }
-    setSecret(db, req.user.id, 'google.email.clientId', clientId);
-    setSecret(db, req.user.id, 'google.email.clientSecret', clientSecret);
+    const bodyClientId = (body?.clientId || '').trim();
+    const bodyClientSecret = (body?.clientSecret || '').trim();
+    // BYO intent is keyed on the FIELD being present in the body, not on
+    // its trimmed value being truthy — a caller sending explicit empty
+    // strings (e.g. a form the user cleared) is still asking for the BYO
+    // path and should get a validation error, not a silent fallback to
+    // hosted credentials. Only a body with neither key at all (or no
+    // body) means "no opinion, use hosted."
+    const isByo = Object.prototype.hasOwnProperty.call(body || {}, 'clientId')
+      || Object.prototype.hasOwnProperty.call(body || {}, 'clientSecret');
+    let clientId, clientSecret;
+    if (isByo) {
+      if (!bodyClientId || !bodyClientSecret) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'clientId and clientSecret are required' } }); return; }
+      clientId = bodyClientId;
+      clientSecret = bodyClientSecret;
+      setSecret(db, req.user.id, 'google.email.clientId', clientId);
+      setSecret(db, req.user.id, 'google.email.clientSecret', clientSecret);
+    } else {
+      if (!config.googleClientId || !config.googleClientSecret) {
+        send(res, 503, { error: { code: 'CONFIG_MISSING', message: "Google connect isn't set up on this server yet." } });
+        return;
+      }
+      clientId = config.googleClientId;
+      clientSecret = config.googleClientSecret;
+    }
     const { verifier, challenge } = pkcePair();
     const state = crypto.randomBytes(24).toString('base64url');
-    putState(state, { userId: req.user.id, verifier });
+    putState(state, { userId: req.user.id, verifier, clientId, clientSecret });
     const redirectUri = 'http://127.0.0.1:' + config.port + '/auth/google/callback';
     send(res, 200, { authUrl: buildAuthUrl({ clientId, redirectUri, state, challenge }), state });
     return;

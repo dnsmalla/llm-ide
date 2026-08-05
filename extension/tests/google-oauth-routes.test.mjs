@@ -12,6 +12,8 @@ process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 // Avoid polluting the real server.log when this suite runs alongside others.
 process.env.LLMIDE_LOG_FILE = 'none';
+process.env.LLMIDE_GOOGLE_CLIENT_ID = 'test-hosted-client-id';
+process.env.LLMIDE_GOOGLE_CLIENT_SECRET = 'test-hosted-client-secret';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tmpDb = path.join(__dirname, '_google-oauth-routes-test.db');
@@ -287,4 +289,65 @@ test('GET /auth/google/status forbids reading another user\'s pending state', as
   const res = await callAuth({ method: 'GET', url: `/auth/google/status?state=${state}`, user: { id: intruder.id } });
   assert.equal(res.statusCode, 403);
   assert.equal(res.json().error.code, 'FORBIDDEN');
+});
+
+// ---- POST /auth/google/start (hosted path, no body) --------------------
+
+test('POST /auth/google/start with an empty body uses the hosted server config, no per-user vault write', async () => {
+  const { user } = await registerAndLogin();
+  const res = await callAuth({ method: 'POST', url: '/auth/google/start', user: { id: user.id }, body: {} });
+  assert.equal(res.statusCode, 200, res._body);
+  const body = res.json();
+  assert.ok(body.authUrl.includes('test-hosted-client-id'), 'authUrl carries the hosted client id');
+  assert.ok(!body.authUrl.includes('test-hosted-client-secret'), 'client secret must never appear in the authUrl');
+  // No per-user vault write for the hosted path.
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientId'), null);
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientSecret'), null);
+});
+
+test('POST /auth/google/start rejects a partial BYO body (only one of clientId/clientSecret)', async () => {
+  const { user } = await registerAndLogin();
+  const res = await callAuth({ method: 'POST', url: '/auth/google/start', user: { id: user.id }, body: { clientId: 'only-one' } });
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.json().error.code, 'VALIDATION_FAILED');
+});
+
+test('full hosted flow: start (no body) -> callback (token exchange + userinfo stubbed) -> status complete, no per-user client vault write', async () => {
+  const { user } = await registerAndLogin();
+  const start = await callAuth({ method: 'POST', url: '/auth/google/start', user: { id: user.id }, body: {} });
+  assert.equal(start.statusCode, 200, start._body);
+  const { state } = start.json();
+
+  const originalFetch = global.fetch;
+  const email = 'hosted-user@example.com';
+  global.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('oauth2.googleapis.com/token')) {
+      return { ok: true, json: async () => ({ access_token: 'hosted-access-tok', refresh_token: 'hosted-refresh-tok', expires_in: 3600 }) };
+    }
+    if (u.includes('openidconnect.googleapis.com/v1/userinfo')) {
+      return { ok: true, json: async () => ({ email }) };
+    }
+    throw new Error(`Unexpected fetch to ${u}`);
+  };
+
+  try {
+    const cb = await callAuth({ method: 'GET', url: `/auth/google/callback?code=hosted-auth-code&state=${state}` });
+    assert.equal(cb.statusCode, 200, cb._body);
+    assert.match(cb._body, /Signed in to Google/i);
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  // Refresh token persisted (same vault key BYO already uses).
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.refreshToken'), 'hosted-refresh-tok');
+  // But no per-user clientId/clientSecret — those are hosted, never per-user.
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientId'), null);
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientSecret'), null);
+
+  const status = await callAuth({ method: 'GET', url: `/auth/google/status?state=${state}`, user: { id: user.id } });
+  assert.equal(status.statusCode, 200, status._body);
+  const statusBody = status.json();
+  assert.equal(statusBody.status, 'complete');
+  assert.equal(statusBody.email, email);
 });
