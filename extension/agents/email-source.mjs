@@ -187,14 +187,26 @@ async function makeClient({ host, port, secure, user, password, accessToken }) {
 // refresh token. Access tokens are short-lived (~1hr) so we always refresh
 // rather than caching — the token endpoint call is cheap and this keeps us
 // from ever holding a stale/expired token across requests.
+//
 // Prefer the user's own stored OAuth client (BYO — Google requires the SAME
 // client that minted a refresh token to be used when refreshing it, this is
-// not a preference), falling back to the server's hosted client for users
-// who connected via the hosted "Connect Google" flow and never had per-user
-// client fields written.
+// not a preference) as an atomic pair — falling back to the server's hosted
+// client only when NEITHER per-user field is present. This can't produce a
+// mismatched clientId-from-one-client + clientSecret-from-another state, even
+// if the vault somehow ends up with only one of the two fields set.
+//
+// Invariant this depends on: a per-user google.email.clientId/clientSecret
+// pair exists ONLY while the current refreshToken was minted by that same
+// BYO client. server/auth-routes.mjs's Google OAuth callback enforces this —
+// it clears both fields the moment a HOSTED connect succeeds, so a former-BYO
+// user who switches to hosted never keeps a stale, now-mismatched BYO client
+// around (see the "clears stale per-user client fields" comment there).
 export async function getGoogleAccessToken(db, userId) {
-  const clientId = getSecret(db, userId, 'google.email.clientId') || config.googleClientId;
-  const clientSecret = getSecret(db, userId, 'google.email.clientSecret') || config.googleClientSecret;
+  const byoClientId = getSecret(db, userId, 'google.email.clientId');
+  const byoClientSecret = getSecret(db, userId, 'google.email.clientSecret');
+  const useByo = !!(byoClientId && byoClientSecret);
+  const clientId = useByo ? byoClientId : config.googleClientId;
+  const clientSecret = useByo ? byoClientSecret : config.googleClientSecret;
   const refreshToken = getSecret(db, userId, 'google.email.refreshToken');
   if (!refreshToken) throw new Error('Not signed in to Google — use Sign in with Google.');
   const { accessToken } = await refreshAccessToken({ clientId, clientSecret, refreshToken });

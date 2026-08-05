@@ -1,3 +1,7 @@
+// Tests for getGoogleAccessToken's client-credential resolution
+// (agents/email-source.mjs) — proves BYO always wins as an atomic pair when
+// present, hosted config is used only when neither per-user field is set,
+// and the missing-refresh-token guard fires before any network call.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -20,11 +24,12 @@ const users = await import('../server/users.mjs');
 const { setSecret } = await import('../server/vault.mjs');
 const { getGoogleAccessToken } = await import('../agents/email-source.mjs');
 
-function stubTokenFetch(expectClientId) {
+function stubTokenFetch(expectClientId, expectClientSecret) {
   const orig = global.fetch;
   global.fetch = async (url, init) => {
     const body = new URLSearchParams(init.body);
     assert.equal(body.get('client_id'), expectClientId, `expected token refresh to use client_id=${expectClientId}`);
+    assert.equal(body.get('client_secret'), expectClientSecret, `expected token refresh to use client_secret=${expectClientSecret} (paired with client_id=${expectClientId})`);
     return { ok: true, json: async () => ({ access_token: `AT-for-${expectClientId}`, expires_in: 3600 }) };
   };
   return () => { global.fetch = orig; };
@@ -36,7 +41,7 @@ test('getGoogleAccessToken uses the per-user BYO client when one is stored (not 
   setSecret(kb.getDb(), u.id, 'google.email.clientSecret', 'byo-csecret');
   setSecret(kb.getDb(), u.id, 'google.email.refreshToken', 'RT');
 
-  const restore = stubTokenFetch('byo-cid');
+  const restore = stubTokenFetch('byo-cid', 'byo-csecret');
   try {
     const accessToken = await getGoogleAccessToken(kb.getDb(), u.id);
     assert.equal(accessToken, 'AT-for-byo-cid');
@@ -48,7 +53,7 @@ test('getGoogleAccessToken falls back to the hosted config when no per-user clie
   setSecret(kb.getDb(), u.id, 'google.email.refreshToken', 'RT');
   // Deliberately NOT setting google.email.clientId/clientSecret for this user.
 
-  const restore = stubTokenFetch('hosted-cid');
+  const restore = stubTokenFetch('hosted-cid', 'hosted-csecret');
   try {
     const accessToken = await getGoogleAccessToken(kb.getDb(), u.id);
     assert.equal(accessToken, 'AT-for-hosted-cid');
@@ -57,5 +62,9 @@ test('getGoogleAccessToken falls back to the hosted config when no per-user clie
 
 test('getGoogleAccessToken throws when no refresh token is stored, regardless of client config', async () => {
   const u = users.registerUser(kb.getDb(), { email: `none-${Date.now()}@e.com`, password: 'CorrectHorseBattery', displayName: 'v' });
-  await assert.rejects(() => getGoogleAccessToken(kb.getDb(), u.id), /not signed in/i);
+  const orig = global.fetch;
+  global.fetch = async () => { throw new Error('must not reach the network — the missing-refresh-token guard should short-circuit first'); };
+  try {
+    await assert.rejects(() => getGoogleAccessToken(kb.getDb(), u.id), /not signed in/i);
+  } finally { global.fetch = orig; }
 });
