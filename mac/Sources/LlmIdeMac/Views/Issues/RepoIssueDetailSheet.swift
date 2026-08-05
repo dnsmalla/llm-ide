@@ -58,10 +58,11 @@ struct RepoIssueDetailSheet: View {
     @State private var showScheduleEditor = false
     @State private var currentSchedule: LlmIdeAPIClient.IssueSchedule? = nil
 
-    // MR / PR creation
+    // MR / PR creation. Busy/error while creating are handled inside
+    // MRCreationSheet itself (it has its own busy/error state) — mrURL is
+    // the only thing that needs to survive past the sheet's dismissal, to
+    // back the confirmation banner shown once creation succeeds.
     @State private var showMRSheet = false
-    @State private var mrBusy = false
-    @State private var mrError: String?
     @State private var mrURL: String?
 
     init(issue: RepoIssue, client: RepoBackend, projectId: String,
@@ -84,6 +85,9 @@ struct RepoIssueDetailSheet: View {
         let t = theme.current
         VStack(spacing: 0) {
             header
+            if let url = mrURL {
+                mrCreatedBanner(url: url)
+            }
             Divider().background(t.border)
             HStack(spacing: 0) {
                 // LEFT: description + comments + the comment composer (the
@@ -131,6 +135,38 @@ struct RepoIssueDetailSheet: View {
                 .environmentObject(theme)
             }
         }
+    }
+
+    // MARK: - MR / PR created confirmation banner
+    //
+    // MRCreationSheet's onCreated only handed the parent a URL to store
+    // (mrURL) and closed the sheet — nothing ever rendered it, so a
+    // successful create/PR had zero visible confirmation. This banner is
+    // that confirmation; it clears itself via the "x" or by opening the link.
+
+    private func mrCreatedBanner(url: String) -> some View {
+        let t = theme.current
+        return HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(t.accent3)
+            Text("\(client.kind.changeRequestNoun) created.")
+                .font(Typography.body).foregroundStyle(t.text)
+            Button("View") {
+                if let u = URL(string: url) { NSWorkspace.shared.open(u) }
+                mrURL = nil
+            }
+            .buttonStyle(.bordered).controlSize(.small)
+            Spacer()
+            Button {
+                mrURL = nil
+            } label: {
+                Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(t.textMuted)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
+        .background(t.accent3.opacity(0.08))
     }
 
     // MARK: - Header
@@ -217,11 +253,7 @@ struct RepoIssueDetailSheet: View {
                 showMRSheet = true
             } label: {
                 HStack(spacing: 4) {
-                    if mrBusy {
-                        ProgressView().controlSize(.small).scaleEffect(0.7)
-                    } else {
-                        Image(systemName: "arrow.triangle.branch").font(.system(size: 11))
-                    }
+                    Image(systemName: "arrow.triangle.branch").font(.system(size: 11))
                     Text(client.kind.changeRequestAbbrev).font(Typography.captionStrong)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 5)
@@ -229,7 +261,7 @@ struct RepoIssueDetailSheet: View {
                 .foregroundStyle(t.text)
             }
             .buttonStyle(.plain)
-            .disabled(mrBusy || !config.isAllowed(.createPR, provider: client.kind))
+            .disabled(!config.isAllowed(.createPR, provider: client.kind))
             .help(config.isAllowed(.createPR, provider: client.kind)
                   ? "Create \(client.kind.changeRequestNoun)"
                   : "Enable Create PR / MR in Settings → \(client.kind.displayName) → Automation & Actions")
