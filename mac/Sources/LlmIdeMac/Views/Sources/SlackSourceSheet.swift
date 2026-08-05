@@ -110,7 +110,7 @@ struct SlackSourceSheet: View {
                             if isEditing {
                                 SettingsHint("Leave blank to keep the current one.")
                             }
-                            SettingsHint("The bot must be invited to each channel you paste below.")
+                            SettingsHint("The bot must be invited to each channel you select.")
                             if let s = testStatus {
                                 Text(s)
                                     .font(Typography.caption)
@@ -147,7 +147,7 @@ struct SlackSourceSheet: View {
             HStack {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                if isEditing {
+                if isEditing || sourceLinks.hasSecret(.slack) {
                     Button("Disconnect", role: .destructive) {
                         Task { await disconnect() }
                     }
@@ -182,7 +182,7 @@ struct SlackSourceSheet: View {
                 .font(Typography.body)
                 .foregroundStyle(theme.current.textMuted)
             Spacer()
-            Button("Select All") { selectedChannelIds = Set(availableChannels.map(\.id)) }
+            Button("Select All") { selectedChannelIds.formUnion(availableChannels.map(\.id)) }
                 .buttonStyle(.plain)
                 .font(Typography.caption)
                 .disabled(availableChannels.isEmpty)
