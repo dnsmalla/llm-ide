@@ -26,6 +26,7 @@ struct EmailSourceSheet: View {
     @State private var connecting = false
     @State private var connectError: String?
     @State private var connectTask: Task<Void, Never>?
+    @State private var signInTask: Task<Void, Never>?
     @State private var showAdvanced = false
 
     @State private var password: String = ""
@@ -92,7 +93,7 @@ struct EmailSourceSheet: View {
                             connectTask = Task { await connectGoogle() }
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(connecting)
+                        .disabled(connecting || signingIn)
                         if let err = connectError {
                             Text(err)
                                 .font(Typography.caption)
@@ -179,10 +180,10 @@ struct EmailSourceSheet: View {
                                 }
                                 field("") {
                                     Button(signingIn ? "Signing in…" : "Sign in with Google") {
-                                        connectTask = Task { await signInWithGoogle() }
+                                        signInTask = Task { await signInWithGoogle() }
                                     }
                                     .buttonStyle(.bordered)
-                                    .disabled(signingIn
+                                    .disabled(connecting || signingIn
                                               || clientId.trimmingCharacters(in: .whitespaces).isEmpty
                                               || clientSecret.trimmingCharacters(in: .whitespaces).isEmpty)
                                 }
@@ -271,6 +272,7 @@ struct EmailSourceSheet: View {
         .background(theme.current.body)
         .onDisappear {
             connectTask?.cancel()
+            signInTask?.cancel()
         }
     }
 
