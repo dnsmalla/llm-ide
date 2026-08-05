@@ -66,8 +66,11 @@ export async function fetchEmailAddress(accessToken) {
   return d.email || '';
 }
 
-// In-memory OAuth state store (single-node; TTL-swept). Never holds the
-// client secret — the callback reads that from the vault by userId.
+// In-memory OAuth state store (single-node; TTL-swept). May hold
+// clientId/clientSecret when the caller (auth-routes.mjs's Google OAuth
+// routes) stores the resolved credentials for its own callback to read —
+// kept in memory only, for this flow's ~10-minute TTL, never logged or
+// serialized back to any client response.
 const _states = new Map();
 function sweep() {
   const now = Date.now();

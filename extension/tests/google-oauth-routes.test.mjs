@@ -351,3 +351,62 @@ test('full hosted flow: start (no body) -> callback (token exchange + userinfo s
   assert.equal(statusBody.status, 'complete');
   assert.equal(statusBody.email, email);
 });
+
+test('a former BYO user who later connects via hosted Google clears their stale per-user client fields', async () => {
+  const { user } = await registerAndLogin();
+
+  // Step 1: this user previously did the BYO flow — simulate that by
+  // completing a real BYO start+callback first.
+  const byoStart = await callAuth({
+    method: 'POST', url: '/auth/google/start', user: { id: user.id },
+    body: { clientId: 'stale-byo-client-id', clientSecret: 'stale-byo-client-secret' },
+  });
+  assert.equal(byoStart.statusCode, 200, byoStart._body);
+  const byoState = byoStart.json().state;
+
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('oauth2.googleapis.com/token')) {
+      return { ok: true, json: async () => ({ access_token: 'byo-access-tok', refresh_token: 'byo-refresh-tok', expires_in: 3600 }) };
+    }
+    if (u.includes('openidconnect.googleapis.com/v1/userinfo')) {
+      return { ok: true, json: async () => ({ email: 'byo-user@example.com' }) };
+    }
+    throw new Error(`Unexpected fetch to ${u}`);
+  };
+  try {
+    const byoCb = await callAuth({ method: 'GET', url: `/auth/google/callback?code=byo-code&state=${byoState}` });
+    assert.equal(byoCb.statusCode, 200, byoCb._body);
+  } finally { global.fetch = originalFetch; }
+
+  // Confirm the BYO fields really are in the vault now.
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientId'), 'stale-byo-client-id');
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientSecret'), 'stale-byo-client-secret');
+
+  // Step 2: the SAME user now does a hosted connect instead.
+  const hostedStart = await callAuth({ method: 'POST', url: '/auth/google/start', user: { id: user.id }, body: {} });
+  assert.equal(hostedStart.statusCode, 200, hostedStart._body);
+  const hostedState = hostedStart.json().state;
+
+  global.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('oauth2.googleapis.com/token')) {
+      return { ok: true, json: async () => ({ access_token: 'hosted-access-tok-2', refresh_token: 'hosted-refresh-tok-2', expires_in: 3600 }) };
+    }
+    if (u.includes('openidconnect.googleapis.com/v1/userinfo')) {
+      return { ok: true, json: async () => ({ email: 'hosted-user@example.com' }) };
+    }
+    throw new Error(`Unexpected fetch to ${u}`);
+  };
+  try {
+    const hostedCb = await callAuth({ method: 'GET', url: `/auth/google/callback?code=hosted-code-2&state=${hostedState}` });
+    assert.equal(hostedCb.statusCode, 200, hostedCb._body);
+  } finally { global.fetch = originalFetch; }
+
+  // The stale BYO client fields must now be gone, and the refresh token
+  // must be the NEW hosted-minted one.
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientId'), null, 'stale BYO clientId must be cleared after a hosted connect');
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientSecret'), null, 'stale BYO clientSecret must be cleared after a hosted connect');
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.refreshToken'), 'hosted-refresh-tok-2');
+});

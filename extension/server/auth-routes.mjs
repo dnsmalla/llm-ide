@@ -347,12 +347,23 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     if (q.get('error')) { if (st) completeState(state, { status: 'error', message: 'Sign-in cancelled.' }); oauthCallbackHtml(res, 'Sign-in cancelled.'); return; }
     if (!st) { oauthCallbackHtml(res, 'This sign-in link has expired — start again from the app.'); return; }
     if (st.status !== 'pending') { oauthCallbackHtml(res, 'This sign-in link has already been used — start again from the app.'); return; }
-    const { clientId, clientSecret } = st;
+    const { clientId, clientSecret, isByo } = st;
     try {
       const redirectUri = 'http://127.0.0.1:' + config.port + '/auth/google/callback';
       const tok = await exchangeCode({ clientId, clientSecret, code: q.get('code') || '', verifier: st.verifier, redirectUri });
       if (!tok.refreshToken) throw new Error('Google did not return a refresh token — remove the app under myaccount.google.com/permissions and try again.');
       setSecret(db, st.userId, 'google.email.refreshToken', tok.refreshToken);
+      if (!isByo) {
+        // This flow used the hosted client, so the new refresh token is
+        // minted under it — clear any stale per-user clientId/clientSecret
+        // left over from a PREVIOUS bring-your-own setup. Otherwise the
+        // token-refresh resolver (agents/email-source.mjs) would find the
+        // old BYO client still present, prefer it, and try to refresh a
+        // hosted-minted token with the wrong client — Google rejects that
+        // outright (invalid_grant), permanently breaking the connection.
+        setSecret(db, st.userId, 'google.email.clientId', '');
+        setSecret(db, st.userId, 'google.email.clientSecret', '');
+      }
       const email = await fetchEmailAddress(tok.accessToken).catch(() => '');
       completeState(state, { status: 'complete', email });
       oauthCallbackHtml(res, 'Signed in to Google.');
@@ -486,7 +497,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     }
     const { verifier, challenge } = pkcePair();
     const state = crypto.randomBytes(24).toString('base64url');
-    putState(state, { userId: req.user.id, verifier, clientId, clientSecret });
+    putState(state, { userId: req.user.id, verifier, clientId, clientSecret, isByo });
     const redirectUri = 'http://127.0.0.1:' + config.port + '/auth/google/callback';
     send(res, 200, { authUrl: buildAuthUrl({ clientId, redirectUri, state, challenge }), state });
     return;
