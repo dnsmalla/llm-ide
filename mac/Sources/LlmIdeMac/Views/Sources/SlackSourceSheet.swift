@@ -1,23 +1,34 @@
 import SwiftUI
+import AppKit
 
-/// Configure / edit the Slack source. The bot **token** is written to the
-/// server secrets vault (`slack.botToken`) — never to AppConfig.
-/// When editing an existing source the token field starts blank and is
-/// only re-sent if the user types a new one ("leave blank to keep current").
+/// Configure / edit the Slack source. Connecting goes through LLM-IDE's
+/// hosted Slack OAuth app (agents/slack-oauth.mjs, /auth/slack/*) — the user
+/// clicks "Connect Slack", approves in the browser, and gets back a user
+/// token (vault key slack.userToken) plus a checklist of channels/groups
+/// they already belong to. No bot to invite, no token to paste. A manual
+/// bot-token paste stays available behind "Advanced" for a workspace that
+/// blocks new app installs; it writes to the older slack.botToken key,
+/// which the server prefers slack.userToken over but falls back to.
 struct SlackSourceSheet: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
+    @EnvironmentObject var sourceLinks: SourceLinkStore
     @Environment(\.dismiss) private var dismiss
 
     /// Draft seeded from the existing source (or defaults for first setup).
     @State private var draft: SavedSlackSource
-    /// True when we're editing an already-saved source (drives the
-    /// "leave blank to keep current" token hint + save semantics).
+    /// True when we're editing an already-saved source.
     private let isEditing: Bool
 
-    /// Raw channels text (comma-separated channel IDs shown in the field).
-    @State private var channelsText: String
+    @State private var selectedChannelIds: Set<String>
+    @State private var availableChannels: [LlmIdeAPIClient.SlackConversation] = []
+    @State private var channelsIncomplete = false
+    @State private var loadingChannels = false
+    @State private var connecting = false
+    @State private var connectError: String?
+
+    @State private var showAdvanced = false
     @State private var token: String = ""
     @State private var tokenVisible = false
     @State private var testing = false
@@ -29,12 +40,7 @@ struct SlackSourceSheet: View {
         let existing = AppConfig.shared.slackSource
         _draft = State(initialValue: existing ?? SavedSlackSource())
         isEditing = existing != nil
-        _channelsText = State(initialValue: existing?.channels.joined(separator: ", ") ?? "")
-    }
-
-    /// Test only makes sense once we have a token to authenticate with.
-    private var canTest: Bool {
-        !token.isEmpty && !testing
+        _selectedChannelIds = State(initialValue: Set(existing?.channels ?? []))
     }
 
     var body: some View {
@@ -51,38 +57,66 @@ struct SlackSourceSheet: View {
                         TextField("My workspace (optional)", text: $draft.displayName)
                             .textFieldStyle(.roundedBorder)
                     }
-                    field("Bot token") {
-                        ZStack(alignment: .trailing) {
-                            Group {
-                                if tokenVisible {
-                                    TextField("", text: $token)
-                                } else {
-                                    SecureField("", text: $token)
+
+                    if sourceLinks.hasSecret(.slack) {
+                        SettingsHint("✓ Connected to Slack.")
+                        channelChecklist
+                    } else {
+                        Button(connecting ? "Connecting…" : "Connect Slack") {
+                            Task { await connectSlack() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(connecting)
+                        if let err = connectError {
+                            Text(err)
+                                .font(Typography.caption)
+                                .foregroundStyle(theme.current.danger)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        SettingsHint("Opens Slack in your browser to approve access. Reads channels you already belong to — no bot to invite.")
+                    }
+
+                    DisclosureGroup("Advanced: paste a token manually", isExpanded: $showAdvanced) {
+                        VStack(alignment: .leading, spacing: Spacing.md) {
+                            field("Bot token") {
+                                ZStack(alignment: .trailing) {
+                                    Group {
+                                        if tokenVisible {
+                                            TextField("", text: $token)
+                                        } else {
+                                            SecureField("", text: $token)
+                                        }
+                                    }
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(Typography.mono)
+                                    .disableAutocorrection(true)
+                                    Button { tokenVisible.toggle() } label: {
+                                        Image(systemName: tokenVisible ? "eye.slash" : "eye")
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(theme.current.textMuted)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(.trailing, 8)
+                                    .help(tokenVisible ? "Hide token" : "Show token")
+                                    .accessibilityLabel(tokenVisible ? "Hide token" : "Show token")
                                 }
                             }
-                            .textFieldStyle(.roundedBorder)
-                            .font(Typography.mono)
-                            .disableAutocorrection(true)
-                            Button { tokenVisible.toggle() } label: {
-                                Image(systemName: tokenVisible ? "eye.slash" : "eye")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(theme.current.textMuted)
+                            SettingsHint("Leave blank to keep the current one. The bot must be invited to each channel you select above.")
+                            if let s = testStatus {
+                                Text(s)
+                                    .font(Typography.caption)
+                                    .foregroundStyle(testWasError ? theme.current.danger : theme.current.accent3)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
-                            .buttonStyle(.plain)
-                            .padding(.trailing, 8)
-                            .help(tokenVisible ? "Hide token" : "Show token")
-                            .accessibilityLabel(tokenVisible ? "Hide token" : "Show token")
+                            Button(testing ? "Testing…" : "Test token") {
+                                Task { await test() }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(token.isEmpty || testing)
                         }
+                        .padding(.top, Spacing.sm)
                     }
-                    if isEditing {
-                        SettingsHint("Leave the token blank to keep the current one.")
-                    }
-                    field("Channels") {
-                        TextField("C0123ABCD, C0456EFGH", text: $channelsText)
-                            .textFieldStyle(.roundedBorder)
-                            .disableAutocorrection(true)
-                    }
-                    SettingsHint("Comma-separated channel IDs (e.g. C0123ABCD). The bot must be invited to each channel.")
+
                     field("Lookback days") {
                         Stepper(value: $draft.lookbackDays, in: 1...60) {
                             Text("\(draft.lookbackDays) day\(draft.lookbackDays == 1 ? "" : "s")")
@@ -94,13 +128,6 @@ struct SlackSourceSheet: View {
                         Toggle("", isOn: $draft.enabled)
                             .toggleStyle(.switch)
                             .labelsHidden()
-                    }
-
-                    if let s = testStatus {
-                        Text(s)
-                            .font(Typography.caption)
-                            .foregroundStyle(testWasError ? theme.current.danger : theme.current.accent3)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .padding(Spacing.lg)
@@ -115,24 +142,58 @@ struct SlackSourceSheet: View {
                     Button("Disconnect", role: .destructive) {
                         Task { await disconnect() }
                     }
-                    .help("Remove this source and delete the stored bot token.")
+                    .help("Remove this source and delete the stored Slack credentials.")
                 }
                 Spacer()
-                Button(testing ? "Testing…" : "Test") {
-                    Task { await test() }
-                }
-                .buttonStyle(.bordered)
-                .disabled(!canTest)
                 Button("Save") {
                     Task { await save() }
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
+                .disabled(!sourceLinks.hasSecret(.slack) && token.isEmpty)
             }
             .padding(Spacing.lg)
         }
-        .frame(minWidth: 440, idealWidth: 480, minHeight: 460)
+        .frame(minWidth: 460, idealWidth: 500, minHeight: 520)
         .background(theme.current.body)
+        .task {
+            if sourceLinks.hasSecret(.slack) { await loadChannels() }
+        }
+    }
+
+    // MARK: - Channel checklist
+
+    @ViewBuilder
+    private var channelChecklist: some View {
+        HStack {
+            Text("Channels")
+                .font(Typography.body)
+                .foregroundStyle(theme.current.textMuted)
+            Spacer()
+            Button(loadingChannels ? "Refreshing…" : "Refresh channels") {
+                Task { await loadChannels() }
+            }
+            .buttonStyle(.plain)
+            .font(Typography.caption)
+            .disabled(loadingChannels)
+        }
+        if availableChannels.isEmpty && !loadingChannels {
+            SettingsHint("Couldn't load channels — tap Refresh channels to try again.")
+        } else if channelsIncomplete {
+            SettingsHint("Showing \(availableChannels.count) channels — the list may be incomplete (large workspace or Slack rate limit). Tap Refresh channels to try again.")
+        }
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(availableChannels) { ch in
+                Toggle("#\(ch.name)", isOn: Binding(
+                    get: { selectedChannelIds.contains(ch.id) },
+                    set: { on in
+                        if on { selectedChannelIds.insert(ch.id) } else { selectedChannelIds.remove(ch.id) }
+                    }
+                ))
+                .toggleStyle(.checkbox)
+            }
+        }
+        .frame(maxHeight: 220)
     }
 
     // MARK: - Field row
@@ -152,8 +213,55 @@ struct SlackSourceSheet: View {
 
     // MARK: - Actions
 
-    /// Write the token to the vault FIRST (so the server can read it),
-    /// then run the connectivity probe.
+    /// Drive the Slack OAuth loopback flow: ask the server (which owns its
+    /// own Slack App credentials — nothing to paste) to start the flow,
+    /// open the returned consent URL in the default browser, then poll
+    /// `/auth/slack/status` until it reports complete/error or ~3 minutes
+    /// elapse.
+    private func connectSlack() async {
+        connecting = true
+        connectError = nil
+        defer { connecting = false }
+        do {
+            let r = try await api.slackConnectStart()
+            if let u = URL(string: r.authUrl) { NSWorkspace.shared.open(u) }
+            for _ in 0..<90 {
+                try await Task.sleep(nanoseconds: 2_000_000_000)
+                let s = try await api.slackConnectStatus(state: r.state)
+                if s.status == "complete" {
+                    await sourceLinks.refresh(api: api)
+                    await loadChannels()
+                    selectedChannelIds = Set(availableChannels.map(\.id))
+                    return
+                }
+                if s.status != "pending" {
+                    connectError = s.message ?? "Connection failed"
+                    return
+                }
+            }
+            connectError = "Connecting timed out — try again."
+        } catch {
+            connectError = error.localizedDescription
+        }
+    }
+
+    /// Refresh the channel checklist from the currently-saved Slack
+    /// connection (user token, or a manually-pasted bot token).
+    private func loadChannels() async {
+        loadingChannels = true
+        defer { loadingChannels = false }
+        do {
+            let result = try await api.fetchSlackConversations()
+            availableChannels = result.channels
+            channelsIncomplete = !result.complete
+        } catch {
+            availableChannels = []
+            channelsIncomplete = false
+        }
+    }
+
+    /// Write the token to the vault FIRST (so the server can read it), then
+    /// run the connectivity probe. Advanced/manual fallback path only.
     private func test() async {
         testing = true
         testStatus = nil
@@ -165,44 +273,45 @@ struct SlackSourceSheet: View {
             testStatus = r.ok
                 ? "Connected to \(r.team)"
                 : "Test failed."
+            if r.ok { await sourceLinks.refresh(api: api) }
         } catch {
             testWasError = true
             testStatus = error.localizedDescription
         }
     }
 
-    /// Persist the source. Only re-send the token when the user typed one
-    /// (blank on edit = keep the stored secret untouched).
+    /// Persist the source. The manual token (if the user typed one in
+    /// Advanced) is saved as slack.botToken; the OAuth-issued slack.userToken
+    /// (if present) already lives in the vault from `connectSlack()`.
     private func save() async {
         if !token.isEmpty {
             do {
                 try await api.setSecret(key: "slack.botToken", value: token)
+                await sourceLinks.refresh(api: api)
             } catch {
                 testWasError = true
                 testStatus = "Couldn't save token: \(error.localizedDescription)"
                 return
             }
         }
-        let channels = channelsText
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        draft.channels = channels
+        draft.channels = Array(selectedChannelIds)
         config.slackSource = draft
         dismiss()
     }
 
-    /// Remove the source and delete the stored bot token from the vault
-    /// (empty value = delete, per the secrets endpoint). If clearing the
-    /// secret fails we keep the source so the token isn't silently orphaned.
+    /// Remove the source and delete BOTH possible stored credentials
+    /// (OAuth user token + manual bot token — deleting an absent key is a
+    /// harmless no-op) so a reconnect starts clean.
     private func disconnect() async {
         do {
+            try await api.setSecret(key: "slack.userToken", value: "")
             try await api.setSecret(key: "slack.botToken", value: "")
         } catch {
             testWasError = true
-            testStatus = "Couldn't remove the stored token: \(error.localizedDescription)"
+            testStatus = "Couldn't remove the stored Slack credentials: \(error.localizedDescription)"
             return
         }
+        await sourceLinks.refresh(api: api)
         config.slackSource = nil
         dismiss()
     }
