@@ -139,6 +139,15 @@ extension LlmIdeAPIClient {
                               authenticated: true)
     }
 
+    /// Kick off the hosted Google OAuth flow (LLM-IDE's own Google Cloud
+    /// OAuth client, Testing-mode — no client id/secret from the user).
+    /// Returns a browser URL to open plus a state token to poll via
+    /// `googleSignInStatus`.
+    func googleConnectStart() async throws -> GoogleStartResult {
+        struct Req: Encodable {}
+        return try await post("/auth/google/start", body: Req(), authenticated: true)
+    }
+
     /// Poll the state of an in-flight Google sign-in started via
     /// `googleSignInStart`.
     func googleSignInStatus(state: String) async throws -> GoogleStatusResult {
