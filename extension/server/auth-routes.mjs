@@ -353,7 +353,15 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       const tok = await exchangeCode({ clientId, clientSecret, code: q.get('code') || '', verifier: st.verifier, redirectUri });
       if (!tok.refreshToken) throw new Error('Google did not return a refresh token — remove the app under myaccount.google.com/permissions and try again.');
       setSecret(db, st.userId, 'google.email.refreshToken', tok.refreshToken);
-      if (!isByo) {
+      if (isByo) {
+        // Only now — after the token exchange has proven this exact
+        // clientId/clientSecret pair actually works against Google — persist
+        // them for future refreshes. Deliberately NOT done in /start (see
+        // the comment there): an abandoned attempt must never leave
+        // unverified credentials sitting in the vault.
+        setSecret(db, st.userId, 'google.email.clientId', clientId);
+        setSecret(db, st.userId, 'google.email.clientSecret', clientSecret);
+      } else {
         // This flow used the hosted client, so the new refresh token is
         // minted under it — clear any stale per-user clientId/clientSecret
         // left over from a PREVIOUS bring-your-own setup. Otherwise the
@@ -459,13 +467,15 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   // ---- Google Sign-In: start + status (authed) ------------------------
   //
   // POST /auth/google/start { clientId?, clientSecret? }
-  //   Both fields present → bring-your-own: persists the user's own OAuth
-  //   client credentials to the vault, exactly as before. Both absent →
-  //   hosted: LLM-IDE's own Testing-mode Google Cloud OAuth client (env
-  //   vars), nothing to paste, 503 if the operator hasn't configured it.
-  //   Either way, the resolved clientId/clientSecret are carried in the
-  //   state entry itself so the callback below never needs to re-derive
-  //   them (uniform code path for both BYO and hosted).
+  //   Both fields present → bring-your-own: the pasted credentials are
+  //   carried in the OAuth state entry and used for this flow, but NOT
+  //   persisted to the vault yet — only the callback does that, and only
+  //   after the token exchange proves they work (see the callback below
+  //   for why). Both absent → hosted: LLM-IDE's own Testing-mode Google
+  //   Cloud OAuth client (env vars), nothing to paste, 503 if the operator
+  //   hasn't configured it. Either way, the resolved clientId/clientSecret
+  //   are carried in the state entry itself so the callback below never
+  //   needs to re-derive them (uniform code path for both BYO and hosted).
   if (method === 'POST' && url === '/auth/google/start') {
     let body;
     try { body = await readJson(req, bodyLimit); }
@@ -485,8 +495,16 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       if (!bodyClientId || !bodyClientSecret) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'clientId and clientSecret are required' } }); return; }
       clientId = bodyClientId;
       clientSecret = bodyClientSecret;
-      setSecret(db, req.user.id, 'google.email.clientId', clientId);
-      setSecret(db, req.user.id, 'google.email.clientSecret', clientSecret);
+      // NOTE: do NOT persist these to the vault here — the state entry
+      // below already carries them through to the callback. Writing them
+      // eagerly would overwrite a still-working BYO client the moment a
+      // user starts a new attempt; if they then abandon consent (closes
+      // the tab, denies access), the vault is left with unverified
+      // credentials paired against the OLD refresh token, and Google
+      // rejects that refresh outright (invalid_grant) — silently breaking
+      // a connection that worked a moment ago. Persist only after the
+      // token exchange proves the credentials actually work (see the
+      // callback below).
     } else {
       if (!config.googleClientId || !config.googleClientSecret) {
         send(res, 503, { error: { code: 'CONFIG_MISSING', message: "Google connect isn't set up on this server yet." } });

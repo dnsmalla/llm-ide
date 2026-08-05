@@ -93,7 +93,7 @@ test('POST /auth/google/start validates clientId/clientSecret', async () => {
   assert.equal(res.json().error.code, 'VALIDATION_FAILED');
 });
 
-test('POST /auth/google/start returns authUrl+state and persists clientSecret to the vault', async () => {
+test('POST /auth/google/start (BYO) returns authUrl+state WITHOUT persisting clientId/clientSecret yet', async () => {
   const { user } = await registerAndLogin();
   const clientId = 'test-client-id.apps.googleusercontent.com';
   const clientSecret = 'test-client-secret-abc123';
@@ -107,9 +107,65 @@ test('POST /auth/google/start returns authUrl+state and persists clientSecret to
   assert.ok(body.authUrl.includes(encodeURIComponent(clientId)) || body.authUrl.includes(clientId), 'authUrl carries the clientId');
   assert.ok(body.authUrl.includes('code_challenge='), 'authUrl carries a PKCE code_challenge');
 
-  // Side effect: clientId/clientSecret are persisted to the vault for this user.
-  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientId'), clientId);
-  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientSecret'), clientSecret);
+  // The pasted credentials are NOT written to the vault until the token
+  // exchange in the callback proves they work — a start that's never
+  // completed must not leave unverified credentials behind.
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientId'), null);
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientSecret'), null);
+});
+
+test('an abandoned BYO re-attempt does not clobber a working BYO connection', async () => {
+  const { user } = await registerAndLogin();
+
+  // Step 1: user has a WORKING BYO connection already (client1 + a refresh
+  // token minted under it) — simulate via a full start+callback.
+  const start1 = await callAuth({
+    method: 'POST', url: '/auth/google/start', user: { id: user.id },
+    body: { clientId: 'working-client-id', clientSecret: 'working-client-secret' },
+  });
+  assert.equal(start1.statusCode, 200, start1._body);
+  const state1 = start1.json().state;
+
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('oauth2.googleapis.com/token')) {
+      return { ok: true, json: async () => ({ access_token: 'working-access-tok', refresh_token: 'working-refresh-tok', expires_in: 3600 }) };
+    }
+    if (u.includes('openidconnect.googleapis.com/v1/userinfo')) {
+      return { ok: true, json: async () => ({ email: 'working-user@example.com' }) };
+    }
+    throw new Error(`Unexpected fetch to ${u}`);
+  };
+  try {
+    const cb1 = await callAuth({ method: 'GET', url: `/auth/google/callback?code=working-code&state=${state1}` });
+    assert.equal(cb1.statusCode, 200, cb1._body);
+  } finally { global.fetch = originalFetch; }
+
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientId'), 'working-client-id');
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientSecret'), 'working-client-secret');
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.refreshToken'), 'working-refresh-tok');
+
+  // Step 2: same user starts a NEW BYO attempt with DIFFERENT credentials
+  // (e.g. testing a second Google Cloud project) — then abandons it (never
+  // hits the callback: closed the tab, denied consent, whatever).
+  const start2 = await callAuth({
+    method: 'POST', url: '/auth/google/start', user: { id: user.id },
+    body: { clientId: 'abandoned-client-id', clientSecret: 'abandoned-client-secret' },
+  });
+  assert.equal(start2.statusCode, 200, start2._body);
+  // No callback is ever made for state2 — the flow is simply abandoned.
+
+  // The vault must still hold the ORIGINAL working credentials, unchanged —
+  // a start that's merely initiated (not completed) must never touch the
+  // vault. Before the fix, /start wrote the new credentials immediately,
+  // which would have paired "abandoned-client-id/secret" with
+  // "working-refresh-tok" — a combination Google rejects outright
+  // (invalid_grant), permanently breaking a connection that worked a
+  // moment earlier.
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientId'), 'working-client-id');
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientSecret'), 'working-client-secret');
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.refreshToken'), 'working-refresh-tok');
 });
 
 // ---- GET /auth/google/callback (public) --------------------------------
@@ -173,8 +229,11 @@ test('full flow: start -> callback (token exchange + userinfo stubbed) -> status
     global.fetch = originalFetch;
   }
 
-  // Side effect: refreshToken persisted to vault.
+  // Side effect: refreshToken persisted to vault, and — now that the
+  // exchange has proven them — the BYO clientId/clientSecret too.
   assert.equal(getSecret(kb.getDb(), user.id, 'google.email.refreshToken'), 'refresh-tok-456');
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientId'), clientId);
+  assert.equal(getSecret(kb.getDb(), user.id, 'google.email.clientSecret'), clientSecret);
 
   // GET /auth/google/status (authed) reflects completion + email.
   const status = await callAuth({ method: 'GET', url: `/auth/google/status?state=${state}`, user: { id: user.id } });
