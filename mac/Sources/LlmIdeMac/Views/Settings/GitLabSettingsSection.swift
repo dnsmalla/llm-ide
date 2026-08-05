@@ -473,7 +473,17 @@ struct GitLabSettingsSection: View {
 
         if raw.hasPrefix("http"), let parsedURL = URL(string: raw),
            let scheme = parsedURL.scheme, let host = parsedURL.host {
-            apiBase = "\(scheme)://\(host)"
+            let candidateBase = "\(scheme)://\(host)"
+            // Validate BEFORE persisting — writing first and checking later
+            // meant a pasted http:// URL corrupted the stored Instance URL
+            // even though the request that follows correctly refuses to
+            // send it, leaving every other GitLab feature broken until the
+            // user manually repairs the field.
+            guard GitLabClient.isSafeBaseURL(candidateBase) else {
+                resolveErrors[p.id] = "GitLab host must use https (or be loopback)."
+                return
+            }
+            apiBase = candidateBase
             // Also update the stored base URL to match the project's host
             config.gitLabBaseURL = apiBase
             path = parsedURL.path
