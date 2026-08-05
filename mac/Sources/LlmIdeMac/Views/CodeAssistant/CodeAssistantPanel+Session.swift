@@ -118,6 +118,13 @@ extension CodeAssistantPanel {
         pendingTool = nil
         // Fresh budget of auto-run git ops for this user turn (commit→push→… ).
         autoGitOpsThisTurn = 0
+        // Captured once, fixed for this whole invocation, and declared
+        // OUTSIDE the do block below so every catch clause can compare
+        // against it directly — re-reading the global `revealingTurnID`
+        // inside a catch would pick up whatever turn is CURRENTLY
+        // streaming, not the one this call started, if a stale/delayed
+        // catch fires after a session switch started a newer turn.
+        let streamingID = beginStreamingTurn()
         do {
             // Send the most recent ~8 turns as history — server caps too
             // but we'd rather not push a huge payload over the wire.
@@ -126,7 +133,6 @@ extension CodeAssistantPanel {
             // "Writing the answer…") instead of a frozen spinner for the
             // 60–90s an agent turn can take. Falls back to buffered on a
             // stream failure (see codeAssistRoundTrip).
-            let streamingID = beginStreamingTurn()
             let resp = try await codeAssistRoundTrip(
                 message: message,
                 history: Array(recent.dropLast()),  // exclude the just-pushed user turn — server appends it
@@ -185,11 +191,11 @@ extension CodeAssistantPanel {
         } catch is CancellationError {
             // Stopped by the user — leave the partial streamed text (if any)
             // in place, tagged as stopped, instead of vanishing it.
-            if let streamingID = revealingTurnID {
+            if revealingTurnID == streamingID {
                 finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, stopped: true)
             }
         } catch let urlError as URLError where urlError.code == .cancelled {
-            if let streamingID = revealingTurnID {
+            if revealingTurnID == streamingID {
                 finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, stopped: true)
             }
         } catch {
@@ -199,7 +205,7 @@ extension CodeAssistantPanel {
             // `history` forever. The separate `self.error` banner already
             // tells the user what went wrong; "(stopped)" here just means
             // "this reply did not complete," which is honest either way.
-            if let streamingID = revealingTurnID {
+            if revealingTurnID == streamingID {
                 finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, stopped: true)
             }
             self.error = error.localizedDescription
@@ -407,13 +413,17 @@ extension CodeAssistantPanel {
         busy = true
         statusText = ""
         defer { busy = false }
+        // Captured once, fixed for this whole invocation, and declared
+        // OUTSIDE the do block below — see runTurn's matching comment for
+        // why the catch clause must compare against this exact id instead
+        // of re-reading the (possibly now-different) global `revealingTurnID`.
+        let streamingID = beginStreamingTurn()
         do {
             let recent = history.count > 8 ? Array(history.suffix(8)) : history
             // The synthetic "(executed create-gitlab-issue …)" turn we
             // pushed before this call IS the signal the agent needs to
             // see. Keep it in `history`; pass "(continue)" as the user
             // message purely to pass the server's empty-message guard.
-            let streamingID = beginStreamingTurn()
             let resp = try await codeAssistRoundTrip(
                 message: "(continue)",
                 history: recent,
@@ -436,7 +446,7 @@ extension CodeAssistantPanel {
             // already inserted an empty placeholder turn before this
             // round-trip started, and a non-cancellation failure must not
             // leave it orphaned in `history` forever.
-            if let streamingID = revealingTurnID {
+            if revealingTurnID == streamingID {
                 finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, stopped: true)
             }
             self.error = error.localizedDescription
