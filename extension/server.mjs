@@ -32,7 +32,7 @@ const HOST = config.host;
 // Bump whenever the HTTP surface changes so the extension can detect
 // a stale server process ("you installed the new client but forgot to
 // restart node server.mjs") and surface a clear message.
-const SERVER_API_VERSION = 21;
+const SERVER_API_VERSION = 22;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -61,6 +61,7 @@ const ENDPOINTS = [
   '/kb/slack/test',
   '/kb/slack/fetch',
   '/kb/slack/seen',
+  '/kb/slack/conversations',
   '/kb/box/test',
   '/kb/connect-box',
   '/kb/activity',

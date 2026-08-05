@@ -32,7 +32,7 @@ import { handleCustomProvidersSync } from '../server/custom-providers.mjs';
 import { iterateUserMeetings } from './exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../agents/email-source.mjs';
-import { testConnection as slackTest, fetchChannelHistory } from '../agents/slack-source.mjs';
+import { testConnection as slackTest, fetchChannelHistory, listUserConversations } from '../agents/slack-source.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
@@ -544,12 +544,19 @@ export async function handleKB(req, res) {
       return true;
     }
 
+    // Prefer the OAuth-issued user token; fall back to a manually-pasted bot
+    // token so Slack connections set up before the OAuth flow shipped keep
+    // working unmodified.
+    function resolveSlackToken(userId) {
+      return getSecret(kb.getDb(), userId, 'slack.userToken') || getSecret(kb.getDb(), userId, 'slack.botToken');
+    }
+
     // Slack input (twin of /kb/email/*) ---
     if (req.method === 'POST' && (url === '/kb/slack/test' || url === '/kb/slack/fetch')) {
       const body = parseJSON(await readBody(req)) || {};
-      const token = getSecret(kb.getDb(), userId, 'slack.botToken');
+      const token = resolveSlackToken(userId);
       if (!token) {
-        sendJSON(res, 400, { error: { code: 'SLACK_NO_TOKEN', message: 'No Slack bot token saved. Save one first.' } });
+        sendJSON(res, 400, { error: { code: 'SLACK_NO_TOKEN', message: 'No Slack connection saved. Connect Slack first.' } });
         return true;
       }
 
@@ -599,6 +606,17 @@ export async function handleKB(req, res) {
         logger.error('slack_fetch_failed', { userId, channelId, reason: redactSecrets(e.message) });
         sendJSON(res, 502, { error: { code: 'SLACK_FETCH_FAILED', message: redactSecrets(e.message) } });
       }
+      return true;
+    }
+
+    if (req.method === 'GET' && url === '/kb/slack/conversations') {
+      const token = resolveSlackToken(userId);
+      if (!token) {
+        sendJSON(res, 400, { error: { code: 'SLACK_NO_TOKEN', message: 'No Slack connection saved. Connect Slack first.' } });
+        return true;
+      }
+      const channels = await listUserConversations({ token });
+      sendJSON(res, 200, { channels });
       return true;
     }
 

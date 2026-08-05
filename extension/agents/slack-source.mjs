@@ -32,6 +32,7 @@ const MAX_BACKOFF_MS = 30_000;
 const USER_CACHE_TTL_MS = 10 * 60 * 1000;
 const MAX_USER_LIST_PAGES = 50;      // bound users.list pagination on big workspaces
 const MAX_USER_INFO_FALLBACK = 25;   // bound per-fetch users.info fallback bursts
+const MAX_CONVERSATIONS_PAGES = 20;  // bound users.conversations pagination on big workspaces
 const userCacheByTeam = new Map();   // teamId → { at: epochMs, names: Map<id, name|null> }
 
 // Real backoff sleep, resolving after `ms` or rejecting if `signal` aborts.
@@ -123,7 +124,7 @@ function friendlyError(code) {
   switch (code) {
     case 'invalid_auth':
     case 'not_authed':
-    case 'token_revoked':     return 'Slack auth failed — check the bot token';
+    case 'token_revoked':     return 'Slack auth failed — check your Slack connection';
     case 'not_in_channel':
     case 'channel_not_found': return 'The bot is not in that channel (invite it, or check the channel id)';
     case 'ratelimited':       return 'Slack rate limit hit — try again shortly';
@@ -271,5 +272,33 @@ export async function fetchChannelHistory({ token, channelId, oldestTs, lookback
     const names = await resolveUserNames(finalSelected.map((m) => m.user), token, team, ctrl.signal);
     const messages = finalSelected.map((m) => normalizeMessage(m, channelId, names.get(m.user) ?? null));
     return { messages, skipped };
+  } finally { clearTimeout(killer); }
+}
+
+// List the channels/groups this token's user already belongs to — powers
+// the "Connect Slack" channel checklist so the user never has to look up or
+// type a channel ID. Bounded pagination; a failure partway through returns
+// whatever was gathered rather than throwing, so a transient Slack hiccup
+// never fails the whole OAuth connect (the callback that calls this is
+// fail-soft by design — see auth-routes.mjs).
+export async function listUserConversations({ token }) {
+  const ctrl = new AbortController();
+  const killer = setTimeout(() => ctrl.abort(), FETCH_DEADLINE_MS);
+  try {
+    const out = [];
+    let cursor = '';
+    for (let page = 0; page < MAX_CONVERSATIONS_PAGES; page++) {
+      const params = { types: 'public_channel,private_channel', exclude_archived: 'true', limit: '200' };
+      if (cursor) params.cursor = cursor;
+      let r;
+      try { r = await slackCall('users.conversations', token, params, ctrl.signal); }
+      catch { break; } // degrade to whatever was gathered so far
+      for (const c of r.channels || []) {
+        if (c?.id && c?.name) out.push({ id: c.id, name: c.name });
+      }
+      cursor = r.response_metadata?.next_cursor || '';
+      if (!cursor) break;
+    }
+    return out;
   } finally { clearTimeout(killer); }
 }

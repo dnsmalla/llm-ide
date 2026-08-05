@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stripMrkdwn, normalizeMessage, fetchChannelHistory, resolveOldestTs } from '../agents/slack-source.mjs';
+import { stripMrkdwn, normalizeMessage, fetchChannelHistory, resolveOldestTs, listUserConversations } from '../agents/slack-source.mjs';
 
 test('resolveOldestTs: high-water wins; else lookbackDays, clamped 1..60', () => {
   // Forward-only high-water always wins, verbatim.
@@ -63,5 +63,37 @@ test('fetchChannelHistory includes thread replies', async () => {
     assert.ok(texts.includes('parent'));
     const reply = messages.find((m) => m.text.includes('a reply'));
     assert.equal(reply.threadTs, '10.0');
+  } finally { global.fetch = orig; }
+});
+
+test('listUserConversations paginates and returns {id, name} pairs', async () => {
+  const orig = global.fetch;
+  global.fetch = async (urlStr) => {
+    const url = String(urlStr);
+    const json = (o) => ({ ok: true, json: async () => o });
+    if (url.includes('users.conversations')) {
+      if (url.includes('cursor=page2')) {
+        return json({ ok: true, channels: [{ id: 'C3', name: 'random' }], response_metadata: { next_cursor: '' } });
+      }
+      return json({ ok: true, channels: [{ id: 'C1', name: 'general' }, { id: 'C2', name: 'eng' }], response_metadata: { next_cursor: 'page2' } });
+    }
+    return json({ ok: false, error: 'unexpected' });
+  };
+  try {
+    const out = await listUserConversations({ token: 't' });
+    assert.deepEqual(out, [
+      { id: 'C1', name: 'general' },
+      { id: 'C2', name: 'eng' },
+      { id: 'C3', name: 'random' },
+    ]);
+  } finally { global.fetch = orig; }
+});
+
+test('listUserConversations degrades to an empty list on failure (never throws)', async () => {
+  const orig = global.fetch;
+  global.fetch = async () => ({ ok: false, status: 500, json: async () => ({}) });
+  try {
+    const out = await listUserConversations({ token: 't' });
+    assert.deepEqual(out, []);
   } finally { global.fetch = orig; }
 });
