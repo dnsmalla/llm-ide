@@ -236,6 +236,10 @@ extension CodeAssistantPanel {
                 role: .user,
                 content: "(executed create-issue → #\(issue.number) \(issue.webUrl))"
             ))
+            // Refresh recentIssues so the newly created issue's title
+            // resolves in follow-up comment/update sheets instead of
+            // showing blank until the next unrelated refresh.
+            await refreshRecentIssuesOnce()
             // Re-invoke the agent so it can acknowledge in natural language.
             await sendFollowup()
             return .success(issue.number)

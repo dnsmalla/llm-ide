@@ -2,34 +2,12 @@ import SwiftUI
 
 extension CodeAssistantPanel {
     // MARK: - Issue confirmation functions
-
-    func confirmCreateIssue(_ args: CreateIssueSheet.Args, target: IssueTarget) async {
-        let payload = RepoIssuePayload(
-            title: args.title,
-            body: args.description,
-            labels: args.labels
-        )
-        let client: RepoBackend = (target.kind == .gitlab)
-            ? RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
-            : RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
-
-        do {
-            let issue = try await client.createIssue(projectId: target.projectId, payload: payload)
-            // Success: acknowledge and clear the tool
-            pendingTool = nil
-            showingIssueSheet = false
-            // Add a synthetic turn so the agent can see the result and continue
-            history.append(.init(
-                role: .user,
-                content: "(executed create-issue → #\(issue.number): \(issue.webUrl))"
-            ))
-            await refreshRecentIssuesOnce()
-            await sendFollowup()
-        } catch {
-            // Error stays in the sheet so the user can retry or cancel
-            // The sheet itself surfaces `error.localizedDescription`
-        }
-    }
+    //
+    // NOTE: confirmCreateIssue lives in CodeAssistantPanel+Session.swift, not
+    // here — a duplicate Void-returning overload previously lived in this
+    // file, shadowed by the CreateIssueSheet.ConfirmResult-returning one at
+    // the actual call site, so it was permanently dead. Removed rather than
+    // fixed in place to avoid the "two copies, only one reachable" trap.
 
     func confirmCommentIssue(_ args: CommentIssueSheet.Args, target: IssueTarget) async -> CommentIssueSheet.ConfirmResult {
         let client: RepoBackend = (target.kind == .gitlab)
