@@ -7,8 +7,10 @@ struct HeaderAccountMenu: View {
     @Environment(ShellState.self) private var shell
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var theme: ThemeStore
+    @EnvironmentObject var config: AppConfig
     @State private var showingPermissions = false
     @State private var showingHelp = false
+    @State private var showingSignOutConfirm = false
 
     var body: some View {
         Group {
@@ -30,7 +32,7 @@ struct HeaderAccountMenu: View {
                     }
                     Divider()
                     Button("Sign out", role: .destructive) {
-                        Task { @MainActor in session.clear() }
+                        showingSignOutConfirm = true
                     }
                 } label: {
                     Image(systemName: "person.crop.circle").font(.system(size: 16))
@@ -38,6 +40,27 @@ struct HeaderAccountMenu: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .help(user.email)
+                .confirmationDialog(
+                    "Sign out of LLM-IDE?",
+                    isPresented: $showingSignOutConfirm,
+                    titleVisibility: .visible
+                ) {
+                    Button("Sign out", role: .destructive) {
+                        Task { @MainActor in
+                            // Mirrors AccountSettingsSection's sign-out —
+                            // clearing only the server session left the
+                            // GitLab PAT, saved projects, and cached chat
+                            // history behind on disk.
+                            session.clear()
+                            KeychainStore.logout()
+                            config.gitLabToken = ""
+                            ChatSessionStore.clear()
+                        }
+                    }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("This will clear your saved tokens (including your GitLab Personal Access Token) and your saved GitLab projects from this Mac.")
+                }
             }
         }
         .sheet(isPresented: $showingPermissions) {
