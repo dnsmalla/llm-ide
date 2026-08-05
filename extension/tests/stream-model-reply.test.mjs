@@ -61,3 +61,35 @@ test('streamModelReply works with no onChunk callback at all (still returns the 
   });
   assert.equal(result, 'text');
 });
+
+test('streamModelReply does NOT fall back to buffered (and does not double-deliver) when the CLI stream fails after already delivering partial chunks', async () => {
+  const chunks = [];
+  let runBufferedCalled = false;
+  await assert.rejects(
+    streamModelReply('hi', {
+      onChunk: (t) => chunks.push(t),
+      provider: 'anthropic',
+      _testSpawnCliStream: async (_provider, _prompt, opts) => {
+        opts.onChunk('partial chunk 1');
+        opts.onChunk('partial chunk 2');
+        throw new Error('cli crashed mid-stream');
+      },
+      _testRunClaude: async () => { runBufferedCalled = true; return 'this must never be delivered'; },
+    }),
+    /cli crashed mid-stream/,
+  );
+  assert.deepEqual(chunks, ['partial chunk 1', 'partial chunk 2'], 'only the partial chunks that arrived before the crash should have been delivered — nothing duplicated on top');
+  assert.equal(runBufferedCalled, false, 'buffered fallback must not run once partial content has already been shown to the user');
+});
+
+test('streamModelReply still falls back to buffered when the CLI stream fails cleanly with zero chunks delivered', async () => {
+  const chunks = [];
+  const result = await streamModelReply('hi', {
+    onChunk: (t) => chunks.push(t),
+    provider: 'anthropic',
+    _testSpawnCliStream: async () => { throw new Error('cli exploded before any output'); },
+    _testRunClaude: async () => 'buffered fallback text',
+  });
+  assert.deepEqual(chunks, ['buffered fallback text']);
+  assert.equal(result, 'buffered fallback text');
+});

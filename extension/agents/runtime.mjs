@@ -586,13 +586,29 @@ export async function streamModelReply(prompt, {
   }
 
   if (provider === 'anthropic' || provider === 'openai' || provider === 'google') {
+    let deliveredAnyChunk = false;
+    const wrappedOnChunk = typeof onChunk === 'function'
+      ? (text) => { deliveredAnyChunk = true; onChunk(text); }
+      : undefined;
     try {
-      const env = minimalCliEnv(provider === 'anthropic' && apiKey ? { ANTHROPIC_API_KEY: apiKey } : {});
-      const { stdoutText } = await doSpawnCliStream(provider, prompt, { env, signal, onChunk });
+      // apiKey is never truthy here for the anthropic case — if it were, the
+      // direct-API branch above would already have returned. No provider's
+      // CLI needs ANTHROPIC_API_KEY injected via this path.
+      const { stdoutText } = await doSpawnCliStream(provider, prompt, { env: minimalCliEnv(), signal, onChunk: wrappedOnChunk });
       return stdoutText;
     } catch (err) {
-      log.warn('streamModelReply CLI stream failed, falling back to buffered', { provider, error: err?.message });
-      // Fall through to the buffered path below.
+      if (deliveredAnyChunk) {
+        // Some of the reply already reached the caller before the stream
+        // failed — falling back to buffered would deliver the WHOLE text
+        // again on top of those partial chunks (this codebase's chunk
+        // consumers only ever append, never replace), producing duplicated,
+        // garbled output. Worse than doing nothing, so propagate the error
+        // instead of masking it with a "fallback."
+        throw err;
+      }
+      log.warn('streamModelReply CLI stream failed before delivering anything, falling back to buffered', { provider, error: err?.message });
+      // Fall through to the buffered path below — safe here because nothing
+      // has been shown to the user yet.
     }
   }
 
