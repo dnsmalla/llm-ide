@@ -29,6 +29,7 @@ struct SlackSourceSheet: View {
     @State private var availableChannels: [LlmIdeAPIClient.SlackConversation] = []
     @State private var channelsIncomplete = false
     @State private var channelsError: String?
+    @State private var hasLoadedChannels = false
     @State private var loadingChannels = false
     @State private var connecting = false
     @State private var connectError: String?
@@ -177,6 +178,13 @@ struct SlackSourceSheet: View {
 
     @ViewBuilder
     private var channelChecklist: some View {
+        // Channels the user already had selected (e.g. from before this
+        // fetch, or picked via the manual/legacy path) that the current
+        // fetch didn't return — a narrower-scoped legacy bot token can't
+        // always rediscover every channel, so these stay visible and
+        // removable instead of silently vanishing from the list.
+        let orphanedIds = selectedChannelIds.subtracting(Set(availableChannels.map(\.id))).sorted()
+
         HStack {
             Text("Channels")
                 .font(Typography.body)
@@ -197,12 +205,18 @@ struct SlackSourceSheet: View {
             .font(Typography.caption)
             .disabled(loadingChannels)
         }
+        // Order matters: an incomplete fetch is reported before an "empty"
+        // reading, and "genuinely zero channels" (a successful fetch that
+        // found none) is distinguished from "never managed to load" —
+        // otherwise a user with zero channels sees a false "couldn't load".
         if let err = channelsError {
             SettingsHint("Couldn't refresh channels: \(err)")
-        } else if availableChannels.isEmpty && !loadingChannels {
-            SettingsHint("Couldn't load channels — Click Refresh channels to try again.")
         } else if channelsIncomplete {
             SettingsHint("Showing \(availableChannels.count) channels — the list may be incomplete (large workspace or Slack rate limit). Click Refresh channels to try again.")
+        } else if availableChannels.isEmpty && orphanedIds.isEmpty && !loadingChannels {
+            SettingsHint(hasLoadedChannels
+                ? "You don't belong to any channels in this workspace yet."
+                : "Couldn't load channels — Click Refresh channels to try again.")
         }
         ScrollView {
             VStack(alignment: .leading, spacing: 4) {
@@ -214,6 +228,17 @@ struct SlackSourceSheet: View {
                         }
                     ))
                     .toggleStyle(.checkbox)
+                }
+                ForEach(orphanedIds, id: \.self) { channelId in
+                    Toggle(channelId, isOn: Binding(
+                        get: { selectedChannelIds.contains(channelId) },
+                        set: { on in
+                            if on { selectedChannelIds.insert(channelId) } else { selectedChannelIds.remove(channelId) }
+                        }
+                    ))
+                    .toggleStyle(.checkbox)
+                    .foregroundStyle(theme.current.textMuted)
+                    .help("Previously selected — not in the current channel list (may need a broader Slack permission).")
                 }
             }
         }
@@ -290,6 +315,7 @@ struct SlackSourceSheet: View {
             let result = try await api.fetchSlackConversations()
             availableChannels = result.channels
             channelsIncomplete = !result.complete
+            hasLoadedChannels = true
         } catch {
             channelsError = error.localizedDescription
         }

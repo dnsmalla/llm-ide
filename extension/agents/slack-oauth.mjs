@@ -44,7 +44,11 @@ export async function exchangeCode({ clientId, clientSecret, code, redirectUri }
 // In-memory OAuth state store (single-node; TTL-swept). Mirrors
 // agents/google-oauth.mjs's store; kept as its own module (not shared) so
 // each provider's state shape stays isolated — this one carries no PKCE
-// verifier and completes with team/channels instead of email.
+// verifier and completes with teamName instead of email. `channels` is
+// passed through generically (takeStatus below) but the callback in
+// auth-routes.mjs no longer populates it — channel discovery moved to a
+// standalone GET /kb/slack/conversations call so the OAuth callback never
+// blocks on a Slack rate limit.
 const _states = new Map();
 function sweep() {
   const now = Date.now();
