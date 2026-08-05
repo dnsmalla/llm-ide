@@ -119,6 +119,12 @@ final class SourceControlService {
     /// Stage everything (`git add -A`), then refresh. Cursor-style "Stage All".
     func stageAll(root: URL) async { await run(["add", "-A"], root) }
 
+    /// Unstage everything (`git reset`, a mixed reset to HEAD — working tree
+    /// untouched), then refresh. Cursor-style "Unstage All". `git reset` on an
+    /// unborn repo (no commits yet) resets the index to the empty tree, which
+    /// is exactly "unstage all" for freshly-added files.
+    func unstageAll(root: URL) async { await run(["reset"], root) }
+
     /// Discard working-tree changes. Untracked files are deleted; tracked files
     /// are restored. Caller must confirm — this is destructive.
     func discard(root: URL, file: FileChange) async {
