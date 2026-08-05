@@ -517,10 +517,18 @@ extension CodeAssistantPanel {
         busy = false
         queued.removeAll()
         expandedTurns.removeAll()
-        revealTask?.cancel()
-        revealTask = nil
-        revealingTurnID = nil
-        revealedCount = 0
+        // runTask?.cancel() above is fire-and-forget — the actual
+        // CancellationError cleanup inside runTurn's/sendFollowup's catch
+        // block runs asynchronously and is NOT guaranteed to complete before
+        // callers of this function persist or swap `history` right after it
+        // returns (session switch/create/delete). Finalize any in-flight
+        // streaming turn synchronously here instead, so the outgoing
+        // session's placeholder is never left unfinished when persisted.
+        if let streamingID = revealingTurnID {
+            finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, stopped: true)
+        } else {
+            revealedCount = 0
+        }
     }
 
     /// Begin a new streaming assistant turn: appends a placeholder turn to
@@ -663,8 +671,11 @@ extension CodeAssistantPanel {
             let title = sessions.first(where: { $0.id.uuidString == currentSessionIDString })?.title ?? "New chat"
             if title == "New chat" || title.isEmpty { return }
         }
-        persistCurrentChat(history: Array(history.suffix(50)))
+        // Finalize any in-flight stream BEFORE persisting — otherwise an
+        // unfinished placeholder turn could be written to disk (see
+        // resetActiveTurnState's doc comment).
         resetActiveTurnState()
+        persistCurrentChat(history: Array(history.suffix(50)))
         mintFreshSession()
     }
 
@@ -672,8 +683,11 @@ extension CodeAssistantPanel {
     func switchSession(to id: UUID) {
         guard id.uuidString != currentSessionIDString else { return }
         guard let session = ChatSessionStore.load(id: id), session.scope == scope else { return }
-        persistCurrentChat(history: Array(history.suffix(50)))
+        // Finalize any in-flight stream BEFORE persisting — otherwise an
+        // unfinished placeholder turn could be written to disk (see
+        // resetActiveTurnState's doc comment).
         resetActiveTurnState()
+        persistCurrentChat(history: Array(history.suffix(50)))
         currentSessionIDString = id.uuidString
         rememberCurrentPointer()
         resetTransientSessionState()

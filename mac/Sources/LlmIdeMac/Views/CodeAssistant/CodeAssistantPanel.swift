@@ -163,7 +163,6 @@ struct CodeAssistantPanel: View {
     /// token streaming. nil once nothing is revealing.
     @State var revealingTurnID: UUID?
     @State var revealedCount: Int = 0
-    @State var revealTask: Task<Void, Never>?
     /// Filter text for the session-picker popover. Reset whenever the
     /// popover closes so it never opens pre-filtered from a prior search.
     @State var sessionSearchQuery: String = ""
