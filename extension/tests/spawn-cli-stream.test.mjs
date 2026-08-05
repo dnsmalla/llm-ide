@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseClaudeStreamJSON } from '../agents/providers.mjs';
+import { parseClaudeStreamJSON, spawnCliStream } from '../agents/providers.mjs';
 
 test('parseClaudeStreamJSON extracts text deltas from real Claude CLI NDJSON output', () => {
   const lines = [
@@ -43,4 +43,52 @@ test('parseClaudeStreamJSON ignores non-delta event types without throwing', () 
 test('parseClaudeStreamJSON surfaces an error result', () => {
   const parsed = parseClaudeStreamJSON('{"type":"result","is_error":true,"result":"","subtype":"error_max_turns"}');
   assert.equal(parsed.isError, true);
+});
+
+test('spawnCliStream delivers incremental chunks for a provider with a stream parser', async () => {
+  // A fake "cli" that just echoes 3 pre-baked NDJSON lines to stdout, mimicking
+  // claude --output-format stream-json --include-partial-messages.
+  const chunks = [];
+  const result = await spawnCliStream('anthropic', 'ignored prompt', {
+    onChunk: (text) => chunks.push(text),
+    // Test seam: override the argv so we run a real, fast, deterministic child
+    // process (`node -e`) instead of the real `claude` binary.
+    binOverride: process.execPath,
+    argsOverride: ['-e', `
+      process.stdout.write('{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hel"}}}\\n');
+      process.stdout.write('{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"lo"}}}\\n');
+      process.stdout.write('{"type":"result","result":"Hello","is_error":false}\\n');
+    `],
+  });
+  assert.deepEqual(chunks, ['Hel', 'lo']);
+  assert.equal(result.stdoutText, 'Hello');
+});
+
+test('spawnCliStream falls back to one buffered onChunk call for a provider with no parser', async () => {
+  const chunks = [];
+  const result = await spawnCliStream('unknown-provider-xyz', 'ignored', {
+    onChunk: (text) => chunks.push(text),
+    binOverride: process.execPath,
+    argsOverride: ['-e', `process.stdout.write('whole output, no streaming')`],
+  });
+  assert.deepEqual(chunks, ['whole output, no streaming']);
+  assert.equal(result.stdoutText, 'whole output, no streaming');
+});
+
+test('spawnCliStream kills the child process when the signal aborts mid-stream', async () => {
+  const ac = new AbortController();
+  const chunks = [];
+  const runPromise = spawnCliStream('anthropic', 'ignored', {
+    onChunk: (text) => chunks.push(text),
+    signal: ac.signal,
+    binOverride: process.execPath,
+    argsOverride: ['-e', `
+      process.stdout.write('{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"partial"}}}\\n');
+      setTimeout(() => {}, 5000); // hang — the test proves this never completes naturally
+    `],
+  });
+  await new Promise((r) => setTimeout(r, 200)); // let the first chunk arrive
+  ac.abort();
+  await assert.rejects(runPromise, /aborted/i);
+  assert.deepEqual(chunks, ['partial']);
 });

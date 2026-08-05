@@ -8,7 +8,8 @@
 // the caller can fall back to that provider's locally-logged-in CLI
 // ("subscription mode" — same auth the claude/codex/gemini CLIs use).
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { lookup } from 'node:dns/promises';
 import { getSecret } from '../server/vault.mjs';
 import { getCustomProvider } from '../server/custom-providers.mjs';
@@ -609,6 +610,132 @@ export function spawnCli(provider, prompt, { env, timeoutMs = CLI_TIMEOUT_MS, si
       // CLI block ~3s waiting for piped input (and warn on stderr); close it so
       // the subprocess proceeds immediately.
       child.stdin?.end();
+    });
+  });
+}
+
+// Per-provider NDJSON line parser: (line) => { delta?, result?, isError? }.
+// A provider absent from this map has no incremental format we understand —
+// spawnCliStream falls back to buffering its whole output as one onChunk call.
+const STREAM_PARSERS = {
+  anthropic: parseClaudeStreamJSON,
+};
+
+// Providers whose CLI needs extra args to enable streaming output, layered on
+// top of their normal single-shot argv from CLI_ARG_BUILDERS.
+const STREAM_ARG_EXTRAS = {
+  anthropic: ['--output-format', 'stream-json', '--include-partial-messages', '--verbose'],
+};
+
+/**
+ * Streaming counterpart to `spawnCli`. Spawns the provider's CLI with
+ * `child_process.spawn` (not `execFile`) and reads stdout incrementally,
+ * calling `onChunk(text)` for each delta as it arrives. Providers without a
+ * `STREAM_PARSERS` entry (or a caller-supplied `argsOverride`/`binOverride`
+ * that bypasses the provider's own streaming flags) still work correctly —
+ * the whole output is delivered as a single `onChunk` call once the process
+ * exits, so callers never need a special case for "does this provider
+ * actually stream." Uses the same concurrency gate (`cliSemaphore`) as
+ * `spawnCli` so streaming spawns count against the same cap.
+ *
+ * Returns `{ stdoutText, stderr, bin }` — `stdoutText` is the FULL
+ * concatenated text (every delta joined, or the parser's own final `result`
+ * when present and non-empty), so callers get the same "complete text at the
+ * end" guarantee `spawnCli`/`runClaude` already provide.
+ *
+ * `binOverride`/`argsOverride` are test seams only (real callers never pass
+ * them) — they let tests run a fast, deterministic `node -e "..."` child
+ * instead of shelling out to the real provider CLI.
+ */
+export function spawnCliStream(provider, prompt, {
+  env, timeoutMs = CLI_TIMEOUT_MS, signal, onChunk,
+  binOverride, argsOverride,
+} = {}) {
+  const inv = binOverride
+    ? { bin: binOverride, args: argsOverride }
+    : cliInvocation(provider, prompt);
+  if (!inv) return Promise.reject(new Error(`spawnCliStream: unknown provider '${provider}'`));
+  const parser = STREAM_PARSERS[provider];
+  const args = binOverride
+    ? argsOverride
+    : [...inv.args, ...(STREAM_ARG_EXTRAS[provider] || [])];
+
+  return cliSemaphore.run(() => {
+    if (signal?.aborted) {
+      return Promise.reject(Object.assign(new Error('spawnCliStream: aborted'), { name: 'AbortError', bin: inv.bin }));
+    }
+    return new Promise((resolve, reject) => {
+      const child = spawn(inv.bin, args, { env: env || minimalCliEnv(), signal });
+      child.stdin?.end();
+
+      let stdoutText = '';
+      let parsedResult = null;
+      let stderrBuf = '';
+      let settled = false;
+
+      const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
+      rl.on('line', (line) => {
+        if (!parser) {
+          // No parser for this provider — accumulate raw stdout, deliver as
+          // one chunk when the process exits (see 'close' below).
+          stdoutText += (stdoutText ? '\n' : '') + line;
+          return;
+        }
+        const parsed = parser(line);
+        if (typeof parsed.delta === 'string') {
+          stdoutText += parsed.delta;
+          if (typeof onChunk === 'function') onChunk(parsed.delta);
+        }
+        if (typeof parsed.result === 'string') {
+          parsedResult = parsed;
+        }
+      });
+
+      child.stderr?.on('data', (buf) => { stderrBuf += buf.toString('utf8'); });
+
+      const timer = timeoutMs > 0 ? setTimeout(() => {
+        if (!settled) child.kill();
+      }, timeoutMs) : null;
+
+      const onAbort = () => { if (!settled) child.kill(); };
+      signal?.addEventListener('abort', onAbort, { once: true });
+
+      child.on('error', (err) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        err.stderr = stderrBuf;
+        err.bin = inv.bin;
+        reject(err);
+      });
+
+      child.on('close', (code) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        if (signal?.aborted) {
+          reject(Object.assign(new Error('spawnCliStream: aborted'), { name: 'AbortError', bin: inv.bin }));
+          return;
+        }
+        if (parser && !stdoutText && !parsedResult) {
+          if (code !== 0) {
+            reject(Object.assign(new Error(`${inv.bin} exited ${code}`), { stderr: stderrBuf, bin: inv.bin }));
+            return;
+          }
+        }
+        if (parser && !onChunk && parsedResult?.result) {
+          stdoutText = parsedResult.result;
+        } else if (!parser && typeof onChunk === 'function' && stdoutText) {
+          onChunk(stdoutText);
+        }
+        if (parsedResult?.isError) {
+          reject(Object.assign(new Error(`${inv.bin} reported an error result`), { stderr: stderrBuf, bin: inv.bin }));
+          return;
+        }
+        resolve({ stdoutText, stderr: stderrBuf, bin: inv.bin });
+      });
     });
   });
 }
