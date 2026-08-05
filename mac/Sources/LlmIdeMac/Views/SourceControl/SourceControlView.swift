@@ -306,7 +306,7 @@ struct SourceControlView: View {
             if mode == .changes {
                 ScrollView {
                     errorBanner()
-                    fileGroup("Staged Changes", scm.stagedFiles, root)
+                    fileGroup("Staged Changes", scm.stagedFiles, root, showUnstageAll: true)
                     fileGroup("Changes", scm.unstagedFiles, root, showStageAll: true)
                 }
                 Divider().background(theme.current.border)
@@ -496,7 +496,8 @@ struct SourceControlView: View {
     }
 
     @ViewBuilder private func fileGroup(_ title: String, _ files: [FileChange], _ root: URL,
-                                        showStageAll: Bool = false) -> some View {
+                                        showStageAll: Bool = false,
+                                        showUnstageAll: Bool = false) -> some View {
         if !files.isEmpty {
             HStack(spacing: Spacing.xs) {
                 Text("\(title) (\(files.count))")
@@ -509,6 +510,14 @@ struct SourceControlView: View {
                     .buttonStyle(.plain)
                     .disabled(scm.isBusy)
                     .help("Stage All")
+                }
+                if showUnstageAll {
+                    Button { Task { await scm.unstageAll(root: root) } } label: {
+                        Image(systemName: "minus")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(scm.isBusy)
+                    .help("Unstage All")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
