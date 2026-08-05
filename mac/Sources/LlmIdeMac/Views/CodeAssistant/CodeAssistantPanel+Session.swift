@@ -193,6 +193,15 @@ extension CodeAssistantPanel {
                 finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, stopped: true)
             }
         } catch {
+            // Same cleanup as the two cancellation catches above — a
+            // non-cancellation failure (network drop, decode error, etc.)
+            // must not leave an orphaned empty/partial placeholder turn in
+            // `history` forever. The separate `self.error` banner already
+            // tells the user what went wrong; "(stopped)" here just means
+            // "this reply did not complete," which is honest either way.
+            if let streamingID = revealingTurnID {
+                finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, stopped: true)
+            }
             self.error = error.localizedDescription
         }
         // Drain the next queued message (FIFO) as a fresh, un-cancelled turn.
@@ -423,6 +432,13 @@ extension CodeAssistantPanel {
                 stopped: false,
             )
         } catch {
+            // Same cleanup as runTurn's generic catch — beginStreamingTurn()
+            // already inserted an empty placeholder turn before this
+            // round-trip started, and a non-cancellation failure must not
+            // leave it orphaned in `history` forever.
+            if let streamingID = revealingTurnID {
+                finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, stopped: true)
+            }
             self.error = error.localizedDescription
         }
         // Chain the NEXT git op hands-free when allowed — this is what lets
