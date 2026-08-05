@@ -12,7 +12,14 @@ import Foundation
 ///             hash vs. notes already generated (`existingSourceHashes`).
 @MainActor
 final class SourceConnector: InputSource {
-    let manifest: SourceConnectorManifest
+    // `manifest` and the properties derived from it below are `nonisolated`
+    // — `SourceConnectorManifest` is an immutable, Sendable value type, and
+    // `InputSource`'s metadata requirements (`id`, `displayName`, ...) are
+    // themselves nonisolated. Without this, the class-level `@MainActor`
+    // makes every member isolated by default, so the conformance would
+    // cross into main-actor-isolated code and fail under Swift 6's strict
+    // concurrency checking.
+    nonisolated let manifest: SourceConnectorManifest
     private let adapterFactory: @MainActor () -> any SourceConnectorAdapter
 
     init(manifest: SourceConnectorManifest,
@@ -21,12 +28,12 @@ final class SourceConnector: InputSource {
         self.adapterFactory = adapterFactory
     }
 
-    var id: String { manifest.id }
-    var displayName: String { manifest.displayName }
-    var icon: String { manifest.icon }
-    var emptyText: String { manifest.emptyText }
-    var platforms: [String] { manifest.platforms }
-    var mode: SourceMode { manifest.mode == .liveCapture ? .liveCapture : .fetch }
+    nonisolated var id: String { manifest.id }
+    nonisolated var displayName: String { manifest.displayName }
+    nonisolated var icon: String { manifest.icon }
+    nonisolated var emptyText: String { manifest.emptyText }
+    nonisolated var platforms: [String] { manifest.platforms }
+    nonisolated var mode: SourceMode { manifest.mode == .liveCapture ? .liveCapture : .fetch }
 
     /// Eagerly create the source inbox folder and the llm-doc notes folder so
     /// both exist from the moment a connector is connected (fixes the "no
