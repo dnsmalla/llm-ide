@@ -32,10 +32,13 @@ export async function exchangeCode({ clientId, clientSecret, code, redirectUri }
     }).toString(),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.ok || !data.authed_user?.access_token) {
+  if (!res.ok || !data.ok) {
     throw new Error(`Slack token exchange failed: ${data.error || res.status}`);
   }
-  return { accessToken: data.authed_user.access_token, team: data.team?.name || '' };
+  if (!data.authed_user?.access_token) {
+    throw new Error('Slack token exchange returned no user token — is the Slack app requesting user_scope (not bot scope)?');
+  }
+  return { accessToken: data.authed_user.access_token, teamName: data.team?.name || '' };
 }
 
 // In-memory OAuth state store (single-node; TTL-swept). Mirrors
@@ -56,7 +59,7 @@ export function takeStatus(state) {
   if (!v) return { status: 'unknown' };
   if (v.status !== 'pending') _states.delete(state);
   const out = { status: v.status };
-  if (v.team !== undefined) out.team = v.team;
+  if (v.teamName !== undefined) out.teamName = v.teamName;
   if (v.channels !== undefined) out.channels = v.channels;
   if (v.message !== undefined) out.message = v.message;
   return out;

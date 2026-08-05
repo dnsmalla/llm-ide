@@ -27,7 +27,7 @@ test('exchangeCode posts and parses the user token + team name', async () => {
   };
   try {
     const t = await exchangeCode({ clientId: 'c', clientSecret: 's', code: 'CODE', redirectUri: 'http://127.0.0.1:3456/auth/slack/callback' });
-    assert.deepEqual(t, { accessToken: 'xoxp-abc', team: 'Acme' });
+    assert.deepEqual(t, { accessToken: 'xoxp-abc', teamName: 'Acme' });
   } finally { global.fetch = orig; }
 });
 
@@ -53,11 +53,22 @@ test('exchangeCode throws when the HTTP request itself fails', async () => {
   } finally { global.fetch = orig; }
 });
 
-test('state store: put/get/complete/take with single-use status, carrying team + channels', () => {
+test('exchangeCode throws when Slack returns ok:true but no user token (bot scope misconfiguration)', async () => {
+  const orig = global.fetch;
+  global.fetch = async () => ({ ok: true, json: async () => ({ ok: true, team: { name: 'Acme' } }) });
+  try {
+    await assert.rejects(
+      () => exchangeCode({ clientId: 'c', clientSecret: 's', code: 'x', redirectUri: 'r' }),
+      /user_scope|no user token/i,
+    );
+  } finally { global.fetch = orig; }
+});
+
+test('state store: put/get/complete/take with single-use status, carrying teamName + channels', () => {
   putState('S1', { userId: 'u1' });
   assert.equal(getState('S1').userId, 'u1');
-  completeState('S1', { status: 'complete', team: 'Acme', channels: [{ id: 'C1', name: 'general' }] });
-  assert.deepEqual(takeStatus('S1'), { status: 'complete', team: 'Acme', channels: [{ id: 'C1', name: 'general' }] });
+  completeState('S1', { status: 'complete', teamName: 'Acme', channels: [{ id: 'C1', name: 'general' }] });
+  assert.deepEqual(takeStatus('S1'), { status: 'complete', teamName: 'Acme', channels: [{ id: 'C1', name: 'general' }] });
   // status is single-read: after take it's gone (or pending→unknown)
   assert.equal(getState('S1'), undefined);
 });
