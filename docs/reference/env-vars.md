@@ -54,6 +54,8 @@ Strongly recommended for any deployment that's not your laptop:
 | `LLMIDE_CORS_ORIGINS` | Comma-separated additions to the always-accepted `chrome-extension://*` + `localhost` + `127.0.0.1` allowlist. Use to whitelist a specific browser extension ID in production. |
 | `LLMIDE_ACCESS_TTL_SEC` | Access token lifetime. Shorter = better, but more refresh churn. Default `900` (15 min). |
 | `LLMIDE_REFRESH_TTL_SEC` | Refresh token lifetime. Determines "stay signed in for N days". Default `2592000` (30 days). |
+| `LLMIDE_SLACK_CLIENT_ID` | Client ID of LLM-IDE's own hosted Slack App (one app for the whole install, not per-user). Required for the "Connect Slack" one-click OAuth flow; `/auth/slack/start` returns `CONFIG_MISSING` when unset. Register at [api.slack.com/apps](https://api.slack.com/apps), redirect URL `http://127.0.0.1:<LLMIDE_PORT>/auth/slack/callback`. |
+| `LLMIDE_SLACK_CLIENT_SECRET` | Client secret for the same hosted Slack App. Never per-user, never stored in the vault — treat like `LLMIDE_JWT_SECRET`. |
 
 ## Tuning knobs
 
@@ -94,6 +96,8 @@ python3 docs/_scripts/extract_env_vars.py
 | `LLMIDE_LOG_LEVEL` | str | `info` in prod / `debug` in dev |
 | `LLMIDE_PORT` | int | `3456` |
 | `LLMIDE_REFRESH_TTL_SEC` | int | `2592000` (30 days) |
+| `LLMIDE_SLACK_CLIENT_ID` | str | _(unset)_ |
+| `LLMIDE_SLACK_CLIENT_SECRET` | str | _(unset)_ |
 | `LLMIDE_TRUST_PROXY` | bool | `false` |
 | `LLMIDE_VAULT_KEY` | str | _(required in prod)_ |
 | `NODE_ENV` | str | `development` |

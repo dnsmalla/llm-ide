@@ -14,6 +14,8 @@
 //   GET  /auth/well-known   — server capabilities + auth metadata
 //   GET  /auth/google/callback — Google's OAuth redirect (no bearer token;
 //                                ownership is enforced via the state token)
+//   GET  /auth/slack/callback  — Slack's OAuth redirect (no bearer token;
+//                                ownership is enforced via the state token)
 //
 // Anything else returns 401 with a stable `AUTH_REQUIRED` error code.
 
