@@ -1570,6 +1570,17 @@ final class AutoCodeUpdateService: ObservableObject {
             return resolveLinkedRepo(active, linked: linked)
         }
 
+        // Legacy fallback: the active CLONED saved repo, GitLab first then
+        // GitHub. Restores behavior lost when this method was extracted
+        // during the utilities-centralization pass (the docstring above
+        // still describes this step; the code silently stopped doing it) —
+        // without it, a project with no linkedRepo reports "no usable
+        // backend" even when an active cloned repo exists.
+        let guardedGitLab = RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
+        if let resolved = resolveWithBackend(guardedGitLab) { return resolved }
+        let guardedGitHub = RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
+        if let resolved = resolveWithBackend(guardedGitHub) { return resolved }
+
         let d = resolveDiagnosis()
         lastResolveDiagnosis = d
         log.warning("auto_task_resolve_failed \(d, privacy: .public)")
