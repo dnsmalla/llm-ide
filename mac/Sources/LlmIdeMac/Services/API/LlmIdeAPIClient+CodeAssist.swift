@@ -16,7 +16,7 @@ extension LlmIdeAPIClient {
     struct CodeAssistTurn: Identifiable, Encodable, Decodable, Equatable {
         let id: UUID
         let role: CodeAssistRole
-        let content: String
+        var content: String
         init(role: CodeAssistRole, content: String) {
             self.id = UUID(); self.role = role; self.content = content
         }
@@ -112,9 +112,10 @@ extension LlmIdeAPIClient {
 
     // One SSE event from the streaming /code-assist endpoint.
     private struct CodeAssistSSEEvent: Decodable {
-        let type: String                 // "progress" | "done" | "error"
+        let type: String                 // "progress" | "chunk" | "done" | "error"
         let phase: String?               // progress: "thinking" | "tool" | "writing"
         let tool: String?                // progress (phase == "tool"): tool name
+        let text: String?                // chunk: a text delta
         let reply: String?               // done
         let pendingTool: PendingTool?    // done
         let usage: CodeAssistResponse.Usage?  // done
@@ -142,11 +143,11 @@ extension LlmIdeAPIClient {
 
     /// Streaming variant of `codeAssist`. POSTs the same body but with
     /// `Accept: text/event-stream`; the server streams live agent progress
-    /// (thinking / tool / writing) which we surface via `onProgress`, then the
-    /// final reply lands as one `done` event. The Mac uses the agent path, so
-    /// this replaces a 60–90s frozen spinner with a live status line. The
-    /// reply itself still arrives whole (token-level streaming of the agent
-    /// synthesis turn is a separate follow-up).
+    /// (thinking / tool / writing) via `onProgress`, and the final synthesis
+    /// turn's text arrives incrementally via `onChunk` as `chunk` events, with
+    /// the complete text also captured in the terminal `done` event as a
+    /// consistency fallback (used verbatim if no chunk events ever arrived —
+    /// e.g. an older server, or a provider with no streaming adapter yet).
     func codeAssistStream(
         message: String,
         language: String?,
@@ -158,6 +159,7 @@ extension LlmIdeAPIClient {
         skills: [String] = [],
         agentContext: AgentContext? = nil,
         onProgress: @escaping @MainActor (String) -> Void,
+        onChunk: @escaping @MainActor (String) -> Void,
     ) async throws -> CodeAssistResponse {
         guard let url = URL(string: baseURL + "/code-assist") else { throw APIError.invalidURL }
         var req = URLRequest(url: url)
@@ -198,6 +200,11 @@ extension LlmIdeAPIClient {
                 sawProgress = true
                 let label = Self.progressLabel(phase: evt.phase, tool: evt.tool)
                 await onProgress(label)
+            case "chunk":
+                if let text = evt.text, !text.isEmpty {
+                    sawProgress = true  // a chunk is proof of life, same as a progress event
+                    await onChunk(text)
+                }
             case "done":
                 reply = evt.reply ?? ""
                 pendingTool = evt.pendingTool
