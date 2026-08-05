@@ -232,6 +232,16 @@ async function readError(res, key) {
 // OpenAI Chat Completions. Newer reasoning models reject `temperature` and
 // use `max_completion_tokens`, so we send only the portable fields.
 export async function callOpenAI({ apiKey, model, prompt, messages, maxTokens, signal, baseUrl, tools }) {
+  // An empty/absent model would be dropped by JSON.stringify below, so the
+  // request body reaches the provider with NO `model` field — which surfaces
+  // as an opaque, provider-specific error (GLM: HTTP 400 code 1211 "Unknown
+  // Model"; OpenAI: "you must provide a model parameter") instead of a clear,
+  // actionable message. This is the single network chokepoint for every
+  // OpenAI-compatible call (native tool loop + completeViaApi), so guarding
+  // here turns the whole class into a loud, fixable failure.
+  if (typeof model !== 'string' || !model.trim()) {
+    throw new Error('No model id provided for this provider. Select a model in the Code Assistant (or Settings → Model Providers) before sending.');
+  }
   const base = (baseUrl || DEFAULT_OPENAI_BASE).replace(/\/+$/, '');
   // `messages` (full array, for the native tool-calling loop) wins over `prompt`
   // (single user string, for the legacy/fence path).

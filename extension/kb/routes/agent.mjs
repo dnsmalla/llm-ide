@@ -231,6 +231,16 @@ export async function handleAgentRoutes(req, res, ctx) {
     }
     prompt += `User: ${message || '(see attached image)'}\nAssistant:`;
 
+    // Forward the caller's selected provider/model so a non-Anthropic
+    // provider routes through completeViaApi (or its CLI) instead of
+    // always falling to the Anthropic→claude-CLI path (which fails with
+    // "claude is not logged in" when the operator has no CLI auth). Mac
+    // llm-chat derives these from AppConfig the same way explore_chat
+    // does for /code-assist. Omitted/empty → undefined → Anthropic (the
+    // historical default), so old callers are unaffected.
+    const provider = typeof body.provider === 'string' && body.provider.trim() ? body.provider : undefined;
+    const model = typeof body.model === 'string' && body.model.trim() ? body.model : undefined;
+
     // Persist the user turn before Claude runs so Mac llm-chat and iPhone
     // history sync while the reply is still in flight.
     try {
@@ -240,7 +250,7 @@ export async function handleAgentRoutes(req, res, ctx) {
     }
 
     try {
-      const result = await runClaude(prompt, { userId, images });
+      const result = await runClaude(prompt, { userId, images, provider, model });
       const reply = (result || '').trim();
       // Assistant append is non-fatal — the user already has the reply
       // in this response; missing it in history is a degradation,

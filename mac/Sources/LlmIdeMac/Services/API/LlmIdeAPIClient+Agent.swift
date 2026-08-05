@@ -165,20 +165,29 @@ extension LlmIdeAPIClient {
     /// matches the in-meeting voice. History is the prior turns of
     /// this conversation, capped to the last 10 server-side; pass
     /// whatever the UI has accumulated.
+    ///
+    /// `model`/`provider` forward the user's selected provider so a
+    /// non-Anthropic provider routes through its own API/CLI server-side
+    /// instead of always falling back to the Claude CLI. `nil` leaves the
+    /// server default (Anthropic) in place.
     func askAgent(message: String, history: [AgentAskMessage] = [],
-                  images: [(mediaType: String, data: String)] = []) async throws -> String {
+                  images: [(mediaType: String, data: String)] = [],
+                  model: String? = nil, provider: String? = nil) async throws -> String {
         struct WireMsg: Encodable { let role: String; let content: String }
         struct WireImage: Encodable { let mediaType: String; let data: String }
         struct Req: Encodable {
             let message: String
             let history: [WireMsg]
             let image: [WireImage]
+            let model: String?
+            let provider: String?
         }
         struct Resp: Decodable { let reply: String }
         let wireHistory = history.map { WireMsg(role: $0.role.rawValue, content: $0.content) }
         let wireImages = images.map { WireImage(mediaType: $0.mediaType, data: $0.data) }
         let r: Resp = try await post("/kb/agent/ask",
-                                     body: Req(message: message, history: wireHistory, image: wireImages),
+                                     body: Req(message: message, history: wireHistory, image: wireImages,
+                                               model: model, provider: provider),
                                      authenticated: true)
         return r.reply
     }

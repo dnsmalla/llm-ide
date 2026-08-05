@@ -28,6 +28,15 @@ final class MobileWebSocketServer: @unchecked Sendable {
     private var listener: NWListener?
     private var client: NWConnection?
     private var paired = false
+    /// Run intent: true between start() and stop(). Gates the EADDRINUSE
+    /// retry so a stop() during a pending retry doesn't rebind after the user
+    /// asked to stop. All access on the serial `queue`.
+    private var shouldRun = false
+    /// Bounded EADDRINUSE retry budget (initial attempt + retries). The port
+    /// releases slightly AFTER the previous listener's `.cancelled` state, so a
+    /// rapid stop→start races the new bind; a few short retries cover that lag.
+    private static let maxStartAttempts = 4
+    private var startAttempts = 0
 
     typealias InboundHandler = (Data) -> Void
 
@@ -49,6 +58,25 @@ final class MobileWebSocketServer: @unchecked Sendable {
     }
 
     func start() throws {
+        // Set run intent + reset the retry budget, then create the listener.
+        // NWListener's bind resolves asynchronously, and a stop() immediately
+        // before this releases :port only after the listener's `.cancelled`
+        // state fires — slightly AFTER a rapid restart's new bind. That race
+        // surfaces as EADDRINUSE, so startListener() retries the bind a few
+        // times before giving up.
+        shouldRun = true
+        startAttempts = 0
+        try startListener()
+    }
+
+    /// Create + start the NWListener. On an EADDRINUSE bind failure (the port
+    /// is still releasing after a recent stop, OR a genuine squatter), retry a
+    /// few times with a short backoff before surfacing the error — the previous
+    /// listener is mid-release, not squatting permanently. Idempotent: cancels
+    /// any lingering listener first, so retries and re-starts never stack two.
+    private func startListener() throws {
+        listener?.cancel()
+        listener = nil
         let opts = NWProtocolWebSocket.Options()
         opts.autoReplyPing = true
         opts.maximumMessageSize = 8_388_608   // 8 MiB — matches the :3456 body cap; paired-LAN only
@@ -63,17 +91,28 @@ final class MobileWebSocketServer: @unchecked Sendable {
                 // Bind succeeded. Logging "listening" only here (not right
                 // after start()) because the socket bind resolves
                 // asynchronously — logging earlier would falsely report up.
+                self.startAttempts = 0   // a clean bind refills the retry budget
                 self.onLog("WebSocket listening on :\(self.port)")
             case .failed(let error):
-                // Bind failures — most often EADDRINUSE (another process
-                // squatting on the port, e.g. the retired computer-agent) —
-                // arrive HERE asynchronously, not as a throw from start().
-                // Surface it so the manager can crash with the actionable
-                // `lsof -i :3006` hint instead of silently reporting
-                // `.running` (root cause of the "Wrong PIN" misdiagnosis).
-                self.onLog("❌ Listener failed on :\(self.port) — \(error.localizedDescription)")
+                // Bind failures arrive HERE asynchronously, not as a throw from
+                // start(). The common one right after a stop() is EADDRINUSE —
+                // the previous listener is still releasing the port. Retry the
+                // bind a few times; only a PERSISTENT failure (e.g. another
+                // process squatting) is surfaced via onBindFailed so the manager
+                // can show the actionable `lsof -i :3006` hint.
                 self.listener = nil
-                self.onBindFailed(error)
+                if self.shouldRun, Self.isAddrInUse(error), self.startAttempts < Self.maxStartAttempts {
+                    self.startAttempts += 1
+                    self.onLog("⏳ :\(self.port) still releasing after stop — retrying bind (\(self.startAttempts)/\(Self.maxStartAttempts))…")
+                    self.queue.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                        guard let self, self.shouldRun else { return }
+                        do { try self.startListener() }
+                        catch { self.onBindFailed(error) }
+                    }
+                } else {
+                    self.onLog("❌ Listener failed on :\(self.port) — \(error.localizedDescription)")
+                    self.onBindFailed(error)
+                }
             case .cancelled:
                 // Intentional stop() — not a failure.
                 break
@@ -85,13 +124,24 @@ final class MobileWebSocketServer: @unchecked Sendable {
         listener.start(queue: queue)
     }
 
+    /// True iff `error` is EADDRINUSE — the port is already bound. The
+    /// transient form right after stop() (previous listener mid-release) is
+    /// what the retry above absorbs. NWError's POSIX case carries a
+    /// `POSIXErrorCode` enum, so compare against `.EADDRINUSE` directly.
+    private static func isAddrInUse(_ error: NWError) -> Bool {
+        if case .posix(.EADDRINUSE) = error { return true }
+        return false
+    }
+
     func stop() {
         queue.async { [weak self] in
-            self?.client?.cancel()
-            self?.client = nil
-            self?.listener?.cancel()
-            self?.listener = nil
-            self?.paired = false
+            guard let self else { return }
+            self.shouldRun = false   // halt any pending EADDRINUSE retry
+            self.client?.cancel()
+            self.client = nil
+            self.listener?.cancel()
+            self.listener = nil
+            self.paired = false
         }
     }
 

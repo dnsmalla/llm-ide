@@ -561,8 +561,13 @@ final class MobileControlManager {
         let images = chat.images.map { (mediaType: $0.mediaType, data: $0.data) }
         // Fold extracted file text into the prompt (mirrors how history is folded server-side).
         let message = Self.messageWithFiles(chat.text, files: chat.files)
+        // Forward the Mac user's selected provider/model (same source as
+        // explore_chat) so a non-Anthropic provider is used instead of the
+        // server defaulting to Anthropic → the claude CLI → "not logged in".
+        let (model, provider) = MobileExploreBridge.modelAndProvider(config: config)
         do {
-            let reply = try await api.askAgent(message: message, history: history, images: images)
+            let reply = try await api.askAgent(message: message, history: history, images: images,
+                                                model: model, provider: provider)
             guard !isMobileCommandCancelled(chat.commandId) else { return }
             await server?.send(Output(commandId: chat.commandId,
                                       payload: OutputPayload(stream: reply, done: true)))

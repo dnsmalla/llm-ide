@@ -307,6 +307,19 @@ export async function handleCodeAssist({
   const NATIVE_PROVIDERS = new Set(['deepseek', 'openai', 'custom']);
   const effProvider = (typeof provider === 'string' && provider) || resolveProvider(model);
 
+  // If the caller explicitly selected a non-Anthropic provider (custom, glm,
+  // deepseek, custom:<uuid>, …) but supplied no model, fail loudly with an
+  // actionable error. Without this guard the request silently fell through to
+  // the Anthropic runAgentLoop branch below — because the native branch
+  // requires a model (`if (nativeKey && model)`) — so a Custom/GLM user with
+  // no model picked saw a confusing "claude is not logged in" instead of the
+  // real problem ("pick a model"). The legitimate Anthropic default is
+  // unaffected: when no provider is given, resolveProvider maps a bare/absent
+  // model to 'anthropic', so effProvider is 'anthropic' and this guard skips.
+  if (effProvider !== 'anthropic' && !(typeof model === 'string' && model.trim())) {
+    throw new Error(`No model selected for provider "${effProvider}". Choose a model in the Code Assistant before sending.`);
+  }
+
   // Resolve credentials for the native loop. Built-in native providers read
   // their key via the vault/env helpers; a user-registered custom:<uuid>
   // provider resolves through the registry + vault (resolveCustomProviderDispatch

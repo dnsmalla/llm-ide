@@ -599,11 +599,22 @@ final class AppConfig: ObservableObject {
         // Migrate a persisted model id forward. A previously-stored choice
         // can be a retired id (e.g. "claude-opus-4-7") or a tool no longer
         // selectable (Gemini/Cursor) — sending either to the API would
-        // 404. Coerce anything not in a current selectable tool's list to
-        // a valid model so users who never reopen the picker don't break.
-        let selectableModelIds = Set(AICliTool.selectable.flatMap { $0.models.map(\.id) })
+        // 404. Coerce anything not recognised to a valid model so users who
+        // never reopen the picker don't break.
+        //
+        // "Recognised" = built-in ids (selectable tools) UNION user-added
+        // custom model ids (per-provider, MEETNOTES_CUSTOM_MODELS = {provider:
+        // [ids]}). Without the custom union, restarting reset ANY user-added /
+        // Custom-provider model (e.g. a GLM id like "glm-5.1") to the Claude
+        // default — silently dropping the user's pick, so the iPhone chat
+        // proxy then forwarded an empty/wrong model on the next launch.
+        var knownModelIds = Set(AICliTool.selectable.flatMap { $0.models.map(\.id) })
+        if let raw = defaults.string(forKey: "MEETNOTES_CUSTOM_MODELS"),
+           let custom = try? JSONDecoder().decode([String: [String]].self, from: Data(raw.utf8)) {
+            knownModelIds.formUnion(custom.values.flatMap { $0 })
+        }
         let storedModelId = defaults.string(forKey: "defaultModelId")
-        if let storedModelId, selectableModelIds.contains(storedModelId) {
+        if let storedModelId, knownModelIds.contains(storedModelId) {
             self.defaultModelId = storedModelId
         } else if storedModelId == "claude-opus-4-7" {
             self.defaultModelId = "claude-opus-4-8"
