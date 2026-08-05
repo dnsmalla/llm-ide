@@ -23,7 +23,6 @@ import {
   putState as putSlackState, getState as getSlackState,
   completeState as completeSlackState, takeStatus as takeSlackStatus,
 } from '../agents/slack-oauth.mjs';
-import { listUserConversations } from '../agents/slack-source.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
 
 // Map any error (including VaultError) to a client-safe message.
@@ -33,6 +32,15 @@ import { redactWithKey } from '../core/redact-secrets.mjs';
 function publicMessageFor(err) {
   if (isVaultError(err)) return err.publicMessage || 'Vault operation failed';
   return err?.message || 'Request failed';
+}
+
+// Shared OAuth-callback HTML response — both Google and Slack redirect here
+// after consent. A single copy so this HTML-escaping (a security control)
+// can't silently drift between the two provider callbacks.
+function oauthCallbackHtml(res, msg) {
+  const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.end(`<!doctype html><meta charset=utf-8><body style="font-family:system-ui;padding:2rem"><p>${escHtml(msg)}</p><p>You can close this tab and return to LLM-IDE.</p><script>setTimeout(()=>window.close(),1500)</script>`);
 }
 import { recordAudit } from './audit.mjs';
 import { getUserPrefs, setUserPrefs, revokeJti } from '../kb/db.mjs';
@@ -333,13 +341,11 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   //   from the vault rather than trusting anything in the query string.
   if (method === 'GET' && url.split('?')[0] === '/auth/google/callback') {
     const q = new URL(url, 'http://127.0.0.1').searchParams;
-    const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-    const html = (msg) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(`<!doctype html><meta charset=utf-8><body style="font-family:system-ui;padding:2rem"><p>${escHtml(msg)}</p><p>You can close this tab and return to LLM-IDE.</p><script>setTimeout(()=>window.close(),1500)</script>`); };
     const state = q.get('state') || '';
     const st = getState(state);
-    if (q.get('error')) { if (st) completeState(state, { status: 'error', message: 'Sign-in cancelled.' }); html('Sign-in cancelled.'); return; }
-    if (!st) { html('This sign-in link has expired — start again from the app.'); return; }
-    if (st.status !== 'pending') { html('This sign-in link has already been used — start again from the app.'); return; }
+    if (q.get('error')) { if (st) completeState(state, { status: 'error', message: 'Sign-in cancelled.' }); oauthCallbackHtml(res, 'Sign-in cancelled.'); return; }
+    if (!st) { oauthCallbackHtml(res, 'This sign-in link has expired — start again from the app.'); return; }
+    if (st.status !== 'pending') { oauthCallbackHtml(res, 'This sign-in link has already been used — start again from the app.'); return; }
     const clientId = getSecret(db, st.userId, 'google.email.clientId');
     const clientSecret = getSecret(db, st.userId, 'google.email.clientSecret');
     try {
@@ -349,10 +355,10 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       setSecret(db, st.userId, 'google.email.refreshToken', tok.refreshToken);
       const email = await fetchEmailAddress(tok.accessToken).catch(() => '');
       completeState(state, { status: 'complete', email });
-      html('Signed in to Google.');
+      oauthCallbackHtml(res, 'Signed in to Google.');
     } catch (e) {
       completeState(state, { status: 'error', message: redactWithKey(e.message, clientSecret) });
-      html('Sign-in failed: ' + redactWithKey(e.message, clientSecret));
+      oauthCallbackHtml(res, 'Sign-in failed: ' + redactWithKey(e.message, clientSecret));
     }
     return;
   }
@@ -367,32 +373,36 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   //   the vault or the query string.
   if (method === 'GET' && url.split('?')[0] === '/auth/slack/callback') {
     const q = new URL(url, 'http://127.0.0.1').searchParams;
-    const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-    const html = (msg) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(`<!doctype html><meta charset=utf-8><body style="font-family:system-ui;padding:2rem"><p>${escHtml(msg)}</p><p>You can close this tab and return to LLM-IDE.</p><script>setTimeout(()=>window.close(),1500)</script>`); };
     const state = q.get('state') || '';
     const st = getSlackState(state);
-    if (q.get('error')) { if (st) completeSlackState(state, { status: 'error', message: 'Sign-in cancelled.' }); html('Sign-in cancelled.'); return; }
-    if (!st) { html('This sign-in link has expired — start again from the app.'); return; }
-    if (st.status !== 'pending') { html('This sign-in link has already been used — start again from the app.'); return; }
+    if (q.get('error')) { if (st) completeSlackState(state, { status: 'error', message: 'Sign-in cancelled.' }); oauthCallbackHtml(res, 'Sign-in cancelled.'); return; }
+    if (!st) { oauthCallbackHtml(res, 'This sign-in link has expired — start again from the app.'); return; }
+    if (st.status !== 'pending') { oauthCallbackHtml(res, 'This sign-in link has already been used — start again from the app.'); return; }
+    let tok;
     try {
       const redirectUri = 'http://127.0.0.1:' + config.port + '/auth/slack/callback';
-      const tok = await exchangeSlackCode({
+      tok = await exchangeSlackCode({
         clientId: config.slackClientId, clientSecret: config.slackClientSecret,
         code: q.get('code') || '', redirectUri,
       });
       setSecret(db, st.userId, 'slack.userToken', tok.accessToken);
-      // Prefetch the channel list so the Mac sheet renders the checklist
-      // immediately. Fail-soft: listUserConversations never throws (it
-      // degrades to {channels: [], complete: false}), so a transient Slack
-      // hiccup here never fails the connect itself — the sheet's "Refresh
-      // channels" retries later.
-      const { channels } = await listUserConversations({ token: tok.accessToken });
-      completeSlackState(state, { status: 'complete', teamName: tok.teamName, channels });
-      html('Connected to Slack.');
     } catch (e) {
-      completeSlackState(state, { status: 'error', message: redactWithKey(e.message, config.slackClientSecret) });
-      html('Connection failed: ' + redactWithKey(e.message, config.slackClientSecret));
+      const msg = redactWithKey(publicMessageFor(e), config.slackClientSecret);
+      if (isVaultError(e)) {
+        process.stderr.write(JSON.stringify({ level: 'warn', msg: 'slack_oauth_vault_set_failed', error: e.message }) + '\n');
+      }
+      completeSlackState(state, { status: 'error', message: msg });
+      oauthCallbackHtml(res, 'Connection failed: ' + msg);
+      return;
     }
+    // Vault write succeeded — nothing below this point can turn a
+    // successful connection into an "error" state.
+    safeAudit(db, {
+      userId: st.userId, requestId, ip, userAgent: ua,
+      action: 'auth.secret_set', resource: 'slack.userToken', outcome: 'success', detail: {},
+    });
+    completeSlackState(state, { status: 'complete', teamName: tok.teamName });
+    oauthCallbackHtml(res, 'Connected to Slack.');
     return;
   }
 

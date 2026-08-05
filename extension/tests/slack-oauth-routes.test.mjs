@@ -69,7 +69,7 @@ async function registerAndLogin() {
   return { email, ...login.json() };
 }
 
-function stubSlackFetch({ tokenOk = true, conversationsOk = true } = {}) {
+function stubSlackFetch({ tokenOk = true } = {}) {
   const orig = global.fetch;
   let tokenExchangeCalls = 0;
   global.fetch = async (url) => {
@@ -78,10 +78,6 @@ function stubSlackFetch({ tokenOk = true, conversationsOk = true } = {}) {
       tokenExchangeCalls++;
       if (!tokenOk) return { ok: true, json: async () => ({ ok: false, error: 'invalid_code' }) };
       return { ok: true, json: async () => ({ ok: true, authed_user: { access_token: 'xoxp-flow-token' }, team: { name: 'Acme' } }) };
-    }
-    if (u.includes('users.conversations')) {
-      if (!conversationsOk) return { ok: true, json: async () => ({ ok: false, error: 'ratelimited' }) };
-      return { ok: true, json: async () => ({ ok: true, channels: [{ id: 'C1', name: 'general' }], response_metadata: { next_cursor: '' } }) };
     }
     throw new Error(`Unexpected fetch to ${u}`);
   };
@@ -129,7 +125,7 @@ test('GET /auth/slack/callback?error=... marks a known state as cancelled', asyn
   assert.equal(status.json().status, 'error');
 });
 
-test('full flow: start -> callback (token exchange + channel prefetch) -> status complete with teamName + channels', async () => {
+test('full flow: start -> callback (token exchange) -> status complete with teamName', async () => {
   const { user } = await registerAndLogin();
   const start = await callAuth({ method: 'POST', url: '/auth/slack/start', user: { id: user.id } });
   assert.equal(start.statusCode, 200, start._body);
@@ -150,25 +146,6 @@ test('full flow: start -> callback (token exchange + channel prefetch) -> status
   const statusBody = status.json();
   assert.equal(statusBody.status, 'complete');
   assert.equal(statusBody.teamName, 'Acme');
-  assert.deepEqual(statusBody.channels, [{ id: 'C1', name: 'general' }]);
-});
-
-test('GET /auth/slack/callback still completes when channel prefetch fails (fail-soft)', async () => {
-  const { user } = await registerAndLogin();
-  const start = await callAuth({ method: 'POST', url: '/auth/slack/start', user: { id: user.id } });
-  const { state } = start.json();
-
-  const stub = stubSlackFetch({ conversationsOk: false });
-  try {
-    const cb = await callAuth({ method: 'GET', url: `/auth/slack/callback?code=auth-code&state=${state}` });
-    assert.equal(cb.statusCode, 200, cb._body);
-    assert.match(cb._body, /Connected to Slack/i);
-  } finally { stub.restore(); }
-
-  assert.equal(getSecret(kb.getDb(), user.id, 'slack.userToken'), 'xoxp-flow-token');
-  const status = await callAuth({ method: 'GET', url: `/auth/slack/status?state=${state}`, user: { id: user.id } });
-  assert.equal(status.json().status, 'complete');
-  assert.deepEqual(status.json().channels, [], 'empty channel list on prefetch failure, not an error status');
 });
 
 test('GET /auth/slack/callback rejects a second callback that reuses an already-completed state', async () => {

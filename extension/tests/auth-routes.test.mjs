@@ -101,6 +101,9 @@ test('isAuthRoute matches auth paths and strips query strings', () => {
   assert.equal(isAuthRoute('/auth/me/audit?limit=5'), true);
   assert.equal(isAuthRoute('/kb/search'), false);
   assert.equal(isAuthRoute('/auth/definitely-not-a-route'), false);
+  assert.equal(isAuthRoute('/auth/slack/start'), true);
+  assert.equal(isAuthRoute('/auth/slack/callback'), true);
+  assert.equal(isAuthRoute('/auth/slack/status?state=abc'), true);
 });
 
 // ---- public routes -----------------------------------------------------

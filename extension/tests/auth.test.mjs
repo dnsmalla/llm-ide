@@ -174,6 +174,7 @@ test('isPublicPath includes health and auth-public routes', () => {
   assert.equal(isPublicPath('POST', '/auth/login'), true);
   assert.equal(isPublicPath('POST', '/auth/register'), true);
   assert.equal(isPublicPath('POST', '/auth/refresh'), true);
+  assert.equal(isPublicPath('GET', '/auth/slack/callback'), true);
 });
 
 test('isPublicPath: /metrics is now a protected route (requires admin JWT)', () => {
