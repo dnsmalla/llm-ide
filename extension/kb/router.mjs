@@ -59,6 +59,13 @@ function rejectUnknownProvider(res, provider) {
   return true;
 }
 
+// Prefer the OAuth-issued user token; fall back to a manually-pasted bot
+// token so Slack connections set up before the OAuth flow shipped keep
+// working unmodified.
+function resolveSlackToken(userId) {
+  return getSecret(kb.getDb(), userId, 'slack.userToken') || getSecret(kb.getDb(), userId, 'slack.botToken');
+}
+
 // Returns true if the request was handled (response written), false if
 // the URL is not a /kb/* route — caller falls through to its own routing.
 export async function handleKB(req, res) {
@@ -544,13 +551,6 @@ export async function handleKB(req, res) {
       return true;
     }
 
-    // Prefer the OAuth-issued user token; fall back to a manually-pasted bot
-    // token so Slack connections set up before the OAuth flow shipped keep
-    // working unmodified.
-    function resolveSlackToken(userId) {
-      return getSecret(kb.getDb(), userId, 'slack.userToken') || getSecret(kb.getDb(), userId, 'slack.botToken');
-    }
-
     // Slack input (twin of /kb/email/*) ---
     if (req.method === 'POST' && (url === '/kb/slack/test' || url === '/kb/slack/fetch')) {
       const body = parseJSON(await readBody(req)) || {};
@@ -615,8 +615,11 @@ export async function handleKB(req, res) {
         sendJSON(res, 400, { error: { code: 'SLACK_NO_TOKEN', message: 'No Slack connection saved. Connect Slack first.' } });
         return true;
       }
-      const channels = await listUserConversations({ token });
-      sendJSON(res, 200, { channels });
+      const { channels, complete } = await listUserConversations({ token });
+      if (!complete) {
+        logger.warn('slack_conversations_incomplete', { userId, count: channels.length });
+      }
+      sendJSON(res, 200, { channels, complete });
       return true;
     }
 

@@ -73,6 +73,7 @@ test('GET /kb/slack/conversations prefers slack.userToken over slack.botToken', 
     await handleKB(makeReq({ method: 'GET', url: '/kb/slack/conversations', userId: u.id }), res);
     assert.equal(res.statusCode, 200, res._body);
     assert.ok(seenTokens.some((h) => h.includes('xoxp-new')), 'must use slack.userToken, not slack.botToken, when both are present');
+    assert.ok(!seenTokens.some((h) => h.includes('xoxb-old')), 'must not use slack.botToken when slack.userToken is present');
   } finally { global.fetch = orig; }
 });
 
@@ -94,4 +95,9 @@ test('GET /kb/slack/conversations falls back to slack.botToken when no user toke
     assert.deepEqual(JSON.parse(res._body).channels, [{ id: 'C9', name: 'legacy' }]);
     assert.ok(seenTokens.some((h) => h.includes('xoxb-only')));
   } finally { global.fetch = orig; }
+});
+
+test('cleanup', () => {
+  db.closeDb();
+  for (const f of [tmpDb, `${tmpDb}-shm`, `${tmpDb}-wal`]) { try { fs.rmSync(f, { force: true }); } catch { /* ignore */ } }
 });
