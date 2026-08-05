@@ -95,6 +95,12 @@ struct BoxSourceSheet: View {
                             .disableAutocorrection(true)
                     }
                     SettingsHint("Uses a Box Custom App with Client Credentials Grant (CCG). The app must be authorized for the enterprise/user above.")
+                    Button("Open Box Developer Console…") {
+                        if let u = URL(string: "https://app.box.com/developers/console") {
+                            NSWorkspace.shared.open(u)
+                        }
+                    }
+                    .buttonStyle(.link)
                     field("Enabled") {
                         Toggle("", isOn: $draft.enabled)
                             .toggleStyle(.switch)

@@ -186,12 +186,20 @@ struct ConnectionsSettingsSection: View {
         }
     }
 
-    // MARK: - Email add-on
+    // MARK: - Email / Slack / Box add-ons
+    //
+    // The three cards below are identical apart from labels and which state
+    // vars back busy/result — factored into sourceCardBody so a fix to the
+    // shared shape (button layout, spinner placement, result-line styling)
+    // can't land in one card and miss the other two.
 
     private var emailCard: some View {
         let configured = config.emailSource != nil
         let enabled = config.emailSource?.enabled == true
         let badge = linkBadge(.email, configured: configured, enabled: enabled)
+        let subtitle = config.emailSource.map { s in
+            s.user.isEmpty ? (s.displayName.isEmpty ? "Configured" : s.displayName) : s.user
+        }
         return InputSourceCard(
             icon: "envelope",
             title: "Email",
@@ -199,48 +207,21 @@ struct ConnectionsSettingsSection: View {
             badgeText: badge.text,
             badgeTone: badge.tone
         ) {
-            if let s = config.emailSource {
-                Text(s.user.isEmpty ? (s.displayName.isEmpty ? "Configured" : s.displayName) : s.user)
-                    .font(Typography.body)
-                    .foregroundStyle(theme.current.text)
-            }
-
-            HStack(spacing: Spacing.sm) {
-                Button(configured ? "Edit…" : "Configure…") {
-                    showingEmailSheet = true
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-
-                if enabled {
-                    Button(fetching ? "Fetching…" : "Fetch now") {
-                        importTask = Task { await runImport() }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(fetching)
-                    if fetching {
-                        ProgressView().controlSize(.mini).scaleEffect(0.8)
-                    }
-                }
-            }
-            .padding(.top, Spacing.xs)
-
-            if let line = lastEmailResult {
-                Text(line)
-                    .font(Typography.caption)
-                    .foregroundStyle(lastEmailWasError ? theme.current.danger : theme.current.textMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            sourceCardBody(
+                subtitle: subtitle, configured: configured, enabled: enabled,
+                onConfigure: { showingEmailSheet = true },
+                secondaryLabel: "Fetch now", secondaryBusyLabel: "Fetching…", busy: fetching,
+                onSecondaryAction: { importTask = Task { await runImport() } },
+                resultLine: lastEmailResult, resultIsError: lastEmailWasError
+            )
         }
     }
-
-    // MARK: - Slack add-on
 
     private var slackCard: some View {
         let configured = config.slackSource != nil
         let enabled = config.slackSource?.enabled == true
         let badge = linkBadge(.slack, configured: configured, enabled: enabled)
+        let subtitle = config.slackSource.map { s in s.displayName.isEmpty ? "Configured" : s.displayName }
         return InputSourceCard(
             icon: "number",
             title: "Slack",
@@ -248,48 +229,23 @@ struct ConnectionsSettingsSection: View {
             badgeText: badge.text,
             badgeTone: badge.tone
         ) {
-            if let s = config.slackSource {
-                Text(s.displayName.isEmpty ? "Configured" : s.displayName)
-                    .font(Typography.body)
-                    .foregroundStyle(theme.current.text)
-            }
-
-            HStack(spacing: Spacing.sm) {
-                Button(configured ? "Edit…" : "Configure…") {
-                    showSlackSheet = true
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-
-                if enabled {
-                    Button(fetchingSlack ? "Fetching…" : "Fetch now") {
-                        slackImportTask = Task { await runSlackImport() }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(fetchingSlack)
-                    if fetchingSlack {
-                        ProgressView().controlSize(.mini).scaleEffect(0.8)
-                    }
-                }
-            }
-            .padding(.top, Spacing.xs)
-
-            if let line = lastSlackResult {
-                Text(line)
-                    .font(Typography.caption)
-                    .foregroundStyle(lastSlackWasError ? theme.current.danger : theme.current.textMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            sourceCardBody(
+                subtitle: subtitle, configured: configured, enabled: enabled,
+                onConfigure: { showSlackSheet = true },
+                secondaryLabel: "Fetch now", secondaryBusyLabel: "Fetching…", busy: fetchingSlack,
+                onSecondaryAction: { slackImportTask = Task { await runSlackImport() } },
+                resultLine: lastSlackResult, resultIsError: lastSlackWasError
+            )
         }
     }
-
-    // MARK: - Box add-on
 
     private var boxCard: some View {
         let configured = config.boxSource != nil
         let enabled = config.boxSource?.enabled == true
         let badge = linkBadge(.box, configured: configured, enabled: enabled)
+        let subtitle = config.boxSource.map { s in
+            s.displayName.isEmpty ? (s.folderName.isEmpty ? "Configured" : s.folderName) : s.displayName
+        }
         return InputSourceCard(
             icon: "doc.text",
             title: "Box",
@@ -297,39 +253,60 @@ struct ConnectionsSettingsSection: View {
             badgeText: badge.text,
             badgeTone: badge.tone
         ) {
-            if let s = config.boxSource {
-                Text(s.displayName.isEmpty ? (s.folderName.isEmpty ? "Configured" : s.folderName) : s.displayName)
-                    .font(Typography.body)
-                    .foregroundStyle(theme.current.text)
-            }
+            sourceCardBody(
+                subtitle: subtitle, configured: configured, enabled: enabled,
+                onConfigure: { showBoxSheet = true },
+                secondaryLabel: "Re-sync", secondaryBusyLabel: "Syncing…", busy: syncingBox,
+                onSecondaryAction: { boxSyncTask = Task { await runBoxSync() } },
+                resultLine: lastBoxResult, resultIsError: lastBoxWasError
+            )
+        }
+    }
 
-            HStack(spacing: Spacing.sm) {
-                Button(configured ? "Edit…" : "Configure…") {
-                    showBoxSheet = true
-                }
+    /// Shared body for the three cards above: an optional subtitle line, a
+    /// Configure/Edit button, an optional secondary action (Fetch now /
+    /// Re-sync) shown once enabled, and an optional result line.
+    @ViewBuilder
+    private func sourceCardBody(
+        subtitle: String?,
+        configured: Bool,
+        enabled: Bool,
+        onConfigure: @escaping () -> Void,
+        secondaryLabel: String,
+        secondaryBusyLabel: String,
+        busy: Bool,
+        onSecondaryAction: @escaping () -> Void,
+        resultLine: String?,
+        resultIsError: Bool
+    ) -> some View {
+        if let subtitle {
+            Text(subtitle)
+                .font(Typography.body)
+                .foregroundStyle(theme.current.text)
+        }
+
+        HStack(spacing: Spacing.sm) {
+            Button(configured ? "Edit…" : "Configure…", action: onConfigure)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
 
-                if enabled {
-                    Button(syncingBox ? "Syncing…" : "Re-sync") {
-                        boxSyncTask = Task { await runBoxSync() }
-                    }
+            if enabled {
+                Button(busy ? secondaryBusyLabel : secondaryLabel, action: onSecondaryAction)
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .disabled(syncingBox)
-                    if syncingBox {
-                        ProgressView().controlSize(.mini).scaleEffect(0.8)
-                    }
+                    .disabled(busy)
+                if busy {
+                    ProgressView().controlSize(.mini).scaleEffect(0.8)
                 }
             }
-            .padding(.top, Spacing.xs)
+        }
+        .padding(.top, Spacing.xs)
 
-            if let line = lastBoxResult {
-                Text(line)
-                    .font(Typography.caption)
-                    .foregroundStyle(lastBoxWasError ? theme.current.danger : theme.current.textMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        if let line = resultLine {
+            Text(line)
+                .font(Typography.caption)
+                .foregroundStyle(resultIsError ? theme.current.danger : theme.current.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
