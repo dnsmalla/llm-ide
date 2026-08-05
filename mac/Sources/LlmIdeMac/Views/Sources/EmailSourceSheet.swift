@@ -14,6 +14,7 @@ struct EmailSourceSheet: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
+    @EnvironmentObject var sourceLinks: SourceLinkStore
     @Environment(\.dismiss) private var dismiss
 
     /// Draft seeded from the existing source (or defaults for first setup).
@@ -60,10 +61,13 @@ struct EmailSourceSheet: View {
         return authMethod == "google" || !password.isEmpty
     }
 
-    /// True once a Google OAuth connect has produced an email address —
-    /// gates the primary "Connect Google" button vs. a "Connected" hint.
+    /// True once a Google OAuth connect has produced BOTH a locally-recorded
+    /// email address AND a real vault secret — checking only local `draft`
+    /// state would show "Connected" for a manually-typed authMethod/email
+    /// with no actual token behind it (e.g. via the Advanced fields without
+    /// ever completing a sign-in).
     private var isConnectedViaGoogle: Bool {
-        draft.authMethod == "google" && !draft.user.trimmingCharacters(in: .whitespaces).isEmpty
+        sourceLinks.hasSecret(.email) && draft.authMethod == "google" && !draft.user.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     var body: some View {
@@ -175,7 +179,7 @@ struct EmailSourceSheet: View {
                                 }
                                 field("") {
                                     Button(signingIn ? "Signing in…" : "Sign in with Google") {
-                                        Task { await signInWithGoogle() }
+                                        connectTask = Task { await signInWithGoogle() }
                                     }
                                     .buttonStyle(.bordered)
                                     .disabled(signingIn
@@ -243,11 +247,11 @@ struct EmailSourceSheet: View {
             HStack {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                if isEditing {
+                if isEditing || sourceLinks.hasSecret(.email) {
                     Button("Disconnect", role: .destructive) {
                         Task { await disconnect() }
                     }
-                    .help("Remove this source and delete the stored app password.")
+                    .help("Remove this source and delete the stored credentials.")
                 }
                 Spacer()
                 Button(testing ? "Testing…" : "Test") {
@@ -324,6 +328,7 @@ struct EmailSourceSheet: View {
                     if let e = s.email, !e.isEmpty { draft.user = e }
                     await initHighWaterMarkIfNeeded()
                     config.emailSource = draft
+                    await sourceLinks.refresh(api: api)
                     dismiss()
                     return
                 }
@@ -353,6 +358,7 @@ struct EmailSourceSheet: View {
             testStatus = r.ok
                 ? "Connected · \(r.total) messages in \(r.mailbox)"
                 : "Test failed."
+            if r.ok { await sourceLinks.refresh(api: api) }
         } catch {
             testWasError = true
             testStatus = error.localizedDescription
@@ -373,6 +379,7 @@ struct EmailSourceSheet: View {
         }
         await initHighWaterMarkIfNeeded()
         config.emailSource = draft
+        await sourceLinks.refresh(api: api)
         dismiss()
     }
 
@@ -408,6 +415,7 @@ struct EmailSourceSheet: View {
             }
             NSWorkspace.shared.open(u)
             for _ in 0..<90 {
+                try Task.checkCancellation()
                 try await Task.sleep(nanoseconds: 2_000_000_000)
                 let s = try await api.googleSignInStatus(state: r.state)
                 if s.status == "complete" {
@@ -415,6 +423,7 @@ struct EmailSourceSheet: View {
                     if let e = s.email, !e.isEmpty { draft.user = e }
                     await initHighWaterMarkIfNeeded()
                     config.emailSource = draft
+                    await sourceLinks.refresh(api: api)
                     dismiss()
                     return
                 }
@@ -424,24 +433,32 @@ struct EmailSourceSheet: View {
                 }
             }
             signInError = "Sign-in timed out — try again."
+        } catch is CancellationError {
+            // Sheet was dismissed mid-sign-in — nothing to update on a gone view.
         } catch {
             signInError = error.localizedDescription
         }
     }
 
-    /// Remove the source and delete the stored app password from the vault
-    /// (empty value = delete, per the secrets endpoint). The dedup ledger is
-    /// left intact so reconnecting the same account won't re-import old mail.
-    /// If clearing the secret fails we keep the source so the password isn't
-    /// silently orphaned in the vault.
+    /// Remove the source and delete the stored credentials from the vault —
+    /// the app password AND the Google OAuth refresh token / BYO client id
+    /// and secret (empty value = delete, per the secrets endpoint; deleting
+    /// an absent key is a harmless no-op). The dedup ledger is left intact
+    /// so reconnecting the same account won't re-import old mail. If
+    /// clearing a secret fails we keep the source so nothing is silently
+    /// orphaned in the vault.
     private func disconnect() async {
         do {
             try await api.setSecret(key: "email.imapPassword", value: "")
+            try await api.setSecret(key: "google.email.refreshToken", value: "")
+            try await api.setSecret(key: "google.email.clientId", value: "")
+            try await api.setSecret(key: "google.email.clientSecret", value: "")
         } catch {
             testWasError = true
-            testStatus = "Couldn't remove the stored password: \(error.localizedDescription)"
+            testStatus = "Couldn't remove the stored credentials: \(error.localizedDescription)"
             return
         }
+        await sourceLinks.refresh(api: api)
         config.emailSource = nil
         dismiss()
     }

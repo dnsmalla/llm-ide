@@ -79,6 +79,7 @@ struct ConnectionsSettingsSection: View {
                     EmailSourceSheet(api: api)
                         .environmentObject(theme)
                         .environmentObject(config)
+                        .environmentObject(sourceLinks)
                 }
                 .sheet(isPresented: $showSlackSheet) {
                     SlackSourceSheet(api: api)
