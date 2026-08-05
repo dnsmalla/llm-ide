@@ -617,6 +617,17 @@ export function spawnCli(provider, prompt, { env, timeoutMs = CLI_TIMEOUT_MS, si
 // Per-provider NDJSON line parser: (line) => { delta?, result?, isError? }.
 // A provider absent from this map has no incremental format we understand —
 // spawnCliStream falls back to buffering its whole output as one onChunk call.
+//
+// Codex (openai) checked 2026-08-05: `codex`/`codex exec --help` fails to even
+// run in this environment — `spawn ENOENT` on its vendored native binary
+// (/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/.../codex),
+// same failure as during the original planning pass. No `--help` output was
+// obtainable, so no streaming/JSON-output flag could be verified — falls back
+// to buffered delivery via the no-parser path in spawnCliStream. Re-check when
+// this environment has a working codex install.
+// Gemini (google) checked 2026-08-05: `gemini` is not installed at all (no
+// binary on PATH, no global npm/brew package) — nothing to test. Same
+// fallback applies. Re-check once `gemini` is installed here.
 const STREAM_PARSERS = {
   anthropic: parseClaudeStreamJSON,
 };
