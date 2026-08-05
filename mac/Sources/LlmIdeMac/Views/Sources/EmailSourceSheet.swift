@@ -63,12 +63,14 @@ struct EmailSourceSheet: View {
     }
 
     /// True once a Google OAuth connect has produced BOTH a locally-recorded
-    /// email address AND a real vault secret — checking only local `draft`
-    /// state would show "Connected" for a manually-typed authMethod/email
-    /// with no actual token behind it (e.g. via the Advanced fields without
-    /// ever completing a sign-in).
+    /// email address AND a real Google refresh token in the vault — checking
+    /// only local `draft` state (or the OR'd `hasSecret(.email)`, which also
+    /// matches a plain app password) would show "Connected" for a manually-
+    /// typed authMethod/email with no actual Google token behind it (e.g. via
+    /// the Advanced fields without ever completing a sign-in).
     private var isConnectedViaGoogle: Bool {
-        sourceLinks.hasSecret(.email) && draft.authMethod == "google" && !draft.user.trimmingCharacters(in: .whitespaces).isEmpty
+        sourceLinks.presentKeys.contains("google.email.refreshToken")
+            && draft.authMethod == "google" && !draft.user.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     var body: some View {
