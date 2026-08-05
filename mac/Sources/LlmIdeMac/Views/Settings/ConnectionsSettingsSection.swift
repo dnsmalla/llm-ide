@@ -84,6 +84,7 @@ struct ConnectionsSettingsSection: View {
                     SlackSourceSheet(api: api)
                         .environmentObject(theme)
                         .environmentObject(config)
+                        .environmentObject(sourceLinks)
                 }
                 .sheet(isPresented: $showBoxSheet) {
                     BoxSourceSheet(api: api)

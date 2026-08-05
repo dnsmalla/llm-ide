@@ -36,7 +36,7 @@ final class SourceLinkStore: ObservableObject {
         switch kind {
         case .email: return ["email.imapPassword", "google.email.refreshToken"]
         case .box:   return ["box.clientSecret"]
-        case .slack: return ["slack.botToken"]
+        case .slack: return ["slack.userToken", "slack.botToken"]
         }
     }
 

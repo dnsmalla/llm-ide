@@ -32,7 +32,7 @@ const HOST = config.host;
 // Bump whenever the HTTP surface changes so the extension can detect
 // a stale server process ("you installed the new client but forgot to
 // restart node server.mjs") and surface a clear message.
-const SERVER_API_VERSION = 21;
+const SERVER_API_VERSION = 22;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -61,6 +61,7 @@ const ENDPOINTS = [
   '/kb/slack/test',
   '/kb/slack/fetch',
   '/kb/slack/seen',
+  '/kb/slack/conversations',
   '/kb/box/test',
   '/kb/connect-box',
   '/kb/activity',
@@ -131,6 +132,11 @@ function rateLimitProfile(url, method) {
   if (method === 'GET') {
     const path = url.split('?')[0];
     if (path === '/kb/export-all') return 'kbExport';
+    // Same 'dispatch' bucket as /kb/slack/test|fetch — this route makes up
+    // to 20 outbound Slack API calls per request, so it must be throttled
+    // to avoid burning through Slack's per-method rate limit and causing
+    // collateral SLACK_FETCH_FAILED errors on unrelated /kb/slack/fetch calls.
+    if (path === '/kb/slack/conversations') return 'dispatch';
     return null;
   }
   // Mutating PUT/DELETE writes need the same throttle as their POST siblings —

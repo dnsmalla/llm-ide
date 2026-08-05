@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stripMrkdwn, normalizeMessage, fetchChannelHistory, resolveOldestTs } from '../agents/slack-source.mjs';
+import { stripMrkdwn, normalizeMessage, fetchChannelHistory, resolveOldestTs, listUserConversations } from '../agents/slack-source.mjs';
 
 test('resolveOldestTs: high-water wins; else lookbackDays, clamped 1..60', () => {
   // Forward-only high-water always wins, verbatim.
@@ -63,5 +63,72 @@ test('fetchChannelHistory includes thread replies', async () => {
     assert.ok(texts.includes('parent'));
     const reply = messages.find((m) => m.text.includes('a reply'));
     assert.equal(reply.threadTs, '10.0');
+  } finally { global.fetch = orig; }
+});
+
+test('listUserConversations paginates and returns {id, name} pairs', async () => {
+  const orig = global.fetch;
+  global.fetch = async (urlStr) => {
+    const url = String(urlStr);
+    const json = (o) => ({ ok: true, json: async () => o });
+    if (url.includes('users.conversations')) {
+      if (url.includes('cursor=page2')) {
+        return json({ ok: true, channels: [{ id: 'C3', name: 'random' }], response_metadata: { next_cursor: '' } });
+      }
+      return json({ ok: true, channels: [{ id: 'C1', name: 'general' }, { id: 'C2', name: 'eng' }], response_metadata: { next_cursor: 'page2' } });
+    }
+    return json({ ok: false, error: 'unexpected' });
+  };
+  try {
+    const { channels, complete } = await listUserConversations({ token: 't' });
+    assert.deepEqual(channels, [
+      { id: 'C1', name: 'general' },
+      { id: 'C2', name: 'eng' },
+      { id: 'C3', name: 'random' },
+    ]);
+    assert.equal(complete, true);
+  } finally { global.fetch = orig; }
+});
+
+test('listUserConversations degrades to an empty list on failure (never throws)', async () => {
+  const orig = global.fetch;
+  global.fetch = async () => ({ ok: false, status: 500, json: async () => ({}) });
+  try {
+    const { channels, complete } = await listUserConversations({ token: 't' });
+    assert.deepEqual(channels, []);
+    assert.equal(complete, false);
+  } finally { global.fetch = orig; }
+});
+
+test('listUserConversations preserves earlier pages when a later page fails', async () => {
+  const orig = global.fetch;
+  let call = 0;
+  global.fetch = async (_urlStr) => {
+    call++;
+    const json = (o) => ({ ok: true, json: async () => o });
+    if (call === 1) {
+      return json({ ok: true, channels: [{ id: 'C1', name: 'general' }], response_metadata: { next_cursor: 'page2' } });
+    }
+    throw new Error('network blip');
+  };
+  try {
+    const { channels, complete } = await listUserConversations({ token: 't' });
+    assert.deepEqual(channels, [{ id: 'C1', name: 'general' }], 'page 1 results must survive the page-2 failure');
+    assert.equal(complete, false);
+  } finally { global.fetch = orig; }
+});
+
+test('listUserConversations stops at MAX_CONVERSATIONS_PAGES on an endless cursor', async () => {
+  const orig = global.fetch;
+  let calls = 0;
+  global.fetch = async () => {
+    calls++;
+    return { ok: true, json: async () => ({ ok: true, channels: [{ id: `C${calls}`, name: `ch${calls}` }], response_metadata: { next_cursor: 'always-more' } }) };
+  };
+  try {
+    const { channels, complete } = await listUserConversations({ token: 't' });
+    assert.equal(calls, 20, 'must stop at the page cap, not loop forever');
+    assert.equal(channels.length, 20);
+    assert.equal(complete, false, 'hitting the cap is not a complete/natural end');
   } finally { global.fetch = orig; }
 });

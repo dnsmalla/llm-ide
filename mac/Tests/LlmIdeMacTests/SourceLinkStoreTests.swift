@@ -13,6 +13,9 @@ final class SourceLinkStoreTests: XCTestCase {
         XCTAssertEqual(SourceLinkStore.linkState(.box, configured: true, presentKeys: ["box.clientSecret"]), .linked)
         XCTAssertEqual(SourceLinkStore.linkState(.slack, configured: true, presentKeys: ["slack.botToken"]), .linked)
     }
+    func testSlackLinkedViaUserToken() {
+        XCTAssertEqual(SourceLinkStore.linkState(.slack, configured: true, presentKeys: ["slack.userToken"]), .linked)
+    }
     func testCredentialsNeededWhenConfiguredButSecretMissing() {
         XCTAssertEqual(SourceLinkStore.linkState(.slack, configured: true, presentKeys: []), .credentialsNeeded)
         XCTAssertEqual(SourceLinkStore.linkState(.box, configured: true, presentKeys: ["email.imapPassword"]), .credentialsNeeded)
