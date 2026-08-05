@@ -57,3 +57,52 @@ extension LlmIdeAPIClient {
         return try await post(path, body: Req(body: body), authenticated: true)
     }
 }
+
+extension LlmIdeAPIClient {
+
+    /// One channel/group the connected Slack user already belongs to.
+    struct SlackConversation: Decodable, Identifiable {
+        let id: String
+        let name: String
+    }
+
+    /// Result of `/auth/slack/start` — the browser URL to open plus the
+    /// opaque state token used to poll for completion.
+    struct SlackConnectStartResult: Decodable { let authUrl: String; let state: String }
+
+    /// Result of `/auth/slack/status` — `status` is one of
+    /// pending|complete|error; `teamName` populates once complete. No
+    /// `channels` here — the server's OAuth callback deliberately doesn't
+    /// prefetch channels (it would block the public redirect page for up
+    /// to 90s under Slack rate-limiting); callers fetch the channel list
+    /// separately via `fetchSlackConversations()` right after seeing
+    /// `status == "complete"`.
+    struct SlackConnectStatusResult: Decodable {
+        let status: String
+        let teamName: String?
+        let message: String?
+    }
+
+    /// Kick off the hosted Slack OAuth flow (LLM-IDE's own Slack App — no
+    /// client id/secret from the user). Returns a browser URL to open plus a
+    /// state token to poll via `slackConnectStatus`.
+    func slackConnectStart() async throws -> SlackConnectStartResult {
+        struct Req: Encodable {}
+        return try await post("/auth/slack/start", body: Req(), authenticated: true)
+    }
+
+    /// Poll the state of an in-flight Slack connect started via `slackConnectStart`.
+    func slackConnectStatus(state: String) async throws -> SlackConnectStatusResult {
+        let encoded = state.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? state
+        return try await get("/auth/slack/status?state=\(encoded)", authenticated: true)
+    }
+
+    /// Channels/groups the connected Slack user belongs to, for the
+    /// "Connect Slack" checklist. Requires slack.userToken or slack.botToken
+    /// to already be saved.
+    func fetchSlackConversations() async throws -> [SlackConversation] {
+        struct Resp: Decodable { let channels: [SlackConversation] }
+        let r: Resp = try await get("/kb/slack/conversations", authenticated: true)
+        return r.channels
+    }
+}
