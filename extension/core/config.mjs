@@ -149,6 +149,14 @@ export const config = Object.freeze({
   // Vault
   vaultKey:     _vaultKey,
 
+  // Slack hosted OAuth app (agents/slack-oauth.mjs). LLM-IDE owns ONE Slack
+  // App registration — these are the app's own client id/secret, never
+  // per-user, never in the vault. Optional: /auth/slack/start returns a
+  // clear "not configured" error when unset instead of proceeding with
+  // undefined credentials.
+  slackClientId:     envStr('LLMIDE_SLACK_CLIENT_ID'),
+  slackClientSecret: envStr('LLMIDE_SLACK_CLIENT_SECRET'),
+
   // JWT rotation support
   jwtSecretPrevious: _jwtSecretPrevious || null,
 

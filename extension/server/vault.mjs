@@ -116,6 +116,12 @@ const ALLOWED_KEYS = new Set([
   // it here via /auth/me/secrets (SlackSourceSheet); the server reads it back in
   // /kb/slack/test and /kb/slack/fetch to read channel messages.
   'slack.botToken',
+  // Slack user token (xoxp-…), minted by the hosted OAuth flow
+  // (agents/slack-oauth.mjs, /auth/slack/callback) after the user connects via
+  // "Connect Slack". Preferred over slack.botToken when both are present (see
+  // kb/router.mjs resolveSlackToken) — reads channels/groups the user already
+  // belongs to, no bot-invite step required.
+  'slack.userToken',
   // Box Client-Credentials-Grant app client secret for the Box document
   // source. The Mac client stores it here via /auth/me/secrets; the server
   // reads it back in /kb/box/test and /kb/connect-box so the secret never

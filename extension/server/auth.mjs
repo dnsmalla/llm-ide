@@ -31,6 +31,7 @@ const PUBLIC_PATHS = new Set([
   '/auth/reset-request',               // Password-reset request (rate-limited per IP)
   '/auth/reset-confirm',               // Password-reset confirm (rate-limited per IP)
   '/auth/google/callback',             // Google's OAuth redirect carries no bearer token
+  '/auth/slack/callback',              // Slack's OAuth redirect carries no bearer token
   '/launch-app',                       // Cross-client deep link → llmide://
 ]);
 

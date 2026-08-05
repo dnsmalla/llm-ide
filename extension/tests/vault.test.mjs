@@ -41,6 +41,18 @@ test('slack.botToken is an allowed vault key and round-trips', () => {
   assert.equal(getSecret(db, userId, 'slack.botToken'), 'xoxb-abc-123');
 });
 
+// The hosted Slack OAuth flow (agents/slack-oauth.mjs, /auth/slack/callback)
+// stores the connected user's token under `slack.userToken`. If the key is
+// not allow-listed, the callback's setSecret throws and every "Connect
+// Slack" attempt fails after a successful browser consent.
+test('slack.userToken is an allowed vault key and round-trips', () => {
+  assert.ok(VAULT_KEYS.includes('slack.userToken'), 'slack.userToken must be allow-listed');
+  const db = secretsDb();
+  const userId = 'user-slack-2';
+  assert.doesNotThrow(() => setSecret(db, userId, 'slack.userToken', 'xoxp-abc-123'));
+  assert.equal(getSecret(db, userId, 'slack.userToken'), 'xoxp-abc-123');
+});
+
 // User-registered custom LLM providers (Settings → Custom Providers) store
 // their per-provider API key under a dynamic `custom.<id>.apiKey` path, where
 // <id> is the provider's stable UUID (lowercased). The vault must allow this
