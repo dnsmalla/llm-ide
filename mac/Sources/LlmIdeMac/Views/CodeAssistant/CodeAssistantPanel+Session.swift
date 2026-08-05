@@ -126,45 +126,32 @@ extension CodeAssistantPanel {
             // "Writing the answer…") instead of a frozen spinner for the
             // 60–90s an agent turn can take. Falls back to buffered on a
             // stream failure (see codeAssistRoundTrip).
+            let streamingID = beginStreamingTurn()
             let resp = try await codeAssistRoundTrip(
                 message: message,
                 history: Array(recent.dropLast()),  // exclude the just-pushed user turn — server appends it
                 attachments: attachments,
                 skills: skillIds,
+                onChunk: { [self] text in appendStreamedChunk(streamingID, text) },
             )
             // If Stop fired during the await, don't append the (now-unwanted) reply.
             try Task.checkCancellation()
-            let assistantTurn = LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: resp.reply)
-            history.append(assistantTurn)
-            revealAssistantReply(assistantTurn)
-            self.pendingTool = resp.pendingTool
-            // Update task list display
-            if let newTasks = resp.tasks {
-                agentPendingTasks = newTasks
+            // If the buffered fallback path fired (no chunk events ever
+            // arrived), the placeholder turn is still empty — fill it from
+            // the complete reply now. If chunks DID arrive, history[idx]
+            // already holds the complete text and this is a no-op overwrite
+            // with the same value.
+            if let idx = history.firstIndex(where: { $0.id == streamingID }) {
+                history[idx].content = resp.reply
             }
-            // Auto-continue if the agent has pending work and the user hasn't stopped
-            if resp.continueNeeded == true && !agentStopRequested {
-                agentIsAutonomous = true
-                let scheduledEpoch = sessionEpoch
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                    // The active chat may have changed (switch/new/delete)
-                    // during this delay — don't let a stale continuation
-                    // fire a turn against a different session's history.
-                    guard self.sessionEpoch == scheduledEpoch else { return }
-                    guard !self.agentStopRequested else {
-                        self.agentIsAutonomous = false
-                        return
-                    }
-                    self.startTurn("Continue working on your pending tasks.")
-                }
-            } else {
-                agentIsAutonomous = false
-                agentStopRequested = false
-            }
-            if let u = resp.usage {
-                lastMemoryTokens = u.memoryApproxTokens
-                lastMemoryHasChat = u.memoryHasChatMemory ?? false
-            }
+            finishStreamingTurn(
+                streamingID,
+                pendingTool: resp.pendingTool,
+                tasks: resp.tasks,
+                continueNeeded: resp.continueNeeded,
+                usage: resp.usage,
+                stopped: false,
+            )
             // Fast path: in Auto mode, apply a proposed file edit immediately
             // instead of surfacing the card + popup. Scoped to `update-file`
             // (confirmUpdateFile enforces the attached-files-only guard, and
@@ -196,9 +183,15 @@ extension CodeAssistantPanel {
                 await runGitOpFlow(g)
             }
         } catch is CancellationError {
-            // Stopped by the user — leave the user turn, no error bubble.
+            // Stopped by the user — leave the partial streamed text (if any)
+            // in place, tagged as stopped, instead of vanishing it.
+            if let streamingID = revealingTurnID {
+                finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, stopped: true)
+            }
         } catch let urlError as URLError where urlError.code == .cancelled {
-            // Stopped: Task cancellation surfaced as a cancelled URLSession request.
+            if let streamingID = revealingTurnID {
+                finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, stopped: true)
+            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -366,6 +359,7 @@ extension CodeAssistantPanel {
         history: [LlmIdeAPIClient.CodeAssistTurn],
         attachments: [LlmIdeAPIClient.CodeAttachment],
         skills: [String] = [],
+        onChunk: @escaping @MainActor (String) -> Void,
     ) async throws -> LlmIdeAPIClient.CodeAssistResponse {
         // Determine provider string: custom:uuid for custom providers, or built-in tool provider
         let provider: String
@@ -382,7 +376,7 @@ extension CodeAssistantPanel {
             return try await api.codeAssistStream(
                 message: message, language: prefLanguage, model: model, provider: provider,
                 history: history, attachments: attachments, skills: skills, agentContext: ctx,
-                onProgress: { statusText = $0 })
+                onProgress: { statusText = $0 }, onChunk: onChunk)
         } catch let e as APIError {
             // APIError == a server/stream/format failure (cancellations surface
             // as CancellationError / URLError.cancelled, which propagate). Retry
@@ -410,15 +404,24 @@ extension CodeAssistantPanel {
             // pushed before this call IS the signal the agent needs to
             // see. Keep it in `history`; pass "(continue)" as the user
             // message purely to pass the server's empty-message guard.
+            let streamingID = beginStreamingTurn()
             let resp = try await codeAssistRoundTrip(
                 message: "(continue)",
                 history: recent,
                 attachments: [],
+                onChunk: { [self] text in appendStreamedChunk(streamingID, text) },
             )
-            let assistantTurn = LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: resp.reply)
-            history.append(assistantTurn)
-            revealAssistantReply(assistantTurn)
-            self.pendingTool = resp.pendingTool
+            if let idx = history.firstIndex(where: { $0.id == streamingID }) {
+                history[idx].content = resp.reply
+            }
+            finishStreamingTurn(
+                streamingID,
+                pendingTool: resp.pendingTool,
+                tasks: nil,
+                continueNeeded: nil,
+                usage: nil,
+                stopped: false,
+            )
         } catch {
             self.error = error.localizedDescription
         }
