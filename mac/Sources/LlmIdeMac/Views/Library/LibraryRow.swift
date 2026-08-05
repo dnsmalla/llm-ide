@@ -75,11 +75,11 @@ struct LibraryRow: View {
     }
 
     private var platformIcon: String {
-        switch (row as? any PlatformProvider)?.platform ?? "" {
+        switch row.platform ?? "" {
         case "teams":  return "video.fill"
         case "zoom":   return "video.circle.fill"
         case "mic":    return "mic.fill"
-        default:       return "video.bubble.left.fill"   // meet / default
+        default:       return "video.bubble.left.fill"   // meet / unindexed / default
         }
     }
 
@@ -126,12 +126,6 @@ struct LibraryRow: View {
         }
     }
 }
-
-// MARK: - Platform icon protocol shim
-// MeetingIndex.Row is a plain struct without platform; the platform
-// lives in the .md frontmatter, not the index.  We show a generic
-// icon and will refine once the index grows a platform column.
-private protocol PlatformProvider { var platform: String { get } }
 
 private extension Int {
     var durationString: String {

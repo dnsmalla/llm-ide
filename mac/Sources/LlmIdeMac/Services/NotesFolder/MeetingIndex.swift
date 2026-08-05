@@ -22,6 +22,9 @@ final class MeetingIndex: @unchecked Sendable {
         let fileMtime: Int64
         let fileSize: Int64
         let indexedAt: Int64
+        /// "meet" | "teams" | "zoom" | "mic" — mirrors `MeetingFrontmatter.platform`.
+        /// Optional/nullable since rows indexed before schema v2 have none.
+        let platform: String?
     }
 
     private var db: OpaquePointer?
@@ -66,7 +69,7 @@ final class MeetingIndex: @unchecked Sendable {
     /// migration step below. `PRAGMA user_version` gives us a real migration
     /// seam so a future schema change can `ALTER TABLE` instead of silently
     /// diverging from an old database.
-    private static let schemaVersion = 1
+    private static let schemaVersion = 2
 
     private func migrate() throws {
         let current = try userVersion()
@@ -93,8 +96,13 @@ final class MeetingIndex: @unchecked Sendable {
             try exec("CREATE INDEX IF NOT EXISTS meetings_index_started_at ON meetings_index(started_at DESC);")
         }
 
-        // Future migrations go here, e.g.:
-        //   if current < 2 { try exec("ALTER TABLE meetings_index ADD COLUMN …;") }
+        // v2 — platform icon shown in LibraryRow always fell back to the
+        // generic default because the index never stored it, even though
+        // MeetingFrontmatter.platform was available at index time; existing
+        // rows backfill to NULL and get their real platform on next rescan.
+        if current < 2 {
+            try exec("ALTER TABLE meetings_index ADD COLUMN platform TEXT;")
+        }
 
         if current < Self.schemaVersion {
             try exec("PRAGMA user_version=\(Self.schemaVersion);")
@@ -117,8 +125,8 @@ final class MeetingIndex: @unchecked Sendable {
         let sql = """
         INSERT INTO meetings_index (id,path,title,started_at,ended_at,duration_sec,
           gist,tldr_json,actions_count,decisions_count,blockers_count,
-          file_mtime,file_size,indexed_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          file_mtime,file_size,indexed_at,platform)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET
           path=excluded.path, title=excluded.title,
           started_at=excluded.started_at, ended_at=excluded.ended_at,
@@ -126,7 +134,7 @@ final class MeetingIndex: @unchecked Sendable {
           tldr_json=excluded.tldr_json, actions_count=excluded.actions_count,
           decisions_count=excluded.decisions_count, blockers_count=excluded.blockers_count,
           file_mtime=excluded.file_mtime, file_size=excluded.file_size,
-          indexed_at=excluded.indexed_at;
+          indexed_at=excluded.indexed_at, platform=excluded.platform;
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { throw err("prepare upsert") }
@@ -145,6 +153,7 @@ final class MeetingIndex: @unchecked Sendable {
         sqlite3_bind_int64(stmt, 12, r.fileMtime)
         sqlite3_bind_int64(stmt, 13, r.fileSize)
         sqlite3_bind_int64(stmt, 14, r.indexedAt)
+        bindOpt(stmt, 15, r.platform)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw err("step upsert") }
     }
 
@@ -177,7 +186,7 @@ final class MeetingIndex: @unchecked Sendable {
         guard sqlite3_prepare_v2(db, """
             SELECT id,path,title,started_at,ended_at,duration_sec,gist,tldr_json,
                    actions_count,decisions_count,blockers_count,
-                   file_mtime,file_size,indexed_at
+                   file_mtime,file_size,indexed_at,platform
             FROM meetings_index ORDER BY started_at DESC;
             """, -1, &stmt, nil) == SQLITE_OK else { throw err("prepare list") }
         defer { sqlite3_finalize(stmt) }
@@ -202,7 +211,7 @@ final class MeetingIndex: @unchecked Sendable {
         guard sqlite3_prepare_v2(db, """
             SELECT id,path,title,started_at,ended_at,duration_sec,gist,tldr_json,
                    actions_count,decisions_count,blockers_count,
-                   file_mtime,file_size,indexed_at
+                   file_mtime,file_size,indexed_at,platform
             FROM meetings_index WHERE id = ?
             """, -1, &stmt, nil) == SQLITE_OK else { throw err("prepare get") }
         defer { sqlite3_finalize(stmt) }
@@ -227,7 +236,8 @@ final class MeetingIndex: @unchecked Sendable {
             blockersCount: Int(sqlite3_column_int(stmt, 10)),
             fileMtime: sqlite3_column_int64(stmt, 11),
             fileSize: sqlite3_column_int64(stmt, 12),
-            indexedAt: sqlite3_column_int64(stmt, 13)
+            indexedAt: sqlite3_column_int64(stmt, 13),
+            platform: textCol(stmt, 14)
         )
     }
 

@@ -117,7 +117,8 @@ final class FolderIndexer: @unchecked Sendable {
             decisionsCount: decisionsCount,
             blockersCount: blockersCount,
             fileMtime: mtime, fileSize: size,
-            indexedAt: Int64(Date().timeIntervalSince1970 * 1000)
+            indexedAt: Int64(Date().timeIntervalSince1970 * 1000),
+            platform: fm.platform
         ))
         return fm.id
     }
