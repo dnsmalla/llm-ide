@@ -18,15 +18,21 @@ struct SlackSourceSheet: View {
 
     /// Draft seeded from the existing source (or defaults for first setup).
     @State private var draft: SavedSlackSource
-    /// True when we're editing an already-saved source.
-    private let isEditing: Bool
+    /// True when we're editing an already-saved source. Starts from whether
+    /// a source existed when the sheet opened, but also flips true the
+    /// moment a fresh OAuth connect succeeds — so Disconnect becomes
+    /// reachable immediately, even if the user closes the sheet before
+    /// tapping Save (the vault token already exists server-side by then).
+    @State private var isEditing: Bool
 
     @State private var selectedChannelIds: Set<String>
     @State private var availableChannels: [LlmIdeAPIClient.SlackConversation] = []
     @State private var channelsIncomplete = false
+    @State private var channelsError: String?
     @State private var loadingChannels = false
     @State private var connecting = false
     @State private var connectError: String?
+    @State private var connectTask: Task<Void, Never>?
 
     @State private var showAdvanced = false
     @State private var token: String = ""
@@ -39,7 +45,7 @@ struct SlackSourceSheet: View {
         self.api = api
         let existing = AppConfig.shared.slackSource
         _draft = State(initialValue: existing ?? SavedSlackSource())
-        isEditing = existing != nil
+        _isEditing = State(initialValue: existing != nil)
         _selectedChannelIds = State(initialValue: Set(existing?.channels ?? []))
     }
 
@@ -63,7 +69,7 @@ struct SlackSourceSheet: View {
                         channelChecklist
                     } else {
                         Button(connecting ? "Connecting…" : "Connect Slack") {
-                            Task { await connectSlack() }
+                            connectTask = Task { await connectSlack() }
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(connecting)
@@ -101,7 +107,10 @@ struct SlackSourceSheet: View {
                                     .accessibilityLabel(tokenVisible ? "Hide token" : "Show token")
                                 }
                             }
-                            SettingsHint("Leave blank to keep the current one. The bot must be invited to each channel you select above.")
+                            if isEditing {
+                                SettingsHint("Leave blank to keep the current one.")
+                            }
+                            SettingsHint("The bot must be invited to each channel you paste below.")
                             if let s = testStatus {
                                 Text(s)
                                     .font(Typography.caption)
@@ -159,6 +168,9 @@ struct SlackSourceSheet: View {
         .task {
             if sourceLinks.hasSecret(.slack) { await loadChannels() }
         }
+        .onDisappear {
+            connectTask?.cancel()
+        }
     }
 
     // MARK: - Channel checklist
@@ -170,6 +182,14 @@ struct SlackSourceSheet: View {
                 .font(Typography.body)
                 .foregroundStyle(theme.current.textMuted)
             Spacer()
+            Button("Select All") { selectedChannelIds = Set(availableChannels.map(\.id)) }
+                .buttonStyle(.plain)
+                .font(Typography.caption)
+                .disabled(availableChannels.isEmpty)
+            Button("Select None") { selectedChannelIds.removeAll() }
+                .buttonStyle(.plain)
+                .font(Typography.caption)
+                .disabled(selectedChannelIds.isEmpty)
             Button(loadingChannels ? "Refreshing…" : "Refresh channels") {
                 Task { await loadChannels() }
             }
@@ -177,23 +197,27 @@ struct SlackSourceSheet: View {
             .font(Typography.caption)
             .disabled(loadingChannels)
         }
-        if availableChannels.isEmpty && !loadingChannels {
-            SettingsHint("Couldn't load channels — tap Refresh channels to try again.")
+        if let err = channelsError {
+            SettingsHint("Couldn't refresh channels: \(err)")
+        } else if availableChannels.isEmpty && !loadingChannels {
+            SettingsHint("Couldn't load channels — Click Refresh channels to try again.")
         } else if channelsIncomplete {
-            SettingsHint("Showing \(availableChannels.count) channels — the list may be incomplete (large workspace or Slack rate limit). Tap Refresh channels to try again.")
+            SettingsHint("Showing \(availableChannels.count) channels — the list may be incomplete (large workspace or Slack rate limit). Click Refresh channels to try again.")
         }
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(availableChannels) { ch in
-                Toggle("#\(ch.name)", isOn: Binding(
-                    get: { selectedChannelIds.contains(ch.id) },
-                    set: { on in
-                        if on { selectedChannelIds.insert(ch.id) } else { selectedChannelIds.remove(ch.id) }
-                    }
-                ))
-                .toggleStyle(.checkbox)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(availableChannels) { ch in
+                    Toggle("#\(ch.name)", isOn: Binding(
+                        get: { selectedChannelIds.contains(ch.id) },
+                        set: { on in
+                            if on { selectedChannelIds.insert(ch.id) } else { selectedChannelIds.remove(ch.id) }
+                        }
+                    ))
+                    .toggleStyle(.checkbox)
+                }
             }
         }
-        .frame(maxHeight: 220)
+        .frame(height: 220)
     }
 
     // MARK: - Field row
@@ -224,14 +248,20 @@ struct SlackSourceSheet: View {
         defer { connecting = false }
         do {
             let r = try await api.slackConnectStart()
-            if let u = URL(string: r.authUrl) { NSWorkspace.shared.open(u) }
+            guard let u = URL(string: r.authUrl) else {
+                connectError = "Couldn't open the Slack sign-in link."
+                return
+            }
+            NSWorkspace.shared.open(u)
             for _ in 0..<90 {
+                try Task.checkCancellation()
                 try await Task.sleep(nanoseconds: 2_000_000_000)
                 let s = try await api.slackConnectStatus(state: r.state)
                 if s.status == "complete" {
                     await sourceLinks.refresh(api: api)
+                    config.slackSource = draft
+                    isEditing = true
                     await loadChannels()
-                    selectedChannelIds = Set(availableChannels.map(\.id))
                     return
                 }
                 if s.status != "pending" {
@@ -240,23 +270,28 @@ struct SlackSourceSheet: View {
                 }
             }
             connectError = "Connecting timed out — try again."
+        } catch is CancellationError {
+            // Sheet was dismissed mid-connect — nothing to update on a gone view.
         } catch {
             connectError = error.localizedDescription
         }
     }
 
     /// Refresh the channel checklist from the currently-saved Slack
-    /// connection (user token, or a manually-pasted bot token).
+    /// connection (user token, or a manually-pasted bot token). Keeps
+    /// whatever channels were already loaded on failure — one failed
+    /// refresh shouldn't blank out a list the user was mid-way through
+    /// checking.
     private func loadChannels() async {
         loadingChannels = true
+        channelsError = nil
         defer { loadingChannels = false }
         do {
             let result = try await api.fetchSlackConversations()
             availableChannels = result.channels
             channelsIncomplete = !result.complete
         } catch {
-            availableChannels = []
-            channelsIncomplete = false
+            channelsError = error.localizedDescription
         }
     }
 
@@ -294,7 +329,7 @@ struct SlackSourceSheet: View {
                 return
             }
         }
-        draft.channels = Array(selectedChannelIds)
+        draft.channels = selectedChannelIds.sorted()
         config.slackSource = draft
         dismiss()
     }
