@@ -92,7 +92,11 @@ enum KeychainStore {
     static func warmSessionCache(refreshTokenHost: String, gitLabHost: String) {
         ensureBlobLoaded()
         migrateIfNeeded(refreshHost: refreshTokenHost, gitLabHost: gitLabHost)
-        // MobilePin keeps its own item (pairing PIN); not part of the token trio.
+        // MobilePin keeps its own item (pairing PIN), separate from the blob
+        // above, but still warmed here so its keychain read also happens in
+        // this single launch-time pass instead of lazily on first mobile-
+        // control use — which would otherwise cost a second unlock prompt.
+        MobilePin.warmCache()
     }
 
     private static func clearBlobCache() {
