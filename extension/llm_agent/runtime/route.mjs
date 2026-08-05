@@ -75,6 +75,7 @@ export async function handleCodeAssist({
   kb,
   userId,
   onProgress,               // optional: live status callback (SSE → client)
+  onChunk,                  // optional: live text-delta callback (SSE → client), fence-loop only
   maxIterations: maxIterationsOverride,  // optional: override for tests
   model,                    // resolved model id (from the client) — routes native vs fence loop
   provider,                 // explicit provider id from the client, if any
@@ -361,6 +362,7 @@ export async function handleCodeAssist({
       userId,
       handlers,
       onProgress,
+      onChunk,
       model: GLOBAL_AGENT_MODEL,
       maxIterations: maxIterationsOverride ?? 1000,  // global cap raised; see runAgentLoop DEFAULT_MAX_ITERATIONS (10)
       deadlineMs: 180_000,

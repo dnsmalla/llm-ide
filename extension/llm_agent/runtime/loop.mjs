@@ -141,9 +141,51 @@ const MAX_USER_MESSAGE_BYTES = 500_000; // 500 KB
 // recursion burning tokens until the deadline.
 const MAX_LOOP_DEPTH = 2;
 
+const TOOL_CALL_FENCE_MARKER = '<<<TOOL_CALL>>>';
+
+/**
+ * Wraps a caller's `onChunk` with a "sniff the first bytes" filter so live
+ * streaming only reaches the client for a real natural-language answer, never
+ * for a `<<<TOOL_CALL>>>` fence directive (which is never user-facing text).
+ * Since a single agent-loop iteration's output isn't known to be "the final
+ * answer" vs. "a tool call" until it's fully parsed, this decides as early as
+ * possible from the stream itself: once enough characters have arrived to
+ * either match or rule out the fence marker, either start forwarding live
+ * (flushing whatever was buffered so far) or suppress silently for the rest
+ * of this call.
+ *
+ * `flushIfUndecided(fullText)` is a safety net for a response SHORTER than
+ * the fence marker itself (15 chars) that therefore never resolved live —
+ * call it only after `parseFence` has confirmed the full response has no
+ * fence, so it's safe to flush in bulk (this only ever fires for genuinely
+ * short answers, where "streamed at the very end" vs. "streamed live" is an
+ * imperceptible difference to the user).
+ */
+function makeSniffingChunkHandler(outerOnChunk) {
+  let buffer = '';
+  let decided = null; // null = undecided, true = forwarding live, false = suppressed (a fence)
+  const onChunk = (delta) => {
+    if (decided === true) { outerOnChunk(delta); return; }
+    if (decided === false) return;
+    buffer += delta;
+    if (buffer.length >= TOOL_CALL_FENCE_MARKER.length) {
+      if (buffer.startsWith(TOOL_CALL_FENCE_MARKER)) {
+        decided = false;
+      } else {
+        decided = true;
+        outerOnChunk(buffer);
+      }
+    }
+  };
+  const flushIfUndecided = (fullText) => {
+    if (decided === null) outerOnChunk(fullText);
+  };
+  return { onChunk, flushIfUndecided };
+}
+
 export async function runAgentLoop({
   skills, userMessage, history, agentContext, runClaude, kb, userId, handlers,
-  maxIterations, deadlineMs, model, maxTokens, depth = 0, onProgress,
+  maxIterations, deadlineMs, model, maxTokens, depth = 0, onProgress, onChunk,
 }) {
   // onProgress is an optional best-effort callback used to surface live
   // status to the client (the macOS Code Assistant turns these into a status
@@ -223,12 +265,14 @@ export async function runAgentLoop({
     // abort, which we turn into the same graceful deadline reply.
     const callSignal = AbortSignal.timeout(remaining);
     let out;
+    const sniff = typeof onChunk === 'function' ? makeSniffingChunkHandler(onChunk) : null;
     try {
       out = await runClaude(prompt, {
         userId,
         model,
         maxTokens: (Number.isFinite(maxTokens) && maxTokens > 0) ? maxTokens : 2048,
         signal: callSignal,
+        ...(sniff ? { onChunk: sniff.onChunk } : {}),
       });
     } catch (err) {
       if (callSignal.aborted) return deadlineReply(i);
@@ -243,6 +287,7 @@ export async function runAgentLoop({
         toolError = parseError;
         continue;
       }
+      if (sniff) sniff.flushIfUndecided(text.trim() || out);
       return { reply: preToolText.trim() || text.trim(), pendingTool: null, iterations: i + 1, cacheHits };
     }
 

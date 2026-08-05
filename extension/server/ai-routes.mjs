@@ -1,4 +1,4 @@
-import { runClaude, runClaudeStream, resolveLanguage } from '../agents/runtime.mjs';
+import { runClaude, runClaudeStream, streamModelReply, resolveLanguage } from '../agents/runtime.mjs';
 import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON } from '../core/utils.mjs';
 import { handleCodeAssist } from '../llm_agent/runtime/route.mjs';
 import { readSkillInstructions } from '../llm_agent/skills/index.mjs';
@@ -458,20 +458,35 @@ export async function handleAIRoutes(req, res) {
               // and maxTokens never reach runClaude, so the deadline-abort is
               // dead code and every call uses the 8192 default. Merge the loop's
               // signal with the route's client-disconnect signal so EITHER aborts.
-              runClaude: (p, opts = {}) => runClaude(p, {
-                userId: req.user?.id,
-                // opts.model (the agent loop's GLOBAL_AGENT_MODEL) overrides
-                // the user's tier model for agent calls; drop provider so it
-                // is derived from the model (e.g. claude-* -> anthropic).
-                model: opts.model ?? tierModel,
-                provider: opts.model ? undefined : body.provider,
-                maxTokens: opts.maxTokens,
-                tools: opts.tools,
-                signal: opts.signal ? AbortSignal.any([opts.signal, ac.signal]) : ac.signal,
-              }),
+              runClaude: (p, opts = {}) => {
+                const callOpts = {
+                  userId: req.user?.id,
+                  // opts.model (the agent loop's GLOBAL_AGENT_MODEL) overrides
+                  // the user's tier model for agent calls; drop provider so it
+                  // is derived from the model (e.g. claude-* -> anthropic).
+                  model: opts.model ?? tierModel,
+                  provider: opts.model ? undefined : body.provider,
+                  maxTokens: opts.maxTokens,
+                  tools: opts.tools,
+                  signal: opts.signal ? AbortSignal.any([opts.signal, ac.signal]) : ac.signal,
+                };
+                // The agent loop's sniffing wrapper (loop.mjs) only passes
+                // onChunk for a call it wants streamed live — when present,
+                // route through streamModelReply instead of the plain
+                // buffered runClaude. Every other call (intermediate
+                // delegate/tool-decision turns, and any caller that never
+                // wired onChunk at all — ask-internal, ask-subagent) is
+                // completely unaffected, since opts.onChunk is simply absent
+                // for those.
+                if (typeof opts.onChunk === 'function') {
+                  return streamModelReply(p, { ...callOpts, onChunk: opts.onChunk });
+                }
+                return runClaude(p, callOpts);
+              },
               kb,
               userId: req.user?.id,
               onProgress: (ev) => writeEvent({ type: 'progress', ...ev }),
+              onChunk: (text) => writeEvent({ type: 'chunk', text }),
             });
             mergeMemoryUsage(usage, out);
             writeEvent({ type: 'done', reply: out.reply, pendingTool: out.pendingTool, usage });
