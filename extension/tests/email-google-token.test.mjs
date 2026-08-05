@@ -60,6 +60,32 @@ test('getGoogleAccessToken falls back to the hosted config when no per-user clie
   } finally { restore(); }
 });
 
+test('getGoogleAccessToken ignores a half-written BYO client (clientId only, no clientSecret) and uses hosted for BOTH', async () => {
+  const u = users.registerUser(kb.getDb(), { email: `half-id-${Date.now()}@e.com`, password: 'CorrectHorseBattery', displayName: 'v' });
+  setSecret(kb.getDb(), u.id, 'google.email.clientId', 'byo-cid');
+  // Deliberately NOT setting google.email.clientSecret.
+  setSecret(kb.getDb(), u.id, 'google.email.refreshToken', 'RT');
+
+  const restore = stubTokenFetch('hosted-cid', 'hosted-csecret');
+  try {
+    const accessToken = await getGoogleAccessToken(kb.getDb(), u.id);
+    assert.equal(accessToken, 'AT-for-hosted-cid');
+  } finally { restore(); }
+});
+
+test('getGoogleAccessToken ignores a half-written BYO client (clientSecret only, no clientId) and uses hosted for BOTH', async () => {
+  const u = users.registerUser(kb.getDb(), { email: `half-secret-${Date.now()}@e.com`, password: 'CorrectHorseBattery', displayName: 'v' });
+  setSecret(kb.getDb(), u.id, 'google.email.clientSecret', 'byo-csecret');
+  // Deliberately NOT setting google.email.clientId.
+  setSecret(kb.getDb(), u.id, 'google.email.refreshToken', 'RT');
+
+  const restore = stubTokenFetch('hosted-cid', 'hosted-csecret');
+  try {
+    const accessToken = await getGoogleAccessToken(kb.getDb(), u.id);
+    assert.equal(accessToken, 'AT-for-hosted-cid');
+  } finally { restore(); }
+});
+
 test('getGoogleAccessToken throws when no refresh token is stored, regardless of client config', async () => {
   const u = users.registerUser(kb.getDb(), { email: `none-${Date.now()}@e.com`, password: 'CorrectHorseBattery', displayName: 'v' });
   const orig = global.fetch;
