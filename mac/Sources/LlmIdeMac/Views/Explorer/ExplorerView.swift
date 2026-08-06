@@ -17,6 +17,12 @@ struct ExplorerView: View {
     @State private var expanded: Set<String> = []
     @State private var childrenCache: [String: [FileSystemTree.Node]] = [:]
 
+    // Selected tree row (folder or file) — VS Code/Cursor-style: distinct
+    // from expand/collapse and from the open editor tab. The toolbar's New
+    // File / New Folder buttons target this (or its parent, for a selected
+    // file) instead of always creating at the workspace root.
+    @State private var selectedURL: URL?
+
     // Editor tabs.
     @State private var tabs: [URL] = []
     @State private var activeTab: URL?
@@ -107,6 +113,7 @@ struct ExplorerView: View {
             childrenCache.removeAll()
             tabs.removeAll()
             activeTab = nil
+            selectedURL = nil
         }
         // Refresh decorations when the project root changes / on appear.
         .task(id: root?.path) { await decorations.refresh(root: root) }
@@ -183,12 +190,21 @@ struct ExplorerView: View {
     @ViewBuilder
     private var treePane: some View {
         if let root {
+            // When the workspace root's only child is a single folder (the
+            // common single-repo case — root is the project's code/
+            // container, its one child is the cloned repo), display AT that
+            // folder instead of wrapping it in an extra collapsible row.
+            // Mirrors VS Code/Cursor opening a folder directly: the folder's
+            // name becomes the fixed header, its contents are the top-level
+            // rows. A multi-repo project (2+ children under code/) keeps
+            // each repo as its own top-level collapsible row, unchanged.
+            let displayRoot = effectiveDisplayRoot(root)
             VStack(spacing: 0) {
-                treeToolbar(root: root)
+                treeToolbar(root: root, displayRoot: displayRoot)
                 Divider()
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(children(of: root)) { node in
+                        ForEach(children(of: displayRoot)) { node in
                             treeRow(node, depth: 0)
                         }
                     }
@@ -203,13 +219,61 @@ struct ExplorerView: View {
         }
     }
 
-    private func treeToolbar(root: URL) -> some View {
-        HStack(spacing: 2) {
-            Button { filePrompt = .newFile(in: root) } label: {
+    /// See `treePane` doc comment. Pure function of already-loaded children
+    /// so it doesn't trigger extra filesystem work beyond the normal
+    /// top-level `children(of:)` call the tree already makes.
+    private func effectiveDisplayRoot(_ root: URL) -> URL {
+        let kids = children(of: root)
+        if kids.count == 1, kids[0].isDirectory { return kids[0].url }
+        return root
+    }
+
+    /// Where the toolbar's New File / New Folder buttons create — the
+    /// selected folder, the parent of a selected file, or `displayRoot`
+    /// when nothing is selected. VS Code/Cursor: toolbar actions target the
+    /// current tree selection, not always the workspace root — previously
+    /// these buttons always created at `root`, silently ignoring whatever
+    /// folder the user had clicked.
+    private func toolbarTargetDir(displayRoot: URL) -> URL {
+        guard let selectedURL else { return displayRoot }
+        var isDir: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: selectedURL.path, isDirectory: &isDir)
+        return (exists && isDir.boolValue) ? selectedURL : selectedURL.deletingLastPathComponent()
+    }
+
+    private func treeToolbar(root: URL, displayRoot: URL) -> some View {
+        let targetDir = toolbarTargetDir(displayRoot: displayRoot)
+        return HStack(spacing: 2) {
+            Text(displayRoot == root
+                 ? (projectStore.activeProject?.bundle.displayName ?? displayRoot.lastPathComponent)
+                 : displayRoot.lastPathComponent)
+                .font(Typography.filename.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .contextMenu {
+                    Button("New File") { filePrompt = .newFile(in: displayRoot) }
+                    Button("New Folder") { filePrompt = .newFolder(in: displayRoot) }
+                    // Only offered when displayRoot is a real folder we
+                    // auto-descended into (single-repo case) — it's no
+                    // longer rendered as its own tree row, so this is the
+                    // only place left to reach Rename/Delete for it. When
+                    // displayRoot == root it's the code/ container itself,
+                    // not a renameable/deletable entity.
+                    if displayRoot != root {
+                        Button("Rename") { filePrompt = .rename(url: displayRoot) }
+                        Button("Delete") { pendingDelete = displayRoot }
+                    }
+                    Divider()
+                    Button("Reveal in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([displayRoot])
+                    }
+                }
+            Spacer(minLength: 4)
+            Button { filePrompt = .newFile(in: targetDir) } label: {
                 Image(systemName: "doc.badge.plus")
             }
             .buttonStyle(.borderless).help("New File")
-            Button { filePrompt = .newFolder(in: root) } label: {
+            Button { filePrompt = .newFolder(in: targetDir) } label: {
                 Image(systemName: "folder.badge.plus")
             }
             .buttonStyle(.borderless).help("New Folder")
@@ -217,7 +281,10 @@ struct ExplorerView: View {
                 Image(systemName: "arrow.clockwise")
             }
             .buttonStyle(.borderless).help("Refresh")
-            Spacer()
+            Button { collapseAll() } label: {
+                Image(systemName: "rectangle.compress.vertical")
+            }
+            .buttonStyle(.borderless).help("Collapse All")
         }
         .padding(.horizontal, 6).padding(.vertical, 4)
     }
@@ -248,13 +315,19 @@ struct ExplorerView: View {
         let deco = root.flatMap {
             decorations.decoration(forAbsolute: node.url, root: $0, isDirectory: true)
         }
+        let isSelected = selectedURL == node.url
         return Button {
+            selectedURL = node.url
             toggle(node)
         } label: {
             TreeRowLabel(name: node.name, isFolder: true, isExpanded: isExpanded,
-                         depth: depth, isSelected: false, gitStatus: deco)
+                         depth: depth, isSelected: isSelected, gitStatus: deco)
         }
         .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(isSelected ? Color.accentColor.opacity(0.22) : Color.clear)
+        )
         .help(node.name)
         .contextMenu {
             Button("New File") { filePrompt = .newFile(in: node.url) }
@@ -275,6 +348,7 @@ struct ExplorerView: View {
             decorations.decoration(forAbsolute: node.url, root: $0, isDirectory: false)
         }
         return Button {
+            selectedURL = node.url
             open(node.url)
         } label: {
             TreeRowLabel(name: node.name, isFolder: false, isExpanded: false,
@@ -372,15 +446,18 @@ struct ExplorerView: View {
         case .newFile:
             let url = try ExplorerFileOps.createFile(in: prompt.dir, name: name)
             invalidate(prompt.dir); expand(prompt.dir); open(url)
+            selectedURL = url
         case .newFolder:
-            _ = try ExplorerFileOps.createFolder(in: prompt.dir, name: name)
+            let url = try ExplorerFileOps.createFolder(in: prompt.dir, name: name)
             invalidate(prompt.dir); expand(prompt.dir)
+            selectedURL = url
         case .rename:
             guard let url = prompt.url else { return }
             let new = try ExplorerFileOps.rename(url, to: name)
             invalidate(url.deletingLastPathComponent())
             tabs = tabs.map { $0 == url ? new : $0 }
             if activeTab == url { activeTab = new }
+            if selectedURL == url { selectedURL = new }
         }
         Task { await decorations.refresh(root: root) }
     }
@@ -393,6 +470,9 @@ struct ExplorerView: View {
             tabs.removeAll { $0 == url || $0.path.hasPrefix(url.path + "/") }
             if let active = activeTab, active == url || active.path.hasPrefix(url.path + "/") {
                 activeTab = tabs.last
+            }
+            if let selected = selectedURL, selected == url || selected.path.hasPrefix(url.path + "/") {
+                selectedURL = nil
             }
             Task { await decorations.refresh(root: root) }
         } catch {
@@ -417,6 +497,11 @@ struct ExplorerView: View {
     private func refreshAll() {
         childrenCache.removeAll()
         Task { await decorations.refresh(root: root) }
+    }
+
+    /// Collapse every expanded folder (toolbar Collapse All), VS Code-style.
+    private func collapseAll() {
+        expanded.removeAll()
     }
 
     private struct FilePrompt: Identifiable {
