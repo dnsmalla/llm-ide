@@ -21,9 +21,17 @@ struct AutoCodeView: View {
     @State private var editPreview: EditPreviewMode = .edit
     @State private var customTasks: [CustomAutoTask] = []
     @State private var showingAddCustomTask = false
-    @State private var selectedCustomTask: CustomAutoTask? = nil
+    @State private var selectedCustomTaskId: String? = nil
     @State private var customTaskPendingDelete: CustomAutoTask? = nil
     @Environment(MobileControlManager.self) private var mobileControl
+
+    /// Derived live from `customTasks` instead of stored as a snapshot — a
+    /// stored `CustomAutoTask?` would go stale the moment another mutation
+    /// (e.g. the enable toggle) reloads `customTasks`, silently re-saving
+    /// the stale copy's fields on the next edit.
+    private var selectedCustomTask: CustomAutoTask? {
+        customTasks.first(where: { $0.id == selectedCustomTaskId })
+    }
 
     var body: some View {
         // Fixed-width left column — HSplitView overrides a child's width
@@ -43,14 +51,15 @@ struct AutoCodeView: View {
             if let new {
                 selectedTask = new
                 showModelLimits = false
+                selectedCustomTaskId = nil
             }
         }
         .onAppear { customTasks = CustomAutoTask.loadAll() }
         .onChange(of: autoCode.currentCustomTaskId) { _, newId in
             // Mirrors the built-in onChange above: during a custom task's
             // run, jump the right pane to follow it.
-            if let newId, let task = customTasks.first(where: { $0.id == newId }) {
-                selectedCustomTask = task
+            if let newId, customTasks.contains(where: { $0.id == newId }) {
+                selectedCustomTaskId = newId
                 selectedTask = nil
                 showModelLimits = false
             }
@@ -313,7 +322,7 @@ struct AutoCodeView: View {
             ? theme.current.accent.opacity(0.12)
             : Color.clear)
         .contentShape(Rectangle())
-        .onTapGesture { selectedTask = task; showModelLimits = false }
+        .onTapGesture { selectedTask = task; showModelLimits = false; selectedCustomTaskId = nil }
         .overlay(alignment: .leading) {
             if selectedTask == task && !showModelLimits {
                 Rectangle()
@@ -346,13 +355,13 @@ struct AutoCodeView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
-        .background(selectedCustomTask?.id == task.id
+        .background(selectedCustomTaskId == task.id
             ? theme.current.accent.opacity(0.12)
             : Color.clear)
         .contentShape(Rectangle())
-        .onTapGesture { selectedCustomTask = task; selectedTask = nil; showModelLimits = false }
+        .onTapGesture { selectedCustomTaskId = task.id; selectedTask = nil; showModelLimits = false }
         .overlay(alignment: .leading) {
-            if selectedCustomTask?.id == task.id {
+            if selectedCustomTaskId == task.id {
                 Rectangle().fill(theme.current.accent).frame(width: 3)
             }
         }
@@ -385,7 +394,7 @@ struct AutoCodeView: View {
         .padding(.vertical, 8)
         .background(showModelLimits ? theme.current.accent.opacity(0.12) : Color.clear)
         .contentShape(Rectangle())
-        .onTapGesture { showModelLimits = true; selectedTask = nil }
+        .onTapGesture { showModelLimits = true; selectedTask = nil; selectedCustomTaskId = nil }
         .overlay(alignment: .leading) {
             if showModelLimits {
                 Rectangle().fill(theme.current.accent).frame(width: 3)
@@ -439,7 +448,7 @@ struct AutoCodeView: View {
                     let task = CustomAutoTask(name: name, template: template)
                     task.save()
                     persistCustomTasksChange()
-                    selectedCustomTask = task
+                    selectedCustomTaskId = task.id
                     selectedTask = nil
                     showModelLimits = false
                     showingAddCustomTask = false
@@ -459,7 +468,7 @@ struct AutoCodeView: View {
                 if let task = customTaskPendingDelete {
                     task.delete()
                     persistCustomTasksChange()
-                    if selectedCustomTask?.id == task.id { selectedCustomTask = nil }
+                    if selectedCustomTaskId == task.id { selectedCustomTaskId = nil }
                 }
                 customTaskPendingDelete = nil
             }
@@ -618,7 +627,6 @@ struct AutoCodeView: View {
                             updated.template = newValue
                             updated.save()
                             customTasks = CustomAutoTask.loadAll()
-                            if selectedCustomTask?.id == task.id { selectedCustomTask = updated }
                         }
                     ))
                     .font(Typography.mono)
