@@ -19,6 +19,11 @@ struct AutoCodeView: View {
     private enum EditPreviewMode { case edit, preview }
     /// Which pane the per-task page shows for prompt tasks. Default Edit.
     @State private var editPreview: EditPreviewMode = .edit
+    @State private var customTasks: [CustomAutoTask] = []
+    @State private var showingAddCustomTask = false
+    @State private var selectedCustomTask: CustomAutoTask? = nil
+    @State private var customTaskPendingDelete: CustomAutoTask? = nil
+    @Environment(MobileControlManager.self) private var mobileControl
 
     var body: some View {
         // Fixed-width left column — HSplitView overrides a child's width
@@ -37,6 +42,16 @@ struct AutoCodeView: View {
             // Per-task ▶ Run leaves currentTask == the viewed task (no jump).
             if let new {
                 selectedTask = new
+                showModelLimits = false
+            }
+        }
+        .onAppear { customTasks = CustomAutoTask.loadAll() }
+        .onChange(of: autoCode.currentCustomTaskId) { _, newId in
+            // Mirrors the built-in onChange above: during a custom task's
+            // run, jump the right pane to follow it.
+            if let newId, let task = customTasks.first(where: { $0.id == newId }) {
+                selectedCustomTask = task
+                selectedTask = nil
                 showModelLimits = false
             }
         }
@@ -65,6 +80,18 @@ struct AutoCodeView: View {
                 if autoCode.isRunning {
                     ProgressView().controlSize(.mini)
                 }
+
+                Button { showingAddCustomTask = true } label: {
+                    Image(systemName: "plus.circle")
+                }
+                .buttonStyle(.borderless)
+                .help("Add Custom Task")
+
+                Button { mobileControl.refreshAutoTaskStateForMobile() } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                }
+                .buttonStyle(.borderless)
+                .help("Push current state to a paired iPhone now")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -130,6 +157,13 @@ struct AutoCodeView: View {
                                 taskRow(task, label: task.label, icon: task.icon,
                                         enabled: taskEnabledBinding(task))
                             }
+                        }
+                    }
+                    let visibleCustom = customTasks.filter { !autoTaskSettings.showOnlyEnabledTasks || $0.isEnabled }
+                    if !visibleCustom.isEmpty {
+                        taskCategoryHeader("Custom Tasks")
+                        ForEach(visibleCustom) { task in
+                            customTaskRow(task)
                         }
                     }
                 }
@@ -247,6 +281,18 @@ struct AutoCodeView: View {
         )
     }
 
+    /// Every custom-task mutation (add/toggle/delete) goes through here:
+    /// persist, reload the in-memory list so the UI reflects it immediately,
+    /// then push the change to a paired iPhone. Built-in tasks push
+    /// automatically via Combine observers on autoCode/autoTaskSettings;
+    /// CustomAutoTask is a plain struct with no such observation, so this
+    /// explicit push is the real mechanism for it (the "Refresh" button
+    /// calls the same underlying method for a manual, visible re-sync).
+    private func persistCustomTasksChange() {
+        customTasks = CustomAutoTask.loadAll()
+        mobileControl.refreshAutoTaskStateForMobile()
+    }
+
     @ViewBuilder
     private func taskRow(_ task: AutoTask, label: String, icon: String,
                          enabled: Binding<Bool>) -> some View {
@@ -274,6 +320,44 @@ struct AutoCodeView: View {
                     .fill(theme.current.accent)
                     .frame(width: 3)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func customTaskRow(_ task: CustomAutoTask) -> some View {
+        HStack(spacing: 10) {
+            Toggle("", isOn: Binding(
+                get: { task.isEnabled },
+                set: { newValue in
+                    var updated = task
+                    updated.isEnabled = newValue
+                    updated.save()
+                    persistCustomTasksChange()
+                }
+            ))
+            .toggleStyle(.checkbox)
+            .labelsHidden()
+
+            Label(task.name, systemImage: "sparkles")
+                .font(Typography.body)
+                .foregroundStyle(task.isEnabled ? theme.current.text : theme.current.textMuted)
+
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(selectedCustomTask?.id == task.id
+            ? theme.current.accent.opacity(0.12)
+            : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture { selectedCustomTask = task; selectedTask = nil; showModelLimits = false }
+        .overlay(alignment: .leading) {
+            if selectedCustomTask?.id == task.id {
+                Rectangle().fill(theme.current.accent).frame(width: 3)
+            }
+        }
+        .contextMenu {
+            Button("Delete", role: .destructive) { customTaskPendingDelete = task }
         }
     }
 
@@ -334,6 +418,8 @@ struct AutoCodeView: View {
                 ModelLimitsPanel(api: api)
             } else if let task = selectedTask {
                 templateEditor(task)
+            } else if let custom = selectedCustomTask {
+                customTaskEditor(custom)
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "arrow.triangle.2.circlepath.circle")
@@ -346,6 +432,38 @@ struct AutoCodeView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(theme.current.body)
             }
+        }
+        .sheet(isPresented: $showingAddCustomTask) {
+            AddCustomAutoTaskSheet(
+                onConfirm: { name, template in
+                    let task = CustomAutoTask(name: name, template: template)
+                    task.save()
+                    persistCustomTasksChange()
+                    selectedCustomTask = task
+                    selectedTask = nil
+                    showModelLimits = false
+                    showingAddCustomTask = false
+                },
+                onCancel: { showingAddCustomTask = false }
+            )
+        }
+        .confirmationDialog(
+            customTaskPendingDelete.map { "Delete \"\($0.name)\"?" } ?? "",
+            isPresented: Binding(
+                get: { customTaskPendingDelete != nil },
+                set: { if !$0 { customTaskPendingDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let task = customTaskPendingDelete {
+                    task.delete()
+                    persistCustomTasksChange()
+                    if selectedCustomTask?.id == task.id { selectedCustomTask = nil }
+                }
+                customTaskPendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { customTaskPendingDelete = nil }
         }
     }
 
@@ -454,6 +572,134 @@ struct AutoCodeView: View {
             }
         } message: {
             Text("Your custom prompt will be permanently replaced.")
+        }
+    }
+
+    @ViewBuilder
+    private func customTaskEditor(_ task: CustomAutoTask) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(theme.current.accent)
+                Text(task.name)
+                    .font(Typography.title)
+                    .foregroundStyle(theme.current.text)
+                Spacer()
+                Button { _ = autoCode.runSingleCustom(task) } label: {
+                    Label(autoCode.currentCustomTaskId == task.id
+                          ? (autoCode.currentStep ?? "Running…")
+                          : "Run",
+                          systemImage: autoCode.currentCustomTaskId == task.id ? "ellipsis.circle" : "play.fill")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(autoCode.isRunning)
+                Button("Delete", role: .destructive) { customTaskPendingDelete = task }
+                    .buttonStyle(.borderless)
+                    .font(Typography.caption)
+                    .disabled(autoCode.currentCustomTaskId == task.id)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .background(theme.current.surface)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Edit template")
+                        .font(Typography.section)
+                        .foregroundStyle(theme.current.textMuted)
+                    TextEditor(text: Binding(
+                        get: { task.template },
+                        set: { newValue in
+                            var updated = task
+                            updated.template = newValue
+                            updated.save()
+                            customTasks = CustomAutoTask.loadAll()
+                            if selectedCustomTask?.id == task.id { selectedCustomTask = updated }
+                        }
+                    ))
+                    .font(Typography.mono)
+                    .foregroundStyle(theme.current.text)
+                    .scrollContentBackground(.hidden)
+                    .background(theme.current.surface)
+                    .frame(minHeight: 180)
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(theme.current.border, lineWidth: 1))
+                    .cornerRadius(6)
+                }
+                .padding(20)
+            }
+
+            if let error = autoCode.taskErrors[task.id] {
+                StatusBanner(severity: .error, message: error, onDismiss: { autoCode.dismissTaskError(forId: task.id) })
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+            }
+
+            customTaskLogSection(task.id)
+
+            if let last = autoCode.lastRunDate {
+                Divider()
+                Text("Last run \(last, style: .relative) ago · \(autoCode.statusMessage)")
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+                    .background(theme.current.surface)
+            }
+        }
+        .background(theme.current.body)
+    }
+
+    /// Live, scrollable log for a custom task — same layout as `logSection`
+    /// but keyed by the task's string id via the TaskLogStore string overload.
+    @ViewBuilder
+    private func customTaskLogSection(_ id: String) -> some View {
+        let lines = logStore.lines(for: id)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Log · live")
+                    .font(Typography.section)
+                    .foregroundStyle(theme.current.textMuted)
+                Spacer()
+                Button { logStore.clear(id) } label: {
+                    Label("Clear", systemImage: "trash")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(theme.current.textMuted)
+                .font(Typography.caption)
+                .disabled(lines.isEmpty)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(lines) { line in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(line.timestamp, format: .dateTime.hour().minute().second())
+                                .font(Typography.caption)
+                                .foregroundStyle(theme.current.textMuted)
+                            Text(line.text)
+                                .font(Typography.mono)
+                                .foregroundStyle(line.level == .error ? theme.current.danger : theme.current.text)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.horizontal, 8)
+                    }
+                }
+                .padding(8)
+            }
+            .frame(maxHeight: 320)
+            .background(theme.current.surface)
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(theme.current.border, lineWidth: 1))
+            .cornerRadius(6)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
         }
     }
 

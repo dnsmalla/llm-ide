@@ -425,6 +425,10 @@ final class AutoCodeUpdateService: ObservableObject {
         taskErrors.removeValue(forKey: task.rawValue)
     }
 
+    func dismissTaskError(forId id: String) {
+        taskErrors.removeValue(forKey: id)
+    }
+
     deinit {
         timer?.invalidate()
     }
