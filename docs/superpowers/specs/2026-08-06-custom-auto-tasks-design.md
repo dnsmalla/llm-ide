@@ -137,3 +137,4 @@ All 55 existing call sites (which pass `AutoTask` literals) are untouched.
 - No editing the *name* after creation in v1 (template is editable; recreate to rename — cheap to add later if wanted).
 - No import/export or sharing of custom tasks across machines.
 - No limit enforced on the number of custom tasks (matches `CustomProvider`, which has none either).
+- No creating or deleting a custom task from the phone — `MobileControlManager` only wires up run/toggle for custom tasks; the iOS `AutoTaskView` row UI has no add/delete affordance either. Creation and deletion are Mac-only in v1.
