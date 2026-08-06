@@ -1,0 +1,140 @@
+name: mac-release
+
+# Tag-driven release for the macOS app: push a `mac-v*` tag (e.g.
+# `mac-v1.0.0`, matching mac/VERSION) and this workflow builds, signs,
+# notarizes, and packages LlmIdeMac.app via the existing mac/Scripts/
+# pipeline, then attaches the DMG to a GitHub Release.
+#
+# Distinct tag prefix from the extension's `v*` release (.github/workflows/
+# release.yml) so the two release trains never collide on the same tag.
+#
+# Requires these repo secrets (Settings → Secrets and variables → Actions).
+# Until they're set, any push of a `mac-v*` tag fails fast at the "Check
+# required secrets" step instead of silently producing an unsigned build:
+#
+#   MAC_CERT_P12_BASE64        base64 of the exported Developer ID
+#                               Application .p12 (Keychain Access → export
+#                               cert + key → base64 the file: `base64 -i cert.p12 | pbcopy`)
+#   MAC_CERT_PASSWORD           password set when exporting that .p12
+#   MAC_CI_KEYCHAIN_PASSWORD    any password — protects the ephemeral
+#                               keychain created for this CI run only
+#   MAC_SIGN_IDENTITY           exact codesign identity string, e.g.
+#                               "Developer ID Application: Your Name (TEAMID)"
+#   MAC_NOTARY_APPLE_ID         Apple ID email used for notarization
+#   MAC_NOTARY_PASSWORD         app-specific password for that Apple ID
+#                               (generate at appleid.apple.com, NOT the
+#                               account password)
+#   MAC_NOTARY_TEAM_ID          Apple Developer Team ID (same TEAMID as
+#                               in MAC_SIGN_IDENTITY)
+#
+# See docs/how-to/release-with-auto-update.md for the equivalent local
+# (non-CI) release flow using mac/Scripts/release.sh directly.
+
+on:
+  push:
+    tags:
+      - "mac-v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, sign, notarize, publish
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: mac
+    env:
+      KEYCHAIN_NAME: mac-release-ci.keychain-db
+      NOTARY_PROFILE: LLM-IDE-CI-Notarize
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select latest stable Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Check required secrets are set
+        run: |
+          missing=()
+          [ -z "${{ secrets.MAC_CERT_P12_BASE64 }}" ] && missing+=(MAC_CERT_P12_BASE64)
+          [ -z "${{ secrets.MAC_CERT_PASSWORD }}" ] && missing+=(MAC_CERT_PASSWORD)
+          [ -z "${{ secrets.MAC_CI_KEYCHAIN_PASSWORD }}" ] && missing+=(MAC_CI_KEYCHAIN_PASSWORD)
+          [ -z "${{ secrets.MAC_SIGN_IDENTITY }}" ] && missing+=(MAC_SIGN_IDENTITY)
+          [ -z "${{ secrets.MAC_NOTARY_APPLE_ID }}" ] && missing+=(MAC_NOTARY_APPLE_ID)
+          [ -z "${{ secrets.MAC_NOTARY_PASSWORD }}" ] && missing+=(MAC_NOTARY_PASSWORD)
+          [ -z "${{ secrets.MAC_NOTARY_TEAM_ID }}" ] && missing+=(MAC_NOTARY_TEAM_ID)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secrets: ${missing[*]}"
+            echo "See the header comment in .github/workflows/mac-release.yml for what each one is."
+            exit 1
+          fi
+
+      - name: Verify mac/VERSION matches the tag
+        run: |
+          file_ver=$(cat VERSION | tr -d '[:space:]')
+          tag_ver="${GITHUB_REF_NAME#mac-v}"
+          if [ "$file_ver" != "$tag_ver" ]; then
+            echo "::error::mac/VERSION ($file_ver) != tag ($tag_ver)"
+            exit 1
+          fi
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v6
+        with:
+          path: mac/.build
+          key: spm-release-${{ runner.os }}-${{ hashFiles('mac/Package.resolved') }}
+          restore-keys: |
+            spm-release-${{ runner.os }}-
+
+      - name: Import signing certificate into an ephemeral keychain
+        env:
+          CERT_P12_BASE64: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MAC_CI_KEYCHAIN_PASSWORD }}
+        run: |
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+          security set-keychain-settings -lut 1800 "$KEYCHAIN_NAME"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+          CERT_PATH="$RUNNER_TEMP/mac_cert.p12"
+          echo "$CERT_P12_BASE64" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN_NAME" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+          security list-keychains -d user -s "$KEYCHAIN_NAME" \
+            $(security list-keychains -d user | tr -d '"')
+          rm -f "$CERT_PATH"
+
+      - name: Store notarization credentials
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.MAC_NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MAC_NOTARY_PASSWORD }}
+          NOTARY_TEAM_ID: ${{ secrets.MAC_NOTARY_TEAM_ID }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MAC_CI_KEYCHAIN_PASSWORD }}
+        run: |
+          xcrun notarytool store-credentials "$NOTARY_PROFILE" \
+            --apple-id "$NOTARY_APPLE_ID" \
+            --password "$NOTARY_PASSWORD" \
+            --team-id "$NOTARY_TEAM_ID" \
+            --keychain "$KEYCHAIN_NAME"
+
+      - name: Build, sign, notarize, package
+        env:
+          LLMIDE_SIGN_IDENTITY: ${{ secrets.MAC_SIGN_IDENTITY }}
+          LLMIDE_NOTARY_PROFILE: ${{ env.NOTARY_PROFILE }}
+        run: Scripts/release.sh
+
+      - name: Clean up ephemeral keychain
+        if: always()
+        run: security delete-keychain "$KEYCHAIN_NAME" || true
+
+      - name: Create GitHub Release with the DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "LLM-IDE Mac ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            LlmIdeMac_v*.dmg

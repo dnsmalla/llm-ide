@@ -106,6 +106,13 @@ That produces `mac/LlmIdeMac_v0.2.0.dmg`. The DMG contains the .app
 with Sparkle wired in via Info.plist — clients of this DMG will
 auto-update on the next release.
 
+**CI alternative:** pushing a `mac-vX.Y.Z` tag (matching `mac/VERSION`)
+runs this same build → sign → notarize → DMG pipeline in GitHub Actions
+and attaches the DMG to a GitHub Release — see
+[`.github/workflows/mac-release.yml`](https://github.com/dnsmalla/llm-ide/blob/main/.github/workflows/mac-release.yml)
+for the required secrets. Steps 3–5 below (appcast + upload) still need
+doing by hand either way.
+
 ### 3. Generate the appcast entry
 
 ```bash
@@ -186,3 +193,4 @@ exactly this transition; that's outside the scope of this guide.
 - [`mac/Scripts/release.sh`](https://github.com/dnsmalla/llm-ide/blob/main/mac/Scripts/release.sh) — release pipeline
 - [`mac/Scripts/appcast.sh`](https://github.com/dnsmalla/llm-ide/blob/main/mac/Scripts/appcast.sh) — appcast item generator
 - [`mac/Scripts/build.sh`](https://github.com/dnsmalla/llm-ide/blob/main/mac/Scripts/build.sh) — where Sparkle env vars feed Info.plist
+- [`.github/workflows/mac-release.yml`](https://github.com/dnsmalla/llm-ide/blob/main/.github/workflows/mac-release.yml) — CI equivalent of step 2 (tag-triggered)
