@@ -7,10 +7,37 @@ import os.log
 // crash text appears in Console.app under the llmide subsystem,
 // which we can pull into a fault report.
 fileprivate let crashLog = Logger(subsystem: "com.llmide.macapp", category: "Crash")
+
+// Directory for CrashReportStore.swift's next-launch banner. Created
+// eagerly here (normal startup path) rather than inside a signal
+// handler, so the handler itself only ever needs to write a file into
+// an already-existing directory — createDirectory is not something
+// we want to risk doing from inside NSSetUncaughtExceptionHandler/signal().
+fileprivate let crashesDirectory: URL = {
+    let dir = AppIdentity.applicationSupportRoot().appendingPathComponent("crashes", isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return dir
+}()
+
+// Best-effort synchronous file write — same risk envelope as the
+// adjacent os.Logger call these handlers already made before this was
+// added: blocking I/O, no Swift concurrency, no networking. Not
+// formally async-signal-safe by the POSIX standard, but this codebase
+// already accepted that tradeoff for crashLog.critical(); this matches
+// it rather than introducing new risk.
+fileprivate func writeCrashReportFile(_ text: String) {
+    let name = "crash-\(Int(Date().timeIntervalSince1970)).log"
+    try? text.write(to: crashesDirectory.appendingPathComponent(name),
+                     atomically: true, encoding: .utf8)
+}
+
 fileprivate func installCrashHandlers() {
     NSSetUncaughtExceptionHandler { exception in
         crashLog.critical(
             "Uncaught \(exception.name.rawValue, privacy: .public): \(exception.reason ?? "<no reason>", privacy: .public)\nstack: \(exception.callStackSymbols.joined(separator: "\n"), privacy: .public)"
+        )
+        writeCrashReportFile(
+            "Uncaught \(exception.name.rawValue): \(exception.reason ?? "<no reason>")\nstack:\n\(exception.callStackSymbols.joined(separator: "\n"))"
         )
     }
     // POSIX signals — SIGSEGV/SIGABRT/SIGILL/SIGBUS. Re-raise the
@@ -19,6 +46,7 @@ fileprivate func installCrashHandlers() {
     for sig: Int32 in [SIGSEGV, SIGABRT, SIGILL, SIGBUS, SIGFPE] {
         signal(sig) { sig in
             crashLog.critical("Fatal signal \(sig)")
+            writeCrashReportFile("Fatal signal \(sig)")
             signal(sig, SIG_DFL)
             raise(sig)
         }

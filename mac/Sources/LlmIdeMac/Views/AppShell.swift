@@ -17,6 +17,7 @@ struct AppShell: View {
     @EnvironmentObject var autoCodeUpdate: AutoCodeUpdateService
     @State private var shell = ShellState()
     @State private var itemStore = LibraryItemStore()
+    @State private var crashReportStore = CrashReportStore()
     @State private var appEnv: AppEnvironment?
     @State private var envInitError: String?
     /// Standalone AppEnvironment for Settings on the Welcome screen (no project).
@@ -40,6 +41,9 @@ struct AppShell: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !crashReportStore.pendingCrashes.isEmpty {
+                CrashReportBanner(store: crashReportStore)
+            }
             Group {
                 if projectStore.activeProject == nil {
                     welcomeShell
@@ -94,6 +98,7 @@ struct AppShell: View {
             if let env = appEnv {
                 env.syncServiceLifecycles()
             }
+            crashReportStore.scanForPendingCrashes()
         }
         .onChange(of: deepLink.pendingEvent) { _, new in applyDeepLink(new?.tab) }
         .onChange(of: registry.activeFeatures) { _, _ in
