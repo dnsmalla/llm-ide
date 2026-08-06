@@ -1559,6 +1559,30 @@ final class AutoCodeUpdateService: ObservableObject {
     ///      best-effort (the clone flow doesn't populate it).
     /// Returns nil when none yield a usable local clone + token.
     func resolveBackendAndProject() -> ResolvedRepo? {
+        if let resolved = attemptResolveBackendAndProject() { return resolved }
+        let d = resolveDiagnosis()
+        lastResolveDiagnosis = d
+        log.warning("auto_task_resolve_failed \(d, privacy: .public)")
+        return nil
+    }
+
+    /// Side-effect-free existence check for SwiftUI view bodies (e.g.
+    /// AutoCodeSettingsSection's "no linked repo" warning). NEVER call
+    /// `resolveBackendAndProject()` from a view: it writes the
+    /// `@Published lastResolveDiagnosis` on failure, and mutating
+    /// observed state while SwiftUI is evaluating a body that reads it
+    /// triggers an immediate re-invalidation of that same body — an
+    /// infinite render loop (100% CPU, fully unresponsive app,
+    /// including Quit). This runs the identical lookup with no writes.
+    var hasResolvableBackend: Bool {
+        attemptResolveBackendAndProject() != nil
+    }
+
+    /// Pure resolution attempt, no side effects — the single source of
+    /// truth shared by `resolveBackendAndProject()` (which additionally
+    /// records a diagnosis on failure, for real task-run error
+    /// messages) and `hasResolvableBackend` (which must not).
+    private func attemptResolveBackendAndProject() -> ResolvedRepo? {
         // Test override: inject a stub backend for tests
         if let backend = backendOverride {
             return resolveWithBackend(backend)
@@ -1579,12 +1603,7 @@ final class AutoCodeUpdateService: ObservableObject {
         let guardedGitLab = RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
         if let resolved = resolveWithBackend(guardedGitLab) { return resolved }
         let guardedGitHub = RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
-        if let resolved = resolveWithBackend(guardedGitHub) { return resolved }
-
-        let d = resolveDiagnosis()
-        lastResolveDiagnosis = d
-        log.warning("auto_task_resolve_failed \(d, privacy: .public)")
-        return nil
+        return resolveWithBackend(guardedGitHub)
     }
 
     private func resolveWithBackend(_ backend: RepoBackend) -> ResolvedRepo? {
@@ -1613,9 +1632,12 @@ final class AutoCodeUpdateService: ObservableObject {
         let tokenName = kind == .gitlab ? "GitLab" : "GitHub"
 
         guard !token.isEmpty else {
-            let msg = "Active project is linked to \(tokenName) but the \(tokenName.lowercased()) token is empty — add it in Settings."
+            // No @Published write here — this can run from a SwiftUI view
+            // body via hasResolvableBackend. resolveBackendAndProject()'s
+            // caller records the diagnosis uniformly (resolveDiagnosis()
+            // already reports token state), so real task-run failures
+            // still get a diagnosis; the view path stays side-effect-free.
             log.warning("Active project linkedRepo is \(tokenName) but token is empty — skipping run")
-            lastResolveDiagnosis = msg
             return nil
         }
 

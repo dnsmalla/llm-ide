@@ -108,7 +108,11 @@ struct AutoCodeSettingsSection: View {
     }
 
     private var hasLinkedRepo: Bool {
-        autoCodeUpdate.resolveBackendAndProject() != nil
+        // Must be the side-effect-free query, not resolveBackendAndProject()
+        // directly — that one writes a @Published property on failure,
+        // which from inside body evaluation causes an infinite re-render
+        // loop. See AutoCodeUpdateService.hasResolvableBackend.
+        autoCodeUpdate.hasResolvableBackend
     }
 
     private var statusSummary: some View {
