@@ -375,6 +375,23 @@ public struct LlmIdeMacApp: App {
                     NotificationCenter.default.post(name: .openLlmChatSheet, object: nil)
                 }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
+                // Moved from the deleted Settings → Recording section (it
+                // had no config, just this button) so ⌘N works globally
+                // instead of only while Settings happened to be the active
+                // tab — a SwiftUI view's own .keyboardShortcut only fires
+                // while that view is mounted; a Commands entry is global.
+                if capture.isRunning {
+                    Button("Stop Recording") {
+                        Task { _ = await capture.stopAndIngest(api: api, meetingTitle: "") }
+                    }
+                    .keyboardShortcut("n", modifiers: .command)
+                } else {
+                    Button("Start Recording") {
+                        capture.start()
+                    }
+                    .keyboardShortcut("n", modifiers: .command)
+                    .disabled(!AXCaptionReader.canRead)
+                }
             }
         }
 

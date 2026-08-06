@@ -4,6 +4,7 @@ struct SettingsView: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var projectStore: ProjectStore
+    @ObservedObject var registry = FeatureRegistry.shared
 
     var body: some View {
         // ScrollViewReader so Library's "Open in Settings" deep-link can
@@ -19,19 +20,22 @@ struct SettingsView: View {
                         Text("App")
                             .font(Typography.title)
                             .foregroundStyle(theme.current.textMuted)
-                        AccountSettingsSection()
                         FeatureProfileSettingsSection()
-                        RecordingSettingsSection(api: api)
                         ServerSettingsSection()
                         BackendSettingsSection()
                         ConnectionsSettingsSection(api: api).id("connections")
                         AppearanceSettingsSection()
                         SidebarVisibilitySection()
                         UpdatesSettingsSection()
-                        AboutSettingsSection()
-                        MobileControlSettingsSection()
+                        // Gated by Feature Profile — hidden automatically
+                        // when the user has turned Mobile Sync off (e.g.
+                        // the "Minimal Code Editor" preset), instead of
+                        // always showing regardless of whether the
+                        // feature itself is enabled.
+                        if registry.isEnabled(.mobileSync) {
+                            MobileControlSettingsSection()
+                        }
                         PreferencesSettingsSection(api: api)
-                        AutoCodeSettingsSection()
                         ProvidersSettingsSection(api: api)
                         CustomProvidersSection(api: api)
                     }

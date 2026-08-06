@@ -47,8 +47,7 @@ struct HeaderAccountMenu: View {
                 ) {
                     Button("Sign out", role: .destructive) {
                         Task { @MainActor in
-                            // Mirrors AccountSettingsSection's sign-out —
-                            // clearing only the server session left the
+                            // Clearing only the server session left the
                             // GitLab PAT, saved projects, and cached chat
                             // history behind on disk.
                             session.clear()

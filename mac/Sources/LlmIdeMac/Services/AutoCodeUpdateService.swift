@@ -1567,7 +1567,7 @@ final class AutoCodeUpdateService: ObservableObject {
     }
 
     /// Side-effect-free existence check for SwiftUI view bodies (e.g.
-    /// AutoCodeSettingsSection's "no linked repo" warning). NEVER call
+    /// AutoCodeView's "no linked repo" warning). NEVER call
     /// `resolveBackendAndProject()` from a view: it writes the
     /// `@Published lastResolveDiagnosis` on failure, and mutating
     /// observed state while SwiftUI is evaluating a body that reads it

@@ -10,6 +10,7 @@ struct AutoCodeView: View {
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var logStore: TaskLogStore
     @EnvironmentObject private var autoTaskSettings: AutoTaskSettings
+    @Environment(ShellState.self) private var shell
 
     @State private var selectedTask: AutoTask? = .reviewCode
     @State private var taskToReset: AutoTask? = nil
@@ -68,6 +69,30 @@ struct AutoCodeView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(theme.current.surface)
+
+            // Absorbed from the deleted Settings → Auto Tasks shortcut
+            // section — this was the only place that warned the user
+            // Auto Tasks can't run without a linked repo + token; without
+            // it here, a misconfigured setup would just silently no-op.
+            // hasResolvableBackend is side-effect-free (safe to read from
+            // a view body) — see its doc comment in AutoCodeUpdateService.
+            if !autoCode.hasResolvableBackend {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("No linked repository detected. Auto Tasks need an active GitLab or GitHub project with a local clone path and a matching access token.")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Open Settings") {
+                        shell.section = .settings
+                    }
+                    .font(Typography.caption)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(theme.current.accent)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(theme.current.surface)
+            }
 
             // Filter — when on, off-task rows (and empty category headers)
             // are hidden so the page focuses on the active set. Toggle off
