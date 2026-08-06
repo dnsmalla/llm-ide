@@ -26,6 +26,10 @@ final class AutoCodeUpdateService: ObservableObject {
     @Published private(set) var taskErrors: [String: String] = [:]
     /// Which task is running right now (drives the per-task ▶ spinner). nil when idle.
     @Published private(set) var currentTask: AutoTask? = nil
+    /// Parallel to `currentTask` for the open, user-created task set —
+    /// `AutoTask` is a closed enum and can't represent a custom task's id.
+    /// At most one of `currentTask`/`currentCustomTaskId` is non-nil at a time.
+    @Published private(set) var currentCustomTaskId: String? = nil
     /// Human-readable description of the currently running step (e.g., "Creating issues", "Running Review Code").
     /// nil when no run is active. Updated throughout the run() flow so the UI shows live progress.
     @Published private(set) var currentStep: String?
@@ -184,6 +188,60 @@ final class AutoCodeUpdateService: ObservableObject {
         return true
     }
 
+    /// Custom-task counterpart to `runSingle(_:)` — shares the same
+    /// `runTask` re-entrancy guard, so a built-in run and a custom run
+    /// can't overlap either.
+    @discardableResult
+    func runSingleCustom(_ task: CustomAutoTask) -> Bool {
+        guard runTask == nil else { return false }
+        runTask = Task { [weak self] in
+            await self?.runCustomTask(task)
+            self?.runTask = nil
+        }
+        return true
+    }
+
+    /// Custom-task counterpart to `runOne(_:)` — the same resolve/guard/
+    /// runCLI pipeline the 5 built-in prompt tasks use (reviewCode etc. in
+    /// `runTaskBody`), generalized to take an arbitrary `CustomAutoTask`
+    /// instead of switching on a fixed `AutoTask` case. Every custom task
+    /// requires a linked repo (there is no source-ingest-only custom task,
+    /// unlike the built-in `sourceUpdate`).
+    func runCustomTask(_ task: CustomAutoTask) async {
+        guard !isRunning else { return }
+        isRunning = true
+        currentCustomTaskId = task.id
+        defer {
+            isRunning = false
+            currentCustomTaskId = nil
+            currentStep = nil
+            lastRunDate = Date()
+        }
+        guard let logDir = logsDirectory() else {
+            statusMessage = "Logs directory unavailable"
+            return
+        }
+        guard let resolved = resolveBackendAndProject() else {
+            let reason = lastResolveDiagnosis ?? "No linked repo — configure in GitLab or GitHub settings"
+            statusMessage = "No linked repo"
+            logStore.append(task.id, "⚠ \(reason)", level: .error)
+            taskErrors[task.id] = reason
+            return
+        }
+        currentStep = "Running \(task.name)"
+        logStore.append(task.id, "Running \(task.name)…")
+        let ok = await runCLI(prompt: task.template, localPath: resolved.gitRoot,
+                              logSuffix: task.id, logDir: logDir, logStoreId: task.id)
+        if ok {
+            taskErrors.removeValue(forKey: task.id)
+            logStore.append(task.id, "— run finished —")
+        } else {
+            taskErrors[task.id] = "\(task.name) task failed. Check ~/Library/Logs/\(AppIdentity.logsDirName)/auto-task-\(task.id).log"
+            logStore.append(task.id, "— run failed —", level: .error)
+        }
+        statusMessage = "\(task.name) — done"
+    }
+
     // MARK: - Cron-driven scheduling
 
     /// Tasks whose next fire is at or before `now` (and are enabled). Pure read —
@@ -288,31 +346,31 @@ final class AutoCodeUpdateService: ObservableObject {
                 currentStep = "Running Review Code"
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewCode,
                                       localPath: resolved.gitRoot, logSuffix: task.logSuffix,
-                                      logDir: logDir, task: task)
+                                      logDir: logDir, logStoreId: task.rawValue)
                 finishPromptTask(task, ok: ok)
             case .reviewDoc:
                 currentStep = "Running Review Doc"
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewDoc,
                                       localPath: resolved.gitRoot, logSuffix: task.logSuffix,
-                                      logDir: logDir, task: task)
+                                      logDir: logDir, logStoreId: task.rawValue)
                 finishPromptTask(task, ok: ok)
             case .reviewConflicts:
                 currentStep = "Running Review Conflicts"
                 let ok = await runCLI(prompt: config.autoTaskTemplateReviewConflicts,
                                       localPath: resolved.gitRoot, logSuffix: task.logSuffix,
-                                      logDir: logDir, task: task)
+                                      logDir: logDir, logStoreId: task.rawValue)
                 finishPromptTask(task, ok: ok)
             case .generateDoc:
                 currentStep = "Generating Documentation"
                 let ok = await runCLI(prompt: config.autoTaskTemplateGenerateDoc,
                                       localPath: resolved.gitRoot, logSuffix: task.logSuffix,
-                                      logDir: logDir, task: task)
+                                      logDir: logDir, logStoreId: task.rawValue)
                 finishPromptTask(task, ok: ok)
             case .updateIssues:
                 currentStep = "Updating Issues"
                 let ok = await runCLI(prompt: config.autoTaskTemplateUpdateIssues,
                                       localPath: resolved.gitRoot, logSuffix: task.logSuffix,
-                                      logDir: logDir, task: task)
+                                      logDir: logDir, logStoreId: task.rawValue)
                 finishPromptTask(task, ok: ok)
             case .regression:
                 currentStep = "Running Regression sweep"
@@ -1374,7 +1432,7 @@ final class AutoCodeUpdateService: ObservableObject {
     }
 
     private func runCLI(prompt: String, localPath: String, logSuffix: String, logDir: URL,
-                        task: AutoTask) async -> Bool {
+                        logStoreId: String) async -> Bool {
         let cliTool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
         let cliCommand = cliTool.cliExecutable
         let components = cliCommand.split(separator: " ").map(String.init)
@@ -1462,7 +1520,7 @@ final class AutoCodeUpdateService: ObservableObject {
                 if let rest = accumulator.withLock({ $0.flush() }) {
                     logFileHandle?.write((rest + "\n").data(using: .utf8) ?? Data())
                     let captured = rest
-                    Task { @MainActor in store.append(task, captured) }
+                    Task { @MainActor in store.append(logStoreId, captured) }
                 }
                 logFileHandle?.closeFile()
                 return
@@ -1471,7 +1529,7 @@ final class AutoCodeUpdateService: ObservableObject {
             guard let chunk = String(data: data, encoding: .utf8) else { return }
             for line in accumulator.withLock({ $0.feed(chunk) }) {
                 let captured = line
-                Task { @MainActor in store.append(task, captured) }
+                Task { @MainActor in store.append(logStoreId, captured) }
             }
         }
         // Detach stdin so a stray permission prompt can never hang the run.
