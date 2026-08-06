@@ -681,7 +681,11 @@ process.on('SIGPIPE', () => {});
 // headersTimeout ensures slowloris-style clients can't hold half-open
 // sockets; keepAliveTimeout reaps idle pooled sockets before they
 // outlive any reasonable client expectation.
-server.requestTimeout   = 300_000;   // total per-request budget (5 min)
+// 600s covers the agent loop's worst case (360s outer deadline +
+// up to 120s for an unbounded ask-internal delegation, see route.mjs)
+// with margin — a legitimate long chat turn must finish here, not get
+// its socket cut mid-response.
+server.requestTimeout   = 600_000;   // total per-request budget (10 min)
 server.headersTimeout   = 65_000;    // headers must arrive within 65 s
 server.keepAliveTimeout = 60_000;    // close idle keep-alive sockets after 60 s
 

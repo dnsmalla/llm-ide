@@ -56,11 +56,14 @@ async function runReadHandler(name, args, ctx) {
 // is the real safety valve; raising iterations only matters when each
 // round-trip is fast (cached read tools, small prompts).
 const DEFAULT_MAX_ITERATIONS = 10;
-// Hard wall-clock cap per agent loop. Raised to 180 s to accommodate
-// deeper multi-hop chains. With nested global→internal the practical
-// worst case is now 10 × 2 = 20 LLM calls; 180 s gives ~9 s per call
-// on average which is ample for most Claude responses.
-const DEFAULT_DEADLINE_MS = 180_000;
+// Hard wall-clock cap per agent loop. Raised to 360 s so a legitimate
+// long chat reply isn't cut off before the 5-minute mark. With nested
+// global→internal the practical worst case is now 10 × 2 = 20 LLM
+// calls; 360 s gives ~18 s per call on average, ample for most Claude
+// responses. Callers pass their own deadlineMs explicitly (route.mjs,
+// ask-internal.mjs, ask-subagent.mjs) — this is only a defensive
+// fallback.
+const DEFAULT_DEADLINE_MS = 360_000;
 
 // Aggregate cap on skill bodies in one system prompt. Each skill file
 // is individually capped at 32 KB by the loader, but a user with many

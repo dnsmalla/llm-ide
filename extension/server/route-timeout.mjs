@@ -1,7 +1,7 @@
 // Opt-in per-route handler timeout budgets.
 //
 // The socket layer already caps every request end-to-end at
-// server.requestTimeout (300 s, see server.mjs). This module adds a
+// server.requestTimeout (600 s, see server.mjs). This module adds a
 // TIGHTER, per-route budget for known-bounded POST handlers so a stuck
 // dependency (DB lock, wedged CLI subprocess) returns a clean 504 JSON
 // envelope early instead of holding the slot until the socket cap.
@@ -23,7 +23,7 @@ const BUDGETS_POST = new Map([
   ['/kb/summarize',          240_000],  // runClaude has its own 3-min ceiling; budget sits above it
   ['/kb/conflict-questions', 240_000],
   ['/kb/generate-code',      240_000],
-  ['/kb/connect-box',        240_000],  // Box folder index: bounded by MAX_FILES; budget below the 300s socket cap so a slow folder 504s cleanly
+  ['/kb/connect-box',        240_000],  // Box folder index: bounded by MAX_FILES; budget below the 600s socket cap so a slow folder 504s cleanly
 ]);
 
 export function routeTimeoutMs(url, method) {

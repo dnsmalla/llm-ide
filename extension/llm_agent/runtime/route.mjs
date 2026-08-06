@@ -361,7 +361,7 @@ export async function handleCodeAssist({
       kb,
       onProgress,
       maxIterations: maxIterationsOverride ?? 50,
-      deadlineMs: 180_000,
+      deadlineMs: 360_000,
     });
   } else {
     out = await runAgentLoop({
@@ -378,7 +378,11 @@ export async function handleCodeAssist({
       onChunk,
       model: GLOBAL_AGENT_MODEL,
       maxIterations: maxIterationsOverride ?? 1000,  // global cap raised; see runAgentLoop DEFAULT_MAX_ITERATIONS (10)
-      deadlineMs: 180_000,
+      // 360 s so a legitimate long chat reply (deep multi-hop chains,
+      // slow model calls) can finish beyond the 5-minute floor users
+      // hit at 180 s. server.mjs's requestTimeout (600 s) sits above
+      // this plus the worst-case ask-internal delegation (see below).
+      deadlineMs: 360_000,
     });
   }
 

@@ -164,15 +164,17 @@ final class LlmIdeAPIClient {
 
         let llmCfg = URLSessionConfiguration.default
         // /code-assist is non-streaming, so timeoutIntervalForRequest is an
-        // IDLE timer with no keepalive to reset it: it must exceed the server's
-        // worst-case agent runtime. The global loop runs up to 180 s
-        // (route.mjs) and a single internal delegation adds its own up-to-120 s
-        // sub-loop (ask-internal.mjs) that isn't bounded by the global's
-        // remaining budget — so ~300 s is reachable. 330 s covers that with a
-        // margin while staying under the 10-min resource cap. (A long wait is
-        // now interruptible via the chat Stop button.)
-        llmCfg.timeoutIntervalForRequest = 330
-        llmCfg.timeoutIntervalForResource = 10 * 60
+        // IDLE timer with no keepalive to reset it: it must exceed the
+        // server's own socket-level cap (server.requestTimeout in
+        // extension/server.mjs, 600 s) — that's the real outer bound, since
+        // the global agent loop (360 s, route.mjs) plus an unbounded
+        // internal delegation (120 s, ask-internal.mjs) can reach ~480 s
+        // and the server keeps the socket open up to 600 s regardless.
+        // 620 s covers that with margin; the resource cap is raised to
+        // match so it doesn't cut the request short first. (A long wait
+        // is interruptible via the chat Stop button.)
+        llmCfg.timeoutIntervalForRequest = 620
+        llmCfg.timeoutIntervalForResource = 15 * 60
         self.llmSession = URLSession(configuration: llmCfg)
 
         self.sessionStore = sessionStore

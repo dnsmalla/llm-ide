@@ -44,7 +44,14 @@ export async function getServerUrl(): Promise<string> {
 }
 
 // Request timeouts
-export const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes for AI operations
+//
+// Must exceed the server's own socket-level cap (server.requestTimeout
+// in extension/server.mjs, 600s) — that's the real outer bound on how
+// long a /chat turn can legitimately run (agent-loop deadline 360s +
+// up to 120s for an unbounded ask-internal delegation, see route.mjs).
+// If this were shorter, the client would abort a reply the server was
+// still going to deliver. 620s = 600s server cap + network margin.
+export const REQUEST_TIMEOUT_MS = 620_000;
 export const HEALTH_CHECK_TIMEOUT_MS = 3_000;
 
 // ---- Session-based auth (v3+) ---------------------------------------
