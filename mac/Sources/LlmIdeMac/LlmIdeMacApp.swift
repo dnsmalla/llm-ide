@@ -56,6 +56,19 @@ public struct LlmIdeMacApp: App {
 
     public init() {
         installCrashHandlers()
+        // Pre-warm the Documents-folder TCC grant off the main actor.
+        // AppEnvironment.init (constructed later, on-demand, from Settings
+        // or project-open — AppShell.swift initWelcomeEnv/initEnv) touches
+        // ~/Documents/llm-ide synchronously on the MainActor. The first time
+        // that access hasn't been granted yet — true on every fresh install/
+        // rebuild since this app is ad-hoc signed and TCC keys grants to the
+        // exact code signature — it blocks the main run loop (and therefore
+        // Quit) until the system consent dialog is answered. Touching it
+        // here first, on a detached background thread, lets that one-time
+        // prompt resolve without freezing the app.
+        Task.detached(priority: .utility) {
+            _ = AppIdentity.documentsRoot()
+        }
         // Chat sessions persist across launches (server + local JSON).
         // CodeAssistantPanel loads the last session on appear.
         // Build the dependency graph once, on the main actor where
