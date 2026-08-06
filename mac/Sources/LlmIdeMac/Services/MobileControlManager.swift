@@ -477,6 +477,7 @@ final class MobileControlManager {
                           var custom = CustomAutoTask.loadAll().first(where: { $0.id == taskName }) {
                     custom.isEnabled = m.enabled
                     custom.save()
+                    NotificationCenter.default.post(name: .customAutoTasksChanged, object: nil)
                     append(.info, "Custom auto-task toggle \(custom.name)=\(m.enabled)")
                 } else if m.task == nil {
                     autoTaskSettings?.enabled = m.enabled

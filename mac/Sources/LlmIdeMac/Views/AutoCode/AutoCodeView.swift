@@ -55,6 +55,9 @@ struct AutoCodeView: View {
             }
         }
         .onAppear { customTasks = CustomAutoTask.loadAll() }
+        .onReceive(NotificationCenter.default.publisher(for: .customAutoTasksChanged)) { _ in
+            customTasks = CustomAutoTask.loadAll()
+        }
         .onChange(of: autoCode.currentCustomTaskId) { _, newId in
             // Mirrors the built-in onChange above: during a custom task's
             // run, jump the right pane to follow it.

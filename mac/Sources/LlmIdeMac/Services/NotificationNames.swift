@@ -45,6 +45,12 @@ extension Notification.Name {
     /// the Mac (the explorer-panel twin of `llmChatTranscriptChanged`).
     static let explorerChatTranscriptChanged = Notification.Name("explorerChatTranscriptChanged")
 
+    /// Posted when a custom Auto Task's enabled-state changes via a
+    /// phone-originated toggle — AutoCodeView observes this to reload its
+    /// local `customTasks` snapshot, since CustomAutoTask is a plain struct
+    /// with no shared ObservableObject the Mac UI already listens to.
+    static let customAutoTasksChanged = Notification.Name("customAutoTasksChanged")
+
     // MARK: - Library / meetings
 
     /// Posted by LibraryRow when the user requests an action on a
