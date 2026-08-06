@@ -12,7 +12,7 @@ extension CodeAssistantPanel {
     func addFile(url: URL) -> AttachOutcome {
         let path = displayPath(url)
         // Idempotent — re-adding the same file does nothing.
-        if attachments.contains(where: { $0.path == path }) { return .duplicate }
+        if attachmentState.attachments.contains(where: { $0.path == path }) { return .duplicate }
         do {
             let data = try Data(contentsOf: url)
             let ext = url.pathExtension.lowercased()
@@ -33,7 +33,7 @@ extension CodeAssistantPanel {
                 }
 
                 let base64Content = "[binary:\(mime)]\n" + data.base64EncodedString()
-                attachments.append(LlmIdeAPIClient.CodeAttachment(path: path, content: base64Content))
+                attachmentState.attachments.append(LlmIdeAPIClient.CodeAttachment(path: path, content: base64Content))
                 return .added
             }
 
@@ -46,7 +46,7 @@ extension CodeAssistantPanel {
                 if nulCount * 100 >= probe.count { return .notText }
             }
             guard let text = String(data: data, encoding: .utf8) else { return .notText }
-            attachments.append(LlmIdeAPIClient.CodeAttachment(path: path, content: text))
+            attachmentState.attachments.append(LlmIdeAPIClient.CodeAttachment(path: path, content: text))
             return .added
         } catch {
             return .unreadable

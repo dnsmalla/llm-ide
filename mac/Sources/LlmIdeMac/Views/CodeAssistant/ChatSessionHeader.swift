@@ -11,10 +11,10 @@ extension CodeAssistantPanel {
                     .lineLimit(1)
             }
             // Session counter only when we have horizontal room to spare.
-            if !isCompact, !history.isEmpty || !attachments.isEmpty {
+            if !isCompact, !history.isEmpty || !attachmentState.attachments.isEmpty {
                 Text("·")
                     .foregroundStyle(theme.current.textMuted.opacity(0.5))
-                Text("\(history.count) turn\(history.count == 1 ? "" : "s")  \(attachments.count) file\(attachments.count == 1 ? "" : "s")")
+                Text("\(history.count) turn\(history.count == 1 ? "" : "s")  \(attachmentState.attachments.count) file\(attachmentState.attachments.count == 1 ? "" : "s")")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(theme.current.textMuted)
                     .lineLimit(1)

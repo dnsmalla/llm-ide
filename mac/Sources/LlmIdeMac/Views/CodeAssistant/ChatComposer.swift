@@ -47,8 +47,8 @@ extension CodeAssistantPanel {
 
     /// Append an invoked-skill chip, deduped by id.
     func addInvokedSkill(_ skill: InvokedSkill) {
-        if !selectedSkills.contains(where: { $0.id == skill.id }) {
-            selectedSkills.append(skill)
+        if !attachmentState.selectedSkills.contains(where: { $0.id == skill.id }) {
+            attachmentState.selectedSkills.append(skill)
         }
     }
 
@@ -83,9 +83,9 @@ extension CodeAssistantPanel {
     var attachmentBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                ForEach(attachments) { a in
+                ForEach(attachmentState.attachments) { a in
                     AttachmentChip(path: a.path, charCount: a.content.count, isBinary: a.content.hasPrefix("[binary:")) {
-                        attachments.removeAll { $0.path == a.path }
+                        attachmentState.attachments.removeAll { $0.path == a.path }
                     }
                 }
             }
@@ -95,12 +95,12 @@ extension CodeAssistantPanel {
         .background(theme.current.surface.opacity(0.6))
     }
 
-    /// Chips for library skills the user invoked — distinct from attachments so
+    /// Chips for library skills the user invoked — distinct from attachmentState.attachments so
     /// it's clear these are followed, not edited. Each is individually removable.
     var skillBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                ForEach(selectedSkills) { s in
+                ForEach(attachmentState.selectedSkills) { s in
                     HStack(spacing: 4) {
                         Image(systemName: s.iconName)
                             .font(.system(size: 10))
@@ -108,7 +108,7 @@ extension CodeAssistantPanel {
                             .font(.system(size: 11, weight: .medium))
                             .lineLimit(1)
                         Button {
-                            selectedSkills.removeAll { $0.id == s.id }
+                            attachmentState.selectedSkills.removeAll { $0.id == s.id }
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 11))
@@ -169,9 +169,9 @@ extension CodeAssistantPanel {
                 Divider().background(theme.current.border)
             }
             // Agent task progress list — shown when the agent has pending tasks
-            if !agentPendingTasks.isEmpty {
+            if !agent.agentPendingTasks.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(agentPendingTasks) { task in
+                    ForEach(agent.agentPendingTasks) { task in
                         HStack(spacing: 6) {
                             Image(systemName: agentTaskIcon(task.status))
                                 .foregroundColor(agentTaskColor(task.status))
@@ -269,9 +269,9 @@ extension CodeAssistantPanel {
     var toolbarSingleRow: some View {
         HStack(spacing: 6) {
             if showFileAttachButtons {
-                contextButton(icon: "plus", label: "Add from Library", action: { showLibraryPicker = true })
-                if !attachments.isEmpty {
-                    Text("\(attachments.count) file\(attachments.count == 1 ? "" : "s") · \(formatBytes(totalAttachmentChars))")
+                contextButton(icon: "plus", label: "Add from Library", action: { sheets.showLibraryPicker = true })
+                if !attachmentState.attachments.isEmpty {
+                    Text("\(attachmentState.attachments.count) file\(attachmentState.attachments.count == 1 ? "" : "s") · \(formatBytes(totalAttachmentChars))")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(theme.current.textMuted)
                         .lineLimit(1)
@@ -295,15 +295,15 @@ extension CodeAssistantPanel {
             if showFileAttachButtons || showModelPicker {
                 HStack(spacing: 6) {
                     if showFileAttachButtons {
-                        contextButton(icon: "plus", label: "Add from Library", action: { showLibraryPicker = true })
+                        contextButton(icon: "plus", label: "Add from Library", action: { sheets.showLibraryPicker = true })
                     }
                     if showModelPicker { modelPickerChips }
                     editModeChip
                     memoryButton
                     Spacer(minLength: 0)
                 }
-                if showFileAttachButtons && !attachments.isEmpty {
-                    Text("\(attachments.count) file\(attachments.count == 1 ? "" : "s") · \(formatBytes(totalAttachmentChars))")
+                if showFileAttachButtons && !attachmentState.attachments.isEmpty {
+                    Text("\(attachmentState.attachments.count) file\(attachmentState.attachments.count == 1 ? "" : "s") · \(formatBytes(totalAttachmentChars))")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(theme.current.textMuted)
                         .lineLimit(1)
@@ -322,16 +322,16 @@ extension CodeAssistantPanel {
     /// Shows the last turn's memory token cost so the always-on memory block's
     /// overhead is visible — 0 means no project memory was injected.
     var memoryButton: some View {
-        Button { showProjectMemory = true } label: {
+        Button { sheets.showProjectMemory = true } label: {
             HStack(spacing: 3) {
                 Image(systemName: "brain").font(.system(size: 11))
-                if let t = lastMemoryTokens {
+                if let t = agent.lastMemoryTokens {
                     Text(t > 0 ? "~\(formatTokens(t))" : "0")
                         .font(.system(size: 9, weight: .medium, design: .rounded))
                 }
             }
             .frame(height: 22)
-            .padding(.horizontal, lastMemoryTokens == nil ? 0 : 3)
+            .padding(.horizontal, agent.lastMemoryTokens == nil ? 0 : 3)
         }
         .buttonStyle(.plain)
         .foregroundStyle(theme.current.textMuted)
@@ -340,13 +340,13 @@ extension CodeAssistantPanel {
     }
 
     var memoryButtonHelp: String {
-        guard let t = lastMemoryTokens else {
+        guard let t = agent.lastMemoryTokens else {
             return "Project memory — what the assistant has learned about this repo"
         }
         if t == 0 {
             return "Project memory — no memory injected last turn (0 tokens). None generated for this project yet."
         }
-        let chat = lastMemoryHasChat ? " (incl. chat-captured facts)" : " (graph-derived only)"
+        let chat = agent.lastMemoryHasChat ? " (incl. chat-captured facts)" : " (graph-derived only)"
         return "Project memory — added ~\(t) tokens to the last request\(chat). Click to view/prune."
     }
 
@@ -377,10 +377,10 @@ extension CodeAssistantPanel {
                 .help("Stop the running response (Esc)")
                 .accessibilityLabel("Stop")
             }
-            if agentIsAutonomous && !busy {
+            if agent.agentIsAutonomous && !busy {
                 Button(action: {
-                    agentStopRequested = true
-                    agentIsAutonomous = false
+                    agent.agentStopRequested = true
+                    agent.agentIsAutonomous = false
                 }) {
                     Label("Stop", systemImage: "stop.circle.fill")
                         .foregroundColor(theme.current.danger)
@@ -413,10 +413,10 @@ extension CodeAssistantPanel {
     /// vertically (one glyph per line).  The chips truncate via
     /// `.lineLimit(1)` as a belt-and-braces guard.
     var modelPickerChips: some View {
-        let isCustom = selectedProvider.starts(with: "custom:")
-        let currentTool = !isCustom ? (AICliTool(rawValue: selectedProvider) ?? .claudeCode) : .claudeCode
+        let isCustom = modelState.selectedProvider.starts(with: "custom:")
+        let currentTool = !isCustom ? (AICliTool(rawValue: modelState.selectedProvider) ?? .claudeCode) : .claudeCode
         let currentProvider = isCustom
-            ? customProviders.first(where: { "custom:\($0.id)" == selectedProvider })
+            ? modelState.customProviders.first(where: { "custom:\($0.id)" == modelState.selectedProvider })
             : nil
 
         return HStack(spacing: 6) {
@@ -429,10 +429,10 @@ extension CodeAssistantPanel {
                         Label(tool.displayName, systemImage: tool.icon)
                     }
                 }
-                if !customProviders.isEmpty {
+                if !modelState.customProviders.isEmpty {
                     Divider()
                     // Custom providers
-                    ForEach(customProviders) { provider in
+                    ForEach(modelState.customProviders) { provider in
                         Button { switchProvider(.custom(provider)) } label: {
                             Label(provider.name, systemImage: "network")
                         }
@@ -456,7 +456,7 @@ extension CodeAssistantPanel {
             Menu {
                 ForEach(modelsForCurrentProvider()) { model in
                     Button(model.displayName) {
-                        selectedModel = model.id
+                        modelState.selectedModel = model.id
                         // Persist the pick so surfaces that read AppConfig —
                         // notably the iPhone chat proxy (MobileExploreBridge
                         // reads config.defaultModelId) — forward the actually-
@@ -466,18 +466,18 @@ extension CodeAssistantPanel {
                         // Model". Skip custom:<uuid> providers: those aren't
                         // represented by config.activeCLI (mobile proxy support
                         // is built-in providers only).
-                        if !selectedProvider.starts(with: "custom:") {
+                        if !modelState.selectedProvider.starts(with: "custom:") {
                             config.defaultModelId = model.id
                         }
                     }
                 }
                 if !isCustom {
                     Divider()
-                    Button("Add model…") { newModelId = ""; showAddModel = true }
+                    Button("Add model…") { modelState.newModelId = ""; modelState.showAddModel = true }
                 }
             } label: {
                 let displayName = isCustom
-                    ? (customProviders.first(where: { "custom:\($0.id)" == selectedProvider })?.models.first(where: { $0.id == selectedModel })?.displayName ?? selectedModel)
+                    ? (modelState.customProviders.first(where: { "custom:\($0.id)" == modelState.selectedProvider })?.models.first(where: { $0.id == modelState.selectedModel })?.displayName ?? modelState.selectedModel)
                     : currentModelDisplayName(for: currentTool)
                 Chip(
                     icon: nil,
@@ -490,10 +490,10 @@ extension CodeAssistantPanel {
             .help("Select model")
             .fixedSize()
         }
-        .alert("Add a model", isPresented: $showAddModel) {
-            TextField("model id, e.g. gpt-5 / claude-opus-4-9 / gemini-2.5-pro", text: $newModelId)
+        .alert("Add a model", isPresented: $modelState.showAddModel) {
+            TextField("model id, e.g. gpt-5 / claude-opus-4-9 / gemini-2.5-pro", text: $modelState.newModelId)
             Button("Add") {
-                let id = newModelId.trimmingCharacters(in: .whitespacesAndNewlines)
+                let id = modelState.newModelId.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !id.isEmpty else { return }
                 let active = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
                 addCustomModel(id, provider: active.provider)
@@ -527,22 +527,22 @@ extension CodeAssistantPanel {
     }
     func currentModelDisplayName(for cli: AICliTool) -> String {
         let models = modelsFor(cli)
-        return models.first(where: { $0.id == selectedModel })?.displayName
+        return models.first(where: { $0.id == modelState.selectedModel })?.displayName
             ?? models.first?.displayName
-            ?? selectedModel
+            ?? modelState.selectedModel
     }
 
     /// Models for the currently selected provider (built-in or custom).
     func modelsForCurrentProvider() -> [AIModel] {
-        if selectedProvider.starts(with: "custom:") {
+        if modelState.selectedProvider.starts(with: "custom:") {
             // Custom provider: return its models list
-            if let custom = customProviders.first(where: { "custom:\($0.id)" == selectedProvider }) {
+            if let custom = modelState.customProviders.first(where: { "custom:\($0.id)" == modelState.selectedProvider }) {
                 return custom.models
             }
             return []
         } else {
             // Built-in provider
-            if let cli = AICliTool(rawValue: selectedProvider) {
+            if let cli = AICliTool(rawValue: modelState.selectedProvider) {
                 return modelsFor(cli)
             }
             return []
@@ -553,7 +553,7 @@ extension CodeAssistantPanel {
     /// otherwise the built-in static list (keeps the picker populated when no
     /// key is set or the fetch failed), plus any user-added custom ids.
     func modelsFor(_ cli: AICliTool) -> [AIModel] {
-        let base = (liveModels[cli.provider]?.isEmpty == false) ? liveModels[cli.provider]! : cli.models
+        let base = (modelState.liveModels[cli.provider]?.isEmpty == false) ? modelState.liveModels[cli.provider]! : cli.models
         let baseIds = Set(base.map(\.id))
         let custom = customModels(for: cli.provider)
             .filter { !baseIds.contains($0) }
@@ -578,11 +578,11 @@ extension CodeAssistantPanel {
         if let data = try? JSONEncoder().encode(dict), let s = String(data: data, encoding: .utf8) {
             customModelsRaw = s
         }
-        selectedModel = id
+        modelState.selectedModel = id
         // Persist so the iPhone chat proxy forwards this model too (see the
         // model-picker Button above). addCustomModel is only reachable from the
-        // built-in "Add model…" alert, so selectedProvider is a built-in tool.
-        if !selectedProvider.starts(with: "custom:") {
+        // built-in "Add model…" alert, so modelState.selectedProvider is a built-in tool.
+        if !modelState.selectedProvider.starts(with: "custom:") {
             config.defaultModelId = id
         }
     }
@@ -590,21 +590,21 @@ extension CodeAssistantPanel {
     /// Fetch the provider's live chat models (best-effort; silent on failure).
     func loadModels(for cli: AICliTool) async {
         guard let ids = try? await api.listProviderModels(cli.provider), !ids.isEmpty else { return }
-        liveModels[cli.provider] = ids.map { AIModel(id: $0, displayName: $0) }
+        modelState.liveModels[cli.provider] = ids.map { AIModel(id: $0, displayName: $0) }
     }
 
     /// Switch the active model provider and reset the selected model.
     func switchProvider(_ provider: ProviderSwitch) {
         switch provider {
         case .builtIn(let tool):
-            selectedProvider = tool.rawValue
-            selectedModel = tool.defaultModelId
+            modelState.selectedProvider = tool.rawValue
+            modelState.selectedModel = tool.defaultModelId
             config.activeCLI = tool.rawValue
             config.defaultModelId = tool.defaultModelId
             Task { await loadModels(for: tool) }
         case .custom(let customProvider):
-            selectedProvider = "custom:\(customProvider.id)"
-            selectedModel = customProvider.models.first?.id ?? ""
+            modelState.selectedProvider = "custom:\(customProvider.id)"
+            modelState.selectedModel = customProvider.models.first?.id ?? ""
         }
     }
 
@@ -671,7 +671,7 @@ extension CodeAssistantPanel {
     }
 
     var totalAttachmentChars: Int {
-        attachments.reduce(0) { $0 + $1.content.count }
+        attachmentState.attachments.reduce(0) { $0 + $1.content.count }
     }
 
     enum AttachOutcome { case added, duplicate, notText, unreadable }
@@ -699,13 +699,13 @@ extension CodeAssistantPanel {
         // directives are prepended to the text; library ids ride alongside it
         // (sent via the skill channel). Cleared so a skill applies to exactly the
         // message it was invoked for, not silently to every later turn.
-        let directives = selectedSkills.compactMap { s -> String? in
+        let directives = attachmentState.selectedSkills.compactMap { s -> String? in
             if case .directive(let d) = s.action { return d } else { return nil }
         }
-        let skillIds = selectedSkills.compactMap { s -> String? in
+        let skillIds = attachmentState.selectedSkills.compactMap { s -> String? in
             if case .library(let id) = s.action { return id } else { return nil }
         }
-        selectedSkills = []
+        attachmentState.selectedSkills = []
         let outgoing = directives.isEmpty ? msg : directives.joined(separator: "\n") + "\n\n" + msg
         if busy {
             queued.append(.init(text: outgoing, skillIds: skillIds))

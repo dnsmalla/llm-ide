@@ -20,8 +20,8 @@ extension CodeAssistantPanel {
                 number: args.iid,
                 body: args.body
             )
-            pendingTool = nil
-            showingCommentSheet = false
+            agent.pendingTool = nil
+            sheets.showingCommentSheet = false
             history.append(.init(
                 role: .user,
                 content: "(executed comment-issue → #\(args.iid))"
@@ -34,8 +34,8 @@ extension CodeAssistantPanel {
     }
 
     func confirmGetIssue() {
-        showingGetIssueSheet = false
-        pendingTool = nil
+        sheets.showingGetIssueSheet = false
+        agent.pendingTool = nil
         // No synthetic turn — get-issue is purely for the agent's context
     }
 
@@ -55,8 +55,8 @@ extension CodeAssistantPanel {
                 number: args.iid,
                 payload: payload
             )
-            pendingTool = nil
-            showingUpdateIssueSheet = false
+            agent.pendingTool = nil
+            sheets.showingUpdateIssueSheet = false
             history.append(.init(
                 role: .user,
                 content: "(executed update-issue → #\(args.iid))"

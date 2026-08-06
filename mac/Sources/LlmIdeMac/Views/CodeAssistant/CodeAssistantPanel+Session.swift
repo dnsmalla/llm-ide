@@ -14,24 +14,24 @@ extension CodeAssistantPanel {
                 .font(Typography.caption).foregroundStyle(t.text)
                 .lineLimit(2).truncationMode(.tail)
             Spacer(minLength: 8)
-            if let err = qaSaveError {
+            if let err = agent.qaSaveError {
                 Text(err).font(Typography.caption).foregroundStyle(t.danger)
                     .lineLimit(1).truncationMode(.tail)
             }
-            Button(savingQA ? "Saving…" : "Save") {
+            Button(agent.savingQA ? "Saving…" : "Save") {
                 Task { await saveLatestAnswer(forPrompt: prompt) }
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-            .disabled(savingQA)
+            .disabled(agent.savingQA)
             Button("Dismiss") {
                 session.dismiss(hash: session.hashForPrompt(prompt))
-                nudgePrompt = nil
-                qaSaveError = nil
+                agent.nudgePrompt = nil
+                agent.qaSaveError = nil
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(savingQA)
+            .disabled(agent.savingQA)
         }
         .padding(.horizontal, Spacing.md).padding(.vertical, 6)
         .background(t.accent2.opacity(0.08))
@@ -44,15 +44,15 @@ extension CodeAssistantPanel {
     /// in history when no exact prompt match is found.
     func saveLatestAnswer(forPrompt prompt: String) async {
         guard let repoRoot = activeRepoRoot else {
-            qaSaveError = "No active repo."
+            agent.qaSaveError = "No active repo."
             return
         }
-        savingQA = true
-        qaSaveError = nil
-        defer { savingQA = false }
+        agent.savingQA = true
+        agent.qaSaveError = nil
+        defer { agent.savingQA = false }
         let answer = mostRecentAnswer(forPrompt: prompt) ?? ""
         guard !answer.isEmpty else {
-            qaSaveError = "No agent answer found yet."
+            agent.qaSaveError = "No agent answer found yet."
             return
         }
         let entry = QAEntry(
@@ -66,9 +66,9 @@ extension CodeAssistantPanel {
         do {
             _ = try store.writeQA(at: repoRoot, entry)
             session.dismiss(hash: session.hashForPrompt(prompt))
-            nudgePrompt = nil
+            agent.nudgePrompt = nil
         } catch {
-            qaSaveError = "Couldn't save: \(error.localizedDescription)"
+            agent.qaSaveError = "Couldn't save: \(error.localizedDescription)"
         }
     }
 
@@ -105,7 +105,7 @@ extension CodeAssistantPanel {
     func runTurn(_ message: String, skillIds: [String] = []) async {
         _ = session.record(prompt: message)
         if session.shouldNudge(for: message) {
-            nudgePrompt = message
+            agent.nudgePrompt = message
         }
         // Append the user turn FIRST so the message appears immediately
         // even if the network call is slow.
@@ -115,7 +115,7 @@ extension CodeAssistantPanel {
         error = nil
         // Clear any stale pending-tool card from a prior turn the user ignored —
         // otherwise it stays interactive against the old args while a new turn runs.
-        pendingTool = nil
+        agent.pendingTool = nil
         // Fresh budget of auto-run git ops for this user turn (commit→push→… ).
         autoGitOpsThisTurn = 0
         // Captured once, fixed for this whole invocation, and declared
@@ -136,7 +136,7 @@ extension CodeAssistantPanel {
             let resp = try await codeAssistRoundTrip(
                 message: message,
                 history: Array(recent.dropLast()),  // exclude the just-pushed user turn — server appends it
-                attachments: attachments,
+                attachments: attachmentState.attachments,
                 skills: skillIds,
                 onChunk: { [self] text in appendStreamedChunk(streamingID, text) },
             )
@@ -237,7 +237,7 @@ extension CodeAssistantPanel {
             )
             let issue = try await client.createIssue(projectId: target.projectId, payload: payload)
             // Clear the pending tool so the card disappears.
-            self.pendingTool = nil
+            self.agent.pendingTool = nil
             // Synthetic acknowledgement turn — agent sees the result in history.
             // RepoIssue.webUrl is backend-correct for both providers.
             history.append(.init(
@@ -269,7 +269,7 @@ extension CodeAssistantPanel {
         let canonProposed = PathUtils.canonicalise(proposedPath)
         let canonBasename = (canonProposed as NSString).lastPathComponent
         // 1. Exact canonicalised match (handles ~, file://, symlinks, ./).
-        if let exact = attachments.first(where: {
+        if let exact = attachmentState.attachments.first(where: {
             PathUtils.canonicalise($0.path) == canonProposed
         }) {
             return exact
@@ -285,7 +285,7 @@ extension CodeAssistantPanel {
         //    shares a basename with an attachment would silently overwrite that
         //    file. Auto mode requires an exact path the agent explicitly chose.
         if allowBasenameFallback && !canonBasename.isEmpty {
-            let matches = attachments.filter {
+            let matches = attachmentState.attachments.filter {
                 ($0.path as NSString).lastPathComponent == canonBasename
             }
             // Only fall back when there's exactly one candidate — if
@@ -326,7 +326,7 @@ extension CodeAssistantPanel {
         do {
             try finalContent.write(to: url, atomically: true, encoding: .utf8)
             // Track this file for File → PR automation
-            modifiedFiles.insert(match.path)
+            attachmentState.modifiedFiles.insert(match.path)
         } catch {
             return .failure("Couldn't write \(absolute): \(error.localizedDescription)")
         }
@@ -336,9 +336,9 @@ extension CodeAssistantPanel {
         // file's chip (other attachments stay), and clear the auto-attach
         // bookkeeping if it was the auto-attached file. `match` is a value copy,
         // so the line-delta math below still sees the pre-write content.
-        attachments.removeAll { $0.path == match.path }
+        attachmentState.attachments.removeAll { $0.path == match.path }
         if autoAttachedPath == match.path { autoAttachedPath = nil }
-        self.pendingTool = nil
+        self.agent.pendingTool = nil
 
         // Synthetic acknowledgement turn so the agent can react.
         let basename = (absolute as NSString).lastPathComponent
@@ -378,14 +378,14 @@ extension CodeAssistantPanel {
     ) async throws -> LlmIdeAPIClient.CodeAssistResponse {
         // Determine provider string: custom:uuid for custom providers, or built-in tool provider
         let provider: String
-        if selectedProvider.starts(with: "custom:") {
+        if modelState.selectedProvider.starts(with: "custom:") {
             // For custom providers, send the full custom:uuid identifier
-            provider = selectedProvider
+            provider = modelState.selectedProvider
         } else {
             // For built-in providers, use the provider string from the AICliTool
-            provider = (AICliTool(rawValue: selectedProvider) ?? .claudeCode).provider
+            provider = (AICliTool(rawValue: modelState.selectedProvider) ?? .claudeCode).provider
         }
-        let model = selectedModel.isEmpty ? nil : selectedModel
+        let model = modelState.selectedModel.isEmpty ? nil : modelState.selectedModel
         let ctx = await buildAgentContext()
         do {
             return try await api.codeAssistStream(
@@ -458,7 +458,7 @@ extension CodeAssistantPanel {
         // own sendFollowup, so the re-entry isn't blocked by the `guard !busy`
         // even though our `busy` is still true here. The recursion (and so any
         // looping agent) is bounded by autoGitOpsThisTurn.
-        if let g = pendingTool?.gitOpArgs, shouldAutoRunGitOp(g) {
+        if let g = agent.pendingTool?.gitOpArgs, shouldAutoRunGitOp(g) {
             autoGitOpsThisTurn += 1
             await runGitOpFlow(g)
         }
@@ -606,28 +606,28 @@ extension CodeAssistantPanel {
             }
         }
         guard !stopped else { return }
-        self.pendingTool = pendingTool
+        self.agent.pendingTool = pendingTool
         if let newTasks = tasks {
-            agentPendingTasks = newTasks
+            agent.agentPendingTasks = newTasks
         }
-        if continueNeeded == true && !agentStopRequested {
-            agentIsAutonomous = true
+        if continueNeeded == true && !agent.agentStopRequested {
+            agent.agentIsAutonomous = true
             let scheduledEpoch = sessionEpoch
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                 guard self.sessionEpoch == scheduledEpoch else { return }
-                guard !self.agentStopRequested else {
-                    self.agentIsAutonomous = false
+                guard !self.agent.agentStopRequested else {
+                    self.agent.agentIsAutonomous = false
                     return
                 }
                 self.startTurn("Continue working on your pending tasks.")
             }
         } else {
-            agentIsAutonomous = false
-            agentStopRequested = false
+            agent.agentIsAutonomous = false
+            agent.agentStopRequested = false
         }
         if let u = usage {
-            lastMemoryTokens = u.memoryApproxTokens
-            lastMemoryHasChat = u.memoryHasChatMemory ?? false
+            agent.lastMemoryTokens = u.memoryApproxTokens
+            agent.lastMemoryHasChat = u.memoryHasChatMemory ?? false
         }
     }
 
@@ -645,17 +645,17 @@ extension CodeAssistantPanel {
     func resetTransientSessionState() {
         sentPrompts = []; historyIndex = nil; draftStash = ""
         draft = ""
-        attachments.removeAll()
-        selectedSkills.removeAll()
+        attachmentState.attachments.removeAll()
+        attachmentState.selectedSkills.removeAll()
         autoAttachedPath = nil
         attachNotice = nil
-        pendingTool = nil
+        agent.pendingTool = nil
         error = nil
-        nudgePrompt = nil
-        agentSessionId = UUID().uuidString
-        agentPendingTasks = []
-        agentIsAutonomous = false
-        agentStopRequested = false
+        agent.nudgePrompt = nil
+        agent.agentSessionId = UUID().uuidString
+        agent.agentPendingTasks = []
+        agent.agentIsAutonomous = false
+        agent.agentStopRequested = false
         sessionEpoch += 1
     }
 

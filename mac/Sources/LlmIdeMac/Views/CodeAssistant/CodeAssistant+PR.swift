@@ -23,8 +23,8 @@ extension CodeAssistantPanel {
             )
             let result = try await client.createMergeRequest(projectId: target.projectId, payload: payload)
 
-            pendingTool = nil
-            showingCreatePRSheet = false
+            agent.pendingTool = nil
+            sheets.showingCreatePRSheet = false
             history.append(.init(
                 role: .user,
                 content: "(executed create-pr → #\(result.number): \(result.webUrl))"

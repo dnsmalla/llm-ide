@@ -21,22 +21,13 @@ struct ChatMessageList: View {
     @Binding var revealingTurnID: UUID?
     @Binding var revealedCount: Int
     @Binding var bubbleHeights: [UUID: CGFloat]
-    @Binding var reportingFault: CodeAssistantPanel.FaultReportContext?
     /// Resolved project root — governs whether "Report this" is shown.
     let activeRepoRoot: URL?
 
-    // Pending-action-card sheet triggers, mirrored from CodeAssistantPanel.
-    @Binding var showingIssueSheet: Bool
-    @Binding var showingCommentSheet: Bool
-    @Binding var showingGetIssueSheet: Bool
-    @Binding var showingUpdateIssueSheet: Bool
-    @Binding var showingListIssuesSheet: Bool
-    @Binding var showingCreateBranchSheet: Bool
-    @Binding var showingCreatePRSheet: Bool
-    @Binding var showingReviewCodeSheet: Bool
-    @Binding var showingUpdateFileSheet: Bool
-    @Binding var showingGitOpSheet: Bool
-    @Binding var branchSheetContext: AgentContext?
+    /// Sheet presentation flags + branch/fault context, shared by reference
+    /// with CodeAssistantPanel (an @Observable class, so mutations here are
+    /// seen by the parent without a Binding).
+    let sheets: CodeAssistantSheetState
 
     /// Wraps `CodeAssistantPanel.buildAgentContext()` — needed by the
     /// "create-branch" pending action to show the current branch.
@@ -71,29 +62,29 @@ struct ChatMessageList: View {
                                 PendingActionCard(pendingTool: pt) {
                                     switch pt.name {
                                     case "create-gitlab-issue", "create-issue":
-                                        showingIssueSheet = true
+                                        sheets.showingIssueSheet = true
                                     case "comment-gitlab-issue", "comment-issue":
-                                        showingCommentSheet = true
+                                        sheets.showingCommentSheet = true
                                     case "get-issue":
-                                        showingGetIssueSheet = true
+                                        sheets.showingGetIssueSheet = true
                                     case "update-issue":
-                                        showingUpdateIssueSheet = true
+                                        sheets.showingUpdateIssueSheet = true
                                     case "list-issues":
-                                        showingListIssuesSheet = true
+                                        sheets.showingListIssuesSheet = true
                                     case "create-branch":
-                                        showingCreateBranchSheet = true
-                                        Task { branchSheetContext = await loadBranchContext() }
+                                        sheets.showingCreateBranchSheet = true
+                                        Task { sheets.branchSheetContext = await loadBranchContext() }
                                     case "create-gitlab-mr", "create-pr":
-                                        showingCreatePRSheet = true
+                                        sheets.showingCreatePRSheet = true
                                     case "trigger-review-code":
-                                        showingReviewCodeSheet = true
+                                        sheets.showingReviewCodeSheet = true
                                     case "update-file":
-                                        showingUpdateFileSheet = true
+                                        sheets.showingUpdateFileSheet = true
                                     case "git-op":
                                         if let g = pt.gitOpArgs, g.op.tier == .read {
                                             Task { await onGitOp(g) }
                                         } else {
-                                            showingGitOpSheet = true
+                                            sheets.showingGitOpSheet = true
                                         }
                                     case "bash":
                                         Task { await onBash(pt.bashArgs) }
@@ -351,7 +342,7 @@ struct ChatMessageList: View {
                     }
                     if !isUser, activeRepoRoot != nil {
                         Button {
-                            reportingFault = CodeAssistantPanel.FaultReportContext(
+                            sheets.reportingFault = CodeAssistantPanel.FaultReportContext(
                                 prompt: prevUserPrompt(before: turn) ?? "",
                                 response: turn.content
                             )

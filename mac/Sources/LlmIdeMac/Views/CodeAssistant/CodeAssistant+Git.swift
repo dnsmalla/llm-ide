@@ -1,7 +1,7 @@
 import SwiftUI
 
 extension CodeAssistantPanel {
-    // Note: branchSheetContext @State property is in the main file
+    // Note: sheets.branchSheetContext @State property is in the main file
 
     // MARK: - Branch creation
 
@@ -20,7 +20,7 @@ extension CodeAssistantPanel {
 
             _ = try await repoManager.runGit(gitArgs, at: repoURL)
 
-            self.pendingTool = nil
+            self.agent.pendingTool = nil
             history.append(.init(
                 role: .user,
                 content: "(executed create-branch → \(args.branch))"
@@ -57,8 +57,8 @@ extension CodeAssistantPanel {
     /// Read-tier ops are auto-run from runTurn; write/destructive run after sheet confirm.
     @MainActor
     func runGitOpFlow(_ args: GitOpArgs) async {
-        pendingTool = nil
-        showingGitOpSheet = false
+        agent.pendingTool = nil
+        sheets.showingGitOpSheet = false
         // Resolve the active repo URL — GitLab first, then GitHub (mirrors config.activeRepoLocalURL).
         guard let repoURL = config.activeRepoLocalURL else {
             history.append(.init(role: .user,

@@ -86,11 +86,11 @@ extension CodeAssistantPanel {
             let ancestor = commonAncestor(items.map { $0.path })
             return .init(name: folder, path: ancestor.isEmpty ? nil : homeRelativePath(ancestor))
         }
-        // NOTE: `recentIssues` is populated by the issue-polling flow
+        // NOTE: `agent.recentIssues` is populated by the issue-polling flow
         // (refreshRecentIssuesOnce) which reads the legacy Settings-active
         // project (config.gitLabSavedProjects / gitHubSavedRepos). When that
         // diverges from the workspace's linkedRepo (the activeProject above),
-        // refreshRecentIssuesOnce now clears recentIssues rather than serving
+        // refreshRecentIssuesOnce now clears agent.recentIssues rather than serving
         // another project's issues. Fetching issues for the workspace-linkedRepo
         // project itself (GitLab URL→id resolution) is the remaining Phase 2 work.
         // The folder open in the Explorer — the server scopes its read-only
@@ -143,16 +143,16 @@ extension CodeAssistantPanel {
         return AgentContext(
             activeProject: activeProject,
             indexedRepos: indexedRepos,
-            recentIssues: recentIssues.isEmpty ? nil : recentIssues,
+            recentIssues: agent.recentIssues.isEmpty ? nil : agent.recentIssues,
             workspaceRoot: workspaceRoot,
-            sessionId: agentSessionId,
+            sessionId: agent.agentSessionId,
             currentBranch: gitBranch,
             gitStatus: gitStatus
         )
     }
 
     /// Polls GitLab for the active project's recent issues and updates
-    /// `recentIssues`. Runs once on panel mount and every 60 s while
+    /// `agent.recentIssues`. Runs once on panel mount and every 60 s while
     /// alive. Silently no-ops when no project is configured or the
     /// project ID hasn't been resolved yet.
     func refreshRecentIssuesLoop() async {
@@ -170,7 +170,7 @@ extension CodeAssistantPanel {
         let configProject = Self.deriveActiveProject(fromConfig: config)
         guard let activeProject = workspaceProject ?? configProject,
               let provider = activeProject.provider else {
-            recentIssues = []
+            agent.recentIssues = []
             return
         }
         // If the workspace's linkedRepo is the active project and it isn't the
@@ -180,7 +180,7 @@ extension CodeAssistantPanel {
         // GitLab URL→id for a proper fetch is the remaining Phase 2 work.
         if let workspaceProject, let configProject,
            workspaceProject.url != configProject.url {
-            recentIssues = []
+            agent.recentIssues = []
             return
         }
 
@@ -191,7 +191,7 @@ extension CodeAssistantPanel {
         if provider == "GitLab" {
             guard let project = config.gitLabSavedProjects.first(where: { $0.isActive }),
                   let pid = project.resolvedId else {
-                recentIssues = []
+                agent.recentIssues = []
                 return
             }
             backend = RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
@@ -199,13 +199,13 @@ extension CodeAssistantPanel {
         } else if provider == "GitHub" {
             guard let repo = config.gitHubSavedRepos.first(where: { $0.isActive }),
                   let (owner, name) = GitHubClient.ownerAndName(from: repo.url) else {
-                recentIssues = []
+                agent.recentIssues = []
                 return
             }
             backend = RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
             projectId = "\(owner)/\(name)"
         } else {
-            recentIssues = []
+            agent.recentIssues = []
             return
         }
 
@@ -223,7 +223,7 @@ extension CodeAssistantPanel {
                     .prefix(15)
             )
 
-            recentIssues = capped.map { issue in
+            agent.recentIssues = capped.map { issue in
                 let desc = issue.body ?? ""
                 let snippet = desc.isEmpty ? nil : String(desc.prefix(160))
                 return AgentContext.RecentIssue(
@@ -237,7 +237,7 @@ extension CodeAssistantPanel {
             }
         } catch {
             // Don't surface — agent just sees an empty list this turn.
-            recentIssues = []
+            agent.recentIssues = []
         }
     }
 

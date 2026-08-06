@@ -48,9 +48,6 @@ struct CodeAssistantPanel: View {
     @EnvironmentObject var projectStore: ProjectStore
     @Environment(LibraryItemStore.self) var library
 
-    @State var attachments: [LlmIdeAPIClient.CodeAttachment] = []
-    /// Files modified during this session (for File → PR automation)
-    @State var modifiedFiles: Set<String> = []
     /// Skills/subagents the user invoked from the "/" menu, shown as removable
     /// chips so the composer stays clean. Two flavours, consumed one-shot on the
     /// next send:
@@ -65,12 +62,9 @@ struct CodeAssistantPanel: View {
         let action: Action
         var iconName: String { if case .library = action { return "books.vertical" } else { return "sparkles" } }
     }
-    @State var selectedSkills: [InvokedSkill] = []
-    /// Per-request project-memory overhead from the last turn, surfaced on the
-    /// 🧠 button so the always-on memory block's token cost is visible.
-    @State var lastMemoryTokens: Int?
-    @State var lastMemoryHasChat = false
-    @State var showLibraryPicker = false
+    /// Attachments/modified-files/invoked-skills — see
+    /// CodeAssistantAttachmentState's doc comment.
+    @State var attachmentState = CodeAssistantAttachmentState()
     @State var history: [LlmIdeAPIClient.CodeAssistTurn] = []
     @State var draft: String = ""
     /// Shell / Claude-Code-style prompt history: submitted prompts (oldest →
@@ -114,39 +108,19 @@ struct CodeAssistantPanel: View {
     /// Transient notice shown when a picked/selected file can't be attached
     /// (e.g. an image or binary). Prevents the silent drop on the Visual page.
     @State var attachNotice: String?
-    @State var selectedModel: String = ""
-    /// Current provider: either an AICliTool rawValue ("anthropic"/"openai"/...)
-    /// or "custom:uuid" for a user-registered custom provider.
-    @State var selectedProvider: String = ""
-    /// Live provider models, keyed by provider id ("openai"/"google"/...).
-    /// Populated from the provider's models endpoint; falls back to the
-    /// built-in AICliTool.models list when empty (no key / fetch failed).
-    @State var liveModels: [String: [AIModel]] = [:]
-    /// Custom providers loaded from UserDefaults, refreshed on panel appear.
-    @State var customProviders: [CustomProvider] = []
+    /// Model/provider selection — see CodeAssistantModelState's doc comment.
+    @State var modelState = CodeAssistantModelState()
     /// User-added model ids, keyed by provider id, JSON in AppStorage. Lets
     /// the user run a model the built-in/live lists don't include (e.g. a
     /// brand-new release) — it's sent as-is and routed by id prefix.
     @AppStorage("MEETNOTES_CUSTOM_MODELS") var customModelsRaw = "{}"
-    @State var showAddModel = false
-    @State var newModelId = ""
-    @State var pendingTool: PendingTool?
-    /// Snapshot of recent issues for the active project, refreshed on
-    /// panel mount and every ~60s. Bundled into agentContext so the
-    /// agent recognises references like "fix the colourful icons issue".
-    @State var recentIssues: [AgentContext.RecentIssue] = []
-    @State var showingIssueSheet: Bool = false
-    @State var showingCommentSheet: Bool = false
-    @State var showingGetIssueSheet: Bool = false
-    @State var showingUpdateIssueSheet: Bool = false
-    @State var showingListIssuesSheet: Bool = false
-    @State var showingCreateBranchSheet: Bool = false
-    @State var branchSheetContext: AgentContext?
-    // PR creation disabled - requires additional backend support
-    @State var showingCreatePRSheet: Bool = false
-    @State var showingReviewCodeSheet: Bool = false
-    @State var showingUpdateFileSheet: Bool = false
-    @State var showingGitOpSheet: Bool = false
+    /// Agent-turn / issue-context / Q&A-nudge metadata — see
+    /// CodeAssistantAgentState's doc comment.
+    @State var agent = CodeAssistantAgentState()
+    /// Sheet/popover presentation flags — see CodeAssistantSheetState's
+    /// doc comment for why these are grouped apart from the fragile
+    /// composer/session/streaming state.
+    @State var sheets = CodeAssistantSheetState()
     /// Git ops auto-run (no confirm card) so far within the current user turn —
     /// counting BOTH the primary turn and follow-ups, so "commit and push" can
     /// complete hands-free in Auto mode. Bounded by maxAutoGitOpsPerTurn so a
@@ -166,7 +140,6 @@ struct CodeAssistantPanel: View {
     /// Filter text for the session-picker popover. Reset whenever the
     /// popover closes so it never opens pre-filtered from a prior search.
     @State var sessionSearchQuery: String = ""
-    @State var reportingFault: FaultReportContext?
     /// How file-edit tool calls are accepted. Persisted across launches.
     /// `.review` (default) shows the confirmation card + popup; `.auto`
     /// applies `update-file` edits immediately (to attached files only —
@@ -180,18 +153,6 @@ struct CodeAssistantPanel: View {
     @State var voiceService = VoiceInputService()
     /// Voice UI state — recording, interim text, errors
     @State var voiceState = ChatVoiceState()
-    /// Project-memory viewer sheet (what the assistant auto-learned).
-    @State var showProjectMemory = false
-    /// Captured at the moment the banner appears so Save uses the
-    /// prompt+answer that triggered the threshold, not whatever the
-    /// user types next.
-    @State var nudgePrompt: String?
-    @State var savingQA = false
-    @State var qaSaveError: String?
-    @State var agentSessionId: String = UUID().uuidString
-    @State var agentIsAutonomous: Bool = false
-    @State var agentStopRequested: Bool = false
-    @State var agentPendingTasks: [AgentTask] = []
     /// Bumped every time the active chat session changes (create/switch/
     /// delete-fallback). Captured by the auto-continue `asyncAfter` closure
     /// before its delay; if the epoch has moved on by the time it fires, the
@@ -245,7 +206,7 @@ struct CodeAssistantPanel: View {
                     completion.close()
                 }
             }
-            .sheet(isPresented: $showProjectMemory) {
+            .sheet(isPresented: $sheets.showProjectMemory) {
                 showProjectMemorySheet
             }
             .task { await refreshRecentIssuesLoop() }
@@ -268,7 +229,7 @@ struct CodeAssistantPanel: View {
                 rebuildSentPrompts(from: session.history)
             }
             .onChange(of: config.activeCLI) { _, _ in
-                selectedModel = config.defaultModelId
+                modelState.selectedModel = config.defaultModelId
             }
             .onChange(of: activeRepoKey) { _, _ in
                 handleActiveRepoChange()
@@ -276,45 +237,45 @@ struct CodeAssistantPanel: View {
             .onChange(of: initialURL) { _, newURL in
                 handleInitialURLChange(newURL)
             }
-            .sheet(isPresented: $showingIssueSheet) {
+            .sheet(isPresented: $sheets.showingIssueSheet) {
                 showingIssueSheetContent
             }
-            .sheet(isPresented: $showingReviewCodeSheet, onDismiss: {
-                if pendingTool?.triggerReviewCodeArgs != nil { pendingTool = nil }
+            .sheet(isPresented: $sheets.showingReviewCodeSheet, onDismiss: {
+                if agent.pendingTool?.triggerReviewCodeArgs != nil { agent.pendingTool = nil }
             }) {
                 showingReviewCodeSheetContent
             }
-            .sheet(isPresented: $showingUpdateFileSheet, onDismiss: {
-                if pendingTool?.updateFileArgs != nil { pendingTool = nil }
+            .sheet(isPresented: $sheets.showingUpdateFileSheet, onDismiss: {
+                if agent.pendingTool?.updateFileArgs != nil { agent.pendingTool = nil }
             }) {
                 showingUpdateFileSheetContent
             }
-            .sheet(isPresented: $showingCommentSheet) {
+            .sheet(isPresented: $sheets.showingCommentSheet) {
                 showingCommentSheetContent
             }
-            .sheet(isPresented: $showingGetIssueSheet) {
+            .sheet(isPresented: $sheets.showingGetIssueSheet) {
                 showingGetIssueSheetContent
             }
-            .sheet(isPresented: $showingUpdateIssueSheet) {
+            .sheet(isPresented: $sheets.showingUpdateIssueSheet) {
                 showingUpdateIssueSheetContent
             }
-            .sheet(isPresented: $showingListIssuesSheet) {
+            .sheet(isPresented: $sheets.showingListIssuesSheet) {
                 showingListIssuesSheetContent
             }
-            .sheet(isPresented: $showingCreateBranchSheet) {
+            .sheet(isPresented: $sheets.showingCreateBranchSheet) {
                 showingCreateBranchSheetContent
             }
-            .sheet(isPresented: $showingCreatePRSheet) {
+            .sheet(isPresented: $sheets.showingCreatePRSheet) {
                 showingCreatePRSheetContent
             }
-            .sheet(item: $reportingFault) { ctx in
+            .sheet(item: $sheets.reportingFault) { ctx in
                 reportingFaultSheetContent(ctx)
             }
-            .sheet(isPresented: $showLibraryPicker) {
+            .sheet(isPresented: $sheets.showLibraryPicker) {
                 showLibraryPickerContent
             }
-            .sheet(isPresented: $showingGitOpSheet, onDismiss: {
-                if pendingTool?.gitOpArgs != nil { pendingTool = nil }
+            .sheet(isPresented: $sheets.showingGitOpSheet, onDismiss: {
+                if agent.pendingTool?.gitOpArgs != nil { agent.pendingTool = nil }
             }) {
                 showingGitOpSheetContent
             }
@@ -329,7 +290,7 @@ struct CodeAssistantPanel: View {
             ChatMessageList(
                 history: history,
                 showModelPicker: showModelPicker,
-                pendingTool: pendingTool,
+                pendingTool: agent.pendingTool,
                 busy: busy,
                 statusText: statusText,
                 error: $error,
@@ -338,28 +299,17 @@ struct CodeAssistantPanel: View {
                 revealingTurnID: $revealingTurnID,
                 revealedCount: $revealedCount,
                 bubbleHeights: $bubbleHeights,
-                reportingFault: $reportingFault,
                 activeRepoRoot: activeRepoRoot,
-                showingIssueSheet: $showingIssueSheet,
-                showingCommentSheet: $showingCommentSheet,
-                showingGetIssueSheet: $showingGetIssueSheet,
-                showingUpdateIssueSheet: $showingUpdateIssueSheet,
-                showingListIssuesSheet: $showingListIssuesSheet,
-                showingCreateBranchSheet: $showingCreateBranchSheet,
-                showingCreatePRSheet: $showingCreatePRSheet,
-                showingReviewCodeSheet: $showingReviewCodeSheet,
-                showingUpdateFileSheet: $showingUpdateFileSheet,
-                showingGitOpSheet: $showingGitOpSheet,
-                branchSheetContext: $branchSheetContext,
+                sheets: sheets,
                 loadBranchContext: { await buildAgentContext() },
                 onGitOp: { g in await runGitOpFlow(g) },
                 onBash: { args in await runBashCommand(args) }
             )
             Divider().background(theme.current.border)
-            if !selectedSkills.isEmpty { skillBar }
-            if !attachments.isEmpty { attachmentBar }
+            if !attachmentState.selectedSkills.isEmpty { skillBar }
+            if !attachmentState.attachments.isEmpty { attachmentBar }
             if let attachNotice { attachNoticeBar(attachNotice) }
-            if let prompt = nudgePrompt, activeRepoRoot != nil {
+            if let prompt = agent.nudgePrompt, activeRepoRoot != nil {
                 nudgeBanner(prompt: prompt)
             }
             // Voice indicators
@@ -382,14 +332,14 @@ struct CodeAssistantPanel: View {
     // MARK: - Event Handlers
 
     func handleOnAppear() {
-        customProviders = CustomProvider.loadAll()
-        if selectedModel.isEmpty {
-            selectedModel = config.defaultModelId.isEmpty
+        modelState.customProviders = CustomProvider.loadAll()
+        if modelState.selectedModel.isEmpty {
+            modelState.selectedModel = config.defaultModelId.isEmpty
                 ? AICliTool.claudeCode.defaultModelId
                 : config.defaultModelId
         }
-        if selectedProvider.isEmpty {
-            selectedProvider = config.activeCLI.isEmpty ? "anthropic" : config.activeCLI
+        if modelState.selectedProvider.isEmpty {
+            modelState.selectedProvider = config.activeCLI.isEmpty ? "anthropic" : config.activeCLI
         }
         _ = ChatSessionStore.migrateScopeFileIfNeeded(for: scope)
         refreshSessions()
@@ -460,15 +410,15 @@ struct CodeAssistantPanel: View {
 
     func handleActiveRepoChange() {
         session.reset()
-        nudgePrompt = nil
-        qaSaveError = nil
+        agent.nudgePrompt = nil
+        agent.qaSaveError = nil
         autoAttachedPath = nil
         attachNotice = nil
     }
 
     func handleInitialURLChange(_ newURL: URL?) {
         if let prev = autoAttachedPath {
-            attachments.removeAll { $0.path == prev }
+            attachmentState.attachments.removeAll { $0.path == prev }
             autoAttachedPath = nil
         }
         attachNotice = nil

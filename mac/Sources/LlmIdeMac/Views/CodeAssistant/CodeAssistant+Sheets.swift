@@ -9,7 +9,7 @@ extension CodeAssistantPanel {
 
     var showingIssueSheetContent: some View {
         Group {
-            if let pt = pendingTool,
+            if let pt = agent.pendingTool,
                let args = pt.createIssueArgs,
                let target = resolveIssueTarget() {
                 CreateIssueSheet(
@@ -29,7 +29,7 @@ extension CodeAssistantPanel {
                     Text("Add or activate a project in Settings → GitLab or GitHub.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                    Button("Close") { showingIssueSheet = false }
+                    Button("Close") { sheets.showingIssueSheet = false }
                 }
                 .padding(20)
             }
@@ -38,12 +38,12 @@ extension CodeAssistantPanel {
 
     var showingReviewCodeSheetContent: some View {
         Group {
-            if let pt = pendingTool,
+            if let pt = agent.pendingTool,
                let args = pt.triggerReviewCodeArgs {
                 TriggerReviewCodeSheet(
                     plan: args.plan,
                     iid: args.iid,
-                    issueTitle: recentIssues.first(where: { $0.iid == args.iid })?.title,
+                    issueTitle: agent.recentIssues.first(where: { $0.iid == args.iid })?.title,
                     api: api
                 )
                 .environmentObject(config)
@@ -51,7 +51,7 @@ extension CodeAssistantPanel {
                 VStack(spacing: 12) {
                     Text("Review Code action unavailable.")
                         .font(.system(size: 13))
-                    Button("Close") { showingReviewCodeSheet = false }
+                    Button("Close") { sheets.showingReviewCodeSheet = false }
                 }
                 .padding(20)
             }
@@ -60,7 +60,7 @@ extension CodeAssistantPanel {
 
     var showingUpdateFileSheetContent: some View {
         Group {
-            if let pt = pendingTool,
+            if let pt = agent.pendingTool,
                let args = pt.updateFileArgs,
                let match = matchingAttachment(for: args.path) {
                 UpdateFileSheet(
@@ -78,7 +78,7 @@ extension CodeAssistantPanel {
                     Text("The agent proposed a path that doesn't match any attached file.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                    if let pt = pendingTool, let args = pt.updateFileArgs {
+                    if let pt = agent.pendingTool, let args = pt.updateFileArgs {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Agent's path").font(.caption).foregroundStyle(.secondary)
                             Text(args.path)
@@ -89,10 +89,10 @@ extension CodeAssistantPanel {
                                 .background(Color.secondary.opacity(0.1))
                                 .clipShape(RoundedRectangle(cornerRadius: 4))
                         }
-                        if !attachments.isEmpty {
+                        if !attachmentState.attachments.isEmpty {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Attached files (\(attachments.count))").font(.caption).foregroundStyle(.secondary)
-                                ForEach(attachments) { att in
+                                Text("Attached files (\(attachmentState.attachments.count))").font(.caption).foregroundStyle(.secondary)
+                                ForEach(attachmentState.attachments) { att in
                                     Text(att.path)
                                         .font(.system(size: 11, design: .monospaced))
                                         .textSelection(.enabled)
@@ -106,7 +106,7 @@ extension CodeAssistantPanel {
                     }
                     HStack {
                         Spacer()
-                        Button("Close") { showingUpdateFileSheet = false }
+                        Button("Close") { sheets.showingUpdateFileSheet = false }
                             .keyboardShortcut(.cancelAction)
                     }
                 }
@@ -118,7 +118,7 @@ extension CodeAssistantPanel {
 
     var showingCommentSheetContent: some View {
         Group {
-            if let pt = pendingTool,
+            if let pt = agent.pendingTool,
                let args = pt.commentIssueArgs,
                let target = resolveIssueTarget() {
                 CommentIssueSheet(
@@ -126,7 +126,7 @@ extension CodeAssistantPanel {
                     projectName: target.label,
                     projectURL: target.projectURL,
                     provider: target.kind == .gitlab ? "GitLab" : "GitHub",
-                    issueTitle: recentIssues.first(where: { $0.iid == args.iid })?.title,
+                    issueTitle: agent.recentIssues.first(where: { $0.iid == args.iid })?.title,
                     isAllowed: config.isAllowed(.commentIssue, provider: target.kind),
                     onConfirm: { editedArgs in
                         await confirmCommentIssue(editedArgs, target: target)
@@ -139,7 +139,7 @@ extension CodeAssistantPanel {
                     Text("Add or activate a project in Settings → GitLab or GitHub.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                    Button("Close") { showingCommentSheet = false }
+                    Button("Close") { sheets.showingCommentSheet = false }
                 }
                 .padding(20)
             }
@@ -148,21 +148,21 @@ extension CodeAssistantPanel {
 
     var showingGetIssueSheetContent: some View {
         Group {
-            if let pt = pendingTool, let args = pt.getIssueArgs, let target = resolveIssueTarget() {
+            if let pt = agent.pendingTool, let args = pt.getIssueArgs, let target = resolveIssueTarget() {
                 GetIssueSheet(
                     iid: args.iid,
                     projectId: target.projectId,
                     providerKind: target.kind,
                     onConfirm: {
-                        showingGetIssueSheet = false
-                        pendingTool = nil
+                        sheets.showingGetIssueSheet = false
+                        agent.pendingTool = nil
                     }
                 )
             } else {
                 VStack(spacing: 12) {
                     Text("No issue tracker available.")
                         .font(.system(size: 13))
-                    Button("Close") { showingGetIssueSheet = false }
+                    Button("Close") { sheets.showingGetIssueSheet = false }
                 }
                 .padding(20)
             }
@@ -171,7 +171,7 @@ extension CodeAssistantPanel {
 
     var showingUpdateIssueSheetContent: some View {
         Group {
-            if let pt = pendingTool, let args = pt.updateIssueArgs, let target = resolveIssueTarget() {
+            if let pt = agent.pendingTool, let args = pt.updateIssueArgs, let target = resolveIssueTarget() {
                 UpdateIssueSheet(
                     initialArgs: UpdateIssueSheet.Args(
                         iid: args.iid,
@@ -180,7 +180,7 @@ extension CodeAssistantPanel {
                         state: args.state,
                         labels: args.labels
                     ),
-                    issueTitle: recentIssues.first(where: { $0.iid == args.iid })?.title,
+                    issueTitle: agent.recentIssues.first(where: { $0.iid == args.iid })?.title,
                     projectId: target.projectId,
                     providerKind: target.kind,
                     isAllowed: config.isAllowed(.editIssue, provider: target.kind),
@@ -192,7 +192,7 @@ extension CodeAssistantPanel {
                 VStack(spacing: 12) {
                     Text("No issue tracker available.")
                         .font(.system(size: 13))
-                    Button("Close") { showingUpdateIssueSheet = false }
+                    Button("Close") { sheets.showingUpdateIssueSheet = false }
                 }
                 .padding(20)
             }
@@ -201,7 +201,7 @@ extension CodeAssistantPanel {
 
     var showingListIssuesSheetContent: some View {
         Group {
-            if let pt = pendingTool, let args = pt.listIssuesArgs, let target = resolveIssueTarget() {
+            if let pt = agent.pendingTool, let args = pt.listIssuesArgs, let target = resolveIssueTarget() {
                 ListIssuesSheet(
                     initialArgs: ListIssuesSheetArgs(
                         search: args.search,
@@ -211,15 +211,15 @@ extension CodeAssistantPanel {
                     projectId: target.projectId,
                     providerKind: target.kind,
                     onConfirm: {
-                        showingListIssuesSheet = false
-                        pendingTool = nil
+                        sheets.showingListIssuesSheet = false
+                        agent.pendingTool = nil
                     }
                 )
             } else {
                 VStack(spacing: 12) {
                     Text("No issue tracker available.")
                         .font(.system(size: 13))
-                    Button("Close") { showingListIssuesSheet = false }
+                    Button("Close") { sheets.showingListIssuesSheet = false }
                 }
                 .padding(20)
             }
@@ -228,13 +228,13 @@ extension CodeAssistantPanel {
 
     var showingCreateBranchSheetContent: some View {
         Group {
-            if let pt = pendingTool, let args = pt.createBranchArgs {
+            if let pt = agent.pendingTool, let args = pt.createBranchArgs {
                 BranchCreationSheet(
                     initialArgs: BranchCreationSheet.CreateBranchArgs(
                         branch: args.branch,
                         startPoint: args.startPoint
                     ),
-                    currentBranch: branchSheetContext?.currentBranch,
+                    currentBranch: sheets.branchSheetContext?.currentBranch,
                     onConfirm: { editedArgs in
                         await confirmBranchCreation(editedArgs)
                     }
@@ -243,7 +243,7 @@ extension CodeAssistantPanel {
                 VStack(spacing: 12) {
                     Text("Branch creation unavailable.")
                         .font(.system(size: 13))
-                    Button("Close") { showingCreateBranchSheet = false }
+                    Button("Close") { sheets.showingCreateBranchSheet = false }
                 }
                 .padding(20)
             }
@@ -259,8 +259,8 @@ extension CodeAssistantPanel {
                     response: ctx.response,
                     repoRoot: repoRoot,
                     agent: config.activeCLI,
-                    onSubmitted: { _ in reportingFault = nil },
-                    onDismiss: { reportingFault = nil },
+                    onSubmitted: { _ in sheets.reportingFault = nil },
+                    onDismiss: { sheets.reportingFault = nil },
                     onFileIssue: target.map { tgt in
                         { fault in try await fileFaultAsIssue(fault, target: tgt) }
                     },
@@ -295,16 +295,16 @@ extension CodeAssistantPanel {
 
     var showingGitOpSheetContent: some View {
         Group {
-            if let pt = pendingTool, let g = pt.gitOpArgs {
+            if let pt = agent.pendingTool, let g = pt.gitOpArgs {
                 GitOpSheet(
                     args: g,
                     onConfirm: {
-                        showingGitOpSheet = false
+                        sheets.showingGitOpSheet = false
                         Task { await runGitOpFlow(g) }
                     },
                     onCancel: {
-                        showingGitOpSheet = false
-                        pendingTool = nil
+                        sheets.showingGitOpSheet = false
+                        agent.pendingTool = nil
                     }
                 )
                 .environmentObject(theme)
@@ -312,7 +312,7 @@ extension CodeAssistantPanel {
                 VStack(spacing: 12) {
                     Text("Git operation unavailable.")
                         .font(.system(size: 13))
-                    Button("Close") { showingGitOpSheet = false }
+                    Button("Close") { sheets.showingGitOpSheet = false }
                 }
                 .padding(20)
                 .environmentObject(theme)
@@ -400,12 +400,12 @@ extension CodeAssistantPanel {
 
     var showingCreatePRSheetContent: some View {
         Group {
-            if let pt = pendingTool, let args = pt.createPRArgs, let target = resolveIssueTarget() {
+            if let pt = agent.pendingTool, let args = pt.createPRArgs, let target = resolveIssueTarget() {
                 // Build description with file changes for File → PR automation
                 let enhancedDescription: String = {
                     let base = args.description.isEmpty ? "" : args.description + "\n\n"
-                    if !modifiedFiles.isEmpty {
-                        let fileList = modifiedFiles.sorted().map { "• \($0)" }.joined(separator: "\n")
+                    if !attachmentState.modifiedFiles.isEmpty {
+                        let fileList = attachmentState.modifiedFiles.sorted().map { "• \($0)" }.joined(separator: "\n")
                         return base + "### Modified Files\n" + fileList
                     }
                     return base
@@ -435,7 +435,7 @@ extension CodeAssistantPanel {
                     Text("Add or activate a project in Settings → GitLab or GitHub.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                    Button("Close") { showingCreatePRSheet = false }
+                    Button("Close") { sheets.showingCreatePRSheet = false }
                 }
                     .padding(20)
             }
