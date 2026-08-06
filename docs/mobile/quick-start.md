@@ -131,4 +131,3 @@ LlmIdeMac (MobileControlManager :3006)
 ## Related
 
 - [verification.md](./verification.md)
-- [docs/archive/mobile-control-complete.md](../archive/mobile-control-complete.md) — superseded (Node agent era)
