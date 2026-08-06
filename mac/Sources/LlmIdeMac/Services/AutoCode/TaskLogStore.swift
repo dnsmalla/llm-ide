@@ -22,27 +22,39 @@ final class TaskLogStore: ObservableObject {
 
     @Published private(set) var buffers: [String: [LogLine]] = [:]
 
-    func append(_ task: AutoTask, _ text: String, level: Level = .info) {
+    func append(_ id: String, _ text: String, level: Level = .info) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        var lines = buffers[task.rawValue] ?? []
+        var lines = buffers[id] ?? []
         lines.append(LogLine(id: UUID(), timestamp: Date(), level: level, text: trimmed))
         if lines.count > Self.maxLinesPerTask {
             lines.removeFirst(lines.count - Self.maxLinesPerTask)
         }
-        buffers[task.rawValue] = lines
+        buffers[id] = lines
+    }
+
+    func append(_ task: AutoTask, _ text: String, level: Level = .info) {
+        append(task.rawValue, text, level: level)
+    }
+
+    func clear(_ id: String) {
+        buffers[id] = []
     }
 
     func clear(_ task: AutoTask) {
-        buffers[task.rawValue] = []
+        clear(task.rawValue)
     }
 
     func clearAll() {
         buffers = [:]
     }
 
+    func lines(for id: String) -> [LogLine] {
+        buffers[id] ?? []
+    }
+
     func lines(for task: AutoTask) -> [LogLine] {
-        buffers[task.rawValue] ?? []
+        lines(for: task.rawValue)
     }
 }
 
