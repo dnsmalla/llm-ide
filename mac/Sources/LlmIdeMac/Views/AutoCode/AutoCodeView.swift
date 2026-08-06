@@ -370,6 +370,7 @@ struct AutoCodeView: View {
         }
         .contextMenu {
             Button("Delete", role: .destructive) { customTaskPendingDelete = task }
+                .disabled(autoCode.currentCustomTaskId == task.id)
         }
     }
 
@@ -468,8 +469,14 @@ struct AutoCodeView: View {
             titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) {
-                if let task = customTaskPendingDelete {
+                // Guard here too, not just on the two entry points' buttons —
+                // this is the one place both the row context-menu and the
+                // detail-pane Delete button funnel into, so it's the single
+                // spot that can't be bypassed. A currently-running task
+                // can't be deleted out from under its in-flight CLI process.
+                if let task = customTaskPendingDelete, autoCode.currentCustomTaskId != task.id {
                     task.delete()
+                    logStore.clear(task.id)
                     persistCustomTasksChange()
                     if selectedCustomTaskId == task.id { selectedCustomTaskId = nil }
                 }
