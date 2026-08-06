@@ -462,17 +462,27 @@ final class MobileControlManager {
             append(.info, "Auto-task state: \(state.isRunning ? "running" : "idle"), master=\(state.masterEnabled)")
             reply(state)
         case MobileProtocol.Tag.autoTaskToggle:
-            // Flip the master enable (task == nil) or a single per-task flag.
-            // Routes through AutoTaskSettings.setEnabled / .enabled so the
+            // Flip the master enable (task == nil), a built-in per-task flag,
+            // or (new) a custom task's isEnabled. Routes through
+            // AutoTaskSettings.setEnabled / .enabled for built-ins so the
             // @Published didSet persists + arms/disarms the scheduler exactly
-            // as the on-Mac Settings toggle would.
+            // as the on-Mac Settings toggle would; custom tasks persist via
+            // CustomAutoTask.save() directly (they have no AutoTaskSettings
+            // entry — enabled-state lives on the struct itself).
             if let m = try? decoder.decode(AutoTaskToggle.self, from: data) {
                 if let taskName = m.task, let t = AutoTask(rawValue: taskName) {
                     autoTaskSettings?.setEnabled(m.enabled, task: t)
                     append(.info, "Auto-task toggle \(t.rawValue)=\(m.enabled)")
-                } else {
+                } else if let taskName = m.task,
+                          var custom = CustomAutoTask.loadAll().first(where: { $0.id == taskName }) {
+                    custom.isEnabled = m.enabled
+                    custom.save()
+                    append(.info, "Custom auto-task toggle \(custom.name)=\(m.enabled)")
+                } else if m.task == nil {
                     autoTaskSettings?.enabled = m.enabled
                     append(.info, "Auto-task master=\(m.enabled)")
+                } else {
+                    append(.stderr, "auto_task_toggle: unknown task id \(m.task ?? "?")")
                 }
                 replyAutoTaskStateOrAck()
             } else {
@@ -491,19 +501,38 @@ final class MobileControlManager {
                 return
             }
             if let m = try? decoder.decode(AutoTaskRun.self, from: data) {
-                let started: Bool
+                // Four-way branch, mirroring the toggle handler above:
+                // built-in task / custom task / no task = global run / an
+                // unrecognized non-nil id (e.g. the phone still shows a
+                // since-deleted custom task) — the last case must NOT fall
+                // through to a global run-all, which would be a surprising
+                // and wrong response to "run this one specific task".
+                var started = false
+                var unrecognized = false
                 if let raw = m.task, let t = AutoTask(rawValue: raw) {
                     started = ac.runSingle(t)
                     if started {
                         append(.info, "Auto-task run single: \(t.rawValue)")
                     }
-                } else {
+                } else if let raw = m.task,
+                          let custom = CustomAutoTask.loadAll().first(where: { $0.id == raw }) {
+                    started = ac.runSingleCustom(custom)
+                    if started {
+                        append(.info, "Custom auto-task run: \(custom.name)")
+                    }
+                } else if m.task == nil {
                     started = ac.runNow()
                     if started {
                         append(.info, "Auto-task run now")
                     }
+                } else {
+                    unrecognized = true
+                    append(.stderr, "auto_task_run: unknown task id \(m.task ?? "?")")
                 }
-                if started {
+                if unrecognized {
+                    reply(CommandError(commandId: "auto_task_run",
+                                       message: "That task no longer exists on your Mac. Refresh the task list."))
+                } else if started {
                     replyAutoTaskStateOrAck()
                 } else {
                     append(.info, "Auto-task run ignored — already running on Mac")
@@ -753,12 +782,18 @@ final class MobileControlManager {
                          enabled: s.isEnabled(task: t),
                          lastError: ac.taskErrors[t.rawValue])
         }
+        let customInfos = CustomAutoTask.loadAll().map { t in
+            AutoTaskInfo(id: t.id, label: t.name, enabled: t.isEnabled,
+                         lastError: ac.taskErrors[t.id])
+        }
         // Mirror the Mac "Show only enabled" filter: when on, the phone sees
         // only the active task set (re-enabling a hidden task is done on Mac).
-        let infos = s.showOnlyEnabledTasks ? allInfos.filter { $0.enabled } : allInfos
+        // Custom tasks participate identically to built-ins.
+        let combined = allInfos + customInfos
+        let infos = s.showOnlyEnabledTasks ? combined.filter { $0.enabled } : combined
         return AutoTaskState(masterEnabled: s.enabled,
                              isRunning: ac.isRunning || ac.hasScheduledRun,
-                             currentTask: ac.currentTask?.rawValue,
+                             currentTask: ac.currentTask?.rawValue ?? ac.currentCustomTaskId,
                              currentStep: ac.currentStep,
                              statusMessage: ac.statusMessage,
                              lastRunDate: ac.lastRunDate?.timeIntervalSince1970,
@@ -782,8 +817,8 @@ final class MobileControlManager {
     /// Build the wire snapshot of per-task live logs for the iPhone run screen.
     private func buildAutoTaskLogsReply() -> AutoTaskLogsReply? {
         guard let logStore else { return nil }
-        let current = autoCode?.currentTask?.rawValue
-        let tasks = AutoTask.allCases.map { task in
+        let current = autoCode?.currentTask?.rawValue ?? autoCode?.currentCustomTaskId
+        let builtIn = AutoTask.allCases.map { task in
             let lines = logStore.lines(for: task).map { line in
                 AutoTaskLogLine(id: line.id.uuidString,
                                 timestamp: line.timestamp.timeIntervalSince1970,
@@ -792,7 +827,16 @@ final class MobileControlManager {
             }
             return AutoTaskTaskLogs(id: task.rawValue, label: task.label, lines: lines)
         }
-        return AutoTaskLogsReply(currentTask: current, tasks: tasks)
+        let custom = CustomAutoTask.loadAll().map { task in
+            let lines = logStore.lines(for: task.id).map { line in
+                AutoTaskLogLine(id: line.id.uuidString,
+                                timestamp: line.timestamp.timeIntervalSince1970,
+                                level: line.level.rawValue,
+                                text: line.text)
+            }
+            return AutoTaskTaskLogs(id: task.id, label: task.name, lines: lines)
+        }
+        return AutoTaskLogsReply(currentTask: current, tasks: builtIn + custom)
     }
 
     // MARK: - Phase A: mobile push sync, cancel, status, rename
@@ -848,6 +892,16 @@ final class MobileControlManager {
     private func pushAutoTaskStateIfPaired() {
         guard mobileClientPaired, let state = buildAutoTaskState() else { return }
         reply(state)
+    }
+
+    /// Explicit "push now" for the Auto Tasks page's Refresh button, and for
+    /// every custom-task mutation (add/toggle/delete/run) — CustomAutoTask is
+    /// a plain struct, not independently Combine-observed like autoCode/
+    /// autoTaskSettings, so this is the actual sync mechanism for it. Built-in
+    /// tasks already auto-push via installMobilePushObservers(); this just
+    /// gives an explicit, visible "synced now" affordance on top of that.
+    func refreshAutoTaskStateForMobile() {
+        pushAutoTaskStateIfPaired()
     }
 
     private func pushAutoTaskLogsIfPaired() {
