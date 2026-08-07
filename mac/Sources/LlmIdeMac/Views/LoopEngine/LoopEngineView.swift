@@ -71,6 +71,7 @@ struct LoopEngineView: View {
         _runner = StateObject(wrappedValue: LoopEngineRunner(
             stageRepairer: AgentLoopStageRepairer(api: api),
             regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
+            skillExecutor: AgentLoopSkillExecutor(api: api),
             approvals: approvals))
     }
 

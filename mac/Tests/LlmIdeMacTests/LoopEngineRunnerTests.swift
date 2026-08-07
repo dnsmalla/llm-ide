@@ -24,6 +24,16 @@ final class LoopEngineRunnerTests: XCTestCase {
         }
     }
 
+    private struct SkillError: Error {}
+    private final class StubSkillExecutor: LoopSkillExecuting {
+        private(set) var callCount = 0
+        var throwOnEveryCall: Bool = false
+        func execute(skillId: String, targetPath: String?, message: String) async throws {
+            callCount += 1
+            if throwOnEveryCall { throw SkillError() }
+        }
+    }
+
     /// Suspends inside `repair(...)` until released, so a test can prove a
     /// second `LoopEngineRunner` is rejected while a first one is
     /// genuinely still in flight (rather than racing on timing).
@@ -130,6 +140,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let runner = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals(approve: [("t1", "swift test")])
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -153,6 +164,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let runner = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals(approve: [("t1", "swift test")])
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -171,6 +183,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let runner = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals(approve: [("t1", "swift test")])
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -191,6 +204,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let runner = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals(approve: [("t1", "swift test")])
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -208,6 +222,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let runner = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals()   // nothing approved
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -230,6 +245,7 @@ final class LoopEngineRunnerTests: XCTestCase {
             verifier: verifier,
             stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: false),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals()
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -252,6 +268,7 @@ final class LoopEngineRunnerTests: XCTestCase {
             verifier: verifier,
             stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: false),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals()
         )
         _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -275,6 +292,7 @@ final class LoopEngineRunnerTests: XCTestCase {
             verifier: verifier,
             stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: false),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals()
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -307,6 +325,7 @@ final class LoopEngineRunnerTests: XCTestCase {
             verifier: verifier,
             stageRepairer: repairer,
             regressionSweep: DecreasingRegressionSweep(),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals()
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -336,11 +355,13 @@ final class LoopEngineRunnerTests: XCTestCase {
         let runner1 = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
             approvals: approvals
         )
         let runner2 = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
             approvals: approvals
         )
 
@@ -374,6 +395,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let runner = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals(approve: [("t1", "swift test")])
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -391,6 +413,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let runner = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals(approve: [("t1", "swift test")])
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -415,6 +438,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let runner = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: false),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals()
         )
         let task = Task { await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot) }
@@ -450,6 +474,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let runner = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: regressionSweep,
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals()
         )
         let task = Task { await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot) }
@@ -472,6 +497,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let runner = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals(approve: [("t1", "swift test")])
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -495,6 +521,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let runner = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals(approve: [("t1", "swift test")])
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -530,6 +557,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let runner = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals(approve: [("t1", "swift test")])
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -553,6 +581,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let runner = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals(approve: [("a", "cmd-a"), ("b", "cmd-b")])
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -591,6 +620,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let runner = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals(approve: [("a", "cmd-a"), ("b", "cmd-b")])
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -614,6 +644,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let runner = LoopEngineRunner(
             verifier: verifier, stageRepairer: repairer,
             regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals(approve: [("t1", "swift test")])
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -621,5 +652,76 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(runner.status, .givenUp(reason: .maxIterations))
         XCTAssertEqual(runner.iteration, 0)
         XCTAssertTrue(verifier.calls.isEmpty)
+    }
+
+    // MARK: - Skill stage dispatch (.skill generate step)
+
+    func testSkillStageRunsOnceAndCompletesWhenVerifyPasses() async {
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let repairer = StubRepairer()
+        let skill = StubSkillExecutor()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "s1", name: "Fix", kind: .skill, command: nil, order: 0,
+                      skillId: "skills/fix", targetPath: nil, prompt: nil),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 1)
+        ], maxIterations: 5, consecutiveFailureStop: 2)
+        let runner = LoopEngineRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill,
+            approvals: makeApprovals(approve: [("t1", "swift test")])
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(runner.iteration, 1)
+        XCTAssertEqual(skill.callCount, 1)
+        XCTAssertEqual(repairer.repairCount, 0)
+    }
+
+    /// A skill stage re-runs every iteration (generate) until a verify stage
+    /// gates the run — here a constant-failing regression sweep burns both
+    /// iterations, so the skill runs twice.
+    func testSkillStageReRunsEachIteration() async {
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let repairer = StubRepairer()
+        let skill = StubSkillExecutor()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "s1", name: "Fix", kind: .skill, command: nil, order: 0,
+                      skillId: "skills/fix", targetPath: nil, prompt: nil),
+            LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil, order: 1)
+        ], maxIterations: 2, consecutiveFailureStop: 5)
+        let runner = LoopEngineRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: false),
+            skillExecutor: skill,
+            approvals: makeApprovals()
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .givenUp(reason: .maxIterations))
+        XCTAssertEqual(runner.iteration, 2)
+        XCTAssertEqual(skill.callCount, 2)   // ran once per iteration, before the regression gate
+    }
+
+    /// A skill that throws a transport error must NOT end the run — it's logged
+    /// and the verify stages still decide.
+    func testSkillStageErrorIsNonFatal() async {
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let repairer = StubRepairer()
+        let skill = StubSkillExecutor()
+        skill.throwOnEveryCall = true
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "s1", name: "Fix", kind: .skill, command: nil, order: 0,
+                      skillId: "skills/fix", targetPath: nil, prompt: nil),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 1)
+        ], maxIterations: 5, consecutiveFailureStop: 2)
+        let runner = LoopEngineRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill,
+            approvals: makeApprovals(approve: [("t1", "swift test")])
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .success)     // verify stage still passed despite the skill error
+        XCTAssertEqual(skill.callCount, 1)
     }
 }

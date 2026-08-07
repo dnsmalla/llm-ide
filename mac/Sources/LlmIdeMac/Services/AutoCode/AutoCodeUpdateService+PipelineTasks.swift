@@ -569,7 +569,8 @@ extension AutoCodeUpdateService {
         regressionRunner.activity = activity
         let runner = LoopEngineRunner(
             stageRepairer: AgentLoopStageRepairer(api: api),
-            regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner)
+            regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
+            skillExecutor: AgentLoopSkillExecutor(api: api)
         )
         // run() returns LoopEngineStatus? — nil means this call was rejected
         // (a run is already in progress for this repo, instance- or

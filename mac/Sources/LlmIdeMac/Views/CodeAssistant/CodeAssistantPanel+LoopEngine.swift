@@ -157,7 +157,8 @@ extension CodeAssistantPanel {
                                                 verifier: ShellFaultVerifier(), repairer: AgentFaultRepairer(api: api))
         let runner = LoopEngineRunner(
             stageRepairer: AgentLoopStageRepairer(api: api, language: language),
-            regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner)
+            regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
+            skillExecutor: AgentLoopSkillExecutor(api: api, language: language)
         )
 
         // Throttled: `runner.$log` fires once per `appendLog` call (every
