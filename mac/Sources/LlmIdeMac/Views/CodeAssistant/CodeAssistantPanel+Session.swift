@@ -605,7 +605,17 @@ extension CodeAssistantPanel {
                 )
             }
         }
-        guard !stopped else { return }
+        guard !stopped else {
+            // A stopped turn (Stop/Esc mid-send, cancellation, or certain
+            // error paths that pass `stopped: true`) must always end any
+            // in-flight autonomous chain, regardless of why it stopped —
+            // this early return happens BEFORE the `else` branch below that
+            // normally resets `agentIsAutonomous`, so without this line the
+            // flag stayed stuck `true` forever after a stop even though
+            // `busy`/`runTask` correctly cleared via the caller's own tail.
+            agent.agentIsAutonomous = false
+            return
+        }
         self.agent.pendingTool = pendingTool
         if let newTasks = tasks {
             agent.agentPendingTasks = newTasks
