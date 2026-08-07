@@ -33,6 +33,11 @@ enum AutoTask: String, CaseIterable, Identifiable {
     /// Plan status updates from external outcome trackers (GitHub/GitLab/Linear/Backlog).
     /// Polls external providers and updates plan task statuses. Structural — no editable prompt.
     case updatePlanStatus
+    /// Multi-stage, multi-iteration loop (Regression -> Test -> ...) with
+    /// auto-fix retry. Additive to `.regression`, which keeps its existing
+    /// single-attempt behavior unchanged. Structural — configured via
+    /// LoopEngineView, not a text template.
+    case loopEngineering
 
     var id: String { rawValue }
 
@@ -58,6 +63,7 @@ enum AutoTask: String, CaseIterable, Identifiable {
         case .generateDoc:       return "Generate Documentation"
         case .updateIssues:      return "Update Issues"
         case .updatePlanStatus:  return "Update Plan Status"
+        case .loopEngineering:   return "Loop Engineering"
         }
     }
 
@@ -75,6 +81,7 @@ enum AutoTask: String, CaseIterable, Identifiable {
         case .generateDoc:       return "wand.and.stars"
         case .updateIssues:      return "checklist"
         case .updatePlanStatus:  return "chart.bar.doc.horizontal"
+        case .loopEngineering:   return "repeat.circle"
         }
     }
 
@@ -93,6 +100,7 @@ enum AutoTask: String, CaseIterable, Identifiable {
         case .generateDoc:       return "generate-doc"
         case .updateIssues:      return "update-issues"
         case .updatePlanStatus:  return "update-plan-status"
+        case .loopEngineering:   return "loop-engineering"
         }
     }
 
@@ -113,7 +121,7 @@ enum AutoTask: String, CaseIterable, Identifiable {
                                               set: { config.autoTaskTemplateUpdateIssues = $0 })
         case .updatePlanStatus: return nil
         case .sourceUpdate, .sourcesToIssue, .implementIssues, .reviewMerge,
-             .regression, .generateKnowledge: return nil
+             .regression, .generateKnowledge, .loopEngineering: return nil
         }
     }
 
@@ -136,7 +144,7 @@ enum AutoTask: String, CaseIterable, Identifiable {
         case .updateIssues:    config.autoTaskTemplateUpdateIssues = AppConfig.defaultTemplateUpdateIssues
         case .updatePlanStatus: break       // no template to reset
         case .sourceUpdate, .sourcesToIssue, .implementIssues, .reviewMerge,
-             .regression, .generateKnowledge: break
+             .regression, .generateKnowledge, .loopEngineering: break
         }
     }
 

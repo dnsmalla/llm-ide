@@ -139,6 +139,13 @@ final class AutoTaskSettings: ObservableObject {
         }
     }
 
+    @Published var runLoopEngineering: Bool {
+        didSet(oldValue) {
+            guard oldValue != runLoopEngineering else { return }
+            save("autoCodeRunLoopEngineering", runLoopEngineering)
+        }
+    }
+
     @Published var regressionAttemptRepair: Bool {
         didSet(oldValue) {
             guard oldValue != regressionAttemptRepair else { return }
@@ -182,6 +189,7 @@ final class AutoTaskSettings: ObservableObject {
         if runReviewDoc { tasks.append("Review Doc") }
         if runReviewConflicts { tasks.append("Review Conflicts") }
         if runRegression { tasks.append("Regression") }
+        if runLoopEngineering { tasks.append("Loop Engineering") }
         if runGenerateKnowledge { tasks.append("Knowledge") }
         if runGenerateDoc { tasks.append("Generate Doc") }
         if runUpdateIssues { tasks.append("Update Issues") }
@@ -209,6 +217,7 @@ final class AutoTaskSettings: ObservableObject {
         case .generateDoc:       return runGenerateDoc
         case .updateIssues:      return runUpdateIssues
         case .updatePlanStatus:  return runUpdatePlanStatus
+        case .loopEngineering:   return runLoopEngineering
         }
     }
 
@@ -230,6 +239,7 @@ final class AutoTaskSettings: ObservableObject {
         case .generateDoc:       runGenerateDoc = value
         case .updateIssues:      runUpdateIssues = value
         case .updatePlanStatus:  runUpdatePlanStatus = value
+        case .loopEngineering:   runLoopEngineering = value
         }
     }
 
@@ -313,6 +323,7 @@ final class AutoTaskSettings: ObservableObject {
         self.runSourcesToIssue = defaults.object(forKey: "autoCodeRunSourcesToIssue") as? Bool ?? true
         self.runImplementIssues = defaults.object(forKey: "autoCodeRunImplementIssues") as? Bool ?? true
         self.runReviewMerge = defaults.object(forKey: "autoCodeRunReviewMerge") as? Bool ?? false
+        self.runLoopEngineering = defaults.object(forKey: "autoCodeRunLoopEngineering") as? Bool ?? false
 
         self.regressionAttemptRepair = defaults.object(forKey: "regressionAttemptRepair") as? Bool ?? false
         self.regressionAutoReopen = defaults.object(forKey: "regressionAutoReopen") as? Bool ?? false
@@ -402,6 +413,9 @@ final class AutoTaskSettings: ObservableObject {
 
         let newRunReviewMerge = defaults.object(forKey: "autoCodeRunReviewMerge") as? Bool ?? false
         if newRunReviewMerge != runReviewMerge { runReviewMerge = newRunReviewMerge }
+
+        let newRunLoopEngineering = defaults.object(forKey: "autoCodeRunLoopEngineering") as? Bool ?? false
+        if newRunLoopEngineering != runLoopEngineering { runLoopEngineering = newRunLoopEngineering }
 
         let newRegressionAttemptRepair = defaults.object(forKey: "regressionAttemptRepair") as? Bool ?? false
         if newRegressionAttemptRepair != regressionAttemptRepair { regressionAttemptRepair = newRegressionAttemptRepair }
