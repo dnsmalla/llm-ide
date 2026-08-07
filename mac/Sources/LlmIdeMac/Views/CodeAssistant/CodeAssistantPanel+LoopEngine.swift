@@ -15,18 +15,27 @@ extension CodeAssistantPanel {
     /// for free — `LoopEngineRunner.run()` already turns task cancellation
     /// into a clean `.aborted` status.
     ///
-    /// Disable condition covers three idle checks, not just `busy`:
-    /// - `busy` — a turn/run is actively in flight.
-    /// - `runTask != nil` — always nil except during an active turn/run
-    ///   (set by the turn tail / `resetTransientSessionState`), so this
-    ///   also catches the ~0.8s window between a normal turn's tail
-    ///   clearing `busy` and `finishStreamingTurn`'s scheduled
+    /// Disable condition covers three idle checks, not just `busy` — each
+    /// closes a DIFFERENT gap, so don't drop one thinking it's redundant
+    /// with another:
+    /// - `busy` — the ordinary idle signal; false once a turn/run's own
+    ///   tail runs.
+    /// - `runTask != nil` — a second, independent signal that something is
+    ///   still running even if `busy` already went false out from under
+    ///   it — e.g. the scenario the `agent.pendingTool = nil` reset above
+    ///   guards against: a stale action card confirmed by the user runs
+    ///   ITS OWN completion handler, which can set `busy = false` while
+    ///   this run's `runTask` is still alive (only this run's own tail
+    ///   clears `runTask`). `busy` alone would miss that; `runTask != nil`
+    ///   doesn't.
+    /// - `agent.agentIsAutonomous` — the ONLY one of these three that
+    ///   closes the ~0.8s window between a normal turn's tail clearing
+    ///   BOTH `busy` and `runTask` and `finishStreamingTurn`'s scheduled
     ///   `DispatchQueue.main.asyncAfter` autonomous-continue closure firing
-    ///   `startTurn(...)` — which does NOT itself check `busy`/`runTask`
+    ///   `startTurn(...)` — which does NOT check `busy`/`runTask` itself
     ///   and would silently overwrite (and orphan) this run's `runTask` if
-    ///   this button fired inside that window.
-    /// - `agent.agentIsAutonomous` — true for exactly that same window,
-    ///   closing it explicitly rather than relying on timing.
+    ///   this button fired inside that window. `runTask` is already nil
+    ///   for the whole width of this window, so it can't help here.
     ///
     /// Matches `LoopEngineView`'s own `.disabled(runner.running || ...)`
     /// precedent, just against this panel's equivalent idle signals.
