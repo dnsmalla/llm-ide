@@ -57,4 +57,69 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
         let passed = await adapter.sweepPassed(faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: false)
         XCTAssertFalse(passed)
     }
+
+    /// Non-vacuous positive case: a fault that actually gets checked and
+    /// lands on `.unchanged` (fresh answer matches the saved one). The
+    /// no-fixed-faults test above passes trivially on an empty result
+    /// set; this one proves a real verdict flows through as a pass.
+    func testSweepPassedTrueForAnActualUnchangedVerdict() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("regression-sweep-adapter-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        // StubPrompter echoes the prompt back; giving the fault a
+        // `response` identical to its `prompt` makes the fresh reply
+        // match the saved answer exactly → `.unchanged`.
+        let text = "does X still work?"
+        let fault = FaultReport(
+            prompt: text,
+            response: text,
+            notes: "",
+            severity: .info,
+            reportedAt: Date(),
+            appVersion: "test",
+            agent: "claude_code",
+            status: .fixed,
+            tags: []
+        )
+        let store = MemoryStore()
+        try store.writeFault(at: tempDir, fault)
+
+        let runner = RegressionRunner(prompter: StubPrompter(), store: store)
+        let adapter = RegressionRunnerSweepAdapter(runner: runner)
+        let passed = await adapter.sweepPassed(faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: false)
+        XCTAssertTrue(passed)
+    }
+
+    /// Mirror case: a fresh answer that no longer matches the saved one
+    /// lands on `.regressed` (no judge configured, so no semantic
+    /// second chance) and must report as not-passed.
+    func testSweepPassedFalseForARegressedVerdict() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("regression-sweep-adapter-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        // StubPrompter echoes the prompt, which differs from the saved
+        // `response` below → exact-match verdict comes back `.regressed`.
+        let fault = FaultReport(
+            prompt: "does X still work?",
+            response: "yes, it does",
+            notes: "",
+            severity: .info,
+            reportedAt: Date(),
+            appVersion: "test",
+            agent: "claude_code",
+            status: .fixed,
+            tags: []
+        )
+        let store = MemoryStore()
+        try store.writeFault(at: tempDir, fault)
+
+        let runner = RegressionRunner(prompter: StubPrompter(), store: store)
+        let adapter = RegressionRunnerSweepAdapter(runner: runner)
+        let passed = await adapter.sweepPassed(faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: false)
+        XCTAssertFalse(passed)
+    }
 }
