@@ -26,6 +26,17 @@ final class VerifyApprovalStore {
         defaults.set(Array(set), forKey: Self.key)
     }
 
+    /// Stage commands reuse the same repo+faultFile+command hash scheme as
+    /// fault verify commands, distinguished by a "loopstage:<id>" faultFile
+    /// so the two approval spaces never collide.
+    func isStageApproved(repo: URL, stageId: String, command: String) -> Bool {
+        isApproved(repo: repo, faultFile: "loopstage:\(stageId)", command: command)
+    }
+
+    func approveStage(repo: URL, stageId: String, command: String) {
+        approve(repo: repo, faultFile: "loopstage:\(stageId)", command: command)
+    }
+
     private func approvedSet() -> Set<String> {
         Set(defaults.stringArray(forKey: Self.key) ?? [])
     }
