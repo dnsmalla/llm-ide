@@ -56,7 +56,7 @@ final class ShellState {
         /// turned off. `.live` is already conditional on capture state
         /// so it doesn't appear here either.
         static let userHideable: [Section] = [
-            .explorer, .search, .conflicts, .sourceControl, .issues, .gantt, .visual, .docGen, .autoCode, .codeGraph, .regression, .loopEngine
+            .explorer, .search, .conflicts, .sourceControl, .issues, .gantt, .visual, .docGen, .autoCode, .codeGraph, .regression
         ]
 
         /// Resolve the effective Home landing: the chosen section if it's a real
