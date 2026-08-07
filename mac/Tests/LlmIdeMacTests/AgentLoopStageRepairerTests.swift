@@ -13,6 +13,7 @@ final class AgentLoopStageRepairerTests: XCTestCase {
         XCTAssertTrue(prompt.contains("swift test"))
         XCTAssertTrue(prompt.contains("XCTAssertEqual failed"))
         XCTAssertTrue(prompt.contains("/tmp/repo"))
+        XCTAssertTrue(prompt.contains("Do not modify the stage command"))
     }
 
     func testPromptOmitsCommandLineWhenNil() {

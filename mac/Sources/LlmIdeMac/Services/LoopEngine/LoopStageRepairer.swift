@@ -1,8 +1,5 @@
-// Attempts to fix a failing Loop Engineering stage. Generalizes
-// FaultRepairer (which is tied to a single FaultReport) to an arbitrary
-// named stage + command + failure output, so it can drive repair for any
-// LoopStage (regression sweep or user-added shell command) rather than
-// only the fixed regression-fault flow.
+// Repair is a multi-file code edit, so the production adapter uses the
+// FULL chat model, not the sub-model tier (mirrors AgentFaultRepairer).
 
 import Foundation
 
@@ -40,9 +37,10 @@ final class AgentLoopStageRepairer: LoopStageRepairer {
         The "\(stageName)" stage of a Loop Engineering run is failing in the codebase at \(repoRoot.path).
 
         \(commandLine)Failure output:
-        \(String(failureOutput.prefix(maxFailureOutputChars)))
+        \(String(failureOutput.suffix(maxFailureOutputChars)))
 
         Edit the code so this stage passes. Make the minimal change required.
+        Do not modify the stage command, weaken or delete tests/assertions, or skip cases to make it pass.
         """
     }
 
