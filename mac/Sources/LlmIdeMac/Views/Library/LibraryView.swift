@@ -14,9 +14,17 @@ struct LibraryView: View {
     /// (newline-joined — folder names may contain commas). Backed by AppStorage
     /// via the computed `expandedFolders` below.
     @AppStorage("library.expandedFolders") private var expandedFoldersRaw = ""
-    /// Which SOURCES sub-groups (Meetings / Mail) are collapsed. Absence means
-    /// expanded, so both groups are open by default. Persisted across relaunch.
-    @AppStorage("library.collapsedSourceGroups") private var collapsedSourceGroupsRaw = ""
+    /// Which SOURCES sub-groups (Meetings / Mail / Slack) are expanded.
+    /// Absence means collapsed, so every sub-group is closed by default,
+    /// matching every other section in this sidebar; the user expands what
+    /// they need. Opt-in (rather than an opt-out "collapsed" set) so a
+    /// source added to `SourceRegistry.all` later is closed automatically,
+    /// with no key to remember to update here. Deliberately a NEW key, not
+    /// a renamed/re-defaulted `library.collapsedSourceGroups`: an
+    /// `@AppStorage` default only applies when the key has never been
+    /// written, so an existing install that already toggled any group would
+    /// keep seeing that stale default forever. Persisted across relaunch.
+    @AppStorage("library.expandedSourceGroups") private var expandedSourceGroupsRaw = ""
 
     /// Set views over the persisted newline-joined strings. Get-modify-set works
     /// (`.insert`/`.remove`) because each has a setter; AppStorage writes are
@@ -25,9 +33,9 @@ struct LibraryView: View {
         get { Set(expandedFoldersRaw.split(separator: "\n").map(String.init)) }
         nonmutating set { expandedFoldersRaw = newValue.joined(separator: "\n") }
     }
-    private var collapsedSourceGroups: Set<String> {
-        get { Set(collapsedSourceGroupsRaw.split(separator: "\n").map(String.init)) }
-        nonmutating set { collapsedSourceGroupsRaw = newValue.joined(separator: "\n") }
+    private var expandedSourceGroups: Set<String> {
+        get { Set(expandedSourceGroupsRaw.split(separator: "\n").map(String.init)) }
+        nonmutating set { expandedSourceGroupsRaw = newValue.joined(separator: "\n") }
     }
     /// Installed plugins for the current user. Loaded once on appear
     /// and refreshed when the user (re-)opens Library. Failures are
@@ -62,7 +70,6 @@ struct LibraryView: View {
         // minWidth here (was 260) fought AppShell's 180 column and the
         // oversized content got centered, clipping headers on the left.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { migrateLegacySourceCollapseKeys() }
         .task { await load() }
         .task { await loadPlugins() }
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
@@ -346,21 +353,7 @@ struct LibraryView: View {
         }
     }
 
-    // MARK: - Sources section (Meetings / Mail)
-
-    /// One-time migration of the persisted SOURCES collapse key after the
-    /// SourceKind→InputSource refactor: the email sub-group's key changed from
-    /// `sources:mail` (old `SourceKind.mail` rawValue) to `sources:email`
-    /// (`EmailSource.id`). Without this, a user who had Mail collapsed would
-    /// see it silently re-expand. Idempotent: a no-op once the legacy key is
-    /// gone. (Meetings is unaffected — its id "meeting" matches the old raw.)
-    private func migrateLegacySourceCollapseKeys() {
-        guard collapsedSourceGroups.contains("sources:mail") else { return }
-        var updated = collapsedSourceGroups
-        updated.remove("sources:mail")
-        updated.insert("sources:email")
-        collapsedSourceGroups = updated
-    }
+    // MARK: - Sources section (Meetings / Mail / Slack)
 
     /// The `.meetings` folder rendered as SOURCES: a single header over one
     /// sub-group per registered `InputSource` (captured Meetings, ingested
@@ -385,7 +378,7 @@ struct LibraryView: View {
 
     /// One collapsible SOURCES sub-group. Mirrors the folder-group
     /// DisclosureGroup styling used elsewhere in the file tree; defaults to
-    /// expanded and shows a muted empty state when it has no files.
+    /// collapsed and shows a muted empty state when it has no files.
     ///
     /// Note: items are shown as a flat list here — unlike the plain file-tree
     /// sections, `folderOrigin` nesting is intentionally not reproduced, since
@@ -395,10 +388,10 @@ struct LibraryView: View {
                                 tint: Color) -> some View {
         let stateKey = "sources:\(source.id)"
         let isExpanded = Binding(
-            get: { !collapsedSourceGroups.contains(stateKey) },
+            get: { expandedSourceGroups.contains(stateKey) },
             set: { open in
-                if open { collapsedSourceGroups.remove(stateKey) }
-                else     { collapsedSourceGroups.insert(stateKey) }
+                if open { expandedSourceGroups.insert(stateKey) }
+                else     { expandedSourceGroups.remove(stateKey) }
             }
         )
         DisclosureGroup(isExpanded: isExpanded) {

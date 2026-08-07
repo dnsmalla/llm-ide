@@ -14,9 +14,9 @@ struct SearchView: View {
     @State private var exclude = ""
     @State private var results = SearchResults()
 
-    // View state. Files default to expanded; `collapsed` records the ones the
-    // user explicitly closed, so the absence of an id == expanded.
-    @State private var collapsed: Set<String> = []
+    // View state. Files default to collapsed; `expanded` records the ones the
+    // user explicitly opened, so the absence of an id == collapsed.
+    @State private var expanded: Set<String> = []
     @State private var dismissed: Set<String> = []        // per-match key, view-only hide
 
     // Replace state
@@ -218,8 +218,8 @@ struct SearchView: View {
 
     @ViewBuilder private func fileGroup(_ fm: FileMatch) -> some View {
         DisclosureGroup(isExpanded: Binding(
-            get: { !collapsed.contains(fm.id) },
-            set: { open in if open { collapsed.remove(fm.id) } else { collapsed.insert(fm.id) } }
+            get: { expanded.contains(fm.id) },
+            set: { open in if open { expanded.insert(fm.id) } else { expanded.remove(fm.id) } }
         )) {
             ForEach(visibleLineMatches(fm), id: \.self) { lm in
                 lineRow(fm, lm)
@@ -344,7 +344,7 @@ struct SearchView: View {
         let files = results.files, q = query, opts = options, repl = replaceText, pc = preserveCase
         Task {
             _ = await searchService.replaceAll(in: files, query: q, options: opts, replacement: repl, preserveCase: pc)
-            scheduleSearch()
+            scheduleSearch(resetExpanded: false)
         }
     }
 
@@ -352,7 +352,7 @@ struct SearchView: View {
         let url = fm.url, q = query, opts = options, repl = replaceText, pc = preserveCase
         Task {
             _ = await searchService.replaceInFile(file: url, query: q, options: opts, replacement: repl, preserveCase: pc)
-            scheduleSearch()
+            scheduleSearch(resetExpanded: false)
         }
     }
 
@@ -360,17 +360,27 @@ struct SearchView: View {
         let url = fm.url, q = query, opts = options, repl = replaceText, pc = preserveCase
         Task {
             _ = await searchService.replaceOne(file: url, fileIndex: fileIndex, query: q, options: opts, replacement: repl, preserveCase: pc)
-            scheduleSearch()
+            scheduleSearch(resetExpanded: false)
         }
     }
 
-    private func scheduleSearch() {
+    /// `resetExpanded: false` is for the replace actions above — a replace
+    /// re-searches to refresh match positions, but (unlike an actual new
+    /// query) the file the user is working in should stay open under them,
+    /// not slam shut mid-edit. `FileMatch.id` is `url.path`, stable across a
+    /// replace, so preserving `expanded` here is safe.
+    private func scheduleSearch(resetExpanded: Bool = true) {
         debounce?.cancel()
         // Dismissals are positional (path:line:fileIndex), so they're only valid
         // for the current result set — clear them when the query/options/globs
         // change, otherwise a dismissal can phantom-hide a different match at the
         // same position in the new results.
         dismissed.removeAll()
+        // Same reasoning as `dismissed`, but only for a genuine new
+        // query/options/globs change (see `resetExpanded` doc above) — keeps
+        // every fresh search starting fully collapsed, not just the first
+        // one in a session.
+        if resetExpanded { expanded.removeAll() }
         guard let root else { results = SearchResults(); return }
         let q = query
         let opts = options

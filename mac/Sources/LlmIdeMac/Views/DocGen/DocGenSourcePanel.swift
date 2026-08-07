@@ -11,6 +11,33 @@ struct DocGenSourcePanel: View {
     @State private var showTemplateImporter = false
     @State private var showTemplateManager = false
 
+    /// Persisted set of EXPANDED section ids (comma-joined). Absence ⇒
+    /// collapsed, so this panel opens fully closed — the user expands what
+    /// they need. Opt-in (rather than an opt-out "collapsed" set seeded with
+    /// today's section ids) so a section added later is closed automatically
+    /// with no key to remember to update here — see `LibraryView`'s
+    /// `expandedSourceGroups` for the same reasoning applied to an
+    /// already-shipped key, where a stale seeded default silently failed to
+    /// take effect on any install that had already toggled a section.
+    @AppStorage("docgen.expandedSections") private var expandedSectionsRaw = ""
+
+    private var expandedSet: Set<String> {
+        Set(expandedSectionsRaw.split(separator: ",").map(String.init))
+    }
+
+    /// Binding for a section's expanded state, persisted in
+    /// `expandedSectionsRaw`. Drives every section's collapse chevron.
+    private func sectionExpanded(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedSet.contains(id) },
+            set: { open in
+                var set = expandedSet
+                if open { set.insert(id) } else { set.remove(id) }
+                expandedSectionsRaw = set.sorted().joined(separator: ",")
+            }
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -52,10 +79,11 @@ struct DocGenSourcePanel: View {
     // MARK: - Template section
 
     private var templateSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let isExpanded = sectionExpanded("template").wrappedValue
+        return VStack(alignment: .leading, spacing: 0) {
             // Header row
             HStack {
-                sectionHeader(title: "Template", icon: "doc.badge.gearshape", color: theme.current.accent)
+                sectionHeader(id: "template", title: "Template", icon: "doc.badge.gearshape", color: theme.current.accent)
                 Spacer()
                 Button { showTemplateManager = true } label: {
                     Text("Manage")
@@ -77,60 +105,62 @@ struct DocGenSourcePanel: View {
                 .padding(.top, 10)
             }
 
-            if templateStore.templates.isEmpty {
-                // Import CTA when no templates yet
-                Button { showTemplateImporter = true } label: {
-                    HStack(spacing: 10) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(theme.current.accent.opacity(0.1))
-                                .frame(width: 36, height: 36)
-                            Image(systemName: "doc.badge.plus")
-                                .font(.system(size: 15))
-                                .foregroundStyle(theme.current.accent)
-                        }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Import .md template")
-                                .font(.callout.weight(.medium))
-                                .foregroundStyle(.primary)
-                            Text("Select a Markdown file to use as your document template")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            if projectStore.activeProject != nil {
-                                Text("Imports into `templates/<name>/template.md` in your project.")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
+            if isExpanded {
+                if templateStore.templates.isEmpty {
+                    // Import CTA when no templates yet
+                    Button { showTemplateImporter = true } label: {
+                        HStack(spacing: 10) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(theme.current.accent.opacity(0.1))
+                                    .frame(width: 36, height: 36)
+                                Image(systemName: "doc.badge.plus")
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(theme.current.accent)
                             }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Import .md template")
+                                    .font(.callout.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                Text("Select a Markdown file to use as your document template")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if projectStore.activeProject != nil {
+                                    Text("Imports into `templates/<name>/template.md` in your project.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                            Spacer(minLength: 0)
                         }
-                        Spacer(minLength: 0)
+                        .padding(12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(theme.current.accent.opacity(0.04))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .strokeBorder(
+                                    theme.current.accent.opacity(0.2),
+                                    style: StrokeStyle(lineWidth: 1, dash: [5])
+                                )
+                        )
+                        .contentShape(Rectangle())
                     }
-                    .padding(12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(theme.current.accent.opacity(0.04))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .strokeBorder(
-                                theme.current.accent.opacity(0.2),
-                                style: StrokeStyle(lineWidth: 1, dash: [5])
-                            )
-                    )
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 12)
-            } else {
-                // Template list
-                VStack(spacing: 3) {
-                    ForEach(templateStore.templates) { template in
-                        templateRow(template)
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 12)
+                } else {
+                    // Template list
+                    VStack(spacing: 3) {
+                        ForEach(templateStore.templates) { template in
+                            templateRow(template)
+                        }
                     }
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
                 }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 10)
             }
         }
     }
@@ -171,15 +201,17 @@ struct DocGenSourcePanel: View {
         let items = itemStore.items(for: .notes)
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
-                sectionHeader(title: "LLM Doc", icon: "note.text", color: .blue)
+                sectionHeader(id: "notes", title: "LLM Doc", icon: "note.text", color: .blue)
                 Spacer()
             }
 
-            if items.isEmpty {
-                emptyHint("No LLM Docs in Library yet")
-            } else {
-                ForEach(items) { item in
-                    fileRow(item: item, iconColor: .blue)
+            if sectionExpanded("notes").wrappedValue {
+                if items.isEmpty {
+                    emptyHint("No LLM Docs in Library yet")
+                } else {
+                    ForEach(items) { item in
+                        fileRow(item: item, iconColor: .blue)
+                    }
                 }
             }
         }
@@ -191,15 +223,17 @@ struct DocGenSourcePanel: View {
         let items = itemStore.items(for: .data)
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
-                sectionHeader(title: "Data", icon: "tablecells", color: .purple)
+                sectionHeader(id: "data", title: "Data", icon: "tablecells", color: .purple)
                 Spacer()
             }
 
-            if items.isEmpty {
-                emptyHint("No data files in Library yet")
-            } else {
-                ForEach(items) { item in
-                    fileRow(item: item, iconColor: .purple)
+            if sectionExpanded("data").wrappedValue {
+                if items.isEmpty {
+                    emptyHint("No data files in Library yet")
+                } else {
+                    ForEach(items) { item in
+                        fileRow(item: item, iconColor: .purple)
+                    }
                 }
             }
         }
@@ -211,14 +245,16 @@ struct DocGenSourcePanel: View {
         let items = itemStore.items(for: .meetings)
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
-                sectionHeader(title: "Sources", icon: "waveform.and.mic", color: .indigo)
+                sectionHeader(id: "sources", title: "Sources", icon: "waveform.and.mic", color: .indigo)
                 Spacer()
             }
-            if items.isEmpty {
-                emptyHint("No meeting transcripts in Library yet")
-            } else {
-                ForEach(items) { item in
-                    fileRow(item: item, iconColor: .indigo)
+            if sectionExpanded("sources").wrappedValue {
+                if items.isEmpty {
+                    emptyHint("No meeting transcripts in Library yet")
+                } else {
+                    ForEach(items) { item in
+                        fileRow(item: item, iconColor: .indigo)
+                    }
                 }
             }
         }
@@ -242,16 +278,33 @@ struct DocGenSourcePanel: View {
 
     // MARK: - Reusable components
 
-    private func sectionHeader(title: String, icon: String, color: Color) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(color.opacity(0.9))
-            SectionLabel(title, size: 10)
+    /// Collapse chevron + icon + label, matching the Library sidebar's
+    /// section-header convention. Tapping toggles `sectionExpanded(id)`.
+    private func sectionHeader(id: String, title: String, icon: String, color: Color) -> some View {
+        let isExpanded = sectionExpanded(id)
+        return Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isExpanded.wrappedValue.toggle()
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
+                    .frame(width: 10)
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(color.opacity(0.9))
+                SectionLabel(title, size: 10)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 6)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 14)
-        .padding(.bottom, 6)
+        .buttonStyle(.plain)
+        .help(isExpanded.wrappedValue ? "Collapse \(title)" : "Expand \(title)")
     }
 
     private func emptyHint(_ text: String) -> some View {
