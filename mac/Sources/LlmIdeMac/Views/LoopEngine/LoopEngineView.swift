@@ -48,7 +48,7 @@ struct LoopEngineView: View {
     private let approvals: VerifyApprovalStore
 
     @State private var stages: [LoopStage] = []
-    @State private var maxIterations: Int = 5
+    @State private var maxIterations: Int = 10
     @State private var consecutiveFailureStop: Int = 2
     @State private var selectedStageId: String?
     @State private var lastStatus: LoopEngineStatus?
@@ -418,7 +418,7 @@ struct LoopEngineView: View {
     /// nor a detectable git root.
     private func resetStagesToDefaults(stages newStages: [LoopStage] = []) {
         stages = newStages
-        maxIterations = 5
+        maxIterations = 10
         consecutiveFailureStop = 2
     }
 

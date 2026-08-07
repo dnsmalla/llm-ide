@@ -7,7 +7,7 @@ import Foundation
 /// already works.
 struct LoopEngineConfig: Codable, Equatable {
     var stages: [LoopStage]
-    var maxIterations: Int = 5
+    var maxIterations: Int = 10
     var consecutiveFailureStop: Int = 2
 
     private static func key(for projectId: String) -> String {
