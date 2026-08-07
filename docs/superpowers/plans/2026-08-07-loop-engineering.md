@@ -1543,6 +1543,7 @@ struct LoopEngineView: View {
     @State private var running = false
     @State private var log: [LoopEngineRunner.LogLine] = []
     @State private var lastStatus: LoopEngineStatus?
+    @State private var didRejectLastRun = false
 
     private let approvals = VerifyApprovalStore()
 
@@ -1601,7 +1602,9 @@ struct LoopEngineView: View {
                 Button(running ? "Running…" : "Run") { Task { await runLoop() } }
                     .disabled(running || stages.isEmpty)
                 if let lastStatus {
-                    Text(describe(lastStatus)).foregroundStyle(.secondary)
+                    Text(lastStatus.summary).foregroundStyle(.secondary)
+                } else if didRejectLastRun {
+                    Text("A run is already in progress for this project").foregroundStyle(.orange)
                 }
             }
         }
@@ -1696,21 +1699,15 @@ struct LoopEngineView: View {
         // distinguished by this page in v1; Task 9's unattended Auto Task
         // path is the one that resolves both roots separately via
         // `resolveBackendAndProject()`.
-        await newRunner.run(config: projectConfig, faultsRoot: gitRoot, gitRoot: gitRoot)
+        // run() returns LoopEngineStatus? — nil means rejected (a run is
+        // already in progress for this repo, instance- or process-wide).
+        // Use the return value, not newRunner.status (only meaningful when
+        // run() returns non-nil — see Task 6/9).
+        let result = await newRunner.run(config: projectConfig, faultsRoot: gitRoot, gitRoot: gitRoot)
         log = newRunner.log
-        lastStatus = newRunner.status
+        lastStatus = result
+        didRejectLastRun = (result == nil)
         running = false
-    }
-
-    private func describe(_ status: LoopEngineStatus) -> String {
-        switch status {
-        case .success: return "Success"
-        case .givenUp(.maxIterations): return "Gave up (max iterations)"
-        case .givenUp(.repeatedFailure): return "Gave up (repeated failure)"
-        case .needsApproval(let name): return "Needs approval: \(name)"
-        case .error(let msg): return "Error: \(msg)"
-        case .aborted: return "Aborted"
-        }
     }
 }
 ```
