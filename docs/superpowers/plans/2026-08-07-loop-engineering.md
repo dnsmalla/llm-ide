@@ -1250,17 +1250,45 @@ import XCTest
 
 @MainActor
 final class AutoCodeUpdateServiceLoopEngineeringTests: XCTestCase {
+    private var suiteName: String!
+    private var suite: UserDefaults!
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "loop-eng-service-\(UUID().uuidString)"
+        suite = UserDefaults(suiteName: suiteName)
+    }
+
+    override func tearDown() {
+        UserDefaults().removePersistentDomain(forName: suiteName)
+        suite = nil
+        super.tearDown()
+    }
+
+    // Real init signature (verified against AutoCodeUpdateServiceCronTests.swift):
+    // init(config: AppConfig, autoTaskSettings: AutoTaskSettings, backend: RepoBackend? = nil,
+    //      registry: ProcessedActionsRegistry, projectStore: ProjectStore? = nil,
+    //      api: LlmIdeAPIClient? = nil, logStore: TaskLogStore)
+    // `registry` and `logStore` are REQUIRED (no default); `api`/`projectStore`/`backend` default to nil.
+    private func makeService() -> AutoCodeUpdateService {
+        let registry = ProcessedActionsRegistry(
+            storeURL: URL(fileURLWithPath: "/tmp/llm-ide-test-registry-\(UUID().uuidString).json"))
+        return AutoCodeUpdateService(
+            config: AppConfig(userDefaults: suite),
+            autoTaskSettings: AutoTaskSettings(defaults: suite),
+            registry: registry,
+            logStore: TaskLogStore())
+    }
+
     func testSkipsWithTaskErrorWhenProjectRootIsEmpty() async {
-        let config = AppConfig()
-        let settings = AutoTaskSettings(defaults: UserDefaults(suiteName: "loop-eng-service-\(UUID().uuidString)")!)
-        let service = AutoCodeUpdateService(config: config, autoTaskSettings: settings)
+        let service = makeService()
         await service.runLoopEngineeringSweep(projectRoot: "", gitRoot: "")
         XCTAssertEqual(service.taskErrors[AutoTask.loopEngineering.rawValue], "Loop Engineering skipped — no project root resolved.")
     }
 }
 ```
 
-Check `AutoCodeUpdateService`'s actual test-friendly initializer signature before finalizing this test (see e.g. `AutoCodeUpdateServiceCronTests.swift` or `AutoCodeUpdateServiceCustomTaskTests.swift` for the exact init call used there) — mirror whichever one those files already use rather than guessing a new one.
+The `makeService()` helper above is written to the real, verified init signature (matching `AutoCodeUpdateServiceCronTests.swift`'s own `makeService()`) — no need to re-derive it, but do confirm `AppConfig(userDefaults:)`, `AutoTaskSettings(defaults:)`, `ProcessedActionsRegistry(storeURL:)`, and `TaskLogStore()` (no-arg) still match by reading those types quickly if anything seems off.
 
 - [ ] **Step 4: Run test to verify it fails**
 
@@ -1320,9 +1348,16 @@ Directly after `runRegressionSweep`:
             stageRepairer: AgentLoopStageRepairer(api: api),
             regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner)
         )
-        await runner.run(config: projectConfig, faultsRoot: faultsRoot, gitRoot: gitRootURL)
+        // Task 6 hardening: run() returns LoopEngineStatus? (nil means this
+        // call was rejected — another run is already in progress for this
+        // repo, instance- or process-wide). Read the RETURN VALUE, not
+        // runner.status, which is only meaningful when run() returns non-nil
+        // (a rejected call leaves a fresh LoopEngineRunner's status at nil
+        // anyway here, since we construct one per sweep, but the return
+        // value is the documented contract to depend on).
+        let result = await runner.run(config: projectConfig, faultsRoot: faultsRoot, gitRoot: gitRootURL)
 
-        switch runner.status {
+        switch result {
         case .success:
             taskErrors.removeValue(forKey: AutoTask.loopEngineering.rawValue)
             logStore.append(.loopEngineering, "Loop finished — all \(projectConfig.stages.count) stage(s) passed after \(runner.iteration) iteration(s).")
@@ -1335,12 +1370,18 @@ Directly after `runRegressionSweep`:
         case .error(let message):
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering error: \(message)"
             logStore.append(.loopEngineering, "Error: \(message)", level: .error)
-        case .aborted, .none:
+        case .aborted:
             break
+        case nil:
+            // Rejected — a run is already in progress for this repo elsewhere
+            // (e.g. the user started one from the chat panel or the Loop
+            // Engineering page). Leave any existing taskErrors entry as-is.
+            logStore.append(.loopEngineering, "Skipped — a Loop Engineering run is already in progress for this repo.")
+            return
         }
         activity?.report(
             kind: .loopEngineeringDone,
-            title: "Loop Engineering complete — \(runner.status.map(describe) ?? "unknown")",
+            title: "Loop Engineering complete — \(result.map(describe) ?? "unknown")",
             detail: ["iterations": runner.iteration]
         )
     }
@@ -1381,7 +1422,9 @@ git add mac/Sources/LlmIdeMac/Services/AutoCode/AutoCodeUpdateService.swift \
 git commit -m "feat(mac): wire Loop Engineering into AutoCodeUpdateService as a new Auto Task"
 ```
 
-At this point the feature is fully functional as an unattended Auto Task (toggle it on in Auto Tasks settings, it runs on its cron schedule) and shows up on a paired iPhone automatically via `MobileControlManager.buildAutoTaskState()` (no mobile-side code change needed — it derives from `AutoTask.allCases`).
+At this point the feature is fully functional as an unattended Auto Task (toggle it on in Auto Tasks settings, it runs on its cron schedule) and shows up on a paired iPhone automatically via `MobileControlManager.buildAutoTaskState()`, which derives its list from `AutoTask.allCases` — the task list itself needs no mobile-side code change. (The iPhone's per-task SF Symbol is a separately-maintained String-keyed mirror in `ios_app/MyApp/Views/Control/AutoTaskView.swift`'s `taskIcon(_:)`; Task 7 already added the `"loopEngineering"` case there so the icon matches too, not just the task list.)
+
+**Note:** `AutoCodeUpdateService.runTaskBody`'s dispatch `switch` has a `default: break` catch-all rather than being exhaustive, so before this task lands, toggling `.loopEngineering` on would have silently no-op'd (no build error, no runtime error, just nothing happening) — worth being aware of as a general pattern in that switch, not something this task needs to fix.
 
 ---
 
