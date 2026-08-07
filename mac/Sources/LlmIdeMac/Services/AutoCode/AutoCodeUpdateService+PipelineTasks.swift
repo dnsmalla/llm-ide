@@ -542,16 +542,17 @@ extension AutoCodeUpdateService {
         // later run (once tooling appears, or once the Task 11 settings UI
         // runs its own one-time auto-detect per `LoopStageDetector`'s doc
         // comment) get a fresh detection attempt instead of being stuck on
-        // a stale one-stage config. `contains { kind != .regressionSweep }`
-        // (rather than `count > 1`) expresses that intent directly, so it
-        // keeps working even if the detector's shape changes later.
+        // a stale one-stage config. `LoopEngineConfig.shouldPersist` is the
+        // single shared policy for this — `LoopEngineView` and the chat
+        // panel's auto-detect path use the exact same helper so all three
+        // call sites agree on when it's safe to persist.
         let projectConfig: LoopEngineConfig
         if let saved = LoopEngineConfig.load(for: projectId, defaults: defaults) {
             projectConfig = saved
         } else {
             let detectedStages = LoopStageDetector.detectDefaultStages(gitRoot: gitRootURL)
             let detected = LoopEngineConfig(stages: detectedStages)
-            if detectedStages.contains(where: { $0.kind != .regressionSweep }) {
+            if LoopEngineConfig.shouldPersist(detectedStages) {
                 detected.save(for: projectId, defaults: defaults)
             }
             projectConfig = detected

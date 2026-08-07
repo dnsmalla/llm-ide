@@ -41,7 +41,17 @@ extension CodeAssistantPanel {
     /// precedent, just against this panel's equivalent idle signals.
     var loopEngineeringButton: some View {
         Button {
+            // Resolve BOTH roots via WorkspaceRoot — the single source of
+            // truth also used by RegressionView/RegressionRunner — instead
+            // of `active.localPath` for both, which only happens to be
+            // correct when the project IS the git repo. In the
+            // "clone-into-code" layout (project folder with the repo cloned
+            // into `<project>/code/<repo>`) that conflation would fault
+            // this run's data into the wrong `system/faults` directory and
+            // run shell-command stages in the wrong tree.
             guard let active = projectStore.activeProject,
+                  let context = WorkspaceRoot.context(config: config, projectStore: projectStore),
+                  let gitRoot = context.gitRoot,
                   !busy, runTask == nil, !agent.agentIsAutonomous
             else { return }
             // Set synchronously here, before the Task is even created — if
@@ -53,10 +63,10 @@ extension CodeAssistantPanel {
             // tree), but it would leave an orphaned first run plus a
             // confusing duplicate "already in progress" placeholder turn.
             busy = true
-            let gitRoot = URL(fileURLWithPath: active.localPath, isDirectory: true)
             runTask = Task {
                 await runLoopEngineeringFromChat(
-                    projectId: active.bundle.id, gitRoot: gitRoot, language: prefLanguage)
+                    projectId: active.bundle.id, faultsRoot: context.projectRoot,
+                    gitRoot: gitRoot, language: prefLanguage)
             }
         } label: {
             Image(systemName: "repeat.circle")
@@ -69,7 +79,12 @@ extension CodeAssistantPanel {
         .buttonStyle(.plain)
         .help("Run Loop Engineering against the active project")
         .accessibilityLabel("Run Loop Engineering")
-        .disabled(projectStore.activeProject == nil || busy || runTask != nil || agent.agentIsAutonomous)
+        // No resolvable git working tree (e.g. a fresh non-repo project) is
+        // treated the same as "no active repo" — `LoopEngineRunner.run`
+        // takes a non-optional `gitRoot`, so a run can't start without one.
+        .disabled(projectStore.activeProject == nil
+                  || WorkspaceRoot.gitWorkingTree(config: config, projectStore: projectStore) == nil
+                  || busy || runTask != nil || agent.agentIsAutonomous)
     }
 
     /// Starts a Loop Engineering run against the active project and appends
@@ -85,7 +100,7 @@ extension CodeAssistantPanel {
     /// this "turn" ends, or it would sit forever waiting for an unrelated
     /// turn to drain it.
     @MainActor
-    func runLoopEngineeringFromChat(projectId: String, gitRoot: URL, language: String) async {
+    func runLoopEngineeringFromChat(projectId: String, faultsRoot: URL, gitRoot: URL, language: String) async {
         // `busy` itself is already set by the button (see its own doc
         // comment) before this function is even reached; setting it again
         // here is a harmless no-op that also makes this function correct
@@ -121,11 +136,20 @@ extension CodeAssistantPanel {
         // `projectId` here is the stable Project.id (see the contract on
         // LoopEngineConfig.load/save from Task 1) — the same key Task 9's
         // Auto Task and Task 11's LoopEngineView use, so all three triggers
-        // share one config per project. `gitRoot` doubles as `faultsRoot`
-        // below (matches Task 11's `runLoop()` same-root simplification).
+        // share one config per project. `faultsRoot`/`gitRoot` are the two
+        // WorkspaceRoot-resolved roots passed in by the button above — NOT
+        // necessarily the same URL (clone-into-code layout).
         let loopConfig = LoopEngineConfig.load(for: projectId) ?? {
-            let detected = LoopEngineConfig(stages: LoopStageDetector.detectDefaultStages(gitRoot: gitRoot))
-            detected.save(for: projectId)
+            let detectedStages = LoopStageDetector.detectDefaultStages(gitRoot: gitRoot)
+            let detected = LoopEngineConfig(stages: detectedStages)
+            // Only persist when detection found real tooling beyond the bare
+            // Regression stage — same policy as the Auto Task sweep's own
+            // guard and LoopEngineView.loadConfig(), so this chat path can't
+            // permanently lock in a Regression-only config if it happens to
+            // run first against a not-yet-fully-detectable repo.
+            if LoopEngineConfig.shouldPersist(detectedStages) {
+                detected.save(for: projectId)
+            }
             return detected
         }()
         let prompter = CodeAssistPrompter(api: api, language: language)
@@ -168,7 +192,7 @@ extension CodeAssistantPanel {
         // this call, so that warning already reached the chat transcript
         // through the (throttled) log stream — but state the stop reason
         // explicitly too, using the shared LoopEngineStatus.summary.
-        let result = await runner.run(config: loopConfig, faultsRoot: gitRoot, gitRoot: gitRoot)
+        let result = await runner.run(config: loopConfig, faultsRoot: faultsRoot, gitRoot: gitRoot)
         cancellable.cancel()
 
         if sessionEpoch == startEpoch, let idx = history.firstIndex(where: { $0.id == placeholderId }) {

@@ -25,6 +25,7 @@ struct LoopEngineView: View {
     let api: LlmIdeAPIClient
 
     @EnvironmentObject var theme: ThemeStore
+    @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
 
     /// Owns the run — a `@StateObject` (not a locally-constructed value
@@ -364,13 +365,21 @@ struct LoopEngineView: View {
     /// different configs for the same project.
     private var activeProjectId: String? { projectStore.activeProject?.bundle.id }
 
+    /// The two-root context (`projectRoot` for faults/index/memory, `gitRoot`
+    /// for the actual git working tree) — the single source of truth also
+    /// used by RegressionView. In the "clone-into-code" layout these differ
+    /// (project root vs `code/<repo>`); using the project root for both, as
+    /// this view previously did via `activeProject.localPath`, silently
+    /// pointed shell-command stages and stage detection at the wrong tree.
+    private var workspaceContext: WorkspaceRoot.Context? {
+        WorkspaceRoot.context(config: config, projectStore: projectStore)
+    }
+
     /// The git working tree shell-command stages run in and approvals are
-    /// keyed against. The active project IS the repo in v1 — a project
-    /// using the clone-into-code layout (project root != git clone dir)
-    /// isn't distinguished by this page; the Auto Task path resolves both
-    /// roots separately.
+    /// keyed against — `nil` when the active project has no resolvable git
+    /// working tree (e.g. a fresh non-repo project).
     private var activeGitRootURL: URL? {
-        projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath, isDirectory: true) }
+        workspaceContext?.gitRoot
     }
 
     private func loadConfig() {
@@ -385,8 +394,15 @@ struct LoopEngineView: View {
         } else if let gitRoot = activeGitRootURL {
             let detected = LoopStageDetector.detectDefaultStages(gitRoot: gitRoot)
             resetStagesToDefaults(stages: detected)
-            LoopEngineConfig(stages: detected, maxIterations: maxIterations, consecutiveFailureStop: consecutiveFailureStop)
-                .save(for: projectId)
+            // Only persist when detection found real tooling beyond the bare
+            // Regression stage — same policy as the Auto Task sweep's own
+            // guard in AutoCodeUpdateService+PipelineTasks.swift, so this
+            // page can't permanently lock in a Regression-only config for
+            // the project before the repo is fully populated/detectable.
+            if LoopEngineConfig.shouldPersist(detected) {
+                LoopEngineConfig(stages: detected, maxIterations: maxIterations, consecutiveFailureStop: consecutiveFailureStop)
+                    .save(for: projectId)
+            }
         } else {
             // No saved config AND no git root to detect defaults from
             // (e.g. the project folder isn't resolvable yet) — reset
@@ -414,13 +430,17 @@ struct LoopEngineView: View {
 
     @MainActor
     private func runLoop() async {
-        guard activeProjectId != nil, let gitRoot = activeGitRootURL else { return }
+        // `gitRoot` is `LoopEngineRunner.run`'s non-optional parameter, so a
+        // run must not start until a real git working tree is resolved —
+        // mirrors RegressionView's own guard against running git-dependent
+        // operations with no working tree.
+        guard activeProjectId != nil,
+              let context = workspaceContext,
+              let gitRoot = context.gitRoot
+        else { return }
         saveConfig()
         let projectConfig = LoopEngineConfig(stages: stages, maxIterations: maxIterations, consecutiveFailureStop: consecutiveFailureStop)
-        // faultsRoot == gitRoot here (both `activeProject.localPath`) — the
-        // "project IS the repo" case `RegressionRunner.run(at:)`'s own
-        // same-root convenience overload already assumes.
-        let result = await runner.run(config: projectConfig, faultsRoot: gitRoot, gitRoot: gitRoot)
+        let result = await runner.run(config: projectConfig, faultsRoot: context.projectRoot, gitRoot: gitRoot)
         lastStatus = result
         didRejectLastRun = (result == nil)
     }
