@@ -78,6 +78,23 @@ final class LoopEngineRunnerTests: XCTestCase {
         }
     }
 
+    /// Returns a failing `SweepOutcome` whose `regressed` count strictly
+    /// decreases on successive calls (5, 4, 3, 2, 1, 1, …), so every
+    /// iteration after the first hits the stall logic's decrease-reset
+    /// (`outcome.regressed < prev`) branch instead of accumulating the
+    /// stall count. The count floors at 1 once exhausted so a run that
+    /// outlasts the sequence still sees a well-formed failing outcome.
+    private final class DecreasingRegressionSweep: RegressionSweepRunning {
+        private var callCount = 0
+        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool) async -> SweepOutcome {
+            defer { callCount += 1 }
+            let regressed = max(1, 5 - callCount)
+            return SweepOutcome(passed: false, total: regressed, regressed: regressed, unchanged: 0,
+                                 repaired: 0, repairFailed: 0, needsApproval: 0,
+                                 failed: 0, pending: 0)
+        }
+    }
+
     private final class ThrowingRepairer: LoopStageRepairer {
         let error: Error
         init(error: Error) { self.error = error }
@@ -270,6 +287,42 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(repairer.repairCount, 0)
     }
 
+    /// A regressed count that DECREASES between iterations must reset the
+    /// regression stall count to 1 (the `else` branch where
+    /// `outcome.regressed < prev`), so the run keeps looping instead of
+    /// giving up with `.regressionStalled`. Mirrors
+    /// `testRegressionStallGivesUpBeforeMaxIterations` in shape, but uses
+    /// `DecreasingRegressionSweep` (5→4→3→2→1) instead of the constant-1
+    /// stub: that test pins regressed at 1 so it never decreases and
+    /// stalls at `consecutiveFailureStop`; this one strictly decreases
+    /// every call, exercising the decrease-reset path and proving the run
+    /// only stops at `maxIterations` — never `.regressionStalled`.
+    func testRegressionStallResetsWhenRegressedCountDecreases() async {
+        let repairer = StubRepairer()
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil, order: 0)
+        ], maxIterations: 5, consecutiveFailureStop: 2)
+        let runner = LoopEngineRunner(
+            verifier: verifier,
+            stageRepairer: repairer,
+            regressionSweep: DecreasingRegressionSweep(),
+            approvals: makeApprovals()
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        // The regressed count decreases every iteration (5→4→3→2→1), so
+        // the stall count is reset to 1 each time and never reaches
+        // `consecutiveFailureStop` (2). The run must therefore exhaust
+        // `maxIterations` rather than give up with `.regressionStalled`.
+        XCTAssertEqual(result, .givenUp(reason: .maxIterations))
+        XCTAssertEqual(runner.status, .givenUp(reason: .maxIterations))
+        XCTAssertEqual(runner.iteration, 5)
+        // The key assertion: a decreasing regressed count does NOT
+        // trigger `.regressionStalled` — progress keeps the run looping.
+        XCTAssertNotEqual(result, .givenUp(reason: .regressionStalled))
+        XCTAssertEqual(repairer.repairCount, 0)
+    }
+
     // MARK: - Fix 1: process-wide concurrency guard
 
     func testConcurrentRunsOnSameGitRootAreRejected() async {
@@ -346,7 +399,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(repairer.repairCount, 0)
     }
 
-    /// `RegressionSweepRunning.sweepPassed` is fail-closed and returns
+    /// `RegressionSweepRunning.sweep` is fail-closed and returns
     /// `false` on cancellation rather than throwing (per its Task 5
     /// contract), so a cancelled regression-sweep-only run would, without
     /// an explicit `Task.isCancelled` check in the iteration loop, just

@@ -138,7 +138,7 @@ final class LoopEngineRunner: ObservableObject {
         var regressionStallCount = 0
 
         iterationLoop: while iteration < config.maxIterations {
-            // `RegressionSweepRunning.sweepPassed` is fail-closed and
+            // `RegressionSweepRunning.sweep` is fail-closed and
             // returns `false` on cancellation rather than throwing, so a
             // cancelled regression-sweep-only run would otherwise just
             // burn every remaining iteration as ordinary failures and

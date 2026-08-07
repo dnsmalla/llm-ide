@@ -123,7 +123,7 @@ extension ShellState.Section {
         case .sourceControl: return Color(red: 0.30, green: 0.70, blue: 0.45) // green
         case .autoCode:   return .teal
         case .codeGraph:  return Color(red: 0.15, green: 0.68, blue: 0.65) // cyan-green
-        case .loopEngine: return Color(red: 0.35, green: 0.70, blue: 0.55) // mint-teal, adjacent to Regression's mint-green
+        case .loopEngine: return Color(red: 0.35, green: 0.70, blue: 0.55) // mint-teal
 
         // ── Data (purple family) ─────────────────────────
         case .issues:     return .purple
