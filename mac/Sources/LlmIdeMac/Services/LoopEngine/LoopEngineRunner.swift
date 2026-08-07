@@ -146,8 +146,9 @@ final class LoopEngineRunner: ObservableObject {
             for stage in orderedStages {
                 switch stage.kind {
                 case .regressionSweep:
-                    let passed = await regressionSweep.sweepPassed(
+                    let outcome = await regressionSweep.sweep(
                         faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: true)
+                    let passed = outcome.passed
                     appendLog(passed ? .info : .warn, "  [\(stage.name)] \(passed ? "passed" : "failed")")
                     if !passed {
                         if iteration >= config.maxIterations {

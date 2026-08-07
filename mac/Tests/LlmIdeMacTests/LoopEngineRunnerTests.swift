@@ -57,18 +57,24 @@ final class LoopEngineRunnerTests: XCTestCase {
 
     private final class StubRegressionSweep: RegressionSweepRunning {
         var alwaysPasses: Bool
-        /// Invoked synchronously on every `sweepPassed` call, before
-        /// returning `alwaysPasses`. Lets a test inject a side effect
-        /// (e.g. cancelling the enclosing `Task`) at the exact moment
-        /// the runner is mid-stage, rather than only before/after a run.
+        /// Invoked synchronously on every `sweep` call, before
+        /// returning. Lets a test inject a side effect (e.g. cancelling
+        /// the enclosing `Task`) at the exact moment the runner is
+        /// mid-stage, rather than only before/after a run.
         var onSweep: (() -> Void)?
         init(alwaysPasses: Bool, onSweep: (() -> Void)? = nil) {
             self.alwaysPasses = alwaysPasses
             self.onSweep = onSweep
         }
-        func sweepPassed(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool) async -> Bool {
+        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool) async -> SweepOutcome {
             onSweep?()
             return alwaysPasses
+                ? SweepOutcome(passed: true, total: 0, regressed: 0, unchanged: 0,
+                               repaired: 0, repairFailed: 0, needsApproval: 0,
+                               failed: 0, pending: 0)
+                : SweepOutcome(passed: false, total: 1, regressed: 1, unchanged: 0,
+                               repaired: 0, repairFailed: 0, needsApproval: 0,
+                               failed: 0, pending: 0)
         }
     }
 

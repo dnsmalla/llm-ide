@@ -23,8 +23,9 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
 
         let runner = RegressionRunner(prompter: StubPrompter())
         let adapter = RegressionRunnerSweepAdapter(runner: runner)
-        let passed = await adapter.sweepPassed(faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: true)
-        XCTAssertTrue(passed)
+        let outcome = await adapter.sweep(faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: true)
+        XCTAssertTrue(outcome.passed)
+        XCTAssertEqual(outcome.total, 0)
     }
 
     /// A fault that can't even be checked (prompter throws) must NOT
@@ -54,8 +55,9 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
 
         let runner = RegressionRunner(prompter: ThrowingPrompter(), store: store)
         let adapter = RegressionRunnerSweepAdapter(runner: runner)
-        let passed = await adapter.sweepPassed(faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: false)
-        XCTAssertFalse(passed)
+        let outcome = await adapter.sweep(faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: false)
+        XCTAssertFalse(outcome.passed)
+        XCTAssertEqual(outcome.failed, 1)
     }
 
     /// Non-vacuous positive case: a fault that actually gets checked and
@@ -88,8 +90,10 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
 
         let runner = RegressionRunner(prompter: StubPrompter(), store: store)
         let adapter = RegressionRunnerSweepAdapter(runner: runner)
-        let passed = await adapter.sweepPassed(faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: false)
-        XCTAssertTrue(passed)
+        let outcome = await adapter.sweep(faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: false)
+        XCTAssertTrue(outcome.passed)
+        XCTAssertEqual(outcome.unchanged, 1)
+        XCTAssertEqual(outcome.total, 1)
     }
 
     /// Mirror case: a fresh answer that no longer matches the saved one
@@ -119,7 +123,9 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
 
         let runner = RegressionRunner(prompter: StubPrompter(), store: store)
         let adapter = RegressionRunnerSweepAdapter(runner: runner)
-        let passed = await adapter.sweepPassed(faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: false)
-        XCTAssertFalse(passed)
+        let outcome = await adapter.sweep(faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: false)
+        XCTAssertFalse(outcome.passed)
+        XCTAssertEqual(outcome.regressed, 1)
+        XCTAssertEqual(outcome.total, 1)
     }
 }
