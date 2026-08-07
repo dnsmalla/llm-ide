@@ -1288,13 +1288,25 @@ Directly after `runRegressionSweep`:
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering skipped — no git working tree resolved."
             return
         }
+        // LoopEngineConfig is keyed by the stable llm-ide Project.id (see the
+        // contract documented on LoopEngineConfig.load/save in Task 1) — NOT
+        // `projectRoot` (a filesystem path) and NOT `resolved.projectId`
+        // (that field is actually the REMOTE repo id — a GitLab numeric id,
+        // "owner/name" for GitHub, or `linked.remoteId`; see
+        // `attemptResolveBackendAndProject()` in
+        // AutoCodeUpdateService+BackendResolution.swift). Using the wrong
+        // key here would silently split one project's config in two.
+        guard let projectId = projectStore?.activeProject?.bundle.id else {
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering skipped — no active project."
+            return
+        }
         let faultsRoot = URL(fileURLWithPath: projectRoot, isDirectory: true)
         let gitRootURL = URL(fileURLWithPath: gitRoot, isDirectory: true)
 
-        let projectConfig = LoopEngineConfig.load(for: projectRoot)
+        let projectConfig = LoopEngineConfig.load(for: projectId)
             ?? {
                 let detected = LoopEngineConfig(stages: LoopStageDetector.detectDefaultStages(gitRoot: gitRootURL))
-                detected.save(for: projectRoot)
+                detected.save(for: projectId)
                 return detected
             }()
 
@@ -1589,7 +1601,13 @@ struct LoopEngineView: View {
         }
     }
 
-    private var activeProjectId: String? { projectStore.activeProject?.id }
+    /// The stable llm-ide Project.id (`ProjectStore.ActiveProject` has no
+    /// `.id` of its own — only `.bundle.id`; see the contract documented on
+    /// `LoopEngineConfig.load`/`save` in Task 1). Do NOT use `localPath` or
+    /// any repo-backend id here — this must match what Task 9's
+    /// `runLoopEngineeringSweep` keys by, or the Auto Task and this page
+    /// silently maintain two different configs for the same project.
+    private var activeProjectId: String? { projectStore.activeProject?.bundle.id }
     private var activeGitRootURL: URL? {
         projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath, isDirectory: true) }
     }
@@ -1628,7 +1646,14 @@ struct LoopEngineView: View {
         )
         runner = newRunner
         running = true
-        await newRunner.run(config: projectConfig, faultsRoot: URL(fileURLWithPath: projectId, isDirectory: true), gitRoot: gitRoot)
+        // faultsRoot == gitRoot here (both `activeProject.localPath`) — the
+        // "project IS the repo" case `RegressionRunner.run(at:)`'s own
+        // same-root convenience overload already assumes. A project using
+        // the clone-into-code layout (project root != git clone dir) isn't
+        // distinguished by this page in v1; Task 9's unattended Auto Task
+        // path is the one that resolves both roots separately via
+        // `resolveBackendAndProject()`.
+        await newRunner.run(config: projectConfig, faultsRoot: gitRoot, gitRoot: gitRoot)
         log = newRunner.log
         lastStatus = newRunner.status
         running = false
@@ -1647,7 +1672,7 @@ struct LoopEngineView: View {
 }
 ```
 
-Before finalizing, confirm `ProjectStore.activeProject`'s actual property names (`id`, `localPath`) via `grep -n "struct.*Project\b\|var activeProject" mac/Sources/LlmIdeMac/Services/ProjectStore.swift` (or wherever it's defined) — the names above are inferred from `resolveBackendAndProject()`'s `projectId`/`gitRoot` usage and may need adjusting to the real property names.
+`ProjectStore.ActiveProject`'s real shape (verified against `mac/Sources/LlmIdeMac/Services/ProjectStore.swift`) is `{ bundle: Project, localPath: String }` — `bundle.id` is the stable id (from `Project.id` in `Models/Project.swift`), which is why `activeProjectId` above reads `.bundle.id`, not `.id`.
 
 - [ ] **Step 3: Build**
 
@@ -1694,8 +1719,17 @@ extension CodeAssistantPanel {
         let placeholderIndex = history.count
         history.append(LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: "Starting Loop Engineering…"))
 
-        let loopConfig = LoopEngineConfig.load(for: projectId)
-            ?? LoopEngineConfig(stages: LoopStageDetector.detectDefaultStages(gitRoot: gitRoot))
+        // `projectId` here is the stable Project.id (see the contract on
+        // LoopEngineConfig.load/save from Task 1) — the same key Task 9's
+        // Auto Task and Task 11's LoopEngineView use, so all three triggers
+        // share one config per project. `gitRoot` doubles as `faultsRoot`
+        // below (see Task 11's `runLoop()` comment on this same
+        // same-root simplification).
+        let loopConfig = LoopEngineConfig.load(for: projectId) ?? {
+            let detected = LoopEngineConfig(stages: LoopStageDetector.detectDefaultStages(gitRoot: gitRoot))
+            detected.save(for: projectId)
+            return detected
+        }()
         let prompter = CodeAssistPrompter(api: api, language: language)
         let regressionRunner = RegressionRunner(prompter: prompter, judge: CodeAssistJudge(api: api),
                                                 verifier: ShellFaultVerifier(), repairer: AgentFaultRepairer(api: api))
@@ -1712,7 +1746,7 @@ extension CodeAssistantPanel {
             }
         }
 
-        await runner.run(config: loopConfig, faultsRoot: URL(fileURLWithPath: projectId, isDirectory: true), gitRoot: gitRoot)
+        await runner.run(config: loopConfig, faultsRoot: gitRoot, gitRoot: gitRoot)
         cancellable.cancel()
 
         if placeholderIndex < history.count {
@@ -1727,18 +1761,19 @@ Because `LoopEngineRunner` is `@Published`-backed and `Combine`, this file needs
 
 - [ ] **Step 3: Add the toolbar button**
 
-Using the insertion point found in Step 1, add a button near the existing header actions:
+Using the insertion point found in Step 1, add a button near the existing header actions. The project id MUST be `projectStore.activeProject?.bundle.id` (the stable `Project.id` — see the contract documented on `LoopEngineConfig.load`/`save` in Task 1; `ProjectStore.ActiveProject` has no bare `.id`, only `.bundle.id`) so this shares the same `LoopEngineConfig` as the Loop Engineering page (Task 11) and the Auto Task (Task 9) — using anything else (a path, a repo id) silently splits the config in three:
 
 ```swift
 Button {
-    guard let gitRoot = /* however the panel already resolves the active repo path for other actions found in Step 1 */ else { return }
-    Task { await runLoopEngineeringFromChat(projectId: /* active project id */, gitRoot: gitRoot, language: /* panel's current language */) }
+    guard let active = projectStore.activeProject else { return }
+    let gitRoot = URL(fileURLWithPath: active.localPath, isDirectory: true)
+    Task { await runLoopEngineeringFromChat(projectId: active.bundle.id, gitRoot: gitRoot, language: /* panel's current language, found in Step 1 */) }
 } label: {
     Label("Run Loop Engineering", systemImage: "repeat.circle")
 }
 ```
 
-Replace the three `/* ... */` placeholders using whatever the panel's existing actions (e.g. the file-attach or model-picker buttons found in Step 1) already use to resolve the active project/repo path and language — do not invent a new resolution path if one already exists in this file.
+Replace the remaining `/* ... */` placeholder using whatever the panel's existing actions already use for the current chat language — do not invent a new resolution path if one already exists in this file.
 
 - [ ] **Step 4: Build**
 
