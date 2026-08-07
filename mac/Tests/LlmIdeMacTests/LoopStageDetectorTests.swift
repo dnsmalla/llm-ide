@@ -73,4 +73,13 @@ final class LoopStageDetectorTests: XCTestCase {
         let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
         XCTAssertEqual(stages.last?.command, "pytest")
     }
+
+    func testDefaultStagesAlwaysIncludeARegressionSweepStage() {
+        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        // Even with no detectable test tooling, a fresh project must get a
+        // regression-sweep stage so Loop Engineering can "run regression
+        // and loop until all pass" out of the box.
+        XCTAssertTrue(stages.contains { $0.kind == .regressionSweep },
+                      "default stages must always include a regressionSweep stage")
+    }
 }
