@@ -434,11 +434,22 @@ struct LoopEngineView: View {
         // run must not start until a real git working tree is resolved —
         // mirrors RegressionView's own guard against running git-dependent
         // operations with no working tree.
-        guard activeProjectId != nil,
+        guard let projectId = activeProjectId,
               let context = workspaceContext,
               let gitRoot = context.gitRoot
         else { return }
-        saveConfig()
+        // Run implicitly saves the current stage list — but only when it's
+        // safe to: an explicit "Save" always persists (user intent), while
+        // this auto-save must not silently lock in a bare-Regression list
+        // that `loadConfig()` deliberately left unsaved (see
+        // `LoopEngineConfig.shouldPersist`). Once a real config already
+        // exists for this project, overwriting it here is fine even if the
+        // in-memory `stages` happens to be Regression-only right now — that
+        // reflects a real edit (e.g. the user removed the Test stage), not
+        // an unconfirmed auto-detection.
+        if LoopEngineConfig.shouldPersist(stages) || LoopEngineConfig.load(for: projectId) != nil {
+            saveConfig()
+        }
         let projectConfig = LoopEngineConfig(stages: stages, maxIterations: maxIterations, consecutiveFailureStop: consecutiveFailureStop)
         let result = await runner.run(config: projectConfig, faultsRoot: context.projectRoot, gitRoot: gitRoot)
         lastStatus = result
