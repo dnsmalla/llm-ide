@@ -69,6 +69,7 @@ struct HelpGuideView: View {
         case .autoTasks:       autoTasksContent
         case .codeGraph:        codeGraphContent
         case .regression:      regressionContent
+        case .loopEngine:      loopEngineContent
         case .settings:        settingsContent
         case .shortcuts:       shortcutsContent
         case .troubleshooting: troubleshootingContent
@@ -364,6 +365,25 @@ struct HelpGuideView: View {
         }
     }
 
+    // MARK: - Loop Engineering
+
+    private var loopEngineContent: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            helpHeader("Loop Engineering", icon: "repeat.circle", tint: Color(red: 0.35, green: 0.70, blue: 0.55))
+
+            helpParagraph("Chains Regression, then Test, then any stages you add, into one loop: on a failure it asks the agent for a fix and retries, up to a configurable number of iterations. Configure stages and approve any shell commands from the Loop Engineering page before running.")
+
+            helpCard("How to use it", icon: "list.number") {
+                helpStep(1, "Open Loop Engineering from the toolbar — a default stage list is detected from your repo the first time")
+                helpStep(2, "Add, remove, or reorder stages; shell-command stages need their command approved once per machine")
+                helpStep(3, "Set max iterations and how many identical failures in a row should stop the loop")
+                helpStep(4, "Click Run — a failing stage triggers an automatic repair attempt, then the loop retries from the top")
+            }
+
+            helpTip("Approval is a one-time, per-machine gate on the exact command text — editing a stage's command requires re-approving it.")
+        }
+    }
+
     // MARK: - Settings
 
     private var settingsContent: some View {
@@ -575,6 +595,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
     case autoTasks
     case codeGraph
     case regression
+    case loopEngine
     case settings
     case shortcuts
     case troubleshooting
@@ -598,6 +619,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
         case .autoTasks:       return "Auto Tasks"
         case .codeGraph:        return "Code Graph"
         case .regression:      return "Regression"
+        case .loopEngine:      return "Loop Engineering"
         case .settings:        return "Settings"
         case .shortcuts:       return "Keyboard Shortcuts"
         case .troubleshooting: return "Troubleshooting"
@@ -621,6 +643,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
         case .autoTasks:       return "arrow.triangle.2.circlepath.circle"
         case .codeGraph:        return "point.3.connected.trianglepath.dotted"
         case .regression:      return "arrow.uturn.backward.circle"
+        case .loopEngine:      return "repeat.circle"
         case .settings:        return "gearshape"
         case .shortcuts:       return "keyboard"
         case .troubleshooting: return "wrench.and.screwdriver"
@@ -647,6 +670,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
         case .autoTasks:       return .teal
         case .codeGraph:        return Color(red: 0.15, green: 0.68, blue: 0.65) // code graph teal
         case .regression:      return Color(red: 0.40, green: 0.75, blue: 0.50)
+        case .loopEngine:      return Color(red: 0.35, green: 0.70, blue: 0.55)
         // ── Data (purple family) ─────────────────────
         case .issues:          return .purple
         case .gantt:           return .indigo
