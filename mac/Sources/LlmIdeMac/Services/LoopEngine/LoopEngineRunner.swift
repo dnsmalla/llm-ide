@@ -22,6 +22,15 @@ final class LoopEngineRunner: ObservableObject {
     @Published private(set) var status: LoopEngineStatus?
     @Published private(set) var iteration = 0
 
+    /// Process-wide set of git roots with a run currently in flight,
+    /// keyed by standardized filesystem path. Guards against two
+    /// *different* `LoopEngineRunner` instances (e.g. a chat-triggered
+    /// run and a scheduled Auto Task run — the design spec explicitly
+    /// promises these are rejected the same way) racing on the same
+    /// working tree. The instance-scoped `running` flag alone can't
+    /// catch that, since each caller constructs its own runner instance.
+    @MainActor private static var activeRoots: Set<String> = []
+
     private let verifier: FaultVerifier
     private let stageRepairer: LoopStageRepairer
     private let regressionSweep: RegressionSweepRunning
@@ -43,25 +52,63 @@ final class LoopEngineRunner: ObservableObject {
     func clearLog() { log.removeAll() }
 
     /// Runs `config`'s ordered stages to completion, success, or give-up.
-    /// Safe to call repeatedly — resets `status`/`iteration` each call.
-    /// No-ops (returns immediately) if already running.
+    ///
+    /// Returns `nil` when the run never started at all — either this
+    /// instance is already mid-run, or another `LoopEngineRunner`
+    /// instance is already running against the same `gitRoot`. Callers
+    /// (e.g. the chat command and the Auto Task scheduler) must check
+    /// for `nil` rather than assume every call produced a real status,
+    /// since a `nil` return means nothing was logged or attempted.
+    /// Otherwise returns the final `LoopEngineStatus` (also available
+    /// afterwards via `status`).
     ///
     /// - Parameters:
     ///   - faultsRoot: project root passed through to the regression sweep.
-    ///   - gitRoot: git working tree shell-command stages run in and
-    ///     approvals are keyed against.
-    func run(config: LoopEngineConfig, faultsRoot: URL, gitRoot: URL) async {
-        guard !running else { return }
+    ///   - gitRoot: git working tree shell-command stages run in,
+    ///     approvals are keyed against, and the concurrency lock key.
+    @discardableResult
+    func run(config: LoopEngineConfig, faultsRoot: URL, gitRoot: URL) async -> LoopEngineStatus? {
+        guard !running else { return nil }
+        let rootKey = gitRoot.standardizedFileURL.path
+        guard !Self.activeRoots.contains(rootKey) else { return nil }
+        Self.activeRoots.insert(rootKey)
         running = true
         status = nil
         iteration = 0
-        defer { running = false }
+        defer {
+            running = false
+            Self.activeRoots.remove(rootKey)
+        }
 
-        let orderedStages = config.stages.sorted { $0.order < $1.order }
-        var lastFailureHash: String?
-        var consecutiveSameFailures = 0
-
+        let orderedStages = config.stages.sorted { ($0.order, $0.id) < ($1.order, $1.id) }
         appendLog(.info, "Loop started · \(orderedStages.count) stage(s), max \(config.maxIterations) iteration(s)")
+
+        // Preflight: every shell-command stage's approval is checked BEFORE
+        // any iteration runs — burning iterations/LLM repair calls on an
+        // earlier stage only to discover a LATER stage is unapproved would
+        // waste both, and per spec, needing approval must not itself
+        // consume an iteration.
+        for stage in orderedStages where stage.kind == .shellCommand {
+            guard let command = Self.validCommand(stage) else {
+                let rejected = LoopEngineStatus.error("Stage \"\(stage.name)\" has no command")
+                status = rejected
+                appendLog(.error, "Loop finished · \(describe(rejected))")
+                return rejected
+            }
+            guard approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: command) else {
+                let rejected = LoopEngineStatus.needsApproval(stageName: stage.name)
+                status = rejected
+                appendLog(.error, "Loop finished · \(describe(rejected))")
+                return rejected
+            }
+        }
+
+        // Per-stage consecutive-identical-failure tracking, keyed by stage
+        // id. Deliberately NOT a single shared hash/count: stage A failing,
+        // getting repaired, and passing must not contaminate stage B's own
+        // count just because B later fails with a coincidentally similar
+        // (or, pre-normalization, identically-shaped) hash.
+        var failureState: [String: (hash: String, count: Int)] = [:]
 
         iterationLoop: while iteration < config.maxIterations {
             iteration += 1
@@ -82,26 +129,47 @@ final class LoopEngineRunner: ObservableObject {
                     }
 
                 case .shellCommand:
-                    guard let command = stage.command else {
+                    // Preflight already validated this once per stage; if a
+                    // command somehow becomes invalid by the time we get
+                    // here, fail closed instead of force-unwrapping.
+                    guard let command = Self.validCommand(stage) else {
                         status = .error("Stage \"\(stage.name)\" has no command")
                         break iterationLoop
                     }
-                    guard approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: command) else {
-                        appendLog(.warn, "  [\(stage.name)] needs approval: \(command)")
-                        status = .needsApproval(stageName: stage.name)
+
+                    let outcome: VerifyOutcome
+                    do {
+                        outcome = try await verifier.verify(command: command, repoRoot: gitRoot, timeout: stageTimeout)
+                    } catch is CancellationError {
+                        status = .aborted
+                        break iterationLoop
+                    } catch VerifyError.timedOut(let seconds) {
+                        // A timeout means the stage never confirmed passing —
+                        // treat it like an ordinary non-zero-exit failure (same
+                        // hash/retry/repair path below), not a fatal run-ending
+                        // error. Only a genuine launch failure below is fatal.
+                        outcome = VerifyOutcome(exitCode: -1, output: "stage timed out after \(seconds)s")
+                    } catch {
+                        status = .error(error.localizedDescription)
+                        appendLog(.error, "  [\(stage.name)] error: \(error.localizedDescription)")
                         break iterationLoop
                     }
-                    do {
-                        let outcome = try await verifier.verify(command: command, repoRoot: gitRoot, timeout: stageTimeout)
-                        if outcome.exitCode == 0 {
-                            appendLog(.info, "  [\(stage.name)] passed")
-                            continue
-                        }
-                        appendLog(.warn, "  [\(stage.name)] FAILED (exit \(outcome.exitCode))")
+
+                    if outcome.exitCode == 0 {
+                        appendLog(.info, "  [\(stage.name)] passed")
+                        failureState[stage.id] = nil
+                    } else {
+                        let excerpt = String(outcome.output.suffix(500))
+                        appendLog(.warn, "  [\(stage.name)] FAILED (exit \(outcome.exitCode)): \(excerpt)")
                         let hash = Self.hash(outcome.output)
-                        consecutiveSameFailures = (hash == lastFailureHash) ? consecutiveSameFailures + 1 : 1
-                        lastFailureHash = hash
-                        if consecutiveSameFailures >= config.consecutiveFailureStop {
+                        let count: Int
+                        if let previous = failureState[stage.id], previous.hash == hash {
+                            count = previous.count + 1
+                        } else {
+                            count = 1
+                        }
+                        failureState[stage.id] = (hash: hash, count: count)
+                        if count >= config.consecutiveFailureStop {
                             status = .givenUp(reason: .repeatedFailure)
                             break iterationLoop
                         }
@@ -110,13 +178,16 @@ final class LoopEngineRunner: ObservableObject {
                             break iterationLoop
                         }
                         appendLog(.info, "  [\(stage.name)] repairing…")
-                        try await stageRepairer.repair(
-                            stageName: stage.name, command: command,
-                            failureOutput: outcome.output, repoRoot: gitRoot)
+                        do {
+                            try await stageRepairer.repair(
+                                stageName: stage.name, command: command,
+                                failureOutput: outcome.output, repoRoot: gitRoot)
+                        } catch {
+                            status = .error(error.localizedDescription)
+                            appendLog(.error, "  [\(stage.name)] repair error: \(error.localizedDescription)")
+                            break iterationLoop
+                        }
                         continue iterationLoop
-                    } catch {
-                        status = .error("\(error)")
-                        break iterationLoop
                     }
                 }
             }
@@ -127,17 +198,42 @@ final class LoopEngineRunner: ObservableObject {
             }
         }
 
-        if status == nil { status = .givenUp(reason: .maxIterations) }
-        appendLog(.info, "Loop finished · \(describe(status!))")
+        let finalStatus = status ?? .givenUp(reason: .maxIterations)
+        status = finalStatus
+        appendLog(logLevel(for: finalStatus), "Loop finished · \(describe(finalStatus))")
+        return finalStatus
     }
 
     private func appendLog(_ level: LogLine.Level, _ text: String) {
         log.append(LogLine(at: Date(), level: level, text: text))
     }
 
+    /// Returns the stage's command when non-nil and non-blank; nil
+    /// otherwise. A missing/empty command is a config error, distinct
+    /// from a stage that ran and failed.
+    private static func validCommand(_ stage: LoopStage) -> String? {
+        guard let command = stage.command,
+              !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return nil }
+        return command
+    }
+
+    /// Hashes failure output after stripping digit runs, so elapsed-time
+    /// noise (e.g. `swift test`'s `"Executed 5 tests ... in 0.003 (0.005)
+    /// seconds"`, or PIDs/timestamps in other tools' output) doesn't make
+    /// an otherwise-identical failure register as "new" every iteration
+    /// and silently defeat `consecutiveFailureStop`. Not a perfect
+    /// normalization — just enough to neutralize the most common source
+    /// of false negatives.
     private static func hash(_ s: String) -> String {
-        let digest = SHA256.hash(data: Data(s.utf8))
+        let normalized = s.replacingOccurrences(of: #"[0-9]+"#, with: "#", options: .regularExpression)
+        let digest = SHA256.hash(data: Data(normalized.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func logLevel(for status: LoopEngineStatus) -> LogLine.Level {
+        if case .success = status { return .info }
+        return .error
     }
 
     private func describe(_ status: LoopEngineStatus) -> String {
