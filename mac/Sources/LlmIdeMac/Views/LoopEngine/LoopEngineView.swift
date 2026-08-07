@@ -27,6 +27,7 @@ struct LoopEngineView: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
+    @Environment(LibraryItemStore.self) private var itemStore
 
     /// Owns the run — a `@StateObject` (not a locally-constructed value
     /// per run) so its `@Published log`/`running`/`iteration` actually
@@ -53,6 +54,8 @@ struct LoopEngineView: View {
     @State private var selectedStageId: String?
     @State private var lastStatus: LoopEngineStatus?
     @State private var didRejectLastRun = false
+    @State private var skillCatalog: [LlmIdeAPIClient.SkillLibraryEntry] = []
+    @State private var skillsLoaded = false
 
     init(api: LlmIdeAPIClient) {
         self.api = api
@@ -99,6 +102,7 @@ struct LoopEngineView: View {
             lastStatus = nil
             didRejectLastRun = false
             loadConfig()
+            Task { await loadSkillsIfNeeded() }
         }
     }
 
@@ -110,14 +114,24 @@ struct LoopEngineView: View {
             HStack {
                 SectionLabel("STAGES")
                 Spacer()
-                Button {
-                    let nextOrder = (stages.map(\.order).max() ?? -1) + 1
-                    stages.append(LoopStage(name: "New Stage", kind: .shellCommand, command: "", order: nextOrder))
+                Menu {
+                    Button("Shell command") {
+                        let nextOrder = (stages.map(\.order).max() ?? -1) + 1
+                        stages.append(LoopStage(name: "New Stage", kind: .shellCommand, command: "", order: nextOrder))
+                    }
+                    Button("Regression sweep") {
+                        let nextOrder = (stages.map(\.order).max() ?? -1) + 1
+                        stages.append(LoopStage(name: "Regression", kind: .regressionSweep, command: nil, order: nextOrder))
+                    }
+                    Button("Skill (generate)") {
+                        let nextOrder = (stages.map(\.order).max() ?? -1) + 1
+                        stages.append(LoopStage(name: "New Skill Stage", kind: .skill, command: nil, order: nextOrder))
+                    }
                 } label: {
                     Image(systemName: "plus")
                 }
                 .buttonStyle(.borderless)
-                .help("Add a shell-command stage")
+                .help("Add a stage")
                 .accessibilityLabel("Add stage")
             }
             List(sortedStages, selection: $selectedStageId) { stage in
@@ -155,7 +169,8 @@ struct LoopEngineView: View {
     private func stageRow(_ stage: LoopStage) -> some View {
         let t = theme.current
         HStack(spacing: 6) {
-            Image(systemName: stage.kind == .regressionSweep ? "arrow.uturn.backward.circle" : "terminal")
+            Image(systemName: stage.kind == .regressionSweep ? "arrow.uturn.backward.circle"
+                  : stage.kind == .shellCommand ? "terminal" : "sparkles")
                 .foregroundStyle(t.textMuted)
             Text(stage.name)
                 .font(Typography.filename)
@@ -243,11 +258,6 @@ struct LoopEngineView: View {
                         let approved = approvals.isStageApproved(repo: gitRoot, stageId: stages[index].id, command: command)
                         Button(approved ? "Approved" : "Approve & enable") {
                             approvals.approveStage(repo: gitRoot, stageId: stages[index].id, command: command)
-                            // Force a body re-evaluation so the approved
-                            // state (and the sidebar's warning triangle)
-                            // reflect the change immediately — approvals
-                            // live in UserDefaults, not @Published state,
-                            // so nothing else here would trigger a redraw.
                             selectedStageId = stages[index].id
                         }
                         .buttonStyle(.borderedProminent)
@@ -255,14 +265,50 @@ struct LoopEngineView: View {
                         .disabled(approved)
                     } else {
                         Text("Enter a command for this stage.")
-                            .font(Typography.caption)
-                            .foregroundStyle(t.textMuted)
+                            .font(Typography.caption).foregroundStyle(t.textMuted)
                     }
                 } else {
                     Text("Open a project with a cloned repo to approve or run shell-command stages.")
-                        .font(Typography.caption)
-                        .foregroundStyle(t.textMuted)
+                        .font(Typography.caption).foregroundStyle(t.textMuted)
                 }
+            } else if stages[index].kind == .skill {
+                Text("Skill").font(Typography.caption).foregroundStyle(t.textMuted)
+                if skillCatalog.isEmpty {
+                    Text(skillsLoaded ? "No library skills found." : "Loading skills…")
+                        .font(Typography.caption).foregroundStyle(t.textMuted)
+                } else {
+                    Picker("Skill", selection: Binding(
+                        get: { stages[index].skillId ?? "" },
+                        set: { stages[index].skillId = $0.isEmpty ? nil : $0 }
+                    )) {
+                        Text("None").tag("")
+                        ForEach(skillCatalog) { s in
+                            Text("\(s.name) · \(s.family)").tag(s.id)
+                        }
+                    }
+                }
+
+                Text("Target source (optional)").font(Typography.caption).foregroundStyle(t.textMuted)
+                let allItems = LibraryItem.Category.allCases.flatMap { itemStore.items(for: $0) }
+                Picker("Target", selection: Binding(
+                    get: { stages[index].targetPath ?? "" },
+                    set: { stages[index].targetPath = $0.isEmpty ? nil : $0 }
+                )) {
+                    Text("None").tag("")
+                    ForEach(allItems) { item in
+                        Text(item.name).tag(item.path)
+                    }
+                }
+
+                Text("Prompt (optional)").font(Typography.caption).foregroundStyle(t.textMuted)
+                TextField("Defaults to: apply this skill", text: Binding(
+                    get: { stages[index].prompt ?? "" },
+                    set: { stages[index].prompt = $0.isEmpty ? nil : $0 }
+                ), axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+
+                Text("Runs the skill as a generate step each iteration; the loop's verify stages decide pass/fail.")
+                    .font(Typography.caption).foregroundStyle(t.textMuted)
             } else {
                 Text("Re-runs the Regression sweep (fault reports + repo checks) with repair attempted on failure.")
                     .font(Typography.caption)
@@ -411,6 +457,16 @@ struct LoopEngineView: View {
             // project's stages displayed (and later saved/run against
             // THIS project's id/gitRoot).
             resetStagesToDefaults()
+        }
+    }
+
+    /// Live-fetch the central skill catalog (best-effort, latched on success)
+    /// for the skill-stage picker — mirrors CompletionController.loadMetaIfNeeded.
+    private func loadSkillsIfNeeded() async {
+        guard !skillsLoaded else { return }
+        if let skills = try? await api.skillLibrary(), !skills.isEmpty {
+            skillCatalog = skills
+            skillsLoaded = true
         }
     }
 
