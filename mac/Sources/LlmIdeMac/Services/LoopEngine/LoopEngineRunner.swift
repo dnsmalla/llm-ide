@@ -34,17 +34,20 @@ final class LoopEngineRunner: ObservableObject {
     private let verifier: FaultVerifier
     private let stageRepairer: LoopStageRepairer
     private let regressionSweep: RegressionSweepRunning
+    private let skillExecutor: LoopSkillExecuting
     private let approvals: VerifyApprovalStore
     private let stageTimeout: TimeInterval
 
     init(verifier: FaultVerifier = ShellFaultVerifier(),
          stageRepairer: LoopStageRepairer,
          regressionSweep: RegressionSweepRunning,
+         skillExecutor: LoopSkillExecuting,
          approvals: VerifyApprovalStore = VerifyApprovalStore(),
          stageTimeout: TimeInterval = 600) {
         self.verifier = verifier
         self.stageRepairer = stageRepairer
         self.regressionSweep = regressionSweep
+        self.skillExecutor = skillExecutor
         self.approvals = approvals
         self.stageTimeout = stageTimeout
     }
@@ -245,6 +248,22 @@ final class LoopEngineRunner: ObservableObject {
                         }
                         continue iterationLoop
                     }
+
+                case .skill:
+                    let skillId = stage.skillId ?? ""
+                    let message = (stage.prompt?.isEmpty == false) ? stage.prompt! : Self.defaultSkillMessage(stage)
+                    appendLog(.info, "  [\(stage.name)] running skill \(skillId.isEmpty ? "(none set)" : skillId) (generate)")
+                    do {
+                        try await skillExecutor.execute(skillId: skillId, targetPath: stage.targetPath, message: message)
+                        appendLog(.info, "  [\(stage.name)] skill completed (generate)")
+                    } catch is CancellationError {
+                        status = .aborted
+                        break iterationLoop
+                    } catch {
+                        // A generate step that errors is non-fatal: log it and let
+                        // the loop's verify stages / iteration cap decide termination.
+                        appendLog(.warn, "  [\(stage.name)] skill error: \(error.localizedDescription)")
+                    }
                 }
             }
 
@@ -279,6 +298,16 @@ final class LoopEngineRunner: ObservableObject {
             return "passed — \(passedCount) of \(outcome.total)"
         }
         return "failed — \(outcome.regressed) regressed / \(passedCount) passed of \(outcome.total)"
+    }
+
+    /// Default agent message for a `.skill` stage with no user-written prompt:
+    /// names the stage and, if set, the target source the skill is scoped to.
+    private static func defaultSkillMessage(_ stage: LoopStage) -> String {
+        var msg = "Apply the skill for stage \"\(stage.name)\"."
+        if let target = stage.targetPath, !target.isEmpty {
+            msg += " Target: \(target)."
+        }
+        return msg
     }
 
     private func appendLog(_ level: LogLine.Level, _ text: String) {

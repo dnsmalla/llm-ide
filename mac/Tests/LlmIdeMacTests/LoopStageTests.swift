@@ -16,4 +16,17 @@ final class LoopStageTests: XCTestCase {
         XCTAssertEqual(decoded, stage)
         XCTAssertEqual(decoded.command, "swift test")
     }
+
+    func testSkillStageRoundTripsThroughJSON() throws {
+        let stage = LoopStage(id: "s1", name: "Fix Skill", kind: .skill,
+                              command: nil, order: 2,
+                              skillId: "skills/fix-code", targetPath: "~/src/App.swift",
+                              prompt: "Fix the bug")
+        let data = try JSONEncoder().encode(stage)
+        let decoded = try JSONDecoder().decode(LoopStage.self, from: data)
+        XCTAssertEqual(decoded, stage)
+        XCTAssertEqual(decoded.skillId, "skills/fix-code")
+        XCTAssertEqual(decoded.targetPath, "~/src/App.swift")
+        XCTAssertEqual(decoded.prompt, "Fix the bug")
+    }
 }
