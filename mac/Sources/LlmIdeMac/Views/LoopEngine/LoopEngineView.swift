@@ -464,7 +464,7 @@ struct LoopEngineView: View {
     /// for the skill-stage picker — mirrors CompletionController.loadMetaIfNeeded.
     private func loadSkillsIfNeeded() async {
         guard !skillsLoaded else { return }
-        if let skills = try? await api.skillLibrary(), !skills.isEmpty {
+        if let skills = try? await api.skillLibrary() {
             skillCatalog = skills
             skillsLoaded = true
         }
