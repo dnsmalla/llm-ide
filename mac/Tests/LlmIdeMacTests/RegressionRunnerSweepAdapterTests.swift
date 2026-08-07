@@ -7,6 +7,14 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
         func ask(prompt: String) async throws -> String { prompt }
     }
 
+    /// Simulates a CLI/network error mid-sweep — the `.failed(String)`
+    /// verdict path in `RegressionRunner.runAnswerCompareFault`, which
+    /// catches whatever `prompter.ask` throws.
+    private final class ThrowingPrompter: RegressionPrompter {
+        struct BoomError: Error {}
+        func ask(prompt: String) async throws -> String { throw BoomError() }
+    }
+
     func testSweepPassedTrueWhenNoFixedFaultsExist() async {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("regression-sweep-adapter-\(UUID().uuidString)", isDirectory: true)
@@ -17,5 +25,36 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
         let adapter = RegressionRunnerSweepAdapter(runner: runner)
         let passed = await adapter.sweepPassed(faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: true)
         XCTAssertTrue(passed)
+    }
+
+    /// A fault that can't even be checked (prompter throws) must NOT
+    /// read as a pass — fail-closed, matching `VerifyApprovalStore`'s
+    /// stance elsewhere: ambiguity blocks, it never silently succeeds.
+    func testSweepPassedFalseWhenAFaultCouldNotBeChecked() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("regression-sweep-adapter-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        // No `verify` command → runner takes the answer-compare path,
+        // where `prompter.ask` throwing surfaces as `.failed`.
+        let fault = FaultReport(
+            prompt: "does X still work?",
+            response: "yes",
+            notes: "",
+            severity: .info,
+            reportedAt: Date(),
+            appVersion: "test",
+            agent: "claude_code",
+            status: .fixed,
+            tags: []
+        )
+        let store = MemoryStore()
+        try store.writeFault(at: tempDir, fault)
+
+        let runner = RegressionRunner(prompter: ThrowingPrompter(), store: store)
+        let adapter = RegressionRunnerSweepAdapter(runner: runner)
+        let passed = await adapter.sweepPassed(faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: false)
+        XCTAssertFalse(passed)
     }
 }

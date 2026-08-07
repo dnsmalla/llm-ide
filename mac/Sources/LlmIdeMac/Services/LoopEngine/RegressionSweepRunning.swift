@@ -8,8 +8,13 @@ protocol RegressionSweepRunning {
 }
 
 /// Production adapter wrapping the real `RegressionRunner`. A sweep
-/// "passes" when no fault came back `.regressed`, `.repairFailed`, or
-/// `.needsApproval` — `.unchanged` and `.repaired` both count as passing.
+/// "passes" when no fault came back `.regressed`, `.repairFailed`,
+/// `.needsApproval`, or `.failed` — `.unchanged` and `.repaired` both
+/// count as passing. `.failed` (a CLI/network error — the check
+/// couldn't even run) is treated as not-passed rather than silently
+/// ignored: fail-closed on ambiguity, matching `VerifyApprovalStore`'s
+/// stance elsewhere in this codebase. Otherwise a transient
+/// infrastructure hiccup would report as "regression sweep passed."
 @MainActor
 final class RegressionRunnerSweepAdapter: RegressionSweepRunning {
     private let runner: RegressionRunner
@@ -22,7 +27,7 @@ final class RegressionRunnerSweepAdapter: RegressionSweepRunning {
         await runner.run(faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: attemptRepair)
         return !runner.results.contains { result in
             switch result.verdict {
-            case .regressed, .repairFailed, .needsApproval: return true
+            case .regressed, .repairFailed, .needsApproval, .failed: return true
             default: return false
             }
         }
