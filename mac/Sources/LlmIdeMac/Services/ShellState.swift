@@ -6,7 +6,7 @@ import SwiftUI
 @Observable
 final class ShellState {
     enum Section: String, Hashable, CaseIterable {
-        case library, live, explorer, search, conflicts, sourceControl, issues, gantt, visual, docGen, autoCode, codeGraph, regression, loopEngine, settings
+        case library, live, explorer, search, conflicts, sourceControl, issues, gantt, visual, docGen, autoCode, codeGraph, loopEngine, settings
 
         /// User-friendly label — single source of truth so the sidebar
         /// row, the settings toggle and any future menu item agree.
@@ -24,7 +24,6 @@ final class ShellState {
             case .docGen:    return "Doc Gen"
             case .autoCode:  return "Auto Tasks"
             case .codeGraph: return "Code Graph"
-            case .regression: return "Regression"
             case .loopEngine: return "Loop Engineering"
             case .settings:  return "Settings"
             }
@@ -44,7 +43,6 @@ final class ShellState {
             case .docGen:    return "wand.and.stars"
             case .autoCode:  return "arrow.triangle.2.circlepath.circle"
             case .codeGraph: return "point.3.connected.trianglepath.dotted"
-            case .regression: return "arrow.uturn.backward.circle"
             case .loopEngine: return "repeat.circle"
             case .settings:  return "gearshape"
             }
@@ -54,9 +52,10 @@ final class ShellState {
         /// fallback when hidden sections are selected; Settings is the
         /// only way back if everything else is hidden — neither can be
         /// turned off. `.live` is already conditional on capture state
-        /// so it doesn't appear here either.
+        /// so it doesn't appear here either. `.loopEngine` is the single
+        /// permanent home for regression and is likewise non-hideable.
         static let userHideable: [Section] = [
-            .explorer, .search, .conflicts, .sourceControl, .issues, .gantt, .visual, .docGen, .autoCode, .codeGraph, .regression
+            .explorer, .search, .conflicts, .sourceControl, .issues, .gantt, .visual, .docGen, .autoCode, .codeGraph
         ]
 
         /// Resolve the effective Home landing: the chosen section if it's a real
@@ -124,7 +123,6 @@ extension ShellState.Section {
         case .sourceControl: return Color(red: 0.30, green: 0.70, blue: 0.45) // green
         case .autoCode:   return .teal
         case .codeGraph:  return Color(red: 0.15, green: 0.68, blue: 0.65) // cyan-green
-        case .regression: return Color(red: 0.40, green: 0.75, blue: 0.50) // mint-green
         case .loopEngine: return Color(red: 0.35, green: 0.70, blue: 0.55) // mint-teal, adjacent to Regression's mint-green
 
         // ── Data (purple family) ─────────────────────────

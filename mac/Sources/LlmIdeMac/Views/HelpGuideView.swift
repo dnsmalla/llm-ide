@@ -68,7 +68,6 @@ struct HelpGuideView: View {
         case .docGen:          docGenContent
         case .autoTasks:       autoTasksContent
         case .codeGraph:        codeGraphContent
-        case .regression:      regressionContent
         case .loopEngine:      loopEngineContent
         case .settings:        settingsContent
         case .shortcuts:       shortcutsContent
@@ -349,22 +348,6 @@ struct HelpGuideView: View {
         }
     }
 
-    // MARK: - Regression
-
-    private var regressionContent: some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            helpHeader("Regression", icon: "arrow.uturn.backward.circle", tint: .orange)
-
-            helpParagraph("Run regression checks against your codebase. The AI compares the current state of your code against previous snapshots to detect unintended changes, broken contracts, or missing functionality.")
-
-            helpCard("When to use it", icon: "exclamationmark.shield") {
-                helpBullet("After a large refactor — make sure nothing was accidentally removed")
-                helpBullet("Before a release — verify that known critical paths still work")
-                helpBullet("When onboarding — understand what changed since you last looked at the code")
-            }
-        }
-    }
-
     // MARK: - Loop Engineering
 
     private var loopEngineContent: some View {
@@ -594,7 +577,6 @@ enum HelpTopic: String, CaseIterable, Identifiable {
     case docGen
     case autoTasks
     case codeGraph
-    case regression
     case loopEngine
     case settings
     case shortcuts
@@ -618,7 +600,6 @@ enum HelpTopic: String, CaseIterable, Identifiable {
         case .docGen:          return "Doc Gen"
         case .autoTasks:       return "Auto Tasks"
         case .codeGraph:        return "Code Graph"
-        case .regression:      return "Regression"
         case .loopEngine:      return "Loop Engineering"
         case .settings:        return "Settings"
         case .shortcuts:       return "Keyboard Shortcuts"
@@ -642,7 +623,6 @@ enum HelpTopic: String, CaseIterable, Identifiable {
         case .docGen:          return "wand.and.stars"
         case .autoTasks:       return "arrow.triangle.2.circlepath.circle"
         case .codeGraph:        return "point.3.connected.trianglepath.dotted"
-        case .regression:      return "arrow.uturn.backward.circle"
         case .loopEngine:      return "repeat.circle"
         case .settings:        return "gearshape"
         case .shortcuts:       return "keyboard"
@@ -669,7 +649,6 @@ enum HelpTopic: String, CaseIterable, Identifiable {
         case .sourceControl:   return Color(red: 0.30, green: 0.70, blue: 0.45) // green, matches the section tint
         case .autoTasks:       return .teal
         case .codeGraph:        return Color(red: 0.15, green: 0.68, blue: 0.65) // code graph teal
-        case .regression:      return Color(red: 0.40, green: 0.75, blue: 0.50)
         case .loopEngine:      return Color(red: 0.35, green: 0.70, blue: 0.55)
         // ── Data (purple family) ─────────────────────
         case .issues:          return .purple

@@ -12,4 +12,12 @@ final class ShellStateSectionTests: XCTestCase {
             "Loop Engineering must not be user-hideable"
         )
     }
+
+    /// The standalone Regression page is gone; the enum must no longer
+    /// carry it and nothing should reference the retired raw value.
+    func testRegressionSectionIsRetired() {
+        XCTAssertNil(ShellState.Section(rawValue: "regression"))
+        XCTAssertFalse(ShellState.Section.userHideable.contains { $0.rawValue == "regression" })
+        XCTAssertFalse(ShellState.Section.allCases.contains { $0.rawValue == "regression" })
+    }
 }

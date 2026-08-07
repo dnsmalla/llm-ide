@@ -409,7 +409,7 @@ struct AppShell: View {
     /// `.settings` is in the account menu; `.live` only while a session runs.
     private static let toolOrder: [ShellState.Section] = [
         .codeGraph, .autoCode, .conflicts, .issues,
-        .gantt, .regression, .loopEngine, .docGen, .visual, .library, .live,
+        .gantt, .loopEngine, .docGen, .visual, .library, .live,
     ]
     private var liveActive: Bool { capture.isRunning || liveMirror.activeSession != nil }
     private var toolSections: [ShellState.Section] {
@@ -604,7 +604,6 @@ struct AppShell: View {
             } else {
                 DisabledFeaturePlaceholderView(featureName: "3D Code Graph")
             }
-        case .regression: RegressionView(api: api)
         case .loopEngine: LoopEngineView(api: api)
         case .settings:  SettingsView(api: api)
         }
