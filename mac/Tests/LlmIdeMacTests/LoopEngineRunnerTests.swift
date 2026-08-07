@@ -61,16 +61,31 @@ final class LoopEngineRunnerTests: XCTestCase {
         func sweepPassed(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool) async -> Bool { alwaysPasses }
     }
 
+    private final class ThrowingRepairer: LoopStageRepairer {
+        let error: Error
+        init(error: Error) { self.error = error }
+        func repair(stageName: String, command: String?, failureOutput: String, repoRoot: URL) async throws {
+            throw error
+        }
+    }
+
     private func makeApprovals(approve stages: [(stageId: String, command: String)] = []) -> VerifyApprovalStore {
         let suite = UserDefaults(suiteName: "loop-engine-runner-test-\(UUID().uuidString)")!
         let store = VerifyApprovalStore(defaults: suite)
         for (stageId, command) in stages {
-            store.approveStage(repo: URL(fileURLWithPath: "/tmp/repo"), stageId: stageId, command: command)
+            // Must match `repoRoot` below — approvals are hashed by repo
+            // path, so a mismatched literal here would silently break
+            // every approval check.
+            store.approveStage(repo: repoRoot, stageId: stageId, command: command)
         }
         return store
     }
 
-    private let repoRoot = URL(fileURLWithPath: "/tmp/repo")
+    // Unique per test-method invocation (XCTest creates a fresh instance
+    // per test, re-running this initializer each time) so the new
+    // process-wide `LoopEngineRunner.activeRoots` static state can't
+    // leak a "still locked" false-rejection between unrelated tests.
+    private let repoRoot = URL(fileURLWithPath: "/tmp/repo-\(UUID().uuidString)")
 
     func testAllStagesPassOnFirstIterationSucceeds() async {
         let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
@@ -269,6 +284,51 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(repairer.repairCount, 0)
     }
 
+    /// `RegressionSweepRunning.sweepPassed` is fail-closed and returns
+    /// `false` on cancellation rather than throwing (per its Task 5
+    /// contract), so a cancelled regression-sweep-only run would, without
+    /// an explicit `Task.isCancelled` check in the iteration loop, just
+    /// burn every remaining iteration as an ordinary sweep failure and
+    /// report `.givenUp(.maxIterations)` — never surfacing that it was
+    /// actually cancelled.
+    func testCancelledRegressionSweepOnlyRunMapsToAborted() async {
+        let repairer = StubRepairer()
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil, order: 0)
+        ], maxIterations: 5, consecutiveFailureStop: 5)
+        let runner = LoopEngineRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: false),
+            approvals: makeApprovals()
+        )
+        let task = Task { await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot) }
+        task.cancel()
+        let result = await task.value
+        XCTAssertEqual(result, .aborted)
+        XCTAssertEqual(runner.status, .aborted)
+    }
+
+    /// The repair call's catch block must special-case `CancellationError`
+    /// too, not just the verify call's — otherwise a cancelled repair
+    /// falls into the generic catch and reports a confusing `.error`
+    /// instead of `.aborted`.
+    func testRepairCancellationMapsToAborted() async {
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") }
+        let repairer = ThrowingRepairer(error: CancellationError())
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5, consecutiveFailureStop: 5)
+        let runner = LoopEngineRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            approvals: makeApprovals(approve: [("t1", "swift test")])
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .aborted)
+        XCTAssertEqual(runner.status, .aborted)
+    }
+
     // MARK: - Fix 5: hash normalization ignores elapsed-time noise
 
     func testConsecutiveFailureDetectionIgnoresElapsedTimeNoise() async {
@@ -293,6 +353,42 @@ final class LoopEngineRunnerTests: XCTestCase {
         // failure twice, not two distinct ones.
         XCTAssertEqual(result, .givenUp(reason: .repeatedFailure))
         XCTAssertEqual(runner.iteration, 2)
+    }
+
+    /// A blanket "strip every digit" normalizer (the previous round's
+    /// implementation) would hash `"3 failures"` and `"1 failure"` as
+    /// identical, hiding genuine progress (a SHRINKING failure count is
+    /// the canonical sign a repair is working) behind a false
+    /// `.repeatedFailure` give-up. The narrowed normalizer only strips
+    /// duration/hex shapes, so these two distinct failures must reset
+    /// the consecutive counter instead of accumulating it.
+    func testShrinkingFailureCountIsTreatedAsADifferentFailureNotARepeat() async {
+        let outcomes = [
+            VerifyOutcome(exitCode: 1, output: "3 failures"),
+            VerifyOutcome(exitCode: 1, output: "1 failure"),
+            VerifyOutcome(exitCode: 0, output: "")
+        ]
+        var callIndex = 0
+        let verifier = StubVerifier { _ in
+            defer { callIndex += 1 }
+            return outcomes[min(callIndex, outcomes.count - 1)]
+        }
+        let repairer = StubRepairer()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5, consecutiveFailureStop: 2)
+        let runner = LoopEngineRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            approvals: makeApprovals(approve: [("t1", "swift test")])
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        // If "3 failures" and "1 failure" had hashed equal, this would
+        // incorrectly give up at iteration 2 with `.repeatedFailure`
+        // instead of reaching a real fix on iteration 3.
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(runner.iteration, 3)
+        XCTAssertEqual(repairer.repairCount, 2)
     }
 
     // MARK: - Fix 6: multi-stage ordering and per-stage isolation

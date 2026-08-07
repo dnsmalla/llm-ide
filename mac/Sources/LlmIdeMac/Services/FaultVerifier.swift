@@ -16,6 +16,22 @@ enum VerifyError: Error, Equatable {
     case launchFailed(String)
 }
 
+/// Without this, `.localizedDescription` on a `VerifyError` falls back to
+/// NSError's generic "The operation couldn't be completed" text instead of
+/// the actual diagnostic — every caller that logs `error.localizedDescription`
+/// (this file's `ShellFaultVerifier`'s own launch-failure path used to hit
+/// this indirectly via `Process`, and `LoopEngineRunner`/`RegressionRunner`
+/// both catch and log `VerifyError` this way) would otherwise lose the
+/// real reason silently.
+extension VerifyError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .timedOut(let seconds): return "timed out after \(seconds)s"
+        case .launchFailed(let reason): return "launch failed: \(reason)"
+        }
+    }
+}
+
 protocol FaultVerifier: Sendable {
     func verify(command: String, repoRoot: URL, timeout: TimeInterval) async throws -> VerifyOutcome
 }

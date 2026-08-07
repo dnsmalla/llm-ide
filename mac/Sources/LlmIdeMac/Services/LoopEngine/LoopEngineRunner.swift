@@ -23,7 +23,7 @@ final class LoopEngineRunner: ObservableObject {
     @Published private(set) var iteration = 0
 
     /// Process-wide set of git roots with a run currently in flight,
-    /// keyed by standardized filesystem path. Guards against two
+    /// keyed by symlink-resolved filesystem path. Guards against two
     /// *different* `LoopEngineRunner` instances (e.g. a chat-triggered
     /// run and a scheduled Auto Task run — the design spec explicitly
     /// promises these are rejected the same way) racing on the same
@@ -56,9 +56,13 @@ final class LoopEngineRunner: ObservableObject {
     /// Returns `nil` when the run never started at all — either this
     /// instance is already mid-run, or another `LoopEngineRunner`
     /// instance is already running against the same `gitRoot`. Callers
-    /// (e.g. the chat command and the Auto Task scheduler) must check
-    /// for `nil` rather than assume every call produced a real status,
-    /// since a `nil` return means nothing was logged or attempted.
+    /// (e.g. the chat command and the Auto Task scheduler) MUST check
+    /// for `nil` rather than assume every call produced a real status:
+    /// `status` is only meaningful when this returns non-nil — on a
+    /// `nil` return, `status` still holds whatever a PREVIOUS run on
+    /// this instance left behind (or `nil` if there was none), since a
+    /// rejected call doesn't touch it. The rejection is still recorded
+    /// to `log`, which is never cleared automatically.
     /// Otherwise returns the final `LoopEngineStatus` (also available
     /// afterwards via `status`).
     ///
@@ -68,9 +72,19 @@ final class LoopEngineRunner: ObservableObject {
     ///     approvals are keyed against, and the concurrency lock key.
     @discardableResult
     func run(config: LoopEngineConfig, faultsRoot: URL, gitRoot: URL) async -> LoopEngineStatus? {
-        guard !running else { return nil }
-        let rootKey = gitRoot.standardizedFileURL.path
-        guard !Self.activeRoots.contains(rootKey) else { return nil }
+        guard !running else {
+            appendLog(.warn, "Loop not started · this runner instance is already running")
+            return nil
+        }
+        // Resolve symlinks (not just `standardizedFileURL`, which leaves
+        // symlinks like macOS's `/tmp` → `/private/tmp` alias untouched) so
+        // two different-looking paths to the SAME actual directory can't
+        // both be admitted as "different" roots and race each other.
+        let rootKey = gitRoot.resolvingSymlinksInPath().path
+        guard !Self.activeRoots.contains(rootKey) else {
+            appendLog(.warn, "Loop not started · a run is already in progress for this repo")
+            return nil
+        }
         Self.activeRoots.insert(rootKey)
         running = true
         status = nil
@@ -96,6 +110,7 @@ final class LoopEngineRunner: ObservableObject {
                 return rejected
             }
             guard approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: command) else {
+                appendLog(.warn, "  [\(stage.name)] needs approval: \(command)")
                 let rejected = LoopEngineStatus.needsApproval(stageName: stage.name)
                 status = rejected
                 appendLog(.error, "Loop finished · \(describe(rejected))")
@@ -111,6 +126,16 @@ final class LoopEngineRunner: ObservableObject {
         var failureState: [String: (hash: String, count: Int)] = [:]
 
         iterationLoop: while iteration < config.maxIterations {
+            // `RegressionSweepRunning.sweepPassed` is fail-closed and
+            // returns `false` on cancellation rather than throwing, so a
+            // cancelled regression-sweep-only run would otherwise just
+            // burn every remaining iteration as ordinary failures and
+            // report `.givenUp(.maxIterations)` — checking here catches
+            // that path too, not just the shell-command one below.
+            if Task.isCancelled {
+                status = .aborted
+                break iterationLoop
+            }
             iteration += 1
             appendLog(.info, "Iteration \(iteration)/\(config.maxIterations)")
 
@@ -182,6 +207,9 @@ final class LoopEngineRunner: ObservableObject {
                             try await stageRepairer.repair(
                                 stageName: stage.name, command: command,
                                 failureOutput: outcome.output, repoRoot: gitRoot)
+                        } catch is CancellationError {
+                            status = .aborted
+                            break iterationLoop
                         } catch {
                             status = .error(error.localizedDescription)
                             appendLog(.error, "  [\(stage.name)] repair error: \(error.localizedDescription)")
@@ -218,15 +246,28 @@ final class LoopEngineRunner: ObservableObject {
         return command
     }
 
-    /// Hashes failure output after stripping digit runs, so elapsed-time
-    /// noise (e.g. `swift test`'s `"Executed 5 tests ... in 0.003 (0.005)
-    /// seconds"`, or PIDs/timestamps in other tools' output) doesn't make
-    /// an otherwise-identical failure register as "new" every iteration
-    /// and silently defeat `consecutiveFailureStop`. Not a perfect
-    /// normalization — just enough to neutralize the most common source
-    /// of false negatives.
+    /// Hashes failure output after stripping duration-shaped and hex
+    /// tokens, so elapsed-time noise (e.g. `swift test`'s `"Executed 5
+    /// tests ... in 0.003 (0.005) seconds"`) doesn't make an otherwise-
+    /// identical failure register as "new" every iteration and silently
+    /// defeat `consecutiveFailureStop`.
+    ///
+    /// Deliberately NOT a blanket "strip every digit" — that would also
+    /// erase the failure COUNT itself (`"9 tests, 3 failures"` vs `"9
+    /// tests, 1 failure"` is a real, shrinking-toward-fixed difference,
+    /// not noise), line numbers (`Foo.swift:42` vs `:118`), and assertion
+    /// values (`("3")` vs `("7")`) — all of which must keep hashing
+    /// differently so genuine progress or a genuinely different failure
+    /// is never mistaken for a repeat. Only three narrow, unambiguously
+    /// noisy shapes are normalized: decimal durations, unit-suffixed
+    /// durations, and hex addresses/ids.
     private static func hash(_ s: String) -> String {
-        let normalized = s.replacingOccurrences(of: #"[0-9]+"#, with: "#", options: .regularExpression)
+        var normalized = s.replacingOccurrences(
+            of: #"\d+\.\d+"#, with: "#", options: .regularExpression)
+        normalized = normalized.replacingOccurrences(
+            of: #"\b\d+\s*(ms|µs|ns|s|sec|seconds?)\b"#, with: "#", options: .regularExpression)
+        normalized = normalized.replacingOccurrences(
+            of: #"0x[0-9a-fA-F]+"#, with: "#", options: .regularExpression)
         let digest = SHA256.hash(data: Data(normalized.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
