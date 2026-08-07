@@ -129,6 +129,14 @@ final class LoopEngineRunner: ObservableObject {
         // (or, pre-normalization, identically-shaped) hash.
         var failureState: [String: (hash: String, count: Int)] = [:]
 
+        // Regression-stall tracking: the regressed count from the previous
+        // iteration, and how many consecutive iterations it has failed to
+        // decrease. Mirrors the shell stage's per-stage `failureState` but
+        // for the single regression stage (count starts at 1 on first
+        // failure, same as the shell path).
+        var lastRegressed: Int? = nil
+        var regressionStallCount = 0
+
         iterationLoop: while iteration < config.maxIterations {
             // `RegressionSweepRunning.sweepPassed` is fail-closed and
             // returns `false` on cancellation rather than throwing, so a
@@ -148,10 +156,24 @@ final class LoopEngineRunner: ObservableObject {
                 case .regressionSweep:
                     let outcome = await regressionSweep.sweep(
                         faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: true)
-                    let passed = outcome.passed
                     appendLog(outcome.passed ? .info : .warn,
                               "  [\(stage.name)] \(Self.regressionLine(outcome))")
-                    if !passed {
+                    if outcome.passed {
+                        // A pass restarts the stall watch so a later failure
+                        // in the same run counts from scratch.
+                        lastRegressed = nil
+                        regressionStallCount = 0
+                    } else {
+                        if let prev = lastRegressed, outcome.regressed >= prev {
+                            regressionStallCount += 1
+                        } else {
+                            regressionStallCount = 1
+                        }
+                        lastRegressed = outcome.regressed
+                        if regressionStallCount >= config.consecutiveFailureStop {
+                            status = .givenUp(reason: .regressionStalled)
+                            break iterationLoop
+                        }
                         if iteration >= config.maxIterations {
                             status = .givenUp(reason: .maxIterations)
                             break iterationLoop

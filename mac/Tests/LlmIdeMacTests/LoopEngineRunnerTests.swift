@@ -246,6 +246,30 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertTrue(regressionLines.contains { $0.text.contains("of 1") })
     }
 
+    func testRegressionStallGivesUpBeforeMaxIterations() async {
+        let repairer = StubRepairer()
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        // The stub always reports regressed == 1 (never decreases), so with
+        // consecutiveFailureStop: 2 the run should stall before maxIterations.
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil, order: 0)
+        ], maxIterations: 10, consecutiveFailureStop: 2)
+        let runner = LoopEngineRunner(
+            verifier: verifier,
+            stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: false),
+            approvals: makeApprovals()
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .givenUp(reason: .regressionStalled))
+        XCTAssertEqual(runner.status, .givenUp(reason: .regressionStalled))
+        // Iteration 1 sets the baseline (count 1); iteration 2 reaches
+        // consecutiveFailureStop → stalls. Mirrors the shell stage's
+        // testConsecutiveIdenticalFailuresGivesUpBeforeMaxIterations.
+        XCTAssertEqual(runner.iteration, 2)
+        XCTAssertEqual(repairer.repairCount, 0)
+    }
+
     // MARK: - Fix 1: process-wide concurrency guard
 
     func testConcurrentRunsOnSameGitRootAreRejected() async {
