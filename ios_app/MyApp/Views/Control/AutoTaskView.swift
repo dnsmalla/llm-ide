@@ -453,6 +453,7 @@ struct AutoTaskView: View {
         case "generateDoc":       return "wand.and.stars"
         case "updateIssues":      return "checklist"
         case "updatePlanStatus":  return "chart.bar.doc.horizontal"
+        case "loopEngineering":   return "repeat.circle"
         default:                  return "bolt.fill"
         }
     }
