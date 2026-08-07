@@ -36,4 +36,18 @@ final class VerifyApprovalStoreLoopStageTests: XCTestCase {
         store.approveStage(repo: repo, stageId: "t1", command: "swift test")
         XCTAssertFalse(store.isStageApproved(repo: repo, stageId: "t1", command: "swift test --parallel"))
     }
+
+    func testStageApprovalDoesNotLeakIntoFaultVerifyNamespace() {
+        let store = VerifyApprovalStore(defaults: suite)
+        let repo = URL(fileURLWithPath: "/tmp/some-repo")
+        store.approveStage(repo: repo, stageId: "t1", command: "swift test")
+        XCTAssertFalse(store.isApproved(repo: repo, faultFile: "t1", command: "swift test"))
+    }
+
+    func testFaultVerifyApprovalDoesNotLeakIntoStageNamespace() {
+        let store = VerifyApprovalStore(defaults: suite)
+        let repo = URL(fileURLWithPath: "/tmp/some-repo")
+        store.approve(repo: repo, faultFile: "t1", command: "swift test")
+        XCTAssertFalse(store.isStageApproved(repo: repo, stageId: "t1", command: "swift test"))
+    }
 }

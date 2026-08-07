@@ -33,6 +33,11 @@ final class VerifyApprovalStore {
         isApproved(repo: repo, faultFile: "loopstage:\(stageId)", command: command)
     }
 
+    /// Call this ONLY from an explicit user-approval UI action that displayed
+    /// the command string first (mirrors how fault-verify `approve` is only
+    /// ever called from RegressionView's "Approve & enable" button). The
+    /// LoopEngineRunner that later consumes `isStageApproved` must never call
+    /// this itself — that would make the gate a no-op.
     func approveStage(repo: URL, stageId: String, command: String) {
         approve(repo: repo, faultFile: "loopstage:\(stageId)", command: command)
     }
