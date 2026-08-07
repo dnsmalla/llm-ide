@@ -22,9 +22,10 @@ enum LoopStageDetector {
             return "swift test"
         }
 
-        if let packageJSON = try? String(
-            contentsOf: gitRoot.appendingPathComponent("package.json"), encoding: .utf8
-        ), packageJSON.contains("\"test\"") {
+        if let data = try? Data(contentsOf: gitRoot.appendingPathComponent("package.json")),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let scripts = obj["scripts"] as? [String: Any],
+           scripts["test"] != nil {
             return "npm test"
         }
 
