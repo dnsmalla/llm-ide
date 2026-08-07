@@ -57,8 +57,19 @@ final class LoopEngineRunnerTests: XCTestCase {
 
     private final class StubRegressionSweep: RegressionSweepRunning {
         var alwaysPasses: Bool
-        init(alwaysPasses: Bool) { self.alwaysPasses = alwaysPasses }
-        func sweepPassed(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool) async -> Bool { alwaysPasses }
+        /// Invoked synchronously on every `sweepPassed` call, before
+        /// returning `alwaysPasses`. Lets a test inject a side effect
+        /// (e.g. cancelling the enclosing `Task`) at the exact moment
+        /// the runner is mid-stage, rather than only before/after a run.
+        var onSweep: (() -> Void)?
+        init(alwaysPasses: Bool, onSweep: (() -> Void)? = nil) {
+            self.alwaysPasses = alwaysPasses
+            self.onSweep = onSweep
+        }
+        func sweepPassed(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool) async -> Bool {
+            onSweep?()
+            return alwaysPasses
+        }
     }
 
     private final class ThrowingRepairer: LoopStageRepairer {
@@ -304,6 +315,41 @@ final class LoopEngineRunnerTests: XCTestCase {
         )
         let task = Task { await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot) }
         task.cancel()
+        let result = await task.value
+        XCTAssertEqual(result, .aborted)
+        XCTAssertEqual(runner.status, .aborted)
+    }
+
+    /// The `Task.isCancelled` check at the top of the iteration loop only
+    /// catches cancellation that arrives BETWEEN iterations. With
+    /// `maxIterations: 1`, that first (and only) iteration's own
+    /// `.givenUp(.maxIterations)` give-up path fires from INSIDE the
+    /// loop body without ever looping back to that check — so a
+    /// cancellation that races in mid-iteration (here, triggered by the
+    /// sweep stub itself, simulating cancellation arriving while the
+    /// regression sweep is running) must still be caught by the
+    /// pre-finalization check right before `finalStatus` is computed.
+    /// Unlike `testCancelledRegressionSweepOnlyRunMapsToAborted` (which
+    /// cancels BEFORE the loop starts, iteration == 0), this cancels
+    /// AFTER the top-of-loop check already passed.
+    func testCancellationDuringFinalIterationOverridesGivenUp() async {
+        let repairer = StubRepairer()
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil, order: 0)
+        ], maxIterations: 1, consecutiveFailureStop: 5)
+
+        var runningTask: Task<LoopEngineStatus?, Never>?
+        let regressionSweep = StubRegressionSweep(alwaysPasses: false, onSweep: {
+            runningTask?.cancel()
+        })
+        let runner = LoopEngineRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: regressionSweep,
+            approvals: makeApprovals()
+        )
+        let task = Task { await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot) }
+        runningTask = task
         let result = await task.value
         XCTAssertEqual(result, .aborted)
         XCTAssertEqual(runner.status, .aborted)

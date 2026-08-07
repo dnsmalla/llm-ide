@@ -76,10 +76,14 @@ final class LoopEngineRunner: ObservableObject {
             appendLog(.warn, "Loop not started · this runner instance is already running")
             return nil
         }
-        // Resolve symlinks (not just `standardizedFileURL`, which leaves
-        // symlinks like macOS's `/tmp` → `/private/tmp` alias untouched) so
-        // two different-looking paths to the SAME actual directory can't
-        // both be admitted as "different" roots and race each other.
+        // Resolve symlinks (not just `standardizedFileURL`, which only
+        // normalizes path components like "." and ".." — it does NOT
+        // resolve symlinks that exist on disk, e.g. a symlinked worktree,
+        // or collapse APFS case-insensitivity/firmlink aliasing) so two
+        // different-looking paths to the SAME actual directory can't both
+        // be admitted as "different" roots and race each other. This only
+        // helps for paths that actually exist; two non-existent paths can
+        // still alias, but a real `gitRoot` always exists on disk.
         let rootKey = gitRoot.resolvingSymlinksInPath().path
         guard !Self.activeRoots.contains(rootKey) else {
             appendLog(.warn, "Loop not started · a run is already in progress for this repo")
@@ -226,6 +230,16 @@ final class LoopEngineRunner: ObservableObject {
             }
         }
 
+        // The `Task.isCancelled` check at the top of the loop only catches
+        // cancellation that happens BETWEEN iterations — a give-up path
+        // (`.givenUp(.maxIterations)` or `.repeatedFailure`) reached
+        // during the FINAL iteration never loops back to that check, so a
+        // cancellation that raced with the last iteration would otherwise
+        // still report a give-up instead of `.aborted`. Check once more
+        // here so cancellation always wins over a give-up verdict.
+        if Task.isCancelled, status != .success {
+            status = .aborted
+        }
         let finalStatus = status ?? .givenUp(reason: .maxIterations)
         status = finalStatus
         appendLog(logLevel(for: finalStatus), "Loop finished · \(describe(finalStatus))")
@@ -255,12 +269,18 @@ final class LoopEngineRunner: ObservableObject {
     /// Deliberately NOT a blanket "strip every digit" — that would also
     /// erase the failure COUNT itself (`"9 tests, 3 failures"` vs `"9
     /// tests, 1 failure"` is a real, shrinking-toward-fixed difference,
-    /// not noise), line numbers (`Foo.swift:42` vs `:118`), and assertion
-    /// values (`("3")` vs `("7")`) — all of which must keep hashing
-    /// differently so genuine progress or a genuinely different failure
-    /// is never mistaken for a repeat. Only three narrow, unambiguously
-    /// noisy shapes are normalized: decimal durations, unit-suffixed
-    /// durations, and hex addresses/ids.
+    /// not noise), integer line numbers (`Foo.swift:42` vs `:118`), and
+    /// integer assertion values (`("3")` vs `("7")`) — those must keep
+    /// hashing differently so genuine progress or a genuinely different
+    /// failure is never mistaken for a repeat. Only three narrow,
+    /// unambiguously noisy shapes are normalized: decimal durations,
+    /// unit-suffixed durations, and hex addresses/ids.
+    ///
+    /// This is an accepted tradeoff, not a fully solved problem: a
+    /// FLOAT or hex assertion value (e.g. `"expected 1.5 got 2.5"` vs
+    /// `"expected 1.5 got 9.75"`) still collapses to the same hash,
+    /// since these regexes can't distinguish "a duration" from "a float
+    /// assertion value" without more context than a bare string offers.
     private static func hash(_ s: String) -> String {
         var normalized = s.replacingOccurrences(
             of: #"\d+\.\d+"#, with: "#", options: .regularExpression)
