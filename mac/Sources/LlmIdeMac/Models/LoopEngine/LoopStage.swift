@@ -9,6 +9,7 @@ struct LoopStage: Identifiable, Codable, Equatable {
     enum Kind: String, Codable {
         case regressionSweep
         case shellCommand
+        case skill
     }
 
     var id: String = UUID().uuidString
@@ -17,4 +18,12 @@ struct LoopStage: Identifiable, Codable, Equatable {
     /// nil for `.regressionSweep`; required for `.shellCommand`.
     var command: String?
     var order: Int
+    /// `.skill` only — the central-skill id ("<family>/<dir>") the server resolves
+    /// to its SKILL.md and frames as a trusted instruction via /code-assist.
+    var skillId: String? = nil
+    /// `.skill` only — optional Library path the skill is scoped to (included in
+    /// the agent message). Phase 3 may attach its content as a CodeAttachment.
+    var targetPath: String? = nil
+    /// `.skill` only — optional task text; empty → a built-in default message.
+    var prompt: String? = nil
 }

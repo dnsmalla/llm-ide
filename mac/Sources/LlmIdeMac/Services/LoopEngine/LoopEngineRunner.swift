@@ -245,6 +245,12 @@ final class LoopEngineRunner: ObservableObject {
                         }
                         continue iterationLoop
                     }
+
+                case .skill:
+                    // TODO: Task 2 implements skill execution via LoopSkillExecuting
+                    appendLog(.error, "  [\(stage.name)] skill stages not yet implemented")
+                    status = .error("Skill execution not implemented")
+                    break iterationLoop
                 }
             }
 
