@@ -14,6 +14,11 @@ struct LoopEngineConfig: Codable, Equatable {
         "loopEngineConfig_\(projectId)"
     }
 
+    /// - Parameter projectId: Must be the stable `Project.id`
+    ///   (`mac/Sources/LlmIdeMac/Models/Project.swift:6`) — e.g.
+    ///   `projectStore.activeProject?.bundle.id` — never a filesystem path
+    ///   or a remote-repo id. Mixing identifier kinds silently splits one
+    ///   project's config across multiple UserDefaults keys.
     static func load(for projectId: String, defaults: UserDefaults = .standard) -> LoopEngineConfig? {
         guard let data = defaults.data(forKey: key(for: projectId)),
               let config = try? JSONDecoder().decode(LoopEngineConfig.self, from: data)
@@ -21,6 +26,11 @@ struct LoopEngineConfig: Codable, Equatable {
         return config
     }
 
+    /// - Parameter projectId: Must be the stable `Project.id`
+    ///   (`mac/Sources/LlmIdeMac/Models/Project.swift:6`) — e.g.
+    ///   `projectStore.activeProject?.bundle.id` — never a filesystem path
+    ///   or a remote-repo id. Mixing identifier kinds silently splits one
+    ///   project's config across multiple UserDefaults keys.
     func save(for projectId: String, defaults: UserDefaults = .standard) {
         guard let data = try? JSONEncoder().encode(self) else { return }
         defaults.set(data, forKey: Self.key(for: projectId))

@@ -36,6 +36,13 @@ final class LoopEngineConfigTests: XCTestCase {
         let a = LoopEngineConfig(stages: [], maxIterations: 5, consecutiveFailureStop: 2)
         a.save(for: "proj-a", defaults: suite)
         XCTAssertNil(LoopEngineConfig.load(for: "proj-b", defaults: suite))
+        XCTAssertEqual(LoopEngineConfig.load(for: "proj-a", defaults: suite), a)
+    }
+
+    func testUserDefaultsKeyIsNamespacedByProjectId() {
+        let config = LoopEngineConfig(stages: [])
+        config.save(for: "abc-123", defaults: suite)
+        XCTAssertNotNil(suite.data(forKey: "loopEngineConfig_abc-123"))
     }
 
     func testDefaultsAreFiveAndTwo() {
