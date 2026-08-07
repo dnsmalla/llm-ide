@@ -3,7 +3,8 @@ import Foundation
 // Split out of AutoCodeUpdateService.swift (which had grown to the largest
 // file in the app) — the 7 built-in "pipeline" task bodies (everything that
 // isn't one of the 5 prompt-based tasks routed through runCLI(prompt:...) in
-// +CLI.swift). Called from runTaskBody(_:resolved:logDir:) in the main file.
+// +CLI.swift). Called from runTaskBody(_:resolved:projectId:logDir:) in the
+// main file.
 // These methods were `private`; Swift's `private` is file-scoped, so moving
 // them here without widening would make them uncallable from the main
 // file's runTaskBody — see the access-control note at the top of
@@ -486,7 +487,17 @@ extension AutoCodeUpdateService {
     /// Loop Engineering sweep: chains Regression -> Test -> any further
     /// configured stages into one multi-iteration loop with auto-fix retry.
     /// Additive to `runRegressionSweep` — does not change its behavior.
-    func runLoopEngineeringSweep(projectRoot: String, gitRoot: String) async {
+    ///
+    /// - Parameter projectId: The stable llm-ide `Project.id`, resolved by
+    ///   the CALLER at the same time as `resolved` (see `run()`'s
+    ///   `projectIdAtResolveTime` and `runOne(_:)`). Deliberately NOT
+    ///   re-derived here from `projectStore?.activeProject?.bundle.id` —
+    ///   `run()` resolves `resolved` once up front then runs several task
+    ///   bodies in sequence with awaits between them, so reading the active
+    ///   project fresh at sweep time could pair a DIFFERENT project's
+    ///   `LoopEngineConfig` with this call's `gitRoot` if the user switched
+    ///   projects mid-batch.
+    func runLoopEngineeringSweep(projectRoot: String, gitRoot: String, projectId: String?) async {
         guard let api else {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering skipped — no API client wired."
             return
@@ -507,19 +518,35 @@ extension AutoCodeUpdateService {
         // `attemptResolveBackendAndProject()` in
         // AutoCodeUpdateService+BackendResolution.swift). Using the wrong
         // key here would silently split one project's config in two.
-        guard let projectId = projectStore?.activeProject?.bundle.id else {
+        guard let projectId else {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering skipped — no active project."
             return
         }
         let faultsRoot = URL(fileURLWithPath: projectRoot, isDirectory: true)
         let gitRootURL = URL(fileURLWithPath: gitRoot, isDirectory: true)
 
-        let projectConfig = LoopEngineConfig.load(for: projectId)
-            ?? {
-                let detected = LoopEngineConfig(stages: LoopStageDetector.detectDefaultStages(gitRoot: gitRootURL))
+        // Auto-detection only ever PERSISTS when it found more than the bare
+        // Regression stage. `detectDefaultStages` always returns at least
+        // Regression, so an all-Regression detection is indistinguishable
+        // from "the tree doesn't have test tooling YET" (clone still
+        // populating, or a genuinely toolless repo) — saving that as the
+        // permanent config would silently and irreversibly turn off the Test
+        // stage for every future run. Using it for just THIS run without
+        // saving lets a later run (once tooling appears, or once the Task 11
+        // settings UI runs its own one-time auto-detect per
+        // `LoopStageDetector`'s doc comment) get a fresh detection attempt
+        // instead of being stuck on a stale one-stage config.
+        let projectConfig: LoopEngineConfig
+        if let saved = LoopEngineConfig.load(for: projectId) {
+            projectConfig = saved
+        } else {
+            let detectedStages = LoopStageDetector.detectDefaultStages(gitRoot: gitRootURL)
+            let detected = LoopEngineConfig(stages: detectedStages)
+            if detectedStages.count > 1 {
                 detected.save(for: projectId)
-                return detected
-            }()
+            }
+            projectConfig = detected
+        }
 
         let prompter = CodeAssistPrompter(api: api, agent: config.activeCLI)
         let judge = CodeAssistJudge(api: api)
@@ -527,6 +554,9 @@ extension AutoCodeUpdateService {
         let regressionRunner = RegressionRunner(prompter: prompter, judge: judge,
                                                 verifier: ShellFaultVerifier(), repairer: repairer,
                                                 verifyTimeout: autoTaskSettings.regressionVerifyTimeout, config: config)
+        // Mirrors runRegressionSweep: without this, the inner Regression
+        // stage's per-fault activity reporting is silently dropped.
+        regressionRunner.activity = activity
         let runner = LoopEngineRunner(
             stageRepairer: AgentLoopStageRepairer(api: api),
             regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner)
@@ -551,7 +581,10 @@ extension AutoCodeUpdateService {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering error: \(message)"
             logStore.append(.loopEngineering, "Error: \(message)", level: .error)
         case .aborted:
-            break
+            // `TaskLogStore.Level` has no `.warn` case (only `.info`/`.error`);
+            // `.error` matches how `LoopEngineRunner.logLevel(for:)` itself
+            // treats every non-`.success` terminal status, aborted included.
+            logStore.append(.loopEngineering, "Run aborted.", level: .error)
         case nil:
             // Rejected — a run is already in progress for this repo elsewhere
             // (e.g. the user started one from the chat panel or the Loop
@@ -561,19 +594,9 @@ extension AutoCodeUpdateService {
         }
         activity?.report(
             kind: .loopEngineeringDone,
-            title: "Loop Engineering complete — \(result.map(describe) ?? "unknown")",
+            title: "Loop Engineering complete — \(result.map(\.summary) ?? "unknown")",
             detail: ["iterations": runner.iteration]
         )
-    }
-
-    private func describe(_ status: LoopEngineStatus) -> String {
-        switch status {
-        case .success: return "success"
-        case .givenUp: return "gave up"
-        case .needsApproval: return "needs approval"
-        case .error: return "error"
-        case .aborted: return "aborted"
-        }
     }
 
     /// Refreshes plan task statuses from external outcome trackers (GitHub/GitLab/Linear/Backlog).

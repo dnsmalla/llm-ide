@@ -322,9 +322,9 @@ final class AutoCodeUpdateService: ObservableObject {
                 taskErrors[task.rawValue] = reason
                 return
             }
-            await runTaskBody(task, resolved: resolved, logDir: logDir)
+            await runTaskBody(task, resolved: resolved, projectId: projectStore?.activeProject?.bundle.id, logDir: logDir)
         } else {
-            await runTaskBody(task, resolved: nil, logDir: logDir)
+            await runTaskBody(task, resolved: nil, projectId: projectStore?.activeProject?.bundle.id, logDir: logDir)
         }
         statusMessage = "\(task.label) — done"
     }
@@ -332,7 +332,15 @@ final class AutoCodeUpdateService: ObservableObject {
     /// Run a single task body. Called by the orchestrator `run()` (enabled
     /// tasks) and by `runOne(_:)` (per-task manual run). Each case logs a start
     /// marker and routes its output into `logStore[task]`.
-    private func runTaskBody(_ task: AutoTask, resolved: ResolvedRepo?, logDir: URL) async {
+    ///
+    /// - Parameter projectId: The active llm-ide `Project.id`, resolved by
+    ///   the CALLER at the same time as `resolved` — see `.loopEngineering`'s
+    ///   use below and the doc comment on `runLoopEngineeringSweep`. Not
+    ///   re-derived here so a project switch mid-batch (`run()`'s
+    ///   `enabledOrder` loop runs several tasks in sequence with awaits
+    ///   between them) can't pair a later task with a DIFFERENT project's id
+    ///   than the one `resolved` was computed against.
+    private func runTaskBody(_ task: AutoTask, resolved: ResolvedRepo?, projectId: String?, logDir: URL) async {
         logStore.append(task, "Running \(task.label)…")
         currentTask = task
         defer { currentTask = nil }
@@ -391,7 +399,7 @@ final class AutoCodeUpdateService: ObservableObject {
                 await runRegressionSweep(projectRoot: resolved.projectRoot, gitRoot: resolved.gitRoot)
             case .loopEngineering:
                 currentStep = "Running Loop Engineering"
-                await runLoopEngineeringSweep(projectRoot: resolved.projectRoot, gitRoot: resolved.gitRoot)
+                await runLoopEngineeringSweep(projectRoot: resolved.projectRoot, gitRoot: resolved.gitRoot, projectId: projectId)
             case .generateKnowledge:
                 currentStep = "Reviewing Knowledge"
                 reportKnowledge(projectRoot: resolved.projectRoot)
@@ -495,6 +503,12 @@ final class AutoCodeUpdateService: ObservableObject {
 
         let needsRepo = enabledOrder.contains { isTaskEnabled($0) && $0.requiresLinkedRepo }
         let resolved: ResolvedRepo? = needsRepo ? resolveBackendAndProject() : nil
+        // Captured once here, alongside `resolved` — NOT re-read inside each
+        // task body — so a project switch partway through this batch (every
+        // task below runs in sequence with awaits in between) can't pair a
+        // later task with a different project's id than `resolved` itself
+        // was resolved against. See `runTaskBody`'s `projectId` parameter.
+        let projectIdAtResolveTime = projectStore?.activeProject?.bundle.id
 
         if needsRepo && resolved == nil {
             let reason = lastResolveDiagnosis ?? "No linked repo — configure in GitLab or GitHub settings"
@@ -523,7 +537,7 @@ final class AutoCodeUpdateService: ObservableObject {
 
         for task in enabledOrder where isTaskEnabled(task) {
             if Task.isCancelled { break }
-            await runTaskBody(task, resolved: resolved, logDir: logDir)
+            await runTaskBody(task, resolved: resolved, projectId: projectIdAtResolveTime, logDir: logDir)
         }
 
         let parts: [String] = [

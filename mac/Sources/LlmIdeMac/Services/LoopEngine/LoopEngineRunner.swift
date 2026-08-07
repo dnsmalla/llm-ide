@@ -110,14 +110,14 @@ final class LoopEngineRunner: ObservableObject {
             guard let command = Self.validCommand(stage) else {
                 let rejected = LoopEngineStatus.error("Stage \"\(stage.name)\" has no command")
                 status = rejected
-                appendLog(.error, "Loop finished · \(describe(rejected))")
+                appendLog(.error, "Loop finished · \(rejected.summary)")
                 return rejected
             }
             guard approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: command) else {
                 appendLog(.warn, "  [\(stage.name)] needs approval: \(command)")
                 let rejected = LoopEngineStatus.needsApproval(stageName: stage.name)
                 status = rejected
-                appendLog(.error, "Loop finished · \(describe(rejected))")
+                appendLog(.error, "Loop finished · \(rejected.summary)")
                 return rejected
             }
         }
@@ -242,7 +242,7 @@ final class LoopEngineRunner: ObservableObject {
         }
         let finalStatus = status ?? .givenUp(reason: .maxIterations)
         status = finalStatus
-        appendLog(logLevel(for: finalStatus), "Loop finished · \(describe(finalStatus))")
+        appendLog(logLevel(for: finalStatus), "Loop finished · \(finalStatus.summary)")
         return finalStatus
     }
 
@@ -295,16 +295,5 @@ final class LoopEngineRunner: ObservableObject {
     private func logLevel(for status: LoopEngineStatus) -> LogLine.Level {
         if case .success = status { return .info }
         return .error
-    }
-
-    private func describe(_ status: LoopEngineStatus) -> String {
-        switch status {
-        case .success: return "success"
-        case .givenUp(.maxIterations): return "given up (max iterations)"
-        case .givenUp(.repeatedFailure): return "given up (repeated failure)"
-        case .needsApproval(let name): return "needs approval: \(name)"
-        case .error(let msg): return "error: \(msg)"
-        case .aborted: return "aborted"
-        }
     }
 }
