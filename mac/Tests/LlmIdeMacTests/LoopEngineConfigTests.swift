@@ -45,9 +45,9 @@ final class LoopEngineConfigTests: XCTestCase {
         XCTAssertNotNil(suite.data(forKey: "loopEngineConfig_abc-123"))
     }
 
-    func testDefaultsAreFiveAndTwo() {
+    func testDefaultsAreTenAndTwo() {
         let config = LoopEngineConfig(stages: [])
-        XCTAssertEqual(config.maxIterations, 5)
+        XCTAssertEqual(config.maxIterations, 10)
         XCTAssertEqual(config.consecutiveFailureStop, 2)
     }
 }

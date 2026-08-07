@@ -57,18 +57,41 @@ final class LoopEngineRunnerTests: XCTestCase {
 
     private final class StubRegressionSweep: RegressionSweepRunning {
         var alwaysPasses: Bool
-        /// Invoked synchronously on every `sweepPassed` call, before
-        /// returning `alwaysPasses`. Lets a test inject a side effect
-        /// (e.g. cancelling the enclosing `Task`) at the exact moment
-        /// the runner is mid-stage, rather than only before/after a run.
+        /// Invoked synchronously on every `sweep` call, before
+        /// returning. Lets a test inject a side effect (e.g. cancelling
+        /// the enclosing `Task`) at the exact moment the runner is
+        /// mid-stage, rather than only before/after a run.
         var onSweep: (() -> Void)?
         init(alwaysPasses: Bool, onSweep: (() -> Void)? = nil) {
             self.alwaysPasses = alwaysPasses
             self.onSweep = onSweep
         }
-        func sweepPassed(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool) async -> Bool {
+        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool) async -> SweepOutcome {
             onSweep?()
             return alwaysPasses
+                ? SweepOutcome(passed: true, total: 0, regressed: 0, unchanged: 0,
+                               repaired: 0, repairFailed: 0, needsApproval: 0,
+                               failed: 0, pending: 0)
+                : SweepOutcome(passed: false, total: 1, regressed: 1, unchanged: 0,
+                               repaired: 0, repairFailed: 0, needsApproval: 0,
+                               failed: 0, pending: 0)
+        }
+    }
+
+    /// Returns a failing `SweepOutcome` whose `regressed` count strictly
+    /// decreases on successive calls (5, 4, 3, 2, 1, 1, …), so every
+    /// iteration after the first hits the stall logic's decrease-reset
+    /// (`outcome.regressed < prev`) branch instead of accumulating the
+    /// stall count. The count floors at 1 once exhausted so a run that
+    /// outlasts the sequence still sees a well-formed failing outcome.
+    private final class DecreasingRegressionSweep: RegressionSweepRunning {
+        private var callCount = 0
+        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool) async -> SweepOutcome {
+            defer { callCount += 1 }
+            let regressed = max(1, 5 - callCount)
+            return SweepOutcome(passed: false, total: regressed, regressed: regressed, unchanged: 0,
+                                 repaired: 0, repairFailed: 0, needsApproval: 0,
+                                 failed: 0, pending: 0)
         }
     }
 
@@ -219,6 +242,87 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertTrue(verifier.calls.isEmpty)
     }
 
+    func testRegressionBranchLogsRegressedAndPassedCounts() async {
+        let repairer = StubRepairer()
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil, order: 0)
+        ], maxIterations: 1, consecutiveFailureStop: 5)
+        let runner = LoopEngineRunner(
+            verifier: verifier,
+            stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: false),
+            approvals: makeApprovals()
+        )
+        _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        // The stub's failing outcome is total:1, regressed:1 → log line must
+        // surface "1 regressed" and "of 1", not a bare "failed".
+        let regressionLines = runner.log.filter { $0.text.contains("[Regression]") }
+        XCTAssertFalse(regressionLines.isEmpty)
+        XCTAssertTrue(regressionLines.contains { $0.text.contains("1 regressed") })
+        XCTAssertTrue(regressionLines.contains { $0.text.contains("of 1") })
+    }
+
+    func testRegressionStallGivesUpBeforeMaxIterations() async {
+        let repairer = StubRepairer()
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        // The stub always reports regressed == 1 (never decreases), so with
+        // consecutiveFailureStop: 2 the run should stall before maxIterations.
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil, order: 0)
+        ], maxIterations: 10, consecutiveFailureStop: 2)
+        let runner = LoopEngineRunner(
+            verifier: verifier,
+            stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: false),
+            approvals: makeApprovals()
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .givenUp(reason: .regressionStalled))
+        XCTAssertEqual(runner.status, .givenUp(reason: .regressionStalled))
+        // Iteration 1 sets the baseline (count 1); iteration 2 reaches
+        // consecutiveFailureStop → stalls. Mirrors the shell stage's
+        // testConsecutiveIdenticalFailuresGivesUpBeforeMaxIterations.
+        XCTAssertEqual(runner.iteration, 2)
+        XCTAssertEqual(repairer.repairCount, 0)
+    }
+
+    /// A regressed count that DECREASES between iterations must reset the
+    /// regression stall count to 1 (the `else` branch where
+    /// `outcome.regressed < prev`), so the run keeps looping instead of
+    /// giving up with `.regressionStalled`. Mirrors
+    /// `testRegressionStallGivesUpBeforeMaxIterations` in shape, but uses
+    /// `DecreasingRegressionSweep` (5→4→3→2→1) instead of the constant-1
+    /// stub: that test pins regressed at 1 so it never decreases and
+    /// stalls at `consecutiveFailureStop`; this one strictly decreases
+    /// every call, exercising the decrease-reset path and proving the run
+    /// only stops at `maxIterations` — never `.regressionStalled`.
+    func testRegressionStallResetsWhenRegressedCountDecreases() async {
+        let repairer = StubRepairer()
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil, order: 0)
+        ], maxIterations: 5, consecutiveFailureStop: 2)
+        let runner = LoopEngineRunner(
+            verifier: verifier,
+            stageRepairer: repairer,
+            regressionSweep: DecreasingRegressionSweep(),
+            approvals: makeApprovals()
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        // The regressed count decreases every iteration (5→4→3→2→1), so
+        // the stall count is reset to 1 each time and never reaches
+        // `consecutiveFailureStop` (2). The run must therefore exhaust
+        // `maxIterations` rather than give up with `.regressionStalled`.
+        XCTAssertEqual(result, .givenUp(reason: .maxIterations))
+        XCTAssertEqual(runner.status, .givenUp(reason: .maxIterations))
+        XCTAssertEqual(runner.iteration, 5)
+        // The key assertion: a decreasing regressed count does NOT
+        // trigger `.regressionStalled` — progress keeps the run looping.
+        XCTAssertNotEqual(result, .givenUp(reason: .regressionStalled))
+        XCTAssertEqual(repairer.repairCount, 0)
+    }
+
     // MARK: - Fix 1: process-wide concurrency guard
 
     func testConcurrentRunsOnSameGitRootAreRejected() async {
@@ -295,7 +399,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(repairer.repairCount, 0)
     }
 
-    /// `RegressionSweepRunning.sweepPassed` is fail-closed and returns
+    /// `RegressionSweepRunning.sweep` is fail-closed and returns
     /// `false` on cancellation rather than throwing (per its Task 5
     /// contract), so a cancelled regression-sweep-only run would, without
     /// an explicit `Task.isCancelled` check in the iteration loop, just

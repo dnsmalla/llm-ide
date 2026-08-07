@@ -1,4 +1,4 @@
-// Loop Engineering — three-pane workspace parallel to RegressionView:
+// Loop Engineering — three-pane workspace (Stages / Detail / Log):
 //
 //   ┌────────────────┬────────────────────────────┬────────────────┐
 //   │ Stages         │ Detail                      │ Log            │
@@ -30,8 +30,8 @@ struct LoopEngineView: View {
 
     /// Owns the run — a `@StateObject` (not a locally-constructed value
     /// per run) so its `@Published log`/`running`/`iteration` actually
-    /// drive the log pane live while a run is in progress, matching
-    /// RegressionRunner's own `@StateObject` pattern in RegressionView.
+    /// drive the log pane live while a run is in progress, matching the
+    /// standard `@StateObject`-for-live-run-UI pattern.
     /// Building a fresh `LoopEngineRunner` inside `runLoop()` instead
     /// would mean SwiftUI never observes it, and the log pane would sit
     /// empty for the run's entire duration (up to `stageTimeout` per
@@ -48,7 +48,7 @@ struct LoopEngineView: View {
     private let approvals: VerifyApprovalStore
 
     @State private var stages: [LoopStage] = []
-    @State private var maxIterations: Int = 5
+    @State private var maxIterations: Int = 10
     @State private var consecutiveFailureStop: Int = 2
     @State private var selectedStageId: String?
     @State private var lastStatus: LoopEngineStatus?
@@ -58,7 +58,7 @@ struct LoopEngineView: View {
         self.api = api
         let approvals = VerifyApprovalStore()
         self.approvals = approvals
-        // Same transport/model tier RegressionView uses for its own
+        // Same transport/model tier the regression sweep uses for its own
         // prompter/judge/repairer — Loop Engineering's stage repair is a
         // multi-file code edit, so the full chat model is used, not the
         // sub-model tier (mirrors AgentLoopStageRepairer's own doc
@@ -366,8 +366,8 @@ struct LoopEngineView: View {
     private var activeProjectId: String? { projectStore.activeProject?.bundle.id }
 
     /// The two-root context (`projectRoot` for faults/index/memory, `gitRoot`
-    /// for the actual git working tree) — the single source of truth also
-    /// used by RegressionView. In the "clone-into-code" layout these differ
+    /// for the actual git working tree) — the single source of truth for
+    /// resolving the two roots. In the "clone-into-code" layout these differ
     /// (project root vs `code/<repo>`); using the project root for both, as
     /// this view previously did via `activeProject.localPath`, silently
     /// pointed shell-command stages and stage detection at the wrong tree.
@@ -418,7 +418,7 @@ struct LoopEngineView: View {
     /// nor a detectable git root.
     private func resetStagesToDefaults(stages newStages: [LoopStage] = []) {
         stages = newStages
-        maxIterations = 5
+        maxIterations = 10
         consecutiveFailureStop = 2
     }
 
@@ -432,8 +432,7 @@ struct LoopEngineView: View {
     private func runLoop() async {
         // `gitRoot` is `LoopEngineRunner.run`'s non-optional parameter, so a
         // run must not start until a real git working tree is resolved —
-        // mirrors RegressionView's own guard against running git-dependent
-        // operations with no working tree.
+        // guards against running git-dependent stages with no working tree.
         guard let projectId = activeProjectId,
               let context = workspaceContext,
               let gitRoot = context.gitRoot

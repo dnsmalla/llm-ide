@@ -4,6 +4,7 @@ enum LoopEngineStatus: Equatable {
     enum GivenUpReason: Equatable {
         case maxIterations
         case repeatedFailure
+        case regressionStalled
     }
 
     case success
@@ -24,6 +25,7 @@ extension LoopEngineStatus {
         case .success: return "success"
         case .givenUp(.maxIterations): return "given up (max iterations)"
         case .givenUp(.repeatedFailure): return "given up (repeated failure)"
+        case .givenUp(.regressionStalled): return "given up (regressions stopped shrinking)"
         case .needsApproval(let name): return "needs approval: \(name)"
         case .error(let msg): return "error: \(msg)"
         case .aborted: return "aborted"
