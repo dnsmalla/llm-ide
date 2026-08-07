@@ -149,7 +149,8 @@ final class LoopEngineRunner: ObservableObject {
                     let outcome = await regressionSweep.sweep(
                         faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: true)
                     let passed = outcome.passed
-                    appendLog(passed ? .info : .warn, "  [\(stage.name)] \(passed ? "passed" : "failed")")
+                    appendLog(outcome.passed ? .info : .warn,
+                              "  [\(stage.name)] \(Self.regressionLine(outcome))")
                     if !passed {
                         if iteration >= config.maxIterations {
                             status = .givenUp(reason: .maxIterations)
@@ -245,6 +246,17 @@ final class LoopEngineRunner: ObservableObject {
         status = finalStatus
         appendLog(logLevel(for: finalStatus), "Loop finished · \(finalStatus.summary)")
         return finalStatus
+    }
+
+    /// One-line, human-readable regression-sweep result for the run log:
+    /// either "passed — M of T" or "failed — R regressed / M passed of T".
+    /// M = faults that still hold (.unchanged + .repaired).
+    private static func regressionLine(_ outcome: SweepOutcome) -> String {
+        let passedCount = outcome.unchanged + outcome.repaired
+        if outcome.passed {
+            return "passed — \(passedCount) of \(outcome.total)"
+        }
+        return "failed — \(outcome.regressed) regressed / \(passedCount) passed of \(outcome.total)"
     }
 
     private func appendLog(_ level: LogLine.Level, _ text: String) {

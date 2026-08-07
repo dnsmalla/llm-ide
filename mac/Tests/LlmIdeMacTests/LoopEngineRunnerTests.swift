@@ -225,6 +225,27 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertTrue(verifier.calls.isEmpty)
     }
 
+    func testRegressionBranchLogsRegressedAndPassedCounts() async {
+        let repairer = StubRepairer()
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil, order: 0)
+        ], maxIterations: 1, consecutiveFailureStop: 5)
+        let runner = LoopEngineRunner(
+            verifier: verifier,
+            stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: false),
+            approvals: makeApprovals()
+        )
+        _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        // The stub's failing outcome is total:1, regressed:1 → log line must
+        // surface "1 regressed" and "of 1", not a bare "failed".
+        let regressionLines = runner.log.filter { $0.text.contains("[Regression]") }
+        XCTAssertFalse(regressionLines.isEmpty)
+        XCTAssertTrue(regressionLines.contains { $0.text.contains("1 regressed") })
+        XCTAssertTrue(regressionLines.contains { $0.text.contains("of 1") })
+    }
+
     // MARK: - Fix 1: process-wide concurrency guard
 
     func testConcurrentRunsOnSameGitRootAreRejected() async {
