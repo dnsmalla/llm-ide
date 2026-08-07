@@ -1786,12 +1786,21 @@ extension CodeAssistantPanel {
             }
         }
 
-        await runner.run(config: loopConfig, faultsRoot: gitRoot, gitRoot: gitRoot)
+        // run() returns LoopEngineStatus? — nil means rejected (a run is
+        // already in progress for this repo, instance- or process-wide).
+        // Task 6 already logs a warning line via appendLog() before
+        // returning nil, and the sink above is subscribed before this call,
+        // so that warning already reached the chat transcript through the
+        // log stream — but state the stop reason explicitly too, using the
+        // shared LoopEngineStatus.summary (added during Task 9's review;
+        // do not write a new local describe/switch function).
+        let result = await runner.run(config: loopConfig, faultsRoot: gitRoot, gitRoot: gitRoot)
         cancellable.cancel()
 
         if placeholderIndex < history.count {
-            let finalText = runner.log.map(\.text).joined(separator: "\n")
-            history[placeholderIndex].content = finalText
+            let logText = runner.log.map(\.text).joined(separator: "\n")
+            let resultLine = result.map { "\n\n**Result:** \($0.summary)" } ?? "\n\n**Result:** a run is already in progress for this repo"
+            history[placeholderIndex].content = logText + resultLine
         }
     }
 }
