@@ -155,6 +155,7 @@ struct ActivityRow: View {
         switch kind {
         case .knowledgeUpdated:     return "brain"
         case .regressionDone:       return "checkmark.seal"
+        case .loopEngineeringDone:  return "arrow.triangle.2.circlepath"
         case .issueCreated:         return "exclamationmark.bubble"
         case .dispatchIssueCreated: return "exclamationmark.bubble"
         case .commentAdded:         return "text.bubble"

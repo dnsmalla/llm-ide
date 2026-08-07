@@ -400,6 +400,7 @@ extension AutoCodeUpdateService {
         case .reviewDoc:         return autoTaskSettings.runReviewDoc
         case .reviewConflicts:   return autoTaskSettings.runReviewConflicts
         case .regression:        return autoTaskSettings.runRegression
+        case .loopEngineering:   return autoTaskSettings.runLoopEngineering
         case .generateKnowledge: return autoTaskSettings.runGenerateKnowledge
         case .generateDoc:       return autoTaskSettings.runGenerateDoc
         case .updateIssues:      return autoTaskSettings.runUpdateIssues
@@ -479,6 +480,99 @@ extension AutoCodeUpdateService {
         } else {
             taskErrors.removeValue(forKey: AutoTask.regression.rawValue)
             logStore.append(.regression, "\(total) faults re-verified — no regressions.")
+        }
+    }
+
+    /// Loop Engineering sweep: chains Regression -> Test -> any further
+    /// configured stages into one multi-iteration loop with auto-fix retry.
+    /// Additive to `runRegressionSweep` — does not change its behavior.
+    func runLoopEngineeringSweep(projectRoot: String, gitRoot: String) async {
+        guard let api else {
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering skipped — no API client wired."
+            return
+        }
+        guard !projectRoot.isEmpty else {
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering skipped — no project root resolved."
+            return
+        }
+        guard !gitRoot.isEmpty else {
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering skipped — no git working tree resolved."
+            return
+        }
+        // LoopEngineConfig is keyed by the stable llm-ide Project.id (see the
+        // contract documented on LoopEngineConfig.load/save in Task 1) — NOT
+        // `projectRoot` (a filesystem path) and NOT `resolved.projectId`
+        // (that field is actually the REMOTE repo id — a GitLab numeric id,
+        // "owner/name" for GitHub, or `linked.remoteId`; see
+        // `attemptResolveBackendAndProject()` in
+        // AutoCodeUpdateService+BackendResolution.swift). Using the wrong
+        // key here would silently split one project's config in two.
+        guard let projectId = projectStore?.activeProject?.bundle.id else {
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering skipped — no active project."
+            return
+        }
+        let faultsRoot = URL(fileURLWithPath: projectRoot, isDirectory: true)
+        let gitRootURL = URL(fileURLWithPath: gitRoot, isDirectory: true)
+
+        let projectConfig = LoopEngineConfig.load(for: projectId)
+            ?? {
+                let detected = LoopEngineConfig(stages: LoopStageDetector.detectDefaultStages(gitRoot: gitRootURL))
+                detected.save(for: projectId)
+                return detected
+            }()
+
+        let prompter = CodeAssistPrompter(api: api, agent: config.activeCLI)
+        let judge = CodeAssistJudge(api: api)
+        let repairer = AgentFaultRepairer(api: api)
+        let regressionRunner = RegressionRunner(prompter: prompter, judge: judge,
+                                                verifier: ShellFaultVerifier(), repairer: repairer,
+                                                verifyTimeout: autoTaskSettings.regressionVerifyTimeout, config: config)
+        let runner = LoopEngineRunner(
+            stageRepairer: AgentLoopStageRepairer(api: api),
+            regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner)
+        )
+        // run() returns LoopEngineStatus? — nil means this call was rejected
+        // (a run is already in progress for this repo, instance- or
+        // process-wide). Use the RETURN VALUE, not runner.status, which per
+        // its doc comment is only meaningful when run() returns non-nil.
+        let result = await runner.run(config: projectConfig, faultsRoot: faultsRoot, gitRoot: gitRootURL)
+
+        switch result {
+        case .success:
+            taskErrors.removeValue(forKey: AutoTask.loopEngineering.rawValue)
+            logStore.append(.loopEngineering, "Loop finished — all \(projectConfig.stages.count) stage(s) passed after \(runner.iteration) iteration(s).")
+        case .givenUp(let reason):
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering gave up (\(reason))."
+            logStore.append(.loopEngineering, "Gave up after \(runner.iteration) iteration(s): \(reason)", level: .error)
+        case .needsApproval(let stageName):
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering needs approval for stage \"\(stageName)\"."
+            logStore.append(.loopEngineering, "Stopped — stage \"\(stageName)\" needs approval in Loop Engineering settings.", level: .error)
+        case .error(let message):
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering error: \(message)"
+            logStore.append(.loopEngineering, "Error: \(message)", level: .error)
+        case .aborted:
+            break
+        case nil:
+            // Rejected — a run is already in progress for this repo elsewhere
+            // (e.g. the user started one from the chat panel or the Loop
+            // Engineering page). Leave any existing taskErrors entry as-is.
+            logStore.append(.loopEngineering, "Skipped — a Loop Engineering run is already in progress for this repo.")
+            return
+        }
+        activity?.report(
+            kind: .loopEngineeringDone,
+            title: "Loop Engineering complete — \(result.map(describe) ?? "unknown")",
+            detail: ["iterations": runner.iteration]
+        )
+    }
+
+    private func describe(_ status: LoopEngineStatus) -> String {
+        switch status {
+        case .success: return "success"
+        case .givenUp: return "gave up"
+        case .needsApproval: return "needs approval"
+        case .error: return "error"
+        case .aborted: return "aborted"
         }
     }
 

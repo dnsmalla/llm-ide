@@ -9,6 +9,7 @@ import os.log
 enum ActivityKind: String, CaseIterable {
     case knowledgeUpdated     = "knowledge_updated"
     case regressionDone       = "regression_done"
+    case loopEngineeringDone  = "loop_engineering_done"
     case issueCreated         = "issue_created"
     case commentAdded         = "comment_added"
     case dispatchIssueCreated = "dispatch_issue_created"
