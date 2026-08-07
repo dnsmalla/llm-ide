@@ -55,4 +55,34 @@ final class AutoCodeUpdateServiceLoopEngineeringTests: XCTestCase {
             projectId: nil)
         XCTAssertEqual(service.taskErrors[AutoTask.loopEngineering.rawValue], "Loop Engineering skipped — no active project.")
     }
+
+    /// Regression test for the false-green persistence bug: a tree with no
+    /// recognized test tooling (no Package.swift/package.json/Makefile/
+    /// pytest markers) makes `LoopStageDetector` yield the bare Regression
+    /// stage only, which must be used for THIS run but never saved — saving
+    /// it would permanently and silently disable the Test stage for every
+    /// future run. `defaults: suite` (an isolated UserDefaults suite,
+    /// threaded through `runLoopEngineeringSweep` for exactly this reason)
+    /// lets the persistence branch be asserted on directly instead of only
+    /// against the developer's real UserDefaults.
+    func testDoesNotPersistBareRegressionDetectionAsSavedConfig() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loop-eng-sweep-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let service = makeService()
+        let projectId = "test-project-\(UUID().uuidString)"
+
+        // Empty directory: no fault reports to re-verify (Regression sweep
+        // passes trivially) and no shell-command stage (none detected), so
+        // this completes without any network call.
+        await service.runLoopEngineeringSweep(
+            projectRoot: tempDir.path,
+            gitRoot: tempDir.path,
+            projectId: projectId,
+            defaults: suite)
+
+        XCTAssertNil(LoopEngineConfig.load(for: projectId, defaults: suite))
+    }
 }

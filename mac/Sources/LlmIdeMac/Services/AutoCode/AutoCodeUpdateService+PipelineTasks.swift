@@ -497,7 +497,13 @@ extension AutoCodeUpdateService {
     ///   project fresh at sweep time could pair a DIFFERENT project's
     ///   `LoopEngineConfig` with this call's `gitRoot` if the user switched
     ///   projects mid-batch.
-    func runLoopEngineeringSweep(projectRoot: String, gitRoot: String, projectId: String?) async {
+    /// - Parameter defaults: The `UserDefaults` `LoopEngineConfig` is loaded
+    ///   from / saved to. Defaults to `.standard` for production; tests pass
+    ///   an isolated suite so the persistence branch (auto-detect + save) is
+    ///   exercisable without touching the developer's real UserDefaults.
+    func runLoopEngineeringSweep(
+        projectRoot: String, gitRoot: String, projectId: String?, defaults: UserDefaults = .standard
+    ) async {
         guard let api else {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering skipped — no API client wired."
             return
@@ -525,25 +531,28 @@ extension AutoCodeUpdateService {
         let faultsRoot = URL(fileURLWithPath: projectRoot, isDirectory: true)
         let gitRootURL = URL(fileURLWithPath: gitRoot, isDirectory: true)
 
-        // Auto-detection only ever PERSISTS when it found more than the bare
-        // Regression stage. `detectDefaultStages` always returns at least
-        // Regression, so an all-Regression detection is indistinguishable
-        // from "the tree doesn't have test tooling YET" (clone still
-        // populating, or a genuinely toolless repo) — saving that as the
-        // permanent config would silently and irreversibly turn off the Test
-        // stage for every future run. Using it for just THIS run without
-        // saving lets a later run (once tooling appears, or once the Task 11
-        // settings UI runs its own one-time auto-detect per
-        // `LoopStageDetector`'s doc comment) get a fresh detection attempt
-        // instead of being stuck on a stale one-stage config.
+        // Auto-detection only ever PERSISTS when it found real tooling (any
+        // stage beyond the bare Regression sweep every detection includes).
+        // `detectDefaultStages` always returns at least Regression, so an
+        // all-Regression detection is indistinguishable from "the tree
+        // doesn't have test tooling YET" (clone still populating, or a
+        // genuinely toolless repo) — saving that as the permanent config
+        // would silently and irreversibly turn off the Test stage for every
+        // future run. Using it for just THIS run without saving lets a
+        // later run (once tooling appears, or once the Task 11 settings UI
+        // runs its own one-time auto-detect per `LoopStageDetector`'s doc
+        // comment) get a fresh detection attempt instead of being stuck on
+        // a stale one-stage config. `contains { kind != .regressionSweep }`
+        // (rather than `count > 1`) expresses that intent directly, so it
+        // keeps working even if the detector's shape changes later.
         let projectConfig: LoopEngineConfig
-        if let saved = LoopEngineConfig.load(for: projectId) {
+        if let saved = LoopEngineConfig.load(for: projectId, defaults: defaults) {
             projectConfig = saved
         } else {
             let detectedStages = LoopStageDetector.detectDefaultStages(gitRoot: gitRootURL)
             let detected = LoopEngineConfig(stages: detectedStages)
-            if detectedStages.count > 1 {
-                detected.save(for: projectId)
+            if detectedStages.contains(where: { $0.kind != .regressionSweep }) {
+                detected.save(for: projectId, defaults: defaults)
             }
             projectConfig = detected
         }
@@ -571,9 +580,12 @@ extension AutoCodeUpdateService {
         case .success:
             taskErrors.removeValue(forKey: AutoTask.loopEngineering.rawValue)
             logStore.append(.loopEngineering, "Loop finished — all \(projectConfig.stages.count) stage(s) passed after \(runner.iteration) iteration(s).")
-        case .givenUp(let reason):
-            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering gave up (\(reason))."
-            logStore.append(.loopEngineering, "Gave up after \(runner.iteration) iteration(s): \(reason)", level: .error)
+        case .givenUp:
+            // `.summary` (not raw `GivenUpReason` interpolation, which
+            // renders as e.g. "maxIterations") so this message and the
+            // activity-feed title below never drift apart for the same run.
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering \(result?.summary ?? "gave up")."
+            logStore.append(.loopEngineering, "Stopped after \(runner.iteration) iteration(s) — \(result?.summary ?? "gave up").", level: .error)
         case .needsApproval(let stageName):
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering needs approval for stage \"\(stageName)\"."
             logStore.append(.loopEngineering, "Stopped — stage \"\(stageName)\" needs approval in Loop Engineering settings.", level: .error)
