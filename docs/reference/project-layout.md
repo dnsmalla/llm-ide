@@ -20,7 +20,11 @@ it already contains `system/project.json` or is completely empty
 
 ```
 <project>/
-├── source/        raw meeting & email transcripts (your Sources)
+├── source/        raw inputs (your Sources)
+│   ├── meetings/    YYYY/MM/<ts>-<slug>.md
+│   ├── emails/      YYYY/MM/<ts>-<slug>
+│   ├── documents/   YYYY/MM/…
+│   └── <noteType>/  YYYY/MM/…   (connectors, e.g. slack/)
 ├── code/          code files / cloned repos
 ├── data/          documents, data files, images; Doc Gen markdown exports
 ├── llm-doc/       generated notes (AI output) — detailed below
@@ -39,7 +43,7 @@ it already contains `system/project.json` or is completely empty
 
 | Path | Holds | Tracked in git? | Written by |
 |---|---|---|---|
-| `source/` | raw transcripts (meetings, email inboxes, doc sources) | yes | capture / import |
+| `source/` | raw inputs — per-type: `meetings/`, `emails/`, `documents/`, `<connector>/` | yes | capture / import |
 | `code/` | code files, cloned repos (`code/<repo>` child git repos) | yes | user / import |
 | `data/` | documents, data, images; Doc Gen markdown export | yes | import / Doc Gen export |
 | `llm-doc/` | generated notes (AI output) | yes (`.gitkeep`) | `NoteService` + meeting/email/connector writers |
@@ -112,6 +116,27 @@ and the Library UI labels the section "LLM Doc".
 The folder was renamed `notes/` → `llm-doc/` (one-time, idempotent
 `NotesToLlmDocMigration` at launch). Do not reintroduce a `notes/` literal for
 generated notes.
+
+## source/ — raw inputs
+
+`source/` is the single home for **raw** inputs, one child folder per source type
+(mirroring `llm-doc/` for processed output). `ProjectStore.openFolder` binds the
+notes folder to `<project>/source/`, so `MeetingFileStore`, the email/connector
+writers, and the Library scanner all resolve here.
+
+### Structure
+
+```
+<project>/source/
+├── meetings/    YYYY/MM/<file>.md     raw transcripts (MeetingFileStore)
+├── emails/      YYYY/MM/<file>        raw emails (EmailSource via InboxStore)
+├── documents/   YYYY/MM/…             raw ingested docs
+└── <noteType>/  YYYY/MM/…             connectors, e.g. slack/ (on-demand)
+```
+
+A one-time `SourceFolderMigration` (run at launch) moves legacy raw locations
+(`source/EmailInbox/`, `<inboxFolder>/`, flat `source/<year>/`) into this layout.
+`data/` remains for user-added misc files and images.
 
 ## See also
 

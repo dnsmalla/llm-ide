@@ -1,7 +1,7 @@
 // Unified note service — Swift mirror of TypeScript NoteService.
 //
 // Architecture:
-// - Raw data stays in source folders (meetings/, EmailInbox/, Documents/)
+// - Raw data stays under source/<type>/ (source/meetings/, source/emails/, source/documents/, source/<connector>/)
 // - Generated notes go to the unified llm-doc/ folder (llm-doc/meetings/, llm-doc/emails/, llm-doc/documents/)
 // - Each generated note tracks its source file
 //

@@ -5,7 +5,7 @@ import Foundation
 /// notes. `date` is decoded as a plain `String` to avoid coupling this
 /// reader to a specific date-decoding strategy. `todos` defaults to `[]`
 /// so skipped notes (which omit the `todos` key entirely) decode cleanly.
-/// `sourceHash` is the SHA-256 of the raw `EmailInbox/` file this note was
+/// `sourceHash` is the SHA-256 of the raw `source/emails/` file this note was
 /// generated from (see `InboxGenerationPipeline`) — nil for notes written
 /// before this field existed.
 struct EmailNoteFrontmatter: Codable, Equatable {
