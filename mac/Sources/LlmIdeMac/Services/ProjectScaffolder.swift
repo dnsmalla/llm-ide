@@ -10,7 +10,10 @@ import os.log
 ///
 /// ```
 /// <projectFolder>/
-/// ├── source/     ← meeting & email transcripts (your Sources)
+/// ├── source/     ← raw inputs (your Sources)
+/// │   ├── meetings/   ← raw meeting transcripts
+/// │   ├── emails/     ← raw emails
+/// │   └── documents/  ← raw ingested documents
 /// ├── code/       ← code files
 /// ├── data/       ← documents, data files, images
 /// ├── llm-doc/    ← notes generated from meetings/email
@@ -32,7 +35,9 @@ enum ProjectScaffolder {
 
     // Directories that must exist under every project root.
     static let requiredDirectories = [
-        "source", "code", "data", "llm-doc", "templates",
+        "source",
+        "source/meetings", "source/emails", "source/documents",
+        "code", "data", "llm-doc", "templates",
         "system", "system/faults", "system/graph", "system/cache",
         ".claude",
     ]
@@ -83,7 +88,7 @@ enum ProjectScaffolder {
         ensureRootGitignore(at: folderURL)
 
         // 3. .gitkeep markers so empty directories survive `git add .`
-        for dir in ["llm-doc", "data"] {
+        for dir in ["llm-doc", "data", "source/meetings", "source/emails", "source/documents"] {
             writeIfAbsent(
                 at: folderURL.appendingPathComponent("\(dir)/.gitkeep"),
                 content: "")
@@ -253,7 +258,7 @@ enum ProjectScaffolder {
 
         ```
         \(name)/
-        ├── source/     ← meeting & email transcripts (your Sources)
+        ├── source/     ← raw inputs (your Sources: meetings/emails/documents/…)
         ├── code/       ← code files
         ├── data/       ← documents, data files, images
         ├── llm-doc/    ← notes generated from meetings/email
@@ -463,7 +468,7 @@ allow you to customize agent behavior per project.
 
         | Path | Purpose |
         |------|---------|
-        | `source/` | Meeting & email transcripts |
+        | `source/` | Raw inputs (meetings/emails/documents/…) |
         | `code/` | Code / cloned repos |
         | `data/` | Documents & data files |
         | `llm-doc/` | Generated notes |
