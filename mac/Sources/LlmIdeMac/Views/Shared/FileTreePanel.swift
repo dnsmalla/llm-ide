@@ -374,7 +374,7 @@ struct FileTreePanel: View {
                 Section {
                     if trees.isEmpty {
                         if !isCompact {
-                            Text("No \(cat.rawValue.lowercased()) files yet")
+                            Text("No \(cat.sectionTitle.lowercased()) files yet")
                                 .font(Typography.fileMeta)
                                 .foregroundStyle(.quaternary)
                                 .listRowSeparator(.hidden)
@@ -421,7 +421,7 @@ struct FileTreePanel: View {
                         .foregroundStyle(category.uiColor)
                         .frame(width: 18, height: 18)
                         .background(category.uiColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-                    Text(category.rawValue)
+                    Text(category.sectionTitle)
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(category.uiColor)
                         .textCase(.uppercase)
