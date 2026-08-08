@@ -139,19 +139,15 @@ extension CodeAssistantPanel {
         // share one config per project. `faultsRoot`/`gitRoot` are the two
         // WorkspaceRoot-resolved roots passed in by the button above — NOT
         // necessarily the same URL (clone-into-code layout).
-        let loopConfig = LoopEngineConfig.load(for: projectId) ?? {
+        let raw = LoopEngineConfig.load(for: projectId) ?? {
             let detectedStages = LoopStageDetector.detectDefaultStages(gitRoot: gitRoot)
             let detected = LoopEngineConfig(stages: detectedStages)
-            // Only persist when detection found real tooling beyond the bare
-            // Regression stage — same policy as the Auto Task sweep's own
-            // guard and LoopEngineView.loadConfig(), so this chat path can't
-            // permanently lock in a Regression-only config if it happens to
-            // run first against a not-yet-fully-detectable repo.
             if LoopEngineConfig.shouldPersist(detectedStages) {
                 detected.save(for: projectId)
             }
             return detected
         }()
+        let loopConfig = LoopStageDetector.ensureDefaultStages(in: raw, gitRoot: gitRoot)
         let prompter = CodeAssistPrompter(api: api, language: language)
         let regressionRunner = RegressionRunner(prompter: prompter, judge: CodeAssistJudge(api: api),
                                                 verifier: ShellFaultVerifier(), repairer: AgentFaultRepairer(api: api))

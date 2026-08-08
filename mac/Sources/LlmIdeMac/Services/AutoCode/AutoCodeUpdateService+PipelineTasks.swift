@@ -546,17 +546,18 @@ extension AutoCodeUpdateService {
         // single shared policy for this — `LoopEngineView` and the chat
         // panel's auto-detect path use the exact same helper so all three
         // call sites agree on when it's safe to persist.
-        let projectConfig: LoopEngineConfig
+        let raw: LoopEngineConfig
         if let saved = LoopEngineConfig.load(for: projectId, defaults: defaults) {
-            projectConfig = saved
+            raw = saved
         } else {
             let detectedStages = LoopStageDetector.detectDefaultStages(gitRoot: gitRootURL)
             let detected = LoopEngineConfig(stages: detectedStages)
             if LoopEngineConfig.shouldPersist(detectedStages) {
                 detected.save(for: projectId, defaults: defaults)
             }
-            projectConfig = detected
+            raw = detected
         }
+        let projectConfig = LoopStageDetector.ensureDefaultStages(in: raw, gitRoot: gitRootURL)
 
         let prompter = CodeAssistPrompter(api: api, agent: config.activeCLI)
         let judge = CodeAssistJudge(api: api)

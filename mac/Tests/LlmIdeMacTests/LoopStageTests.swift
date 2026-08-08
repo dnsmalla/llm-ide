@@ -29,4 +29,22 @@ final class LoopStageTests: XCTestCase {
         XCTAssertEqual(decoded.targetPath, "~/src/App.swift")
         XCTAssertEqual(decoded.prompt, "Fix the bug")
     }
+
+    func testIsDefaultRoundTripsThroughJSON() throws {
+        let stage = LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil, order: 0, isDefault: true)
+        let data = try JSONEncoder().encode(stage)
+        let decoded = try JSONDecoder().decode(LoopStage.self, from: data)
+        XCTAssertEqual(decoded, stage)
+        XCTAssertTrue(decoded.isDefault)
+    }
+
+    func testOldPayloadWithoutIsDefaultDecodesFalse() throws {
+        // A stage saved before isDefault existed must decode as a normal, deletable stage.
+        let json = """
+        {"id":"t1","name":"Test","kind":"shellCommand","command":"swift test","order":1,
+         "skillId":null,"targetPath":null,"prompt":null}
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(LoopStage.self, from: json)
+        XCTAssertEqual(decoded.isDefault, false)
+    }
 }
