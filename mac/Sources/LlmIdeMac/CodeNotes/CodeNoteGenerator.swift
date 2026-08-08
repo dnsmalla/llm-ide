@@ -9,7 +9,7 @@ import os
 ///
 ///   index.md      ← whole-repo summary ranked by impact (LLM reads first)
 ///   graph.json    ← machine-readable adjacency list for tooling
-///   notes/        ← one .md per code file
+///   <path>.md     ← one note per code file (named "<source-path>.md"), directly under system/graph/
 ///
 /// Incremental: when `changedPaths` is supplied, only those files' notes are
 /// rewritten; unchanged notes already on disk are left untouched. `index.md`

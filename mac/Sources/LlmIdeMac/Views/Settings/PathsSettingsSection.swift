@@ -6,7 +6,7 @@
 //
 //   ┌─ Paths ──────────────────────────────────────────────────┐
 //   │ ℹ These folders belong to the active project.            │
-//   │   source/ code/ data/ notes/ system/  [Reveal]           │
+//   │   source/ code/ data/ llm-doc/ system/  [Reveal]         │
 //   │   [ Rebuild missing folders ]                             │
 //   └──────────────────────────────────────────────────────────┘
 

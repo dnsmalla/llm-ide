@@ -108,7 +108,7 @@ struct WelcomeView: View {
                 Text("What counts as a project folder?")
                     .font(Typography.captionStrong)
                     .foregroundStyle(t.text)
-                Text("A project keeps **meetings/**, **notes/**, and **plans/** together with its own settings. Choose an empty folder to start, an existing project to resume, or a cloned code repo — LLM-IDE adds what it needs without overwriting your files.")
+                Text("A project keeps **source/**, **llm-doc/**, and **code/** together with its own settings. Choose an empty folder to start, an existing project to resume, or a cloned code repo — LLM-IDE adds what it needs without overwriting your files.")
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -211,7 +211,7 @@ struct WelcomeView: View {
     /// New project: the user picks a PARENT location and types a project name;
     /// we create `<parent>/<name>/` and scaffold the workspace INSIDE that new
     /// folder. This avoids the old behaviour where picking e.g. the Desktop
-    /// dumped source/code/data/notes/system directly onto the Desktop. The named
+    /// dumped source/code/data/llm-doc/system directly onto the Desktop. The named
     /// folder is created fresh, so scaffolding into it is always clean. Code
     /// only lands in code/ once a GitHub/GitLab repo is set up.
     private func newProject() {

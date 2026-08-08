@@ -334,7 +334,7 @@ struct FileTreePanel: View {
 
     /// Refresh the index when this panel displays notes / meetings —
     /// mirrors AppShell's central refresh.  rescan() is authoritative for
-    /// the bound project's notes/ and meetings/ folders.
+    /// the bound project's llm-doc/ and source/ folders.
     private func syncIfNeeded() {
         if categories.contains(.notes) || categories.contains(.meetings) {
             // Off-main so a notes/meetings refresh never hitches the tree.
@@ -478,7 +478,7 @@ struct FileTreePanel: View {
     private func buildTrees(for category: LibraryItem.Category) -> [FSNode] {
         let items = store.items(for: category)
         // Code renders as a real nested hierarchy (one repo folder, no
-        // parent-name collisions); notes/data keep the flat folder grouping.
+        // parent-name collisions); llm-doc/data keep the flat folder grouping.
         return category == .code ? buildCodeTrees(items: items) : buildCategoryTrees(items: items)
     }
 

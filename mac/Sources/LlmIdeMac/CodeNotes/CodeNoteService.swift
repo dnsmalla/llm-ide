@@ -12,7 +12,7 @@ import os
 ///   <repo>/system/graph/
 ///     index.md        ← whole-repo summary ranked by impact
 ///     graph.json      ← machine-readable adjacency list
-///     notes/          ← one deterministic .md per code file
+///     <path>.md       ← one deterministic note per code file (directly under system/graph/)
 ///     scan-cache.json ← per-file hash + structure (incremental cache)
 @MainActor
 public final class CodeNoteService: ObservableObject {

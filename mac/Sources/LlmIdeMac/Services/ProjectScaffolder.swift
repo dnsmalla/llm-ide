@@ -13,7 +13,7 @@ import os.log
 /// ├── source/     ← meeting & email transcripts (your Sources)
 /// ├── code/       ← code files
 /// ├── data/       ← documents, data files, images
-/// ├── notes/      ← notes generated from meetings/email
+/// ├── llm-doc/    ← notes generated from meetings/email
 /// ├── templates/  ← Doc Gen templates (`<slug>/template.md`)
 /// └── system/     ← LLM-IDE managed: settings, faults, graph, index (most git-ignored)
 ///     ├── project.json   ← project metadata (written by ProjectStore)
@@ -256,7 +256,7 @@ enum ProjectScaffolder {
         ├── source/     ← meeting & email transcripts (your Sources)
         ├── code/       ← code files
         ├── data/       ← documents, data files, images
-        ├── notes/      ← notes generated from meetings/email
+        ├── llm-doc/    ← notes generated from meetings/email
         ├── templates/  ← Doc Gen templates (`<slug>/template.md`)
         └── system/     ← LLM-IDE managed: settings, faults, graph, index (most git-ignored)
         ```
@@ -466,7 +466,7 @@ allow you to customize agent behavior per project.
         | `source/` | Meeting & email transcripts |
         | `code/` | Code / cloned repos |
         | `data/` | Documents & data files |
-        | `notes/` | Generated notes |
+        | `llm-doc/` | Generated notes |
         | `templates/` | Doc Gen templates (`<slug>/template.md`) |
         | `system/` | LLM-IDE settings (mostly git-ignored) |
 

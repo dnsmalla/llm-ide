@@ -1,5 +1,5 @@
 // Email note writer using unified NoteService
-// Writes generated email notes to notes/emails/ instead of Email/
+// Writes generated email notes to llm-doc/emails/ via NoteService.
 
 import Foundation
 import Yams

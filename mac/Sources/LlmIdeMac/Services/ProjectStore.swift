@@ -466,8 +466,8 @@ enum ProjectStoreError: LocalizedError {
             return """
                 "\(name)" is not a LLM-IDE project.
 
-                A valid project folder must contain meetings/, notes/, and plans/ sub-folders, \
-                or have been created by LLM-IDE. \
+                A valid project folder was created by LLM-IDE (it contains `system/project.json`) \
+                or is completely empty. \
                 Select an existing LLM-IDE project folder, or choose an empty folder to start a new project.
                 """
         }

@@ -1,5 +1,5 @@
 // Meeting note writer using unified NoteService
-// Writes generated meeting notes to notes/meetings/ instead of notes/
+// Writes generated meeting notes to llm-doc/meetings/ via NoteService.
 
 import Foundation
 import os.log
@@ -58,7 +58,7 @@ struct MeetingNoteWriter {
     }
 
     /// Get the output directory for meeting notes.
-    /// Returns the full path to notes/meetings/YYYY/MM/.
+    /// Returns the full path to llm-doc/meetings/YYYY/MM/.
     func outputDirectory(for date: Date) -> URL {
         let monthDir = noteService.getMonthDir(type: .meeting, date: date)
         return repoRoot.appendingPathComponent(monthDir.path)

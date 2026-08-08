@@ -77,7 +77,7 @@ final class KnowledgeGraphService: ObservableObject {
     /// - Parameters:
     ///   - codeRepoRoot: the git repo to scan for code (nil skips the code track).
     ///   - docRoots: folders whose docs feed InfiniteBrain (typically the
-    ///     project's `notes/` and `data/` dirs). Missing folders are skipped.
+    ///     project's `llm-doc/` and `data/` dirs). Missing folders are skipped.
     ///   - memoryRoot: when set, write the agent-facing memory artifact under
     ///     `<memoryRoot>/graphify-out/memory/` (the path the extension reads).
     ///     Pass the repo the user has indexed in the extension.

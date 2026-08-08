@@ -283,10 +283,10 @@ struct AppShell: View {
         }
         // Sync the NOTES section from AppShell so every view that reads
         // LibraryItemStore (LibraryView, FileTreePanel in ReviewView, etc.)
-        // always reflects the current notes/ folder — not just the tab
+        // always reflects the current llm-doc/ folder — not just the tab
         // that happens to contain LibraryView.
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
-            // Authoritative refresh of the bound project's meetings/ and notes/
+            // Authoritative refresh of the bound project's source/ and llm-doc/
             // folders. Off-main (rescanAsync) so a notification storm during a
             // sync/import doesn't hitch the UI with the directory walk.
             Task { await itemStore.rescanAsync() }
@@ -654,7 +654,7 @@ struct AppShell: View {
             autoCodeUpdate.environment = self.appEnv
             self.appEnv?.syncServiceLifecycles()
             // Populate the NOTES and MEETINGS sections from the bound project's
-            // meetings/ and notes/ folders. Run OFF the main thread
+            // source/ and llm-doc/ folders. Run OFF the main thread
             // (rescanAsync) so a large project's directory walk doesn't freeze
             // first paint — the Library fills in a beat later instead of the
             // window hanging on open.
@@ -1057,7 +1057,7 @@ struct AppShell: View {
 
                 // Keep the raw .md transcript in meetings/ so it
                 // appears in the MEETINGS section of the Library.
-                // The .docx note lives in notes/ for the NOTES section —
+                // The .docx note lives in llm-doc/ for the NOTES section —
                 // both are useful: transcript for full verbatim text,
                 // .docx for the AI-summarised version.
 
