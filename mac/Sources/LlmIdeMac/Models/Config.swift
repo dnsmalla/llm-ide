@@ -430,7 +430,7 @@ final class AppConfig: ObservableObject {
     }
 
     /// Per-project base path under which all Source Connectors store their
-    /// data (`<root>/<inboxFolder>/`, `<root>/llm-doc/<noteType>/`). Optional
+    /// data (`<root>/<noteType>/`, `<root>/llm-doc/<noteType>/`). Optional
     /// override: when `nil` (the default) `SourceContext.sourceConnectorRoot`
     /// falls back to the per-project `root` the ingest service is constructed
     /// with — i.e. today's behavior. Setting it relocates connector data only.

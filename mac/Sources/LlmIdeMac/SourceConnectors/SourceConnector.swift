@@ -39,7 +39,7 @@ final class SourceConnector: InputSource {
     /// both exist from the moment a connector is connected (fixes the "no
     /// folders in sources/notes" regression). Idempotent and cheap.
     func ensureSetup(at root: URL) throws {
-        let inbox = root.appendingPathComponent(manifest.inboxFolder, isDirectory: true)
+        let inbox = root.appendingPathComponent(NoteType(manifest.noteType).directoryName, isDirectory: true)
         let notes = root.appendingPathComponent("llm-doc", isDirectory: true)
             .appendingPathComponent(NoteType(manifest.noteType).directoryName, isDirectory: true)
         try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
@@ -57,7 +57,7 @@ final class SourceConnector: InputSource {
             return .failure(error.localizedDescription, imported: 0)
         }
 
-        let inboxRoot = ctx.sourceConnectorRoot.appendingPathComponent(manifest.inboxFolder, isDirectory: true)
+        let inboxRoot = ctx.sourceConnectorRoot.appendingPathComponent(NoteType(manifest.noteType).directoryName, isDirectory: true)
         for item in batch.items {
             let headers = resolveHeaders(from: item.fields)
             let slug = InboxStore.slugify(item.fields.values.first ?? manifest.id)

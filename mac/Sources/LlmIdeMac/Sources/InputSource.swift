@@ -29,7 +29,7 @@ struct SourceContext {
     let root: URL
     /// `<project>/llm-doc/` — where the AI `.docx` note is written.
     let notesOutputFolder: URL
-    /// Base path for all Source Connectors (`<root>/<inboxFolder>/`,
+    /// Base path for all Source Connectors (`<root>/<noteType>/`,
     /// `<root>/llm-doc/<noteType>/`). Defaults to `root` when the project has
     /// not set a `sourceConnectorRootOverride`, so connectors colocate with
     /// the existing per-project notes root unless explicitly relocated.

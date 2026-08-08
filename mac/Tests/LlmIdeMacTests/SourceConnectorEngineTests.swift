@@ -55,7 +55,8 @@ extension SourceConnectorEngineTests {
         defer { try? FileManager.default.removeItem(at: tmp) }
         let connector = SourceConnector(manifest: makeManifest(), adapterFactory: { FakeAdapter() })
         try connector.ensureSetup(at: tmp)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("SlackInbox").path))
+        // Raw inbox folder is now `<noteType>/` (slack), not the legacy `inboxFolder`.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("slack").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("llm-doc").appendingPathComponent("slack").path))
     }
 

@@ -2,7 +2,7 @@ import XCTest
 @testable import LlmIdeMacLib
 
 /// `sourceConnectorRootOverride` is the per-project base path under which all
-/// Source Connectors store data (`<root>/<inboxFolder>/`, `<root>/llm-doc/`).
+/// Source Connectors store data (`<root>/<noteType>/`, `<root>/llm-doc/`).
 /// When unset, `SourceContext.sourceConnectorRoot` falls back to the `root`
 /// the ingest service is constructed with — i.e. today's behavior. Uses a
 /// throwaway UserDefaults suite so nothing leaks between tests.
