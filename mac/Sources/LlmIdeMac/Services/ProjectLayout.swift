@@ -20,6 +20,17 @@ struct ProjectLayout {
     var codeDir:   URL { root.appendingPathComponent("code", isDirectory: true) }
     var dataDir:   URL { root.appendingPathComponent("data", isDirectory: true) }
     var notesDir:  URL { root.appendingPathComponent("llm-doc", isDirectory: true) }
+
+    /// Raw source directory for a note type: `<root>/source/<type.directoryName>/`.
+    /// Mirrors `notesDir` so raw and processed trees stay symmetric for every
+    /// type: `source/<type>/YYYY/MM/` (raw) ↔ `llm-doc/<type>/YYYY/MM/` (processed).
+    /// Callers that already hold `source/` as their root (the raw writers) append
+    /// `type.directoryName` directly instead — using this helper on `source/`
+    /// would double the `source/` segment.
+    func sourceRawDir(for type: NoteType) -> URL {
+        sourceDir.appendingPathComponent(type.directoryName, isDirectory: true)
+    }
+
     /// Doc Gen templates — one subfolder per template (`templates/<slug>/template.md`).
     var templatesDir: URL { root.appendingPathComponent("templates", isDirectory: true) }
 
