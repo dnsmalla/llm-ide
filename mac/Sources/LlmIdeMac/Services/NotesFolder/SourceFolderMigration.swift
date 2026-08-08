@@ -54,6 +54,13 @@ enum SourceFolderMigration {
     /// is preserved rather than deleted. No-op if `src` does not exist.
     private static func mergeMove(_ fm: FileManager, from src: URL, to dest: URL) {
         guard fm.fileExists(atPath: src.path) else { return }
+        // `run`'s flat-meeting path matches any 4-digit top-level entry; a user
+        // could keep a regular file (e.g. an extensionless `2026`) at the source
+        // root. Treat a non-directory `src` as a no-op so it is never deleted —
+        // `contentsOfDirectory` would throw, the move loop would skip, and the
+        // empty `remaining` check below would otherwise `removeItem` the file.
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: src.path, isDirectory: &isDir), isDir.boolValue else { return }
         try? fm.createDirectory(at: dest, withIntermediateDirectories: true)
         let entries = (try? fm.contentsOfDirectory(atPath: src.path)) ?? []
         for e in entries {

@@ -68,4 +68,26 @@ final class SourceFolderMigrationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         SourceFolderMigration.run(in: root, connectors: [slackManifest()]) // must not throw
     }
+
+    func testDoesNotDeleteNonDirectoryYearEntry() throws {
+        // A regular file named `2026` at the source root matches the 4-digit
+        // flat-meeting detector. It must be left in place, not deleted: the
+        // migration is move-only and `mergeMove` is a no-op for non-directories.
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try write(root, "2026", "not-a-folder")          // file, not a directory
+        try write(root, "2027/05/m.md")                  // a real year dir, for realism
+
+        SourceFolderMigration.run(in: root, connectors: [slackManifest()])
+
+        // The `2026` file survives (was not deleted).
+        let yearFile = root.appendingPathComponent("2026")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: yearFile.path))
+        let body = try String(contentsOf: yearFile, encoding: .utf8)
+        XCTAssertEqual(body, "not-a-folder")
+
+        // The real year dir still migrated normally.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("meetings/2027/05/m.md").path))
+    }
 }
