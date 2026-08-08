@@ -189,7 +189,7 @@ final class MeetingFileStore {
         // layout is `source/meetings/...` (root is bound to `source/` on project
         // open). Mirrors `llm-doc/meetings/` for the processed .docx.
         return root
-            .appendingPathComponent("meetings", isDirectory: true)
+            .appendingPathComponent(NoteType.meeting.directoryName, isDirectory: true)
             .appendingPathComponent(String(format: "%04d", comps.year ?? 0), isDirectory: true)
             .appendingPathComponent(String(format: "%02d", comps.month ?? 0), isDirectory: true)
     }
