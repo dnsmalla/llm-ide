@@ -2,9 +2,9 @@ import Foundation
 
 /// Ingested email. A fetch source: pulls NEW mail (the server owns the
 /// forward-only high-water mark + seen-ledger) and saves each message as a
-/// raw file into the `EmailInbox/` folder via `InboxStore`. Note generation
+/// raw file into the `emails/` folder via `InboxStore`. Note generation
 /// itself is decoupled from this fetch step — see `generateNote` below and
-/// `InboxGenerationPipeline` — so it runs off whatever is in `EmailInbox/`
+/// `InboxGenerationPipeline` — so it runs off whatever is in `emails/`
 /// regardless of how it got there (fetched here, or dropped in by hand).
 struct EmailSource: InputSource {
     let id = "email"
@@ -19,6 +19,13 @@ struct EmailSource: InputSource {
     /// re-fetches next run rather than being lost).
     private static let maxPerRun = 50
 
+    /// Raw email folder under the source root: `<sourceRoot>/emails/`.
+    /// `sourceRoot` is `ctx.root`, which is already `source/`, so the segment
+    /// is appended directly (not via `ProjectLayout`, which would double it).
+    static func rawInboxRoot(sourceRoot: URL) -> URL {
+        sourceRoot.appendingPathComponent(NoteType.email.directoryName, isDirectory: true)
+    }
+
     @MainActor
     func fetchAndIngest(_ ctx: SourceContext) async -> SourceIngestResult {
         guard let source = ctx.config.emailSource, source.enabled else { return .noSource }
@@ -32,7 +39,7 @@ struct EmailSource: InputSource {
         }
 
         let messages = result.messages
-        let inboxRoot = ctx.root.appendingPathComponent("EmailInbox", isDirectory: true)
+        let inboxRoot = Self.rawInboxRoot(sourceRoot: ctx.root)
         let batch = Array(messages.prefix(Self.maxPerRun))
         let capped = messages.count > batch.count
         let moreAvailable = (messages.count - batch.count) + result.skipped.overCap
@@ -56,7 +63,7 @@ struct EmailSource: InputSource {
 
         if let saveFailure { return .failure(saveFailure, imported: 0) }
 
-        // Generation pass: scans the whole EmailInbox/ folder (not just what
+        // Generation pass: scans the whole emails/ folder (not just what
         // was just saved above), so raw files added by hand are picked up
         // too. Dedup is by content hash against existing notes, not DB state.
         let writer = EmailNoteWriter(repoRoot: ctx.root)
@@ -74,7 +81,7 @@ struct EmailSource: InputSource {
         return .imported(processed, moreAvailable: moreAvailable, oversize: result.skipped.oversize)
     }
 
-    /// Saves one fetched message's raw content into `EmailInbox/`. No
+    /// Saves one fetched message's raw content into `emails/`. No
     /// classification happens here — that's the generation pass's job.
     @MainActor
     private func saveRaw(from msg: EmailMessage, inboxRoot: URL) throws {
@@ -115,7 +122,7 @@ struct EmailSource: InputSource {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy/MM"
         let monthPath = dateFormatter.string(from: item.date)
-        let rawFile = "EmailInbox/\(monthPath)/\(rawFileName)"
+        let rawFile = "\(NoteType.email.directoryName)/\(monthPath)/\(rawFileName)"
 
         if EmailFileStore.isBulkSender(from) {
             _ = try await writer.writeSkipped(from: from, date: item.date, subject: subject,
