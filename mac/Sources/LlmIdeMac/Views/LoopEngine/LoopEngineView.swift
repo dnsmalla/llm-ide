@@ -186,6 +186,22 @@ struct LoopEngineView: View {
                     .foregroundStyle(.orange)
                     .help("Command not yet approved on this machine")
             }
+            if stage.isDefault {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .help("Default stage — can't be deleted")
+            }
+            Menu {
+                Button("Duplicate") { duplicateStage(stage) }
+                if !stage.isDefault {
+                    Button("Delete", role: .destructive) { deleteStage(stage) }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .foregroundStyle(t.textMuted)
+            }
+            .buttonStyle(.borderless)
         }
     }
 
@@ -314,19 +330,6 @@ struct LoopEngineView: View {
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
             }
-
-            Button("Remove Stage", role: .destructive) {
-                // Capture the id BEFORE mutating `stages` — reading
-                // `stages[index]` again from inside removeAll's predicate
-                // (which holds exclusive access to `stages` for the
-                // duration of the call) would be a mutate-while-reading
-                // access to the same @State storage.
-                let id = stages[index].id
-                stages.removeAll { $0.id == id }
-                selectedStageId = nil
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
         }
     }
 
@@ -478,6 +481,24 @@ struct LoopEngineView: View {
         stages = newStages
         maxIterations = 10
         consecutiveFailureStop = 2
+    }
+
+    /// Append a non-default copy of `stage` (new id, cleared isDefault, next order).
+    private func duplicateStage(_ stage: LoopStage) {
+        let nextOrder = (stages.map(\.order).max() ?? -1) + 1
+        var copy = stage
+        copy.id = UUID().uuidString
+        copy.isDefault = false
+        copy.order = nextOrder
+        stages.append(copy)
+    }
+
+    /// Remove a stage by id (row ⋯ → Delete). Pinned stages never offer Delete, so this
+    /// is only reachable for non-default stages. Clears the selection if it was deleted.
+    private func deleteStage(_ stage: LoopStage) {
+        let id = stage.id
+        stages.removeAll { $0.id == id }
+        if selectedStageId == id { selectedStageId = nil }
     }
 
     private func saveConfig() {
