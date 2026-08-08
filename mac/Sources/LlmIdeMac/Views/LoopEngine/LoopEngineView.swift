@@ -435,9 +435,10 @@ struct LoopEngineView: View {
             return
         }
         if let saved = LoopEngineConfig.load(for: projectId) {
-            stages = saved.stages
-            maxIterations = saved.maxIterations
-            consecutiveFailureStop = saved.consecutiveFailureStop
+            let ensured = LoopStageDetector.ensureDefaultStages(in: saved, gitRoot: activeGitRootURL)
+            stages = ensured.stages
+            maxIterations = ensured.maxIterations
+            consecutiveFailureStop = ensured.consecutiveFailureStop
         } else if let gitRoot = activeGitRootURL {
             let detected = LoopStageDetector.detectDefaultStages(gitRoot: gitRoot)
             resetStagesToDefaults(stages: detected)

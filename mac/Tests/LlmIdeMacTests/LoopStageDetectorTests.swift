@@ -82,4 +82,17 @@ final class LoopStageDetectorTests: XCTestCase {
         XCTAssertTrue(stages.contains { $0.kind == .regressionSweep },
                       "default stages must always include a regressionSweep stage")
     }
+
+    func testDetectorMarksRegressionAsDefault() {
+        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        XCTAssertEqual(stages.first?.isDefault, true)
+    }
+
+    func testDetectorMarksTestAsDefaultWhenToolingDetected() throws {
+        try write("Package.swift")
+        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let testStage = stages.first { $0.kind == .shellCommand }
+        XCTAssertNotNil(testStage)
+        XCTAssertEqual(testStage?.isDefault, true)
+    }
 }
