@@ -13,6 +13,18 @@ extension AutoCodeUpdateService {
 
     // MARK: - Pipeline task bodies
 
+    /// Reduce a list of per-item failure messages into the value to write to
+    /// `taskErrors[key]`: `nil` when nothing failed (caller clears the key),
+    /// or the failures joined with " · " when at least one did. This is the
+    /// shared accumulate-then-surface pattern already used inline in
+    /// `runSourceUpdate` and `runReviewMerge`; factored out so the other
+    /// pipeline tasks (e.g. `runSourcesToIssue`) can't regress to the old
+    /// "clear `taskErrors[key]` unconditionally at the end" form that
+    /// silently swallowed partial failures.
+    static func taskErrorFromFailures(_ failures: [String]) -> String? {
+        failures.isEmpty ? nil : failures.joined(separator: " · ")
+    }
+
     /// Fetch configured email/Slack sources into the meeting library.
     func runSourceUpdate() async {
         let key = AutoTask.sourceUpdate.rawValue
@@ -134,6 +146,7 @@ extension AutoCodeUpdateService {
         }
 
         let normalizedExistingTitles = Set(existingIssues.map { NoteActionExtractor.normalize($0.title) })
+        var failures: [String] = []
         for action in newActions {
             if Task.isCancelled { break }
             let normalized = NoteActionExtractor.normalize(action.text)
@@ -159,10 +172,19 @@ extension AutoCodeUpdateService {
                 )
             } catch {
                 log.error("Failed to create issue for action \(action.id): \(error)")
+                let msg = "Issue \(action.id): \(error.localizedDescription)"
+                failures.append(msg)
                 logStore.append(.sourcesToIssue, "Failed to create issue: \(error.localizedDescription)", level: .error)
             }
         }
-        taskErrors.removeValue(forKey: key)
+        // Surface partial failures — without this the task card flipped to
+        // clean even when every createIssue threw. Mirrors runReviewMerge /
+        // runSourceUpdate: set the key when anything failed, clear otherwise.
+        if let msg = Self.taskErrorFromFailures(failures) {
+            taskErrors[key] = msg
+        } else {
+            taskErrors.removeValue(forKey: key)
+        }
         logStore.append(.sourcesToIssue, "— run finished —")
     }
 
