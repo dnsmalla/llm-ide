@@ -119,8 +119,8 @@ extension LlmIdeAPIClient {
         let reply: String?               // done
         let pendingTool: PendingTool?    // done
         let usage: CodeAssistResponse.Usage?  // done
-        let continueNeeded: Bool?        // done — agent has more tasks to run
-        let tasks: [AgentTask]?          // done — task list from the agent
+        let continueNeeded: Bool?        // tasks — agent has more tasks to run
+        let tasks: [AgentTask]?          // tasks — task list from the agent
         let error: String?               // error
     }
 
@@ -209,6 +209,16 @@ extension LlmIdeAPIClient {
                 reply = evt.reply ?? ""
                 pendingTool = evt.pendingTool
                 usage = evt.usage
+                // continueNeeded/tasks are NOT on this event — the server
+                // (ai-routes.mjs) emits them on a SEPARATE, later "tasks"
+                // event instead. Reading evt.continueNeeded/evt.tasks here
+                // would always be nil; see the "tasks" case below.
+            case "tasks":
+                // Server sends this as its own event, right after "done" —
+                // see ai-routes.mjs: writeEvent({ type: 'tasks', tasks, continueNeeded }).
+                // Without this case, the event fell into `default: break`
+                // and PlanTimelineCard / the auto-continue reflex never saw
+                // real data over the streaming path.
                 continueNeeded = evt.continueNeeded
                 tasks = evt.tasks
             case "error":
