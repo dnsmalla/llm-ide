@@ -280,18 +280,50 @@ final class AutoCodeUpdateService: ObservableObject {
         autoTaskSettings.setNextFireAt(next, for: task)
     }
 
-    /// Run every task due at `now`, once, then realign each. Shares the
-    /// `runTask` re-entrancy guard with `runNow()`/`runSingle(_:)`. Each due
-    /// task's nextFireAt is realigned BEFORE its body runs so a slow run can't
-    /// cause a double-fire on the next tick. Returns false when nothing is due
-    /// or a run is already in flight.
+    /// Enabled custom tasks (cron != nil) whose `customNextFireAt` is at or
+    /// before `now`. The custom-task parallel of `dueTasks(now:)` — pure read,
+    /// does not mutate state or run anything. `now` is injected for tests.
+    /// Loads from the same `UserDefaults` this service's `config` was
+    /// constructed with, so tests stay isolated via their injected suite.
+    func dueCustomTasks(now: Date = Date()) -> [CustomAutoTask] {
+        guard autoTaskSettings.enabled else { return [] }
+        return CustomAutoTask.loadAll(from: config.userDefaults).filter { task in
+            guard task.isEnabled, task.cron != nil,
+                  let next = autoTaskSettings.customNextFireAt(for: task.id) else { return false }
+            return now >= next
+        }
+    }
+
+    /// Advance a custom task's customNextFireAt to the first fire strictly
+    /// after `now`. Mirrors `realignNextFire(for:now:)` but uses the task's own
+    /// `cron` (custom tasks carry their schedule on the model, not in
+    /// `AutoTaskSettings`). Clears the fire when cron is nil/invalid so a
+    /// manual task can't be left stuck "due".
+    func realignCustomNextFire(for task: CustomAutoTask, now: Date) {
+        guard let cron = task.cron,
+              let expr = CronExpression.parse(cron),
+              let next = expr.nextFire(after: now, now: now) else {
+            autoTaskSettings.setCustomNextFireAt(nil, for: task.id); return
+        }
+        autoTaskSettings.setCustomNextFireAt(next, for: task.id)
+    }
+
+    /// Run every task due at `now` — built-in AND custom — once, then realign
+    /// each. Shares the `runTask` re-entrancy guard with
+    /// `runNow()`/`runSingle(_:)`. Each due task's nextFireAt is realigned
+    /// BEFORE its body runs so a slow run can't cause a double-fire on the next
+    /// tick (applies to both kinds). Returns false when nothing is due or a run
+    /// is already in flight.
     @discardableResult
     func runDue(now: Date = Date()) -> Bool {
-        let due = dueTasks(now: now)
-        guard !due.isEmpty, runTask == nil else { return false }
-        for task in due { realignNextFire(for: task, now: now) }   // realign BEFORE running
+        let dueBuiltIn = dueTasks(now: now)
+        let dueCustom = dueCustomTasks(now: now)
+        guard !(dueBuiltIn.isEmpty && dueCustom.isEmpty), runTask == nil else { return false }
+        for task in dueBuiltIn { realignNextFire(for: task, now: now) }       // realign BEFORE running
+        for task in dueCustom { realignCustomNextFire(for: task, now: now) }
         runTask = Task { [weak self] in
-            for task in due { await self?.runOne(task) }
+            for task in dueBuiltIn { await self?.runOne(task) }
+            for task in dueCustom { await self?.runCustomTask(task) }
             self?.runTask = nil
         }
         return true

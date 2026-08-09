@@ -198,6 +198,13 @@ final class AppConfig: ObservableObject {
     static let shared = AppConfig()
 
     private let defaults: UserDefaults
+    /// Read-only access to the backing `UserDefaults` so service code can
+    /// load user-created data (e.g. `CustomAutoTask.loadAll(from:)` from
+    /// `AutoCodeUpdateService.dueCustomTasks`) from the SAME store this
+    /// config was constructed with — keeping tests isolated via the suite
+    /// they injected (mirrors the `init(userDefaults:)` escape hatch).
+    /// Internal-only: not part of the app's public API surface.
+    internal var userDefaults: UserDefaults { defaults }
     /// False for isolated instances (tests, previews) constructed with a
     /// non-standard UserDefaults. Gates every KeychainStore read/write so
     /// a test config can NEVER clobber the user's real tokens — a test
