@@ -457,14 +457,22 @@ extension CodeAssistantPanel {
             }
             self.error = error.localizedDescription
         }
-        // Chain the NEXT git op hands-free when allowed — this is what lets
-        // "commit and push" finish without a card: commit auto-runs on the
-        // primary turn, the agent then proposes push on this follow-up, and we
-        // auto-run it too. runGitOpFlow resets `busy = false` itself before its
-        // own sendFollowup, so the re-entry isn't blocked by the `guard !busy`
-        // even though our `busy` is still true here. The recursion (and so any
-        // looping agent) is bounded by autoGitOpsThisTurn.
-        if let g = agent.pendingTool?.gitOpArgs, shouldAutoRunGitOp(g) {
+        // Chain the NEXT step hands-free when allowed — this is what lets a
+        // multi-step plan (e.g. "update A, then update B" or "commit and
+        // push") finish without a card for every step. Mirrors runTurn's own
+        // auto-apply/auto-run checks; without this, only the FIRST step of a
+        // plan (checked in runTurn) would auto-run and every step after it
+        // would stall on a pending-action card even in Auto edit mode.
+        if editMode == .auto, let pt = agent.pendingTool, let args = pt.updateFileArgs {
+            // confirmUpdateFile does its own exact-path matching and safely
+            // returns .failure (leaving the card up) if nothing matches —
+            // same discard-the-result pattern runTurn's own auto-apply uses.
+            _ = await confirmUpdateFile(args, finalContent: args.content)
+        } else if let g = agent.pendingTool?.gitOpArgs, shouldAutoRunGitOp(g) {
+            // runGitOpFlow resets `busy = false` itself before its own
+            // sendFollowup, so the re-entry isn't blocked by the `guard !busy`
+            // even though our `busy` is still true here. The recursion (and
+            // so any looping agent) is bounded by autoGitOpsThisTurn.
             autoGitOpsThisTurn += 1
             await runGitOpFlow(g)
         }
