@@ -27,6 +27,10 @@ import { logger } from '../../core/logger.mjs';
 import { GLOBAL_HANDLER_NAMES } from './global-handlers.mjs';
 import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider, resolveCustomProviderDispatch, assertSafeBaseUrlResolved } from '../../agents/providers.mjs';
 import { skillsToOpenAITools } from './openai-tools.mjs';
+import { classifyCodeAssistMode } from '../../agents/mode-classify.mjs';
+import { personaForMode, restrictsTools, allowedToolNames } from './mode-personas.mjs';
+import { classifyTaskType } from './task-skill-routing.mjs';
+import { readSkillInstructions } from '../skills/skill-library.mjs';
 
 // Re-exported for the HTTP routes that historically imported these
 // from here (server/auth-routes.mjs, kb/routes/agent.mjs import the
@@ -79,11 +83,27 @@ export async function handleCodeAssist({
   maxIterations: maxIterationsOverride,  // optional: override for tests
   model,                    // resolved model id (from the client) — routes native vs fence loop
   provider,                 // explicit provider id from the client, if any
+  mode: requestedMode,      // NEW — "auto" | "plan" | "review" | "document" | "execute" | undefined
+  // Test seam only — defaults to the real classifier. ESM named exports
+  // can't be redefined by node:test's mock.method (module namespace
+  // properties are non-configurable), and mock.module() needs
+  // --experimental-test-module-mocks, which the CI Node (20, see
+  // .github/workflows/extension-ci.yml) doesn't support. Mirrors the
+  // _runClaude seam mode-classify.mjs already uses for the same reason.
+  _classifyMode = classifyCodeAssistMode,
 }) {
   // Per-user plugin view. Building it is cheap (Map clone + readdir
   // for each enabled plugin's skills/). Done per request so a user
   // toggling a plugin in Settings is reflected immediately.
   const { skills: userSkills, commands: userCommands, subagents: userSubagents } = buildPerUserSkillSet(userId);
+
+  // Resolve the request's mode. Missing/undefined behaves exactly like
+  // "execute" (back-compat with clients that don't send the field yet).
+  // "auto" classifies the message; classification failure already falls
+  // back to "execute" inside classifyCodeAssistMode itself.
+  const resolvedMode = requestedMode === 'auto'
+    ? (await _classifyMode(message, { userId })).mode
+    : (requestedMode || 'execute');
 
   // Slash-command expansion. If the user's message starts with /foo,
   // look it up against the enabled command set and expand the prompt
@@ -195,7 +215,29 @@ export async function handleCodeAssist({
   if (sessionTasks.length > 0) {
     const taskLines = sessionTasks.map((t) => `- ${taskStatusIcon(t.status)} (id:${t.id}) ${t.title}`).join('\n');
     personaBase += `\n\n## Your current task list\n${taskLines}\n\nLegend: [ ] pending  [~] in_progress  [x] completed  [-] skipped  [!] failed`;
+
+    // Per-step skill auto-routing (Execute mode, naturally — plan/review/
+    // document personas forbid task tracking, and the tool allowlist for
+    // those modes excludes task-create/task-update, so sessionTasks is
+    // empty for those and this block simply doesn't run). Frozen for the
+    // whole HTTP turn, same as the task-list block above — loop.mjs never
+    // re-reads task state mid-loop.
+    const activeTask = sessionTasks.find((t) => t.status === 'in_progress')
+                     || sessionTasks.find((t) => t.status === 'pending');
+    if (activeTask) {
+      const skillId = classifyTaskType(activeTask.title);
+      const instructions = skillId ? readSkillInstructions(skillId) : null;
+      if (instructions) {
+        personaBase += `\n\n## Guidance for your current task ("${activeTask.title}")\n${instructions.content}`;
+      }
+    }
   }
+
+  // Mode persona addition — appended after the task-list/skill-routing
+  // blocks above so it reads as the most recent, highest-priority
+  // instruction. No-op ("") for execute/unrecognised modes.
+  const modePersona = personaForMode(resolvedMode);
+  if (modePersona) personaBase += `\n\n${modePersona}`;
 
   // Global handler set: ask-internal (for app-state-aware questions)
   // plus ask-subagent (for plugin-defined named delegates). The
@@ -347,10 +389,12 @@ export async function handleCodeAssist({
     // (not the DNS-resolution check).
     if (nativeBaseUrl) await assertSafeBaseUrlResolved(nativeBaseUrl);
     out = await runNativeAgentLoop({
-      systemPrompt: NATIVE_SYSTEM_PROMPT,
+      systemPrompt: NATIVE_SYSTEM_PROMPT + (modePersona ? `\n\n${modePersona}` : ''),
       userMessage: composedUserMessage,
       history: Array.isArray(history) ? history : [],
-      skills: globalSkills.skills,
+      skills: restrictsTools(resolvedMode)
+        ? new Map([...globalSkills.skills].filter(([name]) => allowedToolNames().has(name)))
+        : globalSkills.skills,
       tools: skillsToOpenAITools(globalSkills.skills, { readOnly: true }),
       complete: (opts) => callOpenAI({ apiKey: nativeKey, model, baseUrl: nativeBaseUrl, ...opts }),
       userId,
@@ -362,7 +406,9 @@ export async function handleCodeAssist({
     });
   } else {
     out = await runAgentLoop({
-      skills: globalSkills.skills,
+      skills: restrictsTools(resolvedMode)
+        ? new Map([...globalSkills.skills].filter(([name]) => allowedToolNames().has(name)))
+        : globalSkills.skills,
       userMessage: composedUserMessage,
       history: Array.isArray(history) ? history : [],
       // base = global's composed prompt (role + ask-internal skill).
@@ -381,6 +427,18 @@ export async function handleCodeAssist({
       // this plus the worst-case ask-internal delegation (see below).
       deadlineMs: 360_000,
     });
+  }
+
+  // Belt-and-suspenders: a restricted mode must never surface a write-tool
+  // pendingTool, even one that leaked through ask-internal's delegation
+  // (its nested sub-loop isn't filtered to the mode's tool allowlist — see
+  // docs/superpowers/plans/2026-08-09-code-assistant-modes-phase2.md's
+  // Task 2 review notes). Nothing executes automatically either way (every
+  // pendingTool always requires separate client confirmation), but a
+  // "Create issue?" card mid-"prose only" Plan-mode chat would still
+  // contradict the mode's own persona text.
+  if (restrictsTools(resolvedMode) && out?.pendingTool) {
+    out = { ...out, pendingTool: null };
   }
 
   // Auto project-memory capture. Distill durable, project-specific facts from
@@ -410,5 +468,6 @@ export async function handleCodeAssist({
     ...(expandedFrom ? { expandedFrom } : {}),
     continueNeeded,
     tasks: currentTasks,
+    mode: resolvedMode,
   };
 }
