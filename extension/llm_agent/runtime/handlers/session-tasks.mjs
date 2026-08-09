@@ -40,6 +40,10 @@ export function sessionTaskStore() {
 
     hasPendingWork(userId, sessionId) {
       const tasks = store.get(key(userId, sessionId)) ?? [];
+      // A failed task means the agent was told to stop and ask, not push
+      // through the remaining list — so a failure anywhere in the session's
+      // tasks overrides any OTHER task still sitting at pending/in_progress.
+      if (tasks.some((t) => t.status === 'failed')) return false;
       return tasks.some((t) => t.status === 'pending' || t.status === 'in_progress');
     },
 
