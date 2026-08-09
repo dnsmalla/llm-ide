@@ -38,6 +38,72 @@ extension AutoCodeUpdateService {
         failedCount > 0 ? "\(failedCount) issue(s) failed — see log" : nil
     }
 
+    /// Pure summary of a regression sweep's verdict list, factored out of
+    /// `runRegressionSweep` so the fail-closed verdict accounting is
+    /// unit-testable without spinning up the full `RegressionRunner`.
+    ///
+    /// The non-passing verdict set mirrors `RegressionRunnerSweepAdapter`'s
+    /// `SweepOutcome.passed` logic (regressed + repairFailed + needsApproval
+    /// + failed + pending): any verdict that isn't `.unchanged` or `.repaired`
+    /// means the fault could NOT be confirmed still-fixed, so the sweep must
+    /// signal an error rather than report a false green. Before this helper,
+    /// `runRegressionSweep` keyed the card off `.regressed` ALONE, so a run
+    /// where every fixed fault came back `.failed`/`.needsApproval`/
+    /// `.repairFailed`/`.pending` logged "no regressions" and cleared the card.
+    struct RegressionSweepSummary: Equatable {
+        /// Human-readable line for the task log.
+        let logLine: String
+        /// True when at least one fault was regressed or could not be verified
+        /// — caller sets `taskErrors[.regression]` (flips the card red).
+        /// False means all re-verified faults passed (or there were none) —
+        /// caller clears `taskErrors[.regression]`.
+        let shouldSignalError: Bool
+    }
+
+    static func regressionSweepSummary(
+        verdicts: [RegressionRunner.Verdict],
+        autoReopen: Bool
+    ) -> RegressionSweepSummary {
+        let total = verdicts.count
+        guard total > 0 else {
+            return RegressionSweepSummary(
+                logLine: "No fixed faults to re-verify.",
+                shouldSignalError: false)
+        }
+        var regressed = 0
+        var nonPassing = 0
+        // Exhaustive switch (no `default:`) so a future `Verdict` case can't
+        // silently fall into "passing" — same stance as
+        // `RegressionRunnerSweepAdapter.sweep`.
+        for verdict in verdicts {
+            switch verdict {
+            case .unchanged, .repaired:
+                break // passing — confirmed still fixed
+            case .regressed:
+                regressed += 1
+                nonPassing += 1
+            case .repairFailed, .needsApproval, .pending, .failed:
+                nonPassing += 1
+            }
+        }
+        if regressed > 0 {
+            let reopened = autoReopen ? " (auto-reopened)" : ""
+            return RegressionSweepSummary(
+                logLine: "Regression: \(regressed)/\(total) regressed\(reopened).",
+                shouldSignalError: true)
+        }
+        if nonPassing > 0 {
+            // Regressions are zero, but at least one fault couldn't be
+            // verified — fail-closed rather than claiming "no regressions".
+            return RegressionSweepSummary(
+                logLine: "\(nonPassing)/\(total) fault(s) could not be verified — see log.",
+                shouldSignalError: true)
+        }
+        return RegressionSweepSummary(
+            logLine: "\(total) faults re-verified — no regressions.",
+            shouldSignalError: false)
+    }
+
     /// Fetch configured email/Slack sources into the meeting library.
     func runSourceUpdate() async {
         let key = AutoTask.sourceUpdate.rawValue
@@ -514,19 +580,20 @@ extension AutoCodeUpdateService {
                          autoReopen: autoTaskSettings.regressionAutoReopen,
                          attemptRepair: autoTaskSettings.regressionAttemptRepair)
         // RegressionRunner's published `results` lives on its own
-        // lifetime — we read once after the await for the summary.
-        let total = runner.results.count
-        let regressed = runner.results.filter { $0.verdict == .regressed }.count
-        if total == 0 {
-            taskErrors.removeValue(forKey: AutoTask.regression.rawValue)
-            logStore.append(.regression, "No fixed faults to re-verify.")
-        } else if regressed > 0 {
-            let reopened = autoTaskSettings.regressionAutoReopen ? " (auto-reopened)" : ""
-            taskErrors[AutoTask.regression.rawValue] = "Regression: \(regressed)/\(total) regressed\(reopened)."
-            logStore.append(.regression, "\(regressed)/\(total) faults regressed\(reopened).", level: .error)
+        // lifetime — we read once after the await for the summary. The
+        // verdict→summary accounting is fail-closed (any non-passing
+        // verdict signals an error, not just `.regressed`) and lives in the
+        // pure `regressionSweepSummary` helper so it's unit-testable.
+        let summary = Self.regressionSweepSummary(
+            verdicts: runner.results.map(\.verdict),
+            autoReopen: autoTaskSettings.regressionAutoReopen)
+        let key = AutoTask.regression.rawValue
+        if summary.shouldSignalError {
+            taskErrors[key] = summary.logLine
+            logStore.append(.regression, summary.logLine, level: .error)
         } else {
-            taskErrors.removeValue(forKey: AutoTask.regression.rawValue)
-            logStore.append(.regression, "\(total) faults re-verified — no regressions.")
+            taskErrors.removeValue(forKey: key)
+            logStore.append(.regression, summary.logLine)
         }
     }
 
