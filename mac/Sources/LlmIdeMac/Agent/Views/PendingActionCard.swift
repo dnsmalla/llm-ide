@@ -8,12 +8,12 @@ import SwiftUI
 /// `pendingTool.name`). Today only `create-gitlab-issue` exists.
 struct PendingActionCard: View {
     let pendingTool: PendingTool
-    let onOpen: () -> Void
     /// Precomputed diff stats for the `update-file` variant — nil for every
     /// other tool, or when no attachment matched the proposed path (the
     /// card still shows, just without the preview; the full sheet's own
     /// guard is unaffected).
     var diffPreview: DiffStats?
+    let onOpen: () -> Void
 
     var body: some View {
         Button(action: onOpen) {

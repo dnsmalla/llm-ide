@@ -289,7 +289,7 @@ struct CodeAssistantPanel: View {
     /// attachment-matching logic.
     private var pendingUpdateFileDiff: DiffStats? {
         guard let args = agent.pendingTool?.updateFileArgs,
-              let match = matchingAttachment(for: args.path) else { return nil }
+              let match = matchingAttachment(for: args.path, allowBasenameFallback: editMode != .auto) else { return nil }
         return DiffStats.compute(old: match.content, new: args.content)
     }
 
