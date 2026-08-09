@@ -335,7 +335,10 @@ extension AutoCodeUpdateService {
             args += ["--permission-mode", "acceptEdits"]
         }
         args += modelArgs(for: cliTool, resolvedModel: resolvedModel)
-        args += ["-p", prompt]
+        // Per-tool prompt + unattended-approval args (claude: -p; codex: exec --yolo;
+        // gemini: --yolo -p). nil ⇒ this CLI can't run unattended (interactive editors).
+        guard let promptArgs = cliTool.nonInteractivePromptArgs(prompt) else { return false }
+        args += promptArgs
 
         process.arguments = args
         process.currentDirectoryURL = URL(fileURLWithPath: localPath)
@@ -464,7 +467,10 @@ extension AutoCodeUpdateService {
             args += ["--permission-mode", "acceptEdits"]
         }
         args += modelArgs(for: cliTool, resolvedModel: resolvedModel)
-        args += ["-p", prompt]
+        // Per-tool prompt + unattended-approval args (claude: -p; codex: exec --yolo;
+        // gemini: --yolo -p). nil ⇒ this CLI can't run unattended (interactive editors).
+        guard let promptArgs = cliTool.nonInteractivePromptArgs(prompt) else { return false }
+        args += promptArgs
 
         process.arguments = args
         process.currentDirectoryURL = URL(fileURLWithPath: localPath)

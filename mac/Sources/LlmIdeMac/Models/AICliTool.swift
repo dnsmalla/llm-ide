@@ -160,6 +160,30 @@ enum AICliTool: String, CaseIterable, Identifiable {
         case .custom:     return ""   // no CLI subscription mode
         }
     }
+
+    /// Arguments to run this tool non-interactively with `prompt` for an
+    /// unattended auto task, or nil if the tool can't run non-interactively
+    /// (interactive editors like Copilot/Cursor would block on a TTY).
+    ///
+    /// Includes each tool's unattended/auto-approve mode so the CLI never
+    /// hangs on an interactive permission prompt (there's no stdin to feed).
+    /// `--permission-mode acceptEdits` for Claude is added separately by the
+    /// caller (AutoCodeUpdateService.runCLI).
+    ///
+    /// Trade-off: non-Claude unattended modes are broader than Claude's
+    /// `acceptEdits` — Codex `--yolo` (= `--dangerously-bypass-approvals-and-
+    /// sandbox`, also disables its sandbox) and Gemini `--yolo` auto-approve
+    /// ALL tool calls. Selecting a non-Claude CLI for auto tasks opts into
+    /// that broader permission surface.
+    func nonInteractivePromptArgs(_ prompt: String) -> [String]? {
+        switch self {
+        case .claudeCode:      return ["-p", prompt]
+        case .openai:          return ["exec", "--yolo", prompt]   // codex exec --yolo <prompt>
+        case .gemini:          return ["--yolo", "-p", prompt]     // --yolo auto-approves; -p passes the prompt
+        case .copilot, .cursor: return nil                        // interactive editors — not suited to unattended auto tasks
+        case .deepseek, .glm, .custom: return nil                 // no CLI executable (caller early-returns before this)
+        }
+    }
 }
 
 struct AIModel: Identifiable, Hashable, Codable {
