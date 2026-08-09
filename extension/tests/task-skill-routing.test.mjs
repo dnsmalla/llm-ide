@@ -33,3 +33,9 @@ test('classifyTaskType returns null for a title with no recognisable keyword', (
 test('classifyTaskType is case-insensitive', () => {
   assert.equal(classifyTaskType('FIX THE BUG IN PARSER'), 'skills/systematic-debugging');
 });
+
+test('classifyTaskType does not false-positive on substrings (doc inside docker, test inside latest/contest)', () => {
+  assert.equal(classifyTaskType('Update the docker config'), null);
+  assert.equal(classifyTaskType('Update the latest changelog'), null);
+  assert.equal(classifyTaskType('Add a contest leaderboard feature'), 'skills/add-feature');
+});
