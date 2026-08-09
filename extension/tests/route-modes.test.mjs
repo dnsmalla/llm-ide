@@ -114,3 +114,21 @@ test('mode: "review" never injects the task-list block into the prompt, even wit
   assert.equal(out.mode, 'review');
   assert.ok(!capturedPrompt.includes('## Your current task list'), 'stale task list leaked into a restricted-mode prompt');
 });
+
+test('mode: "plan" reports continueNeeded: false and an empty tasks array, even with real pending session tasks (prevents an unbounded auto-continue loop)', async () => {
+  const sessionTasksModule = await import('../llm_agent/runtime/handlers/session-tasks.mjs');
+  sessionTasksModule.tasks.createTask('u1', 'test-stale-continue-1', 'Fix the auth bug');
+  const runClaude = async () => 'Here is a plan.';
+  const out = await handleCodeAssist({
+    message: 'how should I approach this?',
+    history: [],
+    agentContext: { sessionId: 'test-stale-continue-1' },
+    runClaude,
+    kb: fakeKb(),
+    userId: 'u1',
+    mode: 'plan',
+  });
+  assert.equal(out.mode, 'plan');
+  assert.equal(out.continueNeeded, false);
+  assert.deepEqual(out.tasks, []);
+});

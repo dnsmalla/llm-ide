@@ -497,8 +497,22 @@ export async function handleCodeAssist({
   // Surface the per-request memory overhead so the client can show it (and the
   // user can judge whether the always-on memory block is worth its tokens).
   const memoryUsage = { chars: memoryChars, approxTokens: Math.round(memoryChars / 4), hasChatMemory: memoryHasChat };
-  const continueNeeded = tasks.hasPendingWork(userId, agentContext?.sessionId);
-  const currentTasks = tasks.listTasks(userId, agentContext?.sessionId);
+  // A restricted mode (plan/review/document) can never resolve a pending
+  // task — task-create/task-update are excluded from its tool allowlist,
+  // and its persona forbids acting on one. Without this gate, a stale task
+  // left behind by an EARLIER Execute-mode turn in the same session (tasks
+  // have no mode dimension and are never cleared on a mode switch) would
+  // report continueNeeded: true forever once the user switches to a
+  // restricted mode — the Mac client's auto-continue reflex has no !busy
+  // guard against this and would re-fire every ~0.8s+round-trip
+  // indefinitely. Mirrors the same gate already applied to the task-list
+  // PROMPT injection above; this closes the matching gap in the RESPONSE.
+  const continueNeeded = restrictsTools(resolvedMode)
+    ? false
+    : tasks.hasPendingWork(userId, agentContext?.sessionId);
+  const currentTasks = restrictsTools(resolvedMode)
+    ? []
+    : tasks.listTasks(userId, agentContext?.sessionId);
   return {
     ...out,
     memoryUsage,

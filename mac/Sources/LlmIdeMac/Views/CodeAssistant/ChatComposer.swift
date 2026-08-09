@@ -275,23 +275,21 @@ extension CodeAssistantPanel {
     /// and send button keep their own bottom row right-aligned.
     var toolbarStacked: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if showFileAttachButtons || showModelPicker {
-                HStack(spacing: 6) {
-                    if showFileAttachButtons {
-                        contextButton(icon: "plus", label: "Add from Library", action: { sheets.showLibraryPicker = true })
-                    }
-                    if showModelPicker { modelPickerChips }
-                    modePicker
-                    editModeChip
-                    memoryButton
-                    Spacer(minLength: 0)
+            HStack(spacing: 6) {
+                if showFileAttachButtons {
+                    contextButton(icon: "plus", label: "Add from Library", action: { sheets.showLibraryPicker = true })
                 }
-                if showFileAttachButtons && !attachmentState.attachments.isEmpty {
-                    Text("\(attachmentState.attachments.count) file\(attachmentState.attachments.count == 1 ? "" : "s") · \(formatBytes(totalAttachmentChars))")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(theme.current.textMuted)
-                        .lineLimit(1)
-                }
+                if showModelPicker { modelPickerChips }
+                modePicker
+                editModeChip
+                memoryButton
+                Spacer(minLength: 0)
+            }
+            if showFileAttachButtons && !attachmentState.attachments.isEmpty {
+                Text("\(attachmentState.attachments.count) file\(attachmentState.attachments.count == 1 ? "" : "s") · \(formatBytes(totalAttachmentChars))")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(theme.current.textMuted)
+                    .lineLimit(1)
             }
             HStack(spacing: 6) {
                 Spacer(minLength: 0)
