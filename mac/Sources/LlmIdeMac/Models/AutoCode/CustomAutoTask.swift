@@ -20,7 +20,23 @@ struct CustomAutoTask: Identifiable, Codable, Equatable {
     /// Cron schedule (nil = manual ▶ only). Parsed by `CronExpression`.
     var cron: String?
 
-    enum Mode: String, Codable, CaseIterable { case review, implement }
+    enum Mode: String, Codable, CaseIterable {
+        case review, implement
+
+        var label: String {
+            switch self {
+            case .review: return "Review"
+            case .implement: return "Implement"
+            }
+        }
+
+        var detail: String {
+            switch self {
+            case .review: return "Discards CLI edits after the run"
+            case .implement: return "Commits on an isolated fix/custom-* branch"
+            }
+        }
+    }
 
     init(id: String = UUID().uuidString, name: String, template: String,
          isEnabled: Bool = true, createdAt: Date = Date(),

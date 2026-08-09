@@ -354,6 +354,22 @@ struct AutoCodeView: View {
                 .font(Typography.body)
                 .foregroundStyle(task.isEnabled ? theme.current.text : theme.current.textMuted)
 
+            if task.mode == .implement {
+                Text("Implement")
+                    .font(.caption2)
+                    .foregroundStyle(theme.current.accent3)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(theme.current.accent3.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+            if task.cron != nil {
+                Image(systemName: "clock")
+                    .font(.caption2)
+                    .foregroundStyle(theme.current.textMuted)
+                    .help(task.cron ?? "")
+            }
+
             Spacer()
         }
         .padding(.horizontal, 12)
@@ -448,9 +464,12 @@ struct AutoCodeView: View {
         }
         .sheet(isPresented: $showingAddCustomTask) {
             AddCustomAutoTaskSheet(
-                onConfirm: { name, template in
-                    let task = CustomAutoTask(name: name, template: template)
+                onConfirm: { name, template, mode, cron in
+                    let task = CustomAutoTask(name: name, template: template, mode: mode, cron: cron)
                     task.save()
+                    if cron != nil {
+                        autoCode.realignCustomNextFire(for: task, now: Date())
+                    }
                     persistCustomTasksChange()
                     selectedCustomTaskId = task.id
                     selectedTask = nil
@@ -621,6 +640,13 @@ struct AutoCodeView: View {
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
+            .background(theme.current.surface)
+
+            CustomTaskScheduleSection(task: task, autoCode: autoCode, settings: autoTaskSettings) {
+                persistCustomTasksChange()
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
             .background(theme.current.surface)
 
             Divider()
