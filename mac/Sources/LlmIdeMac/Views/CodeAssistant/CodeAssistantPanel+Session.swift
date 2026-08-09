@@ -653,6 +653,17 @@ extension CodeAssistantPanel {
                     self.agent.agentIsAutonomous = false
                     return
                 }
+                // A round-trip (including a synchronous auto-chain — e.g.
+                // Task 11's update-file/git-op chaining, which can take far
+                // longer than this 0.8s delay) may already be in flight by
+                // the time this fires. That in-flight call will itself
+                // re-evaluate continueNeeded via its own finishStreamingTurn
+                // call when it completes, so firing a second, redundant
+                // "Continue working" turn here would only race its writes to
+                // agent.pendingTool/agent.agentPendingTasks and orphan Stop's
+                // ability to cancel the REAL chain (this closure would
+                // reassign runTask out from under it via startTurn).
+                guard !self.busy else { return }
                 self.startTurn("Continue working on your pending tasks.")
             }
         } else {
