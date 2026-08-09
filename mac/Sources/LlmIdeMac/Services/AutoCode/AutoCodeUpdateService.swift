@@ -245,7 +245,8 @@ final class AutoCodeUpdateService: ObservableObject {
         currentStep = "Running \(task.name)"
         logStore.append(task.id, "Running \(task.name)…")
         let ok = await runCLI(prompt: task.template, localPath: resolved.gitRoot,
-                              logSuffix: task.id, logDir: logDir, logStoreId: task.id)
+                              logSuffix: task.id, logDir: logDir, logStoreId: task.id,
+                              persistChanges: task.mode == .implement)
         if ok {
             taskErrors.removeValue(forKey: task.id)
             logStore.append(task.id, "— run finished —")
