@@ -162,6 +162,7 @@ extension CodeAssistantPanel {
                 tasks: resp.tasks,
                 continueNeeded: resp.continueNeeded,
                 usage: resp.usage,
+                mode: resp.mode,
                 stopped: false,
             )
             // Fast path: in Auto mode, apply a proposed file edit immediately
@@ -200,11 +201,11 @@ extension CodeAssistantPanel {
             // Stopped by the user — leave the partial streamed text (if any)
             // in place, tagged as stopped, instead of vanishing it.
             if revealingTurnID == streamingID {
-                finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, stopped: true)
+                finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
             }
         } catch let urlError as URLError where urlError.code == .cancelled {
             if revealingTurnID == streamingID {
-                finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, stopped: true)
+                finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
             }
         } catch {
             // Same cleanup as the two cancellation catches above — a
@@ -214,7 +215,7 @@ extension CodeAssistantPanel {
             // tells the user what went wrong; "(stopped)" here just means
             // "this reply did not complete," which is honest either way.
             if revealingTurnID == streamingID {
-                finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, stopped: true)
+                finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
             }
             self.error = error.localizedDescription
         }
@@ -449,6 +450,7 @@ extension CodeAssistantPanel {
                 tasks: resp.tasks,
                 continueNeeded: resp.continueNeeded,
                 usage: resp.usage,
+                mode: resp.mode,
                 stopped: false,
             )
         } catch {
@@ -457,7 +459,7 @@ extension CodeAssistantPanel {
             // round-trip started, and a non-cancellation failure must not
             // leave it orphaned in `history` forever.
             if revealingTurnID == streamingID {
-                finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, stopped: true)
+                finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
             }
             self.error = error.localizedDescription
         }
@@ -561,7 +563,7 @@ extension CodeAssistantPanel {
         // streaming turn synchronously here instead, so the outgoing
         // session's placeholder is never left unfinished when persisted.
         if let streamingID = revealingTurnID {
-            finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, stopped: true)
+            finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
         } else {
             revealedCount = 0
         }
@@ -609,10 +611,14 @@ extension CodeAssistantPanel {
         tasks: [AgentTask]?,
         continueNeeded: Bool?,
         usage: LlmIdeAPIClient.CodeAssistResponse.Usage?,
+        mode: String?,
         stopped: Bool,
     ) {
         revealingTurnID = nil
         revealedCount = 0
+        if let mode, let resolved = CodeAssistMode(rawValue: mode) {
+            turnModes[id] = resolved
+        }
         if let idx = history.firstIndex(where: { $0.id == id }) {
             if stopped {
                 if !history[idx].content.isEmpty {

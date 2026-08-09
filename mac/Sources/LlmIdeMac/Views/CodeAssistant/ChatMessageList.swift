@@ -16,6 +16,8 @@ struct ChatMessageList: View {
     /// Precomputed diff stats for the current `update-file` pendingTool, if
     /// any — see CodeAssistantPanel.pendingUpdateFileDiff.
     let diffPreview: DiffStats?
+    /// See CodeAssistantPanel.turnModes / finishStreamingTurn.
+    let turnModes: [UUID: CodeAssistMode]
     let busy: Bool
     let statusText: String
     @Binding var error: String?
@@ -291,6 +293,9 @@ struct ChatMessageList: View {
                     Text(isUser ? "You" : "Claude")
                         .font(Typography.caption)
                         .foregroundStyle(theme.current.textMuted)
+                    if !isUser, let mode = turnModes[turn.id] {
+                        ModeBadge(mode: mode)
+                    }
                     if isUser {
                         // User input is plain text — render verbatim (no markdown).
                         Text(turn.content)

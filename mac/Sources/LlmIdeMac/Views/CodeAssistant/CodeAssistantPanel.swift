@@ -99,6 +99,12 @@ struct CodeAssistantPanel: View {
     /// Measured render height per assistant turn, keyed by turn id, so each
     /// markdown web-view bubble can be sized to its content in the scroll list.
     @State var bubbleHeights: [UUID: CGFloat] = [:]
+    /// Resolved mode for each assistant turn, keyed by turn id — populated
+    /// in finishStreamingTurn, read by ChatMessageList to show ModeBadge.
+    /// Not part of CodeAssistTurn itself (avoids a wire/persistence change
+    /// for a display-only concern, same reasoning as the existing
+    /// isToolNotice content-based convention).
+    @State var turnModes: [UUID: CodeAssistMode] = [:]
     @State var prefLanguage: String = "en"
     @State var didAttachInitial = false
     /// Path of the file auto-attached from the tree selection (`initialURL`),
@@ -303,6 +309,7 @@ struct CodeAssistantPanel: View {
                 pendingTool: agent.pendingTool,
                 tasks: agent.agentPendingTasks,
                 diffPreview: pendingUpdateFileDiff,
+                turnModes: turnModes,
                 busy: busy,
                 statusText: statusText,
                 error: $error,
