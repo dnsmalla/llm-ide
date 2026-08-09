@@ -278,7 +278,11 @@ struct ChatMessageList: View {
     @ViewBuilder
     private func turnView(_ turn: LlmIdeAPIClient.CodeAssistTurn) -> some View {
         if isToolNotice(turn) {
-            toolNoticeView(turn)
+            if let bash = BashResultDisplay.parse(turn.content) {
+                CommandOutputView(display: bash)
+            } else {
+                toolNoticeView(turn)
+            }
         } else {
             let isUser = turn.role == .user
             HStack(alignment: .top, spacing: Spacing.sm) {
