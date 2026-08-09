@@ -298,6 +298,7 @@ extension AutoCodeUpdateService {
         }
 
         let baseBranch = await Task.detached { Self.currentBranch(at: capturedGitRoot) }.value
+        let failedBefore = failedCount   // per-run delta (failedCount is cumulative, reset only by a full run())
         for entry in pending {
             if Task.isCancelled { break }
             guard let number = entry.issueIid else { continue }
@@ -368,14 +369,13 @@ extension AutoCodeUpdateService {
                 failedCount += 1
             }
         }
-        // Surface the aggregate failed count to the UI-visible card key.
-        // `failedCount` is bumped on every per-issue failure above (fetch
-        // error, base-branch switch failure, no-commit), but the old trailing
-        // `taskErrors.removeValue(forKey:)` cleared it regardless — so a run
-        // that failed every issue reported a clean card. AutoCodeView only
-        // reads `taskErrors[task.rawValue]`, never the `#<n>` keys, so the
-        // count message is what flips the card. Clear only when none failed.
-        if let msg = Self.implementIssuesErrorMessage(failedCount: failedCount) {
+        // Surface THIS run's failures to the UI-visible card key. Use the
+        // per-run delta, not cumulative `failedCount` (which is reset only by
+        // a full `run()` — the cumulative value would leave a stale red card
+        // after a successful single-task run). AutoCodeView reads only
+        // `taskErrors[task.rawValue]`, never the `#<n>` keys.
+        let failedThisRun = failedCount - failedBefore
+        if let msg = Self.implementIssuesErrorMessage(failedCount: failedThisRun) {
             taskErrors[key] = msg
         } else {
             taskErrors.removeValue(forKey: key)
