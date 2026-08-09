@@ -53,6 +53,10 @@ extension LlmIdeAPIClient {
         /// content, so this channel can't be used to smuggle followable text.
         let skills: [String]
         let agentContext: AgentContext?     // NEW — optional for back-compat
+        /// "auto" | "plan" | "review" | "document" | "execute". Optional so
+        /// an older client (or a request that doesn't care) omits it —
+        /// server treats missing/nil exactly like "execute".
+        let mode: String?
     }
     struct CodeAssistResponse: Codable {
         let reply: String
@@ -60,6 +64,9 @@ extension LlmIdeAPIClient {
         let pendingTool: PendingTool?       // NEW — optional
         let continueNeeded: Bool?
         let tasks: [AgentTask]?
+        /// Resolved mode the server actually used — differs from the
+        /// requested mode only when the request was "auto".
+        let mode: String?
         struct Usage: Codable {
             let attachmentCount: Int
             let attachmentChars: Int
@@ -92,6 +99,7 @@ extension LlmIdeAPIClient {
         attachments: [CodeAttachment],
         skills: [String] = [],
         agentContext: AgentContext? = nil,
+        mode: String? = nil,
     ) async throws -> CodeAssistResponse {
         try await post(
             "/code-assist",
@@ -105,6 +113,7 @@ extension LlmIdeAPIClient {
                 attachments: attachments,
                 skills: skills,
                 agentContext: agentContext,
+                mode: mode,
             ),
             authenticated: true,
         )
@@ -121,6 +130,7 @@ extension LlmIdeAPIClient {
         let usage: CodeAssistResponse.Usage?  // done
         let continueNeeded: Bool?        // tasks — agent has more tasks to run
         let tasks: [AgentTask]?          // tasks — task list from the agent
+        let mode: String?                // done — resolved mode
         let error: String?               // error
     }
 
@@ -158,6 +168,7 @@ extension LlmIdeAPIClient {
         attachments: [CodeAttachment],
         skills: [String] = [],
         agentContext: AgentContext? = nil,
+        mode: String? = nil,
         onProgress: @escaping @MainActor (String) -> Void,
         onChunk: @escaping @MainActor (String) -> Void,
     ) async throws -> CodeAssistResponse {
@@ -172,7 +183,7 @@ extension LlmIdeAPIClient {
         req.httpBody = try JSONEncoder().encode(CodeAssistRequest(
             message: message, language: language, model: model, provider: provider,
             tier: tier, history: history, attachments: attachments, skills: skills,
-            agentContext: agentContext))
+            agentContext: agentContext, mode: mode))
 
         let (bytes, response) = try await session(for: "/code-assist").bytes(for: req)
         guard let http = response as? HTTPURLResponse else {
@@ -188,6 +199,7 @@ extension LlmIdeAPIClient {
         var usage: CodeAssistResponse.Usage?
         var continueNeeded: Bool?
         var tasks: [AgentTask]?
+        var mode: String?
         var sawProgress = false
         for try await line in bytes.lines {
             guard line.hasPrefix("data:") else { continue }
@@ -209,6 +221,7 @@ extension LlmIdeAPIClient {
                 reply = evt.reply ?? ""
                 pendingTool = evt.pendingTool
                 usage = evt.usage
+                mode = evt.mode
                 // continueNeeded/tasks are NOT on this event — the server
                 // (ai-routes.mjs) emits them on a SEPARATE, later "tasks"
                 // event instead. Reading evt.continueNeeded/evt.tasks here
@@ -247,6 +260,6 @@ extension LlmIdeAPIClient {
             throw APIError.http(status: 500, code: "STREAM_INCOMPLETE",
                                 message: "The response stream ended unexpectedly.", details: nil)
         }
-        return CodeAssistResponse(reply: reply, usage: usage, pendingTool: pendingTool, continueNeeded: continueNeeded, tasks: tasks)
+        return CodeAssistResponse(reply: reply, usage: usage, pendingTool: pendingTool, continueNeeded: continueNeeded, tasks: tasks, mode: mode)
     }
 }
