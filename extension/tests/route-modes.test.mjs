@@ -21,7 +21,7 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
-const { handleCodeAssist } = await import('../llm_agent/runtime/route.mjs');
+const { handleCodeAssist, enforceModeToolRestriction } = await import('../llm_agent/runtime/route.mjs');
 
 function fakeKb() {
   return {
@@ -74,4 +74,43 @@ test('mode: undefined behaves exactly like "execute" (back-compat — no mode fi
     userId: 'u1',
   });
   assert.equal(out.mode, 'execute');
+});
+
+test('enforceModeToolRestriction clears a pendingTool for a restricted mode', () => {
+  const out = { reply: 'hi', pendingTool: { name: 'create-issue', arguments: {} } };
+  const result = enforceModeToolRestriction(out, 'plan');
+  assert.equal(result.pendingTool, null);
+  assert.equal(result.reply, 'hi'); // everything else passes through unchanged
+});
+
+test('enforceModeToolRestriction leaves execute mode untouched', () => {
+  const out = { reply: 'hi', pendingTool: { name: 'create-issue', arguments: {} } };
+  const result = enforceModeToolRestriction(out, 'execute');
+  assert.deepEqual(result.pendingTool, { name: 'create-issue', arguments: {} });
+});
+
+test('enforceModeToolRestriction is a no-op when there is no pendingTool', () => {
+  const out = { reply: 'hi', pendingTool: null };
+  const result = enforceModeToolRestriction(out, 'review');
+  assert.equal(result, out); // same reference — no unnecessary object copy
+});
+
+test('mode: "review" never injects the task-list block into the prompt, even with real session tasks', async () => {
+  // Seed a real task in this session BEFORE the reviewed turn, exactly like
+  // a prior Execute-mode turn would have.
+  const sessionTasksModule = await import('../llm_agent/runtime/handlers/session-tasks.mjs');
+  sessionTasksModule.tasks.createTask('u1', 'test-stale-tasks-1', 'Fix the auth bug');
+  let capturedPrompt = '';
+  const runClaude = async (prompt) => { capturedPrompt = prompt; return 'Looks fine.'; };
+  const out = await handleCodeAssist({
+    message: 'any issues with this?',
+    history: [],
+    agentContext: { sessionId: 'test-stale-tasks-1' },
+    runClaude,
+    kb: fakeKb(),
+    userId: 'u1',
+    mode: 'review',
+  });
+  assert.equal(out.mode, 'review');
+  assert.ok(!capturedPrompt.includes('## Your current task list'), 'stale task list leaked into a restricted-mode prompt');
 });

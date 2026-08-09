@@ -14,8 +14,19 @@
 // was checked individually against its actual handler, not just its kind
 // label:
 //   - ask-internal, ask-subagent (handlers/ask-internal.mjs, ask-subagent.mjs):
-//     delegate to a sub-loop whose own handler map is restricted to
-//     search-kb-only tools — no write tool is reachable through them.
+//     these are included in the allowlist because they're legitimate
+//     read-oriented delegation tools, NOT because their nested loop is
+//     itself filtered to this allowlist — it is NOT. route.mjs passes
+//     ctx.internalSkills.skills = the FULL per-user skill set (including
+//     any plugin's write-kind skills) into askInternal, and loop.mjs
+//     returns `pendingTool` for a `kind: 'write'` skill BEFORE its handler
+//     map is ever consulted. So a plugin write-skill IS reachable through
+//     ask-internal's nested loop, completely unfiltered by mode. The ONLY
+//     thing that actually prevents this from surfacing today is
+//     route.mjs's belt-and-suspenders post-loop null-out of `pendingTool`
+//     for restricted modes (see enforceModeToolRestriction there) — that
+//     null-out is NOT redundant with this allowlist and must never be
+//     removed as such.
 //   - list-files, read-file (handlers/repo-files.mjs): read-only filesystem
 //     access, scoped to an allow-listed root, traversal- and secret-proof.
 //   - fetch-url, web-search (handlers/fetch-url.mjs, web-search.mjs):

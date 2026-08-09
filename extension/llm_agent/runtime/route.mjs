@@ -68,6 +68,21 @@ const NATIVE_SYSTEM_PROMPT = [
   'Never print a command for the user to copy — call the tool.',
 ].join(' ');
 
+/**
+ * Restricted modes (plan/review/document) must never surface a write-tool
+ * pendingTool, even one that leaked through ask-internal's unfiltered
+ * nested delegation (see the comment in mode-personas.mjs — that path is
+ * NOT filtered to this feature's tool allowlist). This is the actual
+ * enforcement point for that guarantee; kept as a small pure function so
+ * it's directly unit-testable without driving a real agent-loop call.
+ */
+export function enforceModeToolRestriction(out, resolvedMode) {
+  if (restrictsTools(resolvedMode) && out?.pendingTool) {
+    return { ...out, pendingTool: null };
+  }
+  return out;
+}
+
 export async function handleCodeAssist({
   message,
   history,
@@ -210,9 +225,17 @@ export async function handleCodeAssist({
   } catch { /* memory is best-effort — keep the base without it */ }
 
   // Inject session task list so the agent always sees its own task state.
+  // Gated on !restrictsTools(resolvedMode) — a restricted mode (plan/
+  // review/document) never tracks a multi-step plan itself, but a PRIOR
+  // turn in the same session could have left real tasks behind (tasks are
+  // keyed only by userId:sessionId, with no mode dimension, and are never
+  // cleared on a mode switch) — without this gate, a later restricted-mode
+  // turn would inject stale Execute-mode task-list/skill-guidance text into
+  // a prompt whose tools have already been stripped to read-only,
+  // contradicting that mode's own persona one paragraph later.
   const sessionId = agentContext?.sessionId;
   const sessionTasks = tasks.listTasks(userId, sessionId);
-  if (sessionTasks.length > 0) {
+  if (sessionTasks.length > 0 && !restrictsTools(resolvedMode)) {
     const taskLines = sessionTasks.map((t) => `- ${taskStatusIcon(t.status)} (id:${t.id}) ${t.title}`).join('\n');
     personaBase += `\n\n## Your current task list\n${taskLines}\n\nLegend: [ ] pending  [~] in_progress  [x] completed  [-] skipped  [!] failed`;
 
@@ -376,6 +399,21 @@ export async function handleCodeAssist({
     nativeKey = providerApiKey(userId, effProvider);
   }
 
+  // Computed once and shared by both loop branches below: the actual
+  // dispatchable skill set for this turn's mode. A restricted mode
+  // (plan/review/document) collapses to the explicit read-only allowlist;
+  // execute/unrecognised modes get the full per-request skill map
+  // unchanged. Previously this filter expression was duplicated between
+  // the native loop's `skills:` and the fence loop's `skills:` — and the
+  // native loop's `tools:` param used the UNFILTERED map, which meant the
+  // model was advertised tools (run-bash, task-create/update/list — all
+  // `kind: read`, so `{ readOnly: true }` alone doesn't drop them) that
+  // its own dispatch would then reject as "Unknown tool" in restricted
+  // modes. Both `skills:` and `tools:` now derive from this single map.
+  const activeSkills = restrictsTools(resolvedMode)
+    ? new Map([...globalSkills.skills].filter(([name]) => allowedToolNames().has(name)))
+    : globalSkills.skills;
+
   let out;
   if (nativeKey && typeof model === 'string' && model) {
     const nativeBaseUrl = customResolved
@@ -392,10 +430,14 @@ export async function handleCodeAssist({
       systemPrompt: NATIVE_SYSTEM_PROMPT + (modePersona ? `\n\n${modePersona}` : ''),
       userMessage: composedUserMessage,
       history: Array.isArray(history) ? history : [],
-      skills: restrictsTools(resolvedMode)
-        ? new Map([...globalSkills.skills].filter(([name]) => allowedToolNames().has(name)))
-        : globalSkills.skills,
-      tools: skillsToOpenAITools(globalSkills.skills, { readOnly: true }),
+      skills: activeSkills,
+      // { readOnly: true } still needs to drop kind: write skills from
+      // activeSkills for the unrestricted/execute case (activeSkills ===
+      // globalSkills.skills there). For restricted modes activeSkills is
+      // already allowlist-filtered, so this is a no-op — none of the
+      // allowlisted names are kind: write anyway — but keeping the flag
+      // is harmless and correct either way.
+      tools: skillsToOpenAITools(activeSkills, { readOnly: true }),
       complete: (opts) => callOpenAI({ apiKey: nativeKey, model, baseUrl: nativeBaseUrl, ...opts }),
       userId,
       handlers,
@@ -406,9 +448,7 @@ export async function handleCodeAssist({
     });
   } else {
     out = await runAgentLoop({
-      skills: restrictsTools(resolvedMode)
-        ? new Map([...globalSkills.skills].filter(([name]) => allowedToolNames().has(name)))
-        : globalSkills.skills,
+      skills: activeSkills,
       userMessage: composedUserMessage,
       history: Array.isArray(history) ? history : [],
       // base = global's composed prompt (role + ask-internal skill).
@@ -432,14 +472,11 @@ export async function handleCodeAssist({
   // Belt-and-suspenders: a restricted mode must never surface a write-tool
   // pendingTool, even one that leaked through ask-internal's delegation
   // (its nested sub-loop isn't filtered to the mode's tool allowlist — see
-  // docs/superpowers/plans/2026-08-09-code-assistant-modes-phase2.md's
-  // Task 2 review notes). Nothing executes automatically either way (every
-  // pendingTool always requires separate client confirmation), but a
-  // "Create issue?" card mid-"prose only" Plan-mode chat would still
-  // contradict the mode's own persona text.
-  if (restrictsTools(resolvedMode) && out?.pendingTool) {
-    out = { ...out, pendingTool: null };
-  }
+  // the comment in mode-personas.mjs). Nothing executes automatically
+  // either way (every pendingTool always requires separate client
+  // confirmation), but a "Create issue?" card mid-"prose only" Plan-mode
+  // chat would still contradict the mode's own persona text.
+  out = enforceModeToolRestriction(out, resolvedMode);
 
   // Auto project-memory capture. Distill durable, project-specific facts from
   // this turn and merge them into the active repo's chat-memory.md, which
