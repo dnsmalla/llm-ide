@@ -291,6 +291,7 @@ struct CodeAssistantPanel: View {
                 history: history,
                 showModelPicker: showModelPicker,
                 pendingTool: agent.pendingTool,
+                tasks: agent.agentPendingTasks,
                 busy: busy,
                 statusText: statusText,
                 error: $error,

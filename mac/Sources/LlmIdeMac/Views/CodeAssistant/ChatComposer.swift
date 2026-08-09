@@ -168,24 +168,6 @@ extension CodeAssistantPanel {
                 .background(theme.current.surface)
                 Divider().background(theme.current.border)
             }
-            // Agent task progress list — shown when the agent has pending tasks
-            if !agent.agentPendingTasks.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(agent.agentPendingTasks) { task in
-                        HStack(spacing: 6) {
-                            Image(systemName: agentTaskIcon(task.status))
-                                .foregroundColor(agentTaskColor(task.status))
-                                .font(.caption)
-                            Text(task.title)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
-            }
             // Autocomplete dropdown — sits directly above the editor (Cursor-style).
             // Kept ALWAYS in the tree and toggled via height/opacity — do NOT
             // wrap in `if completion.isOpen`. Inserting/removing this sibling
@@ -759,26 +741,6 @@ extension CodeAssistantPanel {
             draft = draftStash
         }
         return .handled
-    }
-
-    func agentTaskIcon(_ status: AgentTaskStatus) -> String {
-        switch status {
-        case .completed: return "checkmark.circle.fill"
-        case .inProgress: return "arrow.trianglehead.clockwise"
-        case .skipped: return "minus.circle"
-        case .failed: return "xmark.circle.fill"
-        case .pending: return "circle"
-        }
-    }
-
-    func agentTaskColor(_ status: AgentTaskStatus) -> Color {
-        switch status {
-        case .completed: return theme.current.success
-        case .inProgress: return theme.current.info
-        case .skipped: return theme.current.textMuted
-        case .failed: return theme.current.danger
-        case .pending: return theme.current.textMuted
-        }
     }
 
 }

@@ -10,6 +10,9 @@ struct ChatMessageList: View {
     let history: [LlmIdeAPIClient.CodeAssistTurn]
     let showModelPicker: Bool
     let pendingTool: PendingTool?
+    /// Current multi-step task list — `CodeAssistantAgentState.agentPendingTasks`,
+    /// rendered as a live checklist above the latest assistant turn.
+    let tasks: [AgentTask]
     let busy: Bool
     let statusText: String
     @Binding var error: String?
@@ -53,6 +56,11 @@ struct ChatMessageList: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.md) {
                         ForEach(history) { turn in
+                            if turn.role == .assistant, turn.id == lastAssistantTurnId, !tasks.isEmpty {
+                                PlanTimelineCard(tasks: tasks)
+                                    .padding(.bottom, 4)
+                                    .transition(.opacity)
+                            }
                             turnView(turn)
                                 .id(turn.id)
                                 .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .bottom)))
