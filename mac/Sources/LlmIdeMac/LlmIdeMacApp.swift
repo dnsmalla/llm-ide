@@ -568,7 +568,7 @@ struct MenuBarMenu: View {
             Button {
                 NotificationCenter.default.post(
                     name: .openSection,
-                    object: ShellState.Section.codeGraph.rawValue
+                    object: ShellState.Section.loopEngine.rawValue
                 )
             } label: {
                 Text("🐜 \(openFaultCount) open fault report\(openFaultCount == 1 ? "" : "s")")

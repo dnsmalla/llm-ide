@@ -5,6 +5,7 @@ struct StatusBar: View {
     @EnvironmentObject var projectStore: ProjectStore
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var config: AppConfig
+    @ObservedObject private var registry = FeatureRegistry.shared
     @Environment(TerminalPanelState.self) private var terminalState
 
     /// Working directory for the terminal — mirrors AppShell.projectDirectory:
@@ -30,7 +31,9 @@ struct StatusBar: View {
         HStack(spacing: 12) {
             ProjectSwitcher()
             Spacer()
-            terminalToggleButton
+            if registry.isEnabled(.terminal) {
+                terminalToggleButton
+            }
             ActivityBell()
             LlmChatStatusBadge()
         }

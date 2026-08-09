@@ -108,19 +108,14 @@ struct ActivityPanel: View {
 /// A single activity-feed row.  Tapping posts `.openSection` with
 /// `item.link` as the object when the link is set; the handler in
 /// `AppShell` casts the object to `String` and maps it to a
-/// `ShellState.Section` rawValue — so links work only when `link`
-/// holds a valid Section rawValue (e.g. "issues", "regression").
-/// If the link is nil or does not map to a known section the post
-/// is a silent no-op on AppShell's side (the cast to Section fails
-/// and the block returns without changing state).  For v1 all activity
-/// links emitted by the backend use Section rawValues, so deep-links
-/// work for all items that carry a link.
+/// `ShellState.Section` rawValue. Prefer `item.link` when it holds a
+/// valid section id; fall back to kind-based routing for legacy rows.
 struct ActivityRow: View {
     let item: ActivityItem
 
     var body: some View {
         Button {
-            if let raw = sectionRawValue(for: item.kind) {
+            if let raw = navigationTarget(for: item) {
                 NotificationCenter.default.post(name: .openSection, object: raw)
             }
         } label: {
@@ -138,7 +133,7 @@ struct ActivityRow: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if sectionRawValue(for: item.kind) != nil {
+                if navigationTarget(for: item) != nil {
                     Image(systemName: "chevron.right")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
@@ -168,14 +163,21 @@ struct ActivityRow: View {
         }
     }
 
+    private func navigationTarget(for item: ActivityItem) -> String? {
+        if let link = item.link, ShellState.Section(rawValue: link) != nil {
+            return link
+        }
+        return sectionRawValue(for: item.kind)
+    }
+
     private func sectionRawValue(for kind: ActivityKind?) -> String? {
         switch kind {
         case .issueCreated, .commentAdded, .dispatchIssueCreated, .outcomeChanged:
-            return "issues"
-        case .regressionDone:
-            return "regression"
+            return ShellState.Section.issues.rawValue
+        case .regressionDone, .loopEngineeringDone:
+            return ShellState.Section.loopEngine.rawValue
         case .knowledgeUpdated:
-            return "codeGraph"
+            return ShellState.Section.codeGraph.rawValue
         default:
             return nil   // meetingAdded, emailFetched, slackFetched: non-navigable in v1
         }

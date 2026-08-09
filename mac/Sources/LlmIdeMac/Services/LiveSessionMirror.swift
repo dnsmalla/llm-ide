@@ -48,6 +48,10 @@ final class LiveSessionMirror: ObservableObject {
         let participants: [String]
     }
 
+    /// When set (e.g. from `llmide://transcript?session=…`), discovery
+    /// prefers this session over the default most-recent pick.
+    private var preferredSessionId: String?
+
     private let log = Logger(subsystem: "com.llmide.macapp", category: "LiveMirror")
     private let api: LlmIdeAPIClient
     private var sessionDiscoveryTask: Task<Void, Never>?
@@ -85,6 +89,15 @@ final class LiveSessionMirror: ObservableObject {
         notifiedFinalizedSessions.removeAll()
     }
 
+    /// Pin caption polling to a specific session id (deep links). Pass
+    /// nil to return to the default most-recent session selection.
+    func setPreferredSession(_ id: String?) {
+        preferredSessionId = id
+        if id != nil, isPolling {
+            Task { await discoverSessions() }
+        }
+    }
+
     // --- Internals ---------------------------------------------------
 
     private func startDiscovery() {
@@ -100,9 +113,16 @@ final class LiveSessionMirror: ObservableObject {
     private func discoverSessions() async {
         do {
             let sessions = try await api.listLiveSessions()
-            // Pick the most recently active one — list is already
-            // sorted by lastWrite desc on the server side.
-            if let top = sessions.first {
+            let pick: LlmIdeAPIClient.LiveSessionInfo? = {
+                if let pref = preferredSessionId,
+                   let match = sessions.first(where: { $0.sessionId == pref }) {
+                    return match
+                }
+                return sessions.first
+            }()
+            // Pick the preferred session when deep-linked, else the most
+            // recently active one — list is sorted by lastWrite desc.
+            if let top = pick {
                 if activeSession?.sessionId != top.sessionId {
                     log.info("subscribing to session: \(top.sessionId, privacy: .public)")
                     activeSession = top

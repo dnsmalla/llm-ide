@@ -206,7 +206,8 @@ final class RegressionRunner: ObservableObject {
         activity?.report(
             kind: .regressionDone,
             title: "Regression complete — \(regressedCount) regressed, \(unchangedCount) unchanged",
-            detail: ["regressed": regressedCount, "unchanged": unchangedCount, "failed": failedCount]
+            detail: ["regressed": regressedCount, "unchanged": unchangedCount, "failed": failedCount],
+            link: ShellState.Section.loopEngine.rawValue
         )
 
         // Refresh the faults registry CSV so it always reflects the

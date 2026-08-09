@@ -94,13 +94,13 @@ struct AppShell: View {
             }
         }
         .onAppear {
-            applyDeepLink(deepLink.pendingEvent?.tab)
+            applyDeepLink(deepLink.pendingEvent)
             if let env = appEnv {
                 env.syncServiceLifecycles()
             }
             crashReportStore.scanForPendingCrashes()
         }
-        .onChange(of: deepLink.pendingEvent) { _, new in applyDeepLink(new?.tab) }
+        .onChange(of: deepLink.pendingEvent) { _, new in applyDeepLink(new) }
         .onChange(of: registry.activeFeatures) { _, _ in
             reconcileSectionAfterFeatureChange()
         }
@@ -676,10 +676,14 @@ struct AppShell: View {
         NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
     }
 
-    private func applyDeepLink(_ raw: String?) {
-        guard let raw = raw,
-              let section = ShellState.Section(deepLinkTabName: raw) else { return }
-        shell.section = section
+    private func applyDeepLink(_ event: DeepLinkRouter.Event?) {
+        guard let event else { return }
+        if let section = ShellState.Section(deepLinkTabName: event.tab) {
+            shell.section = section
+        }
+        if let session = event.session {
+            liveMirror.setPreferredSession(session)
+        }
     }
 
     /// Honor edge transitions in the live-capture state without

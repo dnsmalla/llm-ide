@@ -724,7 +724,8 @@ extension AutoCodeUpdateService {
         activity?.report(
             kind: .loopEngineeringDone,
             title: "Loop Engineering complete — \(result.map(\.summary) ?? "unknown")",
-            detail: ["iterations": runner.iteration]
+            detail: ["iterations": runner.iteration],
+            link: ShellState.Section.loopEngine.rawValue
         )
     }
 
