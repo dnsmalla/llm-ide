@@ -444,9 +444,9 @@ extension CodeAssistantPanel {
             finishStreamingTurn(
                 streamingID,
                 pendingTool: resp.pendingTool,
-                tasks: nil,
-                continueNeeded: nil,
-                usage: nil,
+                tasks: resp.tasks,
+                continueNeeded: resp.continueNeeded,
+                usage: resp.usage,
                 stopped: false,
             )
         } catch {
