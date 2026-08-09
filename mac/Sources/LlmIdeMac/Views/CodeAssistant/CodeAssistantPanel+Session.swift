@@ -171,7 +171,8 @@ extension CodeAssistantPanel {
             // keep their confirmation. Only the primary turn auto-applies —
             // the follow-up turn falls back to the card, so an agent that
             // keeps proposing edits can't loop.
-            if editMode == .auto, let pt = resp.pendingTool, let args = pt.updateFileArgs {
+            if editMode == .auto, autoGitOpsThisTurn < Self.maxAutoGitOpsPerTurn,
+               let pt = resp.pendingTool, let args = pt.updateFileArgs {
                 // Data-loss guard: if the server CUT this file to fit the prompt,
                 // the agent only saw its head — auto-overwriting with the "full"
                 // rewrite would silently drop the tail. Fall back to the manual
@@ -185,6 +186,7 @@ extension CodeAssistantPanel {
                     self.error = "“\(basename)” was too large to send in full, so auto-edit is disabled for it — review the proposed change before applying."
                     // Leave resp.pendingTool in place (set above) so the card shows.
                 } else {
+                    autoGitOpsThisTurn += 1
                     _ = await confirmUpdateFile(args, finalContent: args.content)
                 }
             }
@@ -463,10 +465,18 @@ extension CodeAssistantPanel {
         // auto-apply/auto-run checks; without this, only the FIRST step of a
         // plan (checked in runTurn) would auto-run and every step after it
         // would stall on a pending-action card even in Auto edit mode.
-        if editMode == .auto, let pt = agent.pendingTool, let args = pt.updateFileArgs {
+        // `autoGitOpsThisTurn`/`maxAutoGitOpsPerTurn` are shared as a general
+        // "auto-chained actions this turn" budget across BOTH update-file and
+        // git-op auto-chaining — without a shared cap, a large batch of
+        // attached files (e.g. 30+ dragged in for a bulk edit) could
+        // auto-chain through all of them with no ceiling, unlike the git-op
+        // path's existing explicit limit.
+        if editMode == .auto, autoGitOpsThisTurn < Self.maxAutoGitOpsPerTurn,
+           let pt = agent.pendingTool, let args = pt.updateFileArgs {
             // confirmUpdateFile does its own exact-path matching and safely
             // returns .failure (leaving the card up) if nothing matches —
             // same discard-the-result pattern runTurn's own auto-apply uses.
+            autoGitOpsThisTurn += 1
             _ = await confirmUpdateFile(args, finalContent: args.content)
         } else if let g = agent.pendingTool?.gitOpArgs, shouldAutoRunGitOp(g) {
             // runGitOpFlow resets `busy = false` itself before its own
