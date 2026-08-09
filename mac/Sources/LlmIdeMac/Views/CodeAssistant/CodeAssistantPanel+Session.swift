@@ -399,6 +399,7 @@ extension CodeAssistantPanel {
             return try await api.codeAssistStream(
                 message: message, language: prefLanguage, model: model, provider: provider,
                 history: history, attachments: attachments, skills: skills, agentContext: ctx,
+                mode: modelState.selectedMode.rawValue,
                 onProgress: { statusText = $0 }, onChunk: onChunk)
         } catch let e as APIError {
             // APIError == a server/stream/format failure (cancellations surface
@@ -407,7 +408,8 @@ extension CodeAssistantPanel {
             if case .http = e {
                 return try await api.codeAssist(
                     message: message, language: prefLanguage, model: model, provider: provider,
-                    history: history, attachments: attachments, skills: skills, agentContext: ctx)
+                    history: history, attachments: attachments, skills: skills, agentContext: ctx,
+                    mode: modelState.selectedMode.rawValue)
             }
             throw e
         }
