@@ -1,7 +1,7 @@
 // extension/tests/mode-personas.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { personaForMode, restrictsTools } from '../llm_agent/runtime/mode-personas.mjs';
+import { personaForMode, restrictsTools, allowedToolNames } from '../llm_agent/runtime/mode-personas.mjs';
 
 test('personaForMode returns mode-specific text for plan/review/document', () => {
   assert.match(personaForMode('plan'), /PLAN mode/);
@@ -23,4 +23,25 @@ test('restrictsTools is true for plan/review/document, false for execute', () =>
   assert.equal(restrictsTools('document'), true);
   assert.equal(restrictsTools('execute'), false);
   assert.equal(restrictsTools('something-else'), false);
+});
+
+test('allowedToolNames returns a Set that does NOT include run-bash (it executes unconfirmed, despite kind: read)', () => {
+  const names = allowedToolNames();
+  assert.ok(names instanceof Set);
+  assert.equal(names.has('run-bash'), false);
+  assert.equal(names.has('bash'), false);
+});
+
+test('allowedToolNames excludes all write-kind tools (git-op, update-file) alongside run-bash', () => {
+  const names = allowedToolNames();
+  assert.equal(names.has('git-op'), false);
+  assert.equal(names.has('update-file'), false);
+});
+
+test('allowedToolNames includes genuinely read-only tools', () => {
+  const names = allowedToolNames();
+  assert.ok(names.size > 0);
+  assert.ok(names.has('search-kb'));
+  assert.ok(names.has('read-file'));
+  assert.ok(names.has('list-files'));
 });
