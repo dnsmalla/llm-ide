@@ -7,6 +7,9 @@
 // behavior they didn't ask for.
 
 import { runClaude as defaultRunClaude, tryParseJSON } from './runtime.mjs';
+import { logger } from '../core/logger.mjs';
+
+const log = logger.child({ component: 'mode-classify' });
 
 const MODES = new Set(['plan', 'review', 'document', 'execute']);
 
@@ -38,7 +41,8 @@ export async function classifyCodeAssistMode(message, opts = {}) {
     const parsed = tryParseJSON(raw);
     const mode = parsed && MODES.has(parsed.mode) ? parsed.mode : 'execute';
     return { mode };
-  } catch {
+  } catch (err) {
+    log.warn('mode_classify_failed', { error: err?.message, userId });
     return { mode: 'execute' };
   }
 }
