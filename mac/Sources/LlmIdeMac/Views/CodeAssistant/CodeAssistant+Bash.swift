@@ -30,7 +30,14 @@ extension CodeAssistantPanel {
             ? "(bash result - exit code: \(result.exitCode))"
             : "(bash failed - exit code: \(result.exitCode))"
         let body = result.output.isEmpty ? "(no output)" : result.output
-        let output = "\(header)\n$ \(args.command)\n\(body)"
+        // Collapse embedded newlines for display only — a multi-line/heredoc
+        // command must still render on a single "$ ..." line, or a future
+        // parser reading this format back out (line 2 = command, everything
+        // after = output) would silently swallow the command's later lines
+        // into what looks like real stdout. The actual command executed
+        // above is unaffected — this only touches what's shown in the chat.
+        let displayCommand = args.command.replacingOccurrences(of: "\n", with: " ⏎ ")
+        let output = "\(header)\n$ \(displayCommand)\n\(body)"
 
         history.append(.init(role: .user, content: output))
         await sendFollowup()
