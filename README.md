@@ -1,19 +1,21 @@
 # LLM-IDE
 
-> End-to-end AI meeting intelligence — from live transcription to dispatched tickets, draft PRs, and a self-learning knowledge base. Runs entirely on `127.0.0.1`.
+> Local-first AI workspace — capture meetings and sources, plan in a searchable library, automate code review and implementation, and dispatch to GitHub/GitLab/tickets. Everything runs on `127.0.0.1` unless you approve an outbound action.
 
-[![Version](https://img.shields.io/badge/version-3.0-blue.svg)](./extension/package.json)
-[![API](https://img.shields.io/badge/API-v18-green.svg)](./docs/reference/api/openapi.yaml)
+[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](./extension/package.json)
+[![API](https://img.shields.io/badge/API-v22-green.svg)](./docs/reference/api/openapi.yaml)
 [![Manifest](https://img.shields.io/badge/manifest-V3-orange.svg)](./extension/manifest.json)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey.svg)](#license)
 
 ## What this is
 
-A Chrome extension + native macOS app + local Node server that captures meetings, generates plans, and dispatches the work. Nothing leaves your machine unless you approve a delivery action.
+A **Chrome extension**, **native macOS app**, **iPhone companion**, and **local Node server** that share one knowledge base. Capture from meetings, email, Slack, and files; search and plan; run scheduled **Auto Tasks** (review, implement, regression, doc gen); visualize code and issues; dispatch work when you approve it.
+
+Nothing leaves your machine unless you explicitly trigger a delivery action.
 
 ## System at a glance
 
-**Library is the hub.** Every source (meetings, email, Slack, files) lands in the knowledge base. From there you search, plan, automate, visualize, and dispatch — all on `127.0.0.1`.
+**Library is the hub.** Every source (meetings, email, Slack, Box, repos) lands in the KB. From there you search, plan, automate, visualize, and dispatch — all on `127.0.0.1`.
 
 <p align="center">
   <img src="docs/assets/system-map.svg" alt="LLM-IDE system map: Library hub with Sources, Automation, and Visualize &amp; control" width="920"/>
@@ -25,11 +27,11 @@ A Chrome extension + native macOS app + local Node server that captures meetings
 
 | Pillar | What you get | Mac | Extension | iPhone |
 |--------|----------------|-----|-----------|--------|
-| **Sources** | Meet · Teams · Zoom · live mic · **Email** · **Slack** → notes in Library | ✅ full ingest | ✅ web CC capture | — |
+| **Sources** | Meet · Teams · Zoom · live mic · **Email** · **Slack** · Box → notes in Library | ✅ full ingest | ✅ web CC capture | — |
 | **Library** | Unified notes, code, data, plugins · FTS5 search · re-summarize | ✅ hub | ✅ meetings | — |
-| **Automation** | **Auto Tasks**: review code/doc/conflicts, regression, doc & knowledge gen, issue/plan updates | ✅ run + configure | — | ✅ monitor + run |
+| **Automation** | **13 built-in Auto Tasks** + **custom tasks** (review/implement mode, per-task cron) · **Loop Engineering** | ✅ run + configure | — | ✅ monitor + run |
 | **Code** | Explorer chat, codegen, workflows, guardrails, PR/ticket dispatch | ✅ | — | ✅ Explorer |
-| **Visualize** | **Code graph**, **Issues**, **Gantt**, **Visual**, conflicts, regression panel | ✅ | — | — |
+| **Visualize** | **Code graph**, **Issues**, **Gantt**, **Visual**, conflicts, **Loop Engineering** | ✅ | — | — |
 | **Control** | Source control, search, live session, settings, mobile pairing | ✅ | side panel | companion |
 
 ```mermaid
@@ -43,8 +45,8 @@ flowchart LR
   LIB[(Library + KB)]
   subgraph auto [Automation]
     AT[Auto Tasks]
-    RC[Review conflicts]
-    RG[Regression]
+    LE[Loop Engineering]
+    CT[Custom tasks]
     CG[Code generation]
   end
   subgraph viz [Visualize and control]
@@ -58,17 +60,27 @@ flowchart LR
   E --> LIB
   S --> LIB
   L --> LIB
-  LIB --> AT & EX & G & I & GN
-  AT --> RC & RG & CG
+  LIB --> AT & LE & EX & G & I & GN
+  AT --> CT & CG
+  LE --> CG
 ```
 
-**Auto Tasks (scheduled on Mac, mirror on iPhone):** review code · review doc · review conflicts · regression sweep · generate documentation · generate knowledge · update issues · update plan status.
+**Built-in Auto Tasks (13, cron-schedulable on Mac, mirrored on iPhone):**
+
+| Pipeline | Tasks |
+|----------|--------|
+| Ingest → issues | Source Update · Sources → Issue · Implement Issues · Review & Merge |
+| Review | Review Code · Review Doc · Review Conflicts · Regression |
+| Generate | Knowledge · Generate Documentation |
+| Maintain | Update Issues · Update Plan Status · **Loop Engineering** |
+
+**Custom Auto Tasks** — create your own name + prompt; choose **Review** (discard edits) or **Implement** (commit on `fix/custom-*` branch); optional **cron** per task.
 
 **Integrations (opt-in dispatch):** GitHub · GitLab · Backlog · Linear · Slack webhooks.
 
-## Architecture (reality check)
+## Architecture
 
-Four surfaces share one local backend. All traffic stays on `127.0.0.1` unless you explicitly allow remote bind.
+Four surfaces share one local backend. All traffic stays on `127.0.0.1` unless you set `LLMIDE_ALLOW_REMOTE=1`.
 
 ```mermaid
 flowchart TB
@@ -102,7 +114,7 @@ flowchart TB
 | macOS app | Full KB, code assistant, AX capture, mobile server | `:3456` client; `:3006` mobile |
 | iPhone app | Companion — chat, explorer, auto-tasks (no remote desktop) | WebSocket to Mac `:3006` |
 
-Deep dive: [Architecture overview](docs/explanation/architecture.md) · [Engineering invariants](docs/explanation/invariants.md) · [Naming convention](docs/decisions/0016-naming-convention.md)
+Deep dive: [Architecture overview](docs/explanation/architecture.md) · [Engineering invariants](docs/explanation/invariants.md) · [Project folder layout](docs/reference/project-layout.md) · [Naming convention](docs/decisions/0016-naming-convention.md)
 
 ### Naming
 
@@ -116,13 +128,15 @@ Deep dive: [Architecture overview](docs/explanation/architecture.md) · [Enginee
 ## Quick Start (3 Minutes)
 
 ```bash
-git clone git@github.com:dnsmalla/llm-ide.git
+git clone --recurse-submodules git@github.com:dnsmalla/llm-ide.git
 cd llm-ide
-./setup.sh
+./setup.sh          # npm install, .skills submodule, agent symlinks, git hooks
 cd extension && npm run server
 ```
 
 Then load `extension/dist/` as an unpacked Chrome extension. Full tutorial: [Record your first meeting](docs/tutorials/01-first-meeting.md).
+
+> Already cloned without `--recurse-submodules`? Run `./setup.sh` — it initializes `.skills` automatically.
 
 ---
 
@@ -130,217 +144,172 @@ Then load `extension/dist/` as an unpacked Chrome extension. Full tutorial: [Rec
 
 ### Prerequisites
 
-Before installing LLM-IDE, you need:
-
-- **macOS 14+** (for native macOS app)
-- **Node.js 20+** - [Download](https://nodejs.org/) (includes npm)
-- **Claude CLI** - [Install guide](https://docs.claude.com/en/docs/claude-code/quickstart)
-- **Git** - Usually pre-installed on macOS
-- **Chrome Browser** - For the extension
+- **macOS 14+** (for native macOS app; iPhone app needs Xcode + physical device)
+- **Node.js 20+** — [Download](https://nodejs.org/)
+- **Claude CLI** — [Install guide](https://docs.claude.com/en/docs/claude-code/quickstart) (`claude login`)
+- **Git** — pre-installed on macOS
+- **Chrome** — for the extension
+- **Xcode** (optional) — required for `swift test` / full Mac unit tests; `swift build` works with Command Line Tools
 
 **Check what you have:**
-```bash
-node --version        # Should be v20+
-npm --version         # Should be v10+
-claude --version      # Should work
-git --version         # Should work
-```
 
----
+```bash
+node --version        # v20+
+npm --version         # v10+
+claude --version      # should work
+git --version
+swift --version       # optional, for Mac app
+```
 
 ### Step 1: Clone the Repository
 
 ```bash
-# Clone the repo (replace URL with your fork/remote)
-git clone git@github.com:dnsmalla/llm-ide.git
+git clone --recurse-submodules git@github.com:dnsmalla/llm-ide.git
 cd llm-ide
-
-# Verify the structure
-ls -la
-# Should see: docs/, extension/, mac/, CLAUDE.md, README.md, setup.sh
+ls -la   # docs/ extension/ mac/ ios_app/ .skills/ setup.sh
 ```
 
----
-
-### Step 2: Run Setup (Installs Everything)
+### Step 2: Run Setup
 
 ```bash
-# This installs Node dependencies and verifies requirements
 ./setup.sh
-
-# Wait for it to complete. You should see:
-# ✅ Node.js detected: v20.x.x
-# ✅ npm detected: v10.x.x
-# ✅ Backend dependencies compiled successfully!
-# ✅ Claude CLI detected
+# ✅ Node.js, npm, backend deps (better-sqlite3)
+# ✅ Claude CLI
+# ✅ .skills submodule + agent symlinks (Claude / Cursor / Codex / …)
+# ✅ git hooks (pre-push runs make regression when mac/ changes)
 ```
 
-If setup fails, see [Troubleshooting](#troubleshooting) below.
+If setup fails, see [Troubleshooting](#troubleshooting).
 
----
-
-### Step 3: Start the Node Server (One Terminal)
-
-The Node server handles API requests and meetings storage.
+### Step 3: Start the Node Server
 
 ```bash
-cd extension
-npm run server
-
-# You should see:
+cd extension && npm run server
 # Server listening on http://127.0.0.1:3456
-# ✓ Database initialized
 ```
 
-**Keep this terminal running** — the server must stay active.
+Keep this terminal running.
 
----
+### Step 4: Load Chrome Extension
 
-### Step 4: Load Chrome Extension (Browser)
+1. Open `chrome://extensions`
+2. Enable **Developer mode**
+3. **Load unpacked** → select `llm-ide/extension/dist/`
+4. Pin the extension icon in the toolbar
 
-The extension captures meeting audio and sends it to the server.
-
-1. **Open Chrome** and go to: `chrome://extensions`
-2. **Enable** "Developer mode" (toggle in top-right)
-3. **Click** "Load unpacked"
-4. **Select folder:** `llm-ide/extension/dist/`
-5. **Verify:** Extension appears in toolbar, small icon visible
-
----
-
-### Step 5: Build macOS App (Another Terminal)
+### Step 5: Build macOS App
 
 ```bash
-cd mac
-swift build
-
-# You should see:
-# Build complete! (X.XXs)
-# Product: .build/debug/LlmIdeMac (executable)
-```
-
-To run the app:
-```bash
-swift build
-# Then open the built app from Finder:
-# llm-ide/mac/.build/debug/LlmIdeMac
-
-# Or build and run in one step:
-swift run LlmIdeMac
+cd mac && swift build
+swift run LlmIdeMac    # or open .build/debug/LlmIdeMac
 ```
 
 ---
 
 ## Usage
 
-### 1. **Web Version (Chrome Extension)**
-   - Open any Google Meet, Microsoft Teams, or Zoom call
-   - Extension auto-captures captions
-   - Click extension icon to see notes and generate AI outputs
-   - Download results as DOCX or Markdown
+### Chrome Extension
+- Open Google Meet, Microsoft Teams, or Zoom (web)
+- Extension captures **live captions** (not microphone audio)
+- Side panel: notes, questions, entities, DOCX export
 
-### 2. **macOS App**
-   - Standalone app for meetings, code workflows, and AI assistance
-   - Full knowledge base with search
-   - Access to Issues, Gantt, and Code Assistant
-   - Launch from Applications or via `swift run LlmIdeMac`
+### macOS App
+- Native AX caption capture, full Library, Issues, Gantt, Code Assistant
+- **Auto Tasks** page: built-in + custom tasks, cron schedules, Loop Engineering
+- **Explorer** + codegen workflows with guardrails
 
-### 3. **Server API**
-   - REST API runs on `http://127.0.0.1:3456`
-   - Used by both extension and macOS app
-   - Full docs: [API Reference](docs/reference/api/overview.md)
+### iPhone Companion
+- Pair via Bonjour or Direct IP + PIN (Mac Settings → Mobile Control)
+- Chat, Explorer sessions, Auto Task monitor/run
+- See [Mobile quick start](docs/mobile/quick-start.md)
+
+### Server API
+- REST on `http://127.0.0.1:3456` — used by extension, Mac, and mobile proxy
+- [API Reference](docs/reference/api/overview.md)
 
 ---
 
 ## After Pulling New Code
 
-If you pull updates from git, always run setup again:
-
 ```bash
 git pull origin main
-./setup.sh          # Reinstalls dependencies if needed
-cd extension && npm run server  # Restart server
+./setup.sh                    # deps, submodule, skills symlinks
+cd extension && npm run build # refresh extension/dist if UI changed
+cd extension && npm run server
 ```
 
-See [FIRST_TIME_SETUP.md](FIRST_TIME_SETUP.md) for detailed post-pull guide.
+See [FIRST_TIME_SETUP.md](FIRST_TIME_SETUP.md) for the post-pull checklist.
 
 ---
 
 ## Development Commands
 
 ```bash
-# Terminal 1: Start Node server
+# Terminal 1: Node server
 cd extension && npm run server
 
-# Terminal 2: (Optional) Run tests
-cd extension && npm test
+# Terminal 2: Extension dev (hot reload)
+cd extension && npm run dev
 
-# Terminal 3: Build/run macOS app
-cd mac && swift build
+# Terminal 3: Mac app
 cd mac && swift run LlmIdeMac
 
-# Mac unit tests (requires full Xcode — not Command Line Tools alone)
-cd mac && swift test --filter ChatSessionStoreTests
+# Tests
+make test              # extension (Node test runner)
+make test-mac          # macOS (requires full Xcode)
+make regression        # pre-push gate (build + tests where available)
 
-# Extension development
-cd extension
-npm run dev          # Watch mode with hot reload
-npm run build        # Production build
-npm run type-check   # TypeScript check only
+# Lint / docs
+make lint && make format
+make docs-serve        # localhost:8000
+```
+
+Central agent skills live in the [`.skills`](https://github.com/dnsmalla/skills) submodule. Refresh after pull:
+
+```bash
+git submodule update --init --recursive .skills
+bash scripts/install-skills.sh
+cd extension && npm run sync:skills   # agent tool defs only
 ```
 
 ---
 
 ## Troubleshooting
 
-### ❌ "Cannot find module 'docx'"
-**Solution:** Run setup again
+### ❌ "Cannot find module 'docx'" or other npm errors
 ```bash
 ./setup.sh
+# or: rm -rf extension/node_modules && npm ci --prefix extension
 ```
 
 ### ❌ "node: command not found"
-**Solution:** Install Node.js from https://nodejs.org/
-```bash
-node --version  # Should work after install
-```
+Install Node.js 20+ from https://nodejs.org/
 
 ### ❌ "claude: command not found"
-**Solution:** Install Claude CLI
-```bash
-# Follow: https://docs.claude.com/en/docs/claude-code/quickstart
-claude login    # Then authenticate
-```
+Install and authenticate: https://docs.claude.com/en/docs/claude-code/quickstart → `claude login`
 
 ### ❌ "Port 3456 already in use"
-**Solution:** Another server instance is running
 ```bash
-# Kill existing process
-lsof -i :3456
-kill -9 <PID>
-
-# Then restart
+lsof -i :3456 && kill -9 <PID>
 cd extension && npm run server
 ```
 
-### ❌ "Swift build fails" (macOS)
-**Solution:** Update Xcode Command Line Tools
+### ❌ "Swift build fails"
 ```bash
 xcode-select --install
-# Then retry: swift build
+cd mac && swift build
 ```
 
-### ❌ "Chrome extension not updating"
-**Solution:** 
-1. Go to `chrome://extensions`
-2. Click refresh button on LLM-IDE extension
-3. Hard refresh the page (Cmd+Shift+R)
+### ❌ "No such module 'XCTest'" when running swift test
+Full **Xcode** is required (Command Line Tools alone is not enough). `swift build` still works.
 
-### ❌ "Settings/data lost after pull"
-**Solution:** Your local data is safe
-- Local meetings in `kb/data.db` (gitignored)
-- Settings in `~/.llmide/` (user-specific)
-- Only code is pulled, never your data
+### ❌ Chrome extension not updating
+Refresh on `chrome://extensions`, then hard-reload the meeting tab (Cmd+Shift+R).
+
+### ❌ Settings/data lost after pull
+Your data is safe — only code is pulled:
+- Meetings/KB: `kb/` (gitignored per install)
+- User settings: `~/.llmide/`
 
 ---
 
@@ -348,68 +317,70 @@ xcode-select --install
 
 ```
 llm-ide/
-├── extension/          Chrome extension + Node server
-│   ├── server.mjs      Main HTTP server (127.0.0.1:3456)
-│   ├── kb/             SQLite knowledge base
-│   ├── src/            React UI (Chrome panel)
-│   ├── dist/           Built extension (load in Chrome)
-│   └── package.json    Node dependencies
-│
+├── extension/          Chrome extension + Node server (:3456)
+│   ├── server.mjs      HTTP entry (no framework)
+│   ├── kb/             SQLite + FTS5 + migrations
+│   ├── connectors/     GitHub, GitLab, Slack, Box, …
+│   ├── agents/         Planner, codegen, dispatch pipelines
+│   ├── src/            React side panel + content scripts
+│   └── dist/           Built extension (load in Chrome)
 ├── mac/                SwiftUI macOS app
-│   ├── Sources/        Swift source code
-│   ├── Tests/          Test suite
-│   └── Package.swift   Swift configuration
-│
-├── docs/               Engineering documentation
-├── CLAUDE.md           Project instructions
-└── setup.sh            Automated setup script
+│   ├── Sources/LlmIdeMac/
+│   └── Tests/
+├── ios_app/            iPhone companion (SwiftUI)
+├── .skills/            Central agent skills submodule
+├── scripts/            setup helpers, mobile verify, install-skills
+├── docs/               MkDocs site (architecture, API, ADRs)
+├── kb/                 Runtime SQLite (gitignored content)
+├── setup.sh            One-shot install + skills wiring
+└── CLAUDE.md           Agent/developer guide
 ```
+
+Inside each **project**, LLM-IDE scaffolds `source/{meetings,emails,documents}/`, `llm-doc/`, `code/`, `system/`, etc. See [Project folder layout](docs/reference/project-layout.md).
+
+---
+
+## Mobile Control
+
+Native Mac WebSocket server on `:3006` (Bonjour `_llmide._tcp` + PIN pairing). No external Node agent.
+
+| Feature | Description |
+|---------|-------------|
+| **LLM-IDE Chat** | Ask from iPhone; Mac proxies to `:3456` |
+| **Explorer** | List and chat with Mac explorer sessions |
+| **Auto Tasks** | Toggle and inspect scheduled tasks |
+| **Pairing** | QR / PIN from Mac Settings → Mobile Control |
+
+📱 [docs/mobile/quick-start.md](docs/mobile/quick-start.md)
+
+**Loopback check:** `swift scripts/mobile/verify-native-pairing.swift`
+
+---
+
+## Documentation
+
+📚 **Full docs site:** https://grid-devs.gitlab.io/personal/dinesh/notes-extension/
+
+| Topic | Link |
+|-------|------|
+| Architecture | [docs/explanation/architecture.md](docs/explanation/architecture.md) |
+| Invariants (read before changing hot paths) | [docs/explanation/invariants.md](docs/explanation/invariants.md) |
+| API overview | [docs/reference/api/overview.md](docs/reference/api/overview.md) |
+| Project folder layout | [docs/reference/project-layout.md](docs/reference/project-layout.md) |
+| Architecture decisions | [docs/decisions/](docs/decisions/) (ADRs 0001–0016) |
+| Central skills install | [docs/how-to/install-central-skills.md](docs/how-to/install-central-skills.md) |
+| Contribute | [docs/how-to/contribute.md](docs/how-to/contribute.md) |
 
 ---
 
 ## Next Steps
 
-1. ✅ Completed setup? → [Record your first meeting](docs/tutorials/01-first-meeting.md)
-2. Want to understand the system? → [Architecture overview](docs/explanation/architecture.md)
-3. Want to contribute? → [How to contribute](docs/how-to/contribute.md)
-4. Need help? → Check [Troubleshooting](#troubleshooting) above
+1. ✅ Setup done → [Record your first meeting](docs/tutorials/01-first-meeting.md)
+2. Configure Auto Tasks → Mac app → **Auto Tasks** (built-in + custom)
+3. Pair iPhone → [Mobile quick start](docs/mobile/quick-start.md)
+4. Understand the system → [Architecture overview](docs/explanation/architecture.md)
 
 ---
-
-## Mobile control
-
-Use your iPhone as an LLM-IDE companion via the **native Mac WebSocket server** (no external Node agent):
-
-- **LLM-IDE Chat** — Ask questions from iPhone (streamed via Mac → local server)
-- **Explorer** — Browse and chat with Mac explorer sessions
-- **Auto Tasks** — Toggle and inspect scheduled auto-code tasks
-- **Pairing** — Bonjour discovery, Direct IP + PIN, or QR scan from Mac Settings
-
-📱 **Quick start:** [docs/mobile/quick-start.md](docs/mobile/quick-start.md)
-
-**Loopback check:** `swift scripts/mobile/verify-native-pairing.swift` — verifies native server pairing on `127.0.0.1:3006`
-
-## Documentation
-
-📚 **Full docs:** https://grid-devs.gitlab.io/personal/dinesh/notes-extension/
-
-Common entry points:
-
-- [System architecture](docs/explanation/architecture.md)
-- [API overview](docs/reference/api/overview.md)
-- [Engineering invariants](docs/explanation/invariants.md) — read before changing the hot paths
-- [Decisions index](docs/decisions/) — ADRs 0001–0015
-- [How to contribute](docs/how-to/contribute.md)
-
-## Project layout
-
-```
-llm-ide/
-├── docs/         engineering docs — see docs site
-├── extension/    Chrome extension + local Node server
-├── mac/          SwiftUI macOS app
-└── kb/           per-install SQLite (gitignored content)
-```
 
 ## License
 
