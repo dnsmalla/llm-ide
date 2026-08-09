@@ -21,7 +21,7 @@ import { persistTurnMemory } from './memory-persist.mjs';
 import { buildReadableRoots, handleListFiles, handleReadFile } from './handlers/repo-files.mjs';
 import { searchKb } from './handlers/search-kb.mjs';
 import { handleRunBash } from './handlers/run-bash.mjs';
-import { tasks } from './handlers/session-tasks.mjs';
+import { tasks, taskStatusIcon } from './handlers/session-tasks.mjs';
 import { redactFence } from './redaction.mjs';
 import { logger } from '../../core/logger.mjs';
 import { GLOBAL_HANDLER_NAMES } from './global-handlers.mjs';
@@ -193,11 +193,8 @@ export async function handleCodeAssist({
   const sessionId = agentContext?.sessionId;
   const sessionTasks = tasks.listTasks(userId, sessionId);
   if (sessionTasks.length > 0) {
-    const taskLines = sessionTasks.map((t) => {
-      const icon = t.status === 'completed' ? '[x]' : t.status === 'skipped' ? '[-]' : t.status === 'in_progress' ? '[~]' : '[ ]';
-      return `- ${icon} (id:${t.id}) ${t.title}`;
-    }).join('\n');
-    personaBase += `\n\n## Your current task list\n${taskLines}\n\nLegend: [ ] pending  [~] in_progress  [x] completed  [-] skipped`;
+    const taskLines = sessionTasks.map((t) => `- ${taskStatusIcon(t.status)} (id:${t.id}) ${t.title}`).join('\n');
+    personaBase += `\n\n## Your current task list\n${taskLines}\n\nLegend: [ ] pending  [~] in_progress  [x] completed  [-] skipped  [!] failed`;
   }
 
   // Global handler set: ask-internal (for app-state-aware questions)

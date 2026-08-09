@@ -8,6 +8,22 @@ function key(userId, sessionId) {
   return `${userId ?? 'anon'}:${sessionId ?? 'default'}`;
 }
 
+/**
+ * Legend glyph for a task's status, used both in the prompt block the model
+ * sees (`route.mjs`) and anywhere else a compact text rendering is needed.
+ * An unrecognised status renders as pending rather than throwing — a stray
+ * status string must never break prompt construction.
+ */
+export function taskStatusIcon(status) {
+  switch (status) {
+    case 'completed': return '[x]';
+    case 'skipped': return '[-]';
+    case 'in_progress': return '[~]';
+    case 'failed': return '[!]';
+    default: return '[ ]';
+  }
+}
+
 export function sessionTaskStore() {
   return {
     createTask(userId, sessionId, title) {

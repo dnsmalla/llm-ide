@@ -1,7 +1,7 @@
 // extension/tests/session-tasks.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sessionTaskStore } from '../llm_agent/runtime/handlers/session-tasks.mjs';
+import { sessionTaskStore, taskStatusIcon } from '../llm_agent/runtime/handlers/session-tasks.mjs';
 
 test('hasPendingWork is true while a task is pending', () => {
   const store = sessionTaskStore();
@@ -40,4 +40,13 @@ test('sessions are isolated by userId:sessionId key', () => {
   // A different session must not see the other session's failure.
   store.createTask('u2', 'sB', 'B');
   assert.equal(store.hasPendingWork('u2', 'sB'), true);
+});
+
+test('taskStatusIcon maps every status to its legend glyph', () => {
+  assert.equal(taskStatusIcon('pending'), '[ ]');
+  assert.equal(taskStatusIcon('in_progress'), '[~]');
+  assert.equal(taskStatusIcon('completed'), '[x]');
+  assert.equal(taskStatusIcon('skipped'), '[-]');
+  assert.equal(taskStatusIcon('failed'), '[!]');
+  assert.equal(taskStatusIcon('something-unknown'), '[ ]');
 });
