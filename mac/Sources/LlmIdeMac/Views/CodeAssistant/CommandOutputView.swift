@@ -28,13 +28,17 @@ struct BashResultDisplay {
             lines.removeFirst()
         }
         var output = lines.joined(separator: "\n")
-        // The "blocked" variant is a single-line message with no exit code,
-        // no command, and no separate body — the header IS the whole
-        // message (e.g. "(bash blocked - command contains potentially
-        // dangerous operations)"). Surface it as output instead of silently
-        // discarding it, or the user sees a bare "failed" chip with zero
-        // explanation of why the command never ran.
-        if output.isEmpty && command == nil && exitCode == nil {
+        // The "blocked" variant (CodeAssistant+Bash.swift's validateCommand
+        // guard) is a single-line message with no exit code, no command, and
+        // no separate body — the header IS the whole message (e.g. "(bash
+        // blocked - command contains potentially dangerous operations)").
+        // Keyed directly on the "blocked" keyword (the same signal isFailure
+        // already checks above) rather than inferring it from the absence of
+        // exitCode/command/output — that would have been fragile: a future
+        // change to the blocked message's shape could silently defeat an
+        // absence-based guard and reintroduce dropped explanatory text with
+        // nothing to catch it.
+        if header.contains("blocked") {
             var message = header
             if message.hasPrefix("(bash ") { message.removeFirst(6) }
             if message.hasSuffix(")") { message.removeLast() }
