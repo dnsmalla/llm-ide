@@ -761,21 +761,23 @@ extension CodeAssistantPanel {
         return .handled
     }
 
-    func agentTaskIcon(_ status: String) -> String {
+    func agentTaskIcon(_ status: AgentTaskStatus) -> String {
         switch status {
-        case "completed": return "checkmark.circle.fill"
-        case "in_progress": return "arrow.trianglehead.clockwise"
-        case "skipped": return "minus.circle"
-        default: return "circle"
+        case .completed: return "checkmark.circle.fill"
+        case .inProgress: return "arrow.trianglehead.clockwise"
+        case .skipped: return "minus.circle"
+        case .failed: return "xmark.circle.fill"
+        case .pending: return "circle"
         }
     }
 
-    func agentTaskColor(_ status: String) -> Color {
+    func agentTaskColor(_ status: AgentTaskStatus) -> Color {
         switch status {
-        case "completed": return theme.current.success
-        case "in_progress": return theme.current.info
-        case "skipped": return theme.current.textMuted
-        default: return theme.current.textMuted
+        case .completed: return theme.current.accent3
+        case .inProgress: return theme.current.accent2
+        case .skipped: return theme.current.textMuted
+        case .failed: return theme.current.danger
+        case .pending: return theme.current.textMuted
         }
     }
 

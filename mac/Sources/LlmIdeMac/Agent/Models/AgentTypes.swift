@@ -63,10 +63,22 @@ struct AgentContext: Codable, Equatable {
     }
 }
 
+/// Mirrors the server's task-tracking status strings exactly (see
+/// `extension/llm_agent/runtime/handlers/session-tasks.mjs`'s
+/// `taskStatusIcon` and `task-update.md`'s schema enum) — the raw values
+/// below are NOT freely renameable, they must match the wire strings.
+enum AgentTaskStatus: String, Codable {
+    case pending
+    case inProgress = "in_progress"
+    case completed
+    case skipped
+    case failed
+}
+
 struct AgentTask: Codable, Identifiable {
     let id: String
     let title: String
-    let status: String  // "pending" | "in_progress" | "completed" | "skipped"
+    let status: AgentTaskStatus
 }
 
 /// A write tool the agent wants to run. The Mac client renders a
