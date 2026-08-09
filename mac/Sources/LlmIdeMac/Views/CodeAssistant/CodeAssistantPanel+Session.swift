@@ -616,7 +616,11 @@ extension CodeAssistantPanel {
     ) {
         revealingTurnID = nil
         revealedCount = 0
-        if let mode, let resolved = CodeAssistMode(rawValue: mode) {
+        // Only store non-default modes — ModeBadge never renders for
+        // .execute/.auto, and most turns use one of those, so skipping them
+        // here keeps this dictionary from growing with entries nothing ever
+        // reads back.
+        if let mode, let resolved = CodeAssistMode(rawValue: mode), resolved != .execute, resolved != .auto {
             turnModes[id] = resolved
         }
         if let idx = history.firstIndex(where: { $0.id == id }) {
