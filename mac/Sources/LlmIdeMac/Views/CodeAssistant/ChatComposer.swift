@@ -773,8 +773,8 @@ extension CodeAssistantPanel {
 
     func agentTaskColor(_ status: AgentTaskStatus) -> Color {
         switch status {
-        case .completed: return theme.current.accent3
-        case .inProgress: return theme.current.accent2
+        case .completed: return theme.current.success
+        case .inProgress: return theme.current.info
         case .skipped: return theme.current.textMuted
         case .failed: return theme.current.danger
         case .pending: return theme.current.textMuted

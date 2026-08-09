@@ -73,6 +73,17 @@ enum AgentTaskStatus: String, Codable {
     case completed
     case skipped
     case failed
+
+    /// Decodes leniently: an unrecognised status (e.g. the server ships a
+    /// new value before this app updates) falls back to `.pending` instead
+    /// of throwing, which would otherwise drop the ENTIRE `done` SSE event
+    /// via the `try?` decode in `LlmIdeAPIClient+CodeAssist.swift` — losing
+    /// the reply text, pendingTool, and usage along with it, not just the
+    /// task list.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = AgentTaskStatus(rawValue: raw) ?? .pending
+    }
 }
 
 struct AgentTask: Codable, Identifiable {
