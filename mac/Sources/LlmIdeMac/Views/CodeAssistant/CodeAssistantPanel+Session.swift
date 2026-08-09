@@ -116,6 +116,12 @@ extension CodeAssistantPanel {
         // Clear any stale pending-tool card from a prior turn the user ignored —
         // otherwise it stays interactive against the old args while a new turn runs.
         agent.pendingTool = nil
+        // Same reasoning for a finished plan's checklist: without this, a prior
+        // turn's completed/failed task list stays in agentPendingTasks and
+        // (since PlanTimelineCard pins to the latest assistant turn) would
+        // visibly attach to this NEW, unrelated turn if its response happens
+        // not to include a fresh `tasks` field.
+        agent.agentPendingTasks = []
         // Fresh budget of auto-run git ops for this user turn (commit→push→… ).
         autoGitOpsThisTurn = 0
         // Captured once, fixed for this whole invocation, and declared

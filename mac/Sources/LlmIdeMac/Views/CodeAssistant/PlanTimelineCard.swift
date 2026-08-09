@@ -20,8 +20,12 @@ struct PlanTimelineCard: View {
         tasks.contains { $0.status == .pending || $0.status == .inProgress }
     }
 
-    private var doneCount: Int {
-        tasks.filter { $0.status == .completed || $0.status == .skipped || $0.status == .failed }.count
+    private var completedCount: Int {
+        tasks.filter { $0.status == .completed || $0.status == .skipped }.count
+    }
+
+    private var failedCount: Int {
+        tasks.filter { $0.status == .failed }.count
     }
 
     private func icon(for status: AgentTaskStatus) -> String {
@@ -68,11 +72,12 @@ struct PlanTimelineCard: View {
             .frame(maxWidth: 720, alignment: .leading)
         } else {
             HStack(spacing: 6) {
-                let failed = tasks.contains { $0.status == .failed }
-                Image(systemName: failed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                Image(systemName: failedCount > 0 ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
                     .font(.system(size: 10))
-                    .foregroundStyle(failed ? theme.current.danger : theme.current.success)
-                Text("\(doneCount)/\(tasks.count) steps complete")
+                    .foregroundStyle(failedCount > 0 ? theme.current.danger : theme.current.success)
+                Text(failedCount > 0
+                     ? "\(completedCount)/\(tasks.count) complete, \(failedCount) failed"
+                     : "\(completedCount)/\(tasks.count) steps complete")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(theme.current.textMuted)
             }
