@@ -395,6 +395,22 @@ Run through this against a real meeting before merging:
 
 ---
 
+## Code Assistant modes (`extension/llm_agent/runtime/route.mjs`, `mode-personas.mjs`)
+
+### ✅ MUST preserve
+
+- **Plan/Review/Document mode's tool restriction is an explicit tool-*name* allowlist (`mode-personas.mjs`'s `allowedToolNames()`), never `skill.kind`.** `run-bash` and `task-create`/`task-update` are all `kind: read` yet mutate real state (`run-bash` shells out unconfirmed; the task tools write the session's task store) — filtering by `kind` alone would leave them reachable from a "no write tools" mode.
+- **`enforceModeToolRestriction`'s post-loop `pendingTool` null-out is NOT redundant with the allowlist above — do not remove it.** `ask-internal`'s nested sub-loop is passed the FULL per-user skill set (`route.mjs` → `ctx.internalSkills.skills = userSkills`), unfiltered by mode, and `loop.mjs` returns a `pendingTool` for a `kind: write` skill before any handler map is consulted. This is the only thing that actually stops a write-tool proposal from surfacing through that one delegation path in a restricted mode.
+- **`continueNeeded`/`tasks` in `handleCodeAssist`'s response must stay gated on `!restrictsTools(resolvedMode)`, mirroring the task-list prompt-injection gate.** Session tasks are keyed only by `userId:sessionId`, with no mode dimension, and are never cleared on a mode switch. A restricted mode can never resolve a pending task itself (task-create/task-update are excluded from its allowlist, and its persona forbids acting) — reporting a real `continueNeeded: true` from a stale Execute-mode task left in the same session made the Mac client's auto-continue reflex reschedule forever (no `!busy` guard stops it) and rendered Phase 1's `PlanTimelineCard` on top of a Plan-mode reply.
+
+### ❌ DO NOT do these
+
+- **Do NOT filter a restricted mode's skills map by `skill.kind === 'read'`** — see `run-bash`/task-tools above.
+- **Do NOT delete `enforceModeToolRestriction`'s pendingTool null-out as "dead code"** — it is the only guard against the `ask-internal` leak path.
+- **Do NOT compute `continueNeeded`/`currentTasks` unconditionally at the end of `handleCodeAssist`** — always gate them on `restrictsTools(resolvedMode)` the same way the prompt injection is gated.
+
+---
+
 ## Quick reference: where to add X
 
 | I want to… | Touch these files |
