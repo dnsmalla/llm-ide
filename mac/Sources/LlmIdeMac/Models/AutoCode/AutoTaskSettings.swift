@@ -261,6 +261,22 @@ final class AutoTaskSettings: ObservableObject {
         else { defaults.removeObject(forKey: Self.nextFireKey(task)) }
         objectWillChange.send()
     }
+
+    // MARK: - Custom auto-task nextFireAt (cron lives on CustomAutoTask.cron)
+
+    private static func customNextFireKey(_ id: String) -> String { "autoCodeCustomNextFireAt.\(id)" }
+
+    /// nextFireAt for a custom auto-task, keyed by `CustomAutoTask.id`
+    /// (the cron expression itself lives on `CustomAutoTask.cron`).
+    func customNextFireAt(for id: String) -> Date? {
+        let t = defaults.double(forKey: Self.customNextFireKey(id))
+        return t > 0 ? Date(timeIntervalSince1970: t) : nil
+    }
+    func setCustomNextFireAt(_ date: Date?, for id: String) {
+        if let date { defaults.set(date.timeIntervalSince1970, forKey: Self.customNextFireKey(id)) }
+        else { defaults.removeObject(forKey: Self.customNextFireKey(id)) }
+        objectWillChange.send()
+    }
     /// Recompute the next fire strictly after `now`. No-op if cron is invalid.
     func recomputeNextFire(for task: AutoTask, now: Date) {
         guard let expr = CronExpression.parse(cron(for: task)),

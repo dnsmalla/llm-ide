@@ -68,4 +68,15 @@ extension AutoTaskSettingsCronTests {
         // No API to set interval; the key is read once for migration then unused.
         // (If a `var intervalMinutes` still compiles here, this task is incomplete.)
     }
+
+    func testCustomNextFireAtPersistsById() {
+        let a = AutoTaskSettings(defaults: suite)
+        XCTAssertNil(a.customNextFireAt(for: "task-1"))
+        let d = Date(timeIntervalSince1970: 1_700_000_000)
+        a.setCustomNextFireAt(d, for: "task-1")
+        let b = AutoTaskSettings(defaults: suite)
+        XCTAssertEqual(b.customNextFireAt(for: "task-1"), d)
+        b.setCustomNextFireAt(nil, for: "task-1")
+        XCTAssertNil(b.customNextFireAt(for: "task-1"))
+    }
 }
