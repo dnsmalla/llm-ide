@@ -9,6 +9,11 @@ import SwiftUI
 struct PendingActionCard: View {
     let pendingTool: PendingTool
     let onOpen: () -> Void
+    /// Precomputed diff stats for the `update-file` variant — nil for every
+    /// other tool, or when no attachment matched the proposed path (the
+    /// card still shows, just without the preview; the full sheet's own
+    /// guard is unaffected).
+    var diffPreview: DiffStats?
 
     var body: some View {
         Button(action: onOpen) {
@@ -61,6 +66,18 @@ struct PendingActionCard: View {
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                        if let diff = diffPreview {
+                            Text("+\(diff.added) −\(diff.removed)")
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                            ForEach(Array(diff.previewLines.enumerated()), id: \.offset) { _, line in
+                                Text(line)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(line.hasPrefix("+") ? .green : (line.hasPrefix("-") ? .red : .secondary))
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                        }
                     } else if let args = pendingTool.commentIssueArgs {
                         Text("On issue #\(args.iid)")
                             .font(.system(size: 13, weight: .semibold))

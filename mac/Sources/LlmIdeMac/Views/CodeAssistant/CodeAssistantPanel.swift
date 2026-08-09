@@ -283,6 +283,16 @@ struct CodeAssistantPanel: View {
 
     // MARK: - Body Components
 
+    /// Diff stats for the current `update-file` pendingTool, if the agent
+    /// proposed one and its path matches an attached file. Computed once per
+    /// render rather than inside `ChatMessageList` so that view stays free of
+    /// attachment-matching logic.
+    private var pendingUpdateFileDiff: DiffStats? {
+        guard let args = agent.pendingTool?.updateFileArgs,
+              let match = matchingAttachment(for: args.path) else { return nil }
+        return DiffStats.compute(old: match.content, new: args.content)
+    }
+
     var baseContent: some View {
         VStack(spacing: 0) {
             header
@@ -292,6 +302,7 @@ struct CodeAssistantPanel: View {
                 showModelPicker: showModelPicker,
                 pendingTool: agent.pendingTool,
                 tasks: agent.agentPendingTasks,
+                diffPreview: pendingUpdateFileDiff,
                 busy: busy,
                 statusText: statusText,
                 error: $error,

@@ -13,6 +13,9 @@ struct ChatMessageList: View {
     /// Current multi-step task list — `CodeAssistantAgentState.agentPendingTasks`,
     /// rendered as a live checklist above the latest assistant turn.
     let tasks: [AgentTask]
+    /// Precomputed diff stats for the current `update-file` pendingTool, if
+    /// any — see CodeAssistantPanel.pendingUpdateFileDiff.
+    let diffPreview: DiffStats?
     let busy: Bool
     let statusText: String
     @Binding var error: String?
@@ -67,7 +70,7 @@ struct ChatMessageList: View {
                             if let pt = pendingTool,
                                turn.id == history.last?.id,
                                turn.role == .assistant {
-                                PendingActionCard(pendingTool: pt) {
+                                PendingActionCard(pendingTool: pt, diffPreview: diffPreview) {
                                     switch pt.name {
                                     case "create-gitlab-issue", "create-issue":
                                         sheets.showingIssueSheet = true
