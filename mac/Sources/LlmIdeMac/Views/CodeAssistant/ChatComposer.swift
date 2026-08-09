@@ -261,6 +261,7 @@ extension CodeAssistantPanel {
                 }
             }
             if showModelPicker { modelPickerChips }
+            modePicker
             editModeChip
             memoryButton
             Spacer()
@@ -280,6 +281,7 @@ extension CodeAssistantPanel {
                         contextButton(icon: "plus", label: "Add from Library", action: { sheets.showLibraryPicker = true })
                     }
                     if showModelPicker { modelPickerChips }
+                    modePicker
                     editModeChip
                     memoryButton
                     Spacer(minLength: 0)
@@ -505,6 +507,28 @@ extension CodeAssistantPanel {
         }
         .menuStyle(.borderlessButton)
         .help(editMode.help)
+        .fixedSize()
+    }
+
+    /// Code-assist mode selector (Auto / Plan / Review / Document / Execute).
+    /// Same Menu + Chip convention as `editModeChip`, for visual consistency.
+    var modePicker: some View {
+        Menu {
+            ForEach(CodeAssistMode.allCases) { mode in
+                Button { modelState.selectedMode = mode } label: {
+                    Label(mode.label, systemImage: mode.icon)
+                }
+            }
+        } label: {
+            Chip(
+                icon: modelState.selectedMode.icon,
+                label: isCompact ? "" : modelState.selectedMode.label,
+                trailing: "chevron.down",
+                compact: isCompact
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .help(modelState.selectedMode.help)
         .fixedSize()
     }
     func currentModelDisplayName(for cli: AICliTool) -> String {

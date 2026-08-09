@@ -16,6 +16,26 @@ enum CodeAssistMode: String, Codable, CaseIterable, Identifiable {
         case .execute: return "Execute"
         }
     }
+
+    var icon: String {
+        switch self {
+        case .auto: return "sparkles"
+        case .plan: return "list.bullet.clipboard"
+        case .review: return "checkmark.seal"
+        case .document: return "doc.text"
+        case .execute: return "bolt.fill"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .auto: return "Auto — Claude classifies your request and picks a mode itself"
+        case .plan: return "Plan — propose a step-by-step plan in prose; no file edits or commands"
+        case .review: return "Review — give code-review feedback; no file edits or commands"
+        case .document: return "Document — write documentation in the reply; no file edits or commands"
+        case .execute: return "Execute — today's full agentic behavior (file edits, commands, tools)"
+        }
+    }
 }
 
 /// Model/provider selection state for `CodeAssistantPanel` — independent of
