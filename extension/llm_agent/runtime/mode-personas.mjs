@@ -22,16 +22,19 @@
 //     outbound network reads (SSRF-guarded); no mutation of any local or
 //     remote state.
 //   - search-kb (handlers/search-kb.mjs): read-only KB query.
-//   - task-list, task-create, task-update (handlers/session-tasks.mjs):
-//     mutate only the agent's own in-memory, per-session scratch list
-//     (`store` in session-tasks.mjs) — ephemeral bookkeeping for the
-//     conversation, never persisted and never touching the user's files,
-//     git state, or external systems. Distinct in kind from `run-bash`,
-//     which reaches outside the conversation entirely.
 // Excluded despite `kind: read`:
 //   - run-bash (handlers/run-bash.mjs): executes arbitrary shell commands
 //     on the server via /bin/sh with no user confirmation. Must never be
 //     reachable from a "no write tools" mode.
+//   - task-list, task-create, task-update (handlers/session-tasks.mjs): these
+//     modes describe single-turn prose output (a plan proposal, review
+//     feedback, or documentation), never the "work autonomously through a
+//     task list" behavior — so they have no legitimate use for task
+//     tracking. Leaving them reachable would let a model populate
+//     agentPendingTasks and trigger the Mac app's PlanTimelineCard/
+//     auto-continue reflex for a turn that was never meant to have a
+//     tracked plan. See Task 4 of
+//     docs/superpowers/plans/2026-08-09-code-assistant-modes-phase2.md.
 // Never included (kind: write, excluded trivially): bash, git-op, update-file.
 
 const READ_ONLY_TOOL_NAMES = new Set([
@@ -42,9 +45,6 @@ const READ_ONLY_TOOL_NAMES = new Set([
   'fetch-url',
   'web-search',
   'search-kb',
-  'task-list',
-  'task-create',
-  'task-update',
 ]);
 
 const MODE_CONFIG = {

@@ -45,3 +45,10 @@ test('allowedToolNames includes genuinely read-only tools', () => {
   assert.ok(names.has('read-file'));
   assert.ok(names.has('list-files'));
 });
+
+test('allowedToolNames excludes task tracking tools — Plan/Review/Document modes never track a multi-step plan', () => {
+  const names = allowedToolNames();
+  assert.equal(names.has('task-create'), false);
+  assert.equal(names.has('task-update'), false);
+  assert.equal(names.has('task-list'), false);
+});
