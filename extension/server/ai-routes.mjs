@@ -453,6 +453,7 @@ export async function handleAIRoutes(req, res) {
               languageDirective,
               model: tierModel,
               provider: body.provider,
+              mode: body.mode,
               // Forward the agent loop's per-call opts (maxTokens budget +
               // deadline signal) — without this the loop's AbortSignal.timeout
               // and maxTokens never reach runClaude, so the deadline-abort is
@@ -489,7 +490,7 @@ export async function handleAIRoutes(req, res) {
               onChunk: (text) => writeEvent({ type: 'chunk', text }),
             });
             mergeMemoryUsage(usage, out);
-            writeEvent({ type: 'done', reply: out.reply, pendingTool: out.pendingTool, usage });
+            writeEvent({ type: 'done', reply: out.reply, pendingTool: out.pendingTool, usage, mode: out.mode });
             writeEvent({ type: 'tasks', tasks: out.tasks ?? [], continueNeeded: out.continueNeeded ?? false });
           } catch (err) {
             if (!ac.signal.aborted) writeEvent({ type: 'error', error: err?.message || 'code-assist failed' });
@@ -507,6 +508,7 @@ export async function handleAIRoutes(req, res) {
           languageDirective,
           model: tierModel,
           provider: body.provider,
+          mode: body.mode,
           // Forward the loop's per-call opts here too (buffered path): the
           // loop's maxTokens budget + its deadline signal must reach runClaude.
           runClaude: (p, opts = {}) => runClaude(p, {
@@ -530,6 +532,7 @@ export async function handleAIRoutes(req, res) {
           usage,
           continueNeeded: out.continueNeeded ?? false,
           tasks: out.tasks ?? [],
+          mode: out.mode,
         });
         return true;
       }
