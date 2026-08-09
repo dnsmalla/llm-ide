@@ -80,7 +80,12 @@ export function restrictsTools(mode) {
   return Object.prototype.hasOwnProperty.call(MODE_CONFIG, mode);
 }
 
-/** The explicit allowlist a restricted mode's skills map should be filtered to. */
+/**
+ * The explicit allowlist a restricted mode's skills map should be filtered
+ * to. Returns a fresh copy each call — this is a security-relevant
+ * process-wide singleton; a caller mutating the returned Set (e.g. a
+ * future per-request tweak) must never corrupt it for other requests.
+ */
 export function allowedToolNames() {
-  return READ_ONLY_TOOL_NAMES;
+  return new Set(READ_ONLY_TOOL_NAMES);
 }
