@@ -11,7 +11,10 @@ enum CodeAssistMode: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .auto: return "Auto"
         case .plan: return "Plan"
-        case .review: return "Review"
+        // "Code Review", not "Review" — the adjacent editModeChip already
+        // has its own unrelated "Review" option (file-edit confirmation
+        // policy); a bare "Review" here would read as the same control.
+        case .review: return "Code Review"
         case .document: return "Document"
         case .execute: return "Execute"
         }
