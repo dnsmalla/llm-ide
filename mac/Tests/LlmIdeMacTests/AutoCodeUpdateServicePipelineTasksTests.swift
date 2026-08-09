@@ -88,4 +88,35 @@ final class AutoCodeUpdateServicePipelineTasksTests: XCTestCase {
         XCTAssertFalse(s.shouldSignalError)
         XCTAssertTrue(s.logLine.contains("No fixed faults"), "was: \(s.logLine)")
     }
+
+    // MARK: - Fix 4: reportKnowledge clears a stale taskErrors entry on the no-repo path
+
+    private func makeService() -> AutoCodeUpdateService {
+        let suite = UserDefaults(suiteName: "autotask-pipeline-\(UUID().uuidString)")!
+        return AutoCodeUpdateService(
+            config: AppConfig(userDefaults: suite),
+            autoTaskSettings: AutoTaskSettings(defaults: suite),
+            registry: ProcessedActionsRegistry(
+                storeURL: URL(fileURLWithPath: "/tmp/llm-ide-test-registry-\(UUID().uuidString).json")),
+            api: LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456"),
+            logStore: TaskLogStore())
+    }
+
+    func testReportKnowledgeClearsStaleTaskErrorWhenNothingToGraph() {
+        let service = makeService()
+        let key = AutoTask.generateKnowledge.rawValue
+        service.taskErrors[key] = "stale error from a prior run"
+
+        // An empty temp dir has no code/ child and holds no source, so
+        // GraphAutoUpdater.repoToGraph returns nil → the early-return path.
+        let emptyProject = FileManager.default.temporaryDirectory
+            .appendingPathComponent("autotask-gk-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: emptyProject, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: emptyProject) }
+
+        service.reportKnowledge(projectRoot: emptyProject.path)
+
+        XCTAssertNil(service.taskErrors[key],
+                     "no-repo path must clear a stale taskErrors entry, not leave it red")
+    }
 }

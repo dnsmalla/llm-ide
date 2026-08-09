@@ -530,6 +530,7 @@ extension AutoCodeUpdateService {
         let key = AutoTask.generateKnowledge.rawValue
         guard let repo = GraphAutoUpdater.repoToGraph(projectRoot: URL(fileURLWithPath: projectRoot)) else {
             logStore.append(.generateKnowledge, "No code to graph in this project yet.")
+            taskErrors.removeValue(forKey: key)
             return
         }
         var lines: [String] = ["Repo: \(repo.lastPathComponent)"]
