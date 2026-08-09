@@ -26,10 +26,10 @@ Call this to check which tasks are pending, in-progress, or done. Use it at the 
 {
   "tasks": [
     { "id": "1", "title": "Scaffold the new route", "status": "completed" },
-    { "id": "2", "title": "Write tests for the route", "status": "in_progress" },
+    { "id": "2", "title": "Write tests for the route", "status": "failed" },
     { "id": "3", "title": "Update the docs", "status": "pending" }
   ]
 }
 ```
 
-Status values: `pending`, `in_progress`, `completed`, `skipped`.
+Status values: `pending`, `in_progress`, `completed`, `skipped`, `failed`.

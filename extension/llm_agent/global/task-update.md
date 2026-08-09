@@ -9,7 +9,7 @@ schema:
   status:
     type: string
     required: false
-    enum: [pending, in_progress, completed, skipped]
+    enum: [pending, in_progress, completed, skipped, failed]
     description: New status for the task
   title:
     type: string
@@ -27,6 +27,12 @@ Update a task's status or title.
 - Mark a task `in_progress` when you start it.
 - Mark it `completed` when you finish it.
 - Mark it `skipped` if it turns out not to be needed.
+- Mark it `failed` if the tool result for this task indicates an error (a
+  non-zero exit code, a rejected API call, an exception). Do this INSTEAD of
+  `completed` — never mark a task completed when its result was actually a
+  failure. After marking a task failed, the system stops offering you the
+  remaining pending tasks automatically; see the "Multi-turn autonomous work"
+  rules for what to do next.
 
 ## Call shape
 
