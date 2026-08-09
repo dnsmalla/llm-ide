@@ -23,4 +23,19 @@ final class AutoCodeUpdateServicePipelineTasksTests: XCTestCase {
         XCTAssertEqual(AutoCodeUpdateService.taskErrorFromFailures(["boom"]), "boom")
         XCTAssertEqual(AutoCodeUpdateService.taskErrorFromFailures(["a", "b"]), "a · b")
     }
+
+    // MARK: - Fix 2: runImplementIssues failure surfacing
+
+    func testImplementIssuesErrorMessage_nilWhenNoneFailed() {
+        XCTAssertNil(AutoCodeUpdateService.implementIssuesErrorMessage(failedCount: 0))
+    }
+
+    func testImplementIssuesErrorMessage_countMessageWhenSomeFailed() {
+        XCTAssertEqual(
+            AutoCodeUpdateService.implementIssuesErrorMessage(failedCount: 1),
+            "1 issue(s) failed — see log")
+        XCTAssertEqual(
+            AutoCodeUpdateService.implementIssuesErrorMessage(failedCount: 3),
+            "3 issue(s) failed — see log")
+    }
 }

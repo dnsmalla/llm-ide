@@ -25,6 +25,19 @@ extension AutoCodeUpdateService {
         failures.isEmpty ? nil : failures.joined(separator: " · ")
     }
 
+    /// Reduce a count of failed issues into the value to write to the
+    /// `implementIssues` `taskErrors` key: `nil` when all succeeded (caller
+    /// clears the key), or "N issue(s) failed — see log" when at least one
+    /// failed. Per-issue failure detail continues to be written to the
+    /// `#<n>` keys and the log; this only surfaces the aggregate count to the
+    /// UI-visible card key (`AutoCodeView` reads `taskErrors[task.rawValue]`,
+    /// never the `#<n>` keys), so a run that fails every issue no longer
+    /// flips the card to clean via the old trailing
+    /// `taskErrors.removeValue(forKey:)`.
+    static func implementIssuesErrorMessage(failedCount: Int) -> String? {
+        failedCount > 0 ? "\(failedCount) issue(s) failed — see log" : nil
+    }
+
     /// Fetch configured email/Slack sources into the meeting library.
     func runSourceUpdate() async {
         let key = AutoTask.sourceUpdate.rawValue
@@ -289,7 +302,18 @@ extension AutoCodeUpdateService {
                 failedCount += 1
             }
         }
-        taskErrors.removeValue(forKey: key)
+        // Surface the aggregate failed count to the UI-visible card key.
+        // `failedCount` is bumped on every per-issue failure above (fetch
+        // error, base-branch switch failure, no-commit), but the old trailing
+        // `taskErrors.removeValue(forKey:)` cleared it regardless — so a run
+        // that failed every issue reported a clean card. AutoCodeView only
+        // reads `taskErrors[task.rawValue]`, never the `#<n>` keys, so the
+        // count message is what flips the card. Clear only when none failed.
+        if let msg = Self.implementIssuesErrorMessage(failedCount: failedCount) {
+            taskErrors[key] = msg
+        } else {
+            taskErrors.removeValue(forKey: key)
+        }
         logStore.append(.implementIssues, "— run finished —")
     }
 
