@@ -3,9 +3,9 @@ import Foundation
 /// User-created Auto Task: a name + a prompt template, run through the same
 /// generic CLI pipeline the 5 built-in template tasks (Review Code, Review
 /// Doc, Review Conflicts, Generate Documentation, Update Issues) already
-/// use. Unlike `AutoTask` (a closed, compiled enum with exactly 12 cases),
-/// this is an open, user-extensible, runtime-created task — persisted the
-/// same way `CustomProvider` persists named custom AI providers.
+/// use. Unlike `AutoTask` (a closed, compiled enum), this is an open,
+/// user-extensible, runtime-created task — persisted the same way
+/// `CustomProvider` persists named custom AI providers.
 struct CustomAutoTask: Identifiable, Codable, Equatable {
     var id: String = UUID().uuidString
     var name: String
@@ -14,14 +14,43 @@ struct CustomAutoTask: Identifiable, Codable, Equatable {
     var template: String
     var isEnabled: Bool = true
     var createdAt: Date = Date()
+    /// `.review` (default) discards the CLI's edits; `.implement` commits them
+    /// on an isolated `fix/custom-<slug>-<token>` branch.
+    var mode: Mode = .review
+    /// Cron schedule (nil = manual ▶ only). Parsed by `CronExpression`.
+    var cron: String?
+
+    enum Mode: String, Codable, CaseIterable { case review, implement }
 
     init(id: String = UUID().uuidString, name: String, template: String,
-         isEnabled: Bool = true, createdAt: Date = Date()) {
-        self.id = id
-        self.name = name
-        self.template = template
-        self.isEnabled = isEnabled
-        self.createdAt = createdAt
+         isEnabled: Bool = true, createdAt: Date = Date(),
+         mode: Mode = .review, cron: String? = nil) {
+        self.id = id; self.name = name; self.template = template
+        self.isEnabled = isEnabled; self.createdAt = createdAt
+        self.mode = mode; self.cron = cron
+    }
+
+    // MARK: Backward-compatible Codable (mode/cron predate existing payloads)
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, template, isEnabled, createdAt, mode, cron
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        template = try c.decode(String.self, forKey: .template)
+        isEnabled = try c.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        mode = try c.decodeIfPresent(Mode.self, forKey: .mode) ?? .review
+        cron = try c.decodeIfPresent(String.self, forKey: .cron)
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id); try c.encode(name, forKey: .name)
+        try c.encode(template, forKey: .template); try c.encode(isEnabled, forKey: .isEnabled)
+        try c.encode(createdAt, forKey: .createdAt); try c.encode(mode, forKey: .mode)
+        try c.encodeIfPresent(cron, forKey: .cron)
     }
 }
 

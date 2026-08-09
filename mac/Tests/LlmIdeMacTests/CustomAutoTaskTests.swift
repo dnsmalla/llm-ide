@@ -74,4 +74,38 @@ final class CustomAutoTaskTests: XCTestCase {
 
         XCTAssertEqual(CustomAutoTask.loadAll(from: suite).first?.isEnabled, false)
     }
+
+    // MARK: - mode + cron (sub-project 2)
+
+    func testDefaultsToReviewModeAndNilCron() {
+        let t = CustomAutoTask(name: "X", template: "p")
+        XCTAssertEqual(t.mode, .review)
+        XCTAssertNil(t.cron)
+    }
+
+    func testModeAndCronRoundTrip() {
+        var t = CustomAutoTask(name: "Refactor", template: "p")
+        t.mode = .implement
+        t.cron = "0 2 * * *"
+        t.save(in: suite)
+
+        let loaded = CustomAutoTask.loadAll(from: suite).first
+        XCTAssertEqual(loaded?.mode, .implement)
+        XCTAssertEqual(loaded?.cron, "0 2 * * *")
+    }
+
+    func testLegacyPayloadDecodesAsReviewAndNilCron() throws {
+        // A payload that predates mode/cron — simulate by encoding a dict
+        // without those keys.
+        let legacy = """
+            [{"id":"abc","name":"Old","template":"p","isEnabled":true,"createdAt":0}]
+            """
+        suite.data(forKey: CustomAutoTask.defaultsKey) // ensure clean
+        suite.set(Data(legacy.utf8), forKey: CustomAutoTask.defaultsKey)
+
+        let loaded = CustomAutoTask.loadAll(from: suite)
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded.first?.mode, .review)
+        XCTAssertNil(loaded.first?.cron)
+    }
 }
