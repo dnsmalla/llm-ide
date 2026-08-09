@@ -27,7 +27,20 @@ struct BashResultDisplay {
             command = String(first.dropFirst(2))
             lines.removeFirst()
         }
-        return BashResultDisplay(exitCode: exitCode, isFailure: isFailure, command: command, output: lines.joined(separator: "\n"))
+        var output = lines.joined(separator: "\n")
+        // The "blocked" variant is a single-line message with no exit code,
+        // no command, and no separate body — the header IS the whole
+        // message (e.g. "(bash blocked - command contains potentially
+        // dangerous operations)"). Surface it as output instead of silently
+        // discarding it, or the user sees a bare "failed" chip with zero
+        // explanation of why the command never ran.
+        if output.isEmpty && command == nil && exitCode == nil {
+            var message = header
+            if message.hasPrefix("(bash ") { message.removeFirst(6) }
+            if message.hasSuffix(")") { message.removeLast() }
+            output = message
+        }
+        return BashResultDisplay(exitCode: exitCode, isFailure: isFailure, command: command, output: output)
     }
 }
 
