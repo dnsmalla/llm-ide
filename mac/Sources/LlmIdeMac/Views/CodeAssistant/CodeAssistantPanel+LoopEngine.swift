@@ -139,14 +139,14 @@ extension CodeAssistantPanel {
         // share one config per project. `faultsRoot`/`gitRoot` are the two
         // WorkspaceRoot-resolved roots passed in by the button above — NOT
         // necessarily the same URL (clone-into-code layout).
-        let raw = LoopEngineConfig.load(for: projectId) ?? {
+        let raw = LoopEngineConfigStore.load(projectRoot: faultsRoot, projectId: projectId) ?? {
             let detectedStages = LoopStageDetector.detectDefaultStages(gitRoot: gitRoot)
             // Budgets/policy from the app-wide defaults (Settings → Loop) so a
             // project first reached from chat inherits the same starting point as
             // one first opened on the Loop page.
             let detected = LoopEngineDefaults.newConfig(stages: detectedStages)
             if LoopEngineConfig.shouldPersist(detectedStages) {
-                detected.save(for: projectId)
+                LoopEngineConfigStore.save(detected, projectRoot: faultsRoot, projectId: projectId)
             }
             return detected
         }()

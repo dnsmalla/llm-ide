@@ -661,7 +661,8 @@ extension AutoCodeUpdateService {
         // panel's auto-detect path use the exact same helper so all three
         // call sites agree on when it's safe to persist.
         let raw: LoopEngineConfig
-        if let saved = LoopEngineConfig.load(for: projectId, defaults: defaults) {
+        if let saved = LoopEngineConfigStore.load(projectRoot: faultsRoot, projectId: projectId,
+                                                  defaults: defaults) {
             raw = saved
         } else {
             let detectedStages = LoopStageDetector.detectDefaultStages(gitRoot: gitRootURL)
@@ -669,7 +670,8 @@ extension AutoCodeUpdateService {
             // LoopEngineDefaults.newConfig.
             let detected = LoopEngineDefaults.newConfig(stages: detectedStages)
             if LoopEngineConfig.shouldPersist(detectedStages) {
-                detected.save(for: projectId, defaults: defaults)
+                LoopEngineConfigStore.save(detected, projectRoot: faultsRoot, projectId: projectId,
+                                           defaults: defaults)
             }
             raw = detected
         }

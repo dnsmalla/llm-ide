@@ -581,7 +581,7 @@ struct LoopEngineView: View {
             return
         }
         loadPastRuns()
-        if let saved = LoopEngineConfig.load(for: projectId) {
+        if let saved = LoopEngineConfigStore.load(projectRoot: workspaceContext?.projectRoot, projectId: projectId) {
             let ensured = LoopStageDetector.ensureDefaultStages(in: saved, gitRoot: activeGitRootURL)
             stages = ensured.stages
             maxIterations = ensured.maxIterations
@@ -602,7 +602,8 @@ struct LoopEngineView: View {
             if LoopEngineConfig.shouldPersist(detected) {
                 var toSave = currentConfig
                 toSave.stages = detected
-                toSave.save(for: projectId)
+                LoopEngineConfigStore.save(toSave, projectRoot: workspaceContext?.projectRoot,
+                                           projectId: projectId)
             }
         } else {
             // No saved config AND no git root to detect defaults from
@@ -665,7 +666,8 @@ struct LoopEngineView: View {
 
     func saveConfig() {
         guard let projectId = activeProjectId else { return }
-        currentConfig.save(for: projectId)
+        LoopEngineConfigStore.save(currentConfig, projectRoot: workspaceContext?.projectRoot,
+                                   projectId: projectId)
     }
 
     /// Refreshes the "past runs" list from the journal on disk. Best-effort: an
@@ -752,7 +754,8 @@ struct LoopEngineView: View {
         // in-memory `stages` happens to be Regression-only right now — that
         // reflects a real edit (e.g. the user removed the Test stage), not
         // an unconfirmed auto-detection.
-        if LoopEngineConfig.shouldPersist(stages) || LoopEngineConfig.load(for: projectId) != nil {
+        if LoopEngineConfig.shouldPersist(stages)
+            || LoopEngineConfigStore.exists(projectRoot: context.projectRoot, projectId: projectId) {
             saveConfig()
         }
         let result = await runner.run(config: currentConfig, faultsRoot: context.projectRoot,
