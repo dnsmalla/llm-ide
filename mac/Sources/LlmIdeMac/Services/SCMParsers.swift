@@ -56,7 +56,17 @@ enum UnifiedDiffParser {
         var current: DiffHunk?
         var oldLine = 0, newLine = 0
 
-        for raw in diff.split(separator: "\n", omittingEmptySubsequences: false) {
+        // Drop the line terminator before splitting. `split(omittingEmptySubsequences:
+        // false)` on "…+new\n" yields a trailing "" component, which the blank-line
+        // branch below then turns into a phantom empty context row at the end of the
+        // last hunk — and every real `git diff` ends with a newline, so that row
+        // appeared under every diff the app rendered. It is dropped here rather than
+        // by omitting empty subsequences, because a genuinely blank context line in
+        // the middle of a hunk is also an empty component and must be kept.
+        var text = diff
+        if text.hasSuffix("\r\n") { text.removeLast(2) } else if text.hasSuffix("\n") { text.removeLast() }
+
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = String(raw)
             if line.hasPrefix("@@") {
                 if let c = current { hunks.append(c) }

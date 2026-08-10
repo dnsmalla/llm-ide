@@ -22,8 +22,17 @@ enum SavedRepoPathReconciler {
             var t = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             if let r = t.range(of: "://") { t = String(t[r.upperBound...]) }
             if t.hasPrefix("www.") { t.removeFirst(4) }
-            if t.hasSuffix(".git") { t.removeLast(4) }
-            while t.hasSuffix("/") { t.removeLast() }
+            // Strip trailing "/" and ".git" until neither applies, rather than once
+            // each in a fixed order. `.git` before slashes leaves "a/b.git/" as
+            // "a/b.git" (the slash blocks the `.git` test); slashes before `.git`
+            // leaves "a/b/.git" — either fixed order fails on some real remote, so
+            // neither suffix may depend on the other having been removed first.
+            var stripped = true
+            while stripped {
+                stripped = false
+                while t.hasSuffix("/") { t.removeLast(); stripped = true }
+                if t.hasSuffix(".git") { t.removeLast(4); stripped = true }
+            }
             return t
         }
         let a = normalize(repoURL)

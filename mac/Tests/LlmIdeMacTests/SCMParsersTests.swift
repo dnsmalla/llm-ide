@@ -115,6 +115,36 @@ final class SCMParsersTests: XCTestCase {
         XCTAssertEqual(new, 10)
     }
 
+    /// Every real `git diff` ends with a newline. Splitting on "\n" with empty
+    /// subsequences kept then yields a trailing "" component, which the parser's
+    /// blank-line branch turned into a phantom empty context row under the last
+    /// hunk of every diff the app rendered. The existing blank-line test only
+    /// caught it because it was the one case with a trailing newline; the literals
+    /// elsewhere in this file happen not to have one.
+    func testTrailingNewlineDoesNotProduceAPhantomRow() {
+        let hunks = UnifiedDiffParser.parse("@@ -1,1 +1,1 @@\n-old\n+new\n")
+        XCTAssertEqual(hunks[0].rows, [
+            DiffRow(kind: .delete, oldLine: 1, newLine: nil, text: "old"),
+            DiffRow(kind: .insert, oldLine: nil, newLine: 1, text: "new"),
+        ])
+    }
+
+    /// The same diff with and without its terminator must parse identically —
+    /// which is what stops the fix from being re-broken by "just omit empty
+    /// subsequences" (that would also drop real blank context lines).
+    func testTrailingNewlineIsIrrelevantToTheResult() {
+        let withTerminator = UnifiedDiffParser.parse("@@ -1,2 +1,2 @@\n line1\n line2\n")
+        let without = UnifiedDiffParser.parse("@@ -1,2 +1,2 @@\n line1\n line2")
+        XCTAssertEqual(withTerminator, without)
+    }
+
+    /// CRLF diffs (a checkout with CRLF line endings) must not leave a stray \r
+    /// as a one-character "context" row either.
+    func testCRLFTerminatorIsAlsoDropped() {
+        let hunks = UnifiedDiffParser.parse("@@ -1,1 +1,1 @@\n+new\r\n")
+        XCTAssertEqual(hunks[0].rows.count, 1)
+    }
+
     func testBlankLineWithinHunkIsEmptyContextRow() {
         let diff = "@@ -1,2 +1,2 @@\n line1\n\n"
         let hunks = UnifiedDiffParser.parse(diff)

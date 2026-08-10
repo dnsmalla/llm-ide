@@ -45,6 +45,36 @@ final class SavedRepoPathReconcilerTests: XCTestCase {
             repoURL: "https://github.com/a/b", remoteURL: "HTTP://WWW.GitHub.com/A/B.GIT/"))
     }
 
+    /// The root cause of the combined-normalization failure: stripping ".git"
+    /// before trailing slashes leaves "a/b.git/" as "a/b.git", because the slash
+    /// blocks the `.git` test. Every individual normalization passed while their
+    /// combination did not, so neither suffix may depend on the other going first.
+    func testDotGitFollowedBySlashMatches() {
+        XCTAssertTrue(SavedRepoPathReconciler.remoteMatches(
+            repoURL: "https://github.com/a/b", remoteURL: "https://github.com/a/b.git/"))
+    }
+
+    /// The mirror order, which a fixed slashes-then-.git order would have broken
+    /// instead — hence stripping until neither suffix applies.
+    func testSlashFollowedByDotGitMatches() {
+        XCTAssertTrue(SavedRepoPathReconciler.remoteMatches(
+            repoURL: "https://github.com/a/b", remoteURL: "https://github.com/a/b/.git"))
+    }
+
+    func testRepeatedTrailingSlashesAndDotGitMatch() {
+        XCTAssertTrue(SavedRepoPathReconciler.remoteMatches(
+            repoURL: "https://github.com/a/b", remoteURL: "https://github.com/a/b.git//"))
+    }
+
+    /// The stripping loop must not eat a path segment that merely CONTAINS "git",
+    /// or two unrelated repos would be reported as the same clone.
+    func testRepoNamedGitIsNotStrippedAway() {
+        XCTAssertTrue(SavedRepoPathReconciler.remoteMatches(
+            repoURL: "https://github.com/a/git", remoteURL: "https://github.com/a/git.git"))
+        XCTAssertFalse(SavedRepoPathReconciler.remoteMatches(
+            repoURL: "https://github.com/a/git", remoteURL: "https://github.com/a/b"))
+    }
+
     func testDifferentRepoDoesNotMatch() {
         XCTAssertFalse(SavedRepoPathReconciler.remoteMatches(
             repoURL: "https://github.com/a/b", remoteURL: "https://github.com/a/c"))
