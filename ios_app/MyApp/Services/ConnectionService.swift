@@ -178,6 +178,10 @@ final class ConnectionService: ObservableObject {
     /// that would defeat the point of keeping the pairing.
     func closeConnection() {
         userClosed = true
+        // Reset the backoff counter too: an intentional close shouldn't make
+        // the next manual Reconnect inherit whatever delay a prior failed
+        // auto-retry run had climbed to (up to 30s — see scheduleReconnect).
+        reconnectAttempt = 0
         disconnect(clearDirect: false)
     }
 

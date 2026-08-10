@@ -249,23 +249,33 @@ In Xcode: Product → Build (Cmd+B) for the `MyApp` scheme. Confirm it compiles 
 4. Confirm the socket closes (status pill shows "Offline", `disconnectedHint` appears with the new copy and Reconnect button).
 5. Open Settings in the iOS app — confirm the Mac's IP/PIN are still shown as saved (not cleared).
 
-- [ ] **Step 4: Verify Reconnect**
+- [ ] **Step 4: Verify Close Connection stays closed (the `userClosed` guard)**
+
+An early code review found that `ContentView`'s auto-reconnect (`ContentView.swift:19`) originally fired on ANY `.disconnected` + saved-device state, which would have silently undone an intentional Close Connection the moment the view re-appeared. This was fixed with a `userClosed` flag on `ConnectionService`, reset only by `connectDirect(...)`. Verify the fix holds:
+
+1. With the app still Offline from Step 3, open **Settings** from the toolbar menu, then navigate back.
+2. Confirm the app is STILL Offline (`disconnectedHint` still showing) — it must NOT have silently reconnected just from the Settings screen appearing and disappearing.
+3. Background the app (Home button / swipe up) for a few seconds, then foreground it again.
+4. Confirm it is STILL Offline — backgrounding/foregrounding must not silently reconnect either.
+
+- [ ] **Step 5: Verify Reconnect, including after a backoff period**
 
 1. From the disconnected state, tap **Reconnect**.
 2. Confirm the status pill returns to "Live" and the native dashboard reappears, without re-entering the PIN.
+3. Optional but recommended (exercises the `reconnectAttempt` reset added after the holistic review): quit the Mac app, wait ~30-60s so the iPhone's background auto-retry backoff climbs, then quit the Mac app's mobile server for good, tap **Close Connection**, restart the Mac's mobile server, and tap **Reconnect**. It should attempt immediately, not silently wait up to 30s.
 
-- [ ] **Step 5: Verify cold-launch auto-reconnect still works**
+- [ ] **Step 6: Verify cold-launch auto-reconnect still works**
 
 1. Force-quit the iOS app.
 2. Relaunch it while the Mac app is still running.
-3. Confirm it auto-reconnects via `ContentView`'s existing `hasDevice` check — no manual tap needed.
+3. Confirm it auto-reconnects via `ContentView`'s existing `hasDevice` check — no manual tap needed. (This also confirms `userClosed` correctly does NOT persist across process restarts — it's in-memory only.)
 
-- [ ] **Step 6: Regression-check "Forget this Mac"**
+- [ ] **Step 7: Regression-check "Forget this Mac"**
 
 1. In the toolbar menu, tap **Forget this Mac**.
 2. Confirm the app routes back to `ConnectView` (fresh pairing screen) and Settings no longer shows a saved Mac — i.e. this still behaves exactly like the old "Disconnect" did.
 
-- [ ] **Step 7: Final commit (docs only, if any notes were added)**
+- [ ] **Step 8: Final commit (docs only, if any notes were added)**
 
 If Task 4 surfaced any copy or behavior tweak, make that specific edit, then:
 
