@@ -399,11 +399,13 @@ struct MobileHomeView: View {
                     Button {
                         connection.closeConnection()
                     } label: {
-                        Label("Close Connection", systemImage: "network.slash")
+                        Label("Close Connection", systemImage: "wifi.slash")
                     }
-                    Button("Forget this Mac", role: .destructive) {
+                    Button(role: .destructive) {
                         connection.disconnect()
                         connectionStore.clear()
+                    } label: {
+                        Label("Forget this Mac", systemImage: "xmark.circle")
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle.fill")
