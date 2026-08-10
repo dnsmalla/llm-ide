@@ -7,6 +7,19 @@ import CryptoKit
 /// own one-shot repair attempt internally). Every iteration re-runs
 /// every stage from the top so a fix to a later stage can't silently
 /// leave an earlier one broken.
+///
+/// Four properties make this a harness rather than a retry loop:
+/// - **Every run is journalled** to `<faultsRoot>/system/loop-runs/` via
+///   `LoopRunJournaling`, so a run remains inspectable after the app quits.
+/// - **Repairs are scope-checked** by `RepairScopeGuarding`: a stage that only
+///   turns green because the repair edited a test or a build file is reported
+///   `.blocked`, never `.success`.
+/// - **Progress is measured, not guessed.** `ProgressWatch` + `StageOutputParser`
+///   compare failing-test counts across iterations and feed the delta back to the
+///   repair agent as evidence, falling back to output-hash comparison for
+///   unrecognised runners.
+/// - **Four independent budgets** bound a run: iterations, per-stage
+///   non-improving streak, wall clock, and repairs per stage.
 @MainActor
 final class LoopEngineRunner: ObservableObject {
     struct LogLine: Identifiable, Equatable {
@@ -37,22 +50,48 @@ final class LoopEngineRunner: ObservableObject {
     private let skillExecutor: LoopSkillExecuting
     private let approvals: VerifyApprovalStore
     private let stageTimeout: TimeInterval
+    private let journal: LoopRunJournaling
+    private let scopeGuard: RepairScopeGuarding
+    private let trigger: LoopRunTrigger
+
+    /// Accumulated journal state for the in-flight run. Instance state rather
+    /// than a `run`-local `var` only because the per-stage helpers below append
+    /// to it; `@MainActor` makes that safe.
+    private var iterationRecords: [LoopIterationRecord] = []
 
     init(verifier: FaultVerifier = ShellFaultVerifier(),
          stageRepairer: LoopStageRepairer,
          regressionSweep: RegressionSweepRunning,
          skillExecutor: LoopSkillExecuting,
          approvals: VerifyApprovalStore = VerifyApprovalStore(),
-         stageTimeout: TimeInterval = 600) {
+         stageTimeout: TimeInterval = 600,
+         journal: LoopRunJournaling = FileLoopRunJournal(),
+         scopeGuard: RepairScopeGuarding = GitRepairScopeGuard(),
+         trigger: LoopRunTrigger = .manual) {
         self.verifier = verifier
         self.stageRepairer = stageRepairer
         self.regressionSweep = regressionSweep
         self.skillExecutor = skillExecutor
         self.approvals = approvals
         self.stageTimeout = stageTimeout
+        self.journal = journal
+        self.scopeGuard = scopeGuard
+        self.trigger = trigger
     }
 
     func clearLog() { log.removeAll() }
+
+    /// What the loop should do after one stage finished.
+    private enum StageDecision: Equatable {
+        /// Move on to the next stage — the stage passed, or it failed but is
+        /// `.advisory` and therefore does not gate.
+        case proceed
+        /// A blocking stage failed and was handled (repaired or not); restart the
+        /// iteration from the first stage.
+        case retryIteration
+        /// End the run with this status.
+        case terminate(LoopEngineStatus)
+    }
 
     /// Runs `config`'s ordered stages to completion, success, or give-up.
     ///
@@ -70,11 +109,15 @@ final class LoopEngineRunner: ObservableObject {
     /// afterwards via `status`).
     ///
     /// - Parameters:
-    ///   - faultsRoot: project root passed through to the regression sweep.
+    ///   - faultsRoot: project root passed through to the regression sweep, and
+    ///     the root the run journal is written beneath.
     ///   - gitRoot: git working tree shell-command stages run in,
     ///     approvals are keyed against, and the concurrency lock key.
+    ///   - projectId: recorded in the journal so runs can be attributed to a
+    ///     project later. Optional — a missing id degrades analysis, never the run.
     @discardableResult
-    func run(config: LoopEngineConfig, faultsRoot: URL, gitRoot: URL) async -> LoopEngineStatus? {
+    func run(config: LoopEngineConfig, faultsRoot: URL, gitRoot: URL,
+             projectId: String? = nil) async -> LoopEngineStatus? {
         guard !running else {
             appendLog(.warn, "Loop not started · this runner instance is already running")
             return nil
@@ -96,6 +139,8 @@ final class LoopEngineRunner: ObservableObject {
         running = true
         status = nil
         iteration = 0
+        iterationRecords = []
+        let startedAt = Date()
         defer {
             running = false
             Self.activeRoots.remove(rootKey)
@@ -111,34 +156,25 @@ final class LoopEngineRunner: ObservableObject {
         // consume an iteration.
         for stage in orderedStages where stage.kind == .shellCommand {
             guard let command = Self.validCommand(stage) else {
-                let rejected = LoopEngineStatus.error("Stage \"\(stage.name)\" has no command")
-                status = rejected
-                appendLog(.error, "Loop finished · \(rejected.summary)")
-                return rejected
+                return finish(.error("Stage \"\(stage.name)\" has no command"),
+                              config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                              projectId: projectId, startedAt: startedAt)
             }
             guard approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: command) else {
                 appendLog(.warn, "  [\(stage.name)] needs approval: \(command)")
-                let rejected = LoopEngineStatus.needsApproval(stageName: stage.name)
-                status = rejected
-                appendLog(.error, "Loop finished · \(rejected.summary)")
-                return rejected
+                return finish(.needsApproval(stageName: stage.name),
+                              config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                              projectId: projectId, startedAt: startedAt)
             }
         }
 
-        // Per-stage consecutive-identical-failure tracking, keyed by stage
-        // id. Deliberately NOT a single shared hash/count: stage A failing,
-        // getting repaired, and passing must not contaminate stage B's own
-        // count just because B later fails with a coincidentally similar
-        // (or, pre-normalization, identically-shaped) hash.
-        var failureState: [String: (hash: String, count: Int)] = [:]
-
-        // Regression-stall tracking: the regressed count from the previous
-        // iteration, and how many consecutive iterations it has failed to
-        // decrease. Mirrors the shell stage's per-stage `failureState` but
-        // for the single regression stage (count starts at 1 on first
-        // failure, same as the shell path).
-        var lastRegressed: Int? = nil
-        var regressionStallCount = 0
+        // One stall detector for every stage kind, keyed by stage id. Keyed per
+        // stage (not shared) so stage A failing, being repaired, and passing
+        // cannot contaminate stage B's streak just because B later fails with a
+        // coincidentally similar failure.
+        var progress = ProgressWatch()
+        /// Repairs spent per stage this run — `maxRepairsPerStage`'s counter.
+        var repairsUsed: [String: Int] = [:]
 
         iterationLoop: while iteration < config.maxIterations {
             // `RegressionSweepRunning.sweep` is fail-closed and
@@ -151,119 +187,47 @@ final class LoopEngineRunner: ObservableObject {
                 status = .aborted
                 break iterationLoop
             }
+
+            // Wall-clock budget. Checked here only — "stop starting new work",
+            // never a hard kill of a stage mid-flight (that is what the per-stage
+            // timeout is for). Deliberately skipped for the first iteration: a
+            // run must always get one complete pass, because a budget small
+            // enough to expire during startup would otherwise make the loop a
+            // confusing no-op rather than a fast failure.
+            if iteration >= 1, let budget = config.wallClockBudgetSeconds,
+               Date().timeIntervalSince(startedAt) > budget {
+                appendLog(.warn, "Time budget of \(Int(budget))s exceeded after \(iteration) iteration(s)")
+                status = .givenUp(reason: .wallClockExceeded)
+                break iterationLoop
+            }
+
             iteration += 1
+            iterationRecords.append(LoopIterationRecord(index: iteration))
             appendLog(.info, "Iteration \(iteration)/\(config.maxIterations)")
 
             for stage in orderedStages {
+                let decision: StageDecision
                 switch stage.kind {
                 case .regressionSweep:
-                    let outcome = await regressionSweep.sweep(
-                        faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: true)
-                    appendLog(outcome.passed ? .info : .warn,
-                              "  [\(stage.name)] \(Self.regressionLine(outcome))")
-                    if outcome.passed {
-                        // A pass restarts the stall watch so a later failure
-                        // in the same run counts from scratch.
-                        lastRegressed = nil
-                        regressionStallCount = 0
-                    } else {
-                        if let prev = lastRegressed, outcome.regressed >= prev {
-                            regressionStallCount += 1
-                        } else {
-                            regressionStallCount = 1
-                        }
-                        lastRegressed = outcome.regressed
-                        if regressionStallCount >= config.consecutiveFailureStop {
-                            status = .givenUp(reason: .regressionStalled)
-                            break iterationLoop
-                        }
-                        if iteration >= config.maxIterations {
-                            status = .givenUp(reason: .maxIterations)
-                            break iterationLoop
-                        }
-                        continue iterationLoop
-                    }
-
+                    decision = await runRegressionStage(
+                        stage, config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                        progress: &progress)
                 case .shellCommand:
-                    // Preflight already validated this once per stage; if a
-                    // command somehow becomes invalid by the time we get
-                    // here, fail closed instead of force-unwrapping.
-                    guard let command = Self.validCommand(stage) else {
-                        status = .error("Stage \"\(stage.name)\" has no command")
-                        break iterationLoop
-                    }
-
-                    let outcome: VerifyOutcome
-                    do {
-                        outcome = try await verifier.verify(command: command, repoRoot: gitRoot, timeout: stageTimeout)
-                    } catch is CancellationError {
-                        status = .aborted
-                        break iterationLoop
-                    } catch VerifyError.timedOut(let seconds) {
-                        // A timeout means the stage never confirmed passing —
-                        // treat it like an ordinary non-zero-exit failure (same
-                        // hash/retry/repair path below), not a fatal run-ending
-                        // error. Only a genuine launch failure below is fatal.
-                        outcome = VerifyOutcome(exitCode: -1, output: "stage timed out after \(seconds)s")
-                    } catch {
-                        status = .error(error.localizedDescription)
-                        appendLog(.error, "  [\(stage.name)] error: \(error.localizedDescription)")
-                        break iterationLoop
-                    }
-
-                    if outcome.exitCode == 0 {
-                        appendLog(.info, "  [\(stage.name)] passed")
-                        failureState[stage.id] = nil
-                    } else {
-                        let excerpt = String(outcome.output.suffix(500))
-                        appendLog(.warn, "  [\(stage.name)] FAILED (exit \(outcome.exitCode)): \(excerpt)")
-                        let hash = Self.hash(outcome.output)
-                        let count: Int
-                        if let previous = failureState[stage.id], previous.hash == hash {
-                            count = previous.count + 1
-                        } else {
-                            count = 1
-                        }
-                        failureState[stage.id] = (hash: hash, count: count)
-                        if count >= config.consecutiveFailureStop {
-                            status = .givenUp(reason: .repeatedFailure)
-                            break iterationLoop
-                        }
-                        if iteration >= config.maxIterations {
-                            status = .givenUp(reason: .maxIterations)
-                            break iterationLoop
-                        }
-                        appendLog(.info, "  [\(stage.name)] repairing…")
-                        do {
-                            try await stageRepairer.repair(
-                                stageName: stage.name, command: command,
-                                failureOutput: outcome.output, repoRoot: gitRoot)
-                        } catch is CancellationError {
-                            status = .aborted
-                            break iterationLoop
-                        } catch {
-                            status = .error(error.localizedDescription)
-                            appendLog(.error, "  [\(stage.name)] repair error: \(error.localizedDescription)")
-                            break iterationLoop
-                        }
-                        continue iterationLoop
-                    }
-
+                    decision = await runShellStage(
+                        stage, config: config, gitRoot: gitRoot,
+                        progress: &progress, repairsUsed: &repairsUsed)
                 case .skill:
-                    let skillId = stage.skillId ?? ""
-                    let message = (stage.prompt?.isEmpty == false) ? stage.prompt! : Self.defaultSkillMessage(stage)
-                    appendLog(.info, "  [\(stage.name)] running skill \(skillId.isEmpty ? "(none set)" : skillId) (generate)")
-                    do {
-                        try await skillExecutor.execute(skillId: skillId, targetPath: stage.targetPath, message: message)
-                        appendLog(.info, "  [\(stage.name)] skill completed (generate)")
-                    } catch is CancellationError {
-                        status = .aborted
-                        break iterationLoop
-                    } catch {
-                        // A generate step that errors is non-fatal: log it and let
-                        // the loop's verify stages / iteration cap decide termination.
-                        appendLog(.warn, "  [\(stage.name)] skill error: \(error.localizedDescription)")
-                    }
+                    decision = await runSkillStage(stage, config: config, gitRoot: gitRoot)
+                }
+
+                switch decision {
+                case .proceed:
+                    continue
+                case .retryIteration:
+                    continue iterationLoop
+                case .terminate(let terminal):
+                    status = terminal
+                    break iterationLoop
                 }
             }
 
@@ -283,11 +247,315 @@ final class LoopEngineRunner: ObservableObject {
         if Task.isCancelled, status != .success {
             status = .aborted
         }
-        let finalStatus = status ?? .givenUp(reason: .maxIterations)
-        status = finalStatus
-        appendLog(logLevel(for: finalStatus), "Loop finished · \(finalStatus.summary)")
-        return finalStatus
+        return finish(status ?? .givenUp(reason: .maxIterations),
+                      config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                      projectId: projectId, startedAt: startedAt)
     }
+
+    // MARK: - Stage execution
+
+    private func runRegressionStage(_ stage: LoopStage, config: LoopEngineConfig,
+                                    faultsRoot: URL, gitRoot: URL,
+                                    progress: inout ProgressWatch) async -> StageDecision {
+        let startedAt = Date()
+        let outcome = await regressionSweep.sweep(
+            faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: true)
+        let duration = Date().timeIntervalSince(startedAt)
+        appendLog(outcome.passed ? .info : .warn,
+                  "  [\(stage.name)] \(Self.regressionLine(outcome))")
+
+        // The regressed count IS the score here — no parsing needed, which is why
+        // this stage could always see progress while shell stages could not.
+        let line = Self.regressionLine(outcome)
+
+        if outcome.passed {
+            record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
+                   passed: true, output: "", score: 0)
+            // A pass restarts the stall watch so a later failure in the same run
+            // counts from scratch.
+            progress.clear(key: stage.id)
+            return .proceed
+        }
+
+        let verdict = progress.record(key: stage.id, score: outcome.regressed, hash: Self.hash(line))
+        record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
+               passed: false, output: line, score: outcome.regressed)
+
+        if stage.severity == .advisory {
+            appendLog(.warn, "  [\(stage.name)] advisory — not gating the run")
+            return .proceed
+        }
+        if verdict.streak >= config.consecutiveFailureStop {
+            return .terminate(.givenUp(reason: .regressionStalled))
+        }
+        if iteration >= config.maxIterations {
+            return .terminate(.givenUp(reason: .maxIterations))
+        }
+        return .retryIteration
+    }
+
+    private func runShellStage(_ stage: LoopStage, config: LoopEngineConfig, gitRoot: URL,
+                               progress: inout ProgressWatch,
+                               repairsUsed: inout [String: Int]) async -> StageDecision {
+        // Preflight already validated this once per stage; if a command somehow
+        // becomes invalid by the time we get here, fail closed instead of
+        // force-unwrapping.
+        guard let command = Self.validCommand(stage) else {
+            return .terminate(.error("Stage \"\(stage.name)\" has no command"))
+        }
+
+        let startedAt = Date()
+        let timeout = stage.timeoutSeconds.map(TimeInterval.init) ?? stageTimeout
+        let outcome: VerifyOutcome
+        do {
+            outcome = try await verifier.verify(command: command, repoRoot: gitRoot, timeout: timeout)
+        } catch is CancellationError {
+            return .terminate(.aborted)
+        } catch VerifyError.timedOut(let seconds) {
+            // A timeout means the stage never confirmed passing — treat it like an
+            // ordinary non-zero-exit failure (same score/retry/repair path below),
+            // not a fatal run-ending error. Only a genuine launch failure below is
+            // fatal.
+            outcome = VerifyOutcome(exitCode: -1, output: "stage timed out after \(seconds)s")
+        } catch {
+            appendLog(.error, "  [\(stage.name)] error: \(error.localizedDescription)")
+            return .terminate(.error(error.localizedDescription))
+        }
+        let duration = Date().timeIntervalSince(startedAt)
+
+        if outcome.exitCode == 0 {
+            appendLog(.info, "  [\(stage.name)] passed")
+            record(stage, startedAt: startedAt, duration: duration, exitCode: 0,
+                   passed: true, output: "", score: StageOutputParser.parseFailureCount(outcome.output))
+            progress.clear(key: stage.id)
+            return .proceed
+        }
+
+        let score = StageOutputParser.parseFailureCount(outcome.output)
+        let excerpt = String(outcome.output.suffix(500))
+        let scoreNote = score.map { " · \($0) failing" } ?? ""
+        appendLog(.warn, "  [\(stage.name)] FAILED (exit \(outcome.exitCode))\(scoreNote): \(excerpt)")
+
+        let verdict = progress.record(key: stage.id, score: score, hash: Self.hash(outcome.output))
+
+        if stage.severity == .advisory {
+            appendLog(.warn, "  [\(stage.name)] advisory — not gating the run")
+            record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
+                   passed: false, output: outcome.output, score: score)
+            return .proceed
+        }
+
+        if verdict.streak >= config.consecutiveFailureStop {
+            record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
+                   passed: false, output: outcome.output, score: score)
+            // A measured, unchanging failure COUNT and a byte-identical failure are
+            // different diagnoses and get different statuses: `.noProgress` says
+            // "the failures kept changing but never shrank" (thrashing), which a
+            // hash comparison cannot detect at all.
+            let reason: LoopEngineStatus.GivenUpReason =
+                (score != nil && verdict.previousScore != nil)
+                    ? .noProgress(stageName: stage.name)
+                    : .repeatedFailure
+            return .terminate(.givenUp(reason: reason))
+        }
+        if iteration >= config.maxIterations {
+            record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
+                   passed: false, output: outcome.output, score: score)
+            return .terminate(.givenUp(reason: .maxIterations))
+        }
+
+        let used = repairsUsed[stage.id] ?? 0
+        if used >= config.maxRepairsPerStage {
+            appendLog(.warn, "  [\(stage.name)] repair budget of \(config.maxRepairsPerStage) exhausted")
+            record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
+                   passed: false, output: outcome.output, score: score)
+            return .terminate(.givenUp(reason: .repairBudgetExhausted(stageName: stage.name)))
+        }
+
+        appendLog(.info, "  [\(stage.name)] repairing…")
+        repairsUsed[stage.id] = used + 1
+        let evidence = RepairEvidence(
+            attempt: used + 1, previousScore: verdict.previousScore, currentScore: score,
+            improved: verdict.improved, streak: verdict.streak)
+
+        let guarded = await withScopeGuard(stage: stage, config: config, gitRoot: gitRoot) {
+            try await stageRepairer.repair(
+                stageName: stage.name, command: command,
+                failureOutput: outcome.output, evidence: evidence, repoRoot: gitRoot)
+        }
+
+        switch guarded {
+        case .failed(let error):
+            record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
+                   passed: false, output: outcome.output, score: score, repairAttempted: true)
+            if error is CancellationError { return .terminate(.aborted) }
+            appendLog(.error, "  [\(stage.name)] repair error: \(error.localizedDescription)")
+            return .terminate(.error(error.localizedDescription))
+        case .completed(let verdictScope, let violations, let changed):
+            record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
+                   passed: false, output: outcome.output, score: score, repairAttempted: true,
+                   changedPaths: changed, scopeVerdict: verdictScope)
+            if let terminal = scopeTermination(stage: stage, config: config,
+                                              verdict: verdictScope, violations: violations) {
+                return .terminate(terminal)
+            }
+            return .retryIteration
+        }
+    }
+
+    private func runSkillStage(_ stage: LoopStage, config: LoopEngineConfig,
+                              gitRoot: URL) async -> StageDecision {
+        let skillId = stage.skillId ?? ""
+        let message = (stage.prompt?.isEmpty == false) ? stage.prompt! : Self.defaultSkillMessage(stage)
+        let startedAt = Date()
+        appendLog(.info, "  [\(stage.name)] running skill \(skillId.isEmpty ? "(none set)" : skillId) (generate)")
+
+        // A skill stage is a generate step that edits the tree, so it gets the
+        // same protected-path guard as a repair: "make the tests pass" is as
+        // available to a skill as it is to the repairer.
+        let guarded = await withScopeGuard(stage: stage, config: config, gitRoot: gitRoot) {
+            try await skillExecutor.execute(skillId: skillId, targetPath: stage.targetPath, message: message)
+        }
+        let duration = Date().timeIntervalSince(startedAt)
+
+        switch guarded {
+        case .failed(let error):
+            record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
+                   passed: false, output: error.localizedDescription, score: nil)
+            if error is CancellationError { return .terminate(.aborted) }
+            // A generate step that errors is non-fatal: log it and let the loop's
+            // verify stages / iteration cap decide termination.
+            appendLog(.warn, "  [\(stage.name)] skill error: \(error.localizedDescription)")
+            return .proceed
+        case .completed(let verdictScope, let violations, let changed):
+            appendLog(.info, "  [\(stage.name)] skill completed (generate)")
+            record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
+                   passed: true, output: "", score: nil,
+                   changedPaths: changed, scopeVerdict: verdictScope)
+            if let terminal = scopeTermination(stage: stage, config: config,
+                                              verdict: verdictScope, violations: violations) {
+                return .terminate(terminal)
+            }
+            return .proceed
+        }
+    }
+
+    // MARK: - Protected-path guard
+
+    private enum GuardedEditResult {
+        case failed(Error)
+        case completed(RepairScopeVerdict, violations: [String], changed: [String])
+    }
+
+    /// Runs an agent edit with the protected-path guard wrapped around it.
+    ///
+    /// The guard runs whether or not the edit reports success, but only when a
+    /// policy other than `.off` is configured — a project that has opted out
+    /// should not pay for two `git status` calls per repair.
+    private func withScopeGuard(stage: LoopStage, config: LoopEngineConfig, gitRoot: URL,
+                                edit: () async throws -> Void) async -> GuardedEditResult {
+        guard config.protectedPathPolicy != .off else {
+            do { try await edit() } catch { return .failed(error) }
+            return .completed(.notChecked, violations: [], changed: [])
+        }
+
+        let before = await scopeGuard.snapshot(gitRoot: gitRoot)
+        do { try await edit() } catch { return .failed(error) }
+
+        switch await scopeGuard.check(since: before, gitRoot: gitRoot,
+                                      protectedGlobs: config.protectedGlobs) {
+        case .clean(let changed):
+            return .completed(.clean, violations: [], changed: changed)
+
+        case .indeterminate(let reason):
+            // Fail-open, and say so. Refusing to run the loop wherever git cannot
+            // report (a non-git project, a missing binary) would take the feature
+            // away from those projects entirely — a worse outcome than an
+            // unverified repair, which is what every run did before this guard
+            // existed. The verdict is recorded as `.indeterminate`, never
+            // `.clean`, so a journal reader is not told a check passed when it
+            // never ran.
+            appendLog(.warn, "  [\(stage.name)] protected-path check could not run: \(reason)")
+            return .completed(.indeterminate, violations: [], changed: [])
+
+        case .violated(let paths, let changed):
+            appendLog(.error, "  [\(stage.name)] repair edited protected path(s): \(paths.joined(separator: ", "))")
+            guard config.protectedPathPolicy == .revert else {
+                return .completed(.violated, violations: paths, changed: changed)
+            }
+            if let error = await scopeGuard.revert(paths: paths, gitRoot: gitRoot) {
+                appendLog(.error, "  [\(stage.name)] could not revert protected path(s): \(error)")
+                return .completed(.violated, violations: paths, changed: changed)
+            }
+            appendLog(.info, "  [\(stage.name)] reverted \(paths.count) protected path(s)")
+            return .completed(.violatedReverted, violations: paths, changed: changed)
+        }
+    }
+
+    /// The terminal status a scope verdict forces, or `nil` to keep looping.
+    ///
+    /// This is the load-bearing half of the anti-reward-hacking guard: detecting
+    /// the violation is useless if the loop then re-runs the stage, observes the
+    /// exit 0 the violation bought, and reports `.success`. Under `.revert` and
+    /// `.stop` the run ends here and the stage is never re-verified.
+    private func scopeTermination(stage: LoopStage, config: LoopEngineConfig,
+                                  verdict: RepairScopeVerdict,
+                                  violations: [String]) -> LoopEngineStatus? {
+        guard verdict == .violated || verdict == .violatedReverted else { return nil }
+        switch config.protectedPathPolicy {
+        case .revert, .stop:
+            return .blocked(reason: .repairOutOfScope(stageName: stage.name, paths: violations))
+        case .warn:
+            appendLog(.warn, "  [\(stage.name)] protected-path violation left in place (policy: warn)")
+            return nil
+        case .off:
+            return nil
+        }
+    }
+
+    // MARK: - Journal
+
+    /// Appends one stage attempt to the current iteration's record. A stage that
+    /// runs outside any iteration (there is none today) is dropped rather than
+    /// crashing on an empty array.
+    private func record(_ stage: LoopStage, startedAt: Date, duration: Double,
+                        exitCode: Int32?, passed: Bool, output: String, score: Int?,
+                        repairAttempted: Bool = false, changedPaths: [String] = [],
+                        scopeVerdict: RepairScopeVerdict = .notChecked) {
+        guard !iterationRecords.isEmpty else { return }
+        iterationRecords[iterationRecords.count - 1].attempts.append(
+            LoopStageAttempt(
+                stageId: stage.id, stageName: stage.name, kind: stage.kind,
+                severity: stage.severity, startedAt: startedAt, durationSeconds: duration,
+                exitCode: exitCode, passed: passed, outputTail: output,
+                outputHash: passed ? nil : Self.hash(output), score: score,
+                repairAttempted: repairAttempted, changedPaths: changedPaths,
+                scopeVerdict: scopeVerdict))
+    }
+
+    /// Sets the terminal status, logs it, writes the journal entry, and returns
+    /// the status. Every exit from `run` goes through here so no path can end a
+    /// run without journalling it.
+    private func finish(_ terminal: LoopEngineStatus, config: LoopEngineConfig,
+                        faultsRoot: URL, gitRoot: URL, projectId: String?,
+                        startedAt: Date) -> LoopEngineStatus {
+        status = terminal
+        appendLog(logLevel(for: terminal), "Loop finished · \(terminal.summary)")
+
+        let record = LoopRunRecord(
+            id: UUID().uuidString, projectId: projectId, trigger: trigger,
+            gitRoot: gitRoot.path, startedAt: startedAt, endedAt: Date(),
+            iterationsUsed: iteration, config: LoopRunConfigSnapshot(config),
+            iterations: iterationRecords, statusCode: terminal.code,
+            statusSummary: terminal.summary)
+        // Fail-open: telemetry never gates the work it observes.
+        if let reason = journal.write(record, root: faultsRoot) {
+            appendLog(.warn, "Run journal not written: \(reason)")
+        }
+        return terminal
+    }
+
+    // MARK: - Helpers
 
     /// One-line, human-readable regression-sweep result for the run log:
     /// either "passed — M of T" or "failed — R regressed / M passed of T".
@@ -345,6 +613,9 @@ final class LoopEngineRunner: ObservableObject {
     /// `"expected 1.5 got 9.75"`) still collapses to the same hash,
     /// since these regexes can't distinguish "a duration" from "a float
     /// assertion value" without more context than a bare string offers.
+    /// `StageOutputParser`'s score is the primary progress signal precisely
+    /// because it does not share this weakness; the hash is the fallback for
+    /// runners whose output it does not recognise.
     private static func hash(_ s: String) -> String {
         var normalized = s.replacingOccurrences(
             of: #"\d+\.\d+"#, with: "#", options: .regularExpression)

@@ -40,9 +40,14 @@ enum LoopStageDetector {
                 stages.append(def)
             }
         }
-        return LoopEngineConfig(stages: stages,
-                                maxIterations: config.maxIterations,
-                                consecutiveFailureStop: config.consecutiveFailureStop)
+        // Rebuild via `stages` assignment rather than the memberwise initializer:
+        // an initializer call here has to restate every field, so each new
+        // `LoopEngineConfig` field would silently reset to its default every time
+        // a config is loaded (this helper runs on all three load paths). Copying
+        // and mutating cannot drift that way.
+        var updated = config
+        updated.stages = stages
+        return updated
     }
 
     private static func detectTestCommand(gitRoot: URL) -> String? {

@@ -154,7 +154,8 @@ extension CodeAssistantPanel {
         let runner = LoopEngineRunner(
             stageRepairer: AgentLoopStageRepairer(api: api, language: language),
             regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
-            skillExecutor: AgentLoopSkillExecutor(api: api, language: language)
+            skillExecutor: AgentLoopSkillExecutor(api: api, language: language),
+            trigger: .chat
         )
 
         // Throttled: `runner.$log` fires once per `appendLog` call (every
@@ -189,7 +190,8 @@ extension CodeAssistantPanel {
         // this call, so that warning already reached the chat transcript
         // through the (throttled) log stream — but state the stop reason
         // explicitly too, using the shared LoopEngineStatus.summary.
-        let result = await runner.run(config: loopConfig, faultsRoot: faultsRoot, gitRoot: gitRoot)
+        let result = await runner.run(config: loopConfig, faultsRoot: faultsRoot,
+                                      gitRoot: gitRoot, projectId: projectId)
         cancellable.cancel()
 
         if sessionEpoch == startEpoch, let idx = history.firstIndex(where: { $0.id == placeholderId }) {

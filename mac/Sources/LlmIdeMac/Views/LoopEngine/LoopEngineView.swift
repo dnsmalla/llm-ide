@@ -51,11 +51,27 @@ struct LoopEngineView: View {
     @State private var stages: [LoopStage] = []
     @State private var maxIterations: Int = 10
     @State private var consecutiveFailureStop: Int = 2
+    /// 0 means "no wall-clock limit" — a Stepper cannot express `nil`, so the
+    /// zero sentinel is mapped to/from `LoopEngineConfig.wallClockBudgetSeconds`
+    /// in `currentConfig` and `loadConfig`.
+    @State private var wallClockMinutes: Int = 60
+    @State private var maxRepairsPerStage: Int = 3
+    @State private var protectedPathPolicy: ProtectedPathPolicy = .revert
+    /// No UI (the built-in protected set covers the common cases); held in state
+    /// purely so a hand-edited value survives a save from this page instead of
+    /// being silently dropped.
+    @State private var extraProtectedGlobs: [String] = []
     @State private var selectedStageId: String?
     @State private var lastStatus: LoopEngineStatus?
     @State private var didRejectLastRun = false
     @State private var skillCatalog: [LlmIdeAPIClient.SkillLibraryEntry] = []
     @State private var skillsLoaded = false
+    @State private var pastRuns: [LoopRunIndexEntry] = []
+
+    /// Reads `<projectRoot>/system/loop-runs/` for the "past runs" list. A
+    /// separate instance from the runner's own journal is fine — the file layout
+    /// is the contract, and this one only ever reads.
+    private let journal = FileLoopRunJournal()
 
     init(api: LlmIdeAPIClient) {
         self.api = api
@@ -140,8 +156,25 @@ struct LoopEngineView: View {
             .listStyle(.sidebar)
             Divider().background(t.border)
             VStack(alignment: .leading, spacing: 6) {
+                SectionLabel("BUDGETS")
                 Stepper("Max iterations: \(maxIterations)", value: $maxIterations, in: 1...20)
-                Stepper("Stop after \(consecutiveFailureStop) identical failures", value: $consecutiveFailureStop, in: 1...10)
+                Stepper("Stop after \(consecutiveFailureStop) non-improving failures", value: $consecutiveFailureStop, in: 1...10)
+                Stepper(wallClockMinutes == 0 ? "Time budget: none" : "Time budget: \(wallClockMinutes) min",
+                        value: $wallClockMinutes, in: 0...480, step: 15)
+                Stepper("Max repairs per stage: \(maxRepairsPerStage)", value: $maxRepairsPerStage, in: 1...10)
+
+                SectionLabel("PROTECTED PATHS")
+                Picker("If a repair edits a test or build file", selection: $protectedPathPolicy) {
+                    ForEach(ProtectedPathPolicy.allCases, id: \.self) { policy in
+                        Text(policy.label).tag(policy)
+                    }
+                }
+                .pickerStyle(.menu)
+                Text("Tests, build config and system/ are reverted by default, and a stage that only passes after such an edit is reported blocked — not fixed.")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Button("Save") { saveConfig() }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -330,6 +363,32 @@ struct LoopEngineView: View {
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
             }
+
+            Divider().background(t.border).padding(.vertical, 4)
+
+            Text("Severity").font(Typography.caption).foregroundStyle(t.textMuted)
+            Picker("Severity", selection: $stages[index].severity) {
+                ForEach(LoopStageSeverity.allCases, id: \.self) { severity in
+                    Text(severity.label).tag(severity)
+                }
+            }
+            .pickerStyle(.segmented)
+            Text(stages[index].severity == .blocking
+                 ? "A failure triggers repair and can end the run."
+                 : "A failure is recorded only — no repair, no stall, never fails the run. Use for linters and formatters.")
+                .font(Typography.caption)
+                .foregroundStyle(t.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if stages[index].kind == .shellCommand {
+                Text("Timeout").font(Typography.caption).foregroundStyle(t.textMuted)
+                // 0 means "use the runner default" — a Stepper cannot express nil.
+                Stepper(stages[index].timeoutSeconds.map { "\($0)s" } ?? "Default (600s)",
+                        value: Binding(
+                            get: { stages[index].timeoutSeconds ?? 0 },
+                            set: { stages[index].timeoutSeconds = $0 == 0 ? nil : $0 }
+                        ), in: 0...3600, step: 30)
+            }
         }
     }
 
@@ -373,8 +432,52 @@ struct LoopEngineView: View {
                     }
                 }
             }
+            pastRunsSection
         }
         .background(t.surface)
+    }
+
+    /// Runs read back from `<projectRoot>/system/loop-runs/`. The live log above
+    /// is in-memory and dies with the app process; this is the part that survives
+    /// a restart, which is the whole reason the journal exists.
+    @ViewBuilder
+    private var pastRunsSection: some View {
+        let t = theme.current
+        if !pastRuns.isEmpty {
+            Divider().background(t.border)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    SectionLabel("PAST RUNS")
+                    Spacer()
+                }
+                .padding(.horizontal, Spacing.lg)
+                .padding(.vertical, Spacing.sm)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        ForEach(pastRuns, id: \.id) { entry in
+                            HStack(alignment: .top, spacing: 6) {
+                                Circle()
+                                    .fill(entry.statusCode == "success" ? t.success : t.danger)
+                                    .frame(width: 5, height: 5)
+                                    .padding(.top, 5)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(entry.statusSummary)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(t.text)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Text("\(AppDateFormatter.hourMinuteSecond(entry.startedAt)) · \(entry.trigger.rawValue) · \(entry.iterationsUsed) iter · \(Int(entry.durationSeconds))s")
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundStyle(t.textMuted)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.bottom, Spacing.sm)
+                }
+                .frame(maxHeight: 160)
+            }
+        }
     }
 
     @ViewBuilder
@@ -432,16 +535,37 @@ struct LoopEngineView: View {
         workspaceContext?.gitRoot
     }
 
+    /// The config this page currently represents — the single builder used by
+    /// save AND run. Composing it in one place is what stops a newly added
+    /// `LoopEngineConfig` field from being silently reset to its default by a
+    /// call site that forgot to thread it through (the same hazard
+    /// `LoopStageDetector.ensureDefaultStages` copies-and-mutates to avoid).
+    private var currentConfig: LoopEngineConfig {
+        LoopEngineConfig(
+            stages: stages,
+            maxIterations: maxIterations,
+            consecutiveFailureStop: consecutiveFailureStop,
+            wallClockBudgetSeconds: wallClockMinutes == 0 ? nil : Double(wallClockMinutes) * 60,
+            maxRepairsPerStage: maxRepairsPerStage,
+            protectedPathPolicy: protectedPathPolicy,
+            extraProtectedGlobs: extraProtectedGlobs)
+    }
+
     private func loadConfig() {
         guard let projectId = activeProjectId else {
             resetStagesToDefaults()
             return
         }
+        loadPastRuns()
         if let saved = LoopEngineConfig.load(for: projectId) {
             let ensured = LoopStageDetector.ensureDefaultStages(in: saved, gitRoot: activeGitRootURL)
             stages = ensured.stages
             maxIterations = ensured.maxIterations
             consecutiveFailureStop = ensured.consecutiveFailureStop
+            wallClockMinutes = ensured.wallClockBudgetSeconds.map { Int($0 / 60) } ?? 0
+            maxRepairsPerStage = ensured.maxRepairsPerStage
+            protectedPathPolicy = ensured.protectedPathPolicy
+            extraProtectedGlobs = ensured.extraProtectedGlobs
         } else if let gitRoot = activeGitRootURL {
             let detected = LoopStageDetector.detectDefaultStages(gitRoot: gitRoot)
             resetStagesToDefaults(stages: detected)
@@ -451,8 +575,9 @@ struct LoopEngineView: View {
             // page can't permanently lock in a Regression-only config for
             // the project before the repo is fully populated/detectable.
             if LoopEngineConfig.shouldPersist(detected) {
-                LoopEngineConfig(stages: detected, maxIterations: maxIterations, consecutiveFailureStop: consecutiveFailureStop)
-                    .save(for: projectId)
+                var toSave = currentConfig
+                toSave.stages = detected
+                toSave.save(for: projectId)
             }
         } else {
             // No saved config AND no git root to detect defaults from
@@ -481,6 +606,11 @@ struct LoopEngineView: View {
         stages = newStages
         maxIterations = 10
         consecutiveFailureStop = 2
+        wallClockMinutes = 60
+        maxRepairsPerStage = 3
+        protectedPathPolicy = .revert
+        extraProtectedGlobs = []
+        pastRuns = []
     }
 
     /// Append a non-default copy of `stage` (new id, cleared isDefault, next order).
@@ -503,8 +633,17 @@ struct LoopEngineView: View {
 
     private func saveConfig() {
         guard let projectId = activeProjectId else { return }
-        LoopEngineConfig(stages: stages, maxIterations: maxIterations, consecutiveFailureStop: consecutiveFailureStop)
-            .save(for: projectId)
+        currentConfig.save(for: projectId)
+    }
+
+    /// Refreshes the "past runs" list from the journal on disk. Best-effort: an
+    /// absent journal is the normal state for a project that has never looped.
+    private func loadPastRuns() {
+        guard let root = workspaceContext?.projectRoot else {
+            pastRuns = []
+            return
+        }
+        pastRuns = journal.recentRuns(root: root, limit: 15)
     }
 
     @MainActor
@@ -528,9 +667,11 @@ struct LoopEngineView: View {
         if LoopEngineConfig.shouldPersist(stages) || LoopEngineConfig.load(for: projectId) != nil {
             saveConfig()
         }
-        let projectConfig = LoopEngineConfig(stages: stages, maxIterations: maxIterations, consecutiveFailureStop: consecutiveFailureStop)
-        let result = await runner.run(config: projectConfig, faultsRoot: context.projectRoot, gitRoot: gitRoot)
+        let result = await runner.run(config: currentConfig, faultsRoot: context.projectRoot,
+                                      gitRoot: gitRoot, projectId: projectId)
         lastStatus = result
         didRejectLastRun = (result == nil)
+        // The run just journalled itself; re-read so the list reflects it.
+        loadPastRuns()
     }
 }

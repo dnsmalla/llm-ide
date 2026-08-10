@@ -685,13 +685,17 @@ extension AutoCodeUpdateService {
         let runner = LoopEngineRunner(
             stageRepairer: AgentLoopStageRepairer(api: api),
             regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
-            skillExecutor: AgentLoopSkillExecutor(api: api)
+            skillExecutor: AgentLoopSkillExecutor(api: api),
+            // `.autoTask` is the unattended trigger — the journal must be able to
+            // tell these runs apart from ones a human watched.
+            trigger: .autoTask
         )
         // run() returns LoopEngineStatus? — nil means this call was rejected
         // (a run is already in progress for this repo, instance- or
         // process-wide). Use the RETURN VALUE, not runner.status, which per
         // its doc comment is only meaningful when run() returns non-nil.
-        let result = await runner.run(config: projectConfig, faultsRoot: faultsRoot, gitRoot: gitRootURL)
+        let result = await runner.run(config: projectConfig, faultsRoot: faultsRoot,
+                                      gitRoot: gitRootURL, projectId: projectId)
 
         switch result {
         case .success:
@@ -703,6 +707,16 @@ extension AutoCodeUpdateService {
             // activity-feed title below never drift apart for the same run.
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering \(result?.summary ?? "gave up")."
             logStore.append(.loopEngineering, "Stopped after \(runner.iteration) iteration(s) — \(result?.summary ?? "gave up").", level: .error)
+        case .blocked:
+            // A repair edited a protected path (a test, a build file, the
+            // project's system/ state). Distinct from `.givenUp`: the agent did
+            // not fail to fix this, it tried something it is not allowed to do —
+            // so this surfaces as an error a human should read, never as a
+            // near-miss the next cron tick might get past.
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering \(result?.summary ?? "blocked")."
+            logStore.append(.loopEngineering,
+                            "Stopped after \(runner.iteration) iteration(s) — \(result?.summary ?? "blocked").",
+                            level: .error)
         case .needsApproval(let stageName):
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering needs approval for stage \"\(stageName)\"."
             logStore.append(.loopEngineering, "Stopped — stage \"\(stageName)\" needs approval in Loop Engineering settings.", level: .error)
