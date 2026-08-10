@@ -12,8 +12,11 @@ struct ContentView: View {
             NavigationStack {
                 MobileHomeView(deviceName: connectionStore.displayName)
                     .onAppear {
-                        // Re-establish connection if not already connected.
-                        if connection.connectionStatus == .disconnected {
+                        // Re-establish connection if not already connected —
+                        // but not if the user explicitly closed it via
+                        // closeConnection() (e.g. popping back from Settings
+                        // must not silently undo an intentional close).
+                        if connection.connectionStatus == .disconnected, !connection.userClosed {
                             connection.connectDirect(
                                 ip: connectionStore.deviceIP,
                                 port: connectionStore.devicePort,

@@ -112,6 +112,12 @@ final class ConnectionService: ObservableObject {
     private var connectionGeneration = 0
     private var reconnectTask: Task<Void, Never>?
 
+    /// True after `closeConnection()` until the next `connectDirect(...)` call.
+    /// Distinguishes an intentional close (don't auto-reconnect) from an
+    /// unexpected drop (auto-reconnect is correct) — `ContentView`'s
+    /// launch/appear check reads this before reconnecting.
+    private(set) var userClosed = false
+
     private var directIP: String?
     private var directPort: Int = 3006
     private var directPIN: String?
@@ -125,6 +131,7 @@ final class ConnectionService: ObservableObject {
     // MARK: — Connection
 
     func connectDirect(ip: String, port: Int = 3006, pin: String) {
+        userClosed = false
         if connectionStatus == .connected,
            directIP == ip, directPort == port, directPIN == pin {
             return
@@ -163,11 +170,16 @@ final class ConnectionService: ObservableObject {
     func disconnect() { disconnect(clearDirect: true) }
 
     /// Close the socket but keep the saved pairing (`directIP`/`directPort`/
-    /// `directPIN`) so a later `connectDirect` call — from the Reconnect
-    /// button or the next cold launch — can re-establish the link without
-    /// re-pairing. Unlike `disconnect()`, callers must NOT also clear
-    /// `ConnectionStore` — that would defeat the point of this method.
-    func closeConnection() { disconnect(clearDirect: false) }
+    /// `directPIN`) so a later `connectDirect` call — e.g. from a Reconnect
+    /// action within this session — can re-establish the link without
+    /// re-pairing. Sets `userClosed` so `ContentView`'s auto-reconnect does
+    /// not immediately undo this. Callers must NOT pair this with
+    /// `connectionStore.clear()` the way `disconnect()`'s UI call sites do —
+    /// that would defeat the point of keeping the pairing.
+    func closeConnection() {
+        userClosed = true
+        disconnect(clearDirect: false)
+    }
 
     private func disconnect(clearDirect: Bool) {
         reconnectTask?.cancel()
