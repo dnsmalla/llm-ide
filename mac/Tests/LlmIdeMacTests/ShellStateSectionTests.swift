@@ -3,14 +3,43 @@ import XCTest
 
 @MainActor
 final class ShellStateSectionTests: XCTestCase {
-    /// The Loop section is the permanent home for regression and must
-    /// always be reachable — it can't be hidden via Settings like the
-    /// ordinary tool sections.
-    func testLoopEngineeringIsNotUserHideable() {
-        XCTAssertFalse(
+    /// The Loop's toolbar button is hideable via Settings → Menu Bar. It was
+    /// deliberately excluded before, on the grounds that it is the permanent home
+    /// for regression — hiding it is only acceptable because the page stays
+    /// reachable without its button (see `testHidingASectionDoesNotRemoveItFromTheEnum`
+    /// and the `.openSection` handler, which never consults the hidden set).
+    func testLoopIsUserHideable() {
+        XCTAssertTrue(
             ShellState.Section.userHideable.contains(.loopEngine),
-            "the Loop section must not be user-hideable"
+            "the Loop section should be hideable from the top bar"
         )
+    }
+
+    /// The three that must never become hideable: Library is the fallback landing
+    /// that every redirect assumes exists, Settings is the only way back once
+    /// everything else is hidden, and Live is already gated on capture state.
+    func testLibraryLiveAndSettingsAreNeverHideable() {
+        for section in [ShellState.Section.library, .live, .settings] {
+            XCTAssertFalse(ShellState.Section.userHideable.contains(section),
+                           "\(section.rawValue) must not be user-hideable")
+        }
+    }
+
+    /// Hiding removes the toolbar button, not the section — `.openSection` sets the
+    /// section directly, which is what keeps Settings → Loop's "Open Loop" button,
+    /// the menu-bar status rows and the chat command working while it is hidden.
+    func testHidingASectionDoesNotRemoveItFromTheEnum() {
+        XCTAssertNotNil(ShellState.Section(rawValue: "loopEngine"))
+        XCTAssertTrue(ShellState.Section.allCases.contains(.loopEngine))
+    }
+
+    /// Home falls back to Library when the chosen landing is hidden — so picking
+    /// Loop as Home and then hiding it lands somewhere real instead of nowhere.
+    func testHomeFallsBackToLibraryWhenLoopIsHiddenAndWasHome() {
+        XCTAssertEqual(
+            ShellState.Section.resolveHome("loopEngine", hidden: ["loopEngine"]), .library)
+        XCTAssertEqual(
+            ShellState.Section.resolveHome("loopEngine", hidden: []), .loopEngine)
     }
 
     /// The standalone Regression page is gone; the enum must no longer

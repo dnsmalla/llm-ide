@@ -303,6 +303,22 @@ under its own `loop` note type, so a run lands in the Library — searchable and
 filterable by outcome tag alongside meeting and email notes — instead of as a file
 you have to know to go looking for. It shares the journal's fail-open contract.
 
+## Finding it in the UI
+
+The Loop is a top-bar section, and its button can be hidden like any other tool
+section via **Settings → Menu Bar**. Hiding removes the *button*, not the page —
+`.openSection` sets the section directly without consulting the hidden set, so
+every other route still works:
+
+- **Settings → Loop → Open Loop** (the deliberate way back in)
+- the menu-bar dropdown's open-fault and last-regression rows
+- the Code Assistant chat's loop command
+
+Library, Live and Settings remain non-hideable: Library is the fallback landing
+every redirect assumes exists, Settings is the only way back once everything else
+is hidden, and Live is already gated on capture state. If Loop is set as the Home
+landing and then hidden, `resolveHome` falls back to Library.
+
 ## Triggers
 
 All three construct their own `LoopEngineRunner` and share one `LoopEngineConfig`

@@ -36,12 +36,16 @@ struct LoopSettingsSection: View {
                     Spacer()
                     Button("Open Loop") {
                         // Same mechanism the menu-bar rows use to jump sections.
+                        // `.openSection` sets the section directly and never consults
+                        // the hidden set, so this stays the way back in after the Loop
+                        // button has been hidden via Settings → Menu Bar.
                         NotificationCenter.default.post(
                             name: .openSection,
                             object: ShellState.Section.loopEngine.rawValue)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .help("Opens the Loop page, even when its top-bar button is hidden.")
                 }
 
                 Text("A project that has already been opened in the Loop keeps its own settings — these apply the first time a project's stages are detected.")

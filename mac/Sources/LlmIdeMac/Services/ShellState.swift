@@ -48,14 +48,22 @@ final class ShellState {
             }
         }
 
-        /// Sections the user is allowed to hide. Library is the landing
-        /// fallback when hidden sections are selected; Settings is the
+        /// Sections the user is allowed to hide from the top bar. Library is the
+        /// landing fallback when hidden sections are selected; Settings is the
         /// only way back if everything else is hidden — neither can be
         /// turned off. `.live` is already conditional on capture state
-        /// so it doesn't appear here either. `.loopEngine` is the single
-        /// permanent home for regression and is likewise non-hideable.
+        /// so it doesn't appear here either.
+        ///
+        /// `.loopEngine` WAS excluded, on the grounds that it is the single
+        /// permanent home for regression. Hiding it no longer strands that: the
+        /// `.openSection` handler sets the section directly with no visibility
+        /// check, so every route into the Loop still works while its toolbar button
+        /// is hidden — Settings → Loop's "Open Loop" button, the menu-bar
+        /// open-fault and last-regression rows, and the chat loop command. Hiding
+        /// removes the button, not the page.
         static let userHideable: [Section] = [
-            .explorer, .search, .conflicts, .sourceControl, .issues, .gantt, .visual, .docGen, .autoCode, .codeGraph
+            .explorer, .search, .conflicts, .sourceControl, .issues, .gantt, .visual,
+            .docGen, .autoCode, .codeGraph, .loopEngine
         ]
 
         /// Resolve the effective Home landing: the chosen section if it's a real
