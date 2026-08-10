@@ -28,6 +28,12 @@ struct LoopEngineConfig: Codable, Equatable {
     /// What to do when a repair edits a protected path. See `RepairScopeGuard`.
     var protectedPathPolicy: ProtectedPathPolicy = .revert
 
+    /// Write a human-readable run summary into the Library
+    /// (`llm-doc/loop/<yyyy>/<MM>/`) at the end of every run. Off by default —
+    /// the journal already records every run, and a note per run is only wanted
+    /// when a person, not a tool, is the audience. See `LoopRunSummaryWriter`.
+    var writeSummaryNote: Bool = false
+
     /// Project-specific additions to `GitRepairScopeGuard.defaultProtectedGlobs`.
     /// Additive by design — a project can widen the protected set but not narrow
     /// the built-in one, because the built-ins are what stop the loop certifying
@@ -48,11 +54,13 @@ struct LoopEngineConfig: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case stages, maxIterations, consecutiveFailureStop
         case wallClockBudgetSeconds, maxRepairsPerStage, protectedPathPolicy, extraProtectedGlobs
+        case writeSummaryNote
     }
 
     init(stages: [LoopStage], maxIterations: Int = 10, consecutiveFailureStop: Int = 2,
          wallClockBudgetSeconds: Double? = 3600, maxRepairsPerStage: Int = 3,
-         protectedPathPolicy: ProtectedPathPolicy = .revert, extraProtectedGlobs: [String] = []) {
+         protectedPathPolicy: ProtectedPathPolicy = .revert, extraProtectedGlobs: [String] = [],
+         writeSummaryNote: Bool = false) {
         self.stages = stages
         self.maxIterations = maxIterations
         self.consecutiveFailureStop = consecutiveFailureStop
@@ -60,6 +68,7 @@ struct LoopEngineConfig: Codable, Equatable {
         self.maxRepairsPerStage = maxRepairsPerStage
         self.protectedPathPolicy = protectedPathPolicy
         self.extraProtectedGlobs = extraProtectedGlobs
+        self.writeSummaryNote = writeSummaryNote
     }
 
     /// Same rule as `LoopStage.init(from:)`: every field added after the first
@@ -76,6 +85,7 @@ struct LoopEngineConfig: Codable, Equatable {
         protectedPathPolicy = try container.decodeIfPresent(
             ProtectedPathPolicy.self, forKey: .protectedPathPolicy) ?? .revert
         extraProtectedGlobs = try container.decodeIfPresent([String].self, forKey: .extraProtectedGlobs) ?? []
+        writeSummaryNote = try container.decodeIfPresent(Bool.self, forKey: .writeSummaryNote) ?? false
     }
 
     /// Whether an auto-detected stage list is safe to persist as the

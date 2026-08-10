@@ -50,7 +50,11 @@ enum LoopStageDetector {
         return updated
     }
 
-    private static func detectTestCommand(gitRoot: URL) -> String? {
+    /// The project's test command, or `nil` when no tooling is recognised.
+    /// Internal (not private) because `LoopTemplate.applied(to:)` needs the same
+    /// answer to resolve its `detectedTestCommand` placeholder — a built-in
+    /// template must not hardcode `swift test`.
+    static func detectTestCommand(gitRoot: URL) -> String? {
         let fm = FileManager.default
 
         if fm.fileExists(atPath: gitRoot.appendingPathComponent("Package.swift").path) {

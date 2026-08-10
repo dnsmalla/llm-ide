@@ -1,15 +1,24 @@
-// Loop Engineering — three-pane workspace (Stages / Detail / Log):
+// Loop Engineering — three-pane workspace (Stages / Contract / Log):
 //
-//   ┌────────────────┬────────────────────────────┬────────────────┐
-//   │ Stages         │ Detail                      │ Log            │
-//   │  • ordered list │  Selected stage's editor +  │ Streamed lines │
-//   │  • add stages   │  Run button + last status   │ from the most  │
-//   │  • iteration    │                             │ recent run,    │
-//   │    knobs        │                             │ live while it  │
-//   │                 │                             │ runs           │
-//   └────────────────┴────────────────────────────┴────────────────┘
+//   ┌────────────────┬──────────────────────────────┬────────────────┐
+//   │ Stages         │ Run + the loop's contract    │ Log            │
+//   │  • ordered list│   OVERVIEW  what runs, where │ Streamed lines │
+//   │  • add stages  │   TEMPLATE  pick/save recipe │ from the most  │
+//   │                │   SELECTED  stage editor     │ recent run,    │
+//   │                │   SETTINGS  budgets + policy │ live while it  │
+//   │                │   OUTPUT    what it writes   │ runs, then     │
+//   │                │                              │ PAST RUNS      │
+//   └────────────────┴──────────────────────────────┴────────────────┘
 //
-// Selecting a stage on the left drives what the middle pane edits.
+// Panel 2 exists to answer, before a run starts: what will this loop do, in
+// what order, against which working tree, bounded by what, and what artifacts
+// will it leave behind? Sections live in LoopEngineView+DetailPane.swift; the
+// @State they read is declared here (a SwiftUI extension cannot own storage),
+// which is why those members are internal rather than private — same split as
+// CodeAssistantPanel / CodeAssistantPanel+LoopEngine.swift.
+//
+// Selecting a stage on the left drives what the middle pane's SELECTED STAGE
+// section edits.
 // Shell-command stages must be approved (VerifyApprovalStore) before a
 // run will actually execute them — LoopEngineRunner's own preflight
 // enforces this again server-side, so the approve button here is a
@@ -46,27 +55,41 @@ struct LoopEngineView: View {
     /// approval made here is visible to the runner's own preflight —
     /// harmless in practice since both read/write the same UserDefaults
     /// key, but keeping one instance avoids relying on that coincidence.
-    private let approvals: VerifyApprovalStore
+    let approvals: VerifyApprovalStore
 
-    @State private var stages: [LoopStage] = []
-    @State private var maxIterations: Int = 10
-    @State private var consecutiveFailureStop: Int = 2
+    @State var stages: [LoopStage] = []
+    @State var maxIterations: Int = 10
+    @State var consecutiveFailureStop: Int = 2
     /// 0 means "no wall-clock limit" — a Stepper cannot express `nil`, so the
     /// zero sentinel is mapped to/from `LoopEngineConfig.wallClockBudgetSeconds`
     /// in `currentConfig` and `loadConfig`.
-    @State private var wallClockMinutes: Int = 60
-    @State private var maxRepairsPerStage: Int = 3
-    @State private var protectedPathPolicy: ProtectedPathPolicy = .revert
+    @State var wallClockMinutes: Int = 60
+    @State var maxRepairsPerStage: Int = 3
+    @State var protectedPathPolicy: ProtectedPathPolicy = .revert
     /// No UI (the built-in protected set covers the common cases); held in state
     /// purely so a hand-edited value survives a save from this page instead of
     /// being silently dropped.
     @State private var extraProtectedGlobs: [String] = []
-    @State private var selectedStageId: String?
+    @State var selectedStageId: String?
     @State private var lastStatus: LoopEngineStatus?
     @State private var didRejectLastRun = false
     @State private var skillCatalog: [LlmIdeAPIClient.SkillLibraryEntry] = []
     @State private var skillsLoaded = false
     @State private var pastRuns: [LoopRunIndexEntry] = []
+
+    /// App-wide template library (built-in starters + the user's saved recipes).
+    /// A `@StateObject` so the picker updates the moment one is saved or deleted.
+    @StateObject var templateStore = LoopTemplateStore()
+    @State var selectedTemplateId: UUID?
+    @State var isNamingTemplate = false
+    @State var newTemplateName = ""
+    @State var newTemplateSummary = ""
+    /// Mirrors `LoopEngineConfig.writeSummaryNote`; edited in the Output section.
+    @State var writeSummaryNote = false
+    /// Filename of the most recent run-summary note, for the Output section's
+    /// "last written" line. Read from disk rather than the note index so an
+    /// unindexed/hand-deleted note cannot make the row lie.
+    @State var lastSummaryNoteName: String?
 
     /// Reads `<projectRoot>/system/loop-runs/` for the "past runs" list. A
     /// separate instance from the runner's own journal is fine — the file layout
@@ -154,34 +177,10 @@ struct LoopEngineView: View {
                 stageRow(stage)
             }
             .listStyle(.sidebar)
-            Divider().background(t.border)
-            VStack(alignment: .leading, spacing: 6) {
-                SectionLabel("BUDGETS")
-                Stepper("Max iterations: \(maxIterations)", value: $maxIterations, in: 1...20)
-                Stepper("Stop after \(consecutiveFailureStop) non-improving failures", value: $consecutiveFailureStop, in: 1...10)
-                Stepper(wallClockMinutes == 0 ? "Time budget: none" : "Time budget: \(wallClockMinutes) min",
-                        value: $wallClockMinutes, in: 0...480, step: 15)
-                Stepper("Max repairs per stage: \(maxRepairsPerStage)", value: $maxRepairsPerStage, in: 1...10)
-
-                SectionLabel("PROTECTED PATHS")
-                Picker("If a repair edits a test or build file", selection: $protectedPathPolicy) {
-                    ForEach(ProtectedPathPolicy.allCases, id: \.self) { policy in
-                        Text(policy.label).tag(policy)
-                    }
-                }
-                .pickerStyle(.menu)
-                Text("Tests, build config and system/ are reverted by default, and a stage that only passes after such an edit is reported blocked — not fixed.")
-                    .font(Typography.caption)
-                    .foregroundStyle(t.textMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Button("Save") { saveConfig() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            }
-            .font(Typography.caption)
-            .padding(.horizontal, Spacing.md)
-            .padding(.bottom, Spacing.md)
+            // Budgets, protected-path policy, template and output all live in the
+            // detail pane now: a user should be able to answer "what will this
+            // loop do, where, and what does it produce" from one place, and this
+            // pane is only wide enough for a list.
         }
         .padding(.top, Spacing.sm)
         .background(t.surface)
@@ -194,7 +193,7 @@ struct LoopEngineView: View {
     /// re-renders, so the sidebar could show a different order than the
     /// stages actually run in. The `id` tie-break makes both sorts
     /// deterministic and identical.
-    private var sortedStages: [LoopStage] {
+    var sortedStages: [LoopStage] {
         stages.sorted { ($0.order, $0.id) < ($1.order, $1.id) }
     }
 
@@ -240,26 +239,50 @@ struct LoopEngineView: View {
 
     // MARK: - Detail pane
 
+    /// The contract pane: what this loop will do, where it runs, how it is
+    /// bounded, and what it produces — in that order, all in one scroll.
+    ///
+    /// Sections live in `LoopEngineView+DetailPane.swift`; only the composition
+    /// order is here. Nothing is behind a tab on purpose: the question this pane
+    /// answers ("what is this loop going to do to my repo?") is one a user asks
+    /// *before* running, and an answer split across four tabs is not an answer.
     private var detailPane: some View {
         let t = theme.current
         return VStack(alignment: .leading, spacing: 0) {
             toolbar
             Divider().background(t.border)
             ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.md) {
-                    if let id = selectedStageId, let index = stages.firstIndex(where: { $0.id == id }) {
-                        stageDetail(index: index)
-                    } else {
-                        Text("Select a stage on the left, or add one.")
-                            .font(Typography.body)
-                            .foregroundStyle(t.textMuted)
-                    }
+                VStack(alignment: .leading, spacing: Spacing.lg) {
+                    overviewSection
+                    Divider().background(t.border)
+                    templateSection
+                    Divider().background(t.border)
+                    selectedStageSection
+                    Divider().background(t.border)
+                    settingsSection
+                    Divider().background(t.border)
+                    outputSection
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Spacing.lg)
             }
         }
         .background(t.body)
+    }
+
+    @ViewBuilder
+    private var selectedStageSection: some View {
+        let t = theme.current
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            SectionLabel("SELECTED STAGE")
+            if let id = selectedStageId, let index = stages.firstIndex(where: { $0.id == id }) {
+                stageDetail(index: index)
+            } else {
+                Text("Select a stage on the left to edit it, or add one with +.")
+                    .font(Typography.body)
+                    .foregroundStyle(t.textMuted)
+            }
+        }
     }
 
     private var toolbar: some View {
@@ -524,14 +547,14 @@ struct LoopEngineView: View {
     /// (project root vs `code/<repo>`); using the project root for both, as
     /// this view previously did via `activeProject.localPath`, silently
     /// pointed shell-command stages and stage detection at the wrong tree.
-    private var workspaceContext: WorkspaceRoot.Context? {
+    var workspaceContext: WorkspaceRoot.Context? {
         WorkspaceRoot.context(config: config, projectStore: projectStore)
     }
 
     /// The git working tree shell-command stages run in and approvals are
     /// keyed against — `nil` when the active project has no resolvable git
     /// working tree (e.g. a fresh non-repo project).
-    private var activeGitRootURL: URL? {
+    var activeGitRootURL: URL? {
         workspaceContext?.gitRoot
     }
 
@@ -548,7 +571,8 @@ struct LoopEngineView: View {
             wallClockBudgetSeconds: wallClockMinutes == 0 ? nil : Double(wallClockMinutes) * 60,
             maxRepairsPerStage: maxRepairsPerStage,
             protectedPathPolicy: protectedPathPolicy,
-            extraProtectedGlobs: extraProtectedGlobs)
+            extraProtectedGlobs: extraProtectedGlobs,
+            writeSummaryNote: writeSummaryNote)
     }
 
     private func loadConfig() {
@@ -566,6 +590,7 @@ struct LoopEngineView: View {
             maxRepairsPerStage = ensured.maxRepairsPerStage
             protectedPathPolicy = ensured.protectedPathPolicy
             extraProtectedGlobs = ensured.extraProtectedGlobs
+            writeSummaryNote = ensured.writeSummaryNote
         } else if let gitRoot = activeGitRootURL {
             let detected = LoopStageDetector.detectDefaultStages(gitRoot: gitRoot)
             resetStagesToDefaults(stages: detected)
@@ -610,7 +635,9 @@ struct LoopEngineView: View {
         maxRepairsPerStage = 3
         protectedPathPolicy = .revert
         extraProtectedGlobs = []
+        writeSummaryNote = false
         pastRuns = []
+        lastSummaryNoteName = nil
     }
 
     /// Append a non-default copy of `stage` (new id, cleared isDefault, next order).
@@ -631,7 +658,7 @@ struct LoopEngineView: View {
         if selectedStageId == id { selectedStageId = nil }
     }
 
-    private func saveConfig() {
+    func saveConfig() {
         guard let projectId = activeProjectId else { return }
         currentConfig.save(for: projectId)
     }
@@ -644,6 +671,60 @@ struct LoopEngineView: View {
             return
         }
         pastRuns = journal.recentRuns(root: root, limit: 15)
+        lastSummaryNoteName = Self.newestSummaryNoteName(projectRoot: root)
+    }
+
+    /// Newest filename under `llm-doc/loop/`, or nil. Walks the directory rather
+    /// than reading the note index so a note deleted by hand cannot leave the
+    /// Output row claiming a file that is gone.
+    private static func newestSummaryNoteName(projectRoot: URL) -> String? {
+        let root = projectRoot.appendingPathComponent("llm-doc/loop", isDirectory: true)
+        guard let walker = FileManager.default.enumerator(
+            at: root, includingPropertiesForKeys: [.contentModificationDateKey])
+        else { return nil }
+        var newest: (name: String, at: Date)?
+        for case let url as URL in walker where url.pathExtension == "md" {
+            let at = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            if newest == nil || at > newest!.at {
+                newest = (url.lastPathComponent, at)
+            }
+        }
+        return newest?.name
+    }
+
+    // MARK: - Templates
+
+    var selectedTemplate: LoopTemplate? {
+        selectedTemplateId.flatMap { templateStore.template(id: $0) }
+    }
+
+    /// Replaces the current stage list and budgets with the selected template's.
+    ///
+    /// Does NOT save: applying is an edit like any other, and a user who applies a
+    /// template to compare it against what they had must be able to switch away
+    /// without having overwritten their config. `Run` and `Save` persist, as before.
+    func applySelectedTemplate() {
+        guard let template = selectedTemplate else { return }
+        let applied = template.applied(to: activeGitRootURL)
+        stages = applied.stages
+        maxIterations = applied.maxIterations
+        consecutiveFailureStop = applied.consecutiveFailureStop
+        wallClockMinutes = applied.wallClockBudgetSeconds.map { Int($0 / 60) } ?? 0
+        maxRepairsPerStage = applied.maxRepairsPerStage
+        protectedPathPolicy = applied.protectedPathPolicy
+        extraProtectedGlobs = applied.extraProtectedGlobs
+        writeSummaryNote = applied.writeSummaryNote
+        // Stage ids are regenerated on apply, so the old selection no longer exists.
+        selectedStageId = nil
+    }
+
+    func saveCurrentAsTemplate() {
+        let saved = templateStore.save(
+            name: newTemplateName, summary: newTemplateSummary, config: currentConfig)
+        selectedTemplateId = saved.id
+        newTemplateName = ""
+        newTemplateSummary = ""
     }
 
     @MainActor

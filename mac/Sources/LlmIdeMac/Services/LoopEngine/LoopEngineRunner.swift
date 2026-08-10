@@ -51,6 +51,7 @@ final class LoopEngineRunner: ObservableObject {
     private let approvals: VerifyApprovalStore
     private let stageTimeout: TimeInterval
     private let journal: LoopRunJournaling
+    private let summaryWriter: LoopRunSummaryWriting
     private let scopeGuard: RepairScopeGuarding
     private let trigger: LoopRunTrigger
 
@@ -66,6 +67,7 @@ final class LoopEngineRunner: ObservableObject {
          approvals: VerifyApprovalStore = VerifyApprovalStore(),
          stageTimeout: TimeInterval = 600,
          journal: LoopRunJournaling = FileLoopRunJournal(),
+         summaryWriter: LoopRunSummaryWriting = NoteLoopRunSummaryWriter(),
          scopeGuard: RepairScopeGuarding = GitRepairScopeGuard(),
          trigger: LoopRunTrigger = .manual) {
         self.verifier = verifier
@@ -75,6 +77,7 @@ final class LoopEngineRunner: ObservableObject {
         self.approvals = approvals
         self.stageTimeout = stageTimeout
         self.journal = journal
+        self.summaryWriter = summaryWriter
         self.scopeGuard = scopeGuard
         self.trigger = trigger
     }
@@ -156,13 +159,13 @@ final class LoopEngineRunner: ObservableObject {
         // consume an iteration.
         for stage in orderedStages where stage.kind == .shellCommand {
             guard let command = Self.validCommand(stage) else {
-                return finish(.error("Stage \"\(stage.name)\" has no command"),
+                return await finish(.error("Stage \"\(stage.name)\" has no command"),
                               config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
                               projectId: projectId, startedAt: startedAt)
             }
             guard approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: command) else {
                 appendLog(.warn, "  [\(stage.name)] needs approval: \(command)")
-                return finish(.needsApproval(stageName: stage.name),
+                return await finish(.needsApproval(stageName: stage.name),
                               config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
                               projectId: projectId, startedAt: startedAt)
             }
@@ -247,7 +250,7 @@ final class LoopEngineRunner: ObservableObject {
         if Task.isCancelled, status != .success {
             status = .aborted
         }
-        return finish(status ?? .givenUp(reason: .maxIterations),
+        return await finish(status ?? .givenUp(reason: .maxIterations),
                       config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
                       projectId: projectId, startedAt: startedAt)
     }
@@ -538,7 +541,7 @@ final class LoopEngineRunner: ObservableObject {
     /// run without journalling it.
     private func finish(_ terminal: LoopEngineStatus, config: LoopEngineConfig,
                         faultsRoot: URL, gitRoot: URL, projectId: String?,
-                        startedAt: Date) -> LoopEngineStatus {
+                        startedAt: Date) async -> LoopEngineStatus {
         status = terminal
         appendLog(logLevel(for: terminal), "Loop finished · \(terminal.summary)")
 
@@ -551,6 +554,17 @@ final class LoopEngineRunner: ObservableObject {
         // Fail-open: telemetry never gates the work it observes.
         if let reason = journal.write(record, root: faultsRoot) {
             appendLog(.warn, "Run journal not written: \(reason)")
+        }
+        // Opt-in human-readable counterpart, same fail-open contract. Written
+        // after the journal so the machine record exists even if note indexing
+        // (which touches more moving parts) fails.
+        if config.writeSummaryNote {
+            switch await summaryWriter.write(record, root: faultsRoot) {
+            case .written(let path):
+                appendLog(.info, "Run summary note written: \(path)")
+            case .failed(let reason):
+                appendLog(.warn, "Run summary note not written: \(reason)")
+            }
         }
         return terminal
     }

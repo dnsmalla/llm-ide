@@ -137,6 +137,17 @@ final class LoopEngineRunnerTests: XCTestCase {
         }
     }
 
+    /// Captures summary-note writes. Production is `NoteLoopRunSummaryWriter`,
+    /// which would touch the Library index and the disk from every test.
+    private final class StubSummaryWriter: LoopRunSummaryWriting {
+        private(set) var written: [LoopRunRecord] = []
+        var result: LoopSummaryNoteResult = .written(path: "llm-doc/loop/2026/08/loop-x.md")
+        func write(_ record: LoopRunRecord, root: URL) async -> LoopSummaryNoteResult {
+            written.append(record)
+            return result
+        }
+    }
+
     /// Reports whatever a test tells it to. The default `.clean` keeps every
     /// pre-existing test on its original code path (no violation, no git
     /// subprocess) while letting the guard tests drive each policy branch.
@@ -167,6 +178,7 @@ final class LoopEngineRunnerTests: XCTestCase {
                             approvals: VerifyApprovalStore,
                             stageTimeout: TimeInterval = 600,
                             journal: LoopRunJournaling? = nil,
+                            summaryWriter: LoopRunSummaryWriting? = nil,
                             scopeGuard: RepairScopeGuarding? = nil,
                             trigger: LoopRunTrigger = .manual) -> LoopEngineRunner {
         LoopEngineRunner(
@@ -174,6 +186,7 @@ final class LoopEngineRunnerTests: XCTestCase {
             regressionSweep: regressionSweep, skillExecutor: skillExecutor,
             approvals: approvals, stageTimeout: stageTimeout,
             journal: journal ?? InMemoryJournal(),
+            summaryWriter: summaryWriter ?? StubSummaryWriter(),
             scopeGuard: scopeGuard ?? StubScopeGuard(),
             trigger: trigger)
     }
@@ -1369,6 +1382,101 @@ final class LoopEngineRunnerTests: XCTestCase {
         let rejected = await runner2.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
         XCTAssertNil(rejected)
         XCTAssertTrue(journal.written.isEmpty)
+
+        await repairer.release.fire()
+        _ = await task1.value
+    }
+
+    // MARK: - Summary note output
+
+    func testSummaryNoteIsWrittenWhenEnabled() async {
+        let summary = StubSummaryWriter()
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5, consecutiveFailureStop: 2, writeSummaryNote: true)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            summaryWriter: summary
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(summary.written.count, 1)
+        XCTAssertEqual(summary.written[0].statusCode, "success")
+        XCTAssertTrue(runner.log.contains { $0.text.contains("Run summary note written") })
+    }
+
+    /// Off by default: the journal already records every run, and a note per run is
+    /// only wanted when a person is the audience.
+    func testNoSummaryNoteWhenDisabled() async {
+        let summary = StubSummaryWriter()
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5, consecutiveFailureStop: 2)
+        XCTAssertFalse(config.writeSummaryNote)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            summaryWriter: summary
+        )
+        _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertTrue(summary.written.isEmpty)
+    }
+
+    /// Same fail-open contract as the journal: writing a note observes the work and
+    /// must never change its verdict.
+    func testSummaryNoteFailureIsLoggedButDoesNotChangeTheVerdict() async {
+        let summary = StubSummaryWriter()
+        summary.result = .failed(reason: "note index locked")
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5, consecutiveFailureStop: 2, writeSummaryNote: true)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            summaryWriter: summary
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertTrue(runner.log.contains { $0.text.contains("Run summary note not written: note index locked") })
+    }
+
+    /// A run that never started must not produce a note either — the note list
+    /// would otherwise count runs that did not happen.
+    func testRejectedRunWritesNoSummaryNote() async {
+        let summary = StubSummaryWriter()
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") }
+        let repairer = BlockingRepairer()
+        let approvals = makeApprovals(approve: [("t1", "swift test")])
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5, consecutiveFailureStop: 5, writeSummaryNote: true)
+
+        let runner1 = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(), approvals: approvals)
+        let runner2 = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(), approvals: approvals, summaryWriter: summary)
+
+        let task1 = Task { await runner1.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot) }
+        await repairer.started.wait()
+        let rejected = await runner2.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertNil(rejected)
+        XCTAssertTrue(summary.written.isEmpty)
 
         await repairer.release.fire()
         _ = await task1.value
