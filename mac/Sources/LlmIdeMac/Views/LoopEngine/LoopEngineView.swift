@@ -686,9 +686,11 @@ struct LoopEngineView: View {
         for case let url as URL in walker where url.pathExtension == "md" {
             let at = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
                 .contentModificationDate ?? .distantPast
-            if newest == nil || at > newest!.at {
+            guard let current = newest else {
                 newest = (url.lastPathComponent, at)
+                continue
             }
+            if at > current.at { newest = (url.lastPathComponent, at) }
         }
         return newest?.name
     }

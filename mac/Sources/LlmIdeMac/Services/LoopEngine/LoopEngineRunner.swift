@@ -160,14 +160,14 @@ final class LoopEngineRunner: ObservableObject {
         for stage in orderedStages where stage.kind == .shellCommand {
             guard let command = Self.validCommand(stage) else {
                 return await finish(.error("Stage \"\(stage.name)\" has no command"),
-                              config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
-                              projectId: projectId, startedAt: startedAt)
+                                    config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                                    projectId: projectId, startedAt: startedAt)
             }
             guard approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: command) else {
                 appendLog(.warn, "  [\(stage.name)] needs approval: \(command)")
                 return await finish(.needsApproval(stageName: stage.name),
-                              config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
-                              projectId: projectId, startedAt: startedAt)
+                                    config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                                    projectId: projectId, startedAt: startedAt)
             }
         }
 
@@ -251,8 +251,8 @@ final class LoopEngineRunner: ObservableObject {
             status = .aborted
         }
         return await finish(status ?? .givenUp(reason: .maxIterations),
-                      config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
-                      projectId: projectId, startedAt: startedAt)
+                            config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                            projectId: projectId, startedAt: startedAt)
     }
 
     // MARK: - Stage execution
@@ -264,12 +264,12 @@ final class LoopEngineRunner: ObservableObject {
         let outcome = await regressionSweep.sweep(
             faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: true)
         let duration = Date().timeIntervalSince(startedAt)
-        appendLog(outcome.passed ? .info : .warn,
-                  "  [\(stage.name)] \(Self.regressionLine(outcome))")
-
         // The regressed count IS the score here — no parsing needed, which is why
-        // this stage could always see progress while shell stages could not.
+        // this stage could always see progress while shell stages could not. The
+        // same line is the log entry, the journal's output tail, and the hash
+        // input, so it is built once.
         let line = Self.regressionLine(outcome)
+        appendLog(outcome.passed ? .info : .warn, "  [\(stage.name)] \(line)")
 
         if outcome.passed {
             record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
@@ -432,9 +432,14 @@ final class LoopEngineRunner: ObservableObject {
             return .proceed
         case .completed(let verdictScope, let violations, let changed):
             appendLog(.info, "  [\(stage.name)] skill completed (generate)")
+            // `passed` on a generate step means "ran without error" — but a step
+            // whose edits were rejected as out-of-scope did not do its job, and
+            // recording it as passed would render as a clean row directly above
+            // the violation it caused in the run summary.
+            let clean = violations.isEmpty
             record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
-                   passed: true, output: "", score: nil,
-                   changedPaths: changed, scopeVerdict: verdictScope)
+                   passed: clean, output: clean ? "" : "edited protected path(s): \(violations.joined(separator: ", "))",
+                   score: nil, changedPaths: changed, scopeVerdict: verdictScope)
             if let terminal = scopeTermination(stage: stage, config: config,
                                               verdict: verdictScope, violations: violations) {
                 return .terminate(terminal)

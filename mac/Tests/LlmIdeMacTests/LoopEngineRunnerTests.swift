@@ -946,6 +946,7 @@ final class LoopEngineRunnerTests: XCTestCase {
     /// A skill stage edits the tree too, so "make the tests pass" is as available
     /// to it as it is to the repairer.
     func testSkillStageViolationAlsoBlocks() async {
+        let journal = InMemoryJournal()
         let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
         let scopeGuard = StubScopeGuard(result: .violated(
             paths: ["mac/Tests/A.swift"], allChangedPaths: ["mac/Tests/A.swift"]))
@@ -958,7 +959,7 @@ final class LoopEngineRunnerTests: XCTestCase {
             regressionSweep: StubRegressionSweep(alwaysPasses: true),
             skillExecutor: StubSkillExecutor(),
             approvals: makeApprovals(approve: [("t1", "swift test")]),
-            scopeGuard: scopeGuard
+            journal: journal, scopeGuard: scopeGuard
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
 
@@ -966,6 +967,39 @@ final class LoopEngineRunnerTests: XCTestCase {
             stageName: "Fix", paths: ["mac/Tests/A.swift"])))
         // Blocked before the Test stage ran at all.
         XCTAssertTrue(verifier.calls.isEmpty)
+
+        // A generate step whose edits were rejected must NOT be journalled as
+        // passed: the run summary renders `passed` as "pass", which would read as
+        // a clean row directly above the violation that row caused.
+        let attempt = journal.written[0].iterations[0].attempts[0]
+        XCTAssertFalse(attempt.passed)
+        XCTAssertEqual(attempt.scopeVerdict, .violatedReverted)
+        XCTAssertEqual(attempt.changedPaths, ["mac/Tests/A.swift"])
+    }
+
+    /// The mirror case: a skill stage that edits only production code is a clean
+    /// pass, so the guard cannot be accused of flagging ordinary work.
+    func testCleanSkillStageIsJournalledAsPassed() async {
+        let journal = InMemoryJournal()
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let scopeGuard = StubScopeGuard(result: .clean(changedPaths: ["Sources/Thing.swift"]))
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "s1", name: "Fix", kind: .skill, command: nil, order: 0, skillId: "skills/fix")
+        ], maxIterations: 5, consecutiveFailureStop: 5)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(),
+            journal: journal, scopeGuard: scopeGuard
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .success)
+        let attempt = journal.written[0].iterations[0].attempts[0]
+        XCTAssertTrue(attempt.passed)
+        XCTAssertEqual(attempt.scopeVerdict, .clean)
+        XCTAssertEqual(attempt.changedPaths, ["Sources/Thing.swift"])
     }
 
     /// `.off` restores exactly the pre-guard behaviour, and must not pay for the
