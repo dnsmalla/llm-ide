@@ -396,7 +396,12 @@ struct MobileHomeView: View {
                         Label("Settings", systemImage: "gear")
                     }
                     Divider()
-                    Button("Disconnect", role: .destructive) {
+                    Button {
+                        connection.closeConnection()
+                    } label: {
+                        Label("Close Connection", systemImage: "network.slash")
+                    }
+                    Button("Forget this Mac", role: .destructive) {
                         connection.disconnect()
                         connectionStore.clear()
                     }
