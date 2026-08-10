@@ -34,6 +34,28 @@ final class ProjectScaffolderGitignoreTests: XCTestCase {
                        "system/loop.json must stay tracked — it is the portable contract")
     }
 
+    /// Leading whitespace is significant in a `.gitignore` pattern — an indented
+    /// `system/loop-runs/` silently matches nothing. Swift strips a multiline
+    /// literal's indent relative to its closing delimiter, so the blocks are clean
+    /// today; this fails if a future edit moves a delimiter, which a `contains`
+    /// check cannot see.
+    func testNoManagedPatternHasLeadingWhitespace() {
+        var blocks = [ProjectScaffolder.managedGitignoreBlockForTesting]
+        // Every upgrade's injected text, as it would land in a real file.
+        if let upgraded = ProjectScaffolder.upgradedManagedGitignore(
+            managedBlock("system/cache/")) {
+            blocks.append(upgraded)
+        }
+        for block in blocks {
+            for line in block.split(separator: "\n", omittingEmptySubsequences: true) {
+                let text = String(line)
+                guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+                XCTAssertEqual(text, text.trimmingCharacters(in: .whitespaces),
+                               "gitignore line must not be indented: [\(text)]")
+            }
+        }
+    }
+
     // MARK: - Existing projects
 
     func testOlderBlockGainsTheRunHistoryIgnore() throws {

@@ -72,7 +72,12 @@ enum LoopEngineConfigStore {
         write(config, to: fileURL(projectRoot: projectRoot))
     }
 
-    /// Whether this project has a saved contract, without decoding it.
+    /// Whether this project has a saved contract.
+    ///
+    /// Note the side effect: this goes through `load`, so a project still on the
+    /// legacy UserDefaults entry is **migrated to the file** by asking this
+    /// question. That is idempotent and is the migration we want to happen as early
+    /// as possible, but it does mean this is not a pure read.
     static func exists(projectRoot: URL?, projectId: String,
                        defaults: UserDefaults = .standard) -> Bool {
         load(projectRoot: projectRoot, projectId: projectId, defaults: defaults) != nil
