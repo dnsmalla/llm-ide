@@ -411,10 +411,39 @@ Run through this against a real meeting before merging:
 
 ---
 
+## Loop Engineering (`mac/Sources/LlmIdeMac/{Models,Services}/LoopEngine/`)
+
+Design rationale lives in [Loop Engineering](loop-engineering.md); this is the operational checklist.
+
+### ✅ MUST preserve
+
+- **A stage that turns green only after a repair edited a protected path is NOT a pass.** `RepairScopeGuard` detecting the violation is useless on its own — if the loop then re-runs the stage it will observe the exit 0 the violation bought and report `.success`, certifying a regression as fixed. Under `protectedPathPolicy` `.revert`/`.stop` the run MUST terminate as `.blocked(.repairOutOfScope)` and the stage MUST NOT be re-verified. The prompt text asking the agent not to weaken tests is a courtesy, never the enforcement.
+- **Protected paths are enforced in code, and `extraProtectedGlobs` is additive only.** The built-in set (tests, build/verify config, `system/`) is what stops the loop certifying a deleted test as a fix. A project may widen it; nothing may narrow it.
+- **An unavailable scope check reports `.indeterminate`, never `.clean`.** Reporting "no violations" when the check never ran is precisely the silent pass the guard exists to prevent. The runner then warns and continues (fail-open) — refusing to loop in non-git projects would remove the feature from them entirely, which is worse than the unverified repair every run performed before the guard existed.
+- **Journal writes are fail-open and every exit from `LoopEngineRunner.run` goes through `finish`.** A write failure is logged and ignored: telemetry observes the work, it never gates it. And a run rejected at preflight (e.g. `needsApproval`) still writes a record, so "the cron ran and did nothing" stays distinguishable from "the cron never ran".
+- **`system/loop-runs/index.jsonl` is append-only.** One line per run, never rewritten, so a crash mid-append costs one unparseable line (skipped on read) instead of the whole history.
+- **Every field added to `LoopStage` / `LoopEngineConfig` must be `decodeIfPresent` + default in the hand-written `init(from:)`.** These are persisted as un-migrated UserDefaults JSON on the user's machine. One plain `decode` of a new key makes every existing project's saved config fail to decode, which `LoopEngineConfig.load` reports as "no config" — silently discarding the user's stage list and re-detecting defaults.
+- **Config must be rebuilt by copy-and-mutate, never by restating the memberwise initializer.** `LoopStageDetector.ensureDefaultStages` and `LoopEngineView.currentConfig` are the single composition points; an initializer call at a third site silently resets every field it forgets to thread through (and `ensureDefaultStages` runs on all three config-load paths).
+- **`ProgressWatch` falls back to hash equality whenever either side has no score.** That fallback IS the pre-scoring behaviour, and it is what guarantees an unrecognised test runner is never made worse by `StageOutputParser` existing. A first failure must report `streak == 1`, so `consecutiveFailureStop == 1` still means "stop on the first failure".
+- **`LoopEngineStatus.code` is a stable wire value, independent of `summary`.** It is the grouping key for any analysis over the journal, and it must not vary with the stage name or path list the case carries — otherwise grouping produces one bucket per run. Do not rename a code once it has been written to a journal.
+- **An `.advisory` stage never gates.** It runs and is journalled, but must not trigger repair, count toward a stall, or fail the run — that is the only thing that makes a linter or formatter stage safe to add.
+
+### ❌ DO NOT do these
+
+- **Do NOT re-verify a stage after a protected-path violation** to "see if it really passes" — that reintroduces the reward-hacking path wholesale.
+- **Do NOT let a journal write throw or change a run's verdict.**
+- **Do NOT attribute an already-dirty file to the repair.** The guard compares only *newly* dirty paths; flagging pre-existing edits would block every run started from a working tree with uncommitted test changes and get the guard switched off.
+- **Do NOT make `StageOutputParser` return `0` for unrecognised output.** `nil` and `0` drive different runner paths: `nil` means "fall back to the hash", `0` means "this runner genuinely reports zero failures" (a compile error or crash).
+- **Do NOT check the wall-clock budget during the first iteration.** A run always gets one complete pass; checking earlier turns a small budget into a no-op instead of a fast failure.
+
+---
+
 ## Quick reference: where to add X
 
 | I want to… | Touch these files |
 |---|---|
+| Add a Loop Engineering stage kind | `LoopStage.Kind` + the `switch` in `LoopEngineRunner.run` + a `run<Kind>Stage` helper + `LoopEngineView`'s add-stage menu and `stageDetail` |
+| Add a Loop Engineering budget or stop condition | `LoopEngineConfig` (`decodeIfPresent` + default!) + `LoopEngineStatus` (`summary` AND `code`) + the exhaustive `switch` in `AutoCodeUpdateService+PipelineTasks.swift` + `LoopEngineView`'s budgets pane |
 | Support a new meeting platform | `extension/src/content/caption-scraper.ts` (add reader), `detectPlatform()` |
 | Add a new AI feature | New server endpoint in `extension/server.mjs` + add to `ENDPOINTS` + bump `SERVER_API_VERSION` + add to `REQUIRED_ENDPOINTS` in `extension/src/sidepanel/App.tsx` + new hook under `extension/src/sidepanel/hooks/` (with `language` param + AbortController) + wire into App |
 | Add a new UI language | `LANGUAGE_NAMES` in `extension/server.mjs` + `HEADING_LABELS` for questions + LanguageSelector option |

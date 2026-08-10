@@ -216,6 +216,28 @@ The Auto Tasks page has a **Model & Limits** item (`Views/AutoCode/AutoCodeView.
 
 `AutoCodeUpdateService` (`Services/AutoCodeUpdateService.swift`) participates in the global ledger so subscription-CLI usage is counted: before each Auto Task run it calls `GET /kb/usage/resolve` (seeded with the user's default model as `prefer`) and skips the run with a banner when the chain is `paused`; it pins the resolved model on the CLI via `--model` for `claude`/`codex`/`gemini`; and after each run it calls `POST /kb/usage/record`. The `model_fallback` activity kind (`Services/ActivityStore.swift`, mirrored from the backend `ACTIVITY_KINDS`) surfaces auto-switches in the activity bell.
 
+#### Loop Engine (`Services/LoopEngine/`, `Models/LoopEngine/`)
+
+The agentic verify-and-repair loop. Design rationale + the four-level model: [Loop Engineering](../explanation/loop-engineering.md); do-not-regress rules: [invariants](../explanation/invariants.md).
+
+`LoopEngineRunner` (`Services/LoopEngine/LoopEngineRunner.swift`, `@MainActor`) repeats an ordered `[LoopStage]` until every stage passes or a budget stops it. Each iteration re-runs every stage from the top. A process-wide `activeRoots` set, keyed on the symlink-resolved git root, rejects a concurrent run against the same working tree whichever trigger started it (`run` returns `nil`).
+
+Stage kinds (`Models/LoopEngine/LoopStage.swift`) — `regressionSweep` (via `RegressionSweepRunning` → `RegressionRunner`), `shellCommand` (via `FaultVerifier`, gated by `VerifyApprovalStore` in a preflight pass before any iteration), and `skill` (a generate step via `LoopSkillExecuting`). Per stage: `severity` (`blocking` | `advisory` — an advisory failure is logged and journalled but never repairs, stalls, or fails the run) and `timeoutSeconds` (override of the runner's 600 s default).
+
+Progress + repair:
+
+- `StageOutputParser` (`Services/LoopEngine/StageOutputParser.swift`) extracts a failing-test count from XCTest, swift-testing, `node --test`, pytest, jest, and `go test`; `nil` for unrecognised output.
+- `ProgressWatch` (`Models/LoopEngine/ProgressWatch.swift`) is the single per-stage stall detector: a strictly decreasing score resets the streak, equal-or-worse increments it, and a missing score falls back to normalised output-hash equality (the pre-scoring behaviour).
+- `AgentLoopStageRepairer` (`Services/LoopEngine/LoopStageRepairer.swift`) receives that delta as `RepairEvidence` and quotes it back to the agent, over the `api.codeAssist` transport with the full chat model.
+
+`RepairScopeGuard` (`Services/LoopEngine/RepairScopeGuard.swift`) snapshots `git status --porcelain --untracked-files=all` around every repair and skill stage and compares newly-dirty paths against `GitRepairScopeGuard.defaultProtectedGlobs` (tests, build/verify config, `system/`) plus `LoopEngineConfig.extraProtectedGlobs`. `ProtectedPathPolicy` is `revert` (default) | `stop` | `warn` | `off`; under `revert`/`stop` the run terminates as `.blocked(.repairOutOfScope)` and the stage is never re-verified.
+
+Budgets (`Models/LoopEngine/LoopEngineConfig.swift`, persisted per `Project.id` as UserDefaults JSON): `maxIterations` (10), `consecutiveFailureStop` (2), `wallClockBudgetSeconds` (3600, checked between iterations and skipped on the first), `maxRepairsPerStage` (3). Terminal statuses are enumerated by `Models/LoopEngine/LoopEngineStatus.swift`, whose `summary` (human) and `code` (stable, for journal grouping) are the single source of truth for every caller.
+
+Journal: `FileLoopRunJournal` (`Services/LoopEngine/LoopRunJournal.swift`) writes `<projectRoot>/system/loop-runs/<yyyy-MM>/<runId>.json` plus an append-only `index.jsonl`, alongside the `system/faults/` tree `RegressionRunner` already owns. Writes are fail-open; every exit from `run` journals. Surfaced as "Past runs" in `Views/LoopEngine/LoopEngineView.swift`.
+
+Triggers, all sharing one config per project: `manual` (`Views/LoopEngine/LoopEngineView.swift`), `chat` (`Views/CodeAssistant/CodeAssistantPanel+LoopEngine.swift`), `autoTask` (`Services/AutoCode/AutoCodeUpdateService+PipelineTasks.swift`).
+
 ---
 
 ## §4 Server IPC
