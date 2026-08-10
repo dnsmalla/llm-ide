@@ -80,12 +80,40 @@ struct LoopEngineConfig: Codable, Equatable {
         stages = try container.decode([LoopStage].self, forKey: .stages)
         maxIterations = try container.decodeIfPresent(Int.self, forKey: .maxIterations) ?? 10
         consecutiveFailureStop = try container.decodeIfPresent(Int.self, forKey: .consecutiveFailureStop) ?? 2
-        wallClockBudgetSeconds = try container.decodeIfPresent(Double.self, forKey: .wallClockBudgetSeconds) ?? 3600
+        // `nil` here means "no time limit", which is a value the user can choose —
+        // so absent and null must be told apart. `decodeIfPresent ?? 3600` alone
+        // collapses them, and since the synthesized encoder OMITS a nil optional,
+        // choosing "no time limit" was silently restored as 60 minutes on the next
+        // load. `contains` distinguishes them: key absent ⇒ a config written before
+        // this field existed ⇒ 3600; key present-but-null ⇒ deliberately no limit.
+        if container.contains(.wallClockBudgetSeconds) {
+            wallClockBudgetSeconds = try container.decodeIfPresent(
+                Double.self, forKey: .wallClockBudgetSeconds)
+        } else {
+            wallClockBudgetSeconds = 3600
+        }
         maxRepairsPerStage = try container.decodeIfPresent(Int.self, forKey: .maxRepairsPerStage) ?? 3
         protectedPathPolicy = try container.decodeIfPresent(
             ProtectedPathPolicy.self, forKey: .protectedPathPolicy) ?? .revert
         extraProtectedGlobs = try container.decodeIfPresent([String].self, forKey: .extraProtectedGlobs) ?? []
         writeSummaryNote = try container.decodeIfPresent(Bool.self, forKey: .writeSummaryNote) ?? false
+    }
+
+    /// Hand-written so `wallClockBudgetSeconds` is encoded as an explicit JSON
+    /// `null` when nil. The synthesized encoder uses `encodeIfPresent` for
+    /// optionals, which omits the key — and an omitted key has to mean "written by
+    /// a build before this field existed" (see `init(from:)`), so a chosen "no time
+    /// limit" would come back as the 3600 default.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(stages, forKey: .stages)
+        try container.encode(maxIterations, forKey: .maxIterations)
+        try container.encode(consecutiveFailureStop, forKey: .consecutiveFailureStop)
+        try container.encode(wallClockBudgetSeconds, forKey: .wallClockBudgetSeconds)
+        try container.encode(maxRepairsPerStage, forKey: .maxRepairsPerStage)
+        try container.encode(protectedPathPolicy, forKey: .protectedPathPolicy)
+        try container.encode(extraProtectedGlobs, forKey: .extraProtectedGlobs)
+        try container.encode(writeSummaryNote, forKey: .writeSummaryNote)
     }
 
     /// Whether an auto-detected stage list is safe to persist as the

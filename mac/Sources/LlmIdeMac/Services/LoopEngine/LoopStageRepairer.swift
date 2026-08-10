@@ -60,7 +60,7 @@ final class AgentLoopStageRepairer: LoopStageRepairer {
                             repoRoot: URL, evidence: RepairEvidence? = nil) -> String {
         let commandLine = command.map { "Command: \($0)\n" } ?? ""
         return """
-        The "\(stageName)" stage of a Loop Engineering run is failing in the codebase at \(repoRoot.path).
+        The "\(stageName)" stage of an automated verify-and-repair loop is failing in the codebase at \(repoRoot.path).
 
         \(commandLine)Failure output:
         \(String(failureOutput.suffix(maxFailureOutputChars)))

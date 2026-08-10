@@ -35,6 +35,6 @@ final class AutoTaskSettingsLoopEngineeringTests: XCTestCase {
     func testEnabledTasksIncludesLoopEngineeringWhenOn() {
         let settings = AutoTaskSettings(defaults: suite)
         settings.runLoopEngineering = true
-        XCTAssertTrue(settings.enabledTasks.contains("Loop Engineering"))
+        XCTAssertTrue(settings.enabledTasks.contains("Loop"))
     }
 }

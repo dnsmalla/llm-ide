@@ -234,6 +234,10 @@ Progress + repair:
 
 Budgets (`Models/LoopEngine/LoopEngineConfig.swift`, persisted per `Project.id` as UserDefaults JSON): `maxIterations` (10), `consecutiveFailureStop` (2), `wallClockBudgetSeconds` (3600, checked between iterations and skipped on the first), `maxRepairsPerStage` (3). Terminal statuses are enumerated by `Models/LoopEngine/LoopEngineStatus.swift`, whose `summary` (human) and `code` (stable, for journal grouping) are the single source of truth for every caller.
 
+Naming: the section's `label` is **"Loop"**; the `Section.loopEngine` rawValue and `AutoTask.loopEngineering` rawValue are unchanged because both are persisted (deep links, activity rows, `taskErrors`, Auto Task toggles).
+
+Defaults: `LoopEngineDefaults` (`Models/LoopEngine/LoopEngineDefaults.swift`) stores a stage-less `LoopEngineConfig` under one app-wide UserDefaults key as the values a project inherits the first time its config is created; edited by `Views/Settings/LoopSettingsSection.swift`. All three fresh-config sites call `newConfig(stages:)`.
+
 Templates: `LoopTemplate` (`Models/LoopEngine/LoopTemplate.swift`) is a named `LoopEngineConfig` — four built-in starters (Test & Fix, Full Verify, Skill Loop, Docs Refresh) with stable UUIDs, whose test stage carries the `detectedTestCommand` sentinel that `applied(to:)` resolves via `LoopStageDetector.detectTestCommand` (dropping the stage when nothing is detected). `applied(to:)` regenerates every stage id, since ids key `VerifyApprovalStore`. `LoopTemplateStore` (`Services/LoopEngine/LoopTemplateStore.swift`, `@MainActor @Published`) holds built-ins plus the user's saved recipes under one app-wide UserDefaults key — not per-project, unlike `LoopEngineConfig`.
 
 Journal: `FileLoopRunJournal` (`Services/LoopEngine/LoopRunJournal.swift`) writes `<projectRoot>/system/loop-runs/<yyyy-MM>/<runId>.json` plus an append-only `index.jsonl`, alongside the `system/faults/` tree `RegressionRunner` already owns. Writes are fail-open; every exit from `run` journals. Surfaced as "Past runs" in `Views/LoopEngine/LoopEngineView.swift`.

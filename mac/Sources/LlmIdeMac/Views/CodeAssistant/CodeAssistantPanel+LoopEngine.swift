@@ -77,8 +77,8 @@ extension CodeAssistantPanel {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Run Loop Engineering against the active project")
-        .accessibilityLabel("Run Loop Engineering")
+        .help("Run the Loop against the active project")
+        .accessibilityLabel("Run Loop")
         // No resolvable git working tree (e.g. a fresh non-repo project) is
         // treated the same as "no active repo" — `LoopEngineRunner.run`
         // takes a non-optional `gitRoot`, so a run can't start without one.
@@ -119,7 +119,7 @@ extension CodeAssistantPanel {
         agent.pendingTool = nil
         statusText = ""
         error = nil
-        let placeholderTurn = LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: "Starting Loop Engineering…")
+        let placeholderTurn = LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: "Starting Loop…")
         let placeholderId = placeholderTurn.id
         // Captured BEFORE the first await below — if the user switches to a
         // different chat session while this run is in flight, `history`
@@ -141,7 +141,10 @@ extension CodeAssistantPanel {
         // necessarily the same URL (clone-into-code layout).
         let raw = LoopEngineConfig.load(for: projectId) ?? {
             let detectedStages = LoopStageDetector.detectDefaultStages(gitRoot: gitRoot)
-            let detected = LoopEngineConfig(stages: detectedStages)
+            // Budgets/policy from the app-wide defaults (Settings → Loop) so a
+            // project first reached from chat inherits the same starting point as
+            // one first opened on the Loop page.
+            let detected = LoopEngineDefaults.newConfig(stages: detectedStages)
             if LoopEngineConfig.shouldPersist(detectedStages) {
                 detected.save(for: projectId)
             }
@@ -178,7 +181,7 @@ extension CodeAssistantPanel {
                 guard runner != nil, sessionEpoch == startEpoch else { return }
                 guard let idx = history.firstIndex(where: { $0.id == placeholderId }) else { return }
                 let text = lines.map(\.text).joined(separator: "\n")
-                history[idx].content = text.isEmpty ? "Starting Loop Engineering…" : text
+                history[idx].content = text.isEmpty ? "Starting Loop…" : text
             }
 
         // run() returns LoopEngineStatus? — nil means rejected (a run is

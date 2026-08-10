@@ -619,15 +619,15 @@ extension AutoCodeUpdateService {
         projectRoot: String, gitRoot: String, projectId: String?, defaults: UserDefaults = .standard
     ) async {
         guard let api else {
-            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering skipped — no API client wired."
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop skipped — no API client wired."
             return
         }
         guard !projectRoot.isEmpty else {
-            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering skipped — no project root resolved."
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop skipped — no project root resolved."
             return
         }
         guard !gitRoot.isEmpty else {
-            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering skipped — no git working tree resolved."
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop skipped — no git working tree resolved."
             return
         }
         // LoopEngineConfig is keyed by the stable llm-ide Project.id (see the
@@ -639,7 +639,7 @@ extension AutoCodeUpdateService {
         // AutoCodeUpdateService+BackendResolution.swift). Using the wrong
         // key here would silently split one project's config in two.
         guard let projectId else {
-            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering skipped — no active project."
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop skipped — no active project."
             return
         }
         let faultsRoot = URL(fileURLWithPath: projectRoot, isDirectory: true)
@@ -665,7 +665,9 @@ extension AutoCodeUpdateService {
             raw = saved
         } else {
             let detectedStages = LoopStageDetector.detectDefaultStages(gitRoot: gitRootURL)
-            let detected = LoopEngineConfig(stages: detectedStages)
+            // Same app-wide defaults as the other two entry points — see
+            // LoopEngineDefaults.newConfig.
+            let detected = LoopEngineDefaults.newConfig(stages: detectedStages)
             if LoopEngineConfig.shouldPersist(detectedStages) {
                 detected.save(for: projectId, defaults: defaults)
             }
@@ -705,7 +707,7 @@ extension AutoCodeUpdateService {
             // `.summary` (not raw `GivenUpReason` interpolation, which
             // renders as e.g. "maxIterations") so this message and the
             // activity-feed title below never drift apart for the same run.
-            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering \(result?.summary ?? "gave up")."
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop \(result?.summary ?? "gave up")."
             logStore.append(.loopEngineering, "Stopped after \(runner.iteration) iteration(s) — \(result?.summary ?? "gave up").", level: .error)
         case .blocked:
             // A repair edited a protected path (a test, a build file, the
@@ -713,15 +715,15 @@ extension AutoCodeUpdateService {
             // not fail to fix this, it tried something it is not allowed to do —
             // so this surfaces as an error a human should read, never as a
             // near-miss the next cron tick might get past.
-            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering \(result?.summary ?? "blocked")."
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop \(result?.summary ?? "blocked")."
             logStore.append(.loopEngineering,
                             "Stopped after \(runner.iteration) iteration(s) — \(result?.summary ?? "blocked").",
                             level: .error)
         case .needsApproval(let stageName):
-            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering needs approval for stage \"\(stageName)\"."
-            logStore.append(.loopEngineering, "Stopped — stage \"\(stageName)\" needs approval in Loop Engineering settings.", level: .error)
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop needs approval for stage \"\(stageName)\"."
+            logStore.append(.loopEngineering, "Stopped — stage \"\(stageName)\" needs approval on the Loop page.", level: .error)
         case .error(let message):
-            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop Engineering error: \(message)"
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop error: \(message)"
             logStore.append(.loopEngineering, "Error: \(message)", level: .error)
         case .aborted:
             // `TaskLogStore.Level` has no `.warn` case (only `.info`/`.error`);
@@ -732,12 +734,12 @@ extension AutoCodeUpdateService {
             // Rejected — a run is already in progress for this repo elsewhere
             // (e.g. the user started one from the chat panel or the Loop
             // Engineering page). Leave any existing taskErrors entry as-is.
-            logStore.append(.loopEngineering, "Skipped — a Loop Engineering run is already in progress for this repo.")
+            logStore.append(.loopEngineering, "Skipped — a Loop run is already in progress for this repo.")
             return
         }
         activity?.report(
             kind: .loopEngineeringDone,
-            title: "Loop Engineering complete — \(result.map(\.summary) ?? "unknown")",
+            title: "Loop complete — \(result.map(\.summary) ?? "unknown")",
             detail: ["iterations": runner.iteration],
             link: ShellState.Section.loopEngine.rawValue
         )

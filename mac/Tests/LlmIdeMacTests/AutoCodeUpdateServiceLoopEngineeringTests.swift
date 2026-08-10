@@ -40,7 +40,7 @@ final class AutoCodeUpdateServiceLoopEngineeringTests: XCTestCase {
     func testSkipsWithTaskErrorWhenProjectRootIsEmpty() async {
         let service = makeService()
         await service.runLoopEngineeringSweep(projectRoot: "", gitRoot: "", projectId: nil)
-        XCTAssertEqual(service.taskErrors[AutoTask.loopEngineering.rawValue], "Loop Engineering skipped — no project root resolved.")
+        XCTAssertEqual(service.taskErrors[AutoTask.loopEngineering.rawValue], "Loop skipped — no project root resolved.")
     }
 
     /// `projectId` is now a plain parameter (per the Task 9 review — the
@@ -53,7 +53,7 @@ final class AutoCodeUpdateServiceLoopEngineeringTests: XCTestCase {
             projectRoot: "/tmp/loop-eng-test-project",
             gitRoot: "/tmp/loop-eng-test-repo",
             projectId: nil)
-        XCTAssertEqual(service.taskErrors[AutoTask.loopEngineering.rawValue], "Loop Engineering skipped — no active project.")
+        XCTAssertEqual(service.taskErrors[AutoTask.loopEngineering.rawValue], "Loop skipped — no active project.")
     }
 
     /// Regression test for the false-green persistence bug: a tree with no

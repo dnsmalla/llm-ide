@@ -431,7 +431,7 @@ final class AutoCodeUpdateService: ObservableObject {
                 currentStep = "Running Regression sweep"
                 await runRegressionSweep(projectRoot: resolved.projectRoot, gitRoot: resolved.gitRoot)
             case .loopEngineering:
-                currentStep = "Running Loop Engineering"
+                currentStep = "Running Loop"
                 await runLoopEngineeringSweep(projectRoot: resolved.projectRoot, gitRoot: resolved.gitRoot, projectId: projectId)
             case .generateKnowledge:
                 currentStep = "Reviewing Knowledge"

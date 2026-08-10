@@ -24,7 +24,7 @@ final class ShellState {
             case .docGen:    return "Doc Gen"
             case .autoCode:  return "Auto Tasks"
             case .codeGraph: return "Code Graph"
-            case .loopEngine: return "Loop Engineering"
+            case .loopEngine: return "Loop"
             case .settings:  return "Settings"
             }
         }

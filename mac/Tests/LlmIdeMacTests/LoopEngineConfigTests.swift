@@ -45,6 +45,35 @@ final class LoopEngineConfigTests: XCTestCase {
         XCTAssertNotNil(suite.data(forKey: "loopEngineConfig_abc-123"))
     }
 
+    /// "No time limit" (`nil`) is a value the user can pick, so it has to survive a
+    /// save. The synthesized encoder omits a nil optional, and an omitted key means
+    /// "written before this field existed" ⇒ 3600 — so choosing no limit came back
+    /// as 60 minutes on the next load.
+    func testNoTimeLimitSurvivesASaveAndLoad() {
+        var config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ])
+        config.wallClockBudgetSeconds = nil
+        config.save(for: "proj-notime", defaults: suite)
+        XCTAssertNil(LoopEngineConfig.load(for: "proj-notime", defaults: suite)?.wallClockBudgetSeconds)
+    }
+
+    /// The other half of that distinction, and the invariant the fix must not break:
+    /// a config written by a build that had no `wallClockBudgetSeconds` key at all
+    /// still decodes with the 3600 default rather than as "no limit".
+    func testConfigFromBeforeTheFieldExistedDecodesWithTheDefaultBudget() throws {
+        let legacy = #"{"stages":[],"maxIterations":10,"consecutiveFailureStop":2}"#
+        let decoded = try JSONDecoder().decode(LoopEngineConfig.self, from: Data(legacy.utf8))
+        XCTAssertEqual(decoded.wallClockBudgetSeconds, 3600)
+    }
+
+    /// An explicit null is "no limit" — the shape the current encoder writes.
+    func testExplicitNullBudgetDecodesAsNoLimit() throws {
+        let json = #"{"stages":[],"wallClockBudgetSeconds":null}"#
+        let decoded = try JSONDecoder().decode(LoopEngineConfig.self, from: Data(json.utf8))
+        XCTAssertNil(decoded.wallClockBudgetSeconds)
+    }
+
     func testDefaultsAreTenAndTwo() {
         let config = LoopEngineConfig(stages: [])
         XCTAssertEqual(config.maxIterations, 10)

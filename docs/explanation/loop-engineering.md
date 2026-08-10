@@ -7,6 +7,16 @@ status: stable
 
 > How LLM-IDE's agentic loop is built, what bounds it, and why a stage that turns green is not automatically a stage that passed.
 
+**Naming.** The feature is **Loop** in the app — the toolbar section, the page
+title, the Auto Task row, the Settings card. "Loop Engineering" is the engineering
+name for the subsystem and stays in the code (`LoopEngine*` types,
+`ShellState.Section.loopEngine`, `AutoTask.loopEngineering`) and in these docs. The
+identifiers are deliberately *not* renamed: `Section.loopEngine.rawValue` is the
+deep-link payload carried by `.openSection` notifications and stored on activity
+feed rows, and `AutoTask.loopEngineering.rawValue` keys `taskErrors` and the
+persisted Auto Task toggles — renaming either would break links already written to
+disk.
+
 ## Why a loop needs engineering
 
 An agent that calls tools until it thinks it is done is a *retry loop*. It has no
@@ -74,6 +84,27 @@ not an answer. The Overview deliberately says the awkward things out loud — a
 pipeline with no gating stage is reported as "nothing gates this run, so it will
 pass after one iteration without repairing anything", and a shell stage that has
 not been approved is labelled as such, because that stops the run in preflight.
+
+## Where the settings live
+
+Two scopes, and the split matters because the config is never re-derived once a
+project has one:
+
+- **Per project** — the stage list and this project's budgets, edited on the Loop
+  page. Stages are detected from that repo's own test tooling, which is why they
+  cannot be an app-wide setting.
+- **App-wide defaults** (`LoopEngineDefaults`, Settings → Loop) — the budgets and
+  protected-path policy a project inherits **the first time** its config is
+  created. Before this existed, every new project silently started at
+  `LoopEngineConfig`'s hardcoded values and had to be re-tuned by hand.
+
+All three surfaces that can create a fresh config — the Loop page, the chat
+command, and the Auto Task sweep — seed it through
+`LoopEngineDefaults.newConfig(stages:)`. If any one of them built a config
+directly, the defaults would apply or not depending on which surface the user
+happened to open a project from first. The defaults store deliberately holds a
+stage-*less* config: a default stage list would override per-project detection,
+and reusable stage lists are what templates are for.
 
 ## Templates
 

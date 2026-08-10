@@ -63,7 +63,7 @@ enum AutoTask: String, CaseIterable, Identifiable {
         case .generateDoc:       return "Generate Documentation"
         case .updateIssues:      return "Update Issues"
         case .updatePlanStatus:  return "Update Plan Status"
-        case .loopEngineering:   return "Loop Engineering"
+        case .loopEngineering:   return "Loop"
         }
     }
 

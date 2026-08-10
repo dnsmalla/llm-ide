@@ -352,12 +352,12 @@ struct HelpGuideView: View {
 
     private var loopEngineContent: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
-            helpHeader("Loop Engineering", icon: "repeat.circle", tint: Color(red: 0.35, green: 0.70, blue: 0.55))
+            helpHeader("Loop", icon: "repeat.circle", tint: Color(red: 0.35, green: 0.70, blue: 0.55))
 
-            helpParagraph("Chains Regression, then Test, then any stages you add, into one loop: on a failure it asks the agent for a fix and retries, up to a configurable number of iterations. Configure stages and approve any shell commands from the Loop Engineering page before running.")
+            helpParagraph("Chains Regression, then Test, then any stages you add, into one loop: on a failure it asks the agent for a fix and retries, up to a configurable number of iterations. Configure stages and approve any shell commands on the Loop page before running.")
 
             helpCard("How to use it", icon: "list.number") {
-                helpStep(1, "Open Loop Engineering from the toolbar — a default stage list is detected from your repo the first time")
+                helpStep(1, "Open Loop from the toolbar — a default stage list is detected from your repo the first time")
                 helpStep(2, "Add, remove, or reorder stages; shell-command stages need their command approved once per machine")
                 helpStep(3, "Set max iterations and how many identical failures in a row should stop the loop")
                 helpStep(4, "Click Run — a failing stage triggers an automatic repair attempt, then the loop retries from the top")
@@ -600,7 +600,7 @@ enum HelpTopic: String, CaseIterable, Identifiable {
         case .docGen:          return "Doc Gen"
         case .autoTasks:       return "Auto Tasks"
         case .codeGraph:        return "Code Graph"
-        case .loopEngine:      return "Loop Engineering"
+        case .loopEngine:      return "Loop"
         case .settings:        return "Settings"
         case .shortcuts:       return "Keyboard Shortcuts"
         case .troubleshooting: return "Troubleshooting"

@@ -1244,7 +1244,11 @@ final class LoopEngineRunnerTests: XCTestCase {
     /// A per-stage override exists because a full build+test cycle and a
     /// two-second formatter check do not belong under one timeout.
     func testPerStageTimeoutOverridesTheRunnerDefault() async {
-        final class TimeoutRecordingVerifier: FaultVerifier {
+        // `@unchecked` for the same reason the other stubs in this file are: a
+        // mutable recording property on a Sendable-conforming class is an error in
+        // the Swift 6 language mode, and these are only ever touched from the test's
+        // own actor.
+        final class TimeoutRecordingVerifier: FaultVerifier, @unchecked Sendable {
             var timeouts: [TimeInterval] = []
             func verify(command: String, repoRoot: URL, timeout: TimeInterval) async throws -> VerifyOutcome {
                 timeouts.append(timeout)

@@ -127,7 +127,7 @@ struct LoopEngineView: View {
                 .frame(minWidth: 260, idealWidth: 320, maxWidth: 420)
         }
         .background(theme.current.body)
-        .navigationTitle("Loop Engineering")
+        .navigationTitle("Loop")
         // Keyed on the active project's id (not a plain .onAppear) so
         // switching projects while this view stays mounted reloads THIS
         // project's config instead of silently running/saving the
@@ -628,14 +628,19 @@ struct LoopEngineView: View {
     /// project is active and when a project has neither a saved config
     /// nor a detectable git root.
     private func resetStagesToDefaults(stages newStages: [LoopStage] = []) {
-        stages = newStages
-        maxIterations = 10
-        consecutiveFailureStop = 2
-        wallClockMinutes = 60
-        maxRepairsPerStage = 3
-        protectedPathPolicy = .revert
-        extraProtectedGlobs = []
-        writeSummaryNote = false
+        // Seeded from the app-wide defaults (Settings → Loop), not from literals:
+        // a project being set up for the first time must inherit what the user
+        // configured once, and repeating the numbers here would silently diverge
+        // from `LoopEngineConfig`'s and the Settings card's own values.
+        let seed = LoopEngineDefaults.newConfig(stages: newStages)
+        stages = seed.stages
+        maxIterations = seed.maxIterations
+        consecutiveFailureStop = seed.consecutiveFailureStop
+        wallClockMinutes = seed.wallClockBudgetSeconds.map { Int($0 / 60) } ?? 0
+        maxRepairsPerStage = seed.maxRepairsPerStage
+        protectedPathPolicy = seed.protectedPathPolicy
+        extraProtectedGlobs = seed.extraProtectedGlobs
+        writeSummaryNote = seed.writeSummaryNote
         pastRuns = []
         lastSummaryNoteName = nil
     }

@@ -189,7 +189,7 @@ final class AutoTaskSettings: ObservableObject {
         if runReviewDoc { tasks.append("Review Doc") }
         if runReviewConflicts { tasks.append("Review Conflicts") }
         if runRegression { tasks.append("Regression") }
-        if runLoopEngineering { tasks.append("Loop Engineering") }
+        if runLoopEngineering { tasks.append("Loop") }
         if runGenerateKnowledge { tasks.append("Knowledge") }
         if runGenerateDoc { tasks.append("Generate Doc") }
         if runUpdateIssues { tasks.append("Update Issues") }
