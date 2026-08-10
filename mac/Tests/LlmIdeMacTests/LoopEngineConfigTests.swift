@@ -32,6 +32,41 @@ final class LoopEngineConfigTests: XCTestCase {
         XCTAssertEqual(loaded, config)
     }
 
+    /// Drift guard for the hand-written `encode(to:)`. `testSaveThenLoadRoundTrips`
+    /// leaves most fields at their defaults, so deleting an `encode` line would
+    /// still compare equal there — the decoded value would simply fall back to the
+    /// same default. Every field here is set to a NON-default value, so a dropped
+    /// or mis-keyed line makes this fail. Add a field to `LoopEngineConfig` ⇒ set it
+    /// here too.
+    func testEveryFieldSurvivesARoundTripAtNonDefaultValues() {
+        let config = LoopEngineConfig(
+            stages: [
+                LoopStage(id: "s1", name: "Lint", kind: .shellCommand, command: "make lint",
+                          order: 0, severity: .advisory, timeoutSeconds: 45),
+                LoopStage(id: "s2", name: "Fix", kind: .skill, order: 1,
+                          skillId: "skills/fix", targetPath: "src/", prompt: "go")
+            ],
+            maxIterations: 7,
+            consecutiveFailureStop: 5,
+            wallClockBudgetSeconds: 900,
+            maxRepairsPerStage: 1,
+            protectedPathPolicy: .warn,
+            extraProtectedGlobs: ["fixtures/**"],
+            writeSummaryNote: true)
+
+        config.save(for: "proj-all", defaults: suite)
+        let loaded = LoopEngineConfig.load(for: "proj-all", defaults: suite)
+
+        // Whole-value equality, so this covers the nested LoopStage fields too.
+        XCTAssertEqual(loaded, config)
+        // Spot-check the two most easily lost, since equality alone would not say
+        // WHICH field drifted if this ever fails.
+        XCTAssertEqual(loaded?.writeSummaryNote, true)
+        XCTAssertEqual(loaded?.extraProtectedGlobs, ["fixtures/**"])
+        XCTAssertEqual(loaded?.stages.first?.severity, .advisory)
+        XCTAssertEqual(loaded?.stages.first?.timeoutSeconds, 45)
+    }
+
     func testDifferentProjectsDoNotShareConfig() {
         let a = LoopEngineConfig(stages: [], maxIterations: 5, consecutiveFailureStop: 2)
         a.save(for: "proj-a", defaults: suite)
