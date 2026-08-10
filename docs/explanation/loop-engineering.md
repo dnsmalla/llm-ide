@@ -54,6 +54,60 @@ flowchart TD
 Every iteration re-runs **every** stage from the top, so a fix to a later stage
 cannot silently leave an earlier one broken.
 
+## The contract pane
+
+Everything above is decided before a run starts, so the Loop Engineering page puts
+it in one place. Panel 1 is the stage list, panel 3 is the live log plus past
+runs, and panel 2 answers the questions a user actually has before pressing Run:
+
+| Section | Answers |
+|---|---|
+| **Overview** | What will run, in what order, which steps generate vs gate, which working tree it runs in, and what bounds it |
+| **Template** | Start from a recipe, or save this one for the next project |
+| **Selected stage** | Edit the stage picked on the left |
+| **Settings** | The four budgets and the protected-path policy |
+| **Output** | Every artifact a run writes, with a link to it |
+
+The sections are one scroll rather than four tabs on purpose: "what is this loop
+going to do to my repo?" is a single question, and an answer split across tabs is
+not an answer. The Overview deliberately says the awkward things out loud — a
+pipeline with no gating stage is reported as "nothing gates this run, so it will
+pass after one iteration without repairing anything", and a shell stage that has
+not been approved is labelled as such, because that stops the run in preflight.
+
+## Templates
+
+A `LoopTemplate` is a named stage list plus the budgets and policy it expects —
+the knowledge "this is what a docs-refresh loop looks like", made portable. Four
+starters ship:
+
+| Template | Pipeline |
+|---|---|
+| **Test & Fix** | Regression → Test. The default, and what the loop did before templates existed |
+| **Full Verify** | Lint (advisory) → Test → Regression. The pre-merge gate |
+| **Skill Loop** | Skill → Test → Regression. The generate-then-verify shape |
+| **Docs Refresh** | Skill → `make docs-check` |
+
+`LoopTemplateStore` holds these plus the user's own saved recipes. It is
+**app-wide, not per-project** — carrying a recipe to the next project is the whole
+point — and built-ins live in a static constant rather than being persisted, so an
+improved starter still reaches a user who has already opened the page.
+
+Two details that matter more than they look:
+
+- A template carries a whole `LoopEngineConfig` rather than a parallel list of
+  fields, so a field added to the config is automatically part of every template
+  instead of being silently dropped on apply.
+- A built-in cannot hardcode `swift test`. Its test stage carries the
+  `LoopTemplate.detectedTestCommand` sentinel, which `applied(to:)` replaces using
+  `LoopStageDetector` — or **drops the stage entirely** when nothing is detected,
+  rather than shipping a command that could never run.
+
+Applying regenerates every stage id, because ids key `VerifyApprovalStore`
+approvals: reusing them would let a command approved in one project run unapproved
+in another. Apply does not save, so a user can try a recipe against what they had
+and switch away without having overwritten their config.
+
 ## Stages
 
 A stage is one step of the run (`LoopStage`). Three kinds:
@@ -194,6 +248,29 @@ Two invariants make it trustworthy:
 
 The index is append-only JSONL rather than a rewritten array so a crash mid-append
 costs one unparseable line — skipped on read — instead of the whole history.
+
+## Output
+
+The journal is machine-shaped. Everything a run produces is also *findable*, which
+is what the Output section is for — each row is a real path with a Reveal link,
+and a path nothing has written yet says "not yet" rather than pretending:
+
+| Output | Where |
+|---|---|
+| Run journal | `system/loop-runs/` — always written |
+| Fault state | `system/faults.csv` — refreshed by the Regression stage |
+| Working tree | the git root — repair edits land here, review with git before committing |
+| Run log | live, panel 3 |
+| Summary note | `llm-doc/loop/<yyyy>/<MM>/` — opt-in |
+
+The **summary note** (`LoopRunSummaryWriter`, off by default) is the journal's
+human-readable counterpart: a markdown note carrying the outcome, the pipeline,
+a per-stage table with failing counts and durations, the files the run changed,
+and any protected-path violations called out as violations rather than folded into
+"a repair ran". It goes through the same `NoteService` the Source Connectors use,
+under its own `loop` note type, so a run lands in the Library — searchable and
+filterable by outcome tag alongside meeting and email notes — instead of as a file
+you have to know to go looking for. It shares the journal's fail-open contract.
 
 ## Triggers
 

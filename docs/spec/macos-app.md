@@ -234,7 +234,13 @@ Progress + repair:
 
 Budgets (`Models/LoopEngine/LoopEngineConfig.swift`, persisted per `Project.id` as UserDefaults JSON): `maxIterations` (10), `consecutiveFailureStop` (2), `wallClockBudgetSeconds` (3600, checked between iterations and skipped on the first), `maxRepairsPerStage` (3). Terminal statuses are enumerated by `Models/LoopEngine/LoopEngineStatus.swift`, whose `summary` (human) and `code` (stable, for journal grouping) are the single source of truth for every caller.
 
+Templates: `LoopTemplate` (`Models/LoopEngine/LoopTemplate.swift`) is a named `LoopEngineConfig` — four built-in starters (Test & Fix, Full Verify, Skill Loop, Docs Refresh) with stable UUIDs, whose test stage carries the `detectedTestCommand` sentinel that `applied(to:)` resolves via `LoopStageDetector.detectTestCommand` (dropping the stage when nothing is detected). `applied(to:)` regenerates every stage id, since ids key `VerifyApprovalStore`. `LoopTemplateStore` (`Services/LoopEngine/LoopTemplateStore.swift`, `@MainActor @Published`) holds built-ins plus the user's saved recipes under one app-wide UserDefaults key — not per-project, unlike `LoopEngineConfig`.
+
 Journal: `FileLoopRunJournal` (`Services/LoopEngine/LoopRunJournal.swift`) writes `<projectRoot>/system/loop-runs/<yyyy-MM>/<runId>.json` plus an append-only `index.jsonl`, alongside the `system/faults/` tree `RegressionRunner` already owns. Writes are fail-open; every exit from `run` journals. Surfaced as "Past runs" in `Views/LoopEngine/LoopEngineView.swift`.
+
+Summary note (opt-in, `LoopEngineConfig.writeSummaryNote`): `NoteLoopRunSummaryWriter` (`Services/LoopEngine/LoopRunSummaryWriter.swift`) renders a markdown run summary — outcome, pipeline, per-stage table, files changed, protected-path violations — and saves it through `NoteService` under the `loop` note type, i.e. `llm-doc/loop/<yyyy>/<MM>/`. Returns `LoopSummaryNoteResult`; fail-open, and written after the journal.
+
+UI: `Views/LoopEngine/LoopEngineView.swift` owns the three-pane shell and all `@State`; the detail pane's sections (Overview, Template, Selected stage, Settings, Output) live in `Views/LoopEngine/LoopEngineView+DetailPane.swift` as computed views, which is why the shared state members are internal rather than private — the same split as `CodeAssistantPanel` / `CodeAssistantPanel+LoopEngine.swift`.
 
 Triggers, all sharing one config per project: `manual` (`Views/LoopEngine/LoopEngineView.swift`), `chat` (`Views/CodeAssistant/CodeAssistantPanel+LoopEngine.swift`), `autoTask` (`Services/AutoCode/AutoCodeUpdateService+PipelineTasks.swift`).
 
