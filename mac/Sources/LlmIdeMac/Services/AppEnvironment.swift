@@ -25,7 +25,10 @@ final class AppEnvironment {
         // root and the project root, before the indexer scans, so existing
         // generated notes are picked up at their new location.
         NotesToLlmDocMigration.run(in: folder)
-        if let project = indexRootURL { NotesToLlmDocMigration.run(in: project) }
+        if let project = indexRootURL {
+            NotesToLlmDocMigration.run(in: project)
+            SourceNestedLlmDocMigration.run(in: project)
+        }
         SourceFolderMigration.run(in: folder)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         // Place the SQLite index at <indexRoot>/system/index.sqlite.
