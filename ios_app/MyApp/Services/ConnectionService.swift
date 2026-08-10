@@ -162,6 +162,13 @@ final class ConnectionService: ObservableObject {
 
     func disconnect() { disconnect(clearDirect: true) }
 
+    /// Close the socket but keep the saved pairing (`directIP`/`directPort`/
+    /// `directPIN`) so a later `connectDirect` call — from the Reconnect
+    /// button or the next cold launch — can re-establish the link without
+    /// re-pairing. Unlike `disconnect()`, callers must NOT also clear
+    /// `ConnectionStore` — that would defeat the point of this method.
+    func closeConnection() { disconnect(clearDirect: false) }
+
     private func disconnect(clearDirect: Bool) {
         reconnectTask?.cancel()
         reconnectTask = nil
