@@ -66,7 +66,11 @@ struct EmailSource: InputSource {
         // Generation pass: scans the whole emails/ folder (not just what
         // was just saved above), so raw files added by hand are picked up
         // too. Dedup is by content hash against existing notes, not DB state.
-        let writer = EmailNoteWriter(repoRoot: ctx.root)
+        // ctx.root is the project's source/ folder (see rawInboxRoot above) —
+        // EmailNoteWriter needs the actual project root so NoteService's
+        // `repoRoot.appendingPathComponent("llm-doc")` lands at the canonical
+        // <projectRoot>/llm-doc/, not nested one level too deep inside source/.
+        let writer = EmailNoteWriter(repoRoot: ctx.notesOutputFolder.deletingLastPathComponent())
         let knownHashes = try? await writer.existingSourceHashes()
         let (processed, failures) = await InboxGenerationPipeline.run(
             inboxRoot: inboxRoot, knownHashes: knownHashes ?? []

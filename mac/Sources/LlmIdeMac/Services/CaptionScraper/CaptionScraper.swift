@@ -219,11 +219,13 @@ final class CaptionOrchestrator: ObservableObject {
                 let sessionId = handle.id
                 Task.detached(priority: .background) { [api] in
                     // Build the .docx output path before entering the service.
-                    let notesDir = root.deletingLastPathComponent()
-                        .appendingPathComponent("llm-doc", isDirectory: true)
+                    let projectRoot = root.deletingLastPathComponent()
+                    let writer = MeetingNoteWriter(repoRoot: projectRoot)
                     let dateSlug = AppDateFormatter.dateHourMinuteLocal(summarizeFM.startedAt)
-                    let docxURL  = notesDir.appendingPathComponent(
-                        "\(dateSlug)-\(String(sessionId.prefix(8)))-meeting-notes.docx")
+                    let idSuffix = String(sessionId.prefix(8))
+                    let filename = "\(dateSlug)-\(idSuffix)-meeting-notes.docx"
+                    let docxURL  = writer.outputDirectory(for: summarizeFM.startedAt)
+                        .appendingPathComponent(filename)
 
                     await MeetingSummarizationService.run(
                         api: api,
@@ -236,6 +238,30 @@ final class CaptionOrchestrator: ObservableObject {
                         transcriptFileURL: url,
                         docxOutputURL: docxURL,
                         root: root)
+
+                    // Save via MeetingNoteWriter for unified llm-doc/meetings/YYYY/MM/
+                    // storage + note-index registration — previously this wrote the
+                    // .docx flat into llm-doc/ with no month nesting and never
+                    // indexed it, the same class of bug as the other meeting/Slack
+                    // note-generation flows.
+                    let rawFileName = url.lastPathComponent
+                    let monthPath = AppDateFormatter.yearMonthPath(summarizeFM.startedAt)
+                    let rawFile = "meetings/\(monthPath)/\(rawFileName)"
+                    if let docxData = try? Data(contentsOf: docxURL) {
+                        do {
+                            _ = try await writer.writeNote(
+                                docxContent: docxData,
+                                title: summarizeTitle,
+                                startedAt: summarizeFM.startedAt,
+                                participants: summarizeParticipants,
+                                rawFile: rawFile
+                            )
+                            try? FileManager.default.removeItem(at: docxURL)
+                        } catch {
+                            // Leave the temp .docx in place on failure — deleting
+                            // it here would lose the only copy of the note.
+                        }
+                    }
 
                     NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
                 }

@@ -60,8 +60,11 @@ struct MeetingNoteWriter {
     /// Get the output directory for meeting notes.
     /// Returns the full path to llm-doc/meetings/YYYY/MM/.
     func outputDirectory(for date: Date) -> URL {
-        let monthDir = noteService.getMonthDir(type: .meeting, date: date)
-        return repoRoot.appendingPathComponent(monthDir.path)
+        // getMonthDir already returns an absolute URL rooted at `repoRoot`
+        // (NoteService was constructed with it) — re-appending `.path` here
+        // used to double the whole prefix (e.g. `/project/project/llm-doc/…`),
+        // littering the project with a bogus nested folder tree.
+        noteService.getMonthDir(type: .meeting, date: date)
     }
 
     // MARK: - Helpers

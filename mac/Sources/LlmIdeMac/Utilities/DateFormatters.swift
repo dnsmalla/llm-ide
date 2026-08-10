@@ -109,6 +109,21 @@ enum AppDateFormatter {
 
     private static let isoDefault: ISO8601DateFormatter = ISO8601DateFormatter()
 
+    private static let yearMonthPathFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy/MM"
+        // Matches MeetingFileStore.monthFolder's Calendar(identifier: .iso8601)
+        // component extraction exactly (year/month are calendar-system values,
+        // not locale-formatted ones) — a bare DateFormatter() picks up the
+        // system region's calendar by default, which can be non-Gregorian
+        // (Japanese, Buddhist, …) and would then disagree with the actual
+        // on-disk YYYY/MM folder a raw file lives in.
+        f.calendar = Calendar(identifier: .iso8601)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        return f
+    }()
+
     // MARK: - Public API
 
     /// Parses an ISO8601 string, trying fractional seconds then without. Returns nil on failure.
@@ -229,5 +244,11 @@ enum AppDateFormatter {
     /// "2024".
     static func yearString(_ date: Date) -> String {
         yearOnly.string(from: date)
+    }
+
+    /// "2026/08" — the YYYY/MM path segment a raw meeting/email/Slack file
+    /// actually lives under (see `yearMonthPathFormatter`'s doc comment).
+    static func yearMonthPath(_ date: Date) -> String {
+        yearMonthPathFormatter.string(from: date)
     }
 }

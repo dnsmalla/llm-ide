@@ -90,7 +90,9 @@ struct SlackSource: InputSource {
         let participants = Array(Set(ordered.map(\.user))).sorted()
         let transcript = ordered.map { "\($0.user): \($0.text)" }.joined(separator: "\n")
         let root = ctx.root
-        let notesOutputFolder = ctx.notesOutputFolder
+        // ctx.notesOutputFolder is <projectRoot>/llm-doc/; MeetingNoteWriter
+        // wants the project root itself (it appends "llm-doc" internally).
+        let projectRoot = ctx.notesOutputFolder.deletingLastPathComponent()
         let api = ctx.api
         let endedAt = Date(timeIntervalSince1970: Double(lastTsStr) ?? firstTs)
 
@@ -106,10 +108,17 @@ struct SlackSource: InputSource {
             let url = try store.finalize(
                 handle: handle, title: title, endedAt: endedAt, participants: participants)
 
+            // Write via MeetingNoteWriter (same pipeline the raw transcript
+            // already uses — see this function's doc comment) so the .docx
+            // lands nested at llm-doc/meetings/YYYY/MM/ and gets registered
+            // in the note index, instead of flat in llm-doc/ with no month
+            // folder and no index entry.
+            let writer = MeetingNoteWriter(repoRoot: projectRoot)
             let dateSlug = AppDateFormatter.dateHourMinuteLocal(startedAt)
             let idSuffix = id.prefix(8)
-            let docxURL = notesOutputFolder.appendingPathComponent(
-                "\(dateSlug)-\(idSuffix)-slack-notes.docx")
+            let filename = "\(dateSlug)-\(idSuffix)-slack-notes.docx"
+            let docxURL = writer.outputDirectory(for: startedAt).appendingPathComponent(filename)
+
             await MeetingSummarizationService.run(
                 api: api,
                 transcript: transcript,
@@ -121,6 +130,25 @@ struct SlackSource: InputSource {
                 transcriptFileURL: url,
                 docxOutputURL: docxURL,
                 root: root)
+
+            let rawFileName = url.lastPathComponent
+            let monthPath = AppDateFormatter.yearMonthPath(startedAt)
+            let rawFile = "meetings/\(monthPath)/\(rawFileName)"
+            if let docxData = try? Data(contentsOf: docxURL) {
+                do {
+                    _ = try await writer.writeNote(
+                        docxContent: docxData,
+                        title: title,
+                        startedAt: startedAt,
+                        participants: participants,
+                        rawFile: rawFile
+                    )
+                    try? FileManager.default.removeItem(at: docxURL)
+                } catch {
+                    // Leave the temp .docx in place on failure — deleting it
+                    // here would lose the only copy of the note.
+                }
+            }
         }.value
     }
 }

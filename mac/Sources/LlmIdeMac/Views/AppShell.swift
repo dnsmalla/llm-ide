@@ -904,9 +904,7 @@ struct AppShell: View {
 
             // Build raw file path for tracking
             let rawFileName = fileURL.lastPathComponent
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "yyyy/MM"
-            let monthPath = dateFormatter.string(from: fm.startedAt)
+            let monthPath = AppDateFormatter.yearMonthPath(fm.startedAt)
             let rawFile = "meetings/\(monthPath)/\(rawFileName)"
 
             // Create MeetingNoteWriter
@@ -933,15 +931,20 @@ struct AppShell: View {
 
             // 2. Read the generated .docx and save it via MeetingNoteWriter for unified storage
             if let docxData = try? Data(contentsOf: docxURL) {
-                _ = try? await writer.writeNote(
-                    docxContent: docxData,
-                    title: title,
-                    startedAt: fm.startedAt,
-                    participants: fm.participants,
-                    rawFile: rawFile
-                )
-                // Remove the temporary .docx file
-                try? FileManager.default.removeItem(at: docxURL)
+                do {
+                    _ = try await writer.writeNote(
+                        docxContent: docxData,
+                        title: title,
+                        startedAt: fm.startedAt,
+                        participants: fm.participants,
+                        rawFile: rawFile
+                    )
+                    // Remove the temporary .docx file
+                    try? FileManager.default.removeItem(at: docxURL)
+                } catch {
+                    // Leave the temp .docx in place on failure — deleting it
+                    // here would lose the only copy of the note.
+                }
             }
 
             // 3. Re-scan so the library row updates with the new gist.
@@ -1009,9 +1012,7 @@ struct AppShell: View {
 
                 // Build raw file path for tracking
                 let rawFileName = url.lastPathComponent
-                let dateFormatter = DateFormatter()
-                dateFormatter.dateFormat = "yyyy/MM"
-                let monthPath = dateFormatter.string(from: startedAt)
+                let monthPath = AppDateFormatter.yearMonthPath(startedAt)
                 let rawFile = "meetings/\(monthPath)/\(rawFileName)"
 
                 try? PartialRecovery(notesFolder: root).cleanup(id: payload.sessionId)
@@ -1045,15 +1046,20 @@ struct AppShell: View {
 
                 // 7. Read the generated .docx and save it via MeetingNoteWriter for unified storage
                 if let docxData = try? Data(contentsOf: docxURL) {
-                    _ = try? await writer.writeNote(
-                        docxContent: docxData,
-                        title: title,
-                        startedAt: startedAt,
-                        participants: payload.participants,
-                        rawFile: rawFile
-                    )
-                    // Remove the temporary .docx file
-                    try? FileManager.default.removeItem(at: docxURL)
+                    do {
+                        _ = try await writer.writeNote(
+                            docxContent: docxData,
+                            title: title,
+                            startedAt: startedAt,
+                            participants: payload.participants,
+                            rawFile: rawFile
+                        )
+                        // Remove the temporary .docx file
+                        try? FileManager.default.removeItem(at: docxURL)
+                    } catch {
+                        // Leave the temp .docx in place on failure — deleting
+                        // it here would lose the only copy of the note.
+                    }
                 }
 
                 // 8. Re-scan so the index picks up any frontmatter changes.
