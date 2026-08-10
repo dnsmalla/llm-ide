@@ -63,8 +63,7 @@ extension CodeAssistantPanel {
         guard let repoURL = config.activeRepoLocalURL else {
             history.append(.init(role: .user,
                 content: "(git \(args.op.rawValue) skipped — no active repository)"))
-            busy = false   // release the turn's busy flag so sendFollowup isn't skipped by its !busy guard
-            await sendFollowup()
+            await unblockAndFollowUp()
             return
         }
         // Resolve auth token: prefer the active GitLab project's token, fall back to GitHub.
@@ -87,11 +86,10 @@ extension CodeAssistantPanel {
             history.append(.init(role: .user,
                 content: "(git \(args.op.rawValue) failed) \(error.localizedDescription)"))
         }
-        // A read-tier op auto-runs from INSIDE runTurn (busy still true); clear it
-        // here — like confirmUpdateFile does — or sendFollowup's `guard !busy`
-        // skips and the agent never acts on the git result (the stall). On the
-        // sheet/card path busy is already false, so this is a benign no-op there.
-        busy = false
-        await sendFollowup()
+        // A read-tier op auto-runs from INSIDE runTurn (busy still true) — see
+        // unblockAndFollowUp's doc for why this must not just call sendFollowup
+        // directly. On the sheet/card path busy is already false, so this is a
+        // benign no-op there.
+        await unblockAndFollowUp()
     }
 }

@@ -165,59 +165,25 @@ extension CodeAssistantPanel {
                 mode: resp.mode,
                 stopped: false,
             )
-            // Fast path: in Auto mode, apply a proposed file edit immediately
-            // instead of surfacing the card + popup. Scoped to `update-file`
-            // (confirmUpdateFile enforces the attached-files-only guard, and
-            // leaves the card up if the file isn't attached); GitLab actions
-            // keep their confirmation. Only the primary turn auto-applies —
-            // the follow-up turn falls back to the card, so an agent that
-            // keeps proposing edits can't loop.
-            if editMode == .auto, autoGitOpsThisTurn < Self.maxAutoGitOpsPerTurn,
-               let pt = resp.pendingTool, let args = pt.updateFileArgs {
-                // Data-loss guard: if the server CUT this file to fit the prompt,
-                // the agent only saw its head — auto-overwriting with the "full"
-                // rewrite would silently drop the tail. Fall back to the manual
-                // confirmation card (its diff makes the loss visible) instead of
-                // applying. matchingAttachment uses the same exact-path rule
-                // confirmUpdateFile enforces in auto mode.
-                let truncated = Set(resp.usage?.truncatedPaths ?? [])
-                if let match = matchingAttachment(for: args.path, allowBasenameFallback: false),
-                   truncated.contains(match.path) {
-                    let basename = (match.path as NSString).lastPathComponent
-                    self.error = "“\(basename)” was too large to send in full, so auto-edit is disabled for it — review the proposed change before applying."
-                    // Leave resp.pendingTool in place (set above) so the card shows.
-                } else {
-                    autoGitOpsThisTurn += 1
-                    _ = await confirmUpdateFile(args, finalContent: args.content)
-                }
-            }
-            // Auto-run the proposed git op when allowed (see shouldAutoRunGitOp);
-            // otherwise it stays as a pending card for the user to confirm.
-            if let pt = resp.pendingTool, let g = pt.gitOpArgs, shouldAutoRunGitOp(g) {
-                autoGitOpsThisTurn += 1
-                await runGitOpFlow(g)
-            }
-        } catch is CancellationError {
-            // Stopped by the user — leave the partial streamed text (if any)
-            // in place, tagged as stopped, instead of vanishing it.
-            if revealingTurnID == streamingID {
-                finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
-            }
-        } catch let urlError as URLError where urlError.code == .cancelled {
-            if revealingTurnID == streamingID {
-                finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
-            }
+            // Only the primary turn's chain check runs here — the follow-up
+            // turn's own chain check (inside sendFollowup) covers every step
+            // after this one, so an agent that keeps proposing edits can't loop.
+            await autoChainPendingAction(resp.pendingTool, usage: resp.usage)
         } catch {
-            // Same cleanup as the two cancellation catches above — a
-            // non-cancellation failure (network drop, decode error, etc.)
-            // must not leave an orphaned empty/partial placeholder turn in
-            // `history` forever. The separate `self.error` banner already
-            // tells the user what went wrong; "(stopped)" here just means
-            // "this reply did not complete," which is honest either way.
+            // Stopped-by-user (CancellationError, or URLError.cancelled from
+            // URLSession) leaves the partial streamed text (if any) in place,
+            // tagged as stopped, with no error banner. A real failure (network
+            // drop, decode error, etc.) gets the same "(stopped)" cleanup —
+            // an orphaned empty/partial placeholder turn must not linger in
+            // `history` forever either way — plus the `self.error` banner
+            // explaining what went wrong.
+            let isCancellation = error is CancellationError || (error as? URLError)?.code == .cancelled
             if revealingTurnID == streamingID {
                 finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
             }
-            self.error = error.localizedDescription
+            if !isCancellation {
+                self.error = error.localizedDescription
+            }
         }
         // Drain the next queued message (FIFO) as a fresh, un-cancelled turn.
         if !queued.isEmpty {
@@ -235,9 +201,7 @@ extension CodeAssistantPanel {
     @MainActor
     func confirmCreateIssue(_ args: CreateIssueSheet.Args,
                                     target: IssueTarget) async -> CreateIssueSheet.ConfirmResult {
-        let client: RepoBackend = target.kind == .gitlab
-            ? RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
-            : RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
+        let client = RepoBackendFactory.backend(for: target.kind, config: config)
         do {
             let payload = RepoIssuePayload(
                 title: args.title,
@@ -361,15 +325,7 @@ extension CodeAssistantPanel {
             role: .user,
             content: "(applied update to \(basename): \(deltaStr))"
         ))
-        // In auto-edit mode confirmUpdateFile is called from inside runTurn,
-        // which has already set busy = true. sendFollowup() guards on !busy
-        // and would silently skip. Clear busy here so the follow-up fires;
-        // runTurn sets busy = false at its tail afterwards (a benign no-op,
-        // unless a queued message is waiting — which it then drains). In
-        // manual mode the sheet calls us directly with busy already false,
-        // so this is also safe.
-        busy = false
-        await sendFollowup()
+        await unblockAndFollowUp()
         return .success
     }
 
@@ -416,6 +372,23 @@ extension CodeAssistantPanel {
         }
     }
 
+    /// `sendFollowup` guards on `!busy` so a rapid double-confirm or manual
+    /// ⌘↵ mid-stream can't stack overlapping round-trips. But 3 call sites
+    /// (`confirmUpdateFile`'s auto-edit path, and `runGitOpFlow`'s two early
+    /// returns) run their action from INSIDE a turn that already set
+    /// `busy = true` and need their own synthetic-ack `sendFollowup` to
+    /// actually fire, not be silently skipped by that guard. This is the
+    /// one place that unblocks it — `busy = false` here is always safe to
+    /// call from those three sites specifically: `runTurn`/`sendFollowup`
+    /// re-set `busy = false` at their own tail regardless (a benign no-op
+    /// once already false), and each of the three callers is on the
+    /// success path of an action that just appended the synthetic-ack turn
+    /// the follow-up needs to see.
+    func unblockAndFollowUp() async {
+        busy = false
+        await sendFollowup()
+    }
+
     func sendFollowup() async {
         // Don't fire a second round-trip if one is already in flight.
         // Without this guard, rapid confirms or a manual ⌘↵ during
@@ -453,6 +426,16 @@ extension CodeAssistantPanel {
                 mode: resp.mode,
                 stopped: false,
             )
+            // Chain the NEXT step hands-free when allowed — this is what lets a
+            // multi-step plan (e.g. "update A, then update B" or "commit and
+            // push") finish without a card for every step. Mirrors runTurn's
+            // own call; without this, only the FIRST step (checked in runTurn)
+            // would auto-run and every step after it would stall on a
+            // pending-action card even in Auto edit mode. Reading `resp`
+            // directly (rather than `agent.pendingTool`/no usage at all, as
+            // before) gives this call site the same truncated-path data-loss
+            // guard runTurn's copy already had.
+            await autoChainPendingAction(resp.pendingTool, usage: resp.usage)
         } catch {
             // Same cleanup as runTurn's generic catch — beginStreamingTurn()
             // already inserted an empty placeholder turn before this
@@ -463,30 +446,51 @@ extension CodeAssistantPanel {
             }
             self.error = error.localizedDescription
         }
-        // Chain the NEXT step hands-free when allowed — this is what lets a
-        // multi-step plan (e.g. "update A, then update B" or "commit and
-        // push") finish without a card for every step. Mirrors runTurn's own
-        // auto-apply/auto-run checks; without this, only the FIRST step of a
-        // plan (checked in runTurn) would auto-run and every step after it
-        // would stall on a pending-action card even in Auto edit mode.
+    }
+
+    /// Auto-chain the next pending action (file edit or git op) when the
+    /// budget allows. Shared by `runTurn` and `sendFollowup` so both see the
+    /// same truncated-path data-loss guard — previously `sendFollowup` had
+    /// its own copy that read `agent.pendingTool` with no `usage`, silently
+    /// missing the guard for every step after the first in a chained plan.
+    /// DO NOT re-inline this at either call site.
+    @MainActor
+    func autoChainPendingAction(
+        _ pendingTool: PendingTool?,
+        usage: LlmIdeAPIClient.CodeAssistResponse.Usage?
+    ) async {
+        // Fast path: in Auto mode, apply a proposed file edit immediately
+        // instead of surfacing the card + popup. Scoped to `update-file`
+        // (confirmUpdateFile enforces the attached-files-only guard, and
+        // leaves the card up if the file isn't attached); GitLab actions
+        // keep their confirmation.
+        if editMode == .auto, autoGitOpsThisTurn < Self.maxAutoGitOpsPerTurn,
+           let pt = pendingTool, let args = pt.updateFileArgs {
+            // Data-loss guard: if the server CUT this file to fit the prompt,
+            // the agent only saw its head — auto-overwriting with the "full"
+            // rewrite would silently drop the tail. Fall back to the manual
+            // confirmation card (its diff makes the loss visible) instead of
+            // applying. matchingAttachment uses the same exact-path rule
+            // confirmUpdateFile enforces in auto mode.
+            let truncated = Set(usage?.truncatedPaths ?? [])
+            if let match = matchingAttachment(for: args.path, allowBasenameFallback: false),
+               truncated.contains(match.path) {
+                let basename = (match.path as NSString).lastPathComponent
+                self.error = "“\(basename)” was too large to send in full, so auto-edit is disabled for it — review the proposed change before applying."
+                // Leave pendingTool in place (already stored via finishStreamingTurn) so the card shows.
+            } else {
+                autoGitOpsThisTurn += 1
+                _ = await confirmUpdateFile(args, finalContent: args.content)
+            }
+        }
+        // Auto-run the proposed git op when allowed (see shouldAutoRunGitOp);
+        // otherwise it stays as a pending card for the user to confirm.
         // `autoGitOpsThisTurn`/`maxAutoGitOpsPerTurn` are shared as a general
         // "auto-chained actions this turn" budget across BOTH update-file and
         // git-op auto-chaining — without a shared cap, a large batch of
         // attached files (e.g. 30+ dragged in for a bulk edit) could
-        // auto-chain through all of them with no ceiling, unlike the git-op
-        // path's existing explicit limit.
-        if editMode == .auto, autoGitOpsThisTurn < Self.maxAutoGitOpsPerTurn,
-           let pt = agent.pendingTool, let args = pt.updateFileArgs {
-            // confirmUpdateFile does its own exact-path matching and safely
-            // returns .failure (leaving the card up) if nothing matches —
-            // same discard-the-result pattern runTurn's own auto-apply uses.
-            autoGitOpsThisTurn += 1
-            _ = await confirmUpdateFile(args, finalContent: args.content)
-        } else if let g = agent.pendingTool?.gitOpArgs, shouldAutoRunGitOp(g) {
-            // runGitOpFlow resets `busy = false` itself before its own
-            // sendFollowup, so the re-entry isn't blocked by the `guard !busy`
-            // even though our `busy` is still true here. The recursion (and
-            // so any looping agent) is bounded by autoGitOpsThisTurn.
+        // auto-chain through all of them with no ceiling.
+        if let pt = pendingTool, let g = pt.gitOpArgs, shouldAutoRunGitOp(g) {
             autoGitOpsThisTurn += 1
             await runGitOpFlow(g)
         }
