@@ -138,11 +138,37 @@ final class SCMParsersTests: XCTestCase {
         XCTAssertEqual(withTerminator, without)
     }
 
-    /// CRLF diffs (a checkout with CRLF line endings) must not leave a stray \r
-    /// as a one-character "context" row either.
+    /// Asserts the row's CONTENT, not just the count: Swift treats "\r\n" as one
+    /// Character, so a `removeLast(2)` terminator strip silently ate the last line's
+    /// final letter ("new" → "ne") — which a count-only assertion passed straight
+    /// over.
     func testCRLFTerminatorIsAlsoDropped() {
         let hunks = UnifiedDiffParser.parse("@@ -1,1 +1,1 @@\n+new\r\n")
-        XCTAssertEqual(hunks[0].rows.count, 1)
+        XCTAssertEqual(hunks[0].rows, [
+            DiffRow(kind: .insert, oldLine: nil, newLine: 1, text: "new"),
+        ])
+    }
+
+    /// A diff from a CRLF checkout: every break is "\r\n". Splitting on the "\n"
+    /// Character never matched those at all, so the whole diff parsed as a single
+    /// unsplit line and the file showed one garbage row.
+    func testAllCRLFDiffIsSplitIntoRows() {
+        let hunks = UnifiedDiffParser.parse("@@ -1,2 +1,2 @@\r\n line1\r\n-old\r\n+new\r\n")
+        XCTAssertEqual(hunks.count, 1)
+        XCTAssertEqual(hunks[0].rows, [
+            DiffRow(kind: .context, oldLine: 1, newLine: 1, text: "line1"),
+            DiffRow(kind: .delete, oldLine: 2, newLine: nil, text: "old"),
+            DiffRow(kind: .insert, oldLine: nil, newLine: 2, text: "new"),
+        ])
+    }
+
+    /// A lone-CR (classic Mac) break counts as a break too, so such a diff is not
+    /// parsed as one line either.
+    func testLoneCarriageReturnIsTreatedAsALineBreak() {
+        let hunks = UnifiedDiffParser.parse("@@ -1,1 +1,1 @@\r+new\r")
+        XCTAssertEqual(hunks[0].rows, [
+            DiffRow(kind: .insert, oldLine: nil, newLine: 1, text: "new"),
+        ])
     }
 
     func testBlankLineWithinHunkIsEmptyContextRow() {

@@ -56,17 +56,30 @@ enum UnifiedDiffParser {
         var current: DiffHunk?
         var oldLine = 0, newLine = 0
 
-        // Drop the line terminator before splitting. `split(omittingEmptySubsequences:
-        // false)` on "…+new\n" yields a trailing "" component, which the blank-line
-        // branch below then turns into a phantom empty context row at the end of the
-        // last hunk — and every real `git diff` ends with a newline, so that row
-        // appeared under every diff the app rendered. It is dropped here rather than
-        // by omitting empty subsequences, because a genuinely blank context line in
-        // the middle of a hunk is also an empty component and must be kept.
+        // Split on line breaks, dropping the final terminator. Three rules, each
+        // guarding a real regression — see SCMParsersTests:
+        //
+        // 1. **Separate on `isNewline`, never on the "\n" Character.** Swift treats
+        //    "\r\n" as ONE extended grapheme cluster, so `split(separator: "\n")`
+        //    does not match a CRLF break: a diff from a CRLF checkout (each line's
+        //    content ending in \r before the \n terminator) was never split at all
+        //    and parsed as one giant row. `isNewline` consumes LF, CRLF and lone CR.
+        //
+        // 2. **Drop exactly one trailing break, with a single `removeLast()`.** Every
+        //    real `git diff` ends in a newline, and the resulting empty final
+        //    component became a phantom empty context row under every diff. Counting
+        //    characters here is a trap for the same grapheme reason: `removeLast(2)`
+        //    on a CRLF ending removes the break AND the character before it, quietly
+        //    truncating the last line.
+        //
+        // 3. **Keep `omittingEmptySubsequences: false`.** A genuinely blank context
+        //    line mid-hunk is also an empty component and must survive; only the
+        //    terminator's artifact is unwanted, which is why rule 2 handles it
+        //    explicitly instead.
         var text = diff
-        if text.hasSuffix("\r\n") { text.removeLast(2) } else if text.hasSuffix("\n") { text.removeLast() }
+        if let last = text.last, last.isNewline { text.removeLast() }
 
-        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        for raw in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
             let line = String(raw)
             if line.hasPrefix("@@") {
                 if let c = current { hunks.append(c) }
