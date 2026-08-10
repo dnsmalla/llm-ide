@@ -31,4 +31,13 @@ enum PathUtils {
         let url = URL(fileURLWithPath: p).standardizedFileURL
         return url.path
     }
+
+    /// Shorten an absolute path under the user's home directory to a
+    /// `~/`-prefixed display form; returns `raw` unchanged otherwise.
+    /// The inverse of `canonicalise`'s `~/` expansion.
+    static func homeRelative(_ raw: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if raw.hasPrefix(home) { return "~" + raw.dropFirst(home.count) }
+        return raw
+    }
 }

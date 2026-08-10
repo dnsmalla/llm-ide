@@ -27,7 +27,7 @@ enum MobileExploreBridge {
         let activeProject = deriveActiveProject(from: projectStore.activeProject)
             ?? deriveActiveProject(fromConfig: config)
         let workspaceRoot = WorkspaceRoot.resolve(config: config, projectStore: projectStore)
-            .map { homeRelativePath($0.path) }
+            .map { PathUtils.homeRelative($0.path) }
 
         var gitBranch: String?
         var gitStatus: AgentContext.GitStatus?
@@ -97,13 +97,7 @@ enum MobileExploreBridge {
         return nil
     }
 
-    private static func homeRelativePath(_ p: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        if p.hasPrefix(home) { return "~" + p.dropFirst(home.count) }
-        return p
-    }
-
     static func homeRelativePathForDisplay(_ p: String) -> String {
-        homeRelativePath(p)
+        PathUtils.homeRelative(p)
     }
 }

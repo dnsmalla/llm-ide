@@ -11,8 +11,16 @@ import AppKit
 /// model to actually CHANGE files, they take its suggestion to the
 /// Plan tab's Generate Code flow (which is review-gated).
 
+/// Common shape for the toolbar's chip-style Menu selectors (`ChatComposer.chipMenu`) —
+/// `CodeAssistMode` and `EditAcceptanceMode` are its two conformers.
+protocol ChipMenuOption: CaseIterable, Identifiable, Hashable {
+    var label: String { get }
+    var icon: String { get }
+    var help: String { get }
+}
+
 /// How the agent's file-edit tool calls are accepted in the chat panel.
-enum EditAcceptanceMode: String, CaseIterable, Identifiable {
+enum EditAcceptanceMode: String, CaseIterable, Identifiable, ChipMenuOption {
     /// Show the confirmation card + `UpdateFileSheet` for every edit.
     case review
     /// Apply `update-file` edits immediately (to already-attached files,
@@ -20,12 +28,15 @@ enum EditAcceptanceMode: String, CaseIterable, Identifiable {
     case auto
 
     var id: String { rawValue }
-    var label: String { self == .auto ? "Auto" : "Review" }
+    // "Bypass"/"Manual" rather than "Auto"/"Review" — the adjacent modePicker
+    // already has its own unrelated "Auto" task-mode option; a bare "Auto"
+    // here reads as the same control (see CodeAssistMode.label comment).
+    var label: String { self == .auto ? "Bypass" : "Manual" }
     var icon: String { self == .auto ? "bolt.fill" : "checklist" }
     var help: String {
         self == .auto
-            ? "Auto-apply file edits (attached files only) — no popup"
-            : "Review each file edit in a confirmation popup"
+            ? "Bypass review — apply file edits immediately (attached files only), no popup"
+            : "Manual review — confirm each file edit in a popup before it's applied"
     }
 }
 

@@ -2,6 +2,26 @@ import SwiftUI
 
 extension CodeAssistantPanel {
 
+    /// Shared "action unavailable" fallback shown when a pendingTool's args
+    /// are missing or its precondition (target/attachment/branch context)
+    /// didn't resolve — replaces the near-identical VStack the sheet
+    /// contents below each used to build by hand.
+    @ViewBuilder
+    private func unavailableSheet(_ title: String, hint: String? = nil, dismiss: @escaping () -> Void) -> some View {
+        VStack(spacing: 12) {
+            Text(title).font(.system(size: 13))
+            if let hint {
+                Text(hint)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            Button("Close", action: dismiss)
+        }
+        .padding(20)
+    }
+
+    private static let noIssueTrackerHint = "Add or activate a project in Settings → GitLab or GitHub."
+
     var showProjectMemorySheet: some View {
         ProjectMemoryView(api: api, repos: activeMemoryRepos, workspaceRoot: activeMemoryWorkspaceRoot)
             .environmentObject(theme)
@@ -16,22 +36,16 @@ extension CodeAssistantPanel {
                     initialArgs: args,
                     projectName: target.label,
                     projectURL: target.projectURL,
-                    provider: target.kind == .gitlab ? "GitLab" : "GitHub",
+                    provider: target.kind.displayName,
                     isAllowed: config.isAllowed(.createIssue, provider: target.kind),
                     onConfirm: { editedArgs in
                         await confirmCreateIssue(editedArgs, target: target)
                     }
                 )
             } else {
-                VStack(spacing: 12) {
-                    Text("No issue tracker available.")
-                        .font(.system(size: 13))
-                    Text("Add or activate a project in Settings → GitLab or GitHub.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Button("Close") { sheets.showingIssueSheet = false }
+                unavailableSheet("No issue tracker available.", hint: Self.noIssueTrackerHint) {
+                    sheets.showingIssueSheet = false
                 }
-                .padding(20)
             }
         }
     }
@@ -48,12 +62,9 @@ extension CodeAssistantPanel {
                 )
                 .environmentObject(config)
             } else {
-                VStack(spacing: 12) {
-                    Text("Review Code action unavailable.")
-                        .font(.system(size: 13))
-                    Button("Close") { sheets.showingReviewCodeSheet = false }
+                unavailableSheet("Review Code action unavailable.") {
+                    sheets.showingReviewCodeSheet = false
                 }
-                .padding(20)
             }
         }
     }
@@ -125,7 +136,7 @@ extension CodeAssistantPanel {
                     initialArgs: args,
                     projectName: target.label,
                     projectURL: target.projectURL,
-                    provider: target.kind == .gitlab ? "GitLab" : "GitHub",
+                    provider: target.kind.displayName,
                     issueTitle: agent.recentIssues.first(where: { $0.iid == args.iid })?.title,
                     isAllowed: config.isAllowed(.commentIssue, provider: target.kind),
                     onConfirm: { editedArgs in
@@ -133,15 +144,9 @@ extension CodeAssistantPanel {
                     }
                 )
             } else {
-                VStack(spacing: 12) {
-                    Text("No issue tracker available.")
-                        .font(.system(size: 13))
-                    Text("Add or activate a project in Settings → GitLab or GitHub.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Button("Close") { sheets.showingCommentSheet = false }
+                unavailableSheet("No issue tracker available.", hint: Self.noIssueTrackerHint) {
+                    sheets.showingCommentSheet = false
                 }
-                .padding(20)
             }
         }
     }
@@ -159,12 +164,9 @@ extension CodeAssistantPanel {
                     }
                 )
             } else {
-                VStack(spacing: 12) {
-                    Text("No issue tracker available.")
-                        .font(.system(size: 13))
-                    Button("Close") { sheets.showingGetIssueSheet = false }
+                unavailableSheet("No issue tracker available.") {
+                    sheets.showingGetIssueSheet = false
                 }
-                .padding(20)
             }
         }
     }
@@ -189,12 +191,9 @@ extension CodeAssistantPanel {
                     }
                 )
             } else {
-                VStack(spacing: 12) {
-                    Text("No issue tracker available.")
-                        .font(.system(size: 13))
-                    Button("Close") { sheets.showingUpdateIssueSheet = false }
+                unavailableSheet("No issue tracker available.") {
+                    sheets.showingUpdateIssueSheet = false
                 }
-                .padding(20)
             }
         }
     }
@@ -216,12 +215,9 @@ extension CodeAssistantPanel {
                     }
                 )
             } else {
-                VStack(spacing: 12) {
-                    Text("No issue tracker available.")
-                        .font(.system(size: 13))
-                    Button("Close") { sheets.showingListIssuesSheet = false }
+                unavailableSheet("No issue tracker available.") {
+                    sheets.showingListIssuesSheet = false
                 }
-                .padding(20)
             }
         }
     }
@@ -240,12 +236,9 @@ extension CodeAssistantPanel {
                     }
                 )
             } else {
-                VStack(spacing: 12) {
-                    Text("Branch creation unavailable.")
-                        .font(.system(size: 13))
-                    Button("Close") { sheets.showingCreateBranchSheet = false }
+                unavailableSheet("Branch creation unavailable.") {
+                    sheets.showingCreateBranchSheet = false
                 }
-                .padding(20)
             }
         }
     }
@@ -309,12 +302,9 @@ extension CodeAssistantPanel {
                 )
                 .environmentObject(theme)
             } else {
-                VStack(spacing: 12) {
-                    Text("Git operation unavailable.")
-                        .font(.system(size: 13))
-                    Button("Close") { sheets.showingGitOpSheet = false }
+                unavailableSheet("Git operation unavailable.") {
+                    sheets.showingGitOpSheet = false
                 }
-                .padding(20)
                 .environmentObject(theme)
             }
         }
@@ -382,9 +372,7 @@ extension CodeAssistantPanel {
             body: body,
             labels: labels
         )
-        let client: RepoBackend = (target.kind == .gitlab)
-            ? RepoBackendFactory.guarded(GitLabClient(config: config), config: config) as RepoBackend
-            : RepoBackendFactory.guarded(GitHubClient(config: config), config: config) as RepoBackend
+        let client = RepoBackendFactory.backend(for: target.kind, config: config)
         let issue = try await client.createIssue(projectId: target.projectId, payload: payload)
         return URL(string: issue.webUrl)
     }
@@ -422,22 +410,16 @@ extension CodeAssistantPanel {
                     ),
                     projectName: target.label,
                     projectURL: target.projectURL,
-                    provider: target.kind == .gitlab ? "GitLab" : "GitHub",
+                    provider: target.kind.displayName,
                     isAllowed: config.isAllowed(.createPR, provider: target.kind),
                     onConfirm: { editedArgs in
                         await confirmPRCreation(editedArgs, target: target)
                     }
                 )
             } else {
-                VStack(spacing: 12) {
-                    Text("PR/MR creation unavailable.")
-                        .font(.system(size: 13))
-                    Text("Add or activate a project in Settings → GitLab or GitHub.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Button("Close") { sheets.showingCreatePRSheet = false }
+                unavailableSheet("PR/MR creation unavailable.", hint: Self.noIssueTrackerHint) {
+                    sheets.showingCreatePRSheet = false
                 }
-                    .padding(20)
             }
         }
     }

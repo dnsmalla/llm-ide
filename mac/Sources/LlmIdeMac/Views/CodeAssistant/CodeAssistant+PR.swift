@@ -6,12 +6,7 @@ extension CodeAssistantPanel {
     /// Confirm a PR/MR creation. Executes via createMergeRequest API and
     /// appends a synthetic turn so the agent can acknowledge.
     func confirmPRCreation(_ args: PRCreationSheet.Args, target: IssueTarget) async -> PRCreationSheet.ConfirmResult {
-        let client: RepoBackend
-        if target.kind == .gitlab {
-            client = RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
-        } else {
-            client = RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
-        }
+        let client = RepoBackendFactory.backend(for: target.kind, config: config)
 
         do {
             let payload = RepoMergeRequestPayload(

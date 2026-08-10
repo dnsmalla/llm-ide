@@ -8,4 +8,15 @@ enum RepoBackendFactory {
     static func guarded(_ client: RepoBackend, config: AppConfig) -> RepoBackend {
         AllowlistedRepoBackend(wrapping: client, config: config)
     }
+
+    /// Guarded backend for a resolved provider kind — the single spot that
+    /// replaces the `kind == .gitlab ? GitLabClient(...) : GitHubClient(...)`
+    /// ternary repeated at every issue/PR/git-op call site.
+    @MainActor
+    static func backend(for kind: RepoBackendKind, config: AppConfig) -> RepoBackend {
+        switch kind {
+        case .gitlab: return guarded(GitLabClient(config: config), config: config)
+        case .github: return guarded(GitHubClient(config: config), config: config)
+        }
+    }
 }

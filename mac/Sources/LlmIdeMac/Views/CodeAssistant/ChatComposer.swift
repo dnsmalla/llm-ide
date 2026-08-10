@@ -486,48 +486,40 @@ extension CodeAssistantPanel {
         }
     }
 
-    /// Edit-acceptance mode selector (Review / Auto). Same capsule style as
-    /// the model picker; collapses to icon-only when the panel is compact.
-    var editModeChip: some View {
+    /// Shared chip-style Menu builder for any `ChipMenuOption` enum — one
+    /// generic in place of one hand-written Menu+Chip per mode selector.
+    /// `editModeChip` and `modePicker` below are its only two call sites.
+    func chipMenu<T: ChipMenuOption>(_ selection: Binding<T>) -> some View {
         Menu {
-            ForEach(EditAcceptanceMode.allCases) { mode in
-                Button { editModeRaw = mode.rawValue } label: {
-                    Label(mode.label, systemImage: mode.icon)
+            ForEach(Array(T.allCases)) { option in
+                Button { selection.wrappedValue = option } label: {
+                    Label(option.label, systemImage: option.icon)
                 }
             }
         } label: {
             Chip(
-                icon: editMode.icon,
-                label: isCompact ? "" : editMode.label,
+                icon: selection.wrappedValue.icon,
+                label: isCompact ? "" : selection.wrappedValue.label,
                 trailing: "chevron.down",
                 compact: isCompact
             )
         }
         .menuStyle(.borderlessButton)
-        .help(editMode.help)
+        .help(selection.wrappedValue.help)
         .fixedSize()
     }
 
-    /// Code-assist mode selector (Auto / Plan / Review / Document / Execute).
-    /// Same Menu + Chip convention as `editModeChip`, for visual consistency.
+    /// Edit-acceptance mode selector (Manual / Bypass).
+    var editModeChip: some View {
+        chipMenu(Binding(
+            get: { editMode },
+            set: { editModeRaw = $0.rawValue }
+        ))
+    }
+
+    /// Code-assist mode selector (Auto / Plan / Code Review / Document / Execute).
     var modePicker: some View {
-        Menu {
-            ForEach(CodeAssistMode.allCases) { mode in
-                Button { modelState.selectedMode = mode } label: {
-                    Label(mode.label, systemImage: mode.icon)
-                }
-            }
-        } label: {
-            Chip(
-                icon: modelState.selectedMode.icon,
-                label: isCompact ? "" : modelState.selectedMode.label,
-                trailing: "chevron.down",
-                compact: isCompact
-            )
-        }
-        .menuStyle(.borderlessButton)
-        .help(modelState.selectedMode.help)
-        .fixedSize()
+        chipMenu($modelState.selectedMode)
     }
     func currentModelDisplayName(for cli: AICliTool) -> String {
         let models = modelsFor(cli)
@@ -655,12 +647,6 @@ extension CodeAssistantPanel {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { hovering in
-            // Hover highlight handled via the .background modifier
-            // applied to the wrapping Button via a state trick — keep
-            // it simple: no-op, the .help below is enough feedback.
-            _ = hovering
-        }
         .help(label)
     }
 

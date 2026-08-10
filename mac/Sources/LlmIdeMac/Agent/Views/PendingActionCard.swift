@@ -196,18 +196,18 @@ struct PendingActionCard: View {
     }
 
     private var headline: String {
-        switch pendingTool.name {
-        case "create-gitlab-issue", "create-issue": return "WILL CREATE ISSUE"
-        case "comment-gitlab-issue", "comment-issue": return "WILL COMMENT ON ISSUE"
-        case "get-issue": return "WILL READ ISSUE"
-        case "update-issue": return "WILL UPDATE ISSUE"
-        case "list-issues": return "WILL LIST ISSUES"
-        case "create-branch": return "WILL CREATE BRANCH"
-        case "create-gitlab-mr", "create-pr": return "WILL CREATE MERGE REQUEST"
-        case "trigger-review-code": return "WILL OPEN REVIEW CODE WORKFLOW"
-        case "update-file": return "WILL UPDATE FILE"
-        case "git-op": return "WILL RUN GIT OPERATION"
-        default: return "PENDING ACTION: \(pendingTool.name.uppercased())"
+        switch pendingTool.kind {
+        case .createIssue: return "WILL CREATE ISSUE"
+        case .commentIssue: return "WILL COMMENT ON ISSUE"
+        case .getIssue: return "WILL READ ISSUE"
+        case .updateIssue: return "WILL UPDATE ISSUE"
+        case .listIssues: return "WILL LIST ISSUES"
+        case .createBranch: return "WILL CREATE BRANCH"
+        case .createPR: return "WILL CREATE MERGE REQUEST"
+        case .triggerReviewCode: return "WILL OPEN REVIEW CODE WORKFLOW"
+        case .updateFile: return "WILL UPDATE FILE"
+        case .gitOp: return "WILL RUN GIT OPERATION"
+        case .bash, nil: return "PENDING ACTION: \(pendingTool.name.uppercased())"
         }
     }
 

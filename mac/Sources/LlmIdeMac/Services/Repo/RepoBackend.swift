@@ -50,6 +50,38 @@ enum RepoBackendKind: String, Sendable, Hashable, CaseIterable, Codable {
     }
 }
 
+/// The user's Settings → GitLab/GitHub "active" connection — GitLab takes
+/// precedence when both are configured. Distinct from (and NOT a drop-in
+/// replacement for) `resolveIssueTarget()`'s target resolution: that
+/// resolver additionally requires the GitLab project's numeric id to be
+/// resolved before it will use it, falling back to GitHub otherwise — a
+/// precondition this type intentionally does NOT encode, since callers
+/// that only need "which connection is active" (e.g. deriving the agent's
+/// context project) shouldn't wait on that.
+enum ActiveConfigRepo {
+    case gitlab(SavedGitLabProject)
+    case github(SavedGitHubRepo)
+
+    var kind: RepoBackendKind {
+        switch self {
+        case .gitlab: return .gitlab
+        case .github: return .github
+        }
+    }
+}
+
+extension AppConfig {
+    var activeConfigRepo: ActiveConfigRepo? {
+        if !gitLabToken.isEmpty, let p = gitLabSavedProjects.first(where: { $0.isActive }) {
+            return .gitlab(p)
+        }
+        if !gitHubToken.isEmpty, let r = gitHubSavedRepos.first(where: { $0.isActive }) {
+            return .github(r)
+        }
+        return nil
+    }
+}
+
 // MARK: - Neutral models
 //
 // IDs are strings throughout: GitLab uses Int, GitHub uses Int — but

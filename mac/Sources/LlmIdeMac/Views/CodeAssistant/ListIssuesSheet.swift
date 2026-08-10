@@ -130,9 +130,7 @@ struct ListIssuesSheet: View {
         isLoading = true
         defer { isLoading = false }
 
-        let client: RepoBackend = providerKind == .gitlab
-            ? RepoBackendFactory.guarded(GitLabClient(config: AppConfig.shared), config: AppConfig.shared)
-            : RepoBackendFactory.guarded(GitHubClient(config: AppConfig.shared), config: AppConfig.shared)
+        let client = RepoBackendFactory.backend(for: providerKind, config: AppConfig.shared)
 
         do {
             let filter = RepoIssueFilter(
@@ -168,7 +166,7 @@ struct ListIssuesSheet: View {
                         .font(.system(size: 10, weight: .medium))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(stateColor(for: issue.state))
+                        .background(issue.stateColor)
                         .foregroundStyle(.white)
                         .clipShape(Capsule())
                 }
@@ -182,7 +180,7 @@ struct ListIssuesSheet: View {
                     }
 
                     Spacer()
-                    Text(formatDate(issue.updatedAt))
+                    Text(AppDateFormatter.relativeISO(issue.updatedAt))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
 
@@ -202,20 +200,6 @@ struct ListIssuesSheet: View {
             .background(Color.secondary.opacity(0.03))
         }
 
-        private func stateColor(for state: String) -> Color {
-            switch state.lowercased() {
-            case "opened": return .green
-            case "closed": return .red
-            default: return .secondary
-            }
-        }
-
-        private func formatDate(_ date: String) -> String {
-            let formatter = ISO8601DateFormatter()
-            guard let d = formatter.date(from: date) else { return date }
-            let relative = RelativeDateTimeFormatter()
-            return relative.localizedString(for: d, relativeTo: Date())
-        }
     }
 
 

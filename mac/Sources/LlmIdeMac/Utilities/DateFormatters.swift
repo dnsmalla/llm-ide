@@ -142,6 +142,15 @@ enum AppDateFormatter {
         yyyyMMdd.string(from: date)
     }
 
+    /// Relative string ("3 days ago", …) from an ISO8601 issue/PR timestamp;
+    /// falls back to the raw string on parse failure. Unlike `relativeDate`
+    /// (Date → "Today at…"/absolute), this always uses the short relative
+    /// form — issue/PR lists have no room for an absolute fallback column.
+    static func relativeISO(_ iso: String) -> String {
+        guard let date = isoWithoutFractional.date(from: iso) else { return iso }
+        return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
+    }
+
     /// Relative string from a Date: "Today at 2:15 PM", "Yesterday at…", "3 days ago", or absolute.
     static func relativeDate(_ date: Date) -> String {
         let ago = Date().timeIntervalSince(date)

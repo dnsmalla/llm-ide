@@ -46,21 +46,20 @@ extension CodeAssistantPanel {
     /// precedence (GitLab first, then GitHub) so the agent's view of the
     /// active project matches where issues actually get filed.
     static func deriveActiveProject(fromConfig config: AppConfig) -> AgentContext.Project? {
-        if !config.gitLabToken.isEmpty,
-           let p = config.gitLabSavedProjects.first(where: { $0.isActive }) {
+        switch config.activeConfigRepo {
+        case .gitlab(let p):
             let name = !p.displayName.isEmpty ? p.displayName
                 : (URL(string: p.url)?.lastPathComponent ?? "project")
             return AgentContext.Project(name: name, url: p.url,
                                         defaultBranch: p.defaultBranch, provider: "GitLab")
-        }
-        if !config.gitHubToken.isEmpty,
-           let r = config.gitHubSavedRepos.first(where: { $0.isActive }) {
+        case .github(let r):
             let name = !r.displayName.isEmpty ? r.displayName
                 : (URL(string: r.url)?.lastPathComponent ?? "repository")
             return AgentContext.Project(name: name, url: r.url,
                                         defaultBranch: r.defaultBranch, provider: "GitHub")
+        case nil:
+            return nil
         }
-        return nil
     }
 
     /// Builds the per-request snapshot of "what the agent should know":
@@ -194,7 +193,7 @@ extension CodeAssistantPanel {
                 agent.recentIssues = []
                 return
             }
-            backend = RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
+            backend = RepoBackendFactory.backend(for: .gitlab, config: config)
             projectId = String(pid)
         } else if provider == "GitHub" {
             guard let repo = config.gitHubSavedRepos.first(where: { $0.isActive }),
@@ -202,7 +201,7 @@ extension CodeAssistantPanel {
                 agent.recentIssues = []
                 return
             }
-            backend = RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
+            backend = RepoBackendFactory.backend(for: .github, config: config)
             projectId = "\(owner)/\(name)"
         } else {
             agent.recentIssues = []
@@ -255,9 +254,7 @@ extension CodeAssistantPanel {
     }
 
     func homeRelativePath(_ p: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        if p.hasPrefix(home) { return "~" + p.dropFirst(home.count) }
-        return p
+        PathUtils.homeRelative(p)
     }
 
 }

@@ -57,9 +57,6 @@ extension CodeAssistantPanel {
     /// Prevents the user's username leaking unnecessarily into LLM
     /// logs upstream.
     func displayPath(_ url: URL) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let p = url.path
-        if p.hasPrefix(home) { return "~" + p.dropFirst(home.count) }
-        return p
+        PathUtils.homeRelative(url.path)
     }
 }

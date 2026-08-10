@@ -57,6 +57,11 @@ struct ChatMessageList: View {
             // Clean empty state when model picker is shown — no hero, just space
             Color.clear
         } else {
+            // Computed once per render instead of once per turn — history.last(where:)
+            // is an O(n) reverse scan, and turnView/isAssistantExpanded each used to
+            // call the equivalent computed property independently, making the whole
+            // list render O(n^2) instead of O(n).
+            let lastAssistantTurnId = history.last(where: { $0.role == .assistant })?.id
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.md) {
@@ -66,42 +71,42 @@ struct ChatMessageList: View {
                                     .padding(.bottom, 4)
                                     .transition(.opacity)
                             }
-                            turnView(turn)
+                            turnView(turn, lastAssistantTurnId: lastAssistantTurnId)
                                 .id(turn.id)
                                 .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .bottom)))
                             if let pt = pendingTool,
                                turn.id == history.last?.id,
                                turn.role == .assistant {
                                 PendingActionCard(pendingTool: pt, diffPreview: diffPreview) {
-                                    switch pt.name {
-                                    case "create-gitlab-issue", "create-issue":
+                                    switch pt.kind {
+                                    case .createIssue:
                                         sheets.showingIssueSheet = true
-                                    case "comment-gitlab-issue", "comment-issue":
+                                    case .commentIssue:
                                         sheets.showingCommentSheet = true
-                                    case "get-issue":
+                                    case .getIssue:
                                         sheets.showingGetIssueSheet = true
-                                    case "update-issue":
+                                    case .updateIssue:
                                         sheets.showingUpdateIssueSheet = true
-                                    case "list-issues":
+                                    case .listIssues:
                                         sheets.showingListIssuesSheet = true
-                                    case "create-branch":
+                                    case .createBranch:
                                         sheets.showingCreateBranchSheet = true
                                         Task { sheets.branchSheetContext = await loadBranchContext() }
-                                    case "create-gitlab-mr", "create-pr":
+                                    case .createPR:
                                         sheets.showingCreatePRSheet = true
-                                    case "trigger-review-code":
+                                    case .triggerReviewCode:
                                         sheets.showingReviewCodeSheet = true
-                                    case "update-file":
+                                    case .updateFile:
                                         sheets.showingUpdateFileSheet = true
-                                    case "git-op":
+                                    case .gitOp:
                                         if let g = pt.gitOpArgs, g.op.tier == .read {
                                             Task { await onGitOp(g) }
                                         } else {
                                             sheets.showingGitOpSheet = true
                                         }
-                                    case "bash":
+                                    case .bash:
                                         Task { await onBash(pt.bashArgs) }
-                                    default:
+                                    case nil:
                                         break
                                     }
                                 }
@@ -199,14 +204,9 @@ struct ChatMessageList: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// The most recent assistant turn — always rendered expanded.
-    private var lastAssistantTurnId: UUID? {
-        history.last(where: { $0.role == .assistant })?.id
-    }
-
     /// An assistant turn renders in full iff it's the latest one or the user
     /// expanded it; otherwise it collapses to a preview.
-    private func isAssistantExpanded(_ turn: LlmIdeAPIClient.CodeAssistTurn) -> Bool {
+    private func isAssistantExpanded(_ turn: LlmIdeAPIClient.CodeAssistTurn, lastAssistantTurnId: UUID?) -> Bool {
         turn.id == lastAssistantTurnId || expandedTurns.contains(turn.id)
     }
 
@@ -278,7 +278,7 @@ struct ChatMessageList: View {
     }
 
     @ViewBuilder
-    private func turnView(_ turn: LlmIdeAPIClient.CodeAssistTurn) -> some View {
+    private func turnView(_ turn: LlmIdeAPIClient.CodeAssistTurn, lastAssistantTurnId: UUID?) -> some View {
         if isToolNotice(turn) {
             if let bash = BashResultDisplay.parse(turn.content) {
                 CommandOutputView(display: bash)
@@ -307,7 +307,7 @@ struct ChatMessageList: View {
                             .background(theme.current.accent.opacity(0.14))
                             .cornerRadius(8)
                             .fixedSize(horizontal: false, vertical: true)
-                    } else if isAssistantExpanded(turn) {
+                    } else if isAssistantExpanded(turn, lastAssistantTurnId: lastAssistantTurnId) {
                         // Expanded assistant reply — full markdown render (web view).
                         VStack(alignment: .leading, spacing: 4) {
                             SelfSizingMarkdownView(

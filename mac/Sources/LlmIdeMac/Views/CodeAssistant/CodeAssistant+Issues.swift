@@ -10,9 +10,7 @@ extension CodeAssistantPanel {
     // fixed in place to avoid the "two copies, only one reachable" trap.
 
     func confirmCommentIssue(_ args: CommentIssueSheet.Args, target: IssueTarget) async -> CommentIssueSheet.ConfirmResult {
-        let client: RepoBackend = (target.kind == .gitlab)
-            ? RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
-            : RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
+        let client = RepoBackendFactory.backend(for: target.kind, config: config)
 
         do {
             _ = try await client.createNote(
@@ -33,16 +31,8 @@ extension CodeAssistantPanel {
         }
     }
 
-    func confirmGetIssue() {
-        sheets.showingGetIssueSheet = false
-        agent.pendingTool = nil
-        // No synthetic turn — get-issue is purely for the agent's context
-    }
-
     func confirmUpdateIssue(_ args: UpdateIssueSheet.Args, target: IssueTarget) async -> UpdateIssueSheet.ConfirmResult {
-        let client: RepoBackend = (target.kind == .gitlab)
-            ? RepoBackendFactory.guarded(GitLabClient(config: config), config: config)
-            : RepoBackendFactory.guarded(GitHubClient(config: config), config: config)
+        let client = RepoBackendFactory.backend(for: target.kind, config: config)
 
         do {
             let payload = RepoIssuePayload(

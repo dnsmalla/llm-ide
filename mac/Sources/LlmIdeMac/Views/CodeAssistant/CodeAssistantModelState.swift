@@ -3,7 +3,7 @@ import Foundation
 /// Mirrors the server's mode strings exactly (see
 /// extension/llm_agent/runtime/mode-personas.mjs / route.mjs's
 /// `resolvedMode`) — raw values are wire contracts, not renameable.
-enum CodeAssistMode: String, Codable, CaseIterable, Identifiable {
+enum CodeAssistMode: String, Codable, CaseIterable, Identifiable, ChipMenuOption {
     case auto, plan, review, document, execute
     var id: String { rawValue }
 

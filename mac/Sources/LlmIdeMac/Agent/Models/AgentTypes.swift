@@ -92,10 +92,46 @@ struct AgentTask: Codable, Identifiable {
     let status: AgentTaskStatus
 }
 
+/// Canonical identity for a pending tool call — the one place that maps
+/// wire-level `name` strings (including each provider's legacy alias, kept
+/// alongside its provider-agnostic replacement) to a tool kind. Every
+/// `PendingTool.xArgs` accessor below, and every UI dispatch switch over
+/// `pendingTool.name` (see ChatMessageList.swift), should switch on
+/// `PendingTool.kind` instead of re-matching these strings by hand.
+enum PendingToolKind: CaseIterable {
+    case createIssue, commentIssue, getIssue, updateIssue, listIssues
+    case createBranch, createPR, triggerReviewCode, updateFile, gitOp, bash
+
+    fileprivate var names: [String] {
+        switch self {
+        case .createIssue: return ["create-gitlab-issue", "create-issue"]
+        case .commentIssue: return ["comment-gitlab-issue", "comment-issue"]
+        case .getIssue: return ["get-issue"]
+        case .updateIssue: return ["update-issue"]
+        case .listIssues: return ["list-issues"]
+        case .createBranch: return ["create-branch"]
+        case .createPR: return ["create-gitlab-mr", "create-pr"]
+        case .triggerReviewCode: return ["trigger-review-code"]
+        case .updateFile: return ["update-file"]
+        case .gitOp: return ["git-op"]
+        case .bash: return ["bash"]
+        }
+    }
+
+    fileprivate init?(name: String) {
+        guard let match = Self.allCases.first(where: { $0.names.contains(name) }) else { return nil }
+        self = match
+    }
+}
+
 /// A write tool the agent wants to run. The Mac client renders a
 /// confirm sheet based on `name`; once the user confirms, the Mac
 /// executes the action locally (no server round-trip needed).
 struct PendingTool: Codable, Equatable {
+    /// The tool kind `name` maps to, or nil for an unrecognized name (the
+    /// UI dispatch switch's `default`/`nil` case — same as today).
+    var kind: PendingToolKind? { PendingToolKind(name: name) }
+
     var name: String
     /// Raw arguments as JSON — we decode the typed view lazily based
     /// on `name`. Keeps the type extensible without a polymorphic enum.
@@ -132,7 +168,7 @@ struct PendingTool: Codable, Equatable {
     /// `name` is different or the payload doesn't fit the schema.
     /// Supports both "create-gitlab-issue" (legacy) and "create-issue" (provider-agnostic).
     var createIssueArgs: CreateIssueArgs? {
-        guard name == "create-gitlab-issue" || name == "create-issue" else { return nil }
+        guard kind == .createIssue else { return nil }
         return try? AppJSON.decoder.decode(CreateIssueArgs.self, from: arguments.raw)
     }
 
@@ -147,7 +183,7 @@ struct PendingTool: Codable, Equatable {
     /// `name` is different or the payload doesn't fit the schema.
     /// Supports both "comment-gitlab-issue" (legacy) and "comment-issue" (provider-agnostic).
     var commentIssueArgs: CommentIssueArgs? {
-        guard name == "comment-gitlab-issue" || name == "comment-issue" else { return nil }
+        guard kind == .commentIssue else { return nil }
         return try? AppJSON.decoder.decode(CommentIssueArgs.self, from: arguments.raw)
     }
 
@@ -159,7 +195,7 @@ struct PendingTool: Codable, Equatable {
     /// Typed view for the get-issue variant. Returns nil if
     /// `name` is different or the payload doesn't fit the schema.
     var getIssueArgs: GetIssueArgs? {
-        guard name == "get-issue" else { return nil }
+        guard kind == .getIssue else { return nil }
         return try? AppJSON.decoder.decode(GetIssueArgs.self, from: arguments.raw)
     }
 
@@ -170,7 +206,7 @@ struct PendingTool: Codable, Equatable {
     /// Typed view for the update-issue variant. Returns nil if
     /// `name` is different or the payload doesn't fit the schema.
     var updateIssueArgs: UpdateIssueArgs? {
-        guard name == "update-issue" else { return nil }
+        guard kind == .updateIssue else { return nil }
         return try? AppJSON.decoder.decode(UpdateIssueArgs.self, from: arguments.raw)
     }
 
@@ -185,7 +221,7 @@ struct PendingTool: Codable, Equatable {
     /// Typed view for the list-issues variant. Returns nil if
     /// `name` is different or the payload doesn't fit the schema.
     var listIssuesArgs: ListIssuesArgs? {
-        guard name == "list-issues" else { return nil }
+        guard kind == .listIssues else { return nil }
         return try? AppJSON.decoder.decode(ListIssuesArgs.self, from: arguments.raw)
     }
 
@@ -198,7 +234,7 @@ struct PendingTool: Codable, Equatable {
     /// Typed view for the create-branch variant. Returns nil if
     /// `name` is different or the payload doesn't fit the schema.
     var createBranchArgs: CreateBranchArgs? {
-        guard name == "create-branch" else { return nil }
+        guard kind == .createBranch else { return nil }
         return try? AppJSON.decoder.decode(CreateBranchArgs.self, from: arguments.raw)
     }
 
@@ -211,7 +247,7 @@ struct PendingTool: Codable, Equatable {
     /// `name` is different or the payload doesn't fit the schema.
     /// Supports both "create-gitlab-mr" (legacy) and "create-pr" (provider-agnostic).
     var createPRArgs: CreatePRArgs? {
-        guard name == "create-gitlab-mr" || name == "create-pr" else { return nil }
+        guard kind == .createPR else { return nil }
         return try? AppJSON.decoder.decode(CreatePRArgs.self, from: arguments.raw)
     }
 
@@ -227,7 +263,7 @@ struct PendingTool: Codable, Equatable {
     /// Typed view for the trigger-review-code variant. Returns nil if
     /// `name` is different or the payload doesn't fit the schema.
     var triggerReviewCodeArgs: TriggerReviewCodeArgs? {
-        guard name == "trigger-review-code" else { return nil }
+        guard kind == .triggerReviewCode else { return nil }
         return try? AppJSON.decoder.decode(TriggerReviewCodeArgs.self, from: arguments.raw)
     }
 
@@ -239,7 +275,7 @@ struct PendingTool: Codable, Equatable {
     /// Typed view for the update-file variant. Returns nil if `name`
     /// is different or the payload doesn't fit the schema.
     var updateFileArgs: UpdateFileArgs? {
-        guard name == "update-file" else { return nil }
+        guard kind == .updateFile else { return nil }
         return try? AppJSON.decoder.decode(UpdateFileArgs.self, from: arguments.raw)
     }
 
@@ -251,14 +287,14 @@ struct PendingTool: Codable, Equatable {
     /// Typed view for the git-op variant. Returns nil if `name`
     /// is different or the payload doesn't fit the schema.
     var gitOpArgs: GitOpArgs? {
-        guard name == "git-op" else { return nil }
+        guard kind == .gitOp else { return nil }
         return try? AppJSON.decoder.decode(GitOpArgs.self, from: arguments.raw)
     }
 
     /// Typed view for the bash execution variant. Returns nil if
     /// `name` is different or the payload doesn't fit the schema.
     var bashArgs: BashArgs? {
-        guard name == "bash" else { return nil }
+        guard kind == .bash else { return nil }
         return try? AppJSON.decoder.decode(BashArgs.self, from: arguments.raw)
     }
 }
