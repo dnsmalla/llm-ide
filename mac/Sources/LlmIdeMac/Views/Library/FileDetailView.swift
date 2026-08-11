@@ -474,7 +474,11 @@ struct CodeWebView: View {
         HljsLanguage.id(for: language)
     }
 
-    private func html() -> String {
+    // Internal (not private) so CodeWebViewGutterTests can assert the
+    // gutter/code row-height invariant on the generated CSS directly —
+    // the misalignment it guards is invisible to any non-rendering test
+    // that can't see the stylesheet.
+    func html() -> String {
         // Inlined, locally-bundled theme + highlighter (atom-one-dark/light)
         // from the shared single-load `Hljs` cache.
         let themeCSS = Hljs.themeCSS(isDark: isDark)
@@ -510,10 +514,20 @@ struct CodeWebView: View {
         <style>
           * { margin:0; padding:0; box-sizing:border-box; }
           html, body { height:100%; background:\(bg); }
+          /* One row height for BOTH columns. 20px == the old 1.6 × 12.5px, so
+             nothing moves visually; it just stops being font-dependent. */
+          :root { --row: 20px; }
           body {
             font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
             font-size: 12.5px;
-            line-height: 1.6;
+            /* ABSOLUTE row height, not a 1.6 multiplier. The gutter and the
+               code are two independent stacks of line boxes that only line up
+               while both rows are EXACTLY the same height, and a unitless
+               line-height resolves against each element's OWN font-size — so
+               any font-size difference between the two columns compounds one
+               fractional pixel per row into a full row of drift. A px value
+               pins both stacks to the same grid no matter what font resolves. */
+            line-height: var(--row);
             color: \(fg);
           }
           /* Grid: [line-number] [code] — line numbers stay aligned even after
@@ -523,10 +537,17 @@ struct CodeWebView: View {
             grid-template-columns: auto 1fr;
             min-width: 100%;
           }
-          .ln-col, .code-col {
+          /* `pre` and `code` MUST be included here, not just the two column
+             divs. Both carry a UA `font-family: monospace`, which in WebKit
+             also switches them to the *default fixed font size* (13px) rather
+             than inheriting the body's 12.5px — the exact mismatch that used
+             to walk the code out of step with its line numbers. */
+          .ln-col, .code-col, .code-col pre, .code-col code {
             white-space: pre;
             padding: 0;
             font: inherit;
+            line-height: inherit;
+            tab-size: 4;
           }
           .ln-col {
             position: sticky;
@@ -541,7 +562,9 @@ struct CodeWebView: View {
             min-width: 56px;
           }
           .code-col { padding: 0 24px 0 14px; overflow-x: auto; }
-          .ln, .row { display: block; }
+          /* Pinned to the same absolute row height as the code lines so a
+             number can never occupy a taller/shorter box than its line. */
+          .ln, .row { display: block; height: var(--row); }
           .row:hover, .ln:hover { background: \(hoverBg); }
           /* Cursor-style change bars on the line-number cell. A transparent
              baseline border keeps every row's text alignment identical so
@@ -579,7 +602,13 @@ struct CodeWebView: View {
             for (var i = 0; i < lines.length; i++) {
               var n = i + 1;
               var cls = marks[n] ? ('ln ' + marks[n]) : 'ln';
-              out += '<span class="' + cls + '">' + n + '</span>\\n';
+              // NO newline between the spans. `.ln-col` is `white-space: pre`,
+              // where a newline is NOT collapsible whitespace — between two
+              // block-level spans it gets wrapped in an anonymous block and
+              // renders as its own empty row, spacing the gutter out to twice
+              // the code's pitch. The spans are `display: block`, so they
+              // already stack one per row on their own.
+              out += '<span class="' + cls + '">' + n + '</span>';
             }
             ln.innerHTML = out || '<span class="ln">1</span>';
           })();
