@@ -16,6 +16,8 @@ function stateFilePath() {
   return join(dirname(defaultSourcesDir()), 'skills-sources-state.json');
 }
 
+export const STATE_FILE = stateFilePath();
+
 function readAll() {
   const path = stateFilePath();
   if (!existsSync(path)) return {};
