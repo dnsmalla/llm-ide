@@ -19,8 +19,9 @@ repo) so you can review, explain, or reference it.
 
 The user asks you to review/explain/check a file that exists in their project
 ("review the README", "what does logger.mjs do"). Find the path with
-`list-files` first if you're unsure. This is read-only — to CHANGE a file, the
-user must attach it and you propose an `update-file`.
+`list-files` first if you're unsure. This is read-only — to CHANGE a file,
+propose an `update-file` with `old_text`/`new_text` anchored on the lines you
+read here (the file does not need to be attached).
 
 ## Call shape
 

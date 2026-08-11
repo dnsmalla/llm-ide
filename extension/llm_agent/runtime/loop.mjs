@@ -448,7 +448,7 @@ export async function runAgentLoop({
       continue;
     }
 
-    const validation = validateArgs(skill.schema, fence.arguments);
+    const validation = validateArgs(skill.schema, fence.arguments, skill.name);
     if (validation.error) {
       toolError = validation.error;
       continue;
@@ -618,7 +618,7 @@ export async function runNativeAgentLoop({
         messages.push({ role: 'tool', tool_call_id: callId, name: tc.name, content: JSON.stringify({ error: `Unknown tool: ${tc.name}` }) });
         continue;
       }
-      const validation = validateArgs(skill.schema, tc.arguments || {});
+      const validation = validateArgs(skill.schema, tc.arguments || {}, skill.name);
       if (validation.error) {
         messages.push({ role: 'tool', tool_call_id: callId, name: tc.name, content: JSON.stringify({ error: validation.error }) });
         continue;

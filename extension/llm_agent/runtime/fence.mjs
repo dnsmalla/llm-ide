@@ -96,7 +96,44 @@ export function parseFence(raw) {
   return { text, fence: { name: parsed.name, arguments: parsed.arguments } };
 }
 
-export function validateArgs(schema, args) {
+// Cross-field rules a per-argument schema cannot express. The schema layer
+// validates each argument in isolation, but `update-file` accepts two mutually
+// exclusive edit shapes and "neither" / "both" are just as wrong as a bad type.
+// Enforced here, at validation time, so the model gets a tool error it can
+// correct on the next iteration — rather than the client having to refuse the
+// write after the user has already been shown an Apply button.
+//
+// Pure — exported for unit tests.
+export function validateEditShape(toolName, args) {
+  if (toolName !== 'update-file') return {};
+  const hasContent = typeof args.content === 'string';
+  const hasOld = typeof args.old_text === 'string';
+  const hasNew = typeof args.new_text === 'string';
+  if (hasContent && (hasOld || hasNew)) {
+    return { error: "update-file takes EITHER 'content' (whole file) OR 'old_text' + 'new_text' (anchored edit), never both" };
+  }
+  if (hasOld !== hasNew) {
+    return {
+      error: hasOld
+        ? "update-file with 'old_text' also requires 'new_text' (pass an empty string to delete the block)"
+        : "update-file with 'new_text' also requires 'old_text' to locate the edit",
+    };
+  }
+  if (!hasContent && !hasOld) {
+    return { error: "update-file needs either 'content' (whole file, only if you can see all of it) or 'old_text' + 'new_text' (anchored edit)" };
+  }
+  // An empty anchor would match at offset 0 of every file — it locates nothing.
+  if (hasOld && args.old_text.length === 0) {
+    return { error: "update-file 'old_text' must not be empty — it is the anchor that locates the edit" };
+  }
+  return {};
+}
+
+// `toolName` is optional: when given, the tool's cross-field rules
+// (validateEditShape) run after the per-argument checks pass. Threading the
+// name through here rather than making it a separate call at each dispatch
+// site means a new call site cannot forget to apply them.
+export function validateArgs(schema, args, toolName) {
   const value = {};
   if (!args || typeof args !== 'object') {
     return { error: 'arguments must be an object' };
@@ -155,5 +192,7 @@ export function validateArgs(schema, args) {
       return { error: `unexpected argument '${key}'` };
     }
   }
+  const cross = validateEditShape(toolName, value);
+  if (cross.error) return { error: cross.error };
   return { value };
 }

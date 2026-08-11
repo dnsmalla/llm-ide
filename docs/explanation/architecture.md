@@ -194,19 +194,22 @@ WebSocket-style channel. Each `pendingTool` message has the shape:
 
 ```json
 {
-  "type": "pendingTool",
-  "id": "tool_01H...",
   "name": "update-file",
-  "input": {
+  "arguments": {
     "path": "src/foo.ts",
-    "diff": "@@ -1,3 +1,3 @@\n-old\n+new\n"
+    "old_text": "const a = 1\n",
+    "new_text": "const a = 2\n"
   }
 }
 ```
 
-The client renders the diff in `UpdateFileSheet`, the user
-approves, and the result is POSTed back as a `toolResult` message
-keyed by the same `id`.
+`update-file` takes either an anchored `old_text`/`new_text` pair (one
+region, which must match exactly once) or a whole-file `content`
+string — never both. The client resolves the proposal against the
+attachment list and the open project (`ProposedEditResolver`), renders
+the resulting diff on the chat card and in `UpdateFileSheet`, and the
+user applies or skips it. Applying writes the file and posts a synthetic
+"applied"/"skipped" turn back so the agent can continue.
 
 ## Cross-references
 

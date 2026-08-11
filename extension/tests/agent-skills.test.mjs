@@ -100,9 +100,17 @@ test('real global skills directory exposes update-file as a write tool', () => {
   assert.equal(s.schema.path.type, 'string');
   assert.equal(s.schema.path.required, true);
   assert.equal(s.schema.path.maxLength, 1000);
+  // Both edit shapes are individually OPTIONAL — "exactly one of them" is a
+  // cross-field rule the schema can't express, enforced by validateEditShape
+  // (see update-file-edit-shape.test.mjs). Requiring `content` here would ban
+  // the anchored shape that makes editing a partially-read file safe.
   assert.equal(s.schema.content.type, 'string');
-  assert.equal(s.schema.content.required, true);
+  assert.equal(s.schema.content.required, false);
   assert.equal(s.schema.content.maxLength, 200000);
+  assert.equal(s.schema.old_text.type, 'string');
+  assert.equal(s.schema.old_text.required, false);
+  assert.equal(s.schema.new_text.type, 'string');
+  assert.equal(s.schema.new_text.required, false);
   // Sanity: ask-internal still loads alongside update-file.
   assert.ok(result.skills.has('ask-internal'),
     'global agent should still have ask-internal');

@@ -32,7 +32,10 @@ const HOST = config.host;
 // Bump whenever the HTTP surface changes so the extension can detect
 // a stale server process ("you installed the new client but forgot to
 // restart node server.mjs") and surface a clear message.
-const SERVER_API_VERSION = 24;
+// 25: update-file gained the anchored `old_text`/`new_text` edit shape
+//     alongside whole-file `content`, so a pendingTool payload from this
+//     server can carry fields an older client doesn't decode.
+const SERVER_API_VERSION = 25;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
