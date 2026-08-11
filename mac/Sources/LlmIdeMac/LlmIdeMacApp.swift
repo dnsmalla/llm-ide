@@ -323,6 +323,12 @@ public struct LlmIdeMacApp: App {
                     if authed {
                         liveMirror.start()
                         Task { await sourceLinkStore.refresh(api: api) }
+                        // Refresh the cached language pref here, not only when
+                        // Settings → Preferences happens to be opened. That
+                        // view was the sole writer of the mirror, so a user who
+                        // never visited it scaffolded every project with the
+                        // fallback language instead of their real one.
+                        Task { await refreshPreferredLanguage() }
                     } else {
                         liveMirror.stop()
                     }
@@ -494,6 +500,19 @@ public struct LlmIdeMacApp: App {
             if await BackendManager.probeHealth() { return }
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
+    }
+
+    /// Pull the server-synced LLM output language into `AppConfig`'s local
+    /// mirror. `ProjectScaffolder` stamps it into a new project's README /
+    /// project.md / CLAUDE.md and runs synchronously, so it needs a value
+    /// available before any project is created. Best-effort and silent: a
+    /// stale mirror only affects the language stamped into generated docs.
+    @MainActor
+    private func refreshPreferredLanguage() async {
+        guard let prefs = try? await api.getUserPrefs(),
+              let language = prefs.language,
+              !language.isEmpty else { return }
+        config.preferredLanguage = language
     }
 
     /// See `SavedRepoPathReconciler` — repairs `localPath` for any saved

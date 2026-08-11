@@ -339,12 +339,11 @@ final class ProjectStore: ObservableObject {
     // MARK: - Internals
 
     private func createFromDefaults(folder: URL) -> Project {
-        let settings = defaults
-        return Project(
+        Project(
             id: RandomID.generate(),
             displayName: folder.lastPathComponent,
             createdAt: Date(),
-            settings: settings)
+            settings: defaults)
     }
 
     private func bumpRecent(id: String, path: String, displayName: String) {
