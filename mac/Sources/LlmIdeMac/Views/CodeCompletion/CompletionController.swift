@@ -107,8 +107,12 @@ final class CompletionController: ObservableObject {
         // instructions to FOLLOW (NOT a file attachment, which the assistant
         // would treat as data to edit).
         libraryItems = (library ?? []).map { s in
-            Item(id: "lib:\(s.id)", kind: .librarySkill,
-                 label: s.name, detail: "\(s.family) · \(s.description)",
+            // sourceName tells which registered skills repo this came from —
+            // more useful now that multiple sources can be enabled than the
+            // family (always "skills"/"runtime", low information).
+            let detail = s.sourceName.isEmpty ? s.description : "\(s.sourceName) · \(s.description)"
+            return Item(id: "lib:\(s.id)", kind: .librarySkill,
+                 label: s.name, detail: detail,
                  insert: nil, fileURL: nil, skillId: s.id)
         }
         commandItems = (commands ?? []).map { c in

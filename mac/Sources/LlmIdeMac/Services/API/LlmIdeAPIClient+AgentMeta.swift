@@ -35,6 +35,25 @@ extension LlmIdeAPIClient {
         let name: String
         let description: String
         let path: String        // absolute SKILL.md path (attached as context on select)
+        let sourceId: String
+        let sourceName: String
+
+        enum CodingKeys: String, CodingKey {
+            case id, family, name, description, path, sourceId, sourceName
+        }
+        /// `sourceId`/`sourceName` are new fields (multi-source skills-sources
+        /// feature) — decoded with fallbacks so a pre-upgrade server response
+        /// still decodes, mirroring `PluginInfo.subagents`'s back-compat pattern.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.id          = try c.decode(String.self, forKey: .id)
+            self.family      = try c.decode(String.self, forKey: .family)
+            self.name        = try c.decode(String.self, forKey: .name)
+            self.description = try c.decode(String.self, forKey: .description)
+            self.path        = try c.decode(String.self, forKey: .path)
+            self.sourceId    = try c.decodeIfPresent(String.self, forKey: .sourceId) ?? "builtin"
+            self.sourceName  = try c.decodeIfPresent(String.self, forKey: .sourceName) ?? ""
+        }
     }
     private struct SkillLibraryResponse: Decodable { let repo: String?; let skills: [SkillLibraryEntry] }
 
