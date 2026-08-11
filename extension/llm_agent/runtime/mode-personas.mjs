@@ -29,6 +29,12 @@
 //     removed as such.
 //   - list-files, read-file (handlers/repo-files.mjs): read-only filesystem
 //     access, scoped to an allow-listed root, traversal- and secret-proof.
+//   - find-code (handlers/find-code.mjs): read-only query over the symbol index
+//     and code graph. No filesystem writes and no shell; it only touches disk
+//     via existsSync to pick the path form read-file can open, and every path it
+//     returns is gated on the same readable roots. Genuinely useful in these
+//     modes — scoping a plan or a review is exactly when the agent needs to
+//     locate code cheaply.
 //   - fetch-url, web-search (handlers/fetch-url.mjs, web-search.mjs):
 //     outbound network reads (SSRF-guarded); no mutation of any local or
 //     remote state.
@@ -53,6 +59,7 @@ const READ_ONLY_TOOL_NAMES = new Set([
   'ask-subagent',
   'list-files',
   'read-file',
+  'find-code',
   'fetch-url',
   'web-search',
   'search-kb',
@@ -62,8 +69,8 @@ const MODE_CONFIG = {
   plan: {
     persona: 'You are in PLAN mode. Propose a clear, step-by-step plan for the '
            + "user's request in prose — do NOT call any write tool (file edits, "
-           + 'bash, git operations, issue/PR actions). Read-only tools (search, '
-           + 'list-files, read-file) are fine if they help you scope the plan. '
+           + 'bash, git operations, issue/PR actions). Read-only tools (find-code, '
+           + 'search, list-files, read-file) are fine if they help you scope the plan. '
            + "End with a short summary of what you'd do and in what order; the "
            + 'user decides whether to execute it.',
   },

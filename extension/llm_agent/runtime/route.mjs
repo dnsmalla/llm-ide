@@ -19,6 +19,7 @@ import { sanitizePersonaSuffix } from '../../agents/prompt-utils.mjs';
 import { renderGraphifyMemory } from '../../graphkit/index.mjs';
 import { persistTurnMemory } from './memory-persist.mjs';
 import { buildReadableRoots, handleListFiles, handleReadFile } from './handlers/repo-files.mjs';
+import { handleFindCode } from './handlers/find-code.mjs';
 import { searchKb } from './handlers/search-kb.mjs';
 import { handleRunBash } from './handlers/run-bash.mjs';
 import { tasks, taskStatusIcon } from './handlers/session-tasks.mjs';
@@ -61,7 +62,9 @@ const globalPromptBase = composeGlobalPrompt();
 // caching and let the tools array carry capability.
 const NATIVE_SYSTEM_PROMPT = [
   'You are the LLM-IDE Code Assistant. Help the user by calling the provided tools.',
-  'Use run-bash to run a shell command, list-files / read-file for the workspace,',
+  'To locate code, ALWAYS call find-code first (symbol index + code graph) and read',
+  'only the lines it points at — never open with a grep. Use run-bash to run a shell',
+  'command, list-files / read-file for the workspace,',
   'search-kb for meetings/notes/issues, web-search / fetch-url for the web,',
   'ask-internal for app state. Call a tool when action is needed; its result comes',
   'back to you automatically. Once you have what you need, answer the user concisely.',
@@ -317,6 +320,18 @@ export async function handleCodeAssist({
     // This is what lets "find the README and review it" work without an attach.
     'list-files': (args) => handleListFiles(args, { roots: readableRoots }),
     'read-file': (args) => handleReadFile(args, { roots: readableRoots }),
+    // Index→graph code search. Turns "where is X / what touches X" into ONE
+    // call against the symbol index + code graph + FTS, instead of the grep
+    // loop the agent used to run (see handlers/find-code.mjs for the cost
+    // rationale). Same readable-roots gate as read-file, so every path it
+    // hands back is one the agent is allowed to open.
+    'find-code': (args) => handleFindCode(args, {
+      userId,
+      roots: readableRoots,
+      // Same root run-bash uses as its cwd, so the `sed -n` follow-up this tool
+      // recommends runs against the tree the returned paths are relative to.
+      workspaceRoot: agentContext?.workspaceRoot,
+    }),
     // KB search: meetings, decisions, action items, sources — the same FTS
     // the internal agent uses, now first-class so "what did we decide about
     // X?" doesn't need an ask-internal round-trip.

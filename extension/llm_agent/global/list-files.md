@@ -26,6 +26,10 @@ test") and you need to find its path, or you want to see the project's layout.
 Use this instead of guessing a path. Reads are scoped to the open workspace and
 indexed repos — never the wider disk.
 
+Looking for CODE rather than a path? Use `find-code` — it returns the symbol's
+`file:line` and what relates to it, so you skip the list-then-read-whole-file
+round trip.
+
 ## Call shape
 
 ```

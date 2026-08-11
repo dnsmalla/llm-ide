@@ -7,12 +7,26 @@ import path from 'node:path';
 import { getDb, requireUser } from './db.mjs';
 
 // Edge kinds traversed by expandSymbols. The first three are everything the
-// SCIP parser emits, so its behaviour is unchanged; `calls` exists only in the
-// structural graph, where it is the natural symbol→symbol hop ("what does this
-// function reach"). `contains` is deliberately excluded: it is file→symbol, so
-// one file seed would flood the (post-expand, pre-rank) result with every
-// symbol that file declares and crowd out genuinely related code.
-const DEFAULT_EDGE_KINDS = ['implements', 'references', 'imports', 'calls'];
+// SCIP parser emits, so its behaviour is unchanged; `calls` and `inherits`
+// exist only in the structural graph, where they are the natural symbol→symbol
+// hops ("what does this function reach", "what is this class a kind of").
+// `contains` is deliberately excluded HERE: it is file→symbol, so one file seed
+// would flood the (post-expand, pre-rank) result with every symbol that file
+// declares and crowd out genuinely related code. graphNeighbors lets a caller
+// opt into it per-seed instead (see CONTAINS_EDGE_KIND).
+const DEFAULT_EDGE_KINDS = ['implements', 'references', 'imports', 'calls', 'inherits'];
+
+// The file→symbol edge. Excluded from DEFAULT_EDGE_KINDS for the reason above,
+// but the RIGHT hop when the seed is a file node — "what does this file declare"
+// is exactly what a code-search caller wants there.
+export const CONTAINS_EDGE_KIND = 'contains';
+
+// Per-hop frontier ceiling for graphNeighbors. Each hop binds the frontier as
+// SQL parameters, and a hub symbol (imported by 101 modules, as `db.mjs` is
+// here) can otherwise blow past SQLite's variable limit AND swamp the result
+// with low-signal neighbours. Bounded per hop, not per traversal, so hop 2
+// still starts from a full — if truncated — hop-1 set.
+const MAX_FRONTIER = 200;
 
 // Graph producers (the `source` column, migration 0027). Each replaces only its
 // OWN rows, so a Mac-app regeneration can't wipe a SCIP index and vice versa.
@@ -124,6 +138,76 @@ export function expandSymbols(userId, seedIds, { hops = 1, edgeKinds = DEFAULT_E
   return out;
 }
 
+/**
+ * Like expandSymbols, but BIDIRECTIONAL and edge-labelled — the traversal a
+ * code-search tool needs.
+ *
+ * expandSymbols only follows `from_id → to_id`, so it answers "what does this
+ * symbol reach" and can never answer "who calls / references / imports THIS",
+ * which is the more useful direction when you're fixing a bug in a symbol. This
+ * walks both directions and reports, for every neighbour, the edge kind and
+ * which way it pointed — so a caller can tell the agent *why* a symbol is
+ * related ("called by X") instead of dumping an unexplained id list.
+ *
+ * Kept as a separate function rather than an option on expandSymbols so the
+ * code-sync agent's grounding behaviour is untouched.
+ *
+ * @param direction 'both' (default) | 'out' (this → others) | 'in' (others → this)
+ * @returns [{ symbolId, viaKind, direction, hop, fromId }] — seeds excluded,
+ *          deduped by symbolId keeping the shortest hop (first BFS win).
+ */
+export function graphNeighbors(userId, seedIds, {
+  hops = 1,
+  edgeKinds = DEFAULT_EDGE_KINDS,
+  direction = 'both',
+  limit = 60,
+} = {}) {
+  requireUser(userId);
+  if (!Array.isArray(seedIds) || seedIds.length === 0) return [];
+  if (!Array.isArray(edgeKinds) || edgeKinds.length === 0) return [];
+  const db = getDb();
+  const wantOut = direction === 'both' || direction === 'out';
+  const wantIn = direction === 'both' || direction === 'in';
+  const seen = new Set(seedIds);
+  const out = [];
+  let frontier = [...new Set(seedIds)].slice(0, MAX_FRONTIER);
+  const kindPlace = edgeKinds.map(() => '?').join(',');
+
+  for (let hop = 1; hop <= hops; hop++) {
+    if (frontier.length === 0 || out.length >= limit) break;
+    const place = frontier.map(() => '?').join(',');
+    const rows = [];
+    if (wantOut) {
+      rows.push(...db.prepare(
+        `SELECT from_id, to_id AS neighbor_id, kind, 'out' AS dir FROM code_graph_edges
+         WHERE user_id=? AND from_id IN (${place}) AND kind IN (${kindPlace})`,
+      ).all(userId, ...frontier, ...edgeKinds));
+    }
+    if (wantIn) {
+      rows.push(...db.prepare(
+        `SELECT to_id AS from_id, from_id AS neighbor_id, kind, 'in' AS dir FROM code_graph_edges
+         WHERE user_id=? AND to_id IN (${place}) AND kind IN (${kindPlace})`,
+      ).all(userId, ...frontier, ...edgeKinds));
+    }
+    const next = [];
+    for (const r of rows) {
+      if (seen.has(r.neighbor_id)) continue;
+      seen.add(r.neighbor_id);
+      next.push(r.neighbor_id);
+      out.push({
+        symbolId: r.neighbor_id,
+        viaKind: r.kind,
+        direction: r.dir,
+        hop,
+        fromId: r.from_id,
+      });
+      if (out.length >= limit) break;
+    }
+    frontier = next.slice(0, MAX_FRONTIER);
+  }
+  return out;
+}
+
 // TODO scale: findCodeSymbolIds uses a leading-% LIKE on code_graph_nodes, which
 // can't use the (user_id, title) index and scans the table per token. For large
 // indexes, seeding should query the FTS5 `sources` table (where meta.source='scip'
@@ -147,6 +231,68 @@ export function findCodeSymbolIds(userId, query, limit = 10) {
      LIMIT ?`,
   ).all(userId, like, like, limit);
   return rows.map((r) => r.symbol_id);
+}
+
+/**
+ * RANKED symbol lookup: full node rows for the symbols whose title best matches
+ * `query`, best first. This is the index half of the index→graph search the
+ * agent's find-code tool performs.
+ *
+ * Why not findCodeSymbolIds: that one returns bare ids with `LIMIT` and NO
+ * `ORDER BY`, so which rows come back is whatever SQLite scans first — for a
+ * query like "read" that means arbitrary symbols, and the caller then needs a
+ * second hydrate round-trip. Here the match tier is computed in SQL (exact
+ * title > prefix > substring > doc-only) and the shorter title wins inside a
+ * tier, so `find-code "graphNeighbors"` puts the actual definition on top
+ * instead of burying it under longer incidental matches.
+ *
+ * Same LIKE-escaping contract as findCodeSymbolIds; same scan-cost caveat as
+ * the TODO above.
+ */
+export function searchCodeSymbols(userId, query, limit = 10) {
+  requireUser(userId);
+  const q = typeof query === 'string' ? query.trim() : '';
+  if (!q) return [];
+  const escaped = q
+    .replace(/\\/g, '\\\\')
+    .replace(/%/g, '\\%')
+    .replace(/_/g, '\\_');
+  const contains = `%${escaped}%`;
+  const prefix = `${escaped}%`;
+  const lower = q.toLowerCase();
+  return getDb().prepare(
+    `SELECT symbol_id, title, kind, repo_id, source_file, line, language, doc,
+            CASE
+              WHEN lower(title) = ?                     THEN 0
+              WHEN title LIKE ? ESCAPE '\\'             THEN 1
+              WHEN title LIKE ? ESCAPE '\\'             THEN 2
+              ELSE 3
+            END AS tier
+     FROM code_graph_nodes
+     WHERE user_id=? AND (title LIKE ? ESCAPE '\\' OR doc LIKE ? ESCAPE '\\')
+     ORDER BY tier, length(title), title
+     LIMIT ?`,
+    // Bind order is SQL-text order: the three CASE tiers in the SELECT come
+    // before the WHERE clause's user_id + LIKE pair.
+  ).all(lower, prefix, contains, userId, contains, contains, limit);
+}
+
+/**
+ * Whether this user has ANY code-graph rows — i.e. whether a graph has ever
+ * been generated for them.
+ *
+ * Deliberately query-independent: callers need to tell "the index has nothing
+ * matching THIS query" from "there is no index on this install", and those
+ * demand opposite advice (refine the query vs go generate the graph). Inferring
+ * it from an empty result set conflates the two and tells users with a perfectly
+ * good index that they don't have one. `LIMIT 1` on an indexed column, so it
+ * costs nothing to ask on every search.
+ */
+export function hasCodeGraph(userId) {
+  requireUser(userId);
+  return getDb().prepare(
+    'SELECT 1 FROM code_graph_nodes WHERE user_id=? LIMIT 1',
+  ).get(userId) !== undefined;
 }
 
 /**

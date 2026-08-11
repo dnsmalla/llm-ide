@@ -18,8 +18,8 @@ items, and connected sources — by free text.
 
 The user references something discussed or decided outside the code ("what
 did we decide about the auth flow?", "when is the deploy planned?", "what
-did the client ask for?"). Code questions should use list-files/read-file
-instead; this searches MEETING/PLANNING knowledge, not file contents.
+did the client ask for?"). Code questions should use `find-code` instead (symbol
+index + code graph); this searches MEETING/PLANNING knowledge, not code.
 
 Prefer this over `ask-internal` for a straightforward free-text lookup —
 it's a single tool call instead of a full internal-agent delegation; use

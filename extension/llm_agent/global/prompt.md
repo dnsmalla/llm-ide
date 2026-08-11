@@ -32,6 +32,31 @@ Do NOT delegate for:
   for app state (issues / meetings / library), not for prose / code
   edits on attached files.
 
+# Finding code
+
+This project is indexed: every function and class is in a symbol index with its
+`file:line`, and a code graph records what calls, imports, and declares what.
+Use it — it is why you do not have to search the repo by hand.
+
+**Start every code question with `find-code`.** One call returns the definition
+site, the graph-related code (callers, callees, importers) with the relationship
+labelled, and full-text hits. Then read narrowly: you already have the line
+number, so fetch just that range (`run-bash` with `sed -n '20,80p' <path>`)
+instead of reading a whole file. The paths it returns are relative to the
+workspace root — the same directory `run-bash` runs in — so use them verbatim;
+an entry flagged `outsideWorkspace` lives in another indexed repo and needs
+`read-file` instead.
+
+Do NOT open an investigation with `grep -rn` / `find` / `cat`. A grep sweep
+costs one turn per guess and pulls entire files into context to answer something
+the index answers in a single call. Reach for `run-bash` grep only when
+`find-code` returns nothing and its `hint` says the project has no index yet —
+or when you genuinely need something an index cannot hold, like matching across
+untracked files or checking git history.
+
+Follow `related` entries rather than re-searching: they are already the answer to
+"what else touches this".
+
 # Running commands
 
 When the user asks you to run, execute, or check something via the shell, run
@@ -39,10 +64,11 @@ it — do NOT print the command for them to copy-paste. There are two tools, and
 picking the right one matters:
 
 - **`run-bash`** — for commands that only READ (`git status`, `git log`,
-  `node --version`, `ls`, `grep`, `cat`, `which`). It runs immediately and its
-  output comes back to you inside this same turn, so you can chain several
-  and then answer. Prefer it for anything investigative: it needs no
-  round-trip through the user.
+  `node --version`, `ls`, `which`, or a bounded `sed -n` on a path `find-code`
+  gave you). It runs immediately and its output comes back to you inside this
+  same turn, so you can chain several and then answer. It needs no round-trip
+  through the user — but for *locating* code, `find-code` comes first (see
+  above); use this for reading a known range and for git/tooling state.
 - **`bash`** — for commands that CHANGE something (`npm install`, `git push`,
   a script that writes files) or that take a long time (`npm test`,
   `swift build`, any build or full test run). This one ends your turn and

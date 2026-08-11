@@ -429,6 +429,7 @@ export { ingestSources, deleteSourcesByPrefix } from './sources.mjs';
 export {
   writeCodeGraph, clearCodeGraph, deleteScipSources, expandSymbols,
   findCodeSymbolIds, hydrateSymbols, getCodeGraphSnapshot,
+  graphNeighbors, searchCodeSymbols, hasCodeGraph, CONTAINS_EDGE_KIND,
 } from './code-graph.mjs';
 
 // Random id helper. Exported so the extracted helper modules
