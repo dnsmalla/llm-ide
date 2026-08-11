@@ -57,9 +57,17 @@ Every inbound HTTP request passes through these stages **in order** (`extension/
 
 | Parameter | Value | Source |
 |---|---|---|
-| `server.requestTimeout` | 300 000 ms (5 min) | `server.mjs:629` |
-| `server.headersTimeout` | 65 000 ms | `server.mjs:630` |
-| `server.keepAliveTimeout` | 60 000 ms | `server.mjs:631` |
+| `server.requestTimeout` | **0 (disabled)** | `server.mjs` |
+| `server.headersTimeout` | 65 000 ms | `server.mjs` |
+| `server.keepAliveTimeout` | 60 000 ms | `server.mjs` |
+
+`requestTimeout` is disabled because an agent turn has no deadline (see [agent-runtime](agent-runtime.md)); a socket cut out from under work that is still running yields a dead connection instead of an answer. `headersTimeout` (slowloris) and `keepAliveTimeout` (idle sockets between requests) remain — neither can interrupt an in-flight request. Known trade-off: `requestTimeout` also bounded request-*body* reception and nothing replaces it, so a local client that dribbles a body can hold a socket; bounded by loopback-only binding and the 8 MB body cap.
+
+### Per-route handler budgets (`server/route-timeout.mjs`)
+
+Opt-in only; a route absent from the map has no budget, and a budget returns a 504 JSON envelope. Only **short, externally-bounded** routes carry one: `/kb/dispatch` (60 s, outbound provider REST), `/kb/providers/verify` and `/kb/providers/models` (30 s, liveness probes), `/kb/delete` (30 s).
+
+Budgets were **removed** from every LLM route (`/kb/generate-plan`, `/kb/analyze-risks`, `/kb/summarize`, `/kb/conflict-questions`, `/kb/generate-code` — previously 180–240 s) and from the routes that scale with the user's data (`/kb/ingest`, `/kb/connect-box`, `/kb/ingest-scip`). Once `requestTimeout` and the agent-loop deadline were gone these were the last clock over that work, and they cut it off in the cases needing time most: `/kb/summarize` 504'd at 240 s on a long transcript, so the Mac summarizer discarded the real AI summary and wrote its local fallback. Streaming routes (`/code-assist`, SSE, agent dispatch) must never be listed.
 
 ---
 

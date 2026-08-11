@@ -67,7 +67,9 @@ Source: `extension/llm_agent/runtime/loop.mjs`
 | `MAX_LOOP_DEPTH` | 2 | loop.mjs:141 |
 | `MAX_CACHE_SIZE` | 100 entries | loop.mjs:175 |
 
-The global agent overrides `maxIterations` to **3** (route.mjs:201) because it is user-facing and delegates depth to internal. The internal sub-loop runs with the default 10 iterations and a 120 s deadline (ask-internal.mjs:57). Plugin subagents use a 90 s deadline (ask-subagent.mjs:104).
+The global agent overrides `maxIterations` because it is user-facing and delegates depth to internal. The internal sub-loop runs with the default 10 iterations.
+
+**No loop has a wall-clock deadline.** `DEFAULT_DEADLINE_MS` is `null` (loop.mjs), and no call site passes one: the global loop (route.mjs), the internal sub-loop (ask-internal.mjs), and plugin subagents (ask-subagent.mjs) all run unbounded in time. They previously used 360 s / 120 s / 90 s, and a legitimate multi-step turn that exceeded its budget lost the whole reply to `_(reached the Ns deadline — try again)_` — a retry that costs more time and tokens than finishing the first attempt would have. A loop is bounded by `maxIterations` (a call budget), `MAX_LOOP_DEPTH`, and client cancellation. `deadlineMs` is still honoured when a caller passes a finite value, so a specific site or a test can opt in; absent, `null`, `0`, and `Infinity` all mean unlimited. `server.requestTimeout` is `0` to match (server.mjs) — a socket cut out from under running work is strictly worse than the deadline message it would replace.
 
 ### Depth model
 
@@ -83,7 +85,7 @@ Practical depth levels:
 
 Each iteration of the `for` loop (loop.mjs:195–295) executes the following steps:
 
-1. **Deadline check** — if wall-clock elapsed exceeds `deadline`, return `{ reply, pendingTool: null }` with a deadline-expired annotation (loop.mjs:196–197).
+1. **Deadline check** — skipped entirely unless the caller opted into a finite `deadlineMs` (the default is `null` = unlimited; see above). When one was supplied and the wall-clock elapsed exceeds it, return `{ reply, pendingTool: null }` with a deadline-expired annotation, and the in-flight `runClaude` call is bounded by an `AbortSignal` for the remaining budget. With no deadline, no abort signal is created at all.
 2. **Prompt assembly** — `buildIterationPrompt` (loop.mjs:109–130) concatenates:
    - The composed system prompt (base role + optional context block + skill bodies)
    - Replayed history, selected by `selectHistoryTurns` (loop.mjs) under a **char budget** rather than a turn count, each turn clipped to `config.history.perTurnChars` (24 000) with fence sentinels redacted. The budget is `config.history.promptBudgetChars` (460 000, safely under `runClaude`'s hard 500 000-char throw) minus the system prompt, user message, and `prevOutput`, capped by `config.history.maxChars` (240 000) — so history yields to the parts of the prompt that cannot be dropped, and can never be what fails a turn. The **first user turn is always kept** as an anchor and any gap is disclosed inline (`_(N earlier turn(s) omitted…)_`). Replaced a fixed "last 8 turns" window: each client-executed tool call appends a synthetic result turn plus a reply, so a four-step task evicted the user's original request and the agent lost track of what it had been asked. `runNativeAgentLoop` and the non-agent `/code-assist` prompt in `server/ai-routes.mjs` share the same selector.
