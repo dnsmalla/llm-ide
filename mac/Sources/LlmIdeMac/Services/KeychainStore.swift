@@ -2,6 +2,25 @@ import Foundation
 import Security
 import os.log
 
+/// Outcome of a raw keychain read. "Nothing stored" and "could not read what
+/// is stored" are different facts and must never be conflated — only the
+/// former makes it safe to write over the item.
+enum KeychainRawRead: Equatable {
+    case found(Data)
+    case notFound
+    case failed(OSStatus)
+}
+
+/// Raw keychain I/O. Injectable so tests can simulate a denied or locked
+/// keychain — the condition that used to be mistaken for "empty" and then
+/// overwritten, destroying every stored secret.
+protocol RawKeychainAccess: Sendable {
+    func read(account: String, service: String) -> KeychainRawRead
+    func write(account: String, service: String, data: Data) -> Bool
+    func delete(account: String, service: String)
+    @discardableResult func deleteAll(service: String) -> OSStatus
+}
+
 /// Secret storage. All tokens (JWT refresh, GitLab PAT, GitHub PAT) live in a
 /// SINGLE keychain item — a JSON map keyed by account. One item means at most
 /// one macOS "…wants to use the keychain" password prompt per launch, instead
@@ -26,30 +45,84 @@ enum KeychainStore {
     /// (one keychain read ⇒ at most one prompt); served from RAM after that.
     private static var blob: [String: String] = [:]
     private static var blobLoaded = false
+    /// True when the last load attempt hit a real keychain FAILURE (denied,
+    /// locked, corrupt payload) as opposed to "no item stored yet".
+    ///
+    /// This distinction is the whole point of `KeychainRawRead`. The old code funnelled
+    /// both cases into `nil` ⇒ `blob = [:]` ⇒ `blobLoaded = true`, so the very
+    /// next write persisted that empty map over the real item and destroyed
+    /// every stored secret — the refresh token included, which is why a saved
+    /// login stopped surviving relaunch. While this flag is set we refuse to
+    /// persist and we do NOT latch `blobLoaded`, so the next call retries the
+    /// read instead of serving a phantom empty map for the whole session.
+    private static var loadFailed = false
+    /// Last keychain OSStatus worth reporting, for diagnostics/UI. nil = healthy.
+    private(set) static var lastFailureStatus: OSStatus?
     private static let lock = NSLock()
+
+    /// Raw keychain access. Production uses `SecItem*`; tests substitute a
+    /// fake to exercise the read-failure paths.
+    internal static var backend: RawKeychainAccess = SecItemKeychainAccess()
+
+    /// True when secrets are readable (or legitimately absent). False after a
+    /// failed load, when writes are blocked to protect the stored data.
+    static var isHealthy: Bool {
+        lock.lock(); defer { lock.unlock() }
+        ensureBlobLoadedLocked()
+        return !loadFailed
+    }
 
     // MARK: - Blob load / persist
 
-    /// Load the single secrets item into memory. Idempotent — does nothing
-    /// after the first load. Does NOT migrate; see `migrateIfNeeded`.
-    private static func ensureBlobLoaded() {
-        lock.lock()
-        if blobLoaded { lock.unlock(); return }
-        if let data = readRaw(account: blobAccount, service: service),
-           let parsed = try? JSONDecoder().decode([String: String].self, from: data) {
-            blob = parsed
-        } else {
+    /// Load the single secrets item into memory. Idempotent once a load has
+    /// SUCCEEDED; a failed load is retried on the next call. Caller holds
+    /// `lock`. Does NOT migrate; see `migrateIfNeeded`.
+    private static func ensureBlobLoadedLocked() {
+        if blobLoaded { return }
+        switch readRaw(account: blobAccount, service: service) {
+        case .found(let data):
+            if let parsed = try? JSONDecoder().decode([String: String].self, from: data) {
+                blob = parsed
+                blobLoaded = true
+                loadFailed = false
+                lastFailureStatus = nil
+            } else {
+                // The item exists but we can't parse it. Treating that as
+                // "empty" would overwrite recoverable data on the next write,
+                // so refuse to persist and keep the bytes intact for recovery.
+                blob = [:]
+                loadFailed = true
+                lastFailureStatus = errSecDecode
+                log.error("Secrets blob is present but undecodable — writes blocked to preserve it")
+            }
+        case .notFound:
             blob = [:]
+            blobLoaded = true
+            loadFailed = false
+            lastFailureStatus = nil
+        case .failed(let status):
+            // Deliberately leave `blobLoaded == false` so a later call retries
+            // (e.g. once the keychain is unlocked or the user allows access).
+            blob = [:]
+            loadFailed = true
+            lastFailureStatus = status
+            log.error("Keychain read failed: OSStatus \(status, privacy: .public) — secrets unavailable, writes blocked this attempt")
         }
-        blobLoaded = true
-        lock.unlock()
     }
 
     /// Persist the in-memory map to the single keychain item. Caller holds `lock`.
-    private static func persistBlobLocked() {
+    /// Returns false when the write was refused or failed.
+    @discardableResult
+    private static func persistBlobLocked() -> Bool {
+        guard !loadFailed else {
+            log.error("Refusing to persist secrets: the last keychain load failed, so writing the in-memory map would destroy the stored secrets")
+            return false
+        }
         if blob[migratedKey] == nil { blob[migratedKey] = "1" }
-        guard let data = try? JSONEncoder().encode(blob) else { return }
-        writeRaw(account: blobAccount, service: service, data: data)
+        guard let data = try? JSONEncoder().encode(blob) else { return false }
+        let ok = writeRaw(account: blobAccount, service: service, data: data)
+        if !ok { lastFailureStatus = errSecIO }
+        return ok
     }
 
     /// One-time forward migration: copy the legacy per-secret items (refresh,
@@ -59,8 +132,13 @@ enum KeychainStore {
     /// missing items return silently, so fresh installs migrate with zero
     /// prompts. Guarded by the `migratedKey` sentinel so it runs only once.
     private static func migrateIfNeeded(refreshHost: String, gitLabHost: String) {
-        ensureBlobLoaded()
         lock.lock()
+        ensureBlobLoadedLocked()
+        // A failed load must not run the migration: `blob` is empty only
+        // because we couldn't read it, so persisting would both clobber the
+        // real secrets and stamp the `migratedKey` sentinel, permanently
+        // marking a migration that never happened.
+        if loadFailed { lock.unlock(); return }
         if blob[migratedKey] != nil { lock.unlock(); return }
         let accounts = [
             "\(refreshHost)::refresh_token",
@@ -90,7 +168,6 @@ enum KeychainStore {
     /// once per launch — a single read of the blob item — not on every
     /// Settings refresh or API call.
     static func warmSessionCache(refreshTokenHost: String, gitLabHost: String) {
-        ensureBlobLoaded()
         migrateIfNeeded(refreshHost: refreshTokenHost, gitLabHost: gitLabHost)
         // MobilePin keeps its own item (pairing PIN), separate from the blob
         // above, but still warmed here so its keychain read also happens in
@@ -99,10 +176,20 @@ enum KeychainStore {
         MobilePin.warmCache()
     }
 
-    private static func clearBlobCache() {
+    /// Drop the in-memory mirror after a wipe attempt.
+    ///
+    /// `wiped` says whether the backing item is genuinely gone. On success we
+    /// record a KNOWN-empty load so a later write may legitimately re-create
+    /// the item. On failure the old item is still out there holding real
+    /// secrets, so we force a re-read instead — marking it known-empty would
+    /// let the next write clobber whatever survived, which is the same bug
+    /// this file exists to prevent.
+    private static func clearBlobCache(wiped: Bool) {
         lock.lock()
         blob.removeAll(keepingCapacity: false)
-        blobLoaded = false
+        blobLoaded = wiped
+        loadFailed = false
+        lastFailureStatus = nil
         lock.unlock()
         MobilePin.clearSessionCache()
     }
@@ -114,8 +201,7 @@ enum KeychainStore {
     }
 
     static func loadToken(host: String) -> String? {
-        ensureBlobLoaded()
-        return get("\(host)::refresh_token")
+        get("\(host)::refresh_token")
     }
 
     static func deleteToken(host: String) {
@@ -129,8 +215,7 @@ enum KeychainStore {
     }
 
     static func loadGitLabToken(host: String) -> String? {
-        ensureBlobLoaded()
-        return get("gitlab::\(host)::token")
+        get("gitlab::\(host)::token")
     }
 
     static func deleteGitLabToken(host: String) {
@@ -148,8 +233,7 @@ enum KeychainStore {
     }
 
     static func loadGitHubToken(host: String = "github.com") -> String? {
-        ensureBlobLoaded()
-        return get("github::\(host)::token")
+        get("github::\(host)::token")
     }
 
     static func deleteGitHubToken(host: String = "github.com") {
@@ -164,20 +248,14 @@ enum KeychainStore {
     /// lists so repo metadata can't outlive the tokens that authorized them.
     @MainActor
     static func logout() {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: service,
-        ]
-        let status = SecItemDelete(query as CFDictionary)
-        if status != errSecSuccess && status != errSecItemNotFound {
+        let status = backend.deleteAll(service: service)
+        let wiped = (status == errSecSuccess || status == errSecItemNotFound)
+        if !wiped {
             log.error("KeychainStore.logout failed: OSStatus \(status, privacy: .public)")
         }
         // Also wipe items from the pre-rename MeetNotes service.
-        SecItemDelete([
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: legacyService,
-        ] as CFDictionary)
-        clearBlobCache()
+        backend.deleteAll(service: legacyService)
+        clearBlobCache(wiped: wiped)
         AppConfig.shared.gitLabSavedProjects = []
         AppConfig.shared.gitHubSavedRepos = []
     }
@@ -186,36 +264,94 @@ enum KeychainStore {
 
     private static func get(_ account: String) -> String? {
         lock.lock(); defer { lock.unlock() }
+        ensureBlobLoadedLocked()
         return blob[account]
     }
 
-    private static func set(_ account: String, _ value: String) {
-        lock.lock()
+    /// Write one secret. Loads the blob first: writing from a never-loaded
+    /// (empty) map would persist a single-entry blob over every other secret.
+    /// Returns false when the write was refused or failed.
+    @discardableResult
+    private static func set(_ account: String, _ value: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        ensureBlobLoadedLocked()
+        guard !loadFailed else {
+            log.error("Refusing to save secret: keychain is not readable right now")
+            return false
+        }
+        let previous = blob[account]
         blob[account] = value
-        persistBlobLocked()
-        lock.unlock()
+        if persistBlobLocked() { return true }
+        // Keep RAM consistent with disk so a caller that reads back doesn't
+        // see a value that was never stored.
+        blob[account] = previous
+        return false
     }
 
-    private static func remove(_ account: String) {
-        lock.lock()
+    @discardableResult
+    private static func remove(_ account: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        ensureBlobLoadedLocked()
+        guard !loadFailed else {
+            log.error("Refusing to delete secret: keychain is not readable right now")
+            return false
+        }
+        // Nothing stored ⇒ nothing to do. Skipping the write also stops a
+        // no-op delete from re-creating an item that `logout()` just removed.
+        guard let previous = blob[account] else { return true }
         blob.removeValue(forKey: account)
-        persistBlobLocked()
-        lock.unlock()
+        if persistBlobLocked() { return true }
+        blob[account] = previous
+        return false
     }
 
     /// Read a legacy per-secret item from either the current or the
     /// pre-rename service. Used only by the one-time migration.
     private static func loadLegacy(account: String) -> String? {
-        if let d = readRaw(account: account, service: service),
+        if case .found(let d) = readRaw(account: account, service: service),
            let s = String(data: d, encoding: .utf8) { return s }
-        if let d = readRaw(account: account, service: legacyService),
+        if case .found(let d) = readRaw(account: account, service: legacyService),
            let s = String(data: d, encoding: .utf8) { return s }
         return nil
     }
 
     // MARK: - Raw keychain primitives
 
-    private static func readRaw(account: String, service: String) -> Data? {
+    private static func readRaw(account: String, service: String) -> KeychainRawRead {
+        backend.read(account: account, service: service)
+    }
+
+    @discardableResult
+    private static func writeRaw(account: String, service: String, data: Data) -> Bool {
+        backend.write(account: account, service: service, data: data)
+    }
+
+    private static func deleteRaw(account: String, service: String) {
+        backend.delete(account: account, service: service)
+    }
+
+    #if DEBUG
+    /// Test-only: drop all in-memory state so the next call re-reads through
+    /// whatever `backend` is installed. Not for production use.
+    internal static func resetInMemoryStateForTesting() {
+        lock.lock()
+        blob.removeAll(keepingCapacity: false)
+        blobLoaded = false
+        loadFailed = false
+        lastFailureStatus = nil
+        lock.unlock()
+    }
+    #endif
+}
+
+/// The real keychain, via `SecItem*`.
+struct SecItemKeychainAccess: RawKeychainAccess {
+    private static let log = Logger(subsystem: "com.llmide.macapp", category: "Keychain")
+
+    /// Reads one item, keeping "no such item" distinct from "the read failed".
+    /// Collapsing the two is what allowed a denied/locked keychain to be
+    /// mistaken for an empty one and then overwritten.
+    func read(account: String, service: String) -> KeychainRawRead {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
@@ -224,13 +360,21 @@ enum KeychainStore {
             kSecMatchLimit: kSecMatchLimitOne,
         ]
         var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return data
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        switch status {
+        case errSecSuccess:
+            guard let data = result as? Data else { return .failed(errSecDecode) }
+            return .found(data)
+        case errSecItemNotFound:
+            return .notFound
+        default:
+            // errSecAuthFailed / errSecInteractionNotAllowed / errSecUserCanceled
+            // / locked keychain — the item may well exist and be intact.
+            return .failed(status)
+        }
     }
 
-    @discardableResult
-    private static func writeRaw(account: String, service: String, data: Data) -> Bool {
+    func write(account: String, service: String, data: Data) -> Bool {
         let match: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
@@ -246,20 +390,27 @@ enum KeychainStore {
             addQuery[kSecValueData] = data
             let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
             if addStatus != errSecSuccess {
-                log.error("KeychainStore.writeRaw (add) failed: OSStatus \(addStatus, privacy: .public)")
+                Self.log.error("Keychain write (add) failed: OSStatus \(addStatus, privacy: .public)")
             }
             return addStatus == errSecSuccess
         }
-        log.error("KeychainStore.writeRaw (update) failed: OSStatus \(updateStatus, privacy: .public)")
+        Self.log.error("Keychain write (update) failed: OSStatus \(updateStatus, privacy: .public)")
         return false
     }
 
-    private static func deleteRaw(account: String, service: String) {
-        let query: [CFString: Any] = [
+    func delete(account: String, service: String) {
+        SecItemDelete([
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: account,
-        ]
-        SecItemDelete(query as CFDictionary)
+        ] as CFDictionary)
+    }
+
+    @discardableResult
+    func deleteAll(service: String) -> OSStatus {
+        SecItemDelete([
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+        ] as CFDictionary)
     }
 }

@@ -36,37 +36,59 @@ enum MobilePin {
         cacheLock.unlock()
     }
 
-    /// Returns the stored PIN, generating and persisting a fresh one on first call.
+    /// Returns the stored PIN, generating and persisting a fresh one when none
+    /// is stored yet.
+    ///
+    /// Throws rather than regenerating when the keychain is merely *unreadable*
+    /// (denied / locked): a stored PIN is probably sitting there, and minting a
+    /// replacement would overwrite it and invalidate every paired iPhone.
     static func ensure() throws -> String {
-        if let existing = read() { return existing }
-        return try regenerate()
+        switch load() {
+        case .found(let pin): return pin
+        case .notFound: return try regenerate()
+        case .failed(let status): throw MobilePinError.keychainFailure(status)
+        }
     }
 
-    /// Reads the stored PIN, or nil if none.
+    /// Reads the stored PIN, or nil when there is none *or* it can't be read.
+    /// Callers that must tell those apart use `ensure()`.
     static func read() -> String? {
+        if case .found(let pin) = load() { return pin }
+        return nil
+    }
+
+    private enum PinRead {
+        case found(String)
+        case notFound
+        case failed(OSStatus)
+    }
+
+    /// Reads through `KeychainStore.backend` so the pairing PIN shares the app's
+    /// single raw-keychain path (and its test seam) instead of issuing its own
+    /// `SecItem` calls.
+    private static func load() -> PinRead {
         cacheLock.lock()
         if let cached = sessionPin {
             cacheLock.unlock()
-            return cached
+            return .found(cached)
         }
         cacheLock.unlock()
 
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: account,
-            kSecReturnData: true,
-            kSecMatchLimit: kSecMatchLimitOne
-        ]
-        var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data,
-              let pin = String(data: data, encoding: .utf8) else { return nil }
-
-        cacheLock.lock()
-        sessionPin = pin
-        cacheLock.unlock()
-        return pin
+        switch KeychainStore.backend.read(account: account, service: service) {
+        case .found(let data):
+            guard let pin = String(data: data, encoding: .utf8) else {
+                return .failed(errSecDecode)
+            }
+            cacheLock.lock()
+            sessionPin = pin
+            cacheLock.unlock()
+            return .found(pin)
+        case .notFound:
+            return .notFound
+        case .failed(let status):
+            log.error("MobilePin read failed: OSStatus \(status, privacy: .public)")
+            return .failed(status)
+        }
     }
 
     /// Generates a new random 6-digit PIN, overwrites any stored PIN, returns it.
@@ -84,33 +106,16 @@ enum MobilePin {
 
     /// Stores `pin` under `mobile::pin`, overwriting any existing value.
     ///
-    /// Update-then-add so a failed `SecItemAdd` can never empty the account
-    /// (mirrors `KeychainStore.save`). New items are created with
-    /// `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` to match the rest of
-    /// the app's keychain items.
+    /// Goes through `KeychainStore.backend`, which updates in place and only
+    /// adds when the account is absent, so a failed add can never empty it.
     private static func write(_ pin: String) throws {
         // pin is always a 6-digit ASCII string (`%06d`), so UTF-8 encoding
         // cannot fail — `Data(_:)` is infallible here.
-        let data = Data(pin.utf8)
-        let match: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: account,
-        ]
-        let updateStatus = SecItemUpdate(match as CFDictionary,
-                                         [kSecValueData: data] as CFDictionary)
-        if updateStatus == errSecSuccess { return }
-        guard updateStatus == errSecItemNotFound else {
-            log.error("MobilePin SecItemUpdate failed: OSStatus \(updateStatus, privacy: .public)")
-            throw MobilePinError.keychainFailure(updateStatus)
-        }
-        var addQuery = match
-        addQuery[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        addQuery[kSecValueData] = data
-        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-        guard addStatus == errSecSuccess else {
-            log.error("MobilePin SecItemAdd failed: OSStatus \(addStatus, privacy: .public)")
-            throw MobilePinError.keychainFailure(addStatus)
+        guard KeychainStore.backend.write(account: account,
+                                          service: service,
+                                          data: Data(pin.utf8)) else {
+            log.error("MobilePin write failed")
+            throw MobilePinError.keychainFailure(errSecIO)
         }
     }
 
