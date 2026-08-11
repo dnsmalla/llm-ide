@@ -6,11 +6,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
+
+// Isolate the skills-sources registry to a temp dir so tests never touch the
+// real ~/Library/.../skills-sources.json. Required once listSkillLibrary()
+// seeds the builtin source into the registry on first call.
+const tmpRegRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-sl-reg-'));
+process.env.LLMIDE_PLUGIN_DIR = path.join(tmpRegRoot, 'plugins');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(__dirname, `_skill-library-repo-${process.pid}`);
@@ -37,6 +44,9 @@ writeSkill('agent-tools', 'search-kb', 'search-kb', 'should be ignored');
 process.env.SKILLS_REPO = repo;
 const { listSkillLibrary, readSkillInstructions, resolveCentralSkillsRepo, _resetSkillLibraryCache } =
   await import('../llm_agent/skills/skill-library.mjs');
+const { writeRegistry, addSource, seedBuiltinOnce, BUILTIN_ID } =
+  await import('../skills-sources/registry.mjs');
+const { setEnabled } = await import('../skills-sources/state.mjs');
 
 test('resolveCentralSkillsRepo finds the repo via $SKILLS_REPO', () => {
   assert.equal(resolveCentralSkillsRepo(), repo);
@@ -83,12 +93,17 @@ test('a repo with the marker but no library families yields an empty catalog (no
   fs.mkdirSync(empty, { recursive: true });
   fs.writeFileSync(path.join(empty, 'registry.yaml'), 'registryVersion: "3.0.0"\n');
   process.env.SKILLS_REPO = empty;
+  // The builtin source is seeded idempotently (won't re-resolve on its own);
+  // reset the registry so seedBuiltinOnce re-points at the new SKILLS_REPO.
+  writeRegistry([]);
   _resetSkillLibraryCache();
   const out = listSkillLibrary();
   assert.equal(out.repo, empty);
   assert.deepEqual(out.skills, []);
   fs.rmSync(empty, { recursive: true, force: true });
   process.env.SKILLS_REPO = repo; // restore
+  writeRegistry([]); // re-seed builtin at repo for subsequent tests
+  _resetSkillLibraryCache();
 });
 
 test('readSkillInstructions returns name + SKILL.md body for a catalogued id', () => {
@@ -114,6 +129,42 @@ test('readSkillInstructions refuses an unknown id and never reads an arbitrary p
   assert.equal(readSkillInstructions(null), null);
 });
 
+// Multi-source: a registered local source contributes its discovery skills,
+// tagged with sourceId/sourceName. Disable it (per-user) and it disappears.
+test('listSkillLibrary(userId) unions enabled sources and tags each skill', () => {
+  // Isolate registry/state to a temp dir so the real skills-sources.json is untouched.
+  const tmpReg = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-sl-'));
+  process.env.LLMIDE_PLUGIN_DIR = path.join(tmpReg, 'plugins');
+  // A second source repo alongside the existing fixture `repo` (= the builtin).
+  const other = path.join(__dirname, `_skill-library-other-${process.pid}`);
+  fs.mkdirSync(path.join(other, 'skills', 'extra'), { recursive: true });
+  fs.writeFileSync(path.join(other, 'registry.yaml'), 'registryVersion: "3.0.0"\n');
+  fs.writeFileSync(path.join(other, 'skills', 'extra', 'SKILL.md'),
+    '---\nname: extra\ndescription: from another source\n---\n\n# extra\n');
+  writeRegistry([]);
+  seedBuiltinOnce();
+  addSource({ path: other, name: 'other' });
+  const enabledUser = 'multi-1';
+  setEnabled(enabledUser, BUILTIN_ID, true);
+  setEnabled(enabledUser, 'other', true);
+  _resetSkillLibraryCache();
+  const { skills } = listSkillLibrary(enabledUser);
+  const ids = skills.map((s) => s.id).sort();
+  assert.ok(ids.includes('skills/extra'), 'second source contributed');
+  const ex = skills.find((s) => s.id === 'skills/extra');
+  assert.equal(ex.sourceName, 'other');
+  assert.ok(ex.sourceId);
+  // Disable the second source for this user → its skill disappears.
+  setEnabled(enabledUser, 'other', false);
+  _resetSkillLibraryCache();
+  const after = listSkillLibrary(enabledUser).skills.map((s) => s.id);
+  assert.ok(!after.includes('skills/extra'));
+  fs.rmSync(other, { recursive: true, force: true });
+  fs.rmSync(tmpReg, { recursive: true, force: true });
+  delete process.env.LLMIDE_PLUGIN_DIR;
+});
+
 test('cleanup', () => {
   fs.rmSync(repo, { recursive: true, force: true });
+  fs.rmSync(tmpRegRoot, { recursive: true, force: true });
 });

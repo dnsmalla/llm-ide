@@ -15,6 +15,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import * as yaml from 'js-yaml';
+// Circular import is SAFE: registry.mjs imports resolveCentralSkillsRepo from
+// here (a hoisted function declaration, so the live binding exists during the
+// cycle), and every export we consume below (listSources, snapshotSource,
+// BUILTIN_ID, seedBuiltinOnce) is referenced ONLY inside listSkillLibrary —
+// never at module top level.
+import { listSources, snapshotSource, BUILTIN_ID, seedBuiltinOnce } from '../../skills-sources/registry.mjs';
+import { listEnabled } from '../../skills-sources/state.mjs';
 
 // Families NOT already surfaced via /kb/agent/catalog (which covers
 // agent-globals + agent-tools). These are the "all the other skills".
@@ -68,35 +75,48 @@ function readNameDesc(file) {
   }
 }
 
-// { repo: <path|null>, skills: [{ id, family, name, description, path }] }.
-// Cached for the process — the central repo doesn't change under a running
-// server; a server restart (or sync) picks up changes.
-export function listSkillLibrary() {
+// { repo: <builtin path|null>, skills: [{ id, family, name, description, path, sourceId, sourceName }] }.
+// Iterates the user's ENABLED skills sources (per-user state). Backward-compatible:
+// `repo` is the builtin source's resolved path (null if absent); skills gain
+// sourceId/sourceName. Cached per process; call _resetSkillLibraryCache() after
+// any add/update/remove/toggle.
+export function listSkillLibrary(userId) {
   if (_cache) return _cache;
-  const repo = resolveCentralSkillsRepo();
-  if (!repo) { _cache = { repo: null, skills: [] }; return _cache; }
+  seedBuiltinOnce();
+  const enabled = userId
+    ? listEnabled(userId)
+    : new Set(listSources().map((s) => s.id)); // no user (tests/default) → all enabled
 
   const skills = [];
-  for (const family of LIBRARY_FAMILIES) {
-    let entries;
-    try { entries = readdirSync(join(repo, family), { withFileTypes: true }); }
-    catch { continue; }
-    for (const e of entries) {
-      if (!e.isDirectory()) continue;
-      const skillMd = join(repo, family, e.name, 'SKILL.md');
-      const fm = readNameDesc(skillMd);
-      if (!fm) continue;
-      skills.push({
-        id: `${family}/${e.name}`,
-        family,
-        name: fm.name,
-        description: fm.description,
-        path: skillMd,
-      });
+  let builtinRepo = null;
+  for (const src of listSources()) {
+    if (!enabled.has(src.id)) continue;
+    const snap = snapshotSource(src);
+    if (src.id === BUILTIN_ID) builtinRepo = src.location || null;
+    if (!snap.installed) continue;
+    for (const family of LIBRARY_FAMILIES) {
+      let entries;
+      try { entries = readdirSync(join(src.location, family), { withFileTypes: true }); }
+      catch { continue; }
+      for (const e of entries) {
+        if (!e.isDirectory()) continue;
+        const skillMd = join(src.location, family, e.name, 'SKILL.md');
+        const fm = readNameDesc(skillMd);
+        if (!fm) continue;
+        skills.push({
+          id: `${family}/${e.name}`,
+          family,
+          name: fm.name,
+          description: fm.description,
+          path: skillMd,
+          sourceId: src.id,
+          sourceName: src.name,
+        });
+      }
     }
   }
   skills.sort((a, b) => a.family.localeCompare(b.family) || a.name.localeCompare(b.name));
-  _cache = { repo, skills };
+  _cache = { repo: builtinRepo, skills };
   return _cache;
 }
 

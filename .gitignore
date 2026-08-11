@@ -102,7 +102,7 @@ system/
 flag-semantics-flow-zero.md
 mac/MeetNotesMac.app/
 import-repo-settings.sh
-extension/tests/_skill-library-repo-*/
+extension/tests/_skill-library-*/
 extension/tests/_claude-plugins-fixture/
 extension/tests/_llmide-plugins-fixture/
 extension/tests/plugin-state.json
