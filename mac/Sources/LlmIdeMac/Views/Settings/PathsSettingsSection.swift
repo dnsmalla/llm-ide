@@ -78,7 +78,6 @@ struct PathsSettingsSection: View {
                 .controlSize(.small)
             }
 
-            // Project root
             projectFolderRow(label: "Project root",
                              icon: "folder.fill",
                              url: projectURL,

@@ -242,7 +242,6 @@ struct GitLabSettingsSection: View {
                 }
                 .buttonStyle(.plain)
 
-                // Display name
                 TextField("Display name", text: proj.displayName)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13, weight: .medium))

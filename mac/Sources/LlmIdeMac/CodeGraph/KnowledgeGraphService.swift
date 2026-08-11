@@ -490,7 +490,6 @@ final class KnowledgeGraphService: ObservableObject {
                                          options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
             for case let url as URL in en {
                 // Same vendor/build/generated-output pruning collectDocs applies.
-                // Same vendor/build/generated-output pruning collectDocs applies.
                 if let name = url.pathComponents.last, ExcludedDirs.names.contains(name) {
                     en.skipDescendants(); continue
                 }

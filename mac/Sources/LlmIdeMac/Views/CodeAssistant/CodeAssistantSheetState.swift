@@ -15,7 +15,6 @@ final class CodeAssistantSheetState {
     var showingListIssuesSheet = false
     var showingCreateBranchSheet = false
     var branchSheetContext: AgentContext?
-    // PR creation disabled - requires additional backend support
     var showingCreatePRSheet = false
     var showingReviewCodeSheet = false
     var showingUpdateFileSheet = false
