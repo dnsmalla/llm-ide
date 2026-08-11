@@ -2,7 +2,7 @@
 // system-prompt composer. Content (agent prompts, skill markdown, the
 // context renderers) lives outside; runtime is mechanism only.
 
-import { parseFence, validateArgs } from './fence.mjs';
+import { parseFence, validateArgs, stripFenceRemnants } from './fence.mjs';
 import { composeSystemContext } from '../internal/context/compose.mjs';
 import { redactFence } from './redaction.mjs';
 import { logger } from '../../core/logger.mjs';
@@ -71,6 +71,27 @@ const DEFAULT_DEADLINE_MS = 360_000;
 // enabled plugins could still stack enough of them to crowd out the
 // context window. 128 KB ≈ 4 max-size skills; core sets use ~8 KB.
 const MAX_TOTAL_SKILL_BYTES = 131_072;
+
+// The single most useful argument to show alongside a tool name, so live
+// progress reads like an action ("Reading Foo.swift") instead of a bare tool
+// id. Kept to ONE short value on purpose: this crosses the SSE channel on every
+// tool call and is rendered in a single line, so it must never carry a file
+// body, a diff, or anything unbounded. Pure — exported for unit tests.
+export function toolActivityDetail(tool, args) {
+  if (!args || typeof args !== 'object') return undefined;
+  const pick = (v) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+  const raw = pick(args.path) ?? pick(args.file) ?? pick(args.query)
+    ?? pick(args.command) ?? pick(args.q) ?? pick(args.url) ?? pick(args.branch)
+    ?? pick(args.question) ?? pick(args.prompt);
+  if (!raw) return undefined;
+  // A path is far more legible as its last two segments than as an absolute
+  // path that gets truncated from the wrong end in a narrow chat column.
+  const isPathish = tool === 'read-file' || tool === 'list-files' || tool === 'update-file'
+    || raw.includes('/');
+  const shown = isPathish ? raw.split('/').filter(Boolean).slice(-2).join('/') : raw;
+  const collapsed = shown.replace(/\s+/g, ' ');
+  return collapsed.length > 80 ? `${collapsed.slice(0, 80)}…` : collapsed;
+}
 
 export function buildSystemPrompt({ base, skills, agentContextBlock }) {
   const bodies = [];
@@ -219,44 +240,69 @@ const MAX_LOOP_DEPTH = 2;
 
 const TOOL_CALL_FENCE_MARKER = '<<<TOOL_CALL>>>';
 
+/// Longest suffix of `s` that is also a PREFIX of `marker` — i.e. how much of
+/// the tail might still turn out to be the start of a fence once more chunks
+/// arrive. Holding that back is what stops a marker split across deltas
+/// ("…<<<TOOL_" + "CALL>>>") from being forwarded piecemeal.
+function pendingMarkerPrefixLength(s, marker) {
+  const max = Math.min(marker.length - 1, s.length);
+  for (let k = max; k > 0; k--) {
+    if (s.endsWith(marker.slice(0, k))) return k;
+  }
+  return 0;
+}
+
 /**
- * Wraps a caller's `onChunk` with a "sniff the first bytes" filter so live
- * streaming only reaches the client for a real natural-language answer, never
- * for a `<<<TOOL_CALL>>>` fence directive (which is never user-facing text).
- * Since a single agent-loop iteration's output isn't known to be "the final
- * answer" vs. "a tool call" until it's fully parsed, this decides as early as
- * possible from the stream itself: once enough characters have arrived to
- * either match or rule out the fence marker, either start forwarding live
- * (flushing whatever was buffered so far) or suppress silently for the rest
- * of this call.
+ * Wraps a caller's `onChunk` so live streaming carries the agent's prose but
+ * never a `<<<TOOL_CALL>>>` fence directive, which is machine syntax and not
+ * user-facing text.
  *
- * `flushIfUndecided(fullText)` is a safety net for a response SHORTER than
- * the fence marker itself (15 chars) that therefore never resolved live —
- * call it only after `parseFence` has confirmed the full response has no
- * fence, so it's safe to flush in bulk (this only ever fires for genuinely
- * short answers, where "streamed at the very end" vs. "streamed live" is an
- * imperceptible difference to the user).
+ * The previous implementation only inspected the FIRST 15 characters: if they
+ * matched the marker it suppressed the whole call, otherwise it forwarded
+ * everything for the rest of the call. That misses the most common shape by
+ * far —
+ *
+ *     Let me read that file.
+ *     <<<TOOL_CALL>>>
+ *     {"name": "read-file", "arguments": {...}}
+ *     <<<END_TOOL_CALL>>>
+ *
+ * — whose first 15 characters are ordinary prose, so the fence streamed
+ * straight into the chat and the user watched raw JSON appear in the reply.
+ *
+ * Now the marker is detected ANYWHERE: prose before it is forwarded (that
+ * narration is genuinely useful), and everything from the marker onward is
+ * suppressed for the remainder of the call. A tail that could still become a
+ * marker is held back until it's ruled out.
+ *
+ * `flush()` releases any held-back tail; call it only after `parseFence` has
+ * confirmed the response contains no fence.
  */
-function makeSniffingChunkHandler(outerOnChunk) {
-  let buffer = '';
-  let decided = null; // null = undecided, true = forwarding live, false = suppressed (a fence)
+export function makeSniffingChunkHandler(outerOnChunk) {
+  let pending = '';
+  let suppressed = false;
   const onChunk = (delta) => {
-    if (decided === true) { outerOnChunk(delta); return; }
-    if (decided === false) return;
-    buffer += delta;
-    if (buffer.length >= TOOL_CALL_FENCE_MARKER.length) {
-      if (buffer.startsWith(TOOL_CALL_FENCE_MARKER)) {
-        decided = false;
-      } else {
-        decided = true;
-        outerOnChunk(buffer);
-      }
+    if (suppressed) return;
+    pending += delta;
+    const at = pending.indexOf(TOOL_CALL_FENCE_MARKER);
+    if (at >= 0) {
+      if (at > 0) outerOnChunk(pending.slice(0, at));
+      pending = '';
+      suppressed = true;
+      return;
+    }
+    const hold = pendingMarkerPrefixLength(pending, TOOL_CALL_FENCE_MARKER);
+    if (pending.length > hold) {
+      outerOnChunk(pending.slice(0, pending.length - hold));
+      pending = pending.slice(pending.length - hold);
     }
   };
-  const flushIfUndecided = (fullText) => {
-    if (decided === null) outerOnChunk(fullText);
+  const flush = () => {
+    if (suppressed || !pending) return;
+    outerOnChunk(pending);
+    pending = '';
   };
-  return { onChunk, flushIfUndecided };
+  return { onChunk, flush };
 }
 
 export async function runAgentLoop({
@@ -316,7 +362,7 @@ export async function runAgentLoop({
   const deadlineReply = (iters) => {
     const elapsed = Math.round((Date.now() - startTs) / 1000);
     return {
-      reply: (preToolText.trim() + `\n\n_(reached the ${elapsed}s deadline — try again)_`),
+      reply: (stripFenceRemnants(preToolText.trim()) + `\n\n_(reached the ${elapsed}s deadline — try again)_`),
       pendingTool: null, iterations: iters, cacheHits,
     };
   };
@@ -368,8 +414,11 @@ export async function runAgentLoop({
         toolError = parseError;
         continue;
       }
-      if (sniff) sniff.flushIfUndecided(text.trim() || out);
-      return { reply: preToolText.trim() || text.trim(), pendingTool: null, iterations: i + 1, cacheHits };
+      if (sniff) sniff.flush();
+      return {
+        reply: stripFenceRemnants(preToolText.trim() || text.trim()),
+        pendingTool: null, iterations: i + 1, cacheHits,
+      };
     }
 
     const skill = skills.get(fence.name);
@@ -393,13 +442,16 @@ export async function runAgentLoop({
 
     if (skill.kind === 'write') {
       return {
-        reply: preToolText.trim(),
+        reply: stripFenceRemnants(preToolText.trim()),
         pendingTool: { name: fence.name, arguments: validation.value },
       };
     }
 
     // read tool — check cache first, then execute
-    emit({ phase: 'tool', tool: skill.name, iteration: i + 1 });
+    // `detail` names WHAT the tool is acting on (the file, the query, the
+    // command) so the client can render "Reading UpdateFileSheet.swift"
+    // rather than a bare "Using read-file…" — see toolActivityDetail.
+    emit({ phase: 'tool', tool: skill.name, detail: toolActivityDetail(skill.name, validation.value), iteration: i + 1 });
     let result;
     const cacheKey = `${skill.name}:${stableStringify(validation.value)}`;
     if (readCache.has(cacheKey)) {
@@ -428,7 +480,7 @@ export async function runAgentLoop({
     // the write came from the active agent or a nested one.
     if (result.pendingTool) {
       return {
-        reply: preToolText.trim(),
+        reply: stripFenceRemnants(preToolText.trim()),
         pendingTool: result.pendingTool,
         iterations: i + 1,
         cacheHits,
@@ -438,7 +490,7 @@ export async function runAgentLoop({
   }
 
   const capMsg = `\n\n_(reached the ${cap}-call tool iteration limit — try again)_`;
-  return { reply: (preToolText.trim() + capMsg), pendingTool: null, iterations: cap, cacheHits };
+  return { reply: (stripFenceRemnants(preToolText.trim()) + capMsg), pendingTool: null, iterations: cap, cacheHits };
 }
 
 /**
@@ -519,7 +571,7 @@ export async function runNativeAgentLoop({
     // No tool calls → the model produced its user-facing answer. Natural
     // termination — no artificial iteration cap needed for well-behaved models.
     if (!Array.isArray(toolCalls) || !toolCalls.length) {
-      return { reply: (text || '').trim(), pendingTool: null, iterations: i + 1, cacheHits: 0 };
+      return { reply: stripFenceRemnants((text || '').trim()), pendingTool: null, iterations: i + 1, cacheHits: 0 };
     }
 
     // Append the assistant turn (with its tool_calls) per the OpenAI contract —
@@ -550,9 +602,9 @@ export async function runNativeAgentLoop({
       logger.info('skill_invoked', { skill: skill.name, kind: skill.kind, userId, iteration: i + 1 });
       if (skill.kind === 'write') {
         // One write per turn — surface for client confirmation (pendingTool).
-        return { reply: (text || '').trim(), pendingTool: { name: tc.name, arguments: validation.value }, iterations: i + 1, cacheHits: 0 };
+        return { reply: stripFenceRemnants((text || '').trim()), pendingTool: { name: tc.name, arguments: validation.value }, iterations: i + 1, cacheHits: 0 };
       }
-      emit({ phase: 'tool', tool: skill.name, iteration: i + 1 });
+      emit({ phase: 'tool', tool: skill.name, detail: toolActivityDetail(skill.name, validation.value), iteration: i + 1 });
       let result;
       try {
         result = await handlers[skill.name](validation.value, { userId, kb, handlers, depth: depth + 1 });
@@ -560,7 +612,7 @@ export async function runNativeAgentLoop({
         result = { error: `Tool ${skill.name} threw: ${err.message}` };
       }
       if (result?.pendingTool) {
-        return { reply: (text || '').trim(), pendingTool: result.pendingTool, iterations: i + 1, cacheHits: 0 };
+        return { reply: stripFenceRemnants((text || '').trim()), pendingTool: result.pendingTool, iterations: i + 1, cacheHits: 0 };
       }
       messages.push({ role: 'tool', tool_call_id: callId, name: skill.name, content: JSON.stringify(redactDeep(result)) });
     }

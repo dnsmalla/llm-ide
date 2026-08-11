@@ -118,6 +118,36 @@ struct CodeAssistantPanel: View {
     /// for a display-only concern, same reasoning as the existing
     /// isToolNotice content-based convention).
     @State var turnModes: [UUID: CodeAssistMode] = [:]
+    /// One tool step the agent took during a turn — "Reading Foo.swift",
+    /// "Running npm test" — so the transcript shows WHAT it did instead of the
+    /// raw `<<<TOOL_CALL>>>` JSON that used to stream into the reply.
+    struct ToolStep: Identifiable, Equatable {
+        let id = UUID()
+        let label: String
+        let tool: String?
+        /// SF Symbol matching the action, so a glance distinguishes a read from
+        /// a shell run without parsing the text.
+        var icon: String {
+            switch tool {
+            case "read-file", "get-issue":            return "doc.text"
+            case "list-files", "list-issues":         return "list.bullet"
+            case "search-kb":                         return "books.vertical"
+            case "web-search":                        return "globe"
+            case "fetch-url":                         return "link"
+            case "bash", "run-bash":                  return "terminal"
+            case "git-op":                            return "arrow.triangle.branch"
+            case "update-file":                       return "pencil"
+            case "ask-internal", "ask-subagent":      return "sparkles"
+            case "task-create", "task-update", "task-list": return "checklist"
+            default:                                  return "wrench.and.screwdriver"
+            }
+        }
+    }
+    /// Tool steps per assistant turn, keyed by turn id. Display-only and
+    /// in-memory, exactly like `turnModes` — deliberately NOT added to
+    /// `CodeAssistTurn`, which is what gets persisted AND replayed to the model;
+    /// the agent does not need its own tool log fed back to it.
+    @State var turnActivity: [UUID: [ToolStep]] = [:]
     @State var prefLanguage: String = "en"
     @State var didAttachInitial = false
     /// Path of the file auto-attached from the tree selection (`initialURL`),
@@ -323,6 +353,7 @@ struct CodeAssistantPanel: View {
                 tasks: agent.agentPendingTasks,
                 diffPreview: pendingUpdateFileDiff,
                 turnModes: turnModes,
+                turnActivity: turnActivity,
                 busy: busy,
                 statusText: statusText,
                 error: $error,

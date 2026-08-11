@@ -124,6 +124,7 @@ extension LlmIdeAPIClient {
         let type: String                 // "progress" | "chunk" | "done" | "error"
         let phase: String?               // progress: "thinking" | "tool" | "writing"
         let tool: String?                // progress (phase == "tool"): tool name
+        let detail: String?              // progress (phase == "tool"): what it's acting on
         let text: String?                // chunk: a text delta
         let reply: String?               // done
         let pendingTool: PendingTool?    // done
@@ -134,19 +135,53 @@ extension LlmIdeAPIClient {
         let error: String?               // error
     }
 
+    /// One live progress update. Carries the structured fields alongside the
+    /// rendered `label` so a caller can both show the transient status line AND
+    /// keep a durable record of which tools ran — the label alone can't be
+    /// filtered back down to "was this a tool step?".
+    struct AgentProgress: Sendable {
+        let label: String
+        let phase: String?
+        let tool: String?
+        let detail: String?
+        var isTool: Bool { phase == "tool" }
+    }
+
+    /// Verb for a tool, phrased as the action being performed rather than the
+    /// tool's wire name. "Using read-file…" tells the user nothing they care
+    /// about; "Reading" plus the file does.
+    static func toolVerb(_ tool: String?) -> String {
+        switch tool {
+        case "web-search":    return "Searching the web"
+        case "fetch-url":     return "Fetching a page"
+        case "ask-internal":  return "Checking app context"
+        case "ask-subagent":  return "Delegating to a subagent"
+        case "read-file":     return "Reading"
+        case "list-files":    return "Listing"
+        case "search-kb":     return "Searching the library"
+        case "run-bash":      return "Running"
+        case "bash":          return "Running"
+        case "git-op":        return "Git"
+        case "update-file":   return "Editing"
+        case "list-issues":   return "Listing issues"
+        case "get-issue":     return "Reading issue"
+        case "task-create", "task-update", "task-list": return "Planning"
+        case .some(let name): return "Using \(name)"
+        case nil:             return "Working"
+        }
+    }
+
     /// Human-readable status for a progress event — shown as a live line in the
-    /// Code Assistant instead of a frozen "Thinking…".
-    static func progressLabel(phase: String?, tool: String?) -> String {
+    /// Code Assistant instead of a frozen "Thinking…". `detail` is the tool's
+    /// salient argument (file, query, command) supplied by the server; without
+    /// it the line degrades to just the verb rather than exposing wire names.
+    static func progressLabel(phase: String?, tool: String?, detail: String? = nil) -> String {
         switch phase {
         case "writing": return "Writing the answer…"
         case "tool":
-            switch tool {
-            case "web-search":   return "Searching the web…"
-            case "fetch-url":    return "Fetching a page…"
-            case "ask-internal": return "Checking app context…"
-            case "ask-subagent": return "Delegating to a subagent…"
-            default:             return tool.map { "Using \($0)…" } ?? "Working…"
-            }
+            let verb = toolVerb(tool)
+            if let detail, !detail.isEmpty { return "\(verb) \(detail)…" }
+            return "\(verb)…"
         default: return "Thinking…"
         }
     }
@@ -169,7 +204,7 @@ extension LlmIdeAPIClient {
         skills: [String] = [],
         agentContext: AgentContext? = nil,
         mode: String? = nil,
-        onProgress: @escaping @MainActor (String) -> Void,
+        onProgress: @escaping @MainActor (AgentProgress) -> Void,
         onChunk: @escaping @MainActor (String) -> Void,
     ) async throws -> CodeAssistResponse {
         guard let url = URL(string: baseURL + "/code-assist") else { throw APIError.invalidURL }
@@ -210,8 +245,9 @@ extension LlmIdeAPIClient {
             switch evt.type {
             case "progress":
                 sawProgress = true
-                let label = Self.progressLabel(phase: evt.phase, tool: evt.tool)
-                await onProgress(label)
+                let label = Self.progressLabel(phase: evt.phase, tool: evt.tool, detail: evt.detail)
+                await onProgress(AgentProgress(label: label, phase: evt.phase,
+                                               tool: evt.tool, detail: evt.detail))
             case "chunk":
                 if let text = evt.text, !text.isEmpty {
                     sawProgress = true  // a chunk is proof of life, same as a progress event

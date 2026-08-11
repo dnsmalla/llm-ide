@@ -18,6 +18,9 @@ struct ChatMessageList: View {
     let diffPreview: DiffStats?
     /// See CodeAssistantPanel.turnModes / finishStreamingTurn.
     let turnModes: [UUID: CodeAssistMode]
+    /// Tool steps the agent took, per assistant turn — rendered as compact rows
+    /// above the reply. See CodeAssistantPanel.turnActivity.
+    let turnActivity: [UUID: [CodeAssistantPanel.ToolStep]]
     let busy: Bool
     let statusText: String
     @Binding var error: String?
@@ -70,6 +73,9 @@ struct ChatMessageList: View {
                                 PlanTimelineCard(tasks: tasks)
                                     .padding(.bottom, 4)
                                     .transition(.opacity)
+                            }
+                            if turn.role == .assistant, let steps = turnActivity[turn.id], !steps.isEmpty {
+                                toolActivityView(steps)
                             }
                             turnView(turn, lastAssistantTurnId: lastAssistantTurnId)
                                 .id(turn.id)
@@ -255,6 +261,37 @@ struct ChatMessageList: View {
             return ("exclamationmark.triangle.fill", theme.current.warning)
         }
         return ("checkmark.circle.fill", theme.current.success)
+    }
+
+    /// The steps the agent took before answering, as compact rows above the
+    /// reply — the professional form of what used to be raw `<<<TOOL_CALL>>>`
+    /// JSON streaming into the bubble. Read-only and non-interactive: it is a
+    /// record of what happened, not a control.
+    @ViewBuilder
+    private func toolActivityView(_ steps: [CodeAssistantPanel.ToolStep]) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(steps) { step in
+                HStack(spacing: 6) {
+                    Image(systemName: step.icon)
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.current.textMuted)
+                        .frame(width: 12, alignment: .center)
+                    // The trailing "…" belongs to the live status line, not to a
+                    // finished step — a completed action reads as "Read X", and
+                    // leaving the ellipsis makes every past step look stuck.
+                    Text(step.label.hasSuffix("…") ? String(step.label.dropLast()) : step.label)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.current.textMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(.leading, 2)
+        .padding(.bottom, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Steps taken: \(steps.map(\.label).joined(separator: ", "))")
     }
 
     @ViewBuilder

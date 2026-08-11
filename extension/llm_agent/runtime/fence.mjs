@@ -5,6 +5,61 @@
 const OPEN = '<<<TOOL_CALL>>>';
 const CLOSE = '<<<END_TOOL_CALL>>>';
 
+// ── Output hygiene ───────────────────────────────────────────────────
+// `parseFence` removes a WELL-FORMED fence, so anything it fails to recognise
+// is handed to the user as prose. Two shapes reach the chat that way:
+//
+//   • A near-miss the model typed slightly wrong (`<<< TOOL_CALL >>>`,
+//     `<<<TOOLCALL>>>`), which indexOf(OPEN) never finds.
+//   • A ZWJ-REDACTED fence. redactFence (redaction.mjs) neutralises sentinels
+//     in replayed history by inserting a zero-width joiner, so a fence that
+//     once leaked into a stored turn comes back to the model as
+//     `<<‍<TOOL_CALL>‍>>`. The model imitates what it sees, emits the redacted
+//     spelling, and parseFence can't match it — a self-sustaining loop that
+//     shows the user machine syntax indefinitely.
+//
+// Zero-width characters the redactor (or a copy-paste round-trip) can leave
+// between the brackets.
+const ZW = '[\\u200B-\\u200D\\uFEFF]*';
+const ANGLES_OPEN = `<${ZW}<${ZW}<`;
+const ANGLES_CLOSE = `>${ZW}>${ZW}>`;
+// The alternation MUST be grouped: without `(?:…)` the `|` splits the whole
+// pattern, so the regex degenerates into "opening angles + END_TOOL_CALL" OR
+// "TOOL_CALL + closing angles" — the second of which matches from the word
+// rather than the brackets and leaves a stray `<<<` behind in the reply.
+const looseMarker = (word) =>
+  new RegExp(`${ANGLES_OPEN}${ZW}\\s*(?:${word})${ZW}\\s*${ANGLES_CLOSE}`, 'i');
+const LOOSE_OPEN = looseMarker('END_?TOOL_?CALL|TOOL_?CALL');
+const LOOSE_CLOSE = looseMarker('END_?TOOL_?CALL');
+
+/**
+ * Remove leftover tool-call directives from text that is about to be shown to
+ * a user. Deliberately conservative: a fence-shaped marker is only stripped
+ * when a JSON object follows it, so prose that merely MENTIONS the protocol
+ * ("what does <<<TOOL_CALL>>> do?") is preserved — this repo documents the
+ * fence, and the agent must still be able to talk about it.
+ *
+ * Pure + exported for unit tests.
+ */
+export function stripFenceRemnants(text) {
+  if (typeof text !== 'string' || !text) return text;
+  let out = text;
+  // Bounded: each pass removes one directive, so a handful covers any realistic
+  // reply and a pathological one can't spin.
+  for (let pass = 0; pass < 8; pass++) {
+    const open = LOOSE_OPEN.exec(out);
+    if (!open) break;
+    const afterOpen = open.index + open[0].length;
+    const rest = out.slice(afterOpen);
+    // Only treat it as a directive if a JSON payload follows close behind.
+    if (!/^\s{0,40}\{/.test(rest)) break;
+    const close = LOOSE_CLOSE.exec(rest);
+    const end = close ? afterOpen + close.index + close[0].length : out.length;
+    out = (out.slice(0, open.index) + out.slice(end)).trim();
+  }
+  return out;
+}
+
 export function parseFence(raw) {
   if (typeof raw !== 'string') {
     return { text: '', fence: null };

@@ -697,8 +697,9 @@ final class MobileControlManager {
                 attachments: attachments,
                 skills: skillIds,
                 agentContext: agentContext,
-                onProgress: { [weak self] label in
+                onProgress: { [weak self] progress in
                     guard let self, !self.isMobileCommandCancelled(commandId) else { return }
+                    let label = progress.label
                     append(.info, "code-assist: \(label)")
                     Task {
                         guard !self.isMobileCommandCancelled(commandId) else { return }

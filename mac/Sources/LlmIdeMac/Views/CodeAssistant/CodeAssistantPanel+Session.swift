@@ -358,7 +358,21 @@ extension CodeAssistantPanel {
                 message: message, language: prefLanguage, model: model, provider: provider,
                 history: history, attachments: attachments, skills: skills, agentContext: ctx,
                 mode: modelState.selectedMode.rawValue,
-                onProgress: { statusText = $0 }, onChunk: onChunk)
+                onProgress: { progress in
+                    statusText = progress.label
+                    // Keep a durable row for each TOOL step (not for
+                    // thinking/writing, which are momentary): this is the
+                    // record that replaces the raw fence JSON the user used to
+                    // watch stream into the reply.
+                    guard progress.isTool, let turnID = revealingTurnID else { return }
+                    var steps = turnActivity[turnID] ?? []
+                    // The loop re-emits on every iteration; a repeat of the same
+                    // action back-to-back is noise, not a second step.
+                    if steps.last?.label == progress.label { return }
+                    steps.append(.init(label: progress.label, tool: progress.tool))
+                    turnActivity[turnID] = steps
+                },
+                onChunk: onChunk)
         } catch let e as APIError {
             // APIError == a server/stream/format failure (cancellations surface
             // as CancellationError / URLError.cancelled, which propagate). Retry
@@ -774,6 +788,9 @@ extension CodeAssistantPanel {
         autoAttachedPath = nil
         attachNotice = nil
         agent.pendingTool = nil
+        // Tool-step rows belong to the outgoing chat's turns; a reloaded
+        // session mints fresh turn ids, so keeping them would only leak.
+        turnActivity.removeAll()
         error = nil
         agent.nudgePrompt = nil
         agent.agentSessionId = UUID().uuidString

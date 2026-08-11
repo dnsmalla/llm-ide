@@ -395,6 +395,23 @@ Run through this against a real meeting before merging:
 
 ---
 
+## Tool-call fences must never reach the user (`extension/llm_agent/runtime/{loop,fence}.mjs`)
+
+### ✅ MUST preserve
+
+- **The streaming filter detects `<<<TOOL_CALL>>>` ANYWHERE in the output, not just at position 0.** It originally sniffed the first 15 characters and then forwarded the rest of the call unconditionally, so the commonest shape — a sentence of narration followed by a fence — streamed raw JSON straight into the chat bubble. It also holds back any tail that could still become the marker, so a fence split across deltas (`…<<<TOOL_` + `CALL>>>`) can't slip through in pieces.
+- **`stripFenceRemnants` runs on every user-visible reply path** (final answer, deadline reply, iteration-cap reply, pendingTool replies, and both native-loop returns). `parseFence` only removes a *well-formed* fence, so a near-miss spelling or a **ZWJ-redacted** fence is handed to the user as prose. The redacted case is self-sustaining: `redactFence` neutralises sentinels in replayed history, the model imitates the redacted spelling it sees, and the parser can't match it — so it recurs until something strips it.
+- **`stripFenceRemnants` only strips a marker when a JSON object follows it.** This repo documents the fence protocol, and the agent must still be able to *explain* it; prose that merely mentions `<<<TOOL_CALL>>>` is preserved.
+- **Group the alternation in the loose marker regex** (`(?:END_?TOOL_?CALL|TOOL_?CALL)`). Without `(?:…)` the `|` splits the whole pattern and the match starts at the word instead of the brackets, leaving a stray `<<<` in the reply while still passing a naive "no TOOL_CALL" assertion.
+- **Progress events carry a `detail`** (the file / query / command) and the client renders a verb + target ("Reading Foo.swift"), never the tool's wire name. Keep `detail` short — it crosses SSE on every tool call and renders on one line.
+
+### ❌ DO NOT do these
+
+- **Do NOT put tool steps into `CodeAssistTurn`.** `turnActivity` is display-only, like `turnModes`: `CodeAssistTurn` is persisted *and* replayed to the model, which does not need its own tool log fed back to it.
+- **Do NOT make `stripFenceRemnants` greedy** (e.g. strip any `<<<`…`>>>` pair). That silently mangles legitimate answers about the protocol and about this repo's own source.
+
+---
+
 ## Shell execution (`mac/Sources/LlmIdeMac/Services/BashService.swift`)
 
 ### ✅ MUST preserve
