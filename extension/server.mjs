@@ -38,7 +38,10 @@ const HOST = config.host;
 // 26: added the /auth/me/skills-sources/* management endpoints (list,
 //     toggle, add, update, remove) — not tracked in ENDPOINTS below since
 //     /auth/* routes are excluded from that list by convention.
-const SERVER_API_VERSION = 26;
+// 27: renamed those endpoints to /auth/me/llm-sources/* (the feature was
+//     renamed + generalized from skills-only to skills/agents/hooks
+//     discovery) and added a GET .../<id>/discovery detail route.
+const SERVER_API_VERSION = 27;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

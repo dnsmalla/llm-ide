@@ -159,11 +159,11 @@ export function isAuthRoute(url) {
       || path === '/auth/me/claude-plugins/import'
       || path === '/auth/me/claude-plugins/refresh'
       || path === '/auth/me/claude-plugins/updates'
-      || path === '/auth/me/skills-sources'
-      || path === '/auth/me/skills-sources/toggle'
-      || path === '/auth/me/skills-sources/add'
-      || path === '/auth/me/skills-sources/update'
-      || path.startsWith('/auth/me/skills-sources/')
+      || path === '/auth/me/llm-sources'
+      || path === '/auth/me/llm-sources/toggle'
+      || path === '/auth/me/llm-sources/add'
+      || path === '/auth/me/llm-sources/update'
+      || path.startsWith('/auth/me/llm-sources/')
       || path === '/auth/google/start'
       || path === '/auth/google/callback'
       || path === '/auth/google/status'
@@ -976,20 +976,24 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     return;
   }
 
-  // ── Skills sources management ─────────────────────────────────────
-  // GET  /auth/me/skills-sources          → list sources + per-user enable
-  // POST /auth/me/skills-sources/toggle   → { id, enabled }
-  // POST /auth/me/skills-sources/add      → { url|path, ref?, name? }  (admin)
-  // POST /auth/me/skills-sources/update   → { id }                     (admin)
-  // DELETE /auth/me/skills-sources/<id>                                (admin)
-  if (method === 'GET' && url.split('?')[0] === '/auth/me/skills-sources') {
-    const { listSourcesWithState, seedBuiltinOnce } = await import('../skills-sources/registry.mjs');
+  // ── LLM sources management ────────────────────────────────────────
+  // A registered LLM source contributes any mix of skills (chat "/" menu
+  // discovery), agents (subagent definitions), and hooks — the latter two
+  // are catalogued for display only, never invoked/executed (see the
+  // Safety note atop llm-sources/registry.mjs).
+  // GET  /auth/me/llm-sources          → list sources + per-user enable
+  // POST /auth/me/llm-sources/toggle   → { id, enabled }
+  // POST /auth/me/llm-sources/add      → { url|path, ref?, name? }  (admin)
+  // POST /auth/me/llm-sources/update   → { id }                     (admin)
+  // DELETE /auth/me/llm-sources/<id>                                (admin)
+  if (method === 'GET' && url.split('?')[0] === '/auth/me/llm-sources') {
+    const { listSourcesWithState, seedBuiltinOnce } = await import('../llm-sources/registry.mjs');
     seedBuiltinOnce();
     send(res, 200, listSourcesWithState(req.user.id));
     return;
   }
 
-  if (method === 'POST' && url === '/auth/me/skills-sources/toggle') {
+  if (method === 'POST' && url === '/auth/me/llm-sources/toggle') {
     let body;
     try { body = await readJson(req, bodyLimit); }
     catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
@@ -998,15 +1002,15 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
         throw errValidation('id must be a valid source slug');
       }
       if (typeof body.enabled !== 'boolean') throw errValidation('enabled must be a boolean');
-      const { getSource } = await import('../skills-sources/registry.mjs');
+      const { getSource } = await import('../llm-sources/registry.mjs');
       if (!getSource(body.id)) throw errValidation(`source '${body.id}' is not registered`);
-      const { setEnabled } = await import('../skills-sources/state.mjs');
+      const { setEnabled } = await import('../llm-sources/state.mjs');
       setEnabled(req.user.id, body.id, body.enabled);
       const { _resetSkillLibraryCache } = await import('../llm_agent/skills/skill-library.mjs');
       _resetSkillLibraryCache();
       safeAudit(db, {
         userId: req.user.id, requestId, ip, userAgent: ua,
-        action: body.enabled ? 'skills-source.enable' : 'skills-source.disable',
+        action: body.enabled ? 'llm-source.enable' : 'llm-source.disable',
         resource: body.id, outcome: 'success',
       });
       send(res, 200, { ok: true, enabled: body.enabled });
@@ -1016,28 +1020,28 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     return;
   }
 
-  if (method === 'POST' && url === '/auth/me/skills-sources/add') {
+  if (method === 'POST' && url === '/auth/me/llm-sources/add') {
     try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     let body;
     try { body = await readJson(req, bodyLimit); }
     catch { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return; }
-    const { addSource } = await import('../skills-sources/registry.mjs');
+    const { addSource } = await import('../llm-sources/registry.mjs');
     const result = await addSource({ url: body?.url, path: body?.path, ref: body?.ref, name: body?.name });
     if (result.error) {
       safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
-        action: 'skills-source.add', outcome: 'failure', detail: { error: result.error.slice(0, 200) } });
+        action: 'llm-source.add', outcome: 'failure', detail: { error: result.error.slice(0, 200) } });
       send(res, result.status || 400, { error: { code: 'ADD_FAILED', message: result.error } });
       return;
     }
     const { _resetSkillLibraryCache } = await import('../llm_agent/skills/skill-library.mjs');
     _resetSkillLibraryCache();
     safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
-      action: 'skills-source.add', resource: result.source.id, outcome: 'success' });
+      action: 'llm-source.add', resource: result.source.id, outcome: 'success' });
     send(res, 200, result);
     return;
   }
 
-  if (method === 'POST' && url === '/auth/me/skills-sources/update') {
+  if (method === 'POST' && url === '/auth/me/llm-sources/update') {
     try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     let body;
     try { body = await readJson(req, bodyLimit); }
@@ -1045,7 +1049,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     if (!body || typeof body.id !== 'string' || !/^[a-z][a-z0-9-]{1,40}$/.test(body.id)) {
       send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid source id' } }); return;
     }
-    const { updateSource } = await import('../skills-sources/registry.mjs');
+    const { updateSource } = await import('../llm-sources/registry.mjs');
     const result = await updateSource(body.id);
     if (result.error) {
       send(res, result.status || 400, { error: { code: 'UPDATE_FAILED', message: result.error } }); return;
@@ -1053,18 +1057,18 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     const { _resetSkillLibraryCache } = await import('../llm_agent/skills/skill-library.mjs');
     _resetSkillLibraryCache();
     safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
-      action: 'skills-source.update', resource: body.id, outcome: 'success' });
+      action: 'llm-source.update', resource: body.id, outcome: 'success' });
     send(res, 200, result);
     return;
   }
 
-  if (method === 'DELETE' && url.startsWith('/auth/me/skills-sources/')) {
+  if (method === 'DELETE' && url.startsWith('/auth/me/llm-sources/')) {
     try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
-    const id = decodeURIComponent(url.slice('/auth/me/skills-sources/'.length).split('?')[0]);
+    const id = decodeURIComponent(url.slice('/auth/me/llm-sources/'.length).split('?')[0]);
     if (!/^[a-z][a-z0-9-]{1,40}$/.test(id)) {
       send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid source id' } }); return;
     }
-    const { removeSource } = await import('../skills-sources/registry.mjs');
+    const { removeSource } = await import('../llm-sources/registry.mjs');
     const result = removeSource(id);
     if (result.error) {
       send(res, result.status || 400, { error: { code: 'REMOVE_FAILED', message: result.error } }); return;
@@ -1072,8 +1076,20 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     const { _resetSkillLibraryCache } = await import('../llm_agent/skills/skill-library.mjs');
     _resetSkillLibraryCache();
     safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
-      action: 'skills-source.remove', resource: id, outcome: 'success' });
+      action: 'llm-source.remove', resource: id, outcome: 'success' });
     send(res, 200, result);
+    return;
+  }
+
+  if (method === 'GET' && url.split('?')[0].startsWith('/auth/me/llm-sources/') && url.split('?')[0].endsWith('/discovery')) {
+    const id = decodeURIComponent(url.split('?')[0].slice('/auth/me/llm-sources/'.length, -'/discovery'.length));
+    if (!/^[a-z][a-z0-9-]{1,40}$/.test(id)) {
+      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid source id' } }); return;
+    }
+    const { sourceDiscoveryDetail } = await import('../llm-sources/registry.mjs');
+    const detail = sourceDiscoveryDetail(id);
+    if (!detail) { send(res, 404, { error: { code: 'NOT_FOUND', message: 'source not found or not installed' } }); return; }
+    send(res, 200, detail);
     return;
   }
 

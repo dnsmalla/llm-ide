@@ -18,18 +18,31 @@ fs.writeFileSync(path.join(fakeRepo, 'skills', 'demo', 'SKILL.md'),
   '---\nname: demo\ndescription: d\n---\n\n# demo\n');
 process.env.SKILLS_REPO = fakeRepo;
 
-const { readRegistry, writeRegistry, isValidSkillsSource, seedBuiltinOnce,
-  listSources, getSource, BUILTIN_ID, countDiscoverySkills } =
-  await import('../skills-sources/registry.mjs');
+const { readRegistry, writeRegistry, isValidLlmSource, seedBuiltinOnce,
+  listSources, getSource, BUILTIN_ID, countDiscoverySkills,
+  countDiscoveryAgents, listDiscoveryAgents, countDiscoveryHooks, listDiscoveryHooks,
+  sourceDiscoveryDetail } =
+  await import('../llm-sources/registry.mjs');
 
-test('isValidSkillsSource accepts registry.yaml or plugin.json+skills/', () => {
-  assert.ok(isValidSkillsSource(fakeRepo));
+test('isValidLlmSource accepts registry.yaml or plugin.json+skills/', () => {
+  assert.ok(isValidLlmSource(fakeRepo));
   const cp = path.join(tmpRoot, 'cp');
   fs.mkdirSync(path.join(cp, 'skills', 'x'), { recursive: true });
   fs.mkdirSync(path.join(cp, '.claude-plugin'), { recursive: true });
   fs.writeFileSync(path.join(cp, '.claude-plugin', 'plugin.json'), '{"name":"x"}');
-  assert.ok(isValidSkillsSource(cp));
-  assert.ok(!isValidSkillsSource(tmpRoot)); // no markers
+  assert.ok(isValidLlmSource(cp));
+  assert.ok(!isValidLlmSource(tmpRoot)); // no markers
+});
+
+test('isValidLlmSource also accepts an agents/-only or hooks-manifest-only directory', () => {
+  const agentsOnly = path.join(tmpRoot, 'agents-only');
+  fs.mkdirSync(path.join(agentsOnly, 'agents'), { recursive: true });
+  assert.ok(isValidLlmSource(agentsOnly));
+
+  const hooksOnly = path.join(tmpRoot, 'hooks-only');
+  fs.mkdirSync(path.join(hooksOnly, 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(hooksOnly, 'hooks', 'hooks.json'), '{}');
+  assert.ok(isValidLlmSource(hooksOnly));
 });
 
 test('seedBuiltinOnce adds exactly one builtin source pointing at the resolved repo', () => {
@@ -59,7 +72,41 @@ test('countDiscoverySkills counts skills/ + runtime/ SKILL.md', () => {
   assert.equal(countDiscoverySkills(fakeRepo), 2);
 });
 
-import { normalizeGitUrl, addSource, removeSource, updateSource, syncBuiltin } from '../skills-sources/registry.mjs';
+test('countDiscoveryAgents + listDiscoveryAgents read agents/*.md frontmatter', () => {
+  fs.mkdirSync(path.join(fakeRepo, 'agents'), { recursive: true });
+  fs.writeFileSync(path.join(fakeRepo, 'agents', 'reviewer.md'),
+    '---\nname: reviewer\ndescription: reviews code\n---\n\nbody\n');
+  fs.writeFileSync(path.join(fakeRepo, 'agents', 'not-an-agent.txt'), 'ignored, not .md');
+  assert.equal(countDiscoveryAgents(fakeRepo), 1);
+  const agents = listDiscoveryAgents(fakeRepo);
+  assert.equal(agents.length, 1);
+  assert.equal(agents[0].name, 'reviewer');
+  assert.equal(agents[0].description, 'reviews code');
+});
+
+test('countDiscoveryHooks + listDiscoveryHooks read the Claude-plugin hooks manifest — discovery only', () => {
+  fs.mkdirSync(path.join(fakeRepo, '.claude-plugin', 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(fakeRepo, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
+    PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo pre' }] }],
+    SessionStart: [{ hooks: [{ type: 'command', command: 'echo start' }] }],
+  }));
+  assert.equal(countDiscoveryHooks(fakeRepo), 2);
+  const hooks = listDiscoveryHooks(fakeRepo);
+  assert.equal(hooks.length, 2);
+  assert.ok(hooks.some((h) => h.event === 'PreToolUse' && h.matcher === 'Bash' && h.command === 'echo pre'));
+  assert.ok(hooks.some((h) => h.event === 'SessionStart' && h.command === 'echo start'));
+});
+
+test('sourceDiscoveryDetail returns the agents+hooks for a registered, installed source', () => {
+  writeRegistry([]); seedBuiltinOnce(); // re-seed after writeRegistry([]) above cleared it
+  const detail = sourceDiscoveryDetail(BUILTIN_ID);
+  assert.ok(detail);
+  assert.ok(Array.isArray(detail.agents));
+  assert.ok(Array.isArray(detail.hooks));
+  assert.equal(sourceDiscoveryDetail('not-a-real-id'), null);
+});
+
+import { normalizeGitUrl, addSource, removeSource, updateSource, syncBuiltin } from '../llm-sources/registry.mjs';
 
 test('normalizeGitUrl rejects unsafe schemes and localhost, accepts https', () => {
   assert.ok(normalizeGitUrl('https://github.com/o/r.git').ok);
@@ -112,10 +159,10 @@ test('addSource surfaces a clone failure instead of throwing (unreachable host)'
   assert.equal(readRegistry().length, before, 'must not persist a failed clone');
 });
 
-import { listSourcesWithState } from '../skills-sources/registry.mjs';
-import { setEnabled } from '../skills-sources/state.mjs';
+import { listSourcesWithState } from '../llm-sources/registry.mjs';
+import { setEnabled } from '../llm-sources/state.mjs';
 
-test('listSourcesWithState joins per-user enable + live metadata', () => {
+test('listSourcesWithState joins per-user enable + live metadata, including agent/hook counts', () => {
   writeRegistry([]); seedBuiltinOnce();
   setEnabled('viewer', BUILTIN_ID, true);
   const { sources } = listSourcesWithState('viewer');
@@ -123,6 +170,8 @@ test('listSourcesWithState joins per-user enable + live metadata', () => {
   assert.ok(b.enabled);
   assert.equal(b.origin, 'builtin');
   assert.ok(typeof b.skillCount === 'number');
+  assert.ok(typeof b.agentCount === 'number');
+  assert.ok(typeof b.hookCount === 'number');
   // A user who disabled builtin sees enabled=false.
   setEnabled('off', BUILTIN_ID, false);
   const off = listSourcesWithState('off').sources.find((s) => s.id === BUILTIN_ID);

@@ -1,8 +1,20 @@
-// Skills-source registry: a list of registered skills repos (builtin .skills +
-// user-added git clones / local paths). Discovery-only, read in place — never
-// copied into plugins/. The builtin source points at resolveCentralSkillsRepo().
+// LLM-source registry: a list of registered LLM-resource repos (builtin
+// .skills + user-added git clones / local paths). Discovery-only, read in
+// place — never copied into plugins/. The builtin source points at
+// resolveCentralSkillsRepo(). Each source may contribute any mix of three
+// discoverable kinds: skills (skills/, runtime/ families — SKILL.md), agents
+// (agents/*.md subagent definitions), and hooks (.claude-plugin/hooks/hooks.json
+// or hooks/hooks.json, the Claude Code plugin-hook manifest shape).
 //
-// Registry file: <sourcesDir>/../skills-sources.json  (atomic writes)
+// SAFETY: every non-builtin source is discovery-only, for ALL THREE kinds —
+// skills surface as chat "/" menu attachable context (unchanged); agents and
+// hooks are catalogued/listable ONLY, never wired into the runtime. A
+// registered third-party repo's hooks.json is never executed — that would
+// let anyone who can register a source run arbitrary shell commands inside
+// this server. Only the `builtin` source's own hardcoded handlers (in
+// route.mjs) are ever invoked; see the design doc's Safety section.
+//
+// Registry file: <sourcesDir>/../llm-sources.json  (atomic writes)
 // Cloned sources: <sourcesDir>/<id>/  (siblings to plugins/)
 
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
@@ -10,6 +22,7 @@ import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import * as yaml from 'js-yaml';
 import { resolveCentralSkillsRepo } from '../llm_agent/skills/skill-library.mjs';
 import { listEnabled, pruneOrphans } from './state.mjs';
 
@@ -22,6 +35,8 @@ const execFileAsync = promisify(execFile);
 
 export const BUILTIN_ID = 'builtin';
 const LIBRARY_FAMILIES = ['skills', 'runtime'];
+const AGENTS_FAMILY = 'agents';
+const MAX_DESC = 200;
 
 // MUST keep identical to Task 1 stub — state.mjs imports and depends on this.
 function dirnameOf(p) { return p.split('/').slice(0, -1).join('/') || '/'; }
@@ -31,11 +46,11 @@ export function defaultSourcesDir() {
     || (process.platform === 'darwin'
         ? join(homedir(), 'Library', 'Application Support', 'llm-ide', 'plugins')
         : join(homedir(), '.local', 'share', 'llm-ide', 'plugins'));
-  return join(dirnameOf(base), 'skills-sources');
+  return join(dirnameOf(base), 'llm-sources');
 }
 
 function registryFilePath() {
-  return join(dirname(defaultSourcesDir()), 'skills-sources.json');
+  return join(dirname(defaultSourcesDir()), 'llm-sources.json');
 }
 
 export function readRegistry() {
@@ -55,13 +70,17 @@ export function writeRegistry(list) {
   renameSync(tmp, p);
 }
 
-// A directory is a valid skills source if it has registry.yaml OR
-// (.claude-plugin/plugin.json + a skills/ directory).
-export function isValidSkillsSource(dir) {
+// A directory is a valid LLM source if it has registry.yaml OR
+// (.claude-plugin/plugin.json + a skills/ directory) OR an agents/ or hooks
+// manifest of its own — i.e. it contributes at least one discoverable kind.
+export function isValidLlmSource(dir) {
   try {
     if (!existsSync(dir)) return false;
     if (existsSync(join(dir, 'registry.yaml'))) return true;
-    return existsSync(join(dir, '.claude-plugin', 'plugin.json')) && existsSync(join(dir, 'skills'));
+    if (existsSync(join(dir, '.claude-plugin', 'plugin.json')) && existsSync(join(dir, 'skills'))) return true;
+    if (existsSync(join(dir, AGENTS_FAMILY))) return true;
+    if (existsSync(join(dir, '.claude-plugin', 'hooks', 'hooks.json')) || existsSync(join(dir, 'hooks', 'hooks.json'))) return true;
+    return false;
   } catch { return false; }
 }
 
@@ -81,6 +100,28 @@ function readVersion(dir) {
   return undefined;
 }
 
+// Pull name + description from a markdown frontmatter block (SKILL.md or an
+// agents/*.md subagent definition — same shape, both are just "name +
+// description + body"). Uses js-yaml so a folded/quoted description parses
+// the same way the skill-library reader and the agent-loader do.
+function readFrontmatterNameDesc(file) {
+  try {
+    const raw = readFileSync(file, 'utf8');
+    const m = raw.match(/^---\n([\s\S]*?)\n^---\s*$/m);
+    if (!m) return null;
+    const fm = yaml.load(m[1]);
+    if (!fm || typeof fm !== 'object') return null;
+    const name = typeof fm.name === 'string' ? fm.name.trim() : '';
+    if (!name) return null;
+    const description = typeof fm.description === 'string'
+      ? fm.description.trim().slice(0, MAX_DESC)
+      : '';
+    return { name, description };
+  } catch {
+    return null;
+  }
+}
+
 export function countDiscoverySkills(dir) {
   let n = 0;
   for (const fam of LIBRARY_FAMILIES) {
@@ -93,6 +134,65 @@ export function countDiscoverySkills(dir) {
     }
   }
   return n;
+}
+
+// agents/*.md — one file per subagent, same frontmatter shape as SKILL.md
+// (Claude Code's convention for standalone subagent definitions).
+export function listDiscoveryAgents(dir) {
+  const d = join(dir, AGENTS_FAMILY);
+  if (!existsSync(d)) return [];
+  let entries;
+  try { entries = readdirSync(d, { withFileTypes: true }); } catch { return []; }
+  const agents = [];
+  for (const e of entries) {
+    if (!e.isFile() || !e.name.endsWith('.md')) continue;
+    const fm = readFrontmatterNameDesc(join(d, e.name));
+    if (!fm) continue;
+    agents.push({ name: fm.name, description: fm.description, path: join(d, e.name) });
+  }
+  return agents;
+}
+
+export function countDiscoveryAgents(dir) {
+  return listDiscoveryAgents(dir).length;
+}
+
+// .claude-plugin/hooks/hooks.json (Claude Code plugin-hook manifest) or a
+// top-level hooks/hooks.json fallback — shape:
+//   { "<EventName>": [ { "matcher"?: string, "hooks": [{ "type": "command", "command": string }] } ] }
+// DISCOVERY ONLY — the commands inside are never executed by this server;
+// see the Safety note at the top of this file.
+function hooksManifestPath(dir) {
+  const nested = join(dir, '.claude-plugin', 'hooks', 'hooks.json');
+  if (existsSync(nested)) return nested;
+  const flat = join(dir, 'hooks', 'hooks.json');
+  if (existsSync(flat)) return flat;
+  return null;
+}
+
+export function listDiscoveryHooks(dir) {
+  const p = hooksManifestPath(dir);
+  if (!p) return [];
+  let manifest;
+  try { manifest = JSON.parse(readFileSync(p, 'utf8')); } catch { return []; }
+  if (!manifest || typeof manifest !== 'object') return [];
+  const out = [];
+  for (const [event, entries] of Object.entries(manifest)) {
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      const matcher = typeof entry?.matcher === 'string' ? entry.matcher : undefined;
+      const hooks = Array.isArray(entry?.hooks) ? entry.hooks : [];
+      for (const h of hooks) {
+        if (typeof h?.command !== 'string') continue;
+        out.push({ event, matcher, command: h.command.slice(0, 200) });
+      }
+    }
+  }
+  return out;
+}
+
+export function countDiscoveryHooks(dir) {
+  return listDiscoveryHooks(dir).length;
 }
 
 // Ensure the builtin source exists, pointing at the resolved central repo.
@@ -121,7 +221,7 @@ export function listSources() {
   return readRegistry();
 }
 
-// Re-read live metadata (existence + skill count + version) for a snapshot.
+// Re-read live metadata (existence + skill/agent/hook counts + version) for a snapshot.
 export function snapshotSource(src) {
   const exists = !!src.location && existsSync(src.location);
   return {
@@ -129,6 +229,8 @@ export function snapshotSource(src) {
     installed: exists,
     version: exists ? readVersion(src.location) : src.version,
     skillCount: exists ? countDiscoverySkills(src.location) : 0,
+    agentCount: exists ? countDiscoveryAgents(src.location) : 0,
+    hookCount: exists ? countDiscoveryHooks(src.location) : 0,
   };
 }
 
@@ -195,7 +297,7 @@ export async function addSource({ url, path, ref, name } = {}) {
 
   if (path) {
     if (!existsSync(path)) return { error: 'path does not exist', status: 400 };
-    if (!isValidSkillsSource(path)) return { error: 'not a valid skills source (needs registry.yaml or .claude-plugin/plugin.json + skills/)', status: 400 };
+    if (!isValidLlmSource(path)) return { error: 'not a valid LLM source (needs registry.yaml, .claude-plugin/plugin.json + skills/, agents/, or a hooks manifest)', status: 400 };
     const id = slugify(name || path.split('/').pop(), existing);
     const src = { id, name: name || id, origin: 'local', location: path, builtin: false, version: readVersion(path) };
     list.push(src); writeRegistry(list);
@@ -211,7 +313,7 @@ export async function addSource({ url, path, ref, name } = {}) {
     mkdirSync(defaultSourcesDir(), { recursive: true });
     const cl = await cloneShallow(n.url, ref, dest);
     if (cl.error) { try { rmSync(dest, { recursive: true, force: true }); } catch { /* */ } return { error: cl.error, status: 400 }; }
-    if (!isValidSkillsSource(dest)) { try { rmSync(dest, { recursive: true, force: true }); } catch { /* best-effort */ } return { error: 'cloned repo is not a valid skills source', status: 400 }; }
+    if (!isValidLlmSource(dest)) { try { rmSync(dest, { recursive: true, force: true }); } catch { /* best-effort */ } return { error: 'cloned repo is not a valid LLM source', status: 400 }; }
     const src = { id, name: name || id, origin: 'git', location: dest, ref: ref || 'main', builtin: false, version: readVersion(dest) };
     list.push(src); writeRegistry(list);
     return { source: src };
@@ -302,5 +404,17 @@ export function listSourcesWithState(userId) {
       const snap = snapshotSource(s);
       return { ...snap, enabled: enabled.has(s.id) };
     }),
+  };
+}
+
+// Full discovery detail for one source — used by the Mac detail view to
+// actually list what a source contributes, not just show counts. Discovery
+// only: agents/hooks are informational, never invoked/executed from here.
+export function sourceDiscoveryDetail(id) {
+  const src = getSource(id);
+  if (!src || !src.location || !existsSync(src.location)) return null;
+  return {
+    agents: listDiscoveryAgents(src.location),
+    hooks: listDiscoveryHooks(src.location),
   };
 }

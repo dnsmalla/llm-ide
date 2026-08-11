@@ -106,9 +106,9 @@ extension/tests/_skill-library-*/
 extension/tests/_claude-plugins-fixture/
 extension/tests/_llmide-plugins-fixture/
 extension/tests/plugin-state.json
-extension/tests/skills-sources.json
-extension/tests/skills-sources-state.json
-extension/tests/_skills-sources-http-fixture-*/
+extension/tests/llm-sources.json
+extension/tests/llm-sources-state.json
+extension/tests/_llm-sources-http-fixture-*/
 
 # Top-level copy of the external computer-agent (lives at
 # ~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/). Anchored to the repo

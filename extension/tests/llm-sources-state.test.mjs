@@ -1,4 +1,4 @@
-// Per-user enable state for skills sources — mirrors plugins/state.mjs.
+// Per-user enable state for LLM sources — mirrors plugins/state.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -14,7 +14,7 @@ const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-state-'));
 process.env.LLMIDE_PLUGIN_DIR = path.join(tmpRoot, 'plugins'); // defaultSourcesDir derives from this
 
 const { listEnabled, setEnabled, pruneOrphans } =
-  await import('../skills-sources/state.mjs');
+  await import('../llm-sources/state.mjs');
 
 test('first-time user has an empty enable set', () => {
   assert.deepEqual([...listEnabled('user-1')], []);

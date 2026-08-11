@@ -13,8 +13,8 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
-// Isolate the skills-sources registry to a temp dir so tests never touch the
-// real ~/Library/.../skills-sources.json. Required once listSkillLibrary()
+// Isolate the llm-sources registry to a temp dir so tests never touch the
+// real ~/Library/.../llm-sources.json. Required once listSkillLibrary()
 // seeds the builtin source into the registry on first call.
 const tmpRegRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-sl-reg-'));
 process.env.LLMIDE_PLUGIN_DIR = path.join(tmpRegRoot, 'plugins');
@@ -45,8 +45,8 @@ process.env.SKILLS_REPO = repo;
 const { listSkillLibrary, readSkillInstructions, resolveCentralSkillsRepo, _resetSkillLibraryCache } =
   await import('../llm_agent/skills/skill-library.mjs');
 const { writeRegistry, addSource, seedBuiltinOnce, BUILTIN_ID } =
-  await import('../skills-sources/registry.mjs');
-const { setEnabled } = await import('../skills-sources/state.mjs');
+  await import('../llm-sources/registry.mjs');
+const { setEnabled } = await import('../llm-sources/state.mjs');
 
 test('resolveCentralSkillsRepo finds the repo via $SKILLS_REPO', () => {
   assert.equal(resolveCentralSkillsRepo(), repo);
@@ -132,7 +132,7 @@ test('readSkillInstructions refuses an unknown id and never reads an arbitrary p
 // Multi-source: a registered local source contributes its discovery skills,
 // tagged with sourceId/sourceName. Disable it (per-user) and it disappears.
 test('listSkillLibrary(userId) unions enabled sources and tags each skill', async () => {
-  // Isolate registry/state to a temp dir so the real skills-sources.json is untouched.
+  // Isolate registry/state to a temp dir so the real llm-sources.json is untouched.
   const tmpReg = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-sl-'));
   process.env.LLMIDE_PLUGIN_DIR = path.join(tmpReg, 'plugins');
   // A second source repo alongside the existing fixture `repo` (= the builtin).
