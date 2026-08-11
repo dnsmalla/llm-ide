@@ -24,6 +24,7 @@ The following files are governed by this document.
 - `extension/llm_agent/runtime/handlers/ask-internal.mjs`
 - `extension/llm_agent/runtime/handlers/ask-subagent.mjs`
 - `extension/llm_agent/runtime/handlers/search-kb.mjs`
+- `extension/llm_agent/runtime/handlers/find-code.mjs` — index→graph code search (`find-code`); staged query in `extension/graphkit/graph.mjs` (`searchCodeIndex`), paths gated on the same readable roots as `read-file`
 - `extension/llm_agent/runtime/handlers/web-search.mjs` — web search; backed by `extension/agents/web-client.mjs`
 - `extension/llm_agent/runtime/handlers/fetch-url.mjs` — URL fetch (SSRF-guarded); same backend
 
@@ -36,7 +37,7 @@ The following files are governed by this document.
 **Prompt and skill content** (linked, not reproduced here)
 
 - `extension/llm_agent/global/prompt.md` — global agent role
-- `extension/llm_agent/global/ask-internal.md`, `ask-subagent.md`, `update-file.md`, `web-search.md`, `fetch-url.md` — global skill bodies
+- `extension/llm_agent/global/ask-internal.md`, `ask-subagent.md`, `update-file.md`, `web-search.md`, `fetch-url.md`, `find-code.md` — global skill bodies
 - `extension/llm_agent/global/compose-prompt.mjs` — global prompt assembly
 - `extension/llm_agent/internal/prompt.md` — internal agent role
 - `extension/llm_agent/internal/skills/*.md` — internal skill bodies (`_base.md`, `search-kb.md`, `create-gitlab-issue.md`, `comment-gitlab-issue.md`, `trigger-review-code.md`)
@@ -263,6 +264,7 @@ Verbatim prompt and skill files (version-controlled; read the source, do not rel
 - `extension/llm_agent/global/git-op.md` — `git-op` write skill body
 - `extension/llm_agent/global/web-search.md` — `web-search` read skill body
 - `extension/llm_agent/global/fetch-url.md` — `fetch-url` read skill body
+- `extension/llm_agent/global/find-code.md` — `find-code` read skill body (index→graph code search; the role prompt requires it before any grep)
 - `extension/llm_agent/internal/prompt.md` — internal agent role and rules
 - `extension/llm_agent/internal/skills/search-kb.md`
 - `extension/llm_agent/internal/skills/create-gitlab-issue.md`
