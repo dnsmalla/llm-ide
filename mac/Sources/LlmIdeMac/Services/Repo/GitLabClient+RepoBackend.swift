@@ -12,6 +12,8 @@ extension GitLabClient: RepoBackend {
     var canCreateMergeRequests: Bool { true }
     var supportsWeight: Bool { true }
     var usesScheduleOverlay: Bool { false }
+    // /issues takes a `search` param — see asGitLabQuery.
+    var filtersSearchServerSide: Bool { true }
 
     // MARK: - Projects
 

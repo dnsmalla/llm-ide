@@ -27,6 +27,7 @@ final class AllowlistedRepoBackend: RepoBackend {
     var canCreateMergeRequests: Bool { wrapped.canCreateMergeRequests }
     var supportsWeight: Bool { wrapped.supportsWeight }
     var usesScheduleOverlay: Bool { wrapped.usesScheduleOverlay }
+    var filtersSearchServerSide: Bool { wrapped.filtersSearchServerSide }
     func listProjects() async throws -> [RepoProject] { try await wrapped.listProjects() }
     func getProject(id: String) async throws -> RepoProject { try await wrapped.getProject(id: id) }
     func listIssues(projectId: String, filter: RepoIssueFilter, page: Int) async throws -> [RepoIssue] { try await wrapped.listIssues(projectId: projectId, filter: filter, page: page) }

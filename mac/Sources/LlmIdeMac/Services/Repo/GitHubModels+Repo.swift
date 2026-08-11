@@ -101,6 +101,13 @@ extension GitHubClient {
         if let aid = filter.assigneeId  { items.append(.init(name: "assignee",  value: aid)) }
         let issues: [GitHubIssueWire] = try await get("/repos/\(owner)/\(name)/issues", query: items)
         // Drop pull requests — GitHub's /issues endpoint mixes them in.
+        // NOTE: `filter.search` is deliberately NOT applied here. This endpoint
+        // has no text-search parameter (that lives on /search/issues, with its
+        // own much lower rate limit), and filtering a page in place would break
+        // the caller's pagination — it stops when a page comes back empty, so
+        // one page with no matches would silently truncate the results. Callers
+        // page first, then narrow via `RepoIssueFilter.matchesLocally`, which
+        // `filtersSearchServerSide == false` tells them to do.
         return issues.filter { $0.pullRequest == nil }
     }
 

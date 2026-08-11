@@ -3,11 +3,13 @@
 // History: the app started GitLab-only with GitLabClient wired directly
 // into provider-specific views. A shared protocol (this file) now routes
 // every issue-related call so both GitLab and GitHub use the same UI
-// layer (RepoIssuesView, RepoGanttView) without duplication.
+// layer — one board (RepoIssuesView) and one timeline (GanttContainerView →
+// GanttView) — without duplication.
 //
-// Both READ and WRITE paths are covered for GitLab and GitHub.
-// MR/PR creation remains GitLab-only; `canCreateMergeRequests` gates
-// that affordance in the UI.
+// Both READ and WRITE paths are covered for GitLab and GitHub, MR/PR
+// creation included. Where the providers genuinely differ, the difference is
+// a capability flag below (`supportsWeight`, `usesScheduleOverlay`) that the
+// shared views read — never a second view.
 
 import Foundation
 
@@ -313,6 +315,15 @@ struct RepoIssueFilter: Equatable, Sendable {
         }
     }
 
+    /// Substring test for backends that can't search server-side (see
+    /// `RepoBackend.filtersSearchServerSide`). Matches the issue number, title
+    /// and body — the fields GitLab's own `search` covers.
+    func matchesLocally(_ issue: RepoIssue) -> Bool {
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return true }
+        return "#\(issue.number) \(issue.title) \(issue.body ?? "")".lowercased().contains(q)
+    }
+
     init(state: IssueState = .opened,
                 search: String = "",
                 labelName: String = "",
@@ -358,16 +369,22 @@ protocol RepoBackend: Sendable {
     /// (GitLab: numeric id; GitHub: login).
     func listMembers(projectId: String) async throws -> [RepoUser]
 
-    /// Capability flags — call sites read these to gate UI.
-    /// Phase 2 implements issue writes on both backends, so
-    /// `canWriteIssues` is now true everywhere. MR/PR creation is still
-    /// GitLab-only until a separate phase adds GitHub PR support.
+    /// Capability flags — call sites read these to gate UI. Issue writes and
+    /// MR/PR creation are implemented on both backends, so both flags are
+    /// currently true everywhere; they stay in the protocol because a future
+    /// provider (or a read-only token) may not have them.
     var canWriteIssues: Bool { get }
     var canCreateMergeRequests: Bool { get }
     /// True when issues carry a native numeric weight (GitLab). Views show a weight badge/editor only when true.
     var supportsWeight: Bool { get }
     /// True when issue start/due dates come from our /kb/issue-schedule overlay instead of native fields (GitHub).
     var usesScheduleOverlay: Bool { get }
+    /// True when `listIssues` honours `RepoIssueFilter.search` server-side
+    /// (GitLab). False on GitHub, whose issues endpoint has no search
+    /// parameter — callers must page first, then narrow the assembled list
+    /// with `RepoIssueFilter.matchesLocally`. Filtering inside the paged call
+    /// instead would end pagination at the first page with no match.
+    var filtersSearchServerSide: Bool { get }
 
     // MARK: - Writes
 

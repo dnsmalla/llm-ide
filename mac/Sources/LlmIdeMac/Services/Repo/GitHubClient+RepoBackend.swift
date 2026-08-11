@@ -10,14 +10,15 @@ import Foundation
 extension GitHubClient: RepoBackend {
     var kind: RepoBackendKind { .github }
 
-    // Phase 2: issue writes work (create / update / comment). PR
-    // creation is still a separate phase — different lifecycle than
-    // GitLab MRs (draft state, auto-merge, review requests) so it's
-    // not a trivial protocol method.
+    // Issue writes (create / update / comment) and PR creation both work.
+    // What GitHub lacks is per-issue scheduling: no weight, and no native
+    // start/due date — hence the two flags below, which the shared board and
+    // timeline read to decide which editor to offer.
     var canWriteIssues: Bool { true }
     var canCreateMergeRequests: Bool { true }
     var supportsWeight: Bool { false }
     var usesScheduleOverlay: Bool { true }
+    var filtersSearchServerSide: Bool { false }
 
     // MARK: - Projects
 

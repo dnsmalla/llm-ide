@@ -592,7 +592,7 @@ struct RepoIssuesView: View {
         do {
             // Page through results instead of stopping at page 1 — large
             // repos were silently truncated to a single backend page
-            // (GitHub 50 / GitLab 100). Dedup by id and cap pages so a
+            // (100 on both backends). Dedup by id and cap pages so a
             // backend that clamps an out-of-range page can't loop forever.
             var all: [RepoIssue] = []
             var seen = Set<String>()
@@ -603,7 +603,13 @@ struct RepoIssuesView: View {
                 if fresh.isEmpty { break }   // empty page or repeated content → done
                 all.append(contentsOf: fresh)
             }
-            issues = all
+            // Narrow AFTER paging for backends whose issues endpoint has no
+            // search parameter (GitHub) — filtering per page would end the
+            // loop at the first page with no match. Without this the board's
+            // search box did nothing at all on GitHub while working on GitLab.
+            issues = currentClient.filtersSearchServerSide
+                ? all
+                : all.filter { filter.matchesLocally($0) }
         } catch {
             issuesError = error.localizedDescription
         }
