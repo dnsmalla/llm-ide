@@ -21,6 +21,7 @@ process.env.SKILLS_REPO = fakeRepo;
 const { readRegistry, writeRegistry, isValidLlmSource, seedBuiltinOnce,
   listSources, getSource, BUILTIN_ID, countDiscoverySkills,
   countDiscoveryAgents, listDiscoveryAgents, countDiscoveryHooks, listDiscoveryHooks,
+  countDiscoveryMcpServers, listDiscoveryMcpServers,
   sourceDiscoveryDetail } =
   await import('../llm-sources/registry.mjs');
 
@@ -43,6 +44,11 @@ test('isValidLlmSource also accepts an agents/-only or hooks-manifest-only direc
   fs.mkdirSync(path.join(hooksOnly, 'hooks'), { recursive: true });
   fs.writeFileSync(path.join(hooksOnly, 'hooks', 'hooks.json'), '{}');
   assert.ok(isValidLlmSource(hooksOnly));
+
+  const mcpOnly = path.join(tmpRoot, 'mcp-only');
+  fs.mkdirSync(mcpOnly, { recursive: true });
+  fs.writeFileSync(path.join(mcpOnly, '.mcp.json'), '{}');
+  assert.ok(isValidLlmSource(mcpOnly));
 });
 
 test('seedBuiltinOnce adds exactly one builtin source pointing at the resolved repo', () => {
@@ -97,12 +103,28 @@ test('countDiscoveryHooks + listDiscoveryHooks read the Claude-plugin hooks mani
   assert.ok(hooks.some((h) => h.event === 'SessionStart' && h.command === 'echo start'));
 });
 
-test('sourceDiscoveryDetail returns the agents+hooks for a registered, installed source', () => {
+test('countDiscoveryMcpServers + listDiscoveryMcpServers read .mcp.json — discovery only, never spawned', () => {
+  fs.writeFileSync(path.join(fakeRepo, '.mcp.json'), JSON.stringify({
+    mcpServers: {
+      filesystem: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'] },
+      broken: { notACommandField: true }, // must be skipped, not throw
+    },
+  }));
+  assert.equal(countDiscoveryMcpServers(fakeRepo), 1);
+  const servers = listDiscoveryMcpServers(fakeRepo);
+  assert.equal(servers.length, 1);
+  assert.equal(servers[0].name, 'filesystem');
+  assert.equal(servers[0].command, 'npx');
+  assert.deepEqual(servers[0].args, ['-y', '@modelcontextprotocol/server-filesystem', '/tmp']);
+});
+
+test('sourceDiscoveryDetail returns the agents+hooks+mcpServers for a registered, installed source', () => {
   writeRegistry([]); seedBuiltinOnce(); // re-seed after writeRegistry([]) above cleared it
   const detail = sourceDiscoveryDetail(BUILTIN_ID);
   assert.ok(detail);
   assert.ok(Array.isArray(detail.agents));
   assert.ok(Array.isArray(detail.hooks));
+  assert.ok(Array.isArray(detail.mcpServers));
   assert.equal(sourceDiscoveryDetail('not-a-real-id'), null);
 });
 
@@ -162,7 +184,7 @@ test('addSource surfaces a clone failure instead of throwing (unreachable host)'
 import { listSourcesWithState } from '../llm-sources/registry.mjs';
 import { setEnabled } from '../llm-sources/state.mjs';
 
-test('listSourcesWithState joins per-user enable + live metadata, including agent/hook counts', () => {
+test('listSourcesWithState joins per-user enable + live metadata, including agent/hook/mcp counts', () => {
   writeRegistry([]); seedBuiltinOnce();
   setEnabled('viewer', BUILTIN_ID, true);
   const { sources } = listSourcesWithState('viewer');
@@ -172,6 +194,7 @@ test('listSourcesWithState joins per-user enable + live metadata, including agen
   assert.ok(typeof b.skillCount === 'number');
   assert.ok(typeof b.agentCount === 'number');
   assert.ok(typeof b.hookCount === 'number');
+  assert.ok(typeof b.mcpCount === 'number');
   // A user who disabled builtin sees enabled=false.
   setEnabled('off', BUILTIN_ID, false);
   const off = listSourcesWithState('off').sources.find((s) => s.id === BUILTIN_ID);

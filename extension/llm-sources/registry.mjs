@@ -1,18 +1,23 @@
 // LLM-source registry: a list of registered LLM-resource repos (builtin
 // .skills + user-added git clones / local paths). Discovery-only, read in
 // place — never copied into plugins/. The builtin source points at
-// resolveCentralSkillsRepo(). Each source may contribute any mix of three
+// resolveCentralSkillsRepo(). Each source may contribute any mix of four
 // discoverable kinds: skills (skills/, runtime/ families — SKILL.md), agents
-// (agents/*.md subagent definitions), and hooks (.claude-plugin/hooks/hooks.json
-// or hooks/hooks.json, the Claude Code plugin-hook manifest shape).
+// (agents/*.md subagent definitions), hooks (.claude-plugin/hooks/hooks.json
+// or hooks/hooks.json, the Claude Code plugin-hook manifest shape), and MCP
+// servers (.mcp.json or .claude-plugin/.mcp.json, the Claude Code MCP-server
+// manifest shape).
 //
-// SAFETY: every non-builtin source is discovery-only, for ALL THREE kinds —
-// skills surface as chat "/" menu attachable context (unchanged); agents and
-// hooks are catalogued/listable ONLY, never wired into the runtime. A
-// registered third-party repo's hooks.json is never executed — that would
-// let anyone who can register a source run arbitrary shell commands inside
-// this server. Only the `builtin` source's own hardcoded handlers (in
-// route.mjs) are ever invoked; see the design doc's Safety section.
+// SAFETY: every non-builtin source is discovery-only, for ALL FOUR kinds —
+// skills surface as chat "/" menu attachable context (unchanged); agents,
+// hooks, and MCP servers are catalogued/listable ONLY, never wired into the
+// runtime. A registered third-party repo's hooks.json commands are never
+// executed and its .mcp.json servers are never spawned/connected to — either
+// would let anyone who can register a source run arbitrary code (a spawned
+// MCP server is a live process with real capabilities, not just a one-shot
+// command) inside or alongside this server. Only the `builtin` source's own
+// hardcoded handlers (in route.mjs) are ever invoked; see the design doc's
+// Safety section.
 //
 // Registry file: <sourcesDir>/../llm-sources.json  (atomic writes)
 // Cloned sources: <sourcesDir>/<id>/  (siblings to plugins/)
@@ -71,8 +76,9 @@ export function writeRegistry(list) {
 }
 
 // A directory is a valid LLM source if it has registry.yaml OR
-// (.claude-plugin/plugin.json + a skills/ directory) OR an agents/ or hooks
-// manifest of its own — i.e. it contributes at least one discoverable kind.
+// (.claude-plugin/plugin.json + a skills/ directory) OR an agents/, hooks,
+// or MCP manifest of its own — i.e. it contributes at least one
+// discoverable kind.
 export function isValidLlmSource(dir) {
   try {
     if (!existsSync(dir)) return false;
@@ -80,6 +86,7 @@ export function isValidLlmSource(dir) {
     if (existsSync(join(dir, '.claude-plugin', 'plugin.json')) && existsSync(join(dir, 'skills'))) return true;
     if (existsSync(join(dir, AGENTS_FAMILY))) return true;
     if (existsSync(join(dir, '.claude-plugin', 'hooks', 'hooks.json')) || existsSync(join(dir, 'hooks', 'hooks.json'))) return true;
+    if (existsSync(join(dir, '.mcp.json')) || existsSync(join(dir, '.claude-plugin', '.mcp.json'))) return true;
     return false;
   } catch { return false; }
 }
@@ -195,6 +202,44 @@ export function countDiscoveryHooks(dir) {
   return listDiscoveryHooks(dir).length;
 }
 
+// .mcp.json (Claude Code's MCP-server manifest — same file the CLI itself
+// reads from a project root) or a nested .claude-plugin/.mcp.json fallback
+// (mirrors how plugin.json-based sources nest other manifests) — shape:
+//   { "mcpServers": { "<name>": { "command": string, "args"?: string[], "env"?: object } } }
+// DISCOVERY ONLY — this server never spawns/connects to a listed MCP
+// server. An MCP server is a long-lived process with real capabilities
+// (filesystem, network, whatever its tools expose); auto-connecting to one
+// from a third-party-registered source would be strictly worse than the
+// hooks risk this file already guards against, not just equivalent to it.
+// See the Safety note at the top of this file.
+function mcpManifestPath(dir) {
+  const flat = join(dir, '.mcp.json');
+  if (existsSync(flat)) return flat;
+  const nested = join(dir, '.claude-plugin', '.mcp.json');
+  if (existsSync(nested)) return nested;
+  return null;
+}
+
+export function listDiscoveryMcpServers(dir) {
+  const p = mcpManifestPath(dir);
+  if (!p) return [];
+  let manifest;
+  try { manifest = JSON.parse(readFileSync(p, 'utf8')); } catch { return []; }
+  const servers = manifest?.mcpServers;
+  if (!servers || typeof servers !== 'object') return [];
+  const out = [];
+  for (const [name, cfg] of Object.entries(servers)) {
+    if (typeof cfg?.command !== 'string') continue;
+    const args = Array.isArray(cfg.args) ? cfg.args.filter((a) => typeof a === 'string').slice(0, 20) : [];
+    out.push({ name, command: cfg.command.slice(0, 200), args });
+  }
+  return out;
+}
+
+export function countDiscoveryMcpServers(dir) {
+  return listDiscoveryMcpServers(dir).length;
+}
+
 // Ensure the builtin source exists, pointing at the resolved central repo.
 // Idempotent. Does NOT throw if the repo isn't present locally — records the
 // source with location = null so the UI can offer "Install".
@@ -221,7 +266,7 @@ export function listSources() {
   return readRegistry();
 }
 
-// Re-read live metadata (existence + skill/agent/hook counts + version) for a snapshot.
+// Re-read live metadata (existence + skill/agent/hook/mcp counts + version) for a snapshot.
 export function snapshotSource(src) {
   const exists = !!src.location && existsSync(src.location);
   return {
@@ -231,6 +276,7 @@ export function snapshotSource(src) {
     skillCount: exists ? countDiscoverySkills(src.location) : 0,
     agentCount: exists ? countDiscoveryAgents(src.location) : 0,
     hookCount: exists ? countDiscoveryHooks(src.location) : 0,
+    mcpCount: exists ? countDiscoveryMcpServers(src.location) : 0,
   };
 }
 
@@ -297,7 +343,7 @@ export async function addSource({ url, path, ref, name } = {}) {
 
   if (path) {
     if (!existsSync(path)) return { error: 'path does not exist', status: 400 };
-    if (!isValidLlmSource(path)) return { error: 'not a valid LLM source (needs registry.yaml, .claude-plugin/plugin.json + skills/, agents/, or a hooks manifest)', status: 400 };
+    if (!isValidLlmSource(path)) return { error: 'not a valid LLM source (needs registry.yaml, .claude-plugin/plugin.json + skills/, agents/, a hooks manifest, or an .mcp.json manifest)', status: 400 };
     const id = slugify(name || path.split('/').pop(), existing);
     const src = { id, name: name || id, origin: 'local', location: path, builtin: false, version: readVersion(path) };
     list.push(src); writeRegistry(list);
@@ -416,5 +462,6 @@ export function sourceDiscoveryDetail(id) {
   return {
     agents: listDiscoveryAgents(src.location),
     hooks: listDiscoveryHooks(src.location),
+    mcpServers: listDiscoveryMcpServers(src.location),
   };
 }

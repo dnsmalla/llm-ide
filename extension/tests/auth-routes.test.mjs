@@ -703,7 +703,7 @@ test('POST /auth/me/llm-sources/add registers a local source (admin); GET reflec
   fs.rmSync(localSrc, { recursive: true, force: true });
 });
 
-test('GET /auth/me/llm-sources reports agentCount + hookCount alongside skillCount; GET .../<id>/discovery lists them', async () => {
+test('GET /auth/me/llm-sources reports agentCount + hookCount + mcpCount alongside skillCount; GET .../<id>/discovery lists them', async () => {
   const { user } = await registerAndLogin();
   const admin = { id: user.id, role: 'admin' };
 
@@ -715,6 +715,9 @@ test('GET /auth/me/llm-sources reports agentCount + hookCount alongside skillCou
   fs.writeFileSync(path.join(localSrc, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
     PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo hi' }] }],
   }));
+  fs.writeFileSync(path.join(localSrc, '.mcp.json'), JSON.stringify({
+    mcpServers: { filesystem: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem'] } },
+  }));
 
   const added = await callAuth({ method: 'POST', url: '/auth/me/llm-sources/add', user: admin, body: { path: localSrc, name: 'discovery-fixture' } });
   assert.equal(added.statusCode, 200, added._body);
@@ -724,6 +727,7 @@ test('GET /auth/me/llm-sources reports agentCount + hookCount alongside skillCou
   const entry = list.json().sources.find((s) => s.id === id);
   assert.equal(entry.agentCount, 1);
   assert.equal(entry.hookCount, 1);
+  assert.equal(entry.mcpCount, 1);
 
   const discovery = await callAuth({ method: 'GET', url: `/auth/me/llm-sources/${id}/discovery`, user: admin });
   assert.equal(discovery.statusCode, 200, discovery._body);
@@ -731,6 +735,9 @@ test('GET /auth/me/llm-sources reports agentCount + hookCount alongside skillCou
   assert.equal(discovery.json().agents[0].name, 'reviewer');
   assert.equal(discovery.json().hooks.length, 1);
   assert.equal(discovery.json().hooks[0].event, 'PreToolUse');
+  assert.equal(discovery.json().mcpServers.length, 1);
+  assert.equal(discovery.json().mcpServers[0].name, 'filesystem');
+  assert.equal(discovery.json().mcpServers[0].command, 'npx');
 
   const notFound = await callAuth({ method: 'GET', url: '/auth/me/llm-sources/never-registered/discovery', user: admin });
   assert.equal(notFound.statusCode, 404);
