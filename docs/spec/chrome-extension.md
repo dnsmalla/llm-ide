@@ -389,7 +389,7 @@ const REQUIRED_ENDPOINTS = [
 
 - the reported `endpoints` list is empty / absent (treated as stale);
 - any endpoint in `REQUIRED_ENDPOINTS` is absent from the reported list (`missing` array);
-- **the server is below the version floor** — `MIN_SERVER_API_VERSION = 18` (`App.tsx:87`) and `apiVersion < MIN_SERVER_API_VERSION` (a missing/non-numeric `apiVersion` is coerced to `0`, so an old server fails this even when all endpoint names line up). The stale reason becomes `` [`server API v${apiVersion} < required v${MIN_SERVER_API_VERSION}`] ``.
+- **the server is below the version floor** — `MIN_SERVER_API_VERSION = 20` (`App.tsx:88`) and `apiVersion < MIN_SERVER_API_VERSION` (a missing/non-numeric `apiVersion` is coerced to `0`, so an old server fails this even when all endpoint names line up). The stale reason becomes `` [`server API v${apiVersion} < required v${MIN_SERVER_API_VERSION}`] ``.
 
 This mirrors the Mac client's handshake (`BackendManager.minimumServerApiVersion = 18`). The UI renders a "Server needs to be restarted" banner when `serverOnline && serverStale` is truthy (`App.tsx:507–518`). The health check repeats every `TIMING.SERVER_HEALTH_CHECK_INTERVAL_MS = 30_000` ms (`lib/config.ts:467`, `App.tsx:308`).
 
