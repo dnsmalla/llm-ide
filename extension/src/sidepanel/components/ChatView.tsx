@@ -34,7 +34,7 @@ export default function ChatView({
   onClear,
   onAddSession,
   onDeleteSession,
-  canDelete = true
+  canDelete = true,
 }: Props) {
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);

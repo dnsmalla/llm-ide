@@ -28,14 +28,16 @@ export function isActiveMeetingPage(platform: PlatformId | null, pathname: strin
 
 /** Strip control chars, combined-speaker suffixes, collapse whitespace, cap length. */
 export function sanitizeSpeaker(raw: string): string {
-  return raw
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u001F\u007F]/g, ' ')
-    .replace(COMBINED_SPEAKER_RE, '')
-    .replace(COMBINED_SPEAKER_JA, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 50);
+  return (
+    raw
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u001F\u007F]/g, ' ')
+      .replace(COMBINED_SPEAKER_RE, '')
+      .replace(COMBINED_SPEAKER_JA, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 50)
+  );
 }
 
 /** Content-based caption validation — not position-based (see invariants.md). */

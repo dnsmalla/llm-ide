@@ -53,8 +53,7 @@ interface SpeakerGroup {
 // contributions, so an agent question shows up inline at the moment it landed
 // rather than in a separate rail.
 type TimelineItem =
-  | { kind: 'speaker'; ts: number; group: SpeakerGroup }
-  | { kind: 'agent'; ts: number; caption: AgentCaption };
+  { kind: 'speaker'; ts: number; group: SpeakerGroup } | { kind: 'agent'; ts: number; caption: AgentCaption };
 
 const FEEDBACK_OPTIONS: { verdict: AgentFeedbackVerdict; label: string }[] = [
   { verdict: 'useful', label: '👍 Useful' },
@@ -140,9 +139,8 @@ export default function TranscriptView({
           <>
             <p>Listening for captions…</p>
             <p className="transcript-empty-hint">
-              Nothing yet? Turn on closed captions (CC) in your meeting — that's
-              what we read. Captions appear here within a few seconds of someone
-              speaking.
+              Nothing yet? Turn on closed captions (CC) in your meeting — that's what we read. Captions appear here
+              within a few seconds of someone speaking.
             </p>
           </>
         ) : (

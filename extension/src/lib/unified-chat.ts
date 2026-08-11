@@ -80,11 +80,7 @@ export async function getChatSession(id: string, limit = 200): Promise<UnifiedCh
   return session;
 }
 
-export async function appendChatMessage(
-  sessionId: string,
-  role: UnifiedChatRole,
-  content: string,
-): Promise<void> {
+export async function appendChatMessage(sessionId: string, role: UnifiedChatRole, content: string): Promise<void> {
   const base = await getServerUrl();
   const res = await authFetch(`${base}/kb/chat/sessions/${encodeURIComponent(sessionId)}/messages`, {
     method: 'POST',

@@ -288,9 +288,9 @@ export default function App() {
           const apiVersion = typeof health?.apiVersion === 'number' ? health.apiVersion : 0;
           const versionStale = apiVersion < MIN_SERVER_API_VERSION;
           if (reported.length === 0 || missing.length > 0 || versionStale) {
-            setServerStale(missing.length > 0
-              ? missing
-              : [`server API v${apiVersion} < required v${MIN_SERVER_API_VERSION}`]);
+            setServerStale(
+              missing.length > 0 ? missing : [`server API v${apiVersion} < required v${MIN_SERVER_API_VERSION}`],
+            );
           } else {
             setServerStale(null);
           }

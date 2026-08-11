@@ -148,14 +148,12 @@ export function useTranscript() {
     chrome.storage?.local
       ?.get(['primaryLang', 'secondaryLang', 'bilingual', 'speakerNames'])
       .then(
-        (
-          result: {
-            primaryLang?: string;
-            secondaryLang?: string;
-            bilingual?: boolean;
-            speakerNames?: Record<string, string>;
-          },
-        ) => {
+        (result: {
+          primaryLang?: string;
+          secondaryLang?: string;
+          bilingual?: boolean;
+          speakerNames?: Record<string, string>;
+        }) => {
           if (result.primaryLang) setPrimaryLang(result.primaryLang);
           if (result.secondaryLang) setSecondaryLang(result.secondaryLang);
           if (result.bilingual !== undefined) setBilingual(result.bilingual);

@@ -54,9 +54,7 @@ async function ensureContentScriptInjected(tabId: number, url: string): Promise<
         // typed record instead of `any` (this body is inlined into the page).
         const w = window as unknown as Record<string, unknown>;
         return Boolean(
-          w.__llmideCaptionScraperInjected ||
-          w.__llmideSpeakerDetectorInjected ||
-          w.__llmideFloatingOverlayInjected,
+          w.__llmideCaptionScraperInjected || w.__llmideSpeakerDetectorInjected || w.__llmideFloatingOverlayInjected,
         );
       },
     });

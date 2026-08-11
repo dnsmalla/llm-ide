@@ -66,7 +66,9 @@ export function useChat() {
         if (!cancelled) hydratedRef.current = true;
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Local fallback persistence when server sync unavailable.
