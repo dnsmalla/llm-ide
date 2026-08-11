@@ -209,10 +209,15 @@ struct RepoIssuesView: View {
 
     @ViewBuilder
     private var notConfigured: some View {
+        // Distinguish "nothing set up" from "set up but the token is gone".
+        // Both used to read "No repository connected", which sent users
+        // hunting for a repo they had already added — the token was the
+        // missing piece, and nothing said so.
+        let state = RepoConnectionEmptyState(config: config)
         EmptyStateView(
             icon: "lock.shield",
-            title: "No repository connected",
-            message: "Add a GitLab or GitHub Personal Access Token in Settings to start browsing issues.",
+            title: state.title,
+            message: state.message(surface: "browsing issues"),
             actionLabel: "Open Settings",
             action: { NotificationCenter.default.post(name: .openSettings, object: nil) }
         )

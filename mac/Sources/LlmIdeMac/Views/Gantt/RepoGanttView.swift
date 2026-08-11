@@ -108,10 +108,13 @@ struct RepoGanttView: View {
 
     @ViewBuilder
     private var notConfigured: some View {
+        // See RepoConnectionEmptyState — "No repository connected" was shown
+        // even when the repo was saved and only the token had gone missing.
+        let state = RepoConnectionEmptyState(config: config)
         EmptyStateView(
             icon: "lock.shield",
-            title: "No repository connected",
-            message: "Add a GitLab or GitHub Personal Access Token in Settings to start a timeline.",
+            title: state.title,
+            message: state.message(surface: "a timeline"),
             actionLabel: "Open Settings",
             action: { NotificationCenter.default.post(name: .openSettings, object: nil) }
         )

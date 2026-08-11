@@ -80,6 +80,32 @@ extension AppConfig {
         }
         return nil
     }
+
+    /// Which saved repo the active project should be *linked* to, decided
+    /// WITHOUT consulting the tokens.
+    ///
+    /// `activeConfigRepo` above is token-gated, and rightly so: it answers
+    /// "which connection can we call right now". But a project's `linkedRepo`
+    /// records which repo the project targets, which is a different question.
+    /// Deriving the link from token presence meant a token that was merely
+    /// unreadable (keychain denied/locked) read as "no repo configured" and
+    /// erased the link from `system/project.json` on launch. Auth availability
+    /// must not rewrite the user's project configuration.
+    ///
+    /// Precedence: the explicit provider preference wins; otherwise GitLab
+    /// before GitHub, matching `activeConfigRepo`.
+    var linkTargetRepo: ActiveConfigRepo? {
+        let gitLab = gitLabSavedProjects.first(where: { $0.isActive })
+        let gitHub = gitHubSavedRepos.first(where: { $0.isActive })
+        switch preferredRepoProvider {
+        case .gitlab: if let gitLab { return .gitlab(gitLab) }
+        case .github: if let gitHub { return .github(gitHub) }
+        case nil:     break
+        }
+        if let gitLab { return .gitlab(gitLab) }
+        if let gitHub { return .github(gitHub) }
+        return nil
+    }
 }
 
 // MARK: - Neutral models

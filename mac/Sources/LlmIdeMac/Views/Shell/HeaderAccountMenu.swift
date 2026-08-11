@@ -7,7 +7,6 @@ struct HeaderAccountMenu: View {
     @Environment(ShellState.self) private var shell
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var theme: ThemeStore
-    @EnvironmentObject var config: AppConfig
     @State private var showingPermissions = false
     @State private var showingHelp = false
     @State private var showingSignOutConfirm = false
@@ -47,18 +46,25 @@ struct HeaderAccountMenu: View {
                 ) {
                     Button("Sign out", role: .destructive) {
                         Task { @MainActor in
-                            // Clearing only the server session left the
-                            // GitLab PAT, saved projects, and cached chat
-                            // history behind on disk.
+                            // Session + local chat history only. Git PATs and
+                            // saved repos are separate connections the user
+                            // set up independently; revoking them here meant
+                            // signing back in landed on "No repository
+                            // connected". Use the option below to drop those.
                             session.clear()
-                            KeychainStore.logout()
-                            config.gitLabToken = ""
                             ChatSessionStore.clear()
+                        }
+                    }
+                    Button("Sign out and disconnect all accounts", role: .destructive) {
+                        Task { @MainActor in
+                            session.clear()
+                            ChatSessionStore.clear()
+                            KeychainStore.wipeAllSecrets()
                         }
                     }
                     Button("Cancel", role: .cancel) { }
                 } message: {
-                    Text("This will clear your saved tokens (including your GitLab Personal Access Token) and your saved GitLab projects from this Mac.")
+                    Text("Signing out clears your session and local chat history. Your GitHub / GitLab tokens and saved repositories stay on this Mac unless you choose to disconnect all accounts.")
                 }
             }
         }

@@ -117,12 +117,13 @@ struct GitLabSettingsSection: View {
                     .disabled(gitLabBusy || gitLabTokenDraft.isEmpty)
 
                     if !config.gitLabToken.isEmpty {
-                        Button("Clear") {
+                        // Clears the CREDENTIAL only — see the matching note in
+                        // GitHubSettingsSection. The saved project list stays
+                        // so a re-entered token restores the connection.
+                        Button("Clear token") {
                             config.gitLabToken = ""
-                            config.gitLabBaseURL = "https://gitlab.com"
-                            config.gitLabSavedProjects = []
                             gitLabTokenDraft = ""
-                            gitLabStatus = "Cleared."
+                            gitLabStatus = "Token cleared. Saved projects kept."
                             relink()
                         }
                         .buttonStyle(.bordered)
@@ -577,14 +578,13 @@ struct GitLabSettingsSection: View {
                     ?? "unknown"
                 config.gitLabToken = token
                 config.gitLabBaseURL = base
-                // Mutual exclusality: clear GitHub when GitLab is set
-                config.gitHubToken = ""
                 gitLabStatus = "✓ Connected as \(name)"
 
-                // If no preference is set, default to GitLab when first token is saved
-                if config.preferredRepoProvider == nil {
-                    config.preferredRepoProvider = .gitlab
-                }
+                // Make GitLab primary rather than DELETING the GitHub PAT from
+                // the Keychain — see the matching note in GitHubSettingsSection.
+                // The preference deactivates the other provider's repos, which
+                // is the exclusivity that was wanted, and is reversible.
+                config.preferredRepoProvider = .gitlab
                 relink()
             } else if http.statusCode == 401 {
                 gitLabStatus = "Invalid token — check scope and expiry."

@@ -66,9 +66,22 @@ enum KeychainStore {
 
     /// True when secrets are readable (or legitimately absent). False after a
     /// failed load, when writes are blocked to protect the stored data.
+    ///
+    /// Performs a load if one hasn't succeeded yet, so the answer is accurate
+    /// — which also means it can hit the keychain (and re-prompt) after a
+    /// failure. Call it from logic that must be right, not from a SwiftUI
+    /// body; views want `lastKnownHealthy`.
     static var isHealthy: Bool {
         lock.lock(); defer { lock.unlock() }
         ensureBlobLoadedLocked()
+        return !loadFailed
+    }
+
+    /// Last observed health, with no keychain I/O — safe to read from a view
+    /// body that may re-render many times. Optimistic before the first load:
+    /// nothing has failed yet.
+    static var lastKnownHealthy: Bool {
+        lock.lock(); defer { lock.unlock() }
         return !loadFailed
     }
 
@@ -246,12 +259,19 @@ enum KeychainStore {
     /// any pre-blob per-secret stragglers) by deleting all generic-password
     /// entries with our service identifier, then clears the saved-projects
     /// lists so repo metadata can't outlive the tokens that authorized them.
+    ///
+    /// This is the "disconnect everything" action and takes the mobile pairing
+    /// PIN with it. It is deliberately NOT what plain sign-out calls: signing
+    /// out of the LLM-IDE account is about the server session, and revoking
+    /// the user's GitHub/GitLab PATs plus their saved repo list as a side
+    /// effect meant reopening the app showed "No repository connected" with
+    /// no way back except re-entering every credential.
     @MainActor
-    static func logout() {
+    static func wipeAllSecrets() {
         let status = backend.deleteAll(service: service)
         let wiped = (status == errSecSuccess || status == errSecItemNotFound)
         if !wiped {
-            log.error("KeychainStore.logout failed: OSStatus \(status, privacy: .public)")
+            log.error("KeychainStore.wipeAllSecrets failed: OSStatus \(status, privacy: .public)")
         }
         // Also wipe items from the pre-rename MeetNotes service.
         backend.deleteAll(service: legacyService)

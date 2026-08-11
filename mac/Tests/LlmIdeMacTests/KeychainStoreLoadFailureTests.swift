@@ -194,7 +194,7 @@ final class KeychainStoreLoadFailureTests: XCTestCase {
         fake.seedBlob([Self.refreshAccount: "refresh-abc"])
         fake.forcedDeleteAllFailure = errSecAuthFailed
 
-        KeychainStore.logout()
+        KeychainStore.wipeAllSecrets()
         // Next write must re-read first and merge, not overwrite from empty.
         KeychainStore.saveGitHubToken("ghp_new")
 

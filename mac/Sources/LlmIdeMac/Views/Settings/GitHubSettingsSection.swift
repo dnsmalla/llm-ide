@@ -106,11 +106,15 @@ struct GitHubSettingsSection: View {
                     .disabled(busy || tokenDraft.isEmpty)
 
                     if !config.gitHubToken.isEmpty {
-                        Button("Clear") {
+                        // Clears the CREDENTIAL only. It used to delete every
+                        // saved repository too — far more than the label next
+                        // to a token field promises, and unrecoverable. The
+                        // repo list stays so a re-entered token restores the
+                        // connection; delete rows individually to remove them.
+                        Button("Clear token") {
                             config.gitHubToken = ""
-                            config.gitHubSavedRepos = []
                             tokenDraft = ""
-                            status = "Cleared."
+                            status = "Token cleared. Saved repositories kept."
                             relink()
                         }
                         .buttonStyle(.bordered)
@@ -453,12 +457,17 @@ struct GitHubSettingsSection: View {
         do {
             let user = try await GitHubClient.verifyToken(token)
             config.gitHubToken = token
-            config.gitLabToken = ""
             status = "✓ Connected as \(user.name ?? user.login)"
 
-            if config.preferredRepoProvider == nil {
-                config.preferredRepoProvider = .github
-            }
+            // Make GitHub primary rather than DELETING the GitLab PAT from the
+            // Keychain, which is how "mutual exclusivity" used to be enforced:
+            // verifying one provider silently revoked the other's credential,
+            // and it also made the primary-provider picker unreachable (it
+            // only renders when both tokens are present, which could then
+            // never happen). Setting the preference deactivates the other
+            // provider's repos, which is the exclusivity that was actually
+            // wanted — and it is reversible.
+            config.preferredRepoProvider = .github
             relink()
         } catch let e as GitHubClient.GitHubError {
             switch e {

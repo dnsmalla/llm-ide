@@ -308,7 +308,7 @@ final class AppConfig: ObservableObject {
             defaults.set(preferredRepoProvider?.rawValue, forKey: "preferredRepoProvider")
             // Enforce mutual exclusivity: deactivate the other provider's repos
             if let pref = preferredRepoProvider {
-                deactivateOtherProvider(than: pref)
+                enforceProviderExclusivity(preferring: pref)
             } else {
                 // When clearing preference, don't auto-activate anything,
                 // just allow both to be independently managed
@@ -364,22 +364,39 @@ final class AppConfig: ObservableObject {
         }
     }
 
-    /// Deactivate all repositories/projects of the given provider to enforce
-    /// mutual exclusivity when a preference is set.
-    private func deactivateOtherProvider(than preferred: RepoBackendKind) {
+    /// Enforce "one active provider" when a preference is set: the preferred
+    /// provider gets exactly one active repo, the other gets none.
+    ///
+    /// Bails out when the preferred provider has no saved repos at all.
+    /// Deactivating the other side unconditionally used to strand the user
+    /// with nothing active anywhere — preferring GitLab while only GitHub
+    /// repos existed turned the GitHub repo off and left nothing to turn on,
+    /// which every consumer reads as "No repository connected". A preference
+    /// for a provider you haven't configured yet is aspirational; it must not
+    /// tear down the provider you have.
+    private func enforceProviderExclusivity(preferring preferred: RepoBackendKind) {
+        let preferredIsEmpty = preferred == .gitlab
+            ? gitLabSavedProjects.isEmpty
+            : gitHubSavedRepos.isEmpty
+        guard !preferredIsEmpty else { return }
+
         if preferred == .gitlab {
-            // Deactivate GitHub repos when GitLab is preferred
-            var updated = gitHubSavedRepos
-            for i in updated.indices {
-                updated[i].isActive = false
+            if !gitLabSavedProjects.contains(where: { $0.isActive }) {
+                var updated = gitLabSavedProjects
+                updated[0].isActive = true
+                gitLabSavedProjects = updated
             }
+            var updated = gitHubSavedRepos
+            for i in updated.indices { updated[i].isActive = false }
             gitHubSavedRepos = updated  // Reassign to trigger didSet
         } else {
-            // Deactivate GitLab projects when GitHub is preferred
-            var updated = gitLabSavedProjects
-            for i in updated.indices {
-                updated[i].isActive = false
+            if !gitHubSavedRepos.contains(where: { $0.isActive }) {
+                var updated = gitHubSavedRepos
+                updated[0].isActive = true
+                gitHubSavedRepos = updated
             }
+            var updated = gitLabSavedProjects
+            for i in updated.indices { updated[i].isActive = false }
             gitLabSavedProjects = updated  // Reassign to trigger didSet
         }
     }
