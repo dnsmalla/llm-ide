@@ -11,14 +11,19 @@
 
 import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync, existsSync } from 'node:fs';
 import { config } from '../core/config.mjs';
-import { chatMemoryFile, legacyChatMemoryFile, memoryDir } from './paths.mjs';
+import {
+  chatMemoryFile, legacyChatMemoryFile, memoryDir, chatMemoryOriginsFile,
+} from './paths.mjs';
 
-// Caps mirror the reader's per-file budget (PER_FILE_CHARS = 4000 there); we
-// keep the on-disk file comfortably under that so it's never truncated mid-read.
+// How many facts the store may hold. The reader ranks these against the current
+// question and inlines only the most relevant, so this is a disk budget, not a
+// per-prompt one.
 const MAX_FACTS = config.memory.maxFacts;
-// Same value as the reader's chat-memory cap (config.memory.chatFileChars) —
-// one source of truth so the writer never stores more than the reader injects.
-const MAX_FILE_CHARS = config.memory.chatFileChars;
+// Same value as the reader's chat-memory READ cap (config.memory.chatStoreChars)
+// — one source of truth, so the reader can never slice a bullet the writer
+// stored. What the reader INJECTS into a prompt is a smaller, relevance-ranked
+// subset (config.memory.chatInjectChars), which is what lets this store be big.
+const MAX_FILE_CHARS = config.memory.chatStoreChars;
 const MAX_FACT_CHARS = 280; // one durable fact, not a paragraph
 
 const HEADER = [
@@ -58,6 +63,32 @@ export function factKey(s) {
   return k.trim();
 }
 
+// The UPSERT INDEX for a stored fact — what "the same fact" means when deciding
+// whether new data replaces an old row or becomes a new one.
+//
+// `factKey` alone can't answer that, because it keys on the whole sentence: a
+// fact whose VALUE changed ("binds to port 3456" → "binds to port 4000") gets a
+// different factKey and lands as a second, contradictory row. So a fact may
+// carry an explicit subject id in its tag — `[category|subject-id] text` — and
+// when it does, THAT is the index: same subject id ⇒ same fact ⇒ update in
+// place. The extractor is asked to reuse a known fact's id when it revises it
+// (see llm_agent/runtime/memory-extract.mjs).
+//
+// Facts without an id (everything captured before this, plus anything the model
+// declines to tag) fall back to full-text `factKey`, so behaviour is unchanged
+// for them. Exported for unit testing.
+export function factIndex(s) {
+  const tag = /^\s*\[([^\]]+)\]/.exec(String(s));
+  if (tag) {
+    const bar = tag[1].indexOf('|');
+    if (bar >= 0) {
+      const id = tag[1].slice(bar + 1).trim().toLowerCase();
+      if (id) return `#${id}`;   // `#` namespaces ids so one can't collide with a text key
+    }
+  }
+  return factKey(s);
+}
+
 // Pull the `- ` bullet lines out of the markdown body. Pure + exported so the
 // viewer endpoint and tests can parse a file's content without disk I/O.
 export function parseChatMemoryFacts(content) {
@@ -69,7 +100,7 @@ export function parseChatMemoryFacts(content) {
     if (!m) continue;
     const fact = m[1].trim();
     if (!fact) continue;
-    const key = factKey(fact);
+    const key = factIndex(fact);
     if (seen.has(key)) continue; // a file edited by hand may have dupes
     seen.add(key);
     out.push(fact);
@@ -87,7 +118,7 @@ export function renderChatMemoryFile(facts) {
   // Dedup (keep first occurrence) then keep the NEWEST MAX_FACTS.
   const seen = new Set();
   list = list.filter((f) => {
-    const k = factKey(f);
+    const k = factIndex(f);
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
@@ -111,6 +142,91 @@ export function renderChatMemoryFile(facts) {
   list = list.slice(keepFrom);
   const body = list.map((f) => `- ${f}`).join('\n');
   return list.length ? `${HEADER}${body}\n` : '';
+}
+
+// ── Session origins sidecar ────────────────────────────────────────
+// Which chat session taught the agent each fact, so deleting a chat can delete
+// what that chat contributed without touching facts learned elsewhere.
+//
+// SELF-PRUNING: `readFactOrigins` drops any entry whose fact is no longer in the
+// store. That's what keeps this file honest for free — the existing viewer
+// delete / clear-all paths (and cap eviction) know nothing about origins, and
+// don't have to.
+
+function readFactOriginsRaw(root) {
+  try {
+    const parsed = JSON.parse(readFileSync(chatMemoryOriginsFile(root), 'utf8'));
+    return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * `{ factIndex: sessionId }` for facts that still exist. Exported for the
+ * viewer/tests; callers that just want to forget a session use
+ * `forgetSessionMemory`.
+ */
+export function readFactOrigins(root, facts = readChatMemoryFacts(root)) {
+  const live = new Set(facts.map(factIndex));
+  const raw = readFactOriginsRaw(root);
+  const out = {};
+  for (const [idx, session] of Object.entries(raw)) {
+    if (typeof session === 'string' && session && live.has(idx)) out[idx] = session;
+  }
+  return out;
+}
+
+function writeFactOrigins(root, origins) {
+  const target = chatMemoryOriginsFile(root);
+  try {
+    if (Object.keys(origins).length === 0) {
+      try { unlinkSync(target); } catch { /* already absent */ }
+      return;
+    }
+    mkdirSync(memoryDir(root), { recursive: true });
+    // Same atomic write-then-rename as the memory file itself.
+    const tmp = `${target}.tmp-${process.pid}`;
+    try {
+      writeFileSync(tmp, `${JSON.stringify(origins, null, 2)}\n`, 'utf8');
+      renameSync(tmp, target);
+    } catch (err) {
+      try { unlinkSync(tmp); } catch { /* already gone */ }
+      throw err;
+    }
+  } catch { /* best-effort: losing an origin only costs precision on delete */ }
+}
+
+/**
+ * Drop every fact this session contributed. Facts learned in OTHER sessions
+ * stay — including a fact this session merely re-confirmed, since an update
+ * re-attributes the row to whoever wrote it last.
+ *
+ * Returns `{ facts, removed }`: the remaining facts and how many went away.
+ * A missing/unknown session removes nothing.
+ */
+export function forgetSessionMemory({ root, sessionId }) {
+  const facts = readChatMemoryFacts(root);
+  if (typeof sessionId !== 'string' || !sessionId || facts.length === 0) {
+    return { facts, removed: 0 };
+  }
+  const origins = readFactOrigins(root, facts);
+  const doomed = new Set(
+    Object.entries(origins).filter(([, s]) => s === sessionId).map(([idx]) => idx),
+  );
+  if (doomed.size === 0) {
+    writeFactOrigins(root, origins);   // still prune stale entries while we're here
+    return { facts, removed: 0 };
+  }
+  const remaining = facts.filter((f) => !doomed.has(factIndex(f)));
+  const saved = writeChatMemoryFacts(root, remaining);
+  const keptOrigins = {};
+  const live = new Set(saved.map(factIndex));
+  for (const [idx, s] of Object.entries(origins)) {
+    if (!doomed.has(idx) && live.has(idx)) keptOrigins[idx] = s;
+  }
+  writeFactOrigins(root, keptOrigins);
+  return { facts: saved, removed: facts.length - saved.length };
 }
 
 // Read the current fact list for a repo. Best-effort → [] on any error.
@@ -169,12 +285,25 @@ export function writeChatMemoryFacts(root, facts) {
   return parseChatMemoryFacts(content);
 }
 
-// Merge new facts into the existing file (dedup against what's there, newest
-// kept on overflow) and drop superseded facts. `remove` entries are matched
-// by factKey — the same normalization dedup uses, so a paraphrase of a stored
-// fact still removes it. Returns the resulting persisted fact list. No-op
-// (returns existing) when there's nothing to add AND nothing to remove.
-export function appendChatMemory({ root, facts, remove, meta }) {
+// UPSERT new facts into the existing file and drop superseded ones.
+//
+// `factKey` is the index. A fact whose key is already stored is not a
+// duplicate to discard — it's an UPDATE: the new text replaces the stored one
+// IN PLACE, keeping its position in the file. Previously the incoming copy was
+// dropped, so a fact whose value had changed ("the server binds to :3456" →
+// "…:4000") could only ever be corrected via the extractor's `superseded`
+// path, and any re-worded restatement was silently thrown away — the stale
+// version won forever.
+//
+// Position is preserved rather than moving an updated fact to the end: it keeps
+// the file diff-friendly, and with a store this large (config.memory.maxFacts)
+// the newest-wins overflow eviction effectively never fires.
+//
+// `remove` entries are matched by factKey too — the same normalization the
+// index uses — so a paraphrase of a stored fact still removes it. Returns the
+// resulting persisted fact list; no-op (returns existing) when nothing was
+// added, updated, or removed.
+export function appendChatMemory({ root, facts, remove, meta, sessionId }) {
   const incoming = (Array.isArray(facts) ? facts : [])
     .map((f) => String(f).trim())
     .filter(Boolean);
@@ -188,17 +317,57 @@ export function appendChatMemory({ root, facts, remove, meta }) {
     existing = existing.filter((f) => !removeKeys.has(factKey(f)));
     removedCount = before - existing.length;
   }
-  const have = new Set(existing.map(factKey));
-  const fresh = incoming.filter((f) => !have.has(factKey(f)));
-  if (fresh.length === 0 && removedCount === 0) {
-    if (meta && typeof meta === 'object') { meta.evicted = 0; meta.added = 0; meta.removed = 0; }
-    return existing; // nothing genuinely new, nothing superseded
+
+  const merged = [...existing];
+  // First occurrence wins as the slot for a key, matching parseChatMemoryFacts'
+  // own dedup order for a hand-edited file that contains duplicates.
+  const slotByKey = new Map();
+  merged.forEach((f, i) => {
+    const k = factIndex(f);
+    if (k && !slotByKey.has(k)) slotByKey.set(k, i);
+  });
+  let added = 0;
+  let updated = 0;
+  // Indexes this call is responsible for, so `forgetSessionMemory` can undo
+  // exactly this session's contribution. An UPDATE re-attributes the row: the
+  // session that last supplied its content is the one that owns it.
+  const touched = [];
+  for (const fact of incoming) {
+    const k = factIndex(fact);
+    if (!k) continue;
+    const slot = slotByKey.get(k);
+    if (slot === undefined) {
+      slotByKey.set(k, merged.length);
+      merged.push(fact);
+      added++;
+      touched.push(k);
+    } else if (merged[slot] !== fact) {
+      merged[slot] = fact;   // same index, new data → update in place
+      updated++;
+      touched.push(k);
+    }
   }
-  const candidates = [...existing, ...fresh];
-  const saved = writeChatMemoryFacts(root, candidates);
+
+  if (added === 0 && updated === 0 && removedCount === 0) {
+    if (meta && typeof meta === 'object') {
+      meta.evicted = 0; meta.added = 0; meta.updated = 0; meta.removed = 0;
+    }
+    return existing; // nothing new, nothing changed, nothing superseded
+  }
+  const saved = writeChatMemoryFacts(root, merged);
+  if (typeof sessionId === 'string' && sessionId && touched.length > 0) {
+    // readFactOrigins prunes entries for facts that no longer exist (removed
+    // above, or evicted by the cap during the write), so this stays in step
+    // with the store without a second pass.
+    const origins = readFactOrigins(root, saved);
+    const live = new Set(saved.map(factIndex));
+    for (const k of touched) if (live.has(k)) origins[k] = sessionId;
+    writeFactOrigins(root, origins);
+  }
   if (meta && typeof meta === 'object') {
-    meta.evicted = Math.max(0, candidates.length - saved.length);
-    meta.added = Math.max(0, saved.length - existing.length);
+    meta.evicted = Math.max(0, merged.length - saved.length);
+    meta.added = added;
+    meta.updated = updated;
     meta.removed = removedCount;
   }
   return saved;

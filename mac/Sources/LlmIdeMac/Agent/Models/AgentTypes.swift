@@ -12,8 +12,15 @@ struct AgentContext: Codable, Equatable {
     /// root plus the indexed repos. Optional for back-compat.
     var workspaceRoot: String?
     /// Opaque session identifier forwarded to the backend task store so
-    /// multi-turn agentic loops can be correlated across requests.
+    /// multi-turn agentic loops can be correlated across requests. Re-minted on
+    /// every session switch (see `resetTransientSessionState`) — so it is NOT a
+    /// stable handle on a conversation; use `chatSessionId` for that.
     var sessionId: String?
+    /// UUID of the saved chat this turn belongs to (`ChatSession.id`). Stable
+    /// for the life of the conversation, which is what lets the server attribute
+    /// captured project-memory facts to a chat and forget them when the user
+    /// deletes it. Optional for back-compat.
+    var chatSessionId: String?
     /// Current git branch for the active repo (if any). Populated so the agent
     /// can answer "what branch am I on?" without a git-op tool call.
     var currentBranch: String?

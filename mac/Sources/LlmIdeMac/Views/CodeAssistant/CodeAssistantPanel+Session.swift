@@ -787,6 +787,29 @@ extension CodeAssistantPanel {
     func deleteSession(_ id: UUID) {
         if id.uuidString == currentSessionIDString { resetActiveTurnState() }
         ChatSessionStore.delete(id: id)
+        // Forget what this chat taught the agent, so deleting the conversation
+        // deletes its memory too — otherwise facts captured from a chat the user
+        // has thrown away keep coming back in every later prompt. Fire-and-
+        // forget: the chat file is already gone either way, and the server
+        // prunes its own origins index, so a failure here is recoverable by a
+        // later delete rather than something to block the UI on.
+        //
+        // Repos/workspace are captured on the main actor BEFORE detaching:
+        // they read library/config state that isn't Sendable.
+        //
+        // These describe the CURRENTLY open project, which is not necessarily
+        // the one the deleted chat talked to. That can under-clean (a chat's
+        // facts survive in a project the user has since switched away from) but
+        // never mis-cleans: the server filters by session id, so a request
+        // aimed at the wrong repo removes nothing.
+        let repos = activeMemoryRepos
+        let workspaceRoot = activeMemoryWorkspaceRoot
+        let api = self.api
+        Task.detached {
+            _ = try? await api.forgetSessionMemory(sessionId: id.uuidString,
+                                                  repos: repos,
+                                                  workspaceRoot: workspaceRoot)
+        }
         refreshSessions()
         if id.uuidString == currentSessionIDString {
             if let next = sessions.first {

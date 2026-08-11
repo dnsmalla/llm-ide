@@ -61,3 +61,14 @@ export function chatMemoryFile(root) {
 export function legacyChatMemoryFile(root) {
   return join(legacyMemoryDir(root), 'chat-memory.md');
 }
+
+/**
+ * Sidecar recording WHICH chat session contributed each stored fact, so
+ * deleting a chat can delete what that chat taught the agent
+ * (`forgetSessionMemory`). Kept out of chat-memory.md on purpose: that file is
+ * inlined into the prompt verbatim, and session UUIDs are noise to the model.
+ * Shape: `{ "<factIndex>": "<sessionId>" }`.
+ */
+export function chatMemoryOriginsFile(root) {
+  return join(memoryDir(root), 'chat-memory.origins.json');
+}

@@ -19,6 +19,7 @@ import {
   resolveAllowedRepoRoot,
   readChatMemoryFacts,
   writeChatMemoryFacts,
+  forgetSessionMemory,
 } from '../../graphkit/index.mjs';
 
 // Normalised key for matching a fact line (mirrors memory-writer.factKey).
@@ -419,6 +420,40 @@ export async function handleAgentRoutes(req, res, ctx) {
     const target = normFact(body.fact);
     const remaining = readChatMemoryFacts(root).filter((f) => normFact(f) !== target);
     sendJSON(res, 200, { facts: writeChatMemoryFacts(root, remaining) });
+    return true;
+  }
+
+  // DELETE /kb/agent/session-memory   body: { sessionId, repo?, repos?, workspaceRoot? }
+  //   Forget what ONE chat session taught the agent — called when the user
+  //   deletes that chat, so its memory doesn't outlive it. Facts learned in
+  //   other sessions are untouched, including any this session only
+  //   re-confirmed (an update re-attributes the fact to its last writer).
+  //   Same allow-list gate and same candidate-resolution order as
+  //   project-memory above, so it targets the file capture actually wrote to.
+  //   { facts: string[], removed: number, repo: <root | null> }
+  if (req.method === 'DELETE' && new URL(url, 'http://127.0.0.1').pathname === '/kb/agent/session-memory') {
+    const body = parseJSON(await readBody(req, 8 * 1024)) || {};
+    const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
+    if (!sessionId) {
+      sendJSON(res, 400, { error: { code: 'SESSION_ID_REQUIRED', message: 'sessionId is required' } });
+      return true;
+    }
+    const workspaceRoot = typeof body.workspaceRoot === 'string' ? body.workspaceRoot : undefined;
+    const candidates = [
+      ...(Array.isArray(body.repos) ? body.repos.filter((r) => typeof r === 'string') : []),
+      ...(typeof body.repo === 'string' ? [body.repo] : []),
+      ...(workspaceRoot ? [workspaceRoot] : []),
+    ];
+    const allowed = buildAllowedRoots(userId, workspaceRoot);
+    let root = null;
+    if (allowed) {
+      for (const c of candidates) { root = resolveAllowedRepoRoot(c, allowed); if (root) break; }
+    }
+    // No resolvable repo is not an error: a chat with no project attached never
+    // captured anything, and the client deletes the session either way.
+    if (!root) { sendJSON(res, 200, { facts: [], removed: 0, repo: null }); return true; }
+    const { facts, removed } = forgetSessionMemory({ root, sessionId });
+    sendJSON(res, 200, { facts, removed, repo: root });
     return true;
   }
 

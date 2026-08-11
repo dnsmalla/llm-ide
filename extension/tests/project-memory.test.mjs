@@ -57,13 +57,17 @@ test('parseChatMemoryFacts extracts bullet lines and dedups', () => {
   assert.deepEqual(facts, ['One', 'Two']);
 });
 
-test('renderChatMemoryFile dedups and caps to newest', () => {
-  const many = Array.from({ length: 130 }, (_, i) => `fact ${i}`);
+test('renderChatMemoryFile dedups and caps to newest', async () => {
+  // Derived from config, not hard-coded: the cap is an operator-tunable budget
+  // and a literal here just breaks whenever the default moves.
+  const { config } = await import('../core/config.mjs');
+  const cap = config.memory.maxFacts;
+  const many = Array.from({ length: cap + 30 }, (_, i) => `fact ${i}`);
   const out = writer.renderChatMemoryFile([...many, 'fact 0']); // dup of oldest
   const lines = writer.parseChatMemoryFacts(out);
-  assert.equal(lines.length, 100);                  // capped at MAX_FACTS
-  assert.ok(lines.includes('fact 129'));            // newest kept
-  assert.ok(!lines.includes('fact 0'));             // oldest dropped
+  assert.equal(lines.length, cap);                        // capped at MAX_FACTS
+  assert.ok(lines.includes(`fact ${cap + 29}`));          // newest kept
+  assert.ok(!lines.includes('fact 0'));                   // oldest dropped
 });
 
 test('renderChatMemoryFile yields empty string for no facts', () => {
@@ -71,15 +75,110 @@ test('renderChatMemoryFile yields empty string for no facts', () => {
   assert.equal(writer.renderChatMemoryFile(['   ']), '');
 });
 
-test('appendChatMemory merges only genuinely-new facts, write/read round-trips', () => {
+test('appendChatMemory upserts by factKey: same index updates IN PLACE, write/read round-trips', () => {
   reset();
   const u = provision();
   const root = tmpRepo(u, 'append');
   assert.deepEqual(writer.readChatMemoryFacts(root), []);
   writer.appendChatMemory({ root, facts: ['Uses pnpm', 'Deploys via CI'] });
-  writer.appendChatMemory({ root, facts: ['uses PNPM', 'New thing'] }); // 1 dup (case/space)
+  const meta = {};
+  // 'uses PNPM' has the SAME factKey as 'Uses pnpm' (case/space normalised), so
+  // it's an update of that entry — not a duplicate to discard, and not a second
+  // row. It keeps position 0; only 'New thing' is appended.
+  writer.appendChatMemory({ root, facts: ['uses PNPM', 'New thing'], meta });
   const facts = writer.readChatMemoryFacts(root);
-  assert.deepEqual(facts, ['Uses pnpm', 'Deploys via CI', 'New thing']);
+  assert.deepEqual(facts, ['uses PNPM', 'Deploys via CI', 'New thing']);
+  assert.equal(meta.added, 1, 'one genuinely new fact');
+  assert.equal(meta.updated, 1, 'one existing index updated with new text');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a changed VALUE under the same subject id updates in place, not appends', () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'upsert-order');
+  writer.appendChatMemory({
+    root,
+    facts: ['[tooling|server-port] the server binds to port 3456', 'b', 'c'],
+  });
+  const meta = {};
+  // Same subject id, NEW value. Without the id these two sentences have
+  // different factKeys, so the store used to end up holding BOTH — the agent
+  // then saw two contradictory ports with no way to tell which was current.
+  writer.appendChatMemory({
+    root,
+    facts: ['[tooling|server-port] the server binds to port 4000'],
+    meta,
+  });
+  const facts = writer.readChatMemoryFacts(root);
+  assert.equal(facts.length, 3, 'no new row');
+  assert.equal(facts[0], '[tooling|server-port] the server binds to port 4000',
+               'updated in place, position preserved');
+  assert.equal(meta.updated, 1);
+  assert.equal(meta.added, 0);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('factIndex prefers the subject id and falls back to full text', () => {
+  assert.equal(writer.factIndex('[tooling|server-port] binds to 3456'), '#server-port');
+  assert.equal(writer.factIndex('[tooling|server-port] binds to 4000'), '#server-port',
+               'value change keeps the index');
+  // No id → legacy full-text key, so pre-existing facts behave exactly as before.
+  assert.equal(writer.factIndex('[tooling] uses pnpm'), writer.factKey('uses pnpm'));
+  assert.equal(writer.factIndex('uses pnpm'), writer.factKey('the project uses pnpm'));
+  // A subject id can never collide with a text key (`#` namespace).
+  assert.notEqual(writer.factIndex('[x|abc] q'), writer.factIndex('abc'));
+});
+
+test('distinct subject ids stay distinct rows', () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'upsert-distinct');
+  writer.appendChatMemory({
+    root,
+    facts: ['[tooling|server-port] port 3456', '[tooling|test-command] npm test'],
+  });
+  assert.equal(writer.readChatMemoryFacts(root).length, 2);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('sanitizeFacts renders the subject id into the stored tag', async () => {
+  const { sanitizeFacts } = await import('../llm_agent/runtime/memory-extract.mjs');
+  assert.deepEqual(
+    sanitizeFacts([{ category: 'tooling', key: 'Server Port', fact: 'binds to 3456' }]),
+    ['[tooling|server-port] binds to 3456'],
+  );
+  // A key with tag-breaking characters is normalised, never stored raw.
+  assert.deepEqual(
+    sanitizeFacts([{ category: 'tooling', key: 'a|b]c', fact: 'something durable' }]),
+    ['[tooling|a-b-c] something durable'],
+  );
+  // Missing category still yields a usable index.
+  assert.deepEqual(
+    sanitizeFacts([{ key: 'k', fact: 'something durable' }]),
+    ['[|k] something durable'],
+  );
+});
+
+test('sanitizeFacts collapses two facts sharing one subject id, last wins', async () => {
+  const { sanitizeFacts } = await import('../llm_agent/runtime/memory-extract.mjs');
+  const out = sanitizeFacts([
+    { category: 'tooling', key: 'port', fact: 'binds to 3456' },
+    { category: 'tooling', key: 'port', fact: 'binds to 4000' },
+  ]);
+  assert.deepEqual(out, ['[tooling|port] binds to 4000']);
+});
+
+test('appendChatMemory is a no-op when the incoming fact is byte-identical', () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'upsert-noop');
+  writer.appendChatMemory({ root, facts: ['exactly the same fact'] });
+  const meta = {};
+  writer.appendChatMemory({ root, facts: ['exactly the same fact'], meta });
+  assert.deepEqual(writer.readChatMemoryFacts(root), ['exactly the same fact']);
+  assert.equal(meta.added, 0);
+  assert.equal(meta.updated, 0);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -277,28 +376,37 @@ test('renderGraphifyMemory reports per-file injection stats into an optional sin
 
 test('appendChatMemory reports evicted count when the fact store hits its cap', async () => {
   const { appendChatMemory, readChatMemoryFacts } = await import('../graphkit/index.mjs');
+  const { config } = await import('../core/config.mjs');
+  const cap = config.memory.maxFacts;
   const root = path.join(__dirname, `_pm-evict-${process.pid}`);
   fs.mkdirSync(path.join(root, 'system', 'memory'), { recursive: true });
-  // Fill to the 100-fact cap.
-  appendChatMemory({ root, facts: Array.from({ length: 100 }, (_, i) => `fact ${i} distinct convention`) });
-  assert.equal(readChatMemoryFacts(root).length, 100);
+  // Fill to the fact cap.
+  appendChatMemory({ root, facts: Array.from({ length: cap }, (_, i) => `fact ${i} distinct convention`) });
+  assert.equal(readChatMemoryFacts(root).length, cap);
   // Add 3 genuinely new facts → the 3 oldest are evicted to stay at the cap.
   const meta = {};
   const saved = appendChatMemory({ root, facts: ['brand new alpha', 'brand new beta', 'brand new gamma'], meta });
-  assert.equal(saved.length, 100, 'stays at the 100-fact cap');
+  assert.equal(saved.length, cap, 'stays at the fact cap');
   assert.equal(meta.evicted, 3, 'reports the 3 evicted facts');
-  assert.equal(meta.added, 0, 'net size unchanged (added == evicted at the cap)');
+  // `added` counts facts genuinely inserted, NOT the net size delta — at the
+  // cap those 3 inserts are offset by 3 evictions, and reporting 0 there hid
+  // the fact that anything was captured at all.
+  assert.equal(meta.added, 3, 'reports the inserts, independent of eviction');
   fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('config.memory exposes tunable budgets with sane defaults', async () => {
   const { config } = await import('../core/config.mjs');
   const m = config.memory;
-  assert.equal(m.perFileChars, 4000);
-  assert.equal(m.totalChars, 16000);
+  assert.equal(m.perFileChars, 6000);
+  assert.equal(m.totalChars, 40000);
   assert.equal(m.maxRepos, 2);
-  assert.equal(m.chatFileChars, 8000, 'shared reader+writer chat-memory cap');
-  assert.equal(m.maxFacts, 100);
+  assert.equal(m.chatInjectChars, 16000, 'per-prompt chat-memory injection room');
+  assert.equal(m.chatStoreChars, 200000, 'shared reader+writer on-disk chat-memory cap');
+  assert.equal(m.maxFacts, 1000);
+  // The store must be able to hold more than one prompt can inline — that gap
+  // is the whole point of relevance-ranked recall.
+  assert.ok(m.chatStoreChars > m.chatInjectChars);
 });
 
 test('config.memory clamps out-of-range env values instead of silently disabling the feature', () => {
@@ -334,8 +442,10 @@ test('config.memory clamps out-of-range env values instead of silently disabling
   // An absurdly large value is capped rather than letting an operator inflate
   // per-turn prompt cost unbounded.
   assert.equal(readMemoryConfig({ LLMIDE_MEM_TOTAL_CHARS: '999999999' }).totalChars, 200_000);
+  assert.equal(readMemoryConfig({ LLMIDE_MEM_CHAT_STORE_CHARS: '0' }).chatStoreChars, 1_000);
+  assert.equal(readMemoryConfig({ LLMIDE_MEM_CHAT_STORE_CHARS: '999999999' }).chatStoreChars, 2_000_000);
   // Non-numeric input falls back to the documented default, same as envInt.
-  assert.equal(readMemoryConfig({ LLMIDE_MEM_MAX_FACTS: 'not-a-number' }).maxFacts, 100);
+  assert.equal(readMemoryConfig({ LLMIDE_MEM_MAX_FACTS: 'not-a-number' }).maxFacts, 1_000);
 });
 
 test('extractMemories reports approx extraction token cost via meta', async () => {
@@ -661,5 +771,178 @@ test('DELETE /kb/agent/project-memory removes one fact and clears all', async ()
     res, { userId: u, url: '/kb/agent/project-memory' },
   );
   assert.equal(res.statusCode, 404);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+// ── Session-scoped memory (delete the chat → delete what it taught) ───
+
+test('forgetSessionMemory drops only the deleted session\'s facts', () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'session-forget');
+  writer.appendChatMemory({ root, facts: ['from chat A', 'shared fact'], sessionId: 'A' });
+  writer.appendChatMemory({ root, facts: ['from chat B'], sessionId: 'B' });
+
+  const { facts, removed } = writer.forgetSessionMemory({ root, sessionId: 'A' });
+  assert.equal(removed, 2);
+  assert.deepEqual(facts, ['from chat B'], 'chat B\'s memory survives');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a fact re-confirmed by a later session belongs to that session', () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'session-reattribute');
+  writer.appendChatMemory({ root, facts: ['[tooling|pm] uses npm'], sessionId: 'A' });
+  // Session B revises the same subject → B now owns the row, so deleting A
+  // must not take it away. (Deleting a chat should never remove knowledge a
+  // LATER chat re-established.)
+  writer.appendChatMemory({ root, facts: ['[tooling|pm] uses pnpm'], sessionId: 'B' });
+
+  const afterA = writer.forgetSessionMemory({ root, sessionId: 'A' });
+  assert.equal(afterA.removed, 0);
+  assert.deepEqual(afterA.facts, ['[tooling|pm] uses pnpm']);
+
+  const afterB = writer.forgetSessionMemory({ root, sessionId: 'B' });
+  assert.equal(afterB.removed, 1);
+  assert.deepEqual(afterB.facts, []);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('facts captured with no session id are never forgotten by a session delete', () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'session-unattributed');
+  writer.appendChatMemory({ root, facts: ['unattributed fact'] });
+  writer.appendChatMemory({ root, facts: ['session fact'], sessionId: 'S' });
+  const { facts, removed } = writer.forgetSessionMemory({ root, sessionId: 'S' });
+  assert.equal(removed, 1);
+  assert.deepEqual(facts, ['unattributed fact']);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('forgetSessionMemory is a safe no-op for an unknown or empty session', () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'session-noop');
+  writer.appendChatMemory({ root, facts: ['a fact'], sessionId: 'S' });
+  assert.equal(writer.forgetSessionMemory({ root, sessionId: 'other' }).removed, 0);
+  assert.equal(writer.forgetSessionMemory({ root, sessionId: '' }).removed, 0);
+  assert.equal(writer.forgetSessionMemory({ root, sessionId: undefined }).removed, 0);
+  assert.deepEqual(writer.readChatMemoryFacts(root), ['a fact']);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('the origins sidecar self-prunes when facts are deleted by other paths', () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'session-prune');
+  writer.appendChatMemory({ root, facts: ['x fact', 'y fact'], sessionId: 'S' });
+  assert.equal(Object.keys(writer.readFactOrigins(root)).length, 2);
+  // The viewer's own delete path knows nothing about origins — the sidecar has
+  // to stay honest on its own, or a later fact could inherit a stale owner.
+  writer.writeChatMemoryFacts(root, ['x fact']);
+  assert.deepEqual(Object.keys(writer.readFactOrigins(root)), [writer.factIndex('x fact')]);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('the origins sidecar is not inlined into the prompt', async () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'session-not-in-prompt');
+  writer.appendChatMemory({ root, facts: ['a durable fact'], sessionId: 'SECRET-SESSION-ID' });
+  const block = memory.renderGraphifyMemory(
+    { indexedRepos: [{ path: root, name: 'r' }] }, u, null, 'what do you know?');
+  assert.ok(block.includes('a durable fact'));
+  assert.ok(!block.includes('SECRET-SESSION-ID'), 'session ids never reach the model');
+  assert.ok(!block.includes('chat-memory.origins'), 'the sidecar is not read as a memory file');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('persistTurnMemory attributes facts to the CHAT session id', async () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'session-persist');
+  const runClaude = async () => JSON.stringify({
+    facts: [{ category: 'tooling', key: 'build-cmd', fact: 'the build runs via build.sh' }],
+    superseded: [],
+  });
+  await persist.persistTurnMemory({
+    agentContext: {
+      indexedRepos: [{ path: root, name: 'r' }],
+      // sessionId is re-minted on every session switch; chatSessionId is the
+      // stable one, and it must be what capture attributes to.
+      sessionId: 'ephemeral-agent-session',
+      chatSessionId: 'STABLE-CHAT-UUID',
+    },
+    userId: u, userMessage: 'how do I build?', reply: 'run build.sh', runClaude,
+  });
+  const origins = writer.readFactOrigins(root);
+  assert.deepEqual(Object.values(origins), ['STABLE-CHAT-UUID']);
+  // Deleting that chat forgets the fact.
+  assert.equal(writer.forgetSessionMemory({ root, sessionId: 'STABLE-CHAT-UUID' }).removed, 1);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('DELETE /kb/agent/session-memory forgets a session, gated by the allow-list', async () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'http-session-del');
+  writer.appendChatMemory({ root, facts: ['chat A fact'], sessionId: 'A' });
+  writer.appendChatMemory({ root, facts: ['chat B fact'], sessionId: 'B' });
+
+  let res = mkRes();
+  await handleAgentRoutes(
+    mkReq('DELETE', '/kb/agent/session-memory', { repos: [root], sessionId: 'A' }),
+    res, { userId: u, url: '/kb/agent/session-memory' },
+  );
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.removed, 1);
+  assert.deepEqual(res.body.facts, ['chat B fact']);
+
+  // Missing sessionId → 400 rather than silently wiping something.
+  res = mkRes();
+  await handleAgentRoutes(
+    mkReq('DELETE', '/kb/agent/session-memory', { repos: [root] }),
+    res, { userId: u, url: '/kb/agent/session-memory' },
+  );
+  assert.equal(res.statusCode, 400);
+
+  // An unlisted repo touches no disk and reports nothing removed — a chat with
+  // no project attached is deleted client-side regardless.
+  res = mkRes();
+  await handleAgentRoutes(
+    mkReq('DELETE', '/kb/agent/session-memory', { repos: ['/tmp/nope'], sessionId: 'B' }),
+    res, { userId: u, url: '/kb/agent/session-memory' },
+  );
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { facts: [], removed: 0, repo: null });
+  assert.deepEqual(writer.readChatMemoryFacts(root), ['chat B fact'], 'untouched');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('sanitizeFacts keeps the tag inside MAX_FACT_CHARS so the writer never clips it', async () => {
+  const { sanitizeFacts } = await import('../llm_agent/runtime/memory-extract.mjs');
+  const long = 'w'.repeat(400);
+  const [rendered] = sanitizeFacts([{ category: 'tooling', key: 'a-long-subject-id', fact: long }]);
+  // The writer caps a stored line at 280 chars. If the tag were added on top of
+  // a 280-char fact, the stored line would be clipped — and a clipped stored
+  // line never equals the incoming one, so every later turn re-"updated" it.
+  assert.ok(rendered.length <= 280, `rendered ${rendered.length} chars`);
+  assert.ok(rendered.startsWith('[tooling|a-long-subject-id] '));
+  assert.equal(writer.renderChatMemoryFile([rendered]).includes(rendered), true,
+               'survives a write/render round-trip unclipped');
+});
+
+test('a long fact re-captured verbatim is a no-op, not a phantom update', () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'no-phantom-update');
+  const line = `[tooling|build] ${'b'.repeat(240)}`.slice(0, 280);
+  writer.appendChatMemory({ root, facts: [line], sessionId: 'S' });
+  const meta = {};
+  writer.appendChatMemory({ root, facts: [line], sessionId: 'S', meta });
+  assert.equal(meta.updated, 0, 'identical line must not count as an update');
+  assert.equal(meta.added, 0);
   fs.rmSync(root, { recursive: true, force: true });
 });

@@ -71,10 +71,21 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
       return null;
     }
     const meta = {};
-    const saved = appendChatMemory({ root, facts, remove: superseded, meta });
+    // Attribute what we learn to the CHAT session (a stable per-conversation
+    // UUID owned by the client's session store), not `agentContext.sessionId` —
+    // that one is re-minted on every session switch, so facts captured after a
+    // switch could never be traced back to the chat the user would delete.
+    // Falls back to the agent session id for a client that doesn't send one.
+    const sessionId = typeof agentContext?.chatSessionId === 'string' && agentContext.chatSessionId
+      ? agentContext.chatSessionId
+      : (typeof agentContext?.sessionId === 'string' ? agentContext.sessionId : undefined);
+    const saved = appendChatMemory({ root, facts, remove: superseded, meta, sessionId });
     const added = meta.added ?? Math.max(0, (Array.isArray(saved) ? saved.length : 0) - existing.length);
     logger.info('project_memory', {
       outcome: 'captured', extracted: facts.length, added,
+      // `updated` = facts whose index (factKey) was already stored and whose
+      // text changed, so the stored copy was replaced in place.
+      updated: meta.updated ?? 0,
       removedCount: meta.removed ?? 0, removedFacts: superseded,
       evicted: meta.evicted ?? 0,
       extractTokens, total: saved.length, root,

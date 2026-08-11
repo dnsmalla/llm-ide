@@ -44,12 +44,14 @@ export function expandTilde(p, home = homedir()) {
 }
 
 const PER_FILE_CHARS = config.memory.perFileChars;
-// chat-memory.md is written up to config.memory.chatFileChars (the SAME value
-// the writer caps the file at), so read it at that full cap rather than
-// PER_FILE_CHARS — otherwise every curated fact past the first ~4 KB was
-// silently dropped before it reached the agent. The shared TOTAL_CHARS budget
-// below still bounds the whole block.
-const CHAT_MEMORY_CHARS = config.memory.chatFileChars;
+// chat-memory.md is READ at the writer's full file cap (chatStoreChars) rather
+// than PER_FILE_CHARS — otherwise every curated fact past the first few KB was
+// silently dropped before it could even be ranked, and a short read can slice
+// the last bullet in half. What actually reaches the prompt is a much smaller,
+// relevance-selected subset (CHAT_INJECT_CHARS below), so a large store costs
+// disk, not tokens. The shared TOTAL_CHARS budget still bounds the whole block.
+const CHAT_STORE_CHARS = config.memory.chatStoreChars;
+const CHAT_INJECT_CHARS = config.memory.chatInjectChars;
 const TOTAL_CHARS = config.memory.totalChars;
 const MAX_FAULT_FILES = 8;
 const MAX_QA_FILES = 8;
@@ -369,8 +371,8 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) 
   // a fat repo.md can't crowd them out (the old order added repo.md first with
   // the full budget, starving chat-memory within — and across — repos).
   const chatBody = selectChatMemoryFacts(
-    readMemoryFile('chat-memory.md', CHAT_MEMORY_CHARS),
-    { userMessage, room: Math.min(budget, CHAT_MEMORY_CHARS) },
+    readMemoryFile('chat-memory.md', CHAT_STORE_CHARS),
+    { userMessage, room: Math.min(budget, CHAT_INJECT_CHARS) },
   );
   const chatFloor = Math.min(Math.floor(budget * 0.5), chatBody.length);
 

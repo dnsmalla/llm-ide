@@ -12,7 +12,7 @@
 //    chatter ("fix this typo", "what does foo do").
 
 import { tryParseJSON } from '../../agents/runtime.mjs';
-import { factKey } from '../../graphkit/memory-writer.mjs';
+import { factKey, factIndex } from '../../graphkit/memory-writer.mjs';
 
 const EXTRACT_MODEL = process.env.LLMIDE_SUMMARIZE_MODEL || process.env.LLMIDE_MODEL || undefined;
 const MAX_NEW_FACTS = 5;
@@ -35,34 +35,70 @@ function normalizeCategory(c) {
   return FACT_CATEGORIES.has(k) ? k : '';
 }
 
+// A fact's stable subject id: what makes "the same fact with a new value" an
+// UPDATE rather than a second, contradictory row (see `factIndex` in
+// graphkit/memory-writer.mjs). Kebab-case, bounded, and stripped of anything
+// that would break the `[category|id]` tag it's stored in.
+const MAX_KEY_CHARS = 48;
+function normalizeKey(k) {
+  if (typeof k !== 'string') return '';
+  return k.trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')     // also removes `|` and `]`, which would corrupt the tag
+    .replace(/^-+|-+$/g, '')
+    .slice(0, MAX_KEY_CHARS)
+    .replace(/-+$/, '');
+}
+
 // Exported for unit testing the prompt-independent parsing/sanitising logic.
-// Accepts either plain strings (legacy) or `{ category, fact }` objects and
-// emits `[category] fact` strings (untagged when the category is missing or
-// unknown). Dedup is by the fact TEXT so the same fact can't slip in twice
-// under different categories.
+// Accepts plain strings (legacy) or `{ category, key, fact }` objects and emits
+// tagged strings: `[category|key] fact`, degrading to `[category] fact` or a
+// bare fact as the pieces go missing.
+//
+// Dedup within one batch is by the fact's INDEX — its `key` when it has one,
+// else its text — so a model that emits the same subject twice in one response
+// yields one fact (the last wins, matching the writer's upsert), rather than two
+// rows that then fight each other.
 export function sanitizeFacts(parsed) {
   if (!Array.isArray(parsed)) return [];
   const out = [];
-  const seen = new Set();
+  const slotByIndex = new Map();
   for (const item of parsed) {
     let rawFact;
     let rawCat;
+    let rawKey;
     if (typeof item === 'string') {
       rawFact = item;
     } else if (item && typeof item === 'object' && typeof item.fact === 'string') {
       rawFact = item.fact;
       rawCat = item.category;
+      rawKey = item.key;
     } else {
       continue;
     }
-    const fact = rawFact.trim().replace(/\s+/g, ' ').slice(0, MAX_FACT_CHARS);
-    if (fact.length < 4) continue; // junk / empty
-    const key = fact.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
     const cat = normalizeCategory(rawCat);
-    out.push(cat ? `[${cat}] ${fact}` : fact);
-    if (out.length >= MAX_NEW_FACTS) break;
+    const key = normalizeKey(rawKey);
+    const tag = key ? (cat ? `${cat}|${key}` : `|${key}`) : cat;
+    // Budget the tag INSIDE MAX_FACT_CHARS. The writer caps whole stored lines
+    // at the same number, so slicing only the fact text and then prepending
+    // `[category|key] ` produced a line the writer would clip — and a clipped
+    // stored line never equals the incoming one, so every later turn saw a
+    // phantom "update" and rewrote the file.
+    const framing = tag ? tag.length + 3 : 0;   // "[" + "]" + " "
+    const fact = rawFact.trim().replace(/\s+/g, ' ')
+      .slice(0, Math.max(0, MAX_FACT_CHARS - framing));
+    if (fact.length < 4) continue; // junk / empty
+    const rendered = tag ? `[${tag}] ${fact}` : fact;
+    // Index the RENDERED line through the writer's own rule, so the extractor
+    // and the store can never disagree about what counts as the same fact.
+    const index = factIndex(rendered);
+    const slot = slotByIndex.get(index);
+    if (slot !== undefined) {
+      out[slot] = rendered;          // same subject twice in one batch → last wins
+      continue;
+    }
+    if (out.length >= MAX_NEW_FACTS) continue;
+    slotByIndex.set(index, out.length);
+    out.push(rendered);
   }
   return out;
 }
@@ -152,12 +188,18 @@ function buildPrompt({ userMessage, reply, existingFacts }) {
     '- Each fact: one concise sentence, self-contained.',
     '- Classify each fact with a category, exactly one of:',
     '  convention | architecture | tooling | command | preference.',
-    '- If the exchange shows an ALREADY KNOWN fact is now WRONG or outdated',
-    '  (replaced tool, changed convention, reversed decision), list that fact',
-    '  VERBATIM (exactly as written above) in "superseded" — and put the',
-    '  replacement, if any, in "facts".',
-    '- Output ONLY JSON: {"facts": [{"category": "<category>", "fact":',
-    '  "<one concise sentence>"}], "superseded": ["<verbatim known fact>"]}.',
+    '- Give each fact a "key": a short kebab-case id for its SUBJECT that stays',
+    '  the same even when the subject\'s value changes (e.g. "server-port",',
+    '  "package-manager", "test-command"). Do NOT put the value in the key.',
+    '- If a fact you return REVISES something in ALREADY KNOWN, reuse that',
+    '  entry\'s existing key exactly (keys are shown as [category|key]) — the',
+    '  new text then REPLACES the stored one instead of contradicting it.',
+    '- If the exchange shows an ALREADY KNOWN fact is now WRONG or outdated and',
+    '  has no replacement (removed tool, abandoned convention), list that fact',
+    '  VERBATIM (exactly as written above) in "superseded".',
+    '- Output ONLY JSON: {"facts": [{"category": "<category>", "key":',
+    '  "<kebab-case-subject>", "fact": "<one concise sentence>"}],',
+    '  "superseded": ["<verbatim known fact>"]}.',
     '  Use empty arrays when nothing qualifies.',
     '',
     'ALREADY KNOWN:',

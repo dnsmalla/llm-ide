@@ -191,15 +191,26 @@ export const config = Object.freeze({
 
   // Repo-grounding memory block (graphkit/memory.mjs + memory-writer.mjs).
   // Tunable so an operator can trade prompt-token budget against grounding
-  // depth without a rebuild. `chatFileChars` is shared by the writer's file
-  // cap AND the reader's chat-memory read cap so the two can never drift — a
-  // drift there previously dropped half the curated facts silently.
+  // depth without a rebuild.
+  //
+  // Two DIFFERENT chat-memory budgets, deliberately decoupled so the store can
+  // be large without every prompt paying for all of it:
+  //   • `chatStoreChars` — how much chat-memory.md may hold ON DISK. Shared by
+  //     the writer's file cap AND the reader's read cap so the two can never
+  //     drift: reading a file at less than its write cap slices a bullet in
+  //     half, and a drift there previously dropped half the curated facts
+  //     silently.
+  //   • `chatInjectChars` — how much of that store may be INLINED into one
+  //     prompt. The reader ranks facts against the current question
+  //     (selectChatMemoryFacts) and packs only the most relevant ones into this
+  //     room. Keeps the legacy LLMIDE_MEM_CHAT_FILE_CHARS env name.
   memory: Object.freeze({
-    perFileChars:  envIntClamped('LLMIDE_MEM_PER_FILE_CHARS', 4_000,  200, 50_000),
-    totalChars:    envIntClamped('LLMIDE_MEM_TOTAL_CHARS',    16_000, 500, 200_000),
-    maxRepos:      envIntClamped('LLMIDE_MEM_MAX_REPOS',       2,     1,   20),
-    chatFileChars: envIntClamped('LLMIDE_MEM_CHAT_FILE_CHARS', 8_000, 500, 50_000),
-    maxFacts:      envIntClamped('LLMIDE_MEM_MAX_FACTS',       100,   1,   2_000),
+    perFileChars:    envIntClamped('LLMIDE_MEM_PER_FILE_CHARS',    6_000,   200,    50_000),
+    totalChars:      envIntClamped('LLMIDE_MEM_TOTAL_CHARS',      40_000,   500,   200_000),
+    maxRepos:        envIntClamped('LLMIDE_MEM_MAX_REPOS',             2,     1,        20),
+    chatInjectChars: envIntClamped('LLMIDE_MEM_CHAT_FILE_CHARS',  16_000,   500,    50_000),
+    chatStoreChars:  envIntClamped('LLMIDE_MEM_CHAT_STORE_CHARS', 200_000, 1_000, 2_000_000),
+    maxFacts:        envIntClamped('LLMIDE_MEM_MAX_FACTS',         1_000,     1,    20_000),
   }),
 });
 

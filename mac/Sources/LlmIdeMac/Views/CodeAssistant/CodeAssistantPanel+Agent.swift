@@ -145,6 +145,7 @@ extension CodeAssistantPanel {
             recentIssues: agent.recentIssues.isEmpty ? nil : agent.recentIssues,
             workspaceRoot: workspaceRoot,
             sessionId: agent.agentSessionId,
+            chatSessionId: currentSessionIDString.isEmpty ? nil : currentSessionIDString,
             currentBranch: gitBranch,
             gitStatus: gitStatus
         )
