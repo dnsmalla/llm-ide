@@ -17,22 +17,32 @@ schema:
 
 # bash
 
-Run a shell command in the user's workspace. The client executes the
-command immediately and feeds the output back into the conversation.
+Run a shell command **in the user's app**, as an action they can see. Emitting
+this ends your turn: the app surfaces the command (Manual mode — the user
+confirms it; Bypass mode — it runs immediately), runs it with a 180 s timeout,
+and feeds the output back as a new turn for you to continue from.
+
+Use this for commands that DO something. For commands that merely LOOK at
+something, use `run-bash` instead — it executes inside this turn, so you get the
+output without a round-trip through the user.
 
 ## When to use
 
-- The user asks you to run, execute, or test something.
-- You need command output to answer a question (`node --version`, `npm test`, `git status`).
-- A build, lint, install, or script step is the action the user requested.
+- The command CHANGES state: `npm install`, `git push`, a script that writes files.
+- The command is SLOW: `npm test`, `swift build`, a full lint or test run.
+  (`run-bash` gives up at 30 s; this tool allows 180 s.)
+- The user should see the command as a discrete action before it happens.
 
-**Always prefer this tool over printing a command for the user to copy.**
+**Always prefer this over printing a command for the user to copy.**
 
 ## When NOT to use
 
+- Read-only inspection (`git status`, `node --version`, `ls`, `grep`) — use
+  `run-bash`, which answers in the same turn.
 - Destructive, irreversible operations (`rm -rf`, `git reset --hard <sha>`, `DROP TABLE`) —
   describe the risk and ask for explicit confirmation first.
-- Commands that require user input during execution (interactive prompts).
+- Commands that require user input during execution (interactive prompts):
+  stdin is closed, so they fail rather than hang.
 
 ## Call shape
 
@@ -46,6 +56,6 @@ command immediately and feeds the output back into the conversation.
 ## Examples
 
 - "run the tests" → `npm test`
-- "what node version?" → `node --version`
 - "build the extension" → `npm run build` in the extension directory
 - "install deps" → `npm install`
+- "what node version?" → NOT this tool; `run-bash` answers it in one turn

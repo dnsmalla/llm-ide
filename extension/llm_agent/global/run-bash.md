@@ -20,16 +20,26 @@ schema:
 
 # run-bash
 
-Execute a shell command in the user's workspace and return its output.
+Execute a **read-only** shell command in the user's workspace and get its output
+back inside this same turn. Nothing is handed to the user for confirmation, so
+keep it to commands that only LOOK at things — for anything that changes state
+or takes real time, use `bash`, which surfaces as an action in the app.
+
+Because the output arrives immediately, this is the right tool for
+investigation: chain several reads in one turn, then answer.
 
 ## When to use
 
-- User asks to run a script, build, test, lint, or any shell command.
-- You need to inspect output to answer a question (e.g. `node --version`, `npm test`).
-- Running a command is the action the user requested — NOT just showing them how.
+- Inspecting repo or environment state: `git status`, `git log`, `git diff`,
+  `ls`, `cat`, `grep`, `which`, `node --version`.
+- Any quick check whose output you need in order to answer the question.
 
 ## When NOT to use
 
+- Commands that CHANGE state (`npm install`, `git push`, scripts that write
+  files) or that are SLOW (`npm test`, `swift build`) — use `bash`. It gets a
+  180 s budget and, in Manual mode, the user's confirmation; this tool times out
+  at 30 s and asks nobody.
 - Destructive operations (`rm -rf`, `drop table`, `git reset --hard`) — confirm with the user first.
 - Commands requiring user input (interactive prompts).
 - Long-running daemons — use `npm run server &` style only if the user explicitly asks.
@@ -45,11 +55,11 @@ Execute a shell command in the user's workspace and return its output.
 
 ## Examples
 
-- User: "run the tests"
-  → command: "npm test"
-
 - User: "what node version is this?"
   → command: "node --version"
 
-- User: "build the extension"
-  → command: "npm run build", cwd: "<workspace>/extension"
+- User: "what's changed on this branch?"
+  → command: "git status --porcelain=v1"
+
+- User: "run the tests" / "build the extension"
+  → NOT this tool: slow and state-changing, so use `bash`.
