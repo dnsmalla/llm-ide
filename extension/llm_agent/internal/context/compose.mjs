@@ -19,7 +19,11 @@ const APP_CAPABILITIES_PATH = join(__dirname, 'app-capabilities.md');
 // Cache the static markdown once per process.
 const appCapabilities = readFileSync(APP_CAPABILITIES_PATH, 'utf8').trim();
 
-export function composeSystemContext(agentContext, userId) {
+// `userMessage` (optional) is the question this turn is answering. It is used
+// only to rank curated chat-memory facts by relevance inside
+// renderGraphifyMemory; omitting it degrades that selection to newest-first,
+// never to an error.
+export function composeSystemContext(agentContext, userId, userMessage = '') {
   const sections = [
     '# System context',
     '',
@@ -29,11 +33,13 @@ export function composeSystemContext(agentContext, userId) {
     renderRecentIssues(agentContext),
     renderRecentMeetings(agentContext),
     // Surfaces the Mac app's Graphify-generated memory (repo.md,
-    // graph-notes.md, prior bug reports, prior Q&A) so the internal
+    // graph-notes.md, prior fault reports, prior Q&A) so the internal
     // agent benefits from the same context external CLIs already see.
     // userId is required so we can gate path reads against the user's
-    // registered repo allow-list.
-    renderGraphifyMemory(agentContext, userId),
+    // registered repo allow-list. `stats` is omitted deliberately: route.mjs
+    // already logs one `memory_context` line per turn for the global agent's
+    // copy of this same block, and a second sink would double-count it.
+    renderGraphifyMemory(agentContext, userId, undefined, userMessage),
   ];
   // Neutralise fence sentinels across the whole block: issue titles, meeting
   // content, repo names, and Graphify memory are all external/user-derived and

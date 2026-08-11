@@ -43,10 +43,10 @@ function provision(email = 'pm@example.test') {
     email, password: 'CorrectHorseBattery', displayName: 'pm',
   }).id;
 }
-// Make a throwaway repo dir with a graphify-out/memory tree and allow-list it.
+// Make a throwaway repo dir with a system/memory tree and allow-list it.
 function tmpRepo(userId, tag) {
   const root = path.join(__dirname, `_pm-repo-${tag}-${process.pid}`);
-  fs.mkdirSync(path.join(root, 'graphify-out', 'memory'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'system', 'memory'), { recursive: true });
   db.addUserRepo(userId, root);
   return root;
 }
@@ -80,6 +80,29 @@ test('appendChatMemory merges only genuinely-new facts, write/read round-trips',
   writer.appendChatMemory({ root, facts: ['uses PNPM', 'New thing'] }); // 1 dup (case/space)
   const facts = writer.readChatMemoryFacts(root);
   assert.deepEqual(facts, ['Uses pnpm', 'Deploys via CI', 'New thing']);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('chat memory left in the legacy tree is read, then migrated forward on write', () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'migrate');
+  const legacyDir = path.join(root, 'graphify-out', 'memory');
+  const legacyFile = path.join(legacyDir, 'chat-memory.md');
+  fs.mkdirSync(legacyDir, { recursive: true });
+  fs.writeFileSync(legacyFile, '# Chat memory\n- Uses pnpm workspaces\n');
+
+  // Read falls back to the old location so pre-move facts aren't lost.
+  assert.deepEqual(writer.readChatMemoryFacts(root), ['Uses pnpm workspaces']);
+
+  // The first write materialises everything at the canonical path...
+  writer.appendChatMemory({ root, facts: ['Deploys via CI'] });
+  const canonical = path.join(root, 'system', 'memory', 'chat-memory.md');
+  assert.deepEqual(writer.readChatMemoryFacts(root), ['Uses pnpm workspaces', 'Deploys via CI']);
+  assert.ok(fs.existsSync(canonical), 'facts now live at the canonical path');
+  // ...and retires the old file, so exactly one copy exists afterwards.
+  assert.ok(!fs.existsSync(legacyFile), 'legacy file is removed once carried forward');
+
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -203,7 +226,7 @@ test('renderGraphifyMemory inlines chat-memory.md for an allow-listed repo', () 
   reset();
   const u = provision();
   const root = tmpRepo(u, 'reader');
-  fs.writeFileSync(path.join(root, 'graphify-out', 'memory', 'chat-memory.md'),
+  fs.writeFileSync(path.join(root, 'system', 'memory', 'chat-memory.md'),
     '# Chat memory\n- The build runs offline via build.sh\n');
   const out = memory.renderGraphifyMemory({ indexedRepos: [{ path: root, name: 'r' }] }, u);
   assert.match(out, /chat-memory\.md/);
@@ -224,7 +247,7 @@ test('chat-memory.md is read past the old 4 KB reader cap (facts beyond 4 KB sti
   const body = `# Chat memory\n${filler}\n${marker}\n`;
   assert.ok(body.length > 4000, 'fixture must exceed the old 4 KB reader cap');
   assert.ok(body.length <= 8000, 'fixture must stay within the 8 KB write cap');
-  fs.writeFileSync(path.join(root, 'graphify-out', 'memory', 'chat-memory.md'), body);
+  fs.writeFileSync(path.join(root, 'system', 'memory', 'chat-memory.md'), body);
   const out = memory.renderGraphifyMemory({ indexedRepos: [{ path: root, name: 'r' }] }, u);
   assert.match(out, /LATE_FACT_MARKER/, 'a fact past 4 KB must now be injected');
   fs.rmSync(root, { recursive: true, force: true });
@@ -234,14 +257,15 @@ test('renderGraphifyMemory reports per-file injection stats into an optional sin
   reset();
   const u = provision();
   const root = tmpRepo(u, 'stats');
-  const memDir = path.join(root, 'graphify-out', 'memory');
-  fs.writeFileSync(path.join(memDir, 'repo.md'), '# Repo\n- overview line');
+  const memDir = path.join(root, 'system', 'memory');
+  fs.mkdirSync(path.join(root, 'system', 'graph'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'system', 'graph', 'index.md'), '# Repo\n- overview line');
   fs.writeFileSync(path.join(memDir, 'chat-memory.md'), '# Chat memory\n- a durable fact');
   const stats = [];
   const out = memory.renderGraphifyMemory({ indexedRepos: [{ path: root, name: 'r' }] }, u, stats);
   assert.ok(out, 'block still renders');
   const files = stats.map((s) => s.file);
-  assert.ok(files.includes('repo.md') && files.includes('chat-memory.md'), 'lists injected files');
+  assert.ok(files.includes('graph/index.md') && files.includes('chat-memory.md'), 'lists injected files');
   for (const s of stats) {
     assert.equal(typeof s.chars, 'number');
     assert.equal(typeof s.truncated, 'boolean');
@@ -254,7 +278,7 @@ test('renderGraphifyMemory reports per-file injection stats into an optional sin
 test('appendChatMemory reports evicted count when the fact store hits its cap', async () => {
   const { appendChatMemory, readChatMemoryFacts } = await import('../graphkit/index.mjs');
   const root = path.join(__dirname, `_pm-evict-${process.pid}`);
-  fs.mkdirSync(path.join(root, 'graphify-out', 'memory'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'system', 'memory'), { recursive: true });
   // Fill to the 100-fact cap.
   appendChatMemory({ root, facts: Array.from({ length: 100 }, (_, i) => `fact ${i} distinct convention`) });
   assert.equal(readChatMemoryFacts(root).length, 100);
@@ -405,7 +429,7 @@ test('factKey does NOT merge genuinely distinct facts', async () => {
 test('appendChatMemory dedupes a leading-filler paraphrase against an existing fact', async () => {
   const { appendChatMemory } = await import('../graphkit/index.mjs');
   const root = path.join(__dirname, `_pm-paraphrase-${process.pid}`);
-  fs.mkdirSync(path.join(root, 'graphify-out', 'memory'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'system', 'memory'), { recursive: true });
   appendChatMemory({ root, facts: ['uses pnpm workspaces'] });
   const saved = appendChatMemory({ root, facts: ['The project uses pnpm workspaces'] });
   assert.equal(saved.length, 1, 'a leading-filler paraphrase must not create a second entry');
@@ -415,7 +439,7 @@ test('appendChatMemory dedupes a leading-filler paraphrase against an existing f
 test('writeChatMemoryFacts round-trips and leaves no temp file behind', async () => {
   const { writeChatMemoryFacts, readChatMemoryFacts } = await import('../graphkit/index.mjs');
   const root = path.join(__dirname, `_pm-atomic-${process.pid}`);
-  const memDir = path.join(root, 'graphify-out', 'memory');
+  const memDir = path.join(root, 'system', 'memory');
   fs.mkdirSync(memDir, { recursive: true });
   writeChatMemoryFacts(root, ['deploy via release.sh', 'uses pnpm workspaces']);
   // Content correct.
@@ -440,7 +464,7 @@ test('writeChatMemoryFacts creates the memory dir if missing', async () => {
 test('appendChatMemory does not re-add an existing fact under a new category', async () => {
   const { appendChatMemory } = await import('../graphkit/index.mjs');
   const root = path.join(__dirname, `_pm-cat-${process.pid}`);
-  fs.mkdirSync(path.join(root, 'graphify-out', 'memory'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'system', 'memory'), { recursive: true });
   appendChatMemory({ root, facts: ['the API uses cursor pagination'] });   // untagged
   const meta = {};
   const saved = appendChatMemory({ root, facts: ['[architecture] the API uses cursor pagination'], meta });
@@ -452,8 +476,9 @@ test('repoMemoryBlock never exceeds its char budget (header + joins counted)', (
   reset();
   const u = provision();
   const root = tmpRepo(u, 'budget');
-  // An oversized repo.md that would fill the whole budget on its own.
-  fs.writeFileSync(path.join(root, 'graphify-out', 'memory', 'repo.md'),
+  // An oversized overview that would fill the whole budget on its own.
+  fs.mkdirSync(path.join(root, 'system', 'graph'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'system', 'graph', 'index.md'),
     'x'.repeat(50_000), 'utf8');
   const allowed = memory.buildAllowedRoots(u);
   const budget = 2000;
@@ -481,7 +506,7 @@ test('buildAllowedRoots trusts a validated workspace root, rejects over-broad on
   reset();
   const u = provision(); // user has NO indexed repos
   const ws = path.join(__dirname, `_pm-ws-${process.pid}`);
-  fs.mkdirSync(path.join(ws, 'graphify-out', 'memory'), { recursive: true });
+  fs.mkdirSync(path.join(ws, 'system', 'memory'), { recursive: true });
   // A real, deep, project-shaped folder is accepted…
   const ok = memory.buildAllowedRoots(u, ws);
   assert.equal(ok.size, 1);
@@ -496,8 +521,8 @@ test('renderGraphifyMemory inlines chat-memory.md from the workspace root (no in
   reset();
   const u = provision(); // no addUserRepo — the folder is NOT indexed
   const ws = path.join(__dirname, `_pm-ws2-${process.pid}`);
-  fs.mkdirSync(path.join(ws, 'graphify-out', 'memory'), { recursive: true });
-  fs.writeFileSync(path.join(ws, 'graphify-out', 'memory', 'chat-memory.md'),
+  fs.mkdirSync(path.join(ws, 'system', 'memory'), { recursive: true });
+  fs.writeFileSync(path.join(ws, 'system', 'memory', 'chat-memory.md'),
     '# Chat memory\n- Uses the open-workspace memory path\n');
   // indexedRepos empty, but workspaceRoot is provided → still recalled.
   const out = memory.renderGraphifyMemory({ indexedRepos: [], workspaceRoot: ws }, u);
@@ -509,14 +534,14 @@ test('persistTurnMemory captures into the workspace root when no repo is indexed
   reset();
   const u = provision();
   const ws = path.join(__dirname, `_pm-ws3-${process.pid}`);
-  fs.mkdirSync(path.join(ws, 'graphify-out', 'memory'), { recursive: true });
+  fs.mkdirSync(path.join(ws, 'system', 'memory'), { recursive: true });
   const runClaude = async () => '["Deploys via build.sh offline"]';
   const result = await persist.persistTurnMemory({
     agentContext: { indexedRepos: [], workspaceRoot: ws },
     userId: u, userMessage: 'q', reply: 'a', runClaude,
   });
   assert.ok(Array.isArray(result) && result.some((f) => /build\.sh/.test(f)));
-  const onDisk = fs.readFileSync(path.join(ws, 'graphify-out', 'memory', 'chat-memory.md'), 'utf8');
+  const onDisk = fs.readFileSync(path.join(ws, 'system', 'memory', 'chat-memory.md'), 'utf8');
   assert.match(onDisk, /build\.sh/);
   fs.rmSync(ws, { recursive: true, force: true });
 });

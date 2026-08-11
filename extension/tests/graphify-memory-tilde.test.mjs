@@ -49,9 +49,9 @@ test('expandTilde expands ~ and ~/ against the given home', () => {
 test('renderGraphifyMemory reads memory for an absolute allow-listed repo path', () => {
   const U = freshUser('gm');
   const repoAbs = path.join(__dirname, `_graphify-mem-repo-${Date.now()}`);
-  const memDir = path.join(repoAbs, 'graphify-out', 'memory');
+  const memDir = path.join(repoAbs, 'system', 'memory');
   fs.mkdirSync(memDir, { recursive: true });
-  fs.writeFileSync(path.join(memDir, 'repo.md'), '# Repo summary\nHello memory.');
+  fs.writeFileSync(path.join(memDir, 'graph-notes.md'), '# Graph notes\nHello memory.');
   try {
     db.addUserRepo(U, repoAbs);   // allow-list stores the absolute path
     const out = renderGraphifyMemory({ indexedRepos: [{ path: repoAbs, name: 'gm' }] }, U);

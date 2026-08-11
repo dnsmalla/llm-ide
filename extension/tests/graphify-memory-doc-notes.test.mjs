@@ -34,7 +34,7 @@ function freshUser(tag) {
 test('renderGraphifyMemory includes doc-notes.md content', () => {
   const U = freshUser('dn');
   const repoAbs = path.join(__dirname, `_graphify-docnotes-repo-${Date.now()}`);
-  const memDir = path.join(repoAbs, 'graphify-out', 'memory');
+  const memDir = path.join(repoAbs, 'system', 'memory');
   fs.mkdirSync(memDir, { recursive: true });
   fs.writeFileSync(path.join(memDir, 'doc-notes.md'), '# Documentation memory\n## Guide\n- Setup');
   try {

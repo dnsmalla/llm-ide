@@ -1,17 +1,17 @@
 // Writes (and edits) the Code Assistant's auto-captured project memory:
-// `<repo>/graphify-out/memory/chat-memory.md`. This is the WRITE half of the
-// Graphify-memory loop — memory.mjs reads chat-memory.md back into the agent
-// prompt every request, so anything persisted here is recalled next turn for
-// free.
+// `<repo>/system/memory/chat-memory.md` (see graphkit/paths.mjs for the full
+// layout). This is the WRITE half of the repo-memory loop — memory.mjs reads
+// chat-memory.md back into the agent prompt every request, so anything persisted
+// here is recalled next turn for free.
 //
 // Security: callers MUST pass a `root` already resolved through
 // resolveAllowedRepoRoot (memory.mjs) — this module does no path gating itself.
 // All disk I/O is best-effort: a read/write error collapses to a safe value
 // (empty list / no-op), never throws into the caller.
 
-import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync, existsSync } from 'node:fs';
 import { config } from '../core/config.mjs';
+import { chatMemoryFile, legacyChatMemoryFile, memoryDir } from './paths.mjs';
 
 // Caps mirror the reader's per-file budget (PER_FILE_CHARS = 4000 there); we
 // keep the on-disk file comfortably under that so it's never truncated mid-read.
@@ -28,8 +28,9 @@ const HEADER = [
   '',
 ].join('\n');
 
+// The canonical file — see graphkit/paths.mjs. The only path ever WRITTEN.
 function memFilePath(root) {
-  return join(root, 'graphify-out', 'memory', 'chat-memory.md');
+  return chatMemoryFile(root);
 }
 
 // Leading filler the extractor commonly varies between restatements of the
@@ -113,11 +114,21 @@ export function renderChatMemoryFile(facts) {
 }
 
 // Read the current fact list for a repo. Best-effort → [] on any error.
+//
+// Falls back to the pre-consolidation location when the canonical file doesn't
+// exist yet, so facts captured before the move aren't lost on a repo the Mac app
+// hasn't regenerated since. The fallback is READ-ONLY — the next write lands at
+// the canonical path (and retires the legacy file), so this converges to one
+// file after a single turn rather than maintaining two.
 export function readChatMemoryFacts(root) {
   try {
     return parseChatMemoryFacts(readFileSync(memFilePath(root), 'utf8'));
   } catch {
-    return [];
+    try {
+      return parseChatMemoryFacts(readFileSync(legacyChatMemoryFile(root), 'utf8'));
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -128,7 +139,7 @@ export function writeChatMemoryFacts(root, facts) {
   const content = renderChatMemoryFile(facts);
   const target = memFilePath(root);
   try {
-    mkdirSync(join(root, 'graphify-out', 'memory'), { recursive: true });
+    mkdirSync(memoryDir(root), { recursive: true });
     // Atomic write: write to a temp file in the SAME directory (so the rename
     // stays on one filesystem and is atomic), then rename over the target. A
     // crash mid-write can only leave the temp file — never a half-written
@@ -144,6 +155,15 @@ export function writeChatMemoryFacts(root, facts) {
       // Best-effort cleanup so a failed write doesn't leak the temp file.
       try { unlinkSync(tmp); } catch { /* already gone */ }
       throw err;
+    }
+    // The canonical file now holds these facts (including any read forward from
+    // the old location), so retire the legacy one. Done only AFTER a successful
+    // write, so a failure can never leave the facts nowhere. Removing it is what
+    // makes the migration converge — otherwise both files would linger and the
+    // stale one would keep shadowing reads for tools that look there.
+    const legacy = legacyChatMemoryFile(root);
+    if (existsSync(legacy)) {
+      try { unlinkSync(legacy); } catch { /* leave it; the canonical file wins on read */ }
     }
   } catch { /* best-effort — a failed write leaves the previous file intact */ }
   return parseChatMemoryFacts(content);

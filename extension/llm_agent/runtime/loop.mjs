@@ -209,8 +209,13 @@ export async function runAgentLoop({
   // meetings, app capabilities) is heavy and only the internal agent
   // needs it. The global agent must NOT see it — gated behind an
   // explicit flag set by ask-internal.
+  // `userMessage` is forwarded so the repo-memory renderer can rank curated
+  // chat-memory facts against THIS question rather than falling back to
+  // newest-first — the same relevance selection route.mjs already gets for the
+  // global agent. For internal that message is global's restated question,
+  // which is exactly the right relevance signal.
   const contextBlock = agentContext && agentContext.includeSystemContext === true
-    ? composeSystemContext(agentContext, userId)
+    ? composeSystemContext(agentContext, userId, userMessage)
     : '';
   const systemPrompt = buildSystemPrompt({
     base,

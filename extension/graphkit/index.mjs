@@ -1,12 +1,13 @@
 // graphkit — the graph + memory module.
 //
 //   graph.mjs  — code-graph queries (FTS-backed "what code relates to X")
-//   memory.mjs — Graphify repository memory (repo.md, graph-notes.md,
-//                bugs/, q&a/) bridged into agent context
+//   memory.mjs — repository memory bridged into agent context
+//   paths.mjs  — the one definition of where a repo's generated knowledge
+//                lives on disk (`<repo>/system/…`); read it first
 //
 // Agents and context renderers import from here; the KB's graph tables
-// and the graphify-out/ directory layout are implementation details
-// behind this surface.
+// and the on-disk directory layout are implementation details behind
+// this surface.
 
 export { findRelatedCode, findGraphContext, rollupCodeRefs, findRelatedSymbols } from './graph.mjs';
 export { renderGraphifyMemory, buildAllowedRoots, resolveAllowedRepoRoot } from './memory.mjs';

@@ -55,13 +55,13 @@ test('relativeAge treats future / non-finite timestamps as just now', () => {
 test('renderGraphifyMemory annotates present memory with its age', () => {
   const U = freshUser('fresh');
   const repoAbs = path.join(__dirname, `_gm-fresh-repo-${Date.now()}`);
-  const memDir = path.join(repoAbs, 'graphify-out', 'memory');
+  const memDir = path.join(repoAbs, 'system', 'memory');
   fs.mkdirSync(memDir, { recursive: true });
-  const repoMd = path.join(memDir, 'repo.md');
-  fs.writeFileSync(repoMd, '# Repo summary\nHello memory.');
+  const notes = path.join(memDir, 'graph-notes.md');
+  fs.writeFileSync(notes, '# Graph notes\nHello memory.');
   // Backdate the file mtime to ~3 days ago so the age phrase is deterministic.
   const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-  fs.utimesSync(repoMd, threeDaysAgo, threeDaysAgo);
+  fs.utimesSync(notes, threeDaysAgo, threeDaysAgo);
   try {
     db.addUserRepo(U, repoAbs);
     const out = renderGraphifyMemory({ indexedRepos: [{ path: repoAbs, name: 'fresh' }] }, U);
@@ -75,7 +75,7 @@ test('renderGraphifyMemory annotates present memory with its age', () => {
 test('renderGraphifyMemory emits an absence marker for an indexed repo with no memory', () => {
   const U = freshUser('empty');
   const repoAbs = path.join(__dirname, `_gm-empty-repo-${Date.now()}`);
-  fs.mkdirSync(repoAbs, { recursive: true }); // repo dir exists, but NO graphify-out/memory/
+  fs.mkdirSync(repoAbs, { recursive: true }); // repo dir exists, but NO system/memory/
   try {
     db.addUserRepo(U, repoAbs);
     const out = renderGraphifyMemory({ indexedRepos: [{ path: repoAbs, name: 'empty' }] }, U);

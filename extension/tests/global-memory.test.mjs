@@ -41,9 +41,11 @@ const kbStub = { search: () => [], listMeetings: () => ({ items: [] }), getAgent
 test('global agent receives Graphify repo memory directly (Option A)', async () => {
   const U = freshUser('gmem');
   const repoAbs = path.join(__dirname, `_global-mem-repo-${Date.now()}`);
-  const memDir = path.join(repoAbs, 'graphify-out', 'memory');
-  fs.mkdirSync(memDir, { recursive: true });
-  fs.writeFileSync(path.join(memDir, 'repo.md'), '# Repo summary\nUNIQUE_MEMORY_MARKER_42 lives here.');
+  // The repo overview is the code graph's own index.md — there is no second
+  // copy of it in the memory dir any more (see graphkit/paths.mjs).
+  const graphDir = path.join(repoAbs, 'system', 'graph');
+  fs.mkdirSync(graphDir, { recursive: true });
+  fs.writeFileSync(path.join(graphDir, 'index.md'), '# Repo summary\nUNIQUE_MEMORY_MARKER_42 lives here.');
   db.addUserRepo(U, repoAbs);
 
   let globalPrompt = '';

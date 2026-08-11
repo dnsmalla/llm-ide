@@ -1,15 +1,22 @@
 // Renders the `## Repository memory (Graphify)` section.
 //
-// Bridges the Mac app's Graphify-generated memory files into the in-app
-// agent's system prompt. Previously the Mac app wrote rich `repo.md`,
-// `graph-notes.md`, and bug/Q&A entries under `<repo>/graphify-out/memory/`
-// but only external CLIs (Claude/Cursor) read them — the llm-ide
-// `/code-assist` agent ignored them. This module closes that loop.
+// Bridges a repo's generated + curated knowledge into the in-app agent's system
+// prompt. The Mac app writes rich graph notes, doc notes, and fault/Q&A entries
+// but only external CLIs (Claude/Cursor) read them — the llm-ide `/code-assist`
+// agent ignored them. This module closes that loop.
+//
+// Everything lives under ONE container, `<repo>/system/` — see
+// graphkit/paths.mjs for the layout and for why it moved out of the `/graphify`
+// skill's `graphify-out/` tree. Each artifact has exactly one file:
+//   • `system/graph/index.md` — the repo overview (owned by the code graph; it
+//     used to be COPIED to a second `repo.md`, which is now gone).
+//   • `system/memory/{graph-notes,doc-notes,chat-memory}.md`
+//   • `system/repo.md`, `system/faults/`, `system/q&a/` — curated/archived.
 //
 // Safety rails:
 // - Only reads from paths the user has already declared as indexed repos
 //   (agentContext.indexedRepos) — no arbitrary path traversal.
-// - Reads only a fixed allow-list of filenames inside `graphify-out/memory/`.
+// - Reads only a fixed allow-list of filenames inside `system/`.
 // - Hard caps both per-file and total characters so memory growth can't
 //   blow the prompt budget.
 // - All I/O is best-effort: missing files / read errors collapse to a
@@ -21,6 +28,7 @@ import { homedir } from 'node:os';
 import { userRepoAllowlist } from '../kb/db.mjs';
 import { config } from '../core/config.mjs';
 import { parseChatMemoryFacts } from './memory-writer.mjs';
+import { memoryDir, legacyMemoryDir, systemDir, graphIndexFile, SYSTEM_DIR } from './paths.mjs';
 
 // Expand a leading `~`/`~/` to the home directory. The Mac client sends
 // home-relative repo paths (homeRelativePath → "~/Developer/foo"), but the
@@ -43,7 +51,7 @@ const PER_FILE_CHARS = config.memory.perFileChars;
 // below still bounds the whole block.
 const CHAT_MEMORY_CHARS = config.memory.chatFileChars;
 const TOTAL_CHARS = config.memory.totalChars;
-const MAX_BUG_FILES = 8;
+const MAX_FAULT_FILES = 8;
 const MAX_QA_FILES = 8;
 // Cap the number of repos whose memory we inline. The list comes from
 // agentContext.indexedRepos but Graphify memory is heavy — surfacing
@@ -111,6 +119,11 @@ export function safeRead(path, maxChars) {
   }
 }
 
+// The NEWEST `max` markdown files in `dir`, still in chronological order.
+// Fault reports and saved Q&A are written with an ISO-timestamp filename
+// prefix, so a plain ascending sort puts the oldest first — taking the head
+// would pin the agent to the first 8 faults a repo ever recorded and hide
+// everything since. Take the tail instead.
 function listMdFiles(dir, max) {
   try {
     const entries = readdirSync(dir, { withFileTypes: true });
@@ -118,7 +131,7 @@ function listMdFiles(dir, max) {
       .filter((e) => e.isFile() && e.name.endsWith('.md'))
       .map((e) => e.name)
       .sort()
-      .slice(0, max)
+      .slice(-max)
       .map((name) => join(dir, name));
   } catch {
     return [];
@@ -142,7 +155,7 @@ function normalizeForCompare(p) {
 // is relative, contains a `..` segment, or is not in the allow-list.
 //
 // This is the single security boundary for ALL filesystem access into a repo's
-// graphify-out/ tree: anything that resolves a repo path to disk MUST go
+// generated-knowledge tree: anything that resolves a repo path to disk MUST go
 // through here so a hostile/buggy client can't drive reads or writes outside
 // the user's registered repos.
 export function resolveAllowedRepoRoot(repoPath, allowedRoots) {
@@ -296,20 +309,31 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) 
   if (!repo) return null;
   const root = resolveAllowedRepoRoot(repo.path, allowedRoots);
   if (!root) return null;
-  const memDir = join(root, 'graphify-out', 'memory');
+  const memDir = memoryDir(root);
+  const sysDir = systemDir(root);
   const repoName = repo.name || 'Repository';
+
+  // Read a canonical memory file, falling back to its pre-consolidation location
+  // for a repo the Mac app hasn't regenerated since the move. Read-only — see
+  // paths.mjs; nothing writes to the legacy tree any more.
+  const readMemoryFile = (name, maxChars) =>
+    safeRead(join(memDir, name), maxChars) ?? safeRead(join(legacyMemoryDir(root), name), maxChars);
 
   // Compute the block header up front so its length counts against `budget` —
   // otherwise the header + inter-part joins were unbudgeted and a block could
   // overshoot `budget` by ~header size. mtime is a cheap stat read; doing it
   // here (vs at the end) lets `used` reflect the real rendered size.
+  // Freshness tracks the GENERATED artifacts only — the hand-authored
+  // system/repo.md is edited on human timescales and would otherwise report a
+  // repo whose graph is weeks stale as "updated just now".
   const mtime = newestMtimeMs([
-    join(memDir, 'repo.md'),
+    graphIndexFile(root),
     join(memDir, 'graph-notes.md'),
     join(memDir, 'doc-notes.md'),
+    join(legacyMemoryDir(root), 'graph-notes.md'),
   ]);
   const ageClause = mtime != null ? ` (updated ${relativeAge(mtime)})` : '';
-  const header = `## ${repoName} — memory${ageClause}\n_(from \`${root}/graphify-out/memory/\`)_`;
+  const header = `## ${repoName} — memory${ageClause}\n_(from \`${root}/${SYSTEM_DIR}/\`)_`;
 
   const parts = [];
   // Seed with the header + the `\n\n` that will join it to the first part, so
@@ -345,33 +369,40 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) 
   // a fat repo.md can't crowd them out (the old order added repo.md first with
   // the full budget, starving chat-memory within — and across — repos).
   const chatBody = selectChatMemoryFacts(
-    safeRead(join(memDir, 'chat-memory.md'), CHAT_MEMORY_CHARS),
+    readMemoryFile('chat-memory.md', CHAT_MEMORY_CHARS),
     { userMessage, room: Math.min(budget, CHAT_MEMORY_CHARS) },
   );
   const chatFloor = Math.min(Math.floor(budget * 0.5), chatBody.length);
 
   // Order = priority: the memory budget is fixed, so add the highest-signal,
-  // most token-efficient content FIRST. repo.md is the impact-ranked repo
-  // overview — added first, but capped so it leaves `chatFloor` for the curated
-  // facts. The bulkier graph/doc prose comes after, so it's what gets clipped.
-  tryAdd('repo.md', safeRead(join(memDir, 'repo.md'), PER_FILE_CHARS), budget - chatFloor);
+  // most token-efficient content FIRST.
+  //
+  // `system/repo.md` is HAND-AUTHORED project facts (stack, conventions,
+  // gotchas) — the highest-signal memory there is, and the one thing no
+  // generator can reproduce — so it leads. It shares the `budget - chatFloor`
+  // cap with the generated overview so neither can starve the curated facts.
+  tryAdd('system/repo.md', safeRead(join(sysDir, 'repo.md'), PER_FILE_CHARS), budget - chatFloor);
+  // The impact-ranked repo overview, read from the ONE file that owns it —
+  // the code graph's own index.md. This used to be a second, byte-identical
+  // `repo.md` copied into the memory dir on every generation; the copy is gone.
+  tryAdd('graph/index.md', safeRead(graphIndexFile(root), PER_FILE_CHARS), budget - chatFloor);
   // Auto-captured facts the Code Assistant learned in prior chats about this
   // project (written by memory-writer.mjs after each turn). Same dir, same
   // gate — recall is free because this reader already runs every request.
   tryAdd('chat-memory.md', chatBody);
-  tryAdd('graph-notes.md', safeRead(join(memDir, 'graph-notes.md'), PER_FILE_CHARS));
-  tryAdd('doc-notes.md', safeRead(join(memDir, 'doc-notes.md'), PER_FILE_CHARS));
+  tryAdd('graph-notes.md', readMemoryFile('graph-notes.md', PER_FILE_CHARS));
+  tryAdd('doc-notes.md', readMemoryFile('doc-notes.md', PER_FILE_CHARS));
 
-  const bugs = listMdFiles(join(memDir, 'bugs'), MAX_BUG_FILES);
-  if (bugs.length > 0 && used < budget) {
-    const bugBodies = bugs
+  const faults = listMdFiles(join(sysDir, 'faults'), MAX_FAULT_FILES);
+  if (faults.length > 0 && used < budget) {
+    const faultBodies = faults
       .map((p) => safeRead(p, Math.floor(PER_FILE_CHARS / 2)))
       .filter(Boolean)
       .join('\n\n---\n\n');
-    tryAdd(`bugs/ (${bugs.length})`, bugBodies);
+    tryAdd(`faults/ (${faults.length})`, faultBodies);
   }
 
-  const qa = listMdFiles(join(memDir, 'q&a'), MAX_QA_FILES);
+  const qa = listMdFiles(join(sysDir, 'q&a'), MAX_QA_FILES);
   if (qa.length > 0 && used < budget) {
     const qaBodies = qa
       .map((p) => safeRead(p, Math.floor(PER_FILE_CHARS / 2)))
