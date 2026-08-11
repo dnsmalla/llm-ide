@@ -26,4 +26,13 @@ final class MobileBonjourAdvertiser: NSObject, NetServiceDelegate {
         service?.stop()
         service = nil
     }
+
+    /// Backstop for any path that releases the advertiser without calling
+    /// `stop()`, so a stale `_llmide._tcp` record can't keep advertising a
+    /// port nothing is listening on. `stop()` here is synchronous, so unlike
+    /// `MobileWebSocketServer` this class never had the dropped-teardown bug —
+    /// this is belt-and-braces for the same class of resource.
+    deinit {
+        service?.stop()
+    }
 }
