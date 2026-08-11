@@ -93,4 +93,12 @@ test('addSource registers a local valid source and removeSource deletes it', () 
   assert.equal(getSource(id), null);
 });
 
+test('addSource rejects a ref that looks like a git option (arg-injection guard)', () => {
+  const before = readRegistry().length;
+  const res = addSource({ url: 'https://github.com/o/r.git', ref: '-cCore.fsMonitor=/tmp/x' });
+  assert.ok(res.error, 'must return an error');
+  assert.equal(res.status, 400);
+  assert.equal(readRegistry().length, before, 'must not persist a rejected source');
+});
+
 test('cleanup', () => { fs.rmSync(tmpRoot, { recursive: true, force: true }); });

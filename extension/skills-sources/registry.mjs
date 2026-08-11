@@ -125,6 +125,16 @@ export function snapshotSource(src) {
 
 const SLUG_RE = /^[a-z][a-z0-9-]{1,40}$/;
 
+// A git ref must be a simple branch/tag name, never an option. Rejects
+// anything starting with '-' (arg-injection vector: a single argv element
+// like '-cCore.fsMonitor=...' is parsed by git as an option, not a ref) and
+// chars outside the standard ref charset. Required by the plan's Global
+// Constraints.
+const REF_RE = /^[a-zA-Z0-9._/-]{1,100}$/;
+export function isValidRef(ref) {
+  return typeof ref === 'string' && !ref.startsWith('-') && REF_RE.test(ref);
+}
+
 // Only public https git URLs are allowed. Mirrors
 // mac/Sources/LlmIdeMac/Services/PluginGitInstaller.swift normalize().
 export function normalizeGitUrl(raw) {
@@ -187,12 +197,13 @@ export function addSource({ url, path, ref, name } = {}) {
   if (url) {
     const n = normalizeGitUrl(url);
     if (!n.ok) return { error: n.error, status: 400 };
+    if (ref && !isValidRef(ref)) return { error: 'invalid ref', status: 400 };
     const id = slugify(name || n.url.replace(/\.git$/, '').split('/').pop(), existing);
     const dest = join(defaultSourcesDir(), id);
     mkdirSync(defaultSourcesDir(), { recursive: true });
     const cl = cloneShallow(n.url, ref, dest);
     if (cl.error) { try { rmSync(dest, { recursive: true, force: true }); } catch { /* */ } return { error: cl.error, status: 400 }; }
-    if (!isValidSkillsSource(dest)) { rmSync(dest, { recursive: true, force: true }); return { error: 'cloned repo is not a valid skills source', status: 400 }; }
+    if (!isValidSkillsSource(dest)) { try { rmSync(dest, { recursive: true, force: true }); } catch { /* best-effort */ } return { error: 'cloned repo is not a valid skills source', status: 400 }; }
     const src = { id, name: name || id, origin: 'git', location: dest, ref: ref || 'main', builtin: false, version: readVersion(dest) };
     list.push(src); writeRegistry(list);
     return { source: src };
@@ -216,6 +227,7 @@ export function updateSource(id) {
   }
   // git: fetch + checkout tracked ref.
   const ref = src.ref || 'main';
+  if (!isValidRef(ref)) return { error: 'invalid ref', status: 400 };
   let r = spawnSync('git', ['fetch', '--depth', '1', 'origin', ref], {
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, cwd: src.location,
     stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000,
