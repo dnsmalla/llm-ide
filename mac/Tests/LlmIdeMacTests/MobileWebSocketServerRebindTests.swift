@@ -14,8 +14,28 @@ import Network
 /// retry could not possibly win.
 final class MobileWebSocketServerRebindTests: XCTestCase {
 
-    /// High port unlikely to collide with anything on a dev machine or CI.
-    private let port = 39_017
+    /// A fresh high port per test, so one test's asynchronous teardown can
+    /// never be mistaken for the next test's bug.
+    ///
+    /// Note the ~0.6s each rebind test takes is NOT cross-test interference —
+    /// it reproduces at the same duration when a test runs alone. It is the
+    /// in-test restart: the second bind races the first listener's `cancel()`,
+    /// takes one EADDRINUSE retry, and succeeds on the 0.6s backoff. That is
+    /// the behaviour under test, and it is what Kill & Restart does for real.
+    private var port = 0
+
+    private static let portLock = NSLock()
+    private static var nextPortValue = 39_017
+    private static func reservePort() -> Int {
+        portLock.lock(); defer { portLock.unlock() }
+        nextPortValue += 1
+        return nextPortValue
+    }
+
+    override func setUp() {
+        super.setUp()
+        port = Self.reservePort()
+    }
 
     private func makeServer(onLog: @escaping (String) -> Void,
                             onBindFailed: @escaping (Error) -> Void) -> MobileWebSocketServer {

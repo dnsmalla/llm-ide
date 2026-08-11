@@ -32,6 +32,12 @@ final class MobileBonjourAdvertiser: NSObject, NetServiceDelegate {
     /// port nothing is listening on. `stop()` here is synchronous, so unlike
     /// `MobileWebSocketServer` this class never had the dropped-teardown bug —
     /// this is belt-and-braces for the same class of resource.
+    ///
+    /// `NetService` is run-loop bound and expects its methods on the thread
+    /// that published it. That holds here because the only owner is the
+    /// `@MainActor` `MobileControlManager`, so both `start()` and this deinit
+    /// run on the main thread. Anything that takes ownership off the main
+    /// actor must call `stop()` explicitly rather than relying on this.
     deinit {
         service?.stop()
     }
