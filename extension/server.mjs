@@ -35,7 +35,10 @@ const HOST = config.host;
 // 25: update-file gained the anchored `old_text`/`new_text` edit shape
 //     alongside whole-file `content`, so a pendingTool payload from this
 //     server can carry fields an older client doesn't decode.
-const SERVER_API_VERSION = 25;
+// 26: added the /auth/me/skills-sources/* management endpoints (list,
+//     toggle, add, update, remove) — not tracked in ENDPOINTS below since
+//     /auth/* routes are excluded from that list by convention.
+const SERVER_API_VERSION = 26;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

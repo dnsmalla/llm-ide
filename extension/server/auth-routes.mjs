@@ -159,6 +159,11 @@ export function isAuthRoute(url) {
       || path === '/auth/me/claude-plugins/import'
       || path === '/auth/me/claude-plugins/refresh'
       || path === '/auth/me/claude-plugins/updates'
+      || path === '/auth/me/skills-sources'
+      || path === '/auth/me/skills-sources/toggle'
+      || path === '/auth/me/skills-sources/add'
+      || path === '/auth/me/skills-sources/update'
+      || path.startsWith('/auth/me/skills-sources/')
       || path === '/auth/google/start'
       || path === '/auth/google/callback'
       || path === '/auth/google/status'
