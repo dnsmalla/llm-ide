@@ -20,8 +20,8 @@ import * as yaml from 'js-yaml';
 // cycle), and every export we consume below (listSources, snapshotSource,
 // BUILTIN_ID, seedBuiltinOnce) is referenced ONLY inside listSkillLibrary —
 // never at module top level.
-import { listSources, snapshotSource, BUILTIN_ID, seedBuiltinOnce } from '../../skills-sources/registry.mjs';
-import { listEnabled } from '../../skills-sources/state.mjs';
+import { listSources, snapshotSource, BUILTIN_ID, seedBuiltinOnce } from '../../llm-sources/registry.mjs';
+import { listEnabled } from '../../llm-sources/state.mjs';
 
 // Families NOT already surfaced via /kb/agent/catalog (which covers
 // agent-globals + agent-tools). These are the "all the other skills".

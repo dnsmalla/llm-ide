@@ -41,7 +41,7 @@ extension LlmIdeAPIClient {
         enum CodingKeys: String, CodingKey {
             case id, family, name, description, path, sourceId, sourceName
         }
-        /// `sourceId`/`sourceName` are new fields (multi-source skills-sources
+        /// `sourceId`/`sourceName` are new fields (multi-source LLM-sources
         /// feature) — decoded with fallbacks so a pre-upgrade server response
         /// still decodes, mirroring `PluginInfo.subagents`'s back-compat pattern.
         init(from decoder: Decoder) throws {

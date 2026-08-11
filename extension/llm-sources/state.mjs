@@ -1,11 +1,11 @@
-// Per-user skills-source enable state.
+// Per-user LLM-source enable state.
 //
-// Stored as a single JSON file next to the skills-sources directory so it
+// Stored as a single JSON file next to the llm-sources directory so it
 // survives source add/remove and is trivial to back up by hand. Keyed by
 // userId so one server process can serve multiple authenticated users with
 // different enabled sets. Writes are atomic (tmp + rename).
 //
-// File: <sourcesDir>/../skills-sources-state.json
+// File: <sourcesDir>/../llm-sources-state.json
 // Shape: { [userId]: { enabled: string[] } }
 
 import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'node:fs';
@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
 import { defaultSourcesDir } from './registry.mjs';
 
 function stateFilePath() {
-  return join(dirname(defaultSourcesDir()), 'skills-sources-state.json');
+  return join(dirname(defaultSourcesDir()), 'llm-sources-state.json');
 }
 
 export const STATE_FILE = stateFilePath();
