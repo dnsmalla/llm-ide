@@ -9,11 +9,6 @@ enum ProjectDocTemplatesSeeder {
         subsystem: "com.llmide.macapp",
         category: "ProjectDocTemplatesSeeder")
 
-    /// Slugs written under `templates/` for every new project.
-    static func defaultActiveSlugs() -> [String] {
-        DocTemplate.seedDefinitions.map(\.folderName)
-    }
-
     /// Create `templates/` and seed default template folders + README.
     static func seedIfNeeded(at projectRoot: URL) {
         let layout = ProjectLayout(root: projectRoot)

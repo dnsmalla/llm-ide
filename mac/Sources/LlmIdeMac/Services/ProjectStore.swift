@@ -63,10 +63,7 @@ final class ProjectStore: ObservableObject {
 
     /// Defaults used when no AppConfig is supplied (test paths).
     nonisolated static let fallbackDefaults = ProjectSettings(
-        language: "en", activeCLI: "claudeCode", linkedRepo: nil,
-        notesFolderRelative: nil, enabledPlugins: [],
-        regressionLookbackCount: 5,
-        agentPersona: nil, docTemplatesActive: [])
+        language: "en", linkedRepo: nil)
 
     // MARK: - Public API
 
@@ -175,8 +172,19 @@ final class ProjectStore: ObservableObject {
         var bundle = ap.bundle
         bundle.settings.linkedRepo = linked
         activeProject = ActiveProject(bundle: bundle, localPath: ap.localPath)
-        let jsonURL = ProjectLayout(root: URL(fileURLWithPath: ap.localPath)).projectJSON
-        try? writeProjectJSON(bundle, to: jsonURL)
+        let root = URL(fileURLWithPath: ap.localPath)
+        try? writeProjectJSON(bundle, to: ProjectLayout(root: root).projectJSON)
+        // Re-stamp the generated docs. README.md / project.md / CLAUDE.md all
+        // print the linked repository, but were only ever written on New
+        // Project / Rebuild — when nothing is linked yet. So they said
+        // "Repository: (none)" forever, and the agents reading them as project
+        // context believed it. Idempotent, and only reached on a real change
+        // thanks to the equality guard above.
+        do {
+            try ProjectScaffolder.scaffold(at: root, project: bundle)
+        } catch {
+            log.error("scaffold refresh after repo link failed at \(root.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
         NotificationCenter.default.post(name: .activeProjectChanged, object: nil)
     }
 
@@ -331,8 +339,7 @@ final class ProjectStore: ObservableObject {
     // MARK: - Internals
 
     private func createFromDefaults(folder: URL) -> Project {
-        var settings = defaults
-        settings.docTemplatesActive = ProjectDocTemplatesSeeder.defaultActiveSlugs()
+        let settings = defaults
         return Project(
             id: RandomID.generate(),
             displayName: folder.lastPathComponent,

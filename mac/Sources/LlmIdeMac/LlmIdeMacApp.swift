@@ -121,8 +121,7 @@ public struct LlmIdeMacApp: App {
         let autoTaskSettingsInstance = AutoTaskSettings()
         let projectStoreInstance = ProjectStore(
             stateDirectory: projectStoreStateDir,
-            defaults: cfg.defaultProjectSettings(
-                regressionLookbackCount: autoTaskSettingsInstance.lookbackMeetingCount))
+            defaults: cfg.defaultProjectSettings())
         // Wire ProjectStore into the API client so write endpoints
         // (currently /kb/ingest) can stamp `projectId` onto payloads
         // without every caller having to thread it through.

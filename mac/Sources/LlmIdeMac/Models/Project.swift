@@ -58,66 +58,54 @@ extension Project.LoadError: Equatable {
 
 /// Per-project settings bundle stored in `system/project.json`.
 ///
-/// Several fields are legacy snapshots written at project creation and are
-/// not read at runtime — live values live elsewhere:
-/// - `activeCLI`, `regressionLookbackCount` → `AppConfig` / `AutoTaskSettings`
-/// - `language` → server-synced prefs (`PreferencesSettingsSection`)
-/// - `agentPersona` → server agent persona API
-/// - `enabledPlugins` → Library plugin install state (future)
+/// Only fields that are actually READ back belong here. The file used to also
+/// carry `activeCLI`, `regressionLookbackCount`, `enabledPlugins`,
+/// `agentPersona`, `notesFolderRelative` and `docTemplatesActive` — snapshots
+/// taken at project creation that nothing ever read. They looked authoritative
+/// and drifted immediately (a project pinned `activeCLI: "claude_code"` while
+/// the live setting had moved on), so they were removed rather than kept in
+/// sync with owners that already exist:
+/// - CLI + lookback → `AppConfig` / `AutoTaskSettings`
+/// - agent persona → server agent persona API
+/// - doc templates → seeded on disk under `templates/` by
+///   `ProjectDocTemplatesSeeder`, which is the real source
+/// - plugins → Library plugin install state
+///
+/// Decoding ignores those keys where they linger in existing files, and they
+/// drop out on the next write. Note the one-way step: an older build reads
+/// them with a non-optional `decode`, so it cannot open a file written here.
 struct ProjectSettings: Codable, Equatable {
+    /// LLM output language for scaffolded project docs. Seeded from
+    /// `AppConfig.preferredLanguage` (the local mirror of the server-synced
+    /// user pref) — it used to be hard-coded to "" at creation, which is why
+    /// every generated README / CLAUDE.md shipped with a blank language.
     var language: String
-    var activeCLI: String
     var linkedRepo: LinkedRepo?
-    var notesFolderRelative: String?
-    var enabledPlugins: [String]
-    var regressionLookbackCount: Int
-    var agentPersona: String?
-    var docTemplatesActive: [String]
 
     // Explicit memberwise init (required because we provide a custom
     // init(from:) which suppresses the synthesized one).
-    init(language: String, activeCLI: String, linkedRepo: LinkedRepo? = nil,
-         notesFolderRelative: String? = nil, enabledPlugins: [String],
-         regressionLookbackCount: Int,
-         agentPersona: String? = nil, docTemplatesActive: [String]) {
+    init(language: String, linkedRepo: LinkedRepo? = nil) {
         self.language = language
-        self.activeCLI = activeCLI
         self.linkedRepo = linkedRepo
-        self.notesFolderRelative = notesFolderRelative
-        self.enabledPlugins = enabledPlugins
-        self.regressionLookbackCount = regressionLookbackCount
-        self.agentPersona = agentPersona
-        self.docTemplatesActive = docTemplatesActive
     }
 
     enum CodingKeys: String, CodingKey {
-        case language, activeCLI, linkedRepo, notesFolderRelative
-        case enabledPlugins, regressionLookbackCount
-        case agentPersona, docTemplatesActive
+        case language, linkedRepo
     }
 
+    /// Tolerant decoder — a missing field falls back to its default, matching
+    /// the other saved-config structs, so neither adding nor removing fields
+    /// invalidates a file written by another build.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        language = try c.decode(String.self, forKey: .language)
-        activeCLI = try c.decode(String.self, forKey: .activeCLI)
+        language = try c.decodeIfPresent(String.self, forKey: .language) ?? ""
         linkedRepo = try c.decodeIfPresent(LinkedRepo.self, forKey: .linkedRepo)
-        notesFolderRelative = try c.decodeIfPresent(String.self, forKey: .notesFolderRelative)
-        enabledPlugins = try c.decode([String].self, forKey: .enabledPlugins)
-        regressionLookbackCount = try c.decode(Int.self, forKey: .regressionLookbackCount)
-        agentPersona = try c.decodeIfPresent(String.self, forKey: .agentPersona)
-        docTemplatesActive = try c.decode([String].self, forKey: .docTemplatesActive)
     }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(language, forKey: .language)
-        try c.encode(activeCLI, forKey: .activeCLI)
         try c.encodeIfPresent(linkedRepo, forKey: .linkedRepo)
-        try c.encodeIfPresent(notesFolderRelative, forKey: .notesFolderRelative)
-        try c.encode(enabledPlugins, forKey: .enabledPlugins)
-        try c.encode(regressionLookbackCount, forKey: .regressionLookbackCount)
-        try c.encodeIfPresent(agentPersona, forKey: .agentPersona)
-        try c.encode(docTemplatesActive, forKey: .docTemplatesActive)
     }
 
     struct LinkedRepo: Codable, Equatable {

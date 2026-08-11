@@ -56,7 +56,7 @@ struct SettingsView: View {
                                     .foregroundStyle(theme.current.textMuted)
                                 PathsSettingsSection()
                                 GitLabSettingsSection()
-                                GitHubSettingsSection()
+                                GitHubSettingsSection(api: api)
                                 GraphMemorySettingsSection()
                             }
                         }

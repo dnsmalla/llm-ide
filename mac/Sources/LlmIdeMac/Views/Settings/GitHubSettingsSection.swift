@@ -4,6 +4,10 @@ import GraphKit
 /// Mirrors GitLabSettingsSection. Only the auth shape differs: GitHub
 /// uses a Bearer-token PAT against api.github.com; no per-host base URL.
 struct GitHubSettingsSection: View {
+    /// Used to mirror the PAT into the server-side secrets vault — see
+    /// `syncTokenToServerVault`.
+    let api: LlmIdeAPIClient
+
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
@@ -116,6 +120,7 @@ struct GitHubSettingsSection: View {
                             tokenDraft = ""
                             status = "Token cleared. Saved repositories kept."
                             relink()
+                            Task { await syncTokenToServerVault("") }
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -446,6 +451,29 @@ struct GitHubSettingsSection: View {
         }
     }
 
+    // MARK: - Server vault mirror
+
+    /// Mirror the PAT into the server's per-user secrets vault under
+    /// `github.token`, and clear it there when the token is cleared here.
+    ///
+    /// The server reads that key for outcome polling and issue dispatch
+    /// (`kb/router.mjs` → `/kb/outcomes/refresh`). Every other credential the
+    /// Mac collects — Slack, Box, IMAP, each model provider — is pushed via
+    /// `setSecret`; GitHub alone never was, so the vault key existed and was
+    /// read but nothing on this side ever wrote it, and server-side GitHub
+    /// work ran with no credential at all.
+    ///
+    /// Best-effort: the Keychain copy is what the Mac itself uses, so a
+    /// backend that is down must not fail the connection. Surfaced in the
+    /// status line rather than thrown.
+    private func syncTokenToServerVault(_ token: String) async {
+        do {
+            try await api.setSecret(key: "github.token", value: token)
+        } catch {
+            status = "Saved locally, but the server copy failed: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Save & verify token
 
     private func saveAndVerify() async {
@@ -469,6 +497,7 @@ struct GitHubSettingsSection: View {
             // wanted — and it is reversible.
             config.preferredRepoProvider = .github
             relink()
+            await syncTokenToServerVault(token)
         } catch let e as GitHubClient.GitHubError {
             switch e {
             case .httpError(401, _): status = "Invalid token — check scope and expiry."

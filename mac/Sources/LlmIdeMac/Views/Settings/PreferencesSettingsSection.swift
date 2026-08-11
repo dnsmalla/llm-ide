@@ -3,6 +3,7 @@ import SwiftUI
 struct PreferencesSettingsSection: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
+    @EnvironmentObject var config: AppConfig
 
     @State private var language: String = ""
     @State private var prefsBilingual: Bool = false
@@ -67,6 +68,9 @@ struct PreferencesSettingsSection: View {
             let p = try await api.getUserPrefs()
             language = p.language ?? "en"
             prefsBilingual = p.bilingual ?? false
+            // Mirror locally for the synchronous consumers (ProjectScaffolder
+            // stamps this into new projects' docs and can't await the server).
+            config.preferredLanguage = language
         } catch {
             prefsStatus = "Could not load: \(error.localizedDescription)"
         }
@@ -79,6 +83,7 @@ struct PreferencesSettingsSection: View {
         defer { prefsBusy = false }
         do {
             _ = try await api.setUserPrefs(.init(language: language, bilingual: prefsBilingual))
+            config.preferredLanguage = language
             prefsStatus = "✓ Saved."
         } catch {
             prefsStatus = "Failed: \(error.localizedDescription)"

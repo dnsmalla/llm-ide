@@ -259,6 +259,19 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(defaultModelId, forKey: "defaultModelId") }
     }
 
+    /// Local mirror of the server-synced LLM output language pref.
+    ///
+    /// The server stays the source of truth (`/auth/me/prefs`, edited in
+    /// Preferences); this is a last-known cache for the SYNCHRONOUS consumers
+    /// that can't await it — chiefly `ProjectScaffolder`, which stamps the
+    /// language into a project's README / project.md / CLAUDE.md /
+    /// .claude/settings.json. Those were generated with an empty language on
+    /// every project because the only value available at creation time was a
+    /// hard-coded "". Refreshed whenever Preferences loads or saves prefs.
+    @Published var preferredLanguage: String {
+        didSet { defaults.set(preferredLanguage, forKey: "preferredLanguage") }
+    }
+
     // ── GitLab integration ────────────────────────────────────────────
     /// Personal Access Token with api scope. Stored in Keychain.
     @Published var gitLabToken: String {
@@ -620,6 +633,7 @@ final class AppConfig: ObservableObject {
         self.pollIntervalMs = defaults.object(forKey: "pollIntervalMs") as? Int ?? 250
         self.graphAutoUpdateMinutes = max(5, defaults.object(forKey: "graphAutoUpdateMinutes") as? Int ?? 15)
         self.activeCLI = defaults.string(forKey: "activeCLI") ?? AICliTool.claudeCode.rawValue
+        self.preferredLanguage = defaults.string(forKey: "preferredLanguage") ?? "en"
         // Migrate a persisted model id forward. A previously-stored choice
         // can be a retired id (e.g. "claude-opus-4-7") or a tool no longer
         // selectable (Gemini/Cursor) — sending either to the API would
@@ -845,21 +859,15 @@ extension AppConfig {
 }
 
 extension AppConfig {
-    /// Snapshot projected into `project.json` when a folder is first opened.
+    /// Settings projected into `project.json` when a folder is first opened.
     /// Used by `ProjectStore.openFolder` on first materialisation.
     ///
-    /// `regressionLookbackCount` is seeded from `AutoTaskSettings.lookbackMeetingCount`
-    /// at app launch — the live lookback lives on `AutoTaskSettings`, not here.
-    /// `language` defaults to "" (server-synced prefs drive LLM output language).
-    func defaultProjectSettings(regressionLookbackCount: Int = 5) -> ProjectSettings {
+    /// Seeds `language` from the cached user pref so scaffolded docs carry a
+    /// real language; it was hard-coded to "" here, which is why every
+    /// generated README / project.md / CLAUDE.md had a blank one.
+    func defaultProjectSettings() -> ProjectSettings {
         ProjectSettings(
-            language: "",                   // no global field — see note above
-            activeCLI: activeCLI,
-            linkedRepo: nil,                // user picks via Settings on first run
-            notesFolderRelative: nil,
-            enabledPlugins: [],
-            regressionLookbackCount: regressionLookbackCount,
-            agentPersona: nil,
-            docTemplatesActive: [])
+            language: preferredLanguage,
+            linkedRepo: nil)                // user picks via Settings on first run
     }
 }
