@@ -395,6 +395,24 @@ Run through this against a real meeting before merging:
 
 ---
 
+## Shell execution (`mac/Sources/LlmIdeMac/Services/BashService.swift`)
+
+### ✅ MUST preserve
+
+- **Drain both pipes CONCURRENTLY with the child, never after it exits.** A pipe holds ~64 KB; a command that writes more blocks in `write()` until someone reads. The original code called `waitUntilExit()` and *then* `readDataToEndOfFile()`, on `@MainActor` — so any repo-wide `grep` deadlocked the whole app, with the pending-action card still on screen and no result ever returned. `BashServiceTests.testLargeOutputDoesNotDeadlock` is that regression; a reintroduction **hangs** the suite rather than failing it.
+- **Every run is bounded**: wall-clock timeout, SIGTERM→SIGKILL escalation (the group kill matters — `zsh -c "npm test"` leaves grandchildren holding the write end), and a per-stream output cap. The output becomes a chat history turn, so an uncapped `grep` evicted the rest of the conversation from the model's context.
+- **`standardInput = FileHandle.nullDevice`.** Inheriting the app's stdin lets a command that reads input block until the timeout instead of failing fast on EOF.
+- **Every non-`Sendable` object (`Process`, `Pipe`, `FileHandle`) is created and consumed inside the background queue**, with only lock-guarded boxes crossing the boundary. That's what lets the cancellation handler and watchdog signal the child safely.
+- **`runBashCommand` finishes through `unblockAndFollowUp()`, not `sendFollowup()`.** It runs both from a card tap (`busy == false`) and from `autoChainPendingAction` in Bypass mode (`busy == true`); a plain `sendFollowup()` hits its own `guard !busy` and silently drops the command output, ending the turn with no conclusion.
+
+### ❌ DO NOT do these
+
+- **Do NOT make `execute` `@MainActor` again**, and do not reintroduce a bare `waitUntilExit()` before the reads.
+- **Do NOT stop reading a stream once the retention cap is hit** — the loop must keep draining to EOF or the child stays blocked on a full pipe forever.
+- **Do NOT let `bash` auto-run outside `editMode == .auto`**, and keep it on the shared `maxAutoGitOpsPerTurn` budget — that ceiling is the only thing bounding a chain of hands-free commands in one turn.
+
+---
+
 ## Code Assistant modes (`extension/llm_agent/runtime/route.mjs`, `mode-personas.mjs`)
 
 ### ✅ MUST preserve

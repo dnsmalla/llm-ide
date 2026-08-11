@@ -494,6 +494,18 @@ extension CodeAssistantPanel {
             autoGitOpsThisTurn += 1
             await runGitOpFlow(g)
         }
+        // Auto-run a proposed shell command in Bypass mode. Without this, EVERY
+        // "run the tests / check the version" request stalled on a card no
+        // matter which mode was selected — the agent's prompt steers it to the
+        // client-executed `bash` tool, which ends the request, so an untapped
+        // card meant the turn simply ended with no answer. Shares the same
+        // per-turn budget as the two branches above, and runBashCommand still
+        // applies BashService.validateCommand plus its own timeout/output caps.
+        if editMode == .auto, autoGitOpsThisTurn < Self.maxAutoGitOpsPerTurn,
+           let pt = pendingTool, let args = pt.bashArgs {
+            autoGitOpsThisTurn += 1
+            await runBashCommand(args)
+        }
     }
 
     // MARK: - Session management

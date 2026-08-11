@@ -3,12 +3,23 @@ import SwiftUI
 extension CodeAssistantPanel {
     // MARK: - Bash Execution
 
-    /// Execute a bash command and return the result to the chat
+    /// Execute a bash command and return the result to the chat.
+    ///
+    /// Reached two ways: the user tapping the pending-action card (`busy` is
+    /// false), and `autoChainPendingAction` in Bypass mode (`busy` is TRUE,
+    /// because we're still inside the turn that proposed the command). Both
+    /// finish through `unblockAndFollowUp()` — a plain `sendFollowup()` would
+    /// hit its own `guard !busy` and silently drop the output on the auto path,
+    /// ending the turn with no conclusion.
     @MainActor
     func runBashCommand(_ args: BashArgs?) async {
         guard let args = args else { return }
 
         let bashService = BashService()
+        // Drop the card as soon as we commit to running: it's no longer
+        // actionable, and leaving it up invites a second tap that would run the
+        // same command again.
+        agent.pendingTool = nil
 
         // Validate the command first
         guard bashService.validateCommand(args.command) else {
@@ -16,7 +27,7 @@ extension CodeAssistantPanel {
                 role: .user,
                 content: "(bash blocked - command contains potentially dangerous operations)"
             ))
-            await sendFollowup()
+            await unblockAndFollowUp()
             return
         }
 
@@ -40,6 +51,6 @@ extension CodeAssistantPanel {
         let output = "\(header)\n$ \(displayCommand)\n\(body)"
 
         history.append(.init(role: .user, content: output))
-        await sendFollowup()
+        await unblockAndFollowUp()
     }
 }

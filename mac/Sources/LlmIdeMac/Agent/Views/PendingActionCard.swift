@@ -178,11 +178,29 @@ struct PendingActionCard: View {
                             .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
+                    } else if let args = pendingTool.bashArgs {
+                        // The command IS the action here — without it the card
+                        // said nothing but "bash". Rendered monospaced over up
+                        // to 3 lines so a short pipeline stays readable and a
+                        // heredoc/multi-line command is visibly truncated
+                        // rather than silently reduced to its first line.
+                        Text(args.command)
+                            .font(.system(size: 12, design: .monospaced))
+                            .textSelection(.enabled)
+                            .lineLimit(3)
+                            .truncationMode(.tail)
+                        if let cwd = args.workingDirectory, !cwd.isEmpty {
+                            Text("in \(filenameSuffix(cwd))")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
                     } else {
                         Text(pendingTool.name)
                             .font(.system(size: 13, weight: .regular))
                     }
-                    Text("Tap to review and confirm")
+                    Text(callToAction)
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                 }
@@ -207,7 +225,21 @@ struct PendingActionCard: View {
         case .triggerReviewCode: return "WILL OPEN REVIEW CODE WORKFLOW"
         case .updateFile: return "WILL UPDATE FILE"
         case .gitOp: return "WILL RUN GIT OPERATION"
-        case .bash, nil: return "PENDING ACTION: \(pendingTool.name.uppercased())"
+        case .bash: return "WILL RUN COMMAND"
+        case nil: return "PENDING ACTION: \(pendingTool.name.uppercased())"
+        }
+    }
+
+    /// Tapping this card does NOT always open a confirmation sheet: `bash` and
+    /// a read-tier `git-op` execute immediately on tap (see ChatMessageList's
+    /// dispatch switch). Saying "review and confirm" for those promised a
+    /// review step that never existed, so each gets wording that matches what
+    /// the tap actually does.
+    private var callToAction: String {
+        switch pendingTool.kind {
+        case .bash: return "Tap to run it"
+        case .gitOp where pendingTool.gitOpArgs?.op.tier == .read: return "Tap to run it"
+        default: return "Tap to review and confirm"
         }
     }
 

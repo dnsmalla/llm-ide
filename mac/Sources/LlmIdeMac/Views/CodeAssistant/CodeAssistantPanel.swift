@@ -24,7 +24,9 @@ enum EditAcceptanceMode: String, CaseIterable, Identifiable, ChipMenuOption {
     /// Show the confirmation card + `UpdateFileSheet` for every edit.
     case review
     /// Apply `update-file` edits immediately (to already-attached files,
-    /// enforced by `confirmUpdateFile`); GitLab actions still always confirm.
+    /// enforced by `confirmUpdateFile`), auto-run write-tier git ops, and
+    /// auto-run proposed shell commands (still gated by
+    /// `BashService.validateCommand`); GitLab/GitHub actions always confirm.
     case auto
 
     var id: String { rawValue }
@@ -35,8 +37,8 @@ enum EditAcceptanceMode: String, CaseIterable, Identifiable, ChipMenuOption {
     var icon: String { self == .auto ? "bolt.fill" : "checklist" }
     var help: String {
         self == .auto
-            ? "Bypass review — apply file edits immediately (attached files only), no popup"
-            : "Manual review — confirm each file edit in a popup before it's applied"
+            ? "Bypass review — apply file edits (attached files only) and run proposed shell commands immediately, no popup"
+            : "Manual review — confirm each file edit in a popup, and tap to run each proposed command"
     }
 }
 
