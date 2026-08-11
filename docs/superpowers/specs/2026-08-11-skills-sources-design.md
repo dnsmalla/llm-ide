@@ -1,7 +1,7 @@
 # Skills Sources — Central Skills Management Surface
 
 - **Date:** 2026-08-11
-- **Status:** Design (pending implementation plan)
+- **Status:** Implemented (server: `docs/superpowers/plans/2026-08-11-skills-sources-server.md`; Mac: `docs/superpowers/plans/2026-08-12-skills-sources-mac.md`)
 - **Scope:** Surface central (and third-party) skills repos as a manageable "skills source" kind in the Mac Library → Plugins section.
 
 ## Problem
