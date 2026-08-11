@@ -126,12 +126,13 @@ for (const s of [process.stdout, process.stderr]) {
   try { s.on('error', (err) => { if (!_BENIGN_STREAM_ERRS.has(err?.code)) throw err; }); } catch { /* ignore */ }
 }
 
-function log(level, msg, fields) {
+function log(level, msg, fields, { persist = false } = {}) {
   const lvl = LEVELS[level];
   // Persist warn+ to the on-disk crash log ALWAYS — independent of the console
   // minLevel — so a crash line survives even if the console is quieted, and is
   // readable after the supervising app exits. Always JSON so it stays greppable.
-  if (lvl >= FILE_MIN_LEVEL) {
+  // `persist` forces the same for a sub-warn line: see `logger.audit`.
+  if (lvl >= FILE_MIN_LEVEL || persist) {
     writeToFile(JSON.stringify({ ts: new Date().toISOString(), level, msg, ...(fields || {}) }) + '\n');
   }
   if (lvl < minLevel) return;
@@ -147,6 +148,21 @@ export const logger = {
   info:  (msg, fields) => log('info',  msg, fields),
   warn:  (msg, fields) => log('warn',  msg, fields),
   error: (msg, fields) => log('error', msg, fields),
+  /**
+   * An `info`-level line that is ALSO persisted to the on-disk log.
+   *
+   * For the handful of events whose whole purpose is to be auditable after the
+   * fact — "did this actually happen?" — where a `warn` would be a lie because
+   * nothing is wrong. The file sink is otherwise warn+, so an `info` line only
+   * ever reached stdout, which the Mac app swallows into an in-memory buffer;
+   * `project_memory` claimed in its own comment to make "is memory working?"
+   * answerable from the log, and it was not: `grep project_memory server.log`
+   * returned nothing no matter what happened.
+   *
+   * Use sparingly — every audit line competes with crash lines for the 2 MB
+   * rotation budget.
+   */
+  audit: (msg, fields) => log('info', msg, fields, { persist: true }),
   child: (bound) => ({
     trace: (msg, fields) => log('trace', msg, { ...bound, ...(fields || {}) }),
     debug: (msg, fields) => log('debug', msg, { ...bound, ...(fields || {}) }),

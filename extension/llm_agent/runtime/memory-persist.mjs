@@ -12,9 +12,16 @@ import { extractMemories } from './memory-extract.mjs';
 import { logger } from '../../core/logger.mjs';
 
 // Observability: every turn logs ONE `project_memory` line with `outcome` so
-// "is memory working?" is answerable from the log instead of guessing. Skips
-// log WHY (no target / no facts) at info; a genuine exception logs at warn (so
-// it also lands in the on-disk crash log). Success logs the count + root.
+// "is memory working?" is answerable from the log instead of guessing. Skips log
+// WHY (no target / no facts); success logs the counts + root; a genuine
+// exception logs at warn.
+//
+// These go through `logger.audit` — an info-level line that is ALSO persisted to
+// kb/server.log — NOT plain `logger.info`. The file sink is warn+, so the
+// original `info` calls only ever reached stdout, which the Mac app buffers in
+// memory and never writes out. The claim above was therefore false for two
+// years of `grep project_memory kb/server.log`: it returned nothing whether
+// capture had worked, silently skipped, or found nothing durable.
 export async function persistTurnMemory({ agentContext, userId, userMessage, reply, runClaude }) {
   try {
     const indexed = Array.isArray(agentContext?.indexedRepos) ? agentContext.indexedRepos : [];
@@ -24,13 +31,13 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
     // captures memory. Matches what renderGraphifyMemory surfaces.
     const candidatePaths = [...indexed.map((r) => r?.path), wsRoot].filter(Boolean);
     if (!userId || candidatePaths.length === 0) {
-      logger.info('project_memory', { outcome: 'skipped', reason: 'no candidate paths', hasUser: !!userId });
+      logger.audit('project_memory', { outcome: 'skipped', reason: 'no candidate paths', hasUser: !!userId });
       return null;
     }
 
     const allowedRoots = buildAllowedRoots(userId, wsRoot);
     if (!allowedRoots || allowedRoots.size === 0) {
-      logger.info('project_memory', { outcome: 'skipped', reason: 'no allowed roots', candidates: candidatePaths.length });
+      logger.audit('project_memory', { outcome: 'skipped', reason: 'no allowed roots', candidates: candidatePaths.length });
       return null;
     }
 
@@ -42,7 +49,7 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
       if (root) break;
     }
     if (!root) {
-      logger.info('project_memory', { outcome: 'skipped', reason: 'no candidate resolved to an allowed root', candidates: candidatePaths.length });
+      logger.audit('project_memory', { outcome: 'skipped', reason: 'no candidate resolved to an allowed root', candidates: candidatePaths.length });
       return null;
     }
 
@@ -64,7 +71,7 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
       const reason = extractMeta.skipped
         ? 'gated: contentless turn, extraction skipped (no model call)'
         : 'extractor found nothing durable';
-      logger.info('project_memory', {
+      logger.audit('project_memory', {
         outcome: extractMeta.skipped ? 'skipped_extraction' : 'no_facts',
         reason, extractTokens, root,
       });
@@ -81,7 +88,7 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
       : (typeof agentContext?.sessionId === 'string' ? agentContext.sessionId : undefined);
     const saved = appendChatMemory({ root, facts, remove: superseded, meta, sessionId });
     const added = meta.added ?? Math.max(0, (Array.isArray(saved) ? saved.length : 0) - existing.length);
-    logger.info('project_memory', {
+    logger.audit('project_memory', {
       outcome: 'captured', extracted: facts.length, added,
       // `updated` = facts whose index (factKey) was already stored and whose
       // text changed, so the stored copy was replaced in place.

@@ -45,6 +45,25 @@ test('file sink ignores console minLevel (error) and still records warn', () => 
   assert.ok(msgs.includes('warn-line'));
 });
 
+test('logger.audit persists an info-level line to the file sink', () => {
+  // Regression: `project_memory` logged its outcome at info and its own comment
+  // claimed that made "is memory working?" answerable from the log. It did not —
+  // the file sink is warn+, so `grep project_memory kb/server.log` returned
+  // nothing whether capture succeeded, skipped, or found nothing. `audit` is the
+  // narrow exception: info level (nothing is wrong), but written to disk.
+  logger.audit('project_memory', { outcome: 'captured', added: 2 });
+  const parsed = fs.readFileSync(logFile, 'utf8').trim().split('\n')
+    .filter(Boolean).map((l) => JSON.parse(l));
+  const line = parsed.find((p) => p.msg === 'project_memory');
+  assert.ok(line, 'audit line must reach the on-disk log');
+  assert.equal(line.level, 'info', 'still info — an audit event is not a warning');
+  assert.equal(line.outcome, 'captured', 'fields round-trip');
+  // ...and plain info is still NOT persisted, so audit stays a deliberate opt-in.
+  logger.info('another-info-line', {});
+  const after = fs.readFileSync(logFile, 'utf8');
+  assert.ok(!after.includes('another-info-line'));
+});
+
 test('a broken stdout/stderr pipe does not crash logging (EPIPE is swallowed)', () => {
   // Regression: a broken log pipe to the supervising app threw EPIPE from
   // stream.write → uncaughtException → process.exit(1), flapping the backend.
