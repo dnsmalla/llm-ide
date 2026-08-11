@@ -133,9 +133,19 @@ final class MobileWebSocketServer: @unchecked Sendable {
         return false
     }
 
+    /// Tear down the listener and any client.
+    ///
+    /// Captures `self` STRONGLY on purpose. Callers drop their reference right
+    /// after calling this (`server?.stop(); server = nil`), so a `[weak self]`
+    /// capture let the object deallocate before the queue ever ran the block —
+    /// `guard let self else { return }` bailed and `listener.cancel()` never
+    /// happened. An `NWListener` released without `cancel()` keeps its socket
+    /// bound for the lifetime of the PROCESS, so Kill & Restart then hit
+    /// EADDRINUSE against the app's own leaked listener, and no amount of
+    /// retrying could win: the port was never coming back. The strong capture
+    /// is one-shot and released as soon as the block completes.
     func stop() {
-        queue.async { [weak self] in
-            guard let self else { return }
+        queue.async {
             self.shouldRun = false   // halt any pending EADDRINUSE retry
             self.client?.cancel()
             self.client = nil
@@ -143,6 +153,15 @@ final class MobileWebSocketServer: @unchecked Sendable {
             self.listener = nil
             self.paired = false
         }
+    }
+
+    /// Backstop for any path that releases the server without calling `stop()`
+    /// — same reasoning as above: an uncancelled `NWListener` holds the port
+    /// until the process exits. Cancelling here is safe without hopping to
+    /// `queue`: deinit means nothing else can reach these properties.
+    deinit {
+        listener?.cancel()
+        client?.cancel()
     }
 
     /// JSON-encode and send to the active client (no-op if none/paired==false).

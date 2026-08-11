@@ -54,10 +54,7 @@ struct MobileControlSettingsSection: View {
                         Spacer()
                         if case .running = mobile.status {
                             Button("Kill & Restart") {
-                                mobile.stop()
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                    mobile.start()
-                                }
+                                mobile.restart()
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)

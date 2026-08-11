@@ -238,6 +238,21 @@ final class MobileControlManager {
         status = .stopped
     }
 
+    /// Stop, then start again. Used by Settings → Mobile Control →
+    /// Kill & Restart.
+    ///
+    /// Deliberately does NOT sleep between the two. `stop()` hands the
+    /// listener's `cancel()` to a serial queue, so the port can still be
+    /// releasing when the new listener binds — that lag is exactly what
+    /// `MobileWebSocketServer`'s bounded EADDRINUSE retry exists to absorb.
+    /// The old UI wrapped this in a hard-coded 0.5 s delay, which both raced
+    /// the release and hid the real problem: `stop()` was not cancelling the
+    /// listener at all, so the wait could never have been long enough.
+    func restart() {
+        stop()
+        start()
+    }
+
     /// Report that the native WebSocket listener could not bind. The common
     /// case is EADDRINUSE — another process (e.g. the retired computer-agent)
     /// is squatting on `:3006`. `start()` cannot catch this synchronously
