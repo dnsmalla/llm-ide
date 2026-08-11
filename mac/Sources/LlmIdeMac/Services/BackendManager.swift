@@ -32,6 +32,19 @@ final class BackendManager {
     private(set) var pid: Int32?
     private(set) var log: [BackendLogLine] = []
     var lastError: String?
+    /// `apiVersion` reported by the live server's `/health`, once probed.
+    private(set) var serverApiVersion: Int?
+    /// Set when the reachable server is OLDER than this client can talk to.
+    ///
+    /// This is the case the app used to be blind to: `probeHealthDetail`
+    /// computed `versionTooOld` and NOTHING read it — `probeHealth()` threw
+    /// everything but `.ok` away — so a stale `node server.mjs` left running
+    /// from an earlier checkout was adopted as perfectly healthy. Every
+    /// endpoint added since that process started then 404'd with no
+    /// explanation anywhere in the UI (observed: repeated 404s on
+    /// `POST /kb/ingest-code-graph`, i.e. the Mac code graph silently never
+    /// reaching the server).
+    private(set) var serverVersionTooOld = false
 
     private var process: Process?
     private var stdoutPipe: Pipe?
@@ -206,12 +219,19 @@ final class BackendManager {
                 await MainActor.run { self.spawn(nodePath: trimmedNode, workURL: workURL) }
                 return
             }
-            if await Self.probeHealth() {
+            // Adoption is THE stale-server path: an already-listening node is
+            // whatever code it was started with, which may predate half the
+            // endpoints this client calls. Probe for detail, not just
+            // reachability, so a version mismatch is recorded and surfaced
+            // instead of silently 404ing every newer route.
+            let health = await Self.probeHealthDetail()
+            if health.ok {
                 await MainActor.run {
                     self.append("--- Adopted existing backend on 127.0.0.1:\(Self.defaultBackendPort) ---", stream: .info)
                     self.adoptedExternal = true
                     self.pid = nil
                     self.status = .running
+                    self.recordServerVersion(health, adopted: true)
                 }
             } else {
                 await MainActor.run {
@@ -355,10 +375,14 @@ final class BackendManager {
                 // Process died during startup — terminationHandler handles
                 // the .crashed transition and error. Stop polling.
                 if !proc.isRunning { return }
-                if await Self.probeHealth() {
+                let health = await Self.probeHealthDetail()
+                if health.ok {
                     // Make sure we're still the live process and weren't
                     // stop()'d or replaced while the probe was in flight.
                     guard self.process === proc, proc.isRunning else { return }
+                    // A server we spawned ourselves can still be too old — the
+                    // configured server.mjs may live in an older checkout.
+                    self.recordServerVersion(health, adopted: false)
                     self.markRunning(nodePath: nodePath, workURL: workURL, proc: proc)
                     return
                 }
@@ -520,10 +544,14 @@ final class BackendManager {
 
     /// Minimum server `apiVersion` this client knows how to talk to.
     /// Bumped when a server-side change breaks the wire shape (e.g.
-    /// renamed response fields, removed endpoints). Server reports
-    /// its version via /health.apiVersion; if the live server is
-    /// older than this, the Mac app surfaces an "update your server"
-    /// banner instead of hitting silent 4xx/5xx.
+    /// renamed response fields, removed endpoints) — NOT for a merely
+    /// added endpoint, which an older server answers with a 404 that the
+    /// calling feature already tolerates.
+    ///
+    /// The server reports its version via `/health.apiVersion`; a live server
+    /// below this floor sets `serverVersionTooOld` and writes an actionable
+    /// `lastError` (see `recordServerVersion`), which Settings → Backend,
+    /// LoginView and ReconnectView already render.
     nonisolated static let minimumServerApiVersion = 20
 
     struct HealthProbeResult {
@@ -552,21 +580,52 @@ final class BackendManager {
                   (200..<300).contains(http.statusCode) else {
                 return HealthProbeResult(ok: false, apiVersion: nil, versionTooOld: false)
             }
-            // Parse apiVersion best-effort; absent or unparseable
-            // means "old server that didn't surface a version" which
-            // we treat as too-old.
             let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             let apiVer = parsed?["apiVersion"] as? Int
-            let tooOld = apiVer == nil || (apiVer ?? 0) < Self.minimumServerApiVersion
-            return HealthProbeResult(ok: true, apiVersion: apiVer, versionTooOld: tooOld)
+            return HealthProbeResult(ok: true, apiVersion: apiVer,
+                                     versionTooOld: isVersionTooOld(apiVer))
         } catch {
             return HealthProbeResult(ok: false, apiVersion: nil, versionTooOld: false)
         }
     }
 
+    /// Whether a reported `/health.apiVersion` is below what this client needs.
+    /// A MISSING version counts as too old — it means a server from before the
+    /// field existed, which is older than any floor. Pure, so the rule is
+    /// testable without standing up a server; inverting it silently re-blinds
+    /// the app to stale backends.
+    nonisolated static func isVersionTooOld(_ apiVersion: Int?) -> Bool {
+        guard let apiVersion else { return true }
+        return apiVersion < minimumServerApiVersion
+    }
+
     /// Back-compat wrapper for callers that only need reachability.
+    ///
+    /// Prefer `probeHealthDetail()` anywhere the result decides that the
+    /// backend is usable — this wrapper discards the version, which is how a
+    /// too-old server went unnoticed for so long.
     nonisolated static func probeHealth() async -> Bool {
         await probeHealthDetail().ok
+    }
+
+    /// Record a probe's version verdict and, when the server is too old, say so
+    /// where the user will actually see it: the backend log pane plus
+    /// `lastError` (already rendered by Settings → Backend, LoginView and
+    /// ReconnectView). Without this the mismatch was detected and dropped.
+    @MainActor
+    func recordServerVersion(_ health: HealthProbeResult, adopted: Bool) {
+        serverApiVersion = health.apiVersion
+        serverVersionTooOld = health.versionTooOld
+        guard health.versionTooOld else { return }
+        let running = health.apiVersion.map(String.init) ?? "unknown"
+        let hint = adopted
+            ? "It was already running, so the app adopted it instead of starting its own."
+            : "It started from the configured server.mjs, which may be an older checkout."
+        let message = "Backend is too old: API v\(running), this app needs v\(Self.minimumServerApiVersion). "
+            + hint
+            + " Restart it (Settings → Backend → Restart) or newer features will fail with 404s."
+        append("--- \(message) ---", stream: .info)
+        lastError = message
     }
 
     /// Returns true iff some process is currently listening on the
