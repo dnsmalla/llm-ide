@@ -9,7 +9,7 @@ final class LlmSourceDTOTests: XCTestCase {
         let json = """
         {"sources":[{"id":"builtin","name":"Central Skills","origin":"builtin",
         "location":"/repo/.skills","builtin":true,"version":"3.0.0",
-        "installed":true,"skillCount":57,"agentCount":2,"hookCount":1,"enabled":true}]}
+        "installed":true,"skillCount":57,"agentCount":2,"hookCount":1,"mcpCount":1,"enabled":true}]}
         """.data(using: .utf8)!
         struct Wrap: Decodable { let sources: [LlmIdeAPIClient.LlmSourceInfo] }
         let decoded = try JSONDecoder().decode(Wrap.self, from: json)
@@ -18,6 +18,7 @@ final class LlmSourceDTOTests: XCTestCase {
         XCTAssertNil(decoded.sources[0].ref)
         XCTAssertEqual(decoded.sources[0].agentCount, 2)
         XCTAssertEqual(decoded.sources[0].hookCount, 1)
+        XCTAssertEqual(decoded.sources[0].mcpCount, 1)
     }
 
     func testDecodesAddResponseWithoutListOnlyFields() throws {
@@ -34,7 +35,8 @@ final class LlmSourceDTOTests: XCTestCase {
     func testDecodesDiscoveryDetail() throws {
         let json = """
         {"agents":[{"name":"reviewer","description":"reviews code","path":"/repo/agents/reviewer.md"}],
-        "hooks":[{"event":"PreToolUse","matcher":"Bash","command":"echo hi"}]}
+        "hooks":[{"event":"PreToolUse","matcher":"Bash","command":"echo hi"}],
+        "mcpServers":[{"name":"filesystem","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem"]}]}
         """.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(LlmIdeAPIClient.LlmSourceDiscoveryDetail.self, from: json)
         XCTAssertEqual(decoded.agents.count, 1)
@@ -42,5 +44,9 @@ final class LlmSourceDTOTests: XCTestCase {
         XCTAssertEqual(decoded.hooks.count, 1)
         XCTAssertEqual(decoded.hooks[0].event, "PreToolUse")
         XCTAssertEqual(decoded.hooks[0].matcher, "Bash")
+        XCTAssertEqual(decoded.mcpServers.count, 1)
+        XCTAssertEqual(decoded.mcpServers[0].name, "filesystem")
+        XCTAssertEqual(decoded.mcpServers[0].command, "npx")
+        XCTAssertEqual(decoded.mcpServers[0].args, ["-y", "@modelcontextprotocol/server-filesystem"])
     }
 }

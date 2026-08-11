@@ -2,12 +2,14 @@ import Foundation
 
 // LLM-source registry — GET/POST/DELETE /auth/me/llm-sources/*.
 // Mirrors extension/llm-sources/registry.mjs. Each registered source may
-// contribute any mix of three discoverable kinds: skills (chat "/" menu
+// contribute any mix of four discoverable kinds: skills (chat "/" menu
 // discovery via /kb/agent/skill-library), agents (subagent definitions),
-// and hooks. Discovery-only for ALL THREE — a source never contributes
-// agent-loadable tools, and agents/hooks are catalogued for display only,
-// never invoked/executed. See docs/superpowers/specs/2026-08-11-skills-sources-design.md
-// Safety section (superseded in spirit by this rename, same principle).
+// hooks, and MCP servers. Discovery-only for ALL FOUR — a source never
+// contributes agent-loadable tools, and agents/hooks/MCP servers are
+// catalogued for display only, never invoked/executed/spawned. See
+// docs/superpowers/specs/2026-08-11-skills-sources-design.md and
+// docs/superpowers/specs/2026-08-12-llm-sources-rename-and-expand.md
+// Safety sections.
 extension LlmIdeAPIClient {
 
     struct LlmSourceInfo: Decodable, Identifiable, Equatable {
@@ -22,6 +24,7 @@ extension LlmIdeAPIClient {
         let skillCount: Int
         let agentCount: Int
         let hookCount: Int
+        let mcpCount: Int
         let enabled: Bool
     }
     private struct LlmSourcesListResponse: Decodable { let sources: [LlmSourceInfo] }
@@ -37,8 +40,9 @@ extension LlmIdeAPIClient {
     }
     private struct AddLlmSourceResponse: Decodable { let source: LlmSourceSummary }
 
-    /// One catalogued agent (subagent definition) or hook found in a source.
-    /// Display-only — never invoked/executed from the Mac client either.
+    /// One catalogued agent (subagent definition), hook, or MCP server found
+    /// in a source. Display-only — never invoked/executed/spawned from the
+    /// Mac client either.
     struct LlmSourceAgent: Decodable, Identifiable, Equatable {
         let name: String
         let description: String
@@ -51,9 +55,16 @@ extension LlmIdeAPIClient {
         let command: String
         var id: String { "\(event)|\(matcher ?? "")|\(command)" }
     }
+    struct LlmSourceMcpServer: Decodable, Identifiable, Equatable {
+        let name: String
+        let command: String
+        let args: [String]
+        var id: String { name }
+    }
     struct LlmSourceDiscoveryDetail: Decodable {
         let agents: [LlmSourceAgent]
         let hooks: [LlmSourceHook]
+        let mcpServers: [LlmSourceMcpServer]
     }
 
     private struct ToggleAck: Decodable { let ok: Bool; let enabled: Bool }
@@ -109,9 +120,9 @@ extension LlmIdeAPIClient {
         let _: RemoveAck = try await delete("/auth/me/llm-sources/\(slug)", authenticated: true)
     }
 
-    /// The agents + hooks a source actually contains — for the detail view's
-    /// "what's in here" listing. Empty arrays (not an error) for a source
-    /// with zero of either kind.
+    /// The agents + hooks + MCP servers a source actually contains — for the
+    /// detail view's "what's in here" listing. Empty arrays (not an error)
+    /// for a source with zero of a given kind.
     func llmSourceDiscovery(id: String) async throws -> LlmSourceDiscoveryDetail {
         guard let slug = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
         else { throw APIError.invalidURL }
