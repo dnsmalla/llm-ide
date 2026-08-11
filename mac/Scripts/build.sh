@@ -238,4 +238,11 @@ else
   echo -e "${BLUE}[build]${NC} Sparkle.framework not found in .build — auto-update will be inert."
 fi
 
+# Always leave the bundle signed. An UNSIGNED app has no code identity, so
+# macOS can't match it against the ACL on our keychain items — reads of the
+# saved refresh token get denied and the user is bounced back to the login
+# screen. build_app.sh / release.sh sign again afterwards (codesign --force),
+# which is harmless; this covers the plain `Scripts/build.sh` dev path.
+"$SCRIPT_DIR/sign.sh"
+
 echo -e "${GREEN}[build]${NC} ok — $APP_DIR"
