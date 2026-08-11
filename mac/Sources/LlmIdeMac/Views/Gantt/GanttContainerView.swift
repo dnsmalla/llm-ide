@@ -240,7 +240,8 @@ struct GanttContainerView: View {
         vm.issues = []
         vm.milestones = []
         vm.schedules = [:]
-        // `.task(id: effectiveBackend)` picks the reload up from here.
+        // Writing activeBackend changes `loadKey`, which is what re-runs the
+        // project load — hence no explicit reload call here.
         activeBackend = backend
     }
 
