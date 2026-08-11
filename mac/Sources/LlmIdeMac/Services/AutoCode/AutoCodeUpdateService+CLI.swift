@@ -399,11 +399,19 @@ extension AutoCodeUpdateService {
         // Detach stdin so a stray permission prompt can never hang the run.
         process.standardInput = FileHandle.nullDevice
 
-        // Await with 10-minute timeout using terminationHandler (no data race)
-        let timeout: TimeInterval = 600
-        // Expose the live process so cancel() can terminate it instead of
-        // waiting out the timeout. Set on the main actor before launch.
+        // Await via terminationHandler (no data race) with NO wall clock.
+        //
+        // This was a 10-minute watchdog. An auto task is an agent working a real
+        // change — reading the repo, editing, building, re-running tests — and
+        // ten minutes is an ordinary duration for that, not a pathology. When the
+        // watchdog won it terminated the CLI mid-edit and recorded the task as
+        // failed, which is both a lost run and a misleading result.
+        //
+        // Bounds that remain: the task finishes, the user cancels (activeProcess
+        // below is exposed precisely so cancel() can terminate it), or
+        // ResourceGuardService stops it under sustained critical memory pressure.
         activeProcess = process
+        var guardToken: ResourceGuardService.Registration?
         let result = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             let resumed = OSAllocatedUnfairLock(initialState: false)
 
@@ -431,10 +439,11 @@ extension AutoCodeUpdateService {
                 return
             }
 
-            // Timeout watchdog — fires on utility queue. Weak
-            // process capture so a normal-exit run doesn't pin the
-            // Process object in memory for the full timeout window.
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) { [weak process] in
+            // Resource guard, replacing the old timeout watchdog: identical
+            // teardown, triggered by the machine being at risk rather than by a
+            // clock. Weak process capture so a normal-exit run doesn't pin the
+            // Process object for the life of the registration.
+            guardToken = ResourceGuardService.shared.register(label: "auto task CLI") { [weak process] _ in
                 let alreadyResumed = resumed.withLock { state -> Bool in
                     if state { return true }
                     state = true
@@ -446,6 +455,8 @@ extension AutoCodeUpdateService {
             }
         }
 
+        guardToken?.cancel()
+        guardToken = nil
         activeProcess = nil
         // The model was invoked (it ran, pass or fail) — count it.
         await recordRun(model: resolvedModel, endpoint: "auto-task:issue-\(issue.number)")
@@ -580,10 +591,10 @@ extension AutoCodeUpdateService {
         // Detach stdin so a stray permission prompt can never hang the run.
         process.standardInput = FileHandle.nullDevice
 
-        let timeout: TimeInterval = 600
-        // Expose the live process so cancel() can terminate it instead of
-        // waiting out the timeout. Set on the main actor before launch.
+        // No wall clock — same reasoning as the run above. Cancellation goes
+        // through activeProcess; the machine is protected by ResourceGuardService.
         activeProcess = process
+        var guardToken: ResourceGuardService.Registration?
         let result = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             let resumed = OSAllocatedUnfairLock(initialState: false)
 
@@ -611,7 +622,7 @@ extension AutoCodeUpdateService {
                 return
             }
 
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) { [weak process] in
+            guardToken = ResourceGuardService.shared.register(label: "auto task CLI (stream)") { [weak process] _ in
                 let alreadyResumed = resumed.withLock { state -> Bool in
                     if state { return true }
                     state = true
@@ -622,6 +633,8 @@ extension AutoCodeUpdateService {
                 continuation.resume(returning: false)
             }
         }
+        guardToken?.cancel()
+        guardToken = nil
 
         activeProcess = nil
         if persistChanges {

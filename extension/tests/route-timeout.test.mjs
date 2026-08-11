@@ -22,25 +22,39 @@ function makeRes() {
   };
 }
 
-test('routeTimeoutMs returns a budget for listed POST routes (query stripped)', () => {
-  assert.equal(routeTimeoutMs('/kb/ingest', 'POST'), 60_000);
-  assert.equal(routeTimeoutMs('/kb/summarize?x=1', 'POST'), 240_000);
+test('routeTimeoutMs returns a budget for the short bounded POST routes (query stripped)', () => {
+  assert.equal(routeTimeoutMs('/kb/dispatch', 'POST'), 60_000);
+  assert.equal(routeTimeoutMs('/kb/providers/verify?x=1', 'POST'), 30_000);
 });
 
-test('routeTimeoutMs budgets /kb/connect-box below the 600s socket cap so a slow Box index returns a clean 504', () => {
-  const ms = routeTimeoutMs('/kb/connect-box', 'POST');
-  assert.equal(ms, 240_000);
-  assert.ok(ms < 600_000, 'must sit under server.requestTimeout (600s) to win the race and emit a 504 envelope');
+test('routeTimeoutMs has NO budget for LLM generation routes', () => {
+  // These carried 180 s–240 s budgets and were the last clock over AI work once
+  // server.requestTimeout and the agent-loop deadline were removed. /kb/summarize
+  // 504'd at 240 s on a long transcript, so the Mac summarizer threw away the
+  // real AI summary and wrote its local fallback instead.
+  for (const route of ['/kb/generate-plan', '/kb/analyze-risks', '/kb/summarize',
+                       '/kb/conflict-questions', '/kb/generate-code']) {
+    assert.equal(routeTimeoutMs(route, 'POST'), null, `${route} must have no wall-clock budget`);
+  }
+});
+
+test('routeTimeoutMs has NO budget for routes that scale with the user\'s data', () => {
+  // Both are bounded by their own input caps, not by a clock: how long indexing
+  // takes is a function of how much the user asked to index.
+  assert.equal(routeTimeoutMs('/kb/ingest', 'POST'), null);
+  assert.equal(routeTimeoutMs('/kb/connect-box', 'POST'), null);
+  // ingest-scip is bounded by loadScipIndex's own subprocess kill timer.
+  assert.equal(routeTimeoutMs('/kb/ingest-scip', 'POST'), null);
 });
 
 test('routeTimeoutMs applies the /kb/delete budget on both DELETE and POST (the router accepts both verbs)', () => {
   assert.equal(routeTimeoutMs('/kb/delete', 'POST'), 30_000);
   assert.equal(routeTimeoutMs('/kb/delete', 'DELETE'), 30_000);
-  assert.equal(routeTimeoutMs('/kb/ingest', 'DELETE'), null, 'other routes remain POST-only');
+  assert.equal(routeTimeoutMs('/kb/dispatch', 'DELETE'), null, 'other routes remain POST-only');
 });
 
 test('routeTimeoutMs returns null for GETs, unlisted and streaming routes', () => {
-  assert.equal(routeTimeoutMs('/kb/ingest', 'GET'), null);
+  assert.equal(routeTimeoutMs('/kb/dispatch', 'GET'), null);
   assert.equal(routeTimeoutMs('/kb/live/abc/stream', 'GET'), null);
   assert.equal(routeTimeoutMs('/kb/live/abc/append', 'POST'), null);
   assert.equal(routeTimeoutMs('/code-assist', 'POST'), null);

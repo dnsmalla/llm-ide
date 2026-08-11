@@ -48,15 +48,12 @@ export async function askInternal(args, ctx) {
     // so internal can run on a different tier than global.
     model: ctx.model,
     depth: ctx.depth ?? 1,
-    // Internal sub-loop deadline: 120 s.  The outer global loop has a
-    // 360 s deadline (set in route.mjs).  Keeping this at 120 s leaves
-    // ~240 s for the outer loop to compose its final reply after the
-    // sub-loop returns in the typical case. Note this deadline is NOT
-    // bounded by the outer loop's own remaining budget — if invoked
-    // late in the outer's window, worst-case total wall-clock is
-    // outer + internal (~480 s), which is what server.mjs's
-    // requestTimeout (600 s) and the client timeouts are sized against.
-    deadlineMs: 120_000,
+    // No sub-loop deadline. This used to be 120 s, budgeted against the outer
+    // loop's 360 s — and both are gone: a delegation that needs to read several
+    // files or search the KB properly is work, and cutting it at two minutes
+    // returned a half-answer to the outer loop, which then answered the user
+    // from it. The sub-loop is bounded by its own iteration cap and by the
+    // user's cancel propagating through the outer loop.
   });
   return {
     // Redact fence sentinels from the sub-loop reply before returning it

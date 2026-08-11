@@ -14,6 +14,16 @@ struct VerifyOutcome: Equatable {
 enum VerifyError: Error, Equatable {
     case timedOut(TimeInterval)
     case launchFailed(String)
+    /// The ResourceGuard terminated the command to protect the machine.
+    ///
+    /// Distinct from every other outcome on purpose. A guard SIGTERM makes the
+    /// process exit non-zero, and a non-zero exit is how this type reports "the
+    /// fault is present" — so without its own case, a resource stop was
+    /// indistinguishable from a failing test. The callers respond to a failing
+    /// test by asking an LLM to repair it, which means firing off more work at
+    /// the exact moment the system is under critical memory pressure. Raising an
+    /// error instead ends the run cleanly and truthfully.
+    case stoppedForResources(String)
 }
 
 /// Without this, `.localizedDescription` on a `VerifyError` falls back to
@@ -28,6 +38,7 @@ extension VerifyError: LocalizedError {
         switch self {
         case .timedOut(let seconds): return "timed out after \(seconds)s"
         case .launchFailed(let reason): return "launch failed: \(reason)"
+        case .stoppedForResources(let reason): return reason
         }
     }
 }
@@ -60,9 +71,27 @@ struct ShellFaultVerifier: FaultVerifier {
         }
         reader.start()
 
-        let deadline = Date().addingTimeInterval(timeout)
+        // `timeout <= 0` means no limit, which is now the default everywhere that
+        // calls this: a verification command is the user's own test suite or
+        // build, and killing it at an arbitrary mark reports "timed out" for a
+        // stage that was simply still working. The guard below still runs for a
+        // caller that opted into a finite timeout.
+        let deadline: Date? = timeout > 0 ? Date().addingTimeInterval(timeout) : nil
+        // The machine, not the clock, is what stops an unbounded run. The reason
+        // is recorded so the non-zero exit that follows the SIGTERM is reported as
+        // a resource stop rather than as a failing test (see
+        // VerifyError.stoppedForResources).
+        let stopReason = ResourceStopBox()
+        let guardToken = ResourceGuardService.shared.register(
+            label: "verify: \(command.prefix(60))"
+        ) { [weak process] reason in
+            stopReason.set(reason)
+            guard let p = process, p.isRunning else { return }
+            p.terminate()
+        }
+        defer { guardToken.cancel() }
         while process.isRunning {
-            if Date() >= deadline {
+            if let deadline, Date() >= deadline {
                 process.terminate()                       // SIGTERM
                 // Grace period, then hard-kill if it ignored SIGTERM.
                 let killBy = Date().addingTimeInterval(0.5)
@@ -77,8 +106,24 @@ struct ShellFaultVerifier: FaultVerifier {
         }
         process.waitUntilExit()
         let output = String(data: dataBox.get(), encoding: .utf8) ?? ""
+        // A guard stop must never be reported as a verification result: the
+        // command was killed, so its exit code says nothing about the code under
+        // test, and treating it as a failure would trigger an LLM repair while the
+        // machine is already out of memory.
+        if let reason = stopReason.get() {
+            throw VerifyError.stoppedForResources(reason)
+        }
         return VerifyOutcome(exitCode: process.terminationStatus, output: output)
     }
+}
+
+/// Thread-safe one-shot box for the guard's stop reason. The guard's handler runs
+/// on its own queue while the awaiting task reads this after `waitUntilExit`.
+private final class ResourceStopBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var reason: String?
+    func set(_ r: String) { lock.lock(); if reason == nil { reason = r }; lock.unlock() }
+    func get() -> String? { lock.lock(); defer { lock.unlock() }; return reason }
 }
 
 /// Tiny thread-safe box so the reader thread and the awaiting task can

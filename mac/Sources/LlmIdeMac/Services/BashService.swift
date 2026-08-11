@@ -23,10 +23,19 @@ import Foundation
 ///     the conversation from the model's context.
 final class BashService: Sendable {
 
-    /// Wall-clock ceiling for one command. Deliberately larger than the
-    /// server's 30 s: the commands routed here are the user's own build/test
-    /// runs (`swift build`, `npm test`), which legitimately take minutes.
-    static let defaultTimeout: TimeInterval = 180
+    /// NO wall-clock ceiling by default (0 = unlimited).
+    ///
+    /// This was 180 s. The commands routed here are the user's own build and
+    /// test runs — `swift build`, `npm test`, a full regression — and those
+    /// legitimately run longer than any ceiling worth picking. When the ceiling
+    /// won, the user got "command timed out after 180s and was killed" instead
+    /// of their build output, and the work had to start over from scratch.
+    ///
+    /// A command now ends when it finishes, when the user cancels the turn, or
+    /// when `ResourceGuardService` stops it because the machine is under
+    /// sustained critical memory pressure. Pass an explicit `timeout` only when
+    /// a slow result is genuinely worthless.
+    static let defaultTimeout: TimeInterval = 0
     /// Grace period between SIGTERM and SIGKILL for a child that ignores the
     /// polite signal.
     private static let killGrace: TimeInterval = 2
@@ -42,12 +51,28 @@ final class BashService: Sendable {
         let stdout: String
         let stderr: String
         let duration: TimeInterval
-        /// True when the command was killed for exceeding the timeout.
+        /// True when the command was killed for exceeding an EXPLICIT timeout.
+        /// Never set by default — see `defaultTimeout`.
         let timedOut: Bool
+        /// Non-nil when the ResourceGuard stopped the command to protect the
+        /// machine; carries the user-facing reason. Distinct from `timedOut` so
+        /// the chat can say "stopped to protect the system", never "too slow".
+        let stoppedForResources: String?
         /// True when either stream was clipped by a cap above.
         let truncated: Bool
 
-        var isSuccess: Bool { exitCode == 0 && !timedOut }
+        init(exitCode: Int32, stdout: String, stderr: String, duration: TimeInterval,
+             timedOut: Bool, stoppedForResources: String? = nil, truncated: Bool) {
+            self.exitCode = exitCode
+            self.stdout = stdout
+            self.stderr = stderr
+            self.duration = duration
+            self.timedOut = timedOut
+            self.stoppedForResources = stoppedForResources
+            self.truncated = truncated
+        }
+
+        var isSuccess: Bool { exitCode == 0 && !timedOut && stoppedForResources == nil }
 
         /// Chat-facing rendering. Labels the streams only when BOTH carry
         /// content — a lone stderr (the common case for a failing build) reads
@@ -61,7 +86,10 @@ final class BashService: Sendable {
             } else {
                 body = stdout
             }
-            if timedOut {
+            if let reason = stoppedForResources {
+                let note = "(after \(Int(duration))s, \(reason))"
+                body = body.isEmpty ? note : "\(body)\n\n\(note)"
+            } else if timedOut {
                 let note = "(command timed out after \(Int(duration))s and was killed)"
                 body = body.isEmpty ? note : "\(body)\n\n\(note)"
             } else if truncated {
@@ -135,21 +163,49 @@ final class BashService: Sendable {
                     Self.drainInBackground(HandleBox(stderrPipe.fileHandleForReading),
                                           into: err, group: group)
 
-                    // Timeout watchdog: SIGTERM, then SIGKILL after a grace
-                    // period for a child that ignores it. Either way the child
-                    // dies, its write ends close, and the drains reach EOF.
-                    let watchdog = DispatchWorkItem {
+                    // Teardown shared by every reason we might stop the child:
+                    // SIGTERM, then SIGKILL after a grace period for a child
+                    // that ignores the polite signal. Either way the child dies,
+                    // its write ends close, and the drains reach EOF.
+                    let stopChild: @Sendable () -> Void = {
                         guard box.isRunning else { return }
-                        box.markTimedOut()
                         box.terminate()
                         DispatchQueue.global().asyncAfter(deadline: .now() + grace) {
                             box.forceKill()
                         }
                     }
-                    DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
+
+                    // Resource guard: the ONLY thing that stops a command on its
+                    // own now. `timeout` defaults to 0 (unlimited) — a user's
+                    // `swift build` or `npm test` legitimately runs for as long
+                    // as it runs, and the old 180 s ceiling killed those runs
+                    // and reported a timeout instead of their result. What still
+                    // stops a command: the user cancelling the turn, or the
+                    // machine being in real trouble.
+                    let guardToken = ResourceGuardService.shared.register(
+                        label: "bash: \(command.prefix(60))"
+                    ) { reason in
+                        box.markStoppedForResources(reason)
+                        stopChild()
+                    }
+
+                    // Optional explicit ceiling, off by default. Kept as a
+                    // capability so a caller with a genuine reason (a probe that
+                    // is worthless if slow) can still bound one command.
+                    var watchdog: DispatchWorkItem?
+                    if timeout > 0 {
+                        let item = DispatchWorkItem {
+                            guard box.isRunning else { return }
+                            box.markTimedOut()
+                            stopChild()
+                        }
+                        watchdog = item
+                        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: item)
+                    }
 
                     process.waitUntilExit()
-                    watchdog.cancel()
+                    watchdog?.cancel()
+                    guardToken.cancel()
                     // Wait for the readers, not just the process: the tail of
                     // the output can still be in flight when the child exits.
                     group.wait()
@@ -162,6 +218,7 @@ final class BashService: Sendable {
                         stderr: errText,
                         duration: Date().timeIntervalSince(start),
                         timedOut: box.didTimeOut,
+                        stoppedForResources: box.resourceStopReason,
                         truncated: outClipped || errClipped))
                 }
             }
@@ -269,6 +326,7 @@ private final class ProcessBox: @unchecked Sendable {
     private var process: Process?
     private var timedOut = false
     private var cancelled = false
+    private var resourceStop: String?
 
     /// Take ownership of the launched process. Returns false when cancellation
     /// already arrived, meaning the caller should tear it down immediately.
@@ -291,6 +349,17 @@ private final class ProcessBox: @unchecked Sendable {
     func markTimedOut() {
         lock.lock(); defer { lock.unlock() }
         timedOut = true
+    }
+
+    /// Reason the ResourceGuard stopped this child, if it did.
+    var resourceStopReason: String? {
+        lock.lock(); defer { lock.unlock() }
+        return resourceStop
+    }
+
+    func markStoppedForResources(_ reason: String) {
+        lock.lock(); defer { lock.unlock() }
+        resourceStop = reason
     }
 
     func terminate() {

@@ -80,10 +80,12 @@ final class LoopEngineConfigTests: XCTestCase {
         XCTAssertNotNil(suite.data(forKey: "loopEngineConfig_abc-123"))
     }
 
-    /// "No time limit" (`nil`) is a value the user can pick, so it has to survive a
-    /// save. The synthesized encoder omits a nil optional, and an omitted key means
-    /// "written before this field existed" ⇒ 3600 — so choosing no limit came back
-    /// as 60 minutes on the next load.
+    /// "No time limit" (`nil`) is both the default and a value the user can pick,
+    /// so it has to survive a save. Historically this was the bug the explicit
+    /// encoder exists for: the synthesized encoder omitted a nil optional, and an
+    /// omitted key meant "written before this field existed" ⇒ 3600, so choosing
+    /// no limit came back as 60 minutes. Absent now decodes as nil as well, but
+    /// the round trip still has to hold.
     func testNoTimeLimitSurvivesASaveAndLoad() {
         var config = LoopEngineConfig(stages: [
             LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
@@ -93,13 +95,17 @@ final class LoopEngineConfigTests: XCTestCase {
         XCTAssertNil(LoopEngineConfig.load(for: "proj-notime", defaults: suite)?.wallClockBudgetSeconds)
     }
 
-    /// The other half of that distinction, and the invariant the fix must not break:
-    /// a config written by a build that had no `wallClockBudgetSeconds` key at all
-    /// still decodes with the 3600 default rather than as "no limit".
-    func testConfigFromBeforeTheFieldExistedDecodesWithTheDefaultBudget() throws {
+    /// A config written before the field existed now decodes as "no limit" too.
+    ///
+    /// This used to assert 3600: absent and present-null had to be told apart,
+    /// because absent meant "old build, apply the one-hour default". That default
+    /// is gone — a run that is progressing should not be abandoned at the hour
+    /// mark and reported as `.wallClockExceeded` — so both shapes mean unlimited
+    /// and the distinction no longer carries any weight.
+    func testConfigFromBeforeTheFieldExistedDecodesAsUnlimited() throws {
         let legacy = #"{"stages":[],"maxIterations":10,"consecutiveFailureStop":2}"#
         let decoded = try JSONDecoder().decode(LoopEngineConfig.self, from: Data(legacy.utf8))
-        XCTAssertEqual(decoded.wallClockBudgetSeconds, 3600)
+        XCTAssertNil(decoded.wallClockBudgetSeconds)
     }
 
     /// An explicit null is "no limit" — the shape the current encoder writes.

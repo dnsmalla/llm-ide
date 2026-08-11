@@ -103,7 +103,10 @@ final class RegressionRunner: ObservableObject {
          verifier: FaultVerifier? = nil,
          repairer: FaultRepairer? = nil,
          approvals: VerifyApprovalStore = VerifyApprovalStore(),
-         verifyTimeout: TimeInterval = 120,
+         // 0 = no limit. Was 120 s, which is shorter than many of the very test
+         // commands this sweep runs, so a slow suite was recorded as a
+         // verification timeout rather than the pass or fail it would have been.
+         verifyTimeout: TimeInterval = 0,
          config: AppConfig? = nil) {
         self.prompter = prompter
         self.judge = judge
@@ -115,7 +118,10 @@ final class RegressionRunner: ObservableObject {
         self.config = config
     }
 
-    func applyTimeout(_ t: TimeInterval) { verifyTimeout = max(1, t) }
+    /// Set an explicit per-verify ceiling. `<= 0` means no limit (the default);
+    /// the old `max(1, t)` clamp made "unlimited" impossible to express, turning
+    /// a 0 into a one-second timeout that failed every command instantly.
+    func applyTimeout(_ t: TimeInterval) { verifyTimeout = t > 0 ? t : 0 }
 
     /// Execute the run. Safe to call repeatedly — resets state each
     /// call. Bails out cleanly when there are no fixed faults (or none
@@ -269,8 +275,13 @@ final class RegressionRunner: ObservableObject {
                 appendLog(.error, "  → repair attempted · re-verify still failing")
             }
         } catch let e as VerifyError {
-            results[idx].verdict = .failed("\(e)")
-            appendLog(.error, "  → \(e)")
+            // A thrown VerifyError never reaches the repair path above (repair is
+            // gated on verify RETURNING a non-zero exit), so a resource stop
+            // cannot dispatch an LLM repair from here. Report it in the readable
+            // form — `"\(e)"` would print the raw case, e.g.
+            // `stoppedForResources("…")`.
+            results[idx].verdict = .failed(e.localizedDescription)
+            appendLog(.error, "  → \(e.localizedDescription)")
         } catch {
             results[idx].verdict = .failed(error.localizedDescription)
             appendLog(.error, "  → failed: \(error.localizedDescription)")

@@ -10,14 +10,22 @@ struct LoopEngineConfig: Codable, Equatable {
     var maxIterations: Int = 10
     var consecutiveFailureStop: Int = 2
 
-    /// Total wall-clock ceiling for a run, in seconds. `nil` ⇒ unlimited.
+    /// Optional wall-clock ceiling for a run, in seconds. `nil` ⇒ unlimited,
+    /// which is now the DEFAULT.
     ///
-    /// `maxIterations` alone is not a time budget: ten iterations of a
-    /// three-minute test suite plus ten LLM repairs is most of an hour, and on
-    /// the `.autoTask` trigger nobody is watching it happen. Checked between
-    /// stages, so the ceiling is "stop starting new work after this", not a hard
-    /// kill of a stage already running.
-    var wallClockBudgetSeconds: Double? = 3600
+    /// It used to default to 3600. The argument for it was that `maxIterations`
+    /// is not a time budget — ten iterations of a three-minute suite plus ten
+    /// repairs is most of an hour on an unwatched `.autoTask` run. True, but
+    /// spending an hour is not itself a failure: the run was progressing, and
+    /// giving up at the hour mark threw away the work and reported
+    /// `.wallClockExceeded`, which reads like a fault when nothing had faulted.
+    /// `maxIterations`, `consecutiveFailureStop`, and `maxRepairsPerStage` bound
+    /// the loop by PROGRESS, which is the property worth bounding.
+    ///
+    /// Still honoured when the user sets it deliberately in Settings → Loop, and
+    /// still checked only between stages: "stop starting new work after this",
+    /// never a hard kill of a stage already running.
+    var wallClockBudgetSeconds: Double?
 
     /// Maximum repair attempts per stage per run. `maxIterations` bounds how many
     /// times the loop goes round, but a single stubborn stage can consume every
@@ -58,7 +66,7 @@ struct LoopEngineConfig: Codable, Equatable {
     }
 
     init(stages: [LoopStage], maxIterations: Int = 10, consecutiveFailureStop: Int = 2,
-         wallClockBudgetSeconds: Double? = 3600, maxRepairsPerStage: Int = 3,
+         wallClockBudgetSeconds: Double? = nil, maxRepairsPerStage: Int = 3,
          protectedPathPolicy: ProtectedPathPolicy = .revert, extraProtectedGlobs: [String] = [],
          writeSummaryNote: Bool = false) {
         self.stages = stages
@@ -80,18 +88,13 @@ struct LoopEngineConfig: Codable, Equatable {
         stages = try container.decode([LoopStage].self, forKey: .stages)
         maxIterations = try container.decodeIfPresent(Int.self, forKey: .maxIterations) ?? 10
         consecutiveFailureStop = try container.decodeIfPresent(Int.self, forKey: .consecutiveFailureStop) ?? 2
-        // `nil` here means "no time limit", which is a value the user can choose —
-        // so absent and null must be told apart. `decodeIfPresent ?? 3600` alone
-        // collapses them, and since the synthesized encoder OMITS a nil optional,
-        // choosing "no time limit" was silently restored as 60 minutes on the next
-        // load. `contains` distinguishes them: key absent ⇒ a config written before
-        // this field existed ⇒ 3600; key present-but-null ⇒ deliberately no limit.
-        if container.contains(.wallClockBudgetSeconds) {
-            wallClockBudgetSeconds = try container.decodeIfPresent(
-                Double.self, forKey: .wallClockBudgetSeconds)
-        } else {
-            wallClockBudgetSeconds = 3600
-        }
+        // `nil` means "no time limit" and is now BOTH the default and what an
+        // absent key decodes to, so absent and present-null no longer need to be
+        // told apart: a config written before this field existed used to inherit
+        // the 3600 default, and that default is gone. A user who deliberately set
+        // a budget has the key present with a number, which decodes as itself.
+        wallClockBudgetSeconds = try container.decodeIfPresent(
+            Double.self, forKey: .wallClockBudgetSeconds)
         maxRepairsPerStage = try container.decodeIfPresent(Int.self, forKey: .maxRepairsPerStage) ?? 3
         protectedPathPolicy = try container.decodeIfPresent(
             ProtectedPathPolicy.self, forKey: .protectedPathPolicy) ?? .revert
@@ -100,10 +103,11 @@ struct LoopEngineConfig: Codable, Equatable {
     }
 
     /// Hand-written so `wallClockBudgetSeconds` is encoded as an explicit JSON
-    /// `null` when nil. The synthesized encoder uses `encodeIfPresent` for
-    /// optionals, which omits the key — and an omitted key has to mean "written by
-    /// a build before this field existed" (see `init(from:)`), so a chosen "no time
-    /// limit" would come back as the 3600 default.
+    /// `null` when nil rather than omitted (the synthesized encoder uses
+    /// `encodeIfPresent`). Absent and null now decode identically — both mean "no
+    /// limit" — so this is no longer load-bearing for correctness; it stays
+    /// because writing the key makes the stored config self-describing, and a
+    /// future default other than nil would need the distinction back.
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(stages, forKey: .stages)

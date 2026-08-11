@@ -7,7 +7,7 @@ private let sumLog = Logger(subsystem: "com.llmide.macapp", category: "Summariza
 /// MeetingDetailViewModel.
 ///
 /// Each call site used to inline the same four-step pattern:
-///   1. `withThrowingTaskGroup` racing `api.summarize` against a 5-minute deadline
+///   1. `api.summarize` (no wall-clock deadline — see Step 1 below)
 ///   2. `writeSummary(into:)` on success
 ///   3. Fallback `MeetingSummary` + `writeSummary` on failure
 ///   4. `MeetingNoteGenerator.generateDocx(...)` to produce the polished note
@@ -46,30 +46,24 @@ enum MeetingSummarizationService {
         root: URL
     ) async -> MeetingSummary {
 
-        // ── Step 1: AI summary with a 5-minute hard wall-clock deadline ──
-        // URLSession's per-chunk timeout resets on keepalive bytes, so the
-        // call can hang indefinitely.  Racing against Task.sleep enforces a
-        // real deadline regardless of network behaviour.
+        // ── Step 1: AI summary, with no wall-clock deadline ──
+        // This used to race `api.summarize` against a 5-minute `Task.sleep` and
+        // throw when the sleep won. Summarising a long meeting transcript is
+        // exactly the case that loses that race: the user recorded a two-hour
+        // call, waited five minutes, and got the fallback summary instead of the
+        // real one. The client session no longer imposes a clock either (see
+        // LlmIdeAPIClient), so the request now runs until the server answers or
+        // the surrounding Task is cancelled — and the `catch` below still lands on
+        // the local fallback if it genuinely fails.
         let summary: MeetingSummary
         do {
-            let s = try await withThrowingTaskGroup(of: MeetingSummary.self) { group in
-                group.addTask {
-                    try await api.summarize(
-                        transcript: transcript,
-                        title: title,
-                        language: language,
-                        startedAt: startedAt,
-                        durationSeconds: durationSeconds,
-                        participants: participants)
-                }
-                group.addTask {
-                    try await Task.sleep(for: .seconds(5 * 60))
-                    throw CancellationError()
-                }
-                guard let result = try await group.next() else { throw CancellationError() }
-                group.cancelAll()
-                return result
-            }
+            let s = try await api.summarize(
+                transcript: transcript,
+                title: title,
+                language: language,
+                startedAt: startedAt,
+                durationSeconds: durationSeconds,
+                participants: participants)
             do {
                 try MeetingFileStore(root: root).writeSummary(into: transcriptFileURL, summary: s)
             } catch {

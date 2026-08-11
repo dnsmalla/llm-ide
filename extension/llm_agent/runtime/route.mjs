@@ -459,7 +459,8 @@ export async function handleCodeAssist({
       kb,
       onProgress,
       maxIterations: maxIterationsOverride ?? 50,
-      deadlineMs: 360_000,
+      // No deadlineMs: a chat turn is bounded by its call budget and by the
+      // user's cancel, not by a clock. See loop.mjs's DEFAULT_DEADLINE_MS.
     });
   } else {
     out = await runAgentLoop({
@@ -476,11 +477,11 @@ export async function handleCodeAssist({
       onChunk,
       model: GLOBAL_AGENT_MODEL,
       maxIterations: maxIterationsOverride ?? 1000,  // global cap raised; see runAgentLoop DEFAULT_MAX_ITERATIONS (10)
-      // 360 s so a legitimate long chat reply (deep multi-hop chains,
-      // slow model calls) can finish beyond the 5-minute floor users
-      // hit at 180 s. server.mjs's requestTimeout (600 s) sits above
-      // this plus the worst-case ask-internal delegation (see below).
-      deadlineMs: 360_000,
+      // No deadlineMs. This is the call that produced "reached the 360s
+      // deadline — try again": a deep multi-hop turn legitimately outran the
+      // cap and the user lost the whole reply. The iteration budget above and
+      // the user's cancel bound it now; server.mjs's requestTimeout is disabled
+      // to match, so the socket outlives the work instead of cutting it.
     });
   }
 

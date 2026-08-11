@@ -1,29 +1,44 @@
 // Opt-in per-route handler timeout budgets.
 //
-// The socket layer already caps every request end-to-end at
-// server.requestTimeout (600 s, see server.mjs). This module adds a
-// TIGHTER, per-route budget for known-bounded POST handlers so a stuck
-// dependency (DB lock, wedged CLI subprocess) returns a clean 504 JSON
-// envelope early instead of holding the slot until the socket cap.
+// A budget here returns a clean 504 JSON envelope when a route's handler
+// overruns, instead of holding the slot. It is the right tool for a route whose
+// work is a QUICK, BOUNDED interaction with something external — a provider
+// credential check, an outbound dispatch — where a slow answer means the
+// dependency is unhealthy.
+//
+// It is the WRONG tool for a route that does AI generation or scales with the
+// user's data, and those budgets have been removed. `server.requestTimeout` is
+// now 0 (see server.mjs) and the agent loop has no deadline, so these were the
+// last remaining clock over that work — and they cut it off in exactly the cases
+// that need time most: `/kb/summarize` 504'd at 240 s on a long transcript, so
+// the Mac summarizer discarded the real AI summary and wrote its local fallback,
+// which is precisely the failure removing the client-side 5-minute race was
+// meant to fix. Generation routes are bounded by the agent's iteration budget and
+// by client cancellation; indexing routes are bounded by their own input caps.
 //
 // OPT-IN ONLY: a route absent from the map has no handler budget.
 // Streaming routes (SSE: /kb/live/:id/stream, /code-assist, agent
 // dispatch) must NEVER be listed — they are long-lived by design.
+//
+// Do NOT add a budget for an LLM route. See
+// docs/explanation/invariants.md ("Do NOT reintroduce a wall-clock deadline on
+// agent work").
 import { AppError, sendError } from '../core/errors.mjs';
 
 const BUDGETS_POST = new Map([
-  ['/kb/ingest',              60_000],
-  ['/kb/ingest-scip',        120_000],  // scip print subprocess: bounded by loadScipIndex kill timer (120s)
-  ['/kb/delete',              30_000],
+  // Outbound provider REST calls: creating an issue/PR is a short API round
+  // trip, so a minute of silence means the provider is unhealthy, not busy.
   ['/kb/dispatch',            60_000],
+  // Credential/model liveness probes — a slow answer IS the answer.
   ['/kb/providers/verify',    30_000],
   ['/kb/providers/models',    30_000],
-  ['/kb/generate-plan',      180_000],
-  ['/kb/analyze-risks',      180_000],
-  ['/kb/summarize',          240_000],  // runClaude has its own 3-min ceiling; budget sits above it
-  ['/kb/conflict-questions', 240_000],
-  ['/kb/generate-code',      240_000],
-  ['/kb/connect-box',        240_000],  // Box folder index: bounded by MAX_FILES; budget below the 600s socket cap so a slow folder 504s cleanly
+  // A KB delete is a bounded set of indexed DELETEs, not a scaling workload.
+  ['/kb/delete',              30_000],
+  // Removed (were 60 s–240 s): /kb/ingest and /kb/connect-box scale with how
+  // much data the user is indexing; /kb/ingest-scip is already bounded by
+  // loadScipIndex's own subprocess kill timer; and /kb/generate-plan,
+  // /kb/analyze-risks, /kb/summarize, /kb/conflict-questions and
+  // /kb/generate-code are all LLM generation.
 ]);
 
 export function routeTimeoutMs(url, method) {

@@ -49,6 +49,11 @@ final class LoopEngineRunner: ObservableObject {
     private let regressionSweep: RegressionSweepRunning
     private let skillExecutor: LoopSkillExecuting
     private let approvals: VerifyApprovalStore
+    /// Fallback ceiling for a stage whose own `timeoutSeconds` is nil. 0 = no
+    /// limit, which is the default: a stage command is the user's build or test
+    /// suite, and cutting it off reports a timeout for work that was still
+    /// running. `ShellFaultVerifier` treats <= 0 as unbounded and leans on
+    /// `ResourceGuardService` instead.
     private let stageTimeout: TimeInterval
     private let journal: LoopRunJournaling
     private let summaryWriter: LoopRunSummaryWriting
@@ -65,7 +70,7 @@ final class LoopEngineRunner: ObservableObject {
          regressionSweep: RegressionSweepRunning,
          skillExecutor: LoopSkillExecuting,
          approvals: VerifyApprovalStore = VerifyApprovalStore(),
-         stageTimeout: TimeInterval = 600,
+         stageTimeout: TimeInterval = 0,
          journal: LoopRunJournaling = FileLoopRunJournal(),
          summaryWriter: LoopRunSummaryWriting = NoteLoopRunSummaryWriter(),
          scopeGuard: RepairScopeGuarding = GitRepairScopeGuard(),
@@ -320,6 +325,14 @@ final class LoopEngineRunner: ObservableObject {
             // not a fatal run-ending error. Only a genuine launch failure below is
             // fatal.
             outcome = VerifyOutcome(exitCode: -1, output: "stage timed out after \(seconds)s")
+        } catch VerifyError.stoppedForResources(let reason) {
+            // Explicitly NOT the timeout path above: a resource stop must not be
+            // scored as a stage failure, because a failing stage is what triggers
+            // an LLM repair — and dispatching a repair is the last thing to do
+            // while the machine is already under critical memory pressure. End the
+            // run and say why.
+            appendLog(.warn, "  [\(stage.name)] \(reason)")
+            return .terminate(.error(reason))
         } catch {
             appendLog(.error, "  [\(stage.name)] error: \(error.localizedDescription)")
             return .terminate(.error(error.localizedDescription))

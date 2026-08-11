@@ -142,13 +142,33 @@ final class LoopTemplateTests: XCTestCase {
         XCTAssertEqual(applied.protectedPathPolicy, .revert)
     }
 
-    func testApplyPreservesSeverityAndTimeout() {
+    func testApplyPreservesSeverity() {
         FileManager.default.createFile(atPath: repoRoot.appendingPathComponent("Package.swift").path,
                                        contents: nil)
         let applied = LoopTemplate.fullVerify.applied(to: repoRoot)
         let lint = applied.stages.first { $0.name == "Lint" }
         XCTAssertEqual(lint?.severity, .advisory)
-        XCTAssertEqual(lint?.timeoutSeconds, 120)
+        // The built-in used to ship `timeoutSeconds: 120` and this asserted it.
+        // It no longer does: `make lint` on a large repo runs past that, and a
+        // stage killed by the clock was recorded as a lint failure it never was.
+        XCTAssertNil(lint?.timeoutSeconds)
+    }
+
+    func testApplyStillPreservesAnExplicitStageTimeout() {
+        // Built-ins ship none, but a user's own template may set one deliberately,
+        // and `applied(to:)` must carry it through — the field is still honoured,
+        // it is only the DEFAULT that changed.
+        FileManager.default.createFile(atPath: repoRoot.appendingPathComponent("Package.swift").path,
+                                       contents: nil)
+        let custom = LoopTemplate(
+            name: "Custom",
+            summary: "one bounded stage",
+            config: LoopEngineConfig(stages: [
+                LoopStage(name: "Quick check", kind: .shellCommand, command: "true",
+                          order: 0, timeoutSeconds: 45)
+            ]))
+        let applied = custom.applied(to: repoRoot)
+        XCTAssertEqual(applied.stages.first?.timeoutSeconds, 45)
     }
 
     func testApplyPreservesStageOrder() {

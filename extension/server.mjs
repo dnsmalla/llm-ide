@@ -683,11 +683,31 @@ process.on('SIGPIPE', () => {});
 // headersTimeout ensures slowloris-style clients can't hold half-open
 // sockets; keepAliveTimeout reaps idle pooled sockets before they
 // outlive any reasonable client expectation.
-// 600s covers the agent loop's worst case (360s outer deadline +
-// up to 120s for an unbounded ask-internal delegation, see route.mjs)
-// with margin — a legitimate long chat turn must finish here, not get
-// its socket cut mid-response.
-server.requestTimeout   = 600_000;   // total per-request budget (10 min)
+// requestTimeout is DISABLED (0 = no limit). It used to be 600 s, sized against
+// the agent loop's old 360 s deadline; both are gone (see route.mjs / loop.mjs).
+// Leaving it at 600 s would just move the failure: the work would keep running
+// server-side while Node cut the socket out from under it, so the user would get
+// a dead connection instead of an answer — strictly worse than the deadline
+// message it replaced. A long agent turn now holds its socket until it finishes
+// or the client cancels.
+//
+// The other two stay: neither bounds WORK.
+//   headersTimeout  — a slowloris guard. Request headers arrive in milliseconds
+//                     for any real client; this only catches a client that opens
+//                     a socket and dribbles.
+//   keepAliveTimeout — reaps sockets sitting IDLE between requests. It cannot
+//                     interrupt an in-flight request.
+//
+// Accepted trade-off: requestTimeout covered header AND body reception, so a
+// client that dribbles a request BODY can now hold a socket indefinitely, and
+// neither remaining timeout catches that. Node offers no body-only timeout — the
+// only knob is requestTimeout itself, which would also bound the agent work this
+// change exists to unbound. The exposure is small and bounded: the server binds
+// to 127.0.0.1 (remote bind requires an explicit opt-in), every body is capped at
+// 8 MB, and the attacker would have to be a local process. If this ever needs
+// fixing, do it with a body-read stall detector in the body parser, NOT by
+// restoring requestTimeout.
+server.requestTimeout   = 0;         // no per-request wall clock
 server.headersTimeout   = 65_000;    // headers must arrive within 65 s
 server.keepAliveTimeout = 60_000;    // close idle keep-alive sockets after 60 s
 

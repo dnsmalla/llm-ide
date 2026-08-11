@@ -22,15 +22,29 @@ function meterQuota(userId, provider, model) {
 
 const log = logger.child({ component: 'claude-runtime' });
 
-const CLAUDE_TIMEOUT_MS = 90_000;        // 90 s per CLI attempt.  Planning
-                                         // prompts are large but two retries
-                                         // (270 s worst-case) still fit inside
-                                         // the 3-minute /kb/summarize ceiling
-                                         // and the Mac client's 5-minute task
-                                         // group limit.  Previously 180 s meant
-                                         // two calls could hit 6 min, outlasting
-                                         // both the URLSession (240 s) and the
-                                         // route timeout before the fix.
+// No WORK deadline on a CLI attempt: how long a model call legitimately takes
+// depends on the prompt, the model, and how much the model decides to think, and
+// none of that is knowable in advance. Every cap we picked here (90 s, before
+// that 180 s) was wrong for somebody — it killed real answers mid-flight and the
+// user got "try again" instead of their result. What endangers the machine is
+// resource exhaustion, not elapsed time, so that is what is guarded now (see
+// ResourceGuard on the Mac side); a long-running call is the user's to cancel.
+//
+// `undefined` inherits spawnCli's hang breaker (CLI_TIMEOUT_MS, 30 min) rather
+// than passing 0/unlimited: a CLI child holds one of six concurrency slots, so a
+// wedged process that never exits must not retire its slot forever. See the
+// comment on CLI_TIMEOUT_MS in providers.mjs.
+const CLAUDE_TIMEOUT_MS = undefined;
+
+// Last-resort HANG BREAKER for a network socket — deliberately NOT a work
+// deadline. A stalled TLS connection produces no bytes and no error: without any
+// ceiling the fetch waits forever, the agent loop never returns, and the app
+// looks dead — the exact failure this change set exists to prevent. 30 minutes
+// sits far above any real completion (the caps that used to cut work off were
+// 60-90 s), so it should never be reached by legitimate work; if it fires,
+// something is genuinely broken and retrying is correct.
+const SOCKET_HANG_BREAKER_MS = 1_800_000;
+
 const DEFAULT_MODEL = process.env.LLMIDE_MODEL || 'claude-sonnet-4-6';
 // Floor for the context-overflow retry: halving the output budget below
 // this produces summaries/answers too truncated to be useful, so we
@@ -249,15 +263,16 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
             max_tokens: attemptMaxTokens,
             messages,
           }),
-          // Hard ceiling on a single HTTP attempt — without this the
-          // fetch can hang indefinitely if Anthropic's edge stalls,
-          // leaking the request socket and blocking the agent loop.
-          // AbortError surfaces in the catch below and is funnelled
-          // through the same retry path as a transient 529/503. When the
-          // caller passes a deadline `signal`, combine it so the fetch also
-          // aborts the moment the agent-loop deadline fires (see the catch:
-          // a caller-signal abort is propagated, not retried).
-          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000)
+          // Hang breaker only — see SOCKET_HANG_BREAKER_MS. This used to be a
+          // 60 s ceiling, which cut off any completion that legitimately took
+          // longer than a minute; it is now far above real work and exists
+          // solely so a stalled edge can't wait forever. AbortError surfaces in
+          // the catch below and is funnelled through the same retry path as a
+          // transient 529/503. A caller-supplied `signal` (user cancellation) is
+          // combined in and, per the catch, propagated rather than retried.
+          signal: signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(SOCKET_HANG_BREAKER_MS)])
+            : AbortSignal.timeout(SOCKET_HANG_BREAKER_MS)
         });
 
         // Capture Anthropic's API rate-limit headers for the live headroom gauge
@@ -500,7 +515,9 @@ export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheT
           stream: true,
           messages,
         }),
-        signal: signal || AbortSignal.timeout(90_000),
+        // Was a 90 s total cap, which killed any stream that ran longer than a
+        // minute and a half — a work deadline in all but name. Hang breaker only.
+        signal: signal || AbortSignal.timeout(SOCKET_HANG_BREAKER_MS),
       });
     } catch (err) {
       // Network error or abort — fall back to buffered.

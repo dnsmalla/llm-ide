@@ -124,24 +124,39 @@ enum MeetingNoteGenerator {
         // Install the termination handler BEFORE run(): set after, a script that
         // exits in the gap between run() and assignment never signals, forcing a
         // full 60s wait on an already-finished process.
-        let deadline = DispatchTime.now() + .seconds(60)
-        let timedOut = DispatchSemaphore(value: 0)
-        proc.terminationHandler = { _ in timedOut.signal() }
+        let exited = DispatchSemaphore(value: 0)
+        proc.terminationHandler = { _ in exited.signal() }
 
         do {
             try proc.run()
 
-            // Wait up to 60 s — enough for any realistic template + content
-            // size. If the script still hasn't exited, kill it and log.
-            if timedOut.wait(timeout: deadline) == .timedOut {
-                proc.terminate()
-                log.error("python script timed out after 60 s — killed")
-                return
+            // Drain stderr CONCURRENTLY with the process, before waiting on it.
+            // A pipe holds ~64 KB; a script that writes more (a stack trace with a
+            // long payload echoed back) blocks in write() until someone reads, so
+            // reading only after exit means the child can never exit. The old 60 s
+            // ceiling masked that by eventually killing the child — with an
+            // unbounded wait the deadlock would be permanent. Same invariant as
+            // BashService: drain first, then wait.
+            let errBox = StderrBox()
+            let drain = Thread {
+                errBox.set(errPipe.fileHandleForReading.readDataToEndOfFile())
             }
+            drain.start()
+
+            // Wait for the script, with no wall clock. This was a 60 s ceiling
+            // "enough for any realistic template + content size" — but a long
+            // meeting with a large template is exactly what makes it slow, and
+            // when the ceiling won the user's polished note was silently not
+            // produced. Registering with the guard keeps the machine safe while
+            // the wait itself is unbounded.
+            let guardToken = ResourceGuardService.shared.register(label: "meeting note docx") { _ in
+                if proc.isRunning { proc.terminate() }
+            }
+            defer { guardToken.cancel() }
+            exited.wait()
 
             if proc.terminationStatus != 0 {
-                let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-                let msg = String(data: errData, encoding: .utf8) ?? "(no stderr)"
+                let msg = String(data: errBox.get(), encoding: .utf8) ?? "(no stderr)"
                 log.error("python script failed (status \(proc.terminationStatus, privacy: .public)): \(msg, privacy: .public)")
             } else {
                 log.info(".docx written → \(outputURL.path, privacy: .public)")
@@ -150,4 +165,13 @@ enum MeetingNoteGenerator {
             log.error("failed to launch python: \(error.localizedDescription, privacy: .public)")
         }
     }
+}
+
+/// Thread-safe handoff for the concurrently-drained stderr. The reader thread
+/// writes it; the waiting caller reads it after the process exits.
+private final class StderrBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+    func set(_ d: Data) { lock.lock(); data = d; lock.unlock() }
+    func get() -> Data { lock.lock(); defer { lock.unlock() }; return data }
 }

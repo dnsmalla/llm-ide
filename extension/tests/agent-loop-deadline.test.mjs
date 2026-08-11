@@ -81,11 +81,19 @@ test('runAgentLoop: aborts an in-flight runClaude when the deadline passes mid-c
   assert.ok(elapsed < 800, `should bail near the 80ms deadline, not wait ~1000ms (took ${elapsed}ms)`);
 });
 
-test('runAgentLoop: deadline default of 120s does NOT fire for a fast loop', async () => {
-  const runClaude = async () => 'plain reply'; // no fence → exits after 1 call
-  const skills = new Map();
+test('runAgentLoop: no deadlineMs means NO wall-clock limit at all', async () => {
+  // The default used to be a real deadline (180 s, then 360 s), and a legitimate
+  // multi-step turn that outran it lost the whole reply to "reached the 360s
+  // deadline — try again". There is no default clock any more: absent
+  // deadlineMs, the loop must not create an abort signal and must not be able to
+  // produce a deadline reply.
+  let sawSignal = 'unset';
+  const runClaude = async (_prompt, opts) => {
+    sawSignal = opts.signal;
+    return 'plain reply';                     // no fence → exits after 1 call
+  };
   const out = await runAgentLoop({
-    skills,
+    skills: new Map(),
     userMessage: 'hi',
     history: [],
     agentContext: { base: '' },
@@ -93,8 +101,57 @@ test('runAgentLoop: deadline default of 120s does NOT fire for a fast loop', asy
     kb: null,
     userId: 'u1',
     handlers: {},
-    // no deadlineMs override — uses 120s default
+    // no deadlineMs — unlimited
   });
   assert.equal(out.reply, 'plain reply');
   assert.doesNotMatch(out.reply, /deadline/);
+  assert.equal(sawSignal, undefined,
+    'with no deadline there must be no timeout signal — an AbortSignal here is a hidden clock');
+});
+
+test('runAgentLoop: an explicitly opted-in deadline is still honoured', async () => {
+  // Removing the DEFAULT must not remove the capability: a specific call site or
+  // test can still ask for a budget.
+  // Honour the signal the way the real runClaude does — it funnels an abort
+  // through as a rejection, which is what the loop turns into a deadline reply.
+  const runClaude = (_prompt, opts) => new Promise((resolve, reject) => {
+    const t = setTimeout(() => resolve('too late'), 400);
+    opts.signal?.addEventListener('abort', () => {
+      clearTimeout(t);
+      reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+    });
+  });
+  const out = await runAgentLoop({
+    skills: new Map(),
+    userMessage: 'x',
+    history: [],
+    agentContext: { base: '' },
+    runClaude,
+    kb: null,
+    userId: 'u1',
+    handlers: {},
+    deadlineMs: 60,
+  });
+  assert.match(out.reply, /deadline/, 'an explicit finite deadlineMs must still fire');
+});
+
+test('deadlineMs of 0 / null / Infinity all mean unlimited', async () => {
+  const seen = [];
+  const runClaude = async (_p, opts) => { seen.push(opts.signal); return 'ok'; };
+  for (const deadlineMs of [0, null, undefined, Infinity]) {
+    const out = await runAgentLoop({
+      skills: new Map(),
+      userMessage: 'x',
+      history: [],
+      agentContext: { base: '' },
+      runClaude,
+      kb: null,
+      userId: 'u1',
+      handlers: {},
+      deadlineMs,
+    });
+    assert.equal(out.reply, 'ok');
+  }
+  assert.deepEqual(seen, [undefined, undefined, undefined, undefined],
+    'none of these may install a timeout signal');
 });

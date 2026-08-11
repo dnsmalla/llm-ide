@@ -163,18 +163,38 @@ final class LlmIdeAPIClient {
         self.authSession = URLSession(configuration: authCfg)
 
         let llmCfg = URLSessionConfiguration.default
-        // /code-assist is non-streaming, so timeoutIntervalForRequest is an
-        // IDLE timer with no keepalive to reset it: it must exceed the
-        // server's own socket-level cap (server.requestTimeout in
-        // extension/server.mjs, 600 s) — that's the real outer bound, since
-        // the global agent loop (360 s, route.mjs) plus an unbounded
-        // internal delegation (120 s, ask-internal.mjs) can reach ~480 s
-        // and the server keeps the socket open up to 600 s regardless.
-        // 620 s covers that with margin; the resource cap is raised to
-        // match so it doesn't cut the request short first. (A long wait
-        // is interruptible via the chat Stop button.)
-        llmCfg.timeoutIntervalForRequest = 620
-        llmCfg.timeoutIntervalForResource = 15 * 60
+        // NO wall clock on AI work.
+        //
+        // These were 620 s / 15 min, sized against the server's old agent-loop
+        // deadline (360 s) and requestTimeout (600 s). All of those are gone: a
+        // turn now runs until it has an answer or the user presses Stop, so a
+        // client-side clock would just recreate the failure one layer up — the
+        // server would still be working while URLSession cut the socket, and the
+        // user would get a connection error instead of the reply they waited for.
+        //
+        // Cancellation is the real control here (the chat Stop button cancels the
+        // URLSessionTask), and the ResourceGuard stops work when the MACHINE is at
+        // risk — the only condition that actually warrants killing a running
+        // request.
+        //
+        // One clock survives, as a HANG BREAKER rather than a work deadline. A
+        // half-open socket — laptop slept, Wi-Fi dropped, backend killed — produces
+        // no bytes and no error, so with a 30-day timeout the chat would sit
+        // "pending" forever and need an app restart. The server keeps the same kind
+        // of guard (SOCKET_HANG_BREAKER_MS, 30 min per model call); this sits well
+        // above it, because a single turn can make several such calls and must not
+        // be cut off between them. Two hours of TOTAL SILENCE from a local backend
+        // means the connection is dead, not busy.
+        //
+        // Note `timeoutIntervalForRequest` is an IDLE timer (time since the last
+        // byte), not a total: on the streaming path each chunk resets it, so a long
+        // streamed answer never approaches it. `timeoutIntervalForResource` IS a
+        // total, so it stays effectively unlimited — that one is a work deadline
+        // and was the 15-minute cap that cut long turns off.
+        let hangBreaker: TimeInterval = 2 * 60 * 60          // 2 h of no bytes at all
+        let noWallClock: TimeInterval = 30 * 24 * 60 * 60    // effectively unlimited
+        llmCfg.timeoutIntervalForRequest = hangBreaker
+        llmCfg.timeoutIntervalForResource = noWallClock
         self.llmSession = URLSession(configuration: llmCfg)
 
         self.sessionStore = sessionStore

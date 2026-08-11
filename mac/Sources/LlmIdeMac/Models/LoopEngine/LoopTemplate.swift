@@ -84,8 +84,11 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
         summary: "Lint (advisory), then tests, then the fault sweep — the pre-merge gate.",
         config: LoopEngineConfig(
             stages: [
+                // No per-stage timeout: `make lint` on a large repo legitimately
+                // runs past any figure worth shipping as a default, and a stage
+                // killed at 120 s was recorded as a lint FAILURE it never was.
                 LoopStage(name: "Lint", kind: .shellCommand, command: "make lint",
-                          order: 0, severity: .advisory, timeoutSeconds: 120),
+                          order: 0, severity: .advisory),
                 LoopStage(name: "Test", kind: .shellCommand,
                           command: detectedTestCommand, order: 1),
                 LoopStage(name: "Regression", kind: .regressionSweep, order: 2)
@@ -119,8 +122,10 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
         config: LoopEngineConfig(
             stages: [
                 LoopStage(name: "Write docs", kind: .skill, order: 0),
+                // Same reasoning as Lint above — `make docs-check` builds the
+                // whole docs site and is routinely slower than 300 s.
                 LoopStage(name: "Docs check", kind: .shellCommand, command: "make docs-check",
-                          order: 1, timeoutSeconds: 300)
+                          order: 1)
             ],
             maxIterations: 4, consecutiveFailureStop: 2, maxRepairsPerStage: 2),
         isBuiltIn: true)

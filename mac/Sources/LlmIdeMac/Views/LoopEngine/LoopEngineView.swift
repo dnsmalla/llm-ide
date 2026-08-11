@@ -406,7 +406,9 @@ struct LoopEngineView: View {
             if stages[index].kind == .shellCommand {
                 Text("Timeout").font(Typography.caption).foregroundStyle(t.textMuted)
                 // 0 means "use the runner default" — a Stepper cannot express nil.
-                Stepper(stages[index].timeoutSeconds.map { "\($0)s" } ?? "Default (600s)",
+                // That default is now no limit, so say so rather than naming a
+                // number the runner no longer applies.
+                Stepper(stages[index].timeoutSeconds.map { "\($0)s" } ?? "No limit",
                         value: Binding(
                             get: { stages[index].timeoutSeconds ?? 0 },
                             set: { stages[index].timeoutSeconds = $0 == 0 ? nil : $0 }

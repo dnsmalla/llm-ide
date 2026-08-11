@@ -309,24 +309,57 @@ final class RepoManager {
     /// (invisible to `ps`) and never written to `.git/config`.
     // Pure helper — builds a credential env dict from inputs, no main-actor state,
     // so callable off the main actor (it runs during background process setup).
-    private nonisolated static func authEnv(token: String, backend: Backend) -> [String: String] {
-        let header: String
+    /// The `http.extraHeader` credential pair for a backend, as a config pair
+    /// rather than a whole environment.
+    ///
+    /// It used to return the finished env including `GIT_CONFIG_COUNT=1`, which
+    /// made it impossible to add any OTHER git config without silently clobbering
+    /// the count (git reads exactly COUNT pairs, so a second writer either loses
+    /// its own pair or hides the credential header). `gitEnv` below owns the
+    /// numbering now, so config can be composed.
+    nonisolated static func authConfigPair(token: String, backend: Backend) -> (String, String) {
         switch backend {
         case .gitlab:
             // GitLab accepts the PRIVATE-TOKEN header for HTTPS git ops.
-            header = "PRIVATE-TOKEN: \(token)"
+            return ("http.extraHeader", "PRIVATE-TOKEN: \(token)")
         case .github:
             // GitHub uses HTTP Basic with x-access-token as the username.
             let basic = Data("x-access-token:\(token)".utf8).base64EncodedString()
-            header = "Authorization: Basic \(basic)"
+            return ("http.extraHeader", "Authorization: Basic \(basic)")
         }
-        return [
-            "GIT_CONFIG_COUNT": "1",
-            "GIT_CONFIG_KEY_0": "http.extraHeader",
-            "GIT_CONFIG_VALUE_0": header,
-            // Never let git launch an interactive credential prompt; fail fast.
-            "GIT_TERMINAL_PROMPT": "0",
+    }
+
+    /// Environment for a git subprocess: the parent environment plus prompt
+    /// suppression, a transfer-stall guard, and (when authenticating) the
+    /// credential header — with `GIT_CONFIG_COUNT` numbered correctly across all
+    /// of them.
+    ///
+    /// `http.lowSpeedLimit` / `http.lowSpeedTime` are the important part now that
+    /// git has no wall-clock cap. They are a STALL detector, not a deadline: git
+    /// aborts only if throughput stays under ~1 KB/s for 5 minutes, so a slow but
+    /// progressing clone of a huge repo runs as long as it needs, while a dead
+    /// remote (the case the old 120 s cap really guarded) fails with a real error
+    /// instead of wedging the auto-task pipeline forever. `GIT_TERMINAL_PROMPT=0`
+    /// covers the other hang: waiting on credentials nobody can type.
+    nonisolated static func gitEnv(token: String?, backend: Backend) -> [String: String] {
+        var pairs: [(String, String)] = [
+            ("http.lowSpeedLimit", "1000"),   // bytes/sec
+            ("http.lowSpeedTime", "300"),     // sustained for 5 min → abort
         ]
+        if let token, !token.isEmpty {
+            pairs.append(authConfigPair(token: token, backend: backend))
+        }
+        var env = ProcessInfo.processInfo.environment
+        // Never let git launch an interactive credential prompt; fail fast. Set
+        // unconditionally — it used to arrive only with a token, so an
+        // unauthenticated op against a private remote could sit waiting forever.
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["GIT_CONFIG_COUNT"] = String(pairs.count)
+        for (i, pair) in pairs.enumerated() {
+            env["GIT_CONFIG_KEY_\(i)"] = pair.0
+            env["GIT_CONFIG_VALUE_\(i)"] = pair.1
+        }
+        return env
     }
 
     /// Redact a secret from text before it is surfaced in an error/log.
@@ -362,11 +395,17 @@ final class RepoManager {
     /// process environment (see `authEnv`) and redacted from any error text.
     @discardableResult
     private func git(_ args: [String], cwd: URL, token: String? = nil, backend: Backend = .gitlab, timeout: TimeInterval? = nil) async throws -> (String, String) {
-        // Network subcommands (clone/fetch/pull/push) can take a while on
-        // large repos; local plumbing should always be quick. Cap accordingly
-        // so a hung git can never leak the continuation forever.
-        let networkVerbs: Set<String> = ["clone", "fetch", "pull", "push"]
-        let cap = timeout ?? (networkVerbs.contains(args.first ?? "") ? 120 : 30)
+        // No wall clock unless the caller asks for one. The old caps (120 s for
+        // clone/fetch/pull/push, 30 s for local plumbing) failed the operations
+        // that need time most: cloning or fetching a large repo on an ordinary
+        // connection routinely exceeds two minutes, and the user got
+        // "git clone timed out after 120s" for a transfer that was progressing
+        // fine. The hang these caps really guarded against — git waiting on an
+        // interactive credential prompt — is now prevented at the source
+        // (GIT_TERMINAL_PROMPT=0 plus a detached stdin, below), so the clock is
+        // no longer the thing standing between a stuck git and a leaked
+        // continuation.
+        let cap = timeout ?? 0
 
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -375,13 +414,12 @@ final class RepoManager {
                 proc.arguments = args
                 proc.currentDirectoryURL = cwd
 
-                // Inherit the parent environment (git needs PATH/HOME) and
-                // layer credential config on top when authenticating.
-                if let token, !token.isEmpty {
-                    var env = ProcessInfo.processInfo.environment
-                    for (k, v) in Self.authEnv(token: token, backend: backend) { env[k] = v }
-                    proc.environment = env
-                }
+                // Parent environment (git needs PATH/HOME) plus prompt
+                // suppression, the transfer-stall guard, and credentials when
+                // authenticating — see gitEnv. Detaching stdin closes the
+                // credential-prompt hole from the other side.
+                proc.environment = Self.gitEnv(token: token, backend: backend)
+                proc.standardInput = FileHandle.nullDevice
 
                 let stdout = Pipe()
                 let stderr = Pipe()
@@ -426,22 +464,42 @@ final class RepoManager {
                     return
                 }
 
-                // Watchdog: terminate a hung git so the continuation can't leak.
-                // SIGTERM closes the write ends, so the concurrent reads above
-                // unblock and waitUntilExit() returns.
-                let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated))
-                timer.schedule(deadline: .now() + cap)
-                timer.setEventHandler {
-                    if proc.isRunning {
-                        proc.terminate()
-                        finish(.failure(RepoError.commandFailed("git \(args.first ?? "command") timed out after \(Int(cap))s")))
+                // Optional watchdog, only when a caller passed an explicit
+                // timeout (cap == 0 means unlimited). SIGTERM closes the write
+                // ends, so the concurrent reads above unblock and
+                // waitUntilExit() returns.
+                var timer: DispatchSourceTimer?
+                if cap > 0 {
+                    let t = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated))
+                    t.schedule(deadline: .now() + cap)
+                    t.setEventHandler {
+                        if proc.isRunning {
+                            proc.terminate()
+                            finish(.failure(RepoError.commandFailed("git \(args.first ?? "command") timed out after \(Int(cap))s")))
+                        }
                     }
+                    t.resume()
+                    timer = t
                 }
-                timer.resume()
+                // Unbounded runs are still bounded by the machine: the guard
+                // terminates git if the system hits sustained memory pressure.
+                // It only SIGTERMs — SIGTERM closes the write ends, the reads
+                // above unblock, and waitUntilExit() below reports the non-zero
+                // status through the normal failure path. Deliberately not
+                // calling `finish` here: that local function captures mutable
+                // state, so handing it to a @Sendable closure would be a Swift 6
+                // data race, and routing through the existing exit path is both
+                // safer and one less way to resume the continuation.
+                let guardToken = ResourceGuardService.shared.register(
+                    label: "git \(args.first ?? "command")"
+                ) { _ in
+                    if proc.isRunning { proc.terminate() }
+                }
+                defer { guardToken.cancel() }
 
                 proc.waitUntilExit()
                 readGroup.wait()
-                timer.cancel()
+                timer?.cancel()
 
                 let out = String(data: outData, encoding: .utf8) ?? ""
                 let err = String(data: errData, encoding: .utf8) ?? ""

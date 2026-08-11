@@ -101,7 +101,9 @@ export async function askSubagent(args, ctx) {
     // cheaper/faster tier.
     model: subagent.model || ctx.defaultModel,
     depth: ctx.depth ?? 1,
-    deadlineMs: 90_000,         // tight — subagents are leaf calls
+    // No deadline — was 90 s. "Leaf call" bounds how DEEP it can go, not how
+    // long the model may legitimately take to answer. Depth (MAX_LOOP_DEPTH) and
+    // the iteration cap are the bounds that still apply.
   });
 
   return {

@@ -90,7 +90,7 @@ enum PluginGitInstaller {
         // smuggled in as a git flag (arg-injection guard).
         args += ["--", normalizedURL, clonedDir.path]
 
-        let cloneRes = try await runProcess("/usr/bin/git", args: args, timeoutSec: 60)
+        let cloneRes = try await runProcess("/usr/bin/git", args: args)
         guard cloneRes.code == 0 else {
             // Strip the temp path from stderr so we don't leak it.
             let stderr = cloneRes.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -109,8 +109,7 @@ enum PluginGitInstaller {
         let zipRes = try await runProcess(
             "/usr/bin/zip",
             args: ["-rq", zipURL.path, "."],
-            cwd: clonedDir,
-            timeoutSec: 30
+            cwd: clonedDir
         )
         guard zipRes.code == 0 else {
             let stderr = zipRes.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -139,11 +138,17 @@ enum PluginGitInstaller {
         let stderr: String
     }
 
-    /// Run a subprocess with a hard wall-clock timeout. On timeout the
-    /// process is terminated and we return code = -1 with stderr =
-    /// "timeout".  Errors that mean "couldn't even spawn" surface as
-    /// InstallError.noGitCLI for git, generic .cloneFailed otherwise.
-    private static func runProcess(_ launchPath: String, args: [String], cwd: URL? = nil, timeoutSec: TimeInterval) async throws -> ProcessResult {
+    /// Run a subprocess. `timeoutSec <= 0` (the default at both call sites) means
+    /// no wall clock: cloning a plugin repo depends on its size and the user's
+    /// connection, and a clone killed at 60 s reported an install failure for a
+    /// transfer that was working. Errors that mean "couldn't even spawn" surface
+    /// as InstallError.noGitCLI for git, generic .cloneFailed otherwise.
+    ///
+    /// The hang risk that justified the old timeout — git blocking on an
+    /// interactive credential prompt — is removed at the source below
+    /// (GIT_TERMINAL_PROMPT=0 and a detached stdin) rather than papered over with
+    /// a clock, and the machine is protected by ResourceGuardService.
+    private static func runProcess(_ launchPath: String, args: [String], cwd: URL? = nil, timeoutSec: TimeInterval = 0) async throws -> ProcessResult {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<ProcessResult, Error>) in
             let proc = Process()
             proc.launchPath = launchPath
@@ -153,16 +158,33 @@ enum PluginGitInstaller {
             let errPipe = Pipe()
             proc.standardOutput = outPipe
             proc.standardError  = errPipe
+            // Never wait on input nobody can supply.
+            proc.standardInput = FileHandle.nullDevice
+            var env = ProcessInfo.processInfo.environment
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            proc.environment = env
 
             let timeoutItem = DispatchWorkItem {
                 if proc.isRunning { proc.terminate() }
             }
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeoutSec, execute: timeoutItem)
+            if timeoutSec > 0 {
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeoutSec, execute: timeoutItem)
+            }
+            // The registration must outlive this closure, which returns as soon as
+            // the drains are scheduled — a `defer { cancel() }` here deregistered
+            // the job immediately, leaving the clone with neither the old 60 s
+            // timeout nor a live guard, so a stalled transfer would hang forever.
+            // Released on every exit path instead: spawn failure below, and the
+            // group.notify completion.
+            let guardToken = ResourceGuardService.shared.register(label: "plugin install: \(args.first ?? "")") { _ in
+                if proc.isRunning { proc.terminate() }
+            }
 
             do {
                 try proc.run()
             } catch {
                 timeoutItem.cancel()
+                guardToken.cancel()
                 if launchPath.hasSuffix("/git") {
                     cont.resume(throwing: InstallError.noGitCLI)
                 } else {
@@ -189,6 +211,7 @@ enum PluginGitInstaller {
             }
             group.notify(queue: rq) {
                 timeoutItem.cancel()
+                guardToken.cancel()
                 cont.resume(returning: ProcessResult(code: proc.terminationStatus, stdout: outBox.s, stderr: errBox.s))
             }
         }

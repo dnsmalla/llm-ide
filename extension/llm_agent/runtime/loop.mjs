@@ -57,14 +57,31 @@ async function runReadHandler(name, args, ctx) {
 // is the real safety valve; raising iterations only matters when each
 // round-trip is fast (cached read tools, small prompts).
 const DEFAULT_MAX_ITERATIONS = 10;
-// Hard wall-clock cap per agent loop. Raised to 360 s so a legitimate
-// long chat reply isn't cut off before the 5-minute mark. With nested
-// global→internal the practical worst case is now 10 × 2 = 20 LLM
-// calls; 360 s gives ~18 s per call on average, ample for most Claude
-// responses. Callers pass their own deadlineMs explicitly (route.mjs,
-// ask-internal.mjs, ask-subagent.mjs) — this is only a defensive
-// fallback.
-const DEFAULT_DEADLINE_MS = 360_000;
+// NO default wall-clock cap on an agent loop.
+//
+// There used to be one (180 s, then 360 s), and every value was wrong: a real
+// multi-step turn — read a few files, search the graph, synthesise, draft the
+// reply — legitimately outruns any number you can pick, and when it did the user
+// lost the whole turn to "reached the 360s deadline — try again". Retrying then
+// costs MORE time and tokens than letting the first attempt finish, so the cap
+// made the thing it was protecting against worse.
+//
+// What bounds a loop now:
+//   • `maxIterations` — a call budget, not a clock. Still enforced; it is what
+//     actually stops a runaway tool cycle.
+//   • user cancellation — the client can abort a turn at any point.
+//   • resource pressure — the real danger to the machine is memory exhaustion,
+//     not elapsed time. See ResourceGuard (mac/Sources/LlmIdeMac/Services).
+//
+// `deadlineMs` is still honoured when a caller passes a finite value, so a
+// specific call site (or a test) can opt into one deliberately. Absent, null,
+// 0, or Infinity all mean "no deadline".
+const DEFAULT_DEADLINE_MS = null;
+
+/** Normalise a caller's deadlineMs into a finite budget or null (= unlimited). */
+function resolveDeadline(deadlineMs) {
+  return Number.isFinite(deadlineMs) && deadlineMs > 0 ? deadlineMs : DEFAULT_DEADLINE_MS;
+}
 
 // Aggregate cap on skill bodies in one system prompt. Each skill file
 // is individually capped at 32 KB by the loader, but a user with many
@@ -321,7 +338,7 @@ export async function runAgentLoop({
     throw new Error(`agent loop nesting exceeds depth ${MAX_LOOP_DEPTH}`);
   }
   const cap = Number.isFinite(maxIterations) && maxIterations > 0 ? maxIterations : DEFAULT_MAX_ITERATIONS;
-  const deadline = Number.isFinite(deadlineMs) && deadlineMs > 0 ? deadlineMs : DEFAULT_DEADLINE_MS;
+  const deadline = resolveDeadline(deadlineMs);   // null = no wall-clock limit
   const startTs = Date.now();
   const base = agentContext && agentContext.base !== undefined ? agentContext.base : '';
   // System context (active project, indexed repos, recent issues, recent
@@ -368,8 +385,12 @@ export async function runAgentLoop({
   };
 
   for (let i = 0; i < cap; i++) {
-    const remaining = deadline - (Date.now() - startTs);
-    if (remaining <= 0) return deadlineReply(i);
+    // `deadline === null` (the default) means no wall-clock limit at all: the
+    // loop runs until it has an answer, hits the iteration cap, or the user
+    // cancels. A caller that opted into a finite budget still gets it enforced
+    // both between iterations and during the in-flight call below.
+    const remaining = deadline === null ? null : deadline - (Date.now() - startTs);
+    if (remaining !== null && remaining <= 0) return deadlineReply(i);
     // First pass = "thinking"; later passes mean we're folding a tool result
     // back in = "writing the answer".
     emit({ phase: i === 0 ? 'thinking' : 'writing', iteration: i + 1 });
@@ -385,12 +406,12 @@ export async function runAgentLoop({
     // loop to a specific (sub-)model — global, internal, and plugin
     // subagents can each run on a different tier; undefined falls
     // through to runClaude's LLMIDE_MODEL default.
-    // Bound the in-flight call to the remaining wall-clock budget. The
-    // between-iteration check above only catches overruns *between* calls;
-    // without this a single slow runClaude could blow past the deadline.
-    // The signal fires at the deadline; runClaude funnels it through as an
-    // abort, which we turn into the same graceful deadline reply.
-    const callSignal = AbortSignal.timeout(remaining);
+    // Bound the in-flight call ONLY when the caller opted into a deadline. The
+    // between-iteration check above catches overruns between calls; this catches
+    // one slow call blowing the budget on its own. With no deadline (the
+    // default) no signal is created, so nothing interrupts a long model call —
+    // runClaude keeps its own last-resort socket hang breaker.
+    const callSignal = remaining === null ? undefined : AbortSignal.timeout(remaining);
     let out;
     const sniff = typeof onChunk === 'function' ? makeSniffingChunkHandler(onChunk) : null;
     try {
@@ -402,7 +423,7 @@ export async function runAgentLoop({
         ...(sniff ? { onChunk: sniff.onChunk } : {}),
       });
     } catch (err) {
-      if (callSignal.aborted) return deadlineReply(i);
+      if (callSignal?.aborted) return deadlineReply(i);
       throw err;
     }
     prevOutput = out;
@@ -515,7 +536,7 @@ export async function runNativeAgentLoop({
   const emit = (event) => { try { onProgress?.(event); } catch { /* ignore */ } };
   if (depth > MAX_LOOP_DEPTH) throw new Error(`agent loop nesting exceeds depth ${MAX_LOOP_DEPTH}`);
   const cap = Number.isFinite(maxIterations) && maxIterations > 0 ? maxIterations : DEFAULT_MAX_ITERATIONS;
-  const deadline = Number.isFinite(deadlineMs) && deadlineMs > 0 ? deadlineMs : DEFAULT_DEADLINE_MS;
+  const deadline = resolveDeadline(deadlineMs);   // null = no wall-clock limit
   const startTs = Date.now();
 
   // Seed the conversation: system + prior turns (so multi-turn follow-ups keep
@@ -548,8 +569,9 @@ export async function runNativeAgentLoop({
   messages.push({ role: 'user', content: userMessage });
 
   for (let i = 0; i < cap; i++) {
-    const remaining = deadline - (Date.now() - startTs);
-    if (remaining <= 0) return { reply: '_(agent timed out)_', pendingTool: null, iterations: i, cacheHits: 0 };
+    // Same contract as runAgentLoop: null = no wall-clock limit (the default).
+    const remaining = deadline === null ? null : deadline - (Date.now() - startTs);
+    if (remaining !== null && remaining <= 0) return { reply: '_(agent timed out)_', pendingTool: null, iterations: i, cacheHits: 0 };
     emit({ phase: i === 0 ? 'thinking' : 'writing', iteration: i + 1 });
 
     let resp;
@@ -558,7 +580,9 @@ export async function runNativeAgentLoop({
         messages,
         tools,
         maxTokens: 2048,
-        signal: AbortSignal.timeout(remaining),
+        // Only when the caller opted into a deadline; undefined otherwise so a
+        // long native tool-calling turn runs to completion.
+        signal: remaining === null ? undefined : AbortSignal.timeout(remaining),
       });
     } catch (err) {
       if (err?.name === 'AbortError' || err?.code === 'ABORT_ERR') {

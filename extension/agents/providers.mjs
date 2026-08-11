@@ -523,7 +523,22 @@ export function cliInvocation(provider, prompt) {
   return { bin, args: build(prompt) };
 }
 
-const CLI_TIMEOUT_MS = 120_000;
+// Last-resort HANG BREAKER for a CLI completion — not a work deadline.
+//
+// This was 120 s, which cut off real completions. It is NOT 0/unlimited either,
+// because a CLI child is not just a slow request: every spawn holds one of the
+// `cliSemaphore` slots below (6 total), so a single wedged `claude` process that
+// never exits and never prints would retire that slot for the lifetime of the
+// server, and six of them would stop all CLI completions permanently with no
+// error to explain why. The HTTP path has the same protection
+// (SOCKET_HANG_BREAKER_MS in runtime.mjs); this is the CLI equivalent, set to the
+// same 30 minutes — far above any legitimate completion, so it only ever fires on
+// something genuinely stuck.
+//
+// Callers that want a real, tighter ceiling pass `timeoutMs` explicitly —
+// web-client.mjs does, since a web search hitting an unresponsive endpoint is a
+// side lookup, not the user's work.
+const CLI_TIMEOUT_MS = 1_800_000;
 
 // Cap on concurrent CLI subprocesses across the whole process. Every CLI
 // spawn (runtime.mjs's Anthropic fallback and the generic `runViaCli`) routes

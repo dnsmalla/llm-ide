@@ -78,6 +78,10 @@ final class CodeWorkflowService: ObservableObject {
     private var pollTask: Task<Void, Never>? = nil
     /// Tracks the final-tail clear Task so a fresh run can supersede it.
     private var clearTask: Task<Void, Never>? = nil
+    /// Live ResourceGuard registration for the running CLI. Held so it can be
+    /// released the moment the process is gone — a stale registration would let
+    /// the guard try to stop a pid that no longer exists.
+    private var cliGuardToken: ResourceGuardService.Registration? = nil
 
     // Final state reported on the Done step
     @Published var issueClosedSuccessfully: Bool = false
@@ -323,8 +327,19 @@ final class CodeWorkflowService: ObservableObject {
         }
         process.standardInput = FileHandle.nullDevice
 
-        // 4. Await with 10-minute timeout
-        let timeout: TimeInterval = 600
+        // 4. Await the CLI with NO wall clock.
+        //
+        // This was a 10-minute watchdog that terminated the process and reported
+        // failure. A code workflow is exactly the kind of job that legitimately
+        // exceeds ten minutes — the CLI is reading a repo, running builds, and
+        // iterating — and when the watchdog won, the user's run was destroyed
+        // and reported as a plain failure with no explanation. The live progress
+        // poll below already shows elapsed time and a log tail, so a long run is
+        // visible rather than mysterious, and the user can stop it themselves.
+        //
+        // What still ends this process: it exits, the user cancels, or
+        // ResourceGuardService stops it because the machine is under sustained
+        // critical memory pressure.
         let runLog = self.log
         // Reset progress state for this run
         self.cliElapsedSeconds = 0
@@ -386,17 +401,27 @@ final class CodeWorkflowService: ObservableObject {
                 return
             }
 
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) { [weak process] in
+            // Resource guard in place of the old wall-clock watchdog: same
+            // teardown, but it only fires when the machine is genuinely at risk
+            // rather than when a clock runs out. The token is held by the
+            // continuation's scope and released by the termination handler path.
+            let token = ResourceGuardService.shared.register(label: "code workflow CLI") { [weak process] reason in
                 let already = resumed.withLock { state -> Bool in
                     if state { return true }
                     state = true
                     return false
                 }
                 guard !already else { return }
-                runLog.warning("workflow_cli_watchdog_fired pid=\(process?.processIdentifier ?? -1, privacy: .public)")
+                runLog.warning("""
+                    workflow_cli_stopped_for_resources \
+                    pid=\(process?.processIdentifier ?? -1, privacy: .public) reason=\(reason, privacy: .public)
+                    """)
                 process?.terminate()
                 continuation.resume(returning: false)
             }
+            // Release the registration once the process is gone, whichever way
+            // it went — otherwise the guard would hold a handler for a dead pid.
+            self.cliGuardToken = token
         }
         log.info("workflow_cli_await_returned exit_ok=\(exitOk, privacy: .public)")
         // Final tail update so users see the last lines before we clear.
@@ -405,6 +430,9 @@ final class CodeWorkflowService: ObservableObject {
             self.cliElapsedSeconds = Int(Date().timeIntervalSince(startedAt))
         }
         self.currentCliProcess = nil
+        // The process is gone — drop the guard registration with it.
+        self.cliGuardToken?.cancel()
+        self.cliGuardToken = nil
         self.pollTask?.cancel()
         self.pollTask = nil
         // Keep final tail/elapsed visible for ~2s, then clear so the
