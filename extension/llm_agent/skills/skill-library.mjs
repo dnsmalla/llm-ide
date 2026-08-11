@@ -31,7 +31,11 @@ const MAX_DESC = 200;
 // extension/llm_agent/skills/ → repo root (three levels up).
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 
-let _cache = null;
+// Keyed by userId (each user's enabled-sources set differs) — a single
+// shared slot here would leak one user's catalog (including which private
+// sources they've registered) to every other user's next request. The
+// no-user/test caller uses '' as its key.
+const _cache = new Map();
 
 // Locate the central skills checkout on disk. Marker: registry.yaml or an
 // agent-tools/ dir (mirrors sync-skills.sh). No network clone.
@@ -81,7 +85,8 @@ function readNameDesc(file) {
 // sourceId/sourceName. Cached per process; call _resetSkillLibraryCache() after
 // any add/update/remove/toggle.
 export function listSkillLibrary(userId) {
-  if (_cache) return _cache;
+  const cacheKey = userId || '';
+  if (_cache.has(cacheKey)) return _cache.get(cacheKey);
   seedBuiltinOnce();
   const enabled = userId
     ? listEnabled(userId)
@@ -116,8 +121,9 @@ export function listSkillLibrary(userId) {
     }
   }
   skills.sort((a, b) => a.family.localeCompare(b.family) || a.name.localeCompare(b.name));
-  _cache = { repo: builtinRepo, skills };
-  return _cache;
+  const result = { repo: builtinRepo, skills };
+  _cache.set(cacheKey, result);
+  return result;
 }
 
 // Max SKILL.md chars sent as followable instructions. Generous — a skill is a
@@ -134,9 +140,9 @@ const MAX_SKILL_CHARS = 24_000;
 // the caller frame the content as TRUSTED, followable instructions: it comes
 // from the user's own on-disk skills repo, not the wire, so a client can't
 // smuggle arbitrary "follow me" text through this channel.
-export function readSkillInstructions(id) {
+export function readSkillInstructions(id, userId) {
   if (typeof id !== 'string' || !id) return null;
-  const { skills } = listSkillLibrary();
+  const { skills } = listSkillLibrary(userId);
   const entry = skills.find((s) => s.id === id);
   if (!entry) return null;
   try {
@@ -148,4 +154,4 @@ export function readSkillInstructions(id) {
 }
 
 // Test hook — drop the cache so a test can point at a different repo via env.
-export function _resetSkillLibraryCache() { _cache = null; }
+export function _resetSkillLibraryCache() { _cache.clear(); }

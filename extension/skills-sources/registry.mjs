@@ -8,9 +8,17 @@
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { resolveCentralSkillsRepo } from '../llm_agent/skills/skill-library.mjs';
-import { listEnabled } from './state.mjs';
+import { listEnabled, pruneOrphans } from './state.mjs';
+
+// Git operations (clone/fetch/checkout/submodule-update) run async — the
+// server is single-threaded Node, so a *Sync spawn here would freeze every
+// other request (captions, chat, everything) for however long the network
+// op takes, up to each call's own timeout below. Mirrors the async pattern
+// `llm_agent/runtime/handlers/run-bash.mjs` already uses.
+const execFileAsync = promisify(execFile);
 
 export const BUILTIN_ID = 'builtin';
 const LIBRARY_FAMILIES = ['skills', 'runtime'];
@@ -165,24 +173,23 @@ function slugify(name, existing) {
 }
 
 // Shallow clone into <sourcesDir>/<id>. Hardened: -- guard, no prompts, detached stdin.
-function cloneShallow(url, ref, dest) {
+async function cloneShallow(url, ref, dest) {
   const args = ['clone', '--depth', '1', '--single-branch'];
   if (ref) args.push('--branch', ref);
   args.push('--', url, dest);
-  const r = spawnSync('git', args, {
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 60_000,
-  });
-  if (!r.stdout) r.stdout = Buffer.alloc(0);
-  if (r.status !== 0) {
-    const err = (r.stderr ? r.stderr.toString() : '').slice(0, 200) || 'git clone failed';
-    return { error: err };
+  try {
+    await execFileAsync('git', args, {
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      timeout: 60_000,
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = (err.stderr ? String(err.stderr) : err.message || '').slice(0, 200) || 'git clone failed';
+    return { error: msg };
   }
-  return { ok: true };
 }
 
-export function addSource({ url, path, ref, name } = {}) {
+export async function addSource({ url, path, ref, name } = {}) {
   const list = readRegistry();
   const existing = new Set(list.map((s) => s.id));
 
@@ -202,7 +209,7 @@ export function addSource({ url, path, ref, name } = {}) {
     const id = slugify(name || n.url.replace(/\.git$/, '').split('/').pop(), existing);
     const dest = join(defaultSourcesDir(), id);
     mkdirSync(defaultSourcesDir(), { recursive: true });
-    const cl = cloneShallow(n.url, ref, dest);
+    const cl = await cloneShallow(n.url, ref, dest);
     if (cl.error) { try { rmSync(dest, { recursive: true, force: true }); } catch { /* */ } return { error: cl.error, status: 400 }; }
     if (!isValidSkillsSource(dest)) { try { rmSync(dest, { recursive: true, force: true }); } catch { /* best-effort */ } return { error: 'cloned repo is not a valid skills source', status: 400 }; }
     const src = { id, name: name || id, origin: 'git', location: dest, ref: ref || 'main', builtin: false, version: readVersion(dest) };
@@ -213,7 +220,7 @@ export function addSource({ url, path, ref, name } = {}) {
   return { error: 'provide either url or path', status: 400 };
 }
 
-export function updateSource(id) {
+export async function updateSource(id) {
   const list = readRegistry();
   const idx = list.findIndex((s) => s.id === id);
   if (idx < 0) return { error: 'source not found', status: 404 };
@@ -229,16 +236,16 @@ export function updateSource(id) {
   // git: fetch + checkout tracked ref.
   const ref = src.ref || 'main';
   if (!isValidRef(ref)) return { error: 'invalid ref', status: 400 };
-  let r = spawnSync('git', ['fetch', '--depth', '1', 'origin', ref], {
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, cwd: src.location,
-    stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000,
-  });
-  if (r.status !== 0) return { error: 'git fetch failed', status: 400 };
-  r = spawnSync('git', ['checkout', ref], {
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, cwd: src.location,
-    stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000,
-  });
-  if (r.status !== 0) return { error: 'git checkout failed', status: 400 };
+  try {
+    await execFileAsync('git', ['fetch', '--depth', '1', 'origin', ref], {
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, cwd: src.location, timeout: 60_000,
+    });
+  } catch { return { error: 'git fetch failed', status: 400 }; }
+  try {
+    await execFileAsync('git', ['checkout', ref], {
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, cwd: src.location, timeout: 30_000,
+    });
+  } catch { return { error: 'git checkout failed', status: 400 }; }
   list[idx].version = readVersion(src.location);
   writeRegistry(list);
   return { ok: true };
@@ -255,18 +262,27 @@ export function removeSource(id) {
   }
   list.splice(idx, 1);
   writeRegistry(list);
+  // Drop this id from every user's enable set — otherwise a re-added source
+  // that reuses the same slug would inherit a stale "enabled" from before
+  // its removal.
+  pruneOrphans(new Set(list.map((s) => s.id)));
   return { ok: true };
 }
 
 // Builtin update = ensure the .skills submodule is checked out at its pin.
-export function syncBuiltin() {
+export async function syncBuiltin() {
   const repoRoot = join(dirname(defaultSourcesDir()), '..', '..'); // best-effort; server may override
-  const r = spawnSync('git', ['submodule', 'update', '--init', '.skills'], {
-    cwd: process.env.LLMIDE_REPO_ROOT || repoRoot,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-    stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000,
-  });
-  const installed = r.status === 0;
+  let installed;
+  try {
+    await execFileAsync('git', ['submodule', 'update', '--init', '.skills'], {
+      cwd: process.env.LLMIDE_REPO_ROOT || repoRoot,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      timeout: 120_000,
+    });
+    installed = true;
+  } catch {
+    installed = false;
+  }
   // Refresh the builtin location/version regardless.
   const list = readRegistry();
   const idx = list.findIndex((s) => s.id === BUILTIN_ID);

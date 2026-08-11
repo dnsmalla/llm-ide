@@ -617,3 +617,88 @@ test('GET /auth/me/claude-plugins/updates detects a newer source version after i
   assert.equal(update.sourceVersion, '2.0.0');
   assert.equal(update.source, 'installed');
 });
+
+// ---- Skills sources --------------------------------------------------
+// GET/toggle are per-user actions any authenticated user may take; add/
+// update/remove are admin-gated (mirrors the plugin routes' split above).
+
+test('GET /auth/me/skills-sources lists the builtin source, enabled defaults to false until a user opts in', async () => {
+  const { user } = await registerAndLogin();
+  const res = await callAuth({ method: 'GET', url: '/auth/me/skills-sources', user: { id: user.id } });
+  assert.equal(res.statusCode, 200, res._body);
+  const builtin = res.json().sources.find((s) => s.id === 'builtin');
+  assert.ok(builtin, 'builtin source is seeded');
+  assert.equal(builtin.builtin, true);
+  assert.equal(builtin.enabled, false, 'a fresh user has not opted in yet');
+});
+
+test('POST /auth/me/skills-sources/toggle is per-user, not admin-gated, and validates the id', async () => {
+  const { user } = await registerAndLogin();
+  const u = { id: user.id }; // no role -> not 'admin'
+
+  const badSlug = await callAuth({ method: 'POST', url: '/auth/me/skills-sources/toggle', user: u, body: { id: '../evil', enabled: true } });
+  assert.equal(badSlug.statusCode, 400);
+  assert.equal(badSlug.json().error.code, 'VALIDATION_FAILED');
+
+  const unregistered = await callAuth({ method: 'POST', url: '/auth/me/skills-sources/toggle', user: u, body: { id: 'never-registered', enabled: true } });
+  assert.equal(unregistered.statusCode, 400);
+
+  const ok = await callAuth({ method: 'POST', url: '/auth/me/skills-sources/toggle', user: u, body: { id: 'builtin', enabled: true } });
+  assert.equal(ok.statusCode, 200, ok._body);
+  assert.equal(ok.json().enabled, true);
+
+  const list = await callAuth({ method: 'GET', url: '/auth/me/skills-sources', user: u });
+  assert.equal(list.json().sources.find((s) => s.id === 'builtin').enabled, true);
+});
+
+test('skills-sources admin-gated routes reject a non-admin caller', async () => {
+  const { user } = await registerAndLogin();
+  const u = { id: user.id }; // no role -> not 'admin'
+
+  const add = await callAuth({ method: 'POST', url: '/auth/me/skills-sources/add', user: u, body: { path: '/tmp' } });
+  assert.equal(add.statusCode, 403);
+
+  const update = await callAuth({ method: 'POST', url: '/auth/me/skills-sources/update', user: u, body: { id: 'builtin' } });
+  assert.equal(update.statusCode, 403);
+
+  const remove = await callAuth({ method: 'DELETE', url: '/auth/me/skills-sources/whatever', user: u });
+  assert.equal(remove.statusCode, 403);
+});
+
+test('DELETE /auth/me/skills-sources/<id> rejects an invalid id and rejects removing builtin', async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+
+  const badId = await callAuth({ method: 'DELETE', url: `/auth/me/skills-sources/${encodeURIComponent('../../etc')}`, user: admin });
+  assert.equal(badId.statusCode, 400);
+  assert.equal(badId.json().error.code, 'VALIDATION_FAILED');
+
+  const removeBuiltin = await callAuth({ method: 'DELETE', url: '/auth/me/skills-sources/builtin', user: admin });
+  assert.equal(removeBuiltin.statusCode, 400);
+  assert.equal(removeBuiltin.json().error.code, 'REMOVE_FAILED');
+});
+
+test('POST /auth/me/skills-sources/add registers a local source (admin); GET reflects it; DELETE removes it', async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+
+  const localSrc = path.join(__dirname, `_skills-sources-http-fixture-${process.pid}`);
+  fs.mkdirSync(path.join(localSrc, 'skills', 'demo'), { recursive: true });
+  fs.writeFileSync(path.join(localSrc, 'registry.yaml'), 'registryVersion: "3.0.0"\n');
+  fs.writeFileSync(path.join(localSrc, 'skills', 'demo', 'SKILL.md'), '---\nname: demo\ndescription: d\n---\n\n# demo\n');
+
+  const added = await callAuth({ method: 'POST', url: '/auth/me/skills-sources/add', user: admin, body: { path: localSrc, name: 'http-fixture' } });
+  assert.equal(added.statusCode, 200, added._body);
+  const id = added.json().source.id;
+
+  const list = await callAuth({ method: 'GET', url: '/auth/me/skills-sources', user: admin });
+  assert.ok(list.json().sources.some((s) => s.id === id), 'added source appears in the list');
+
+  const removed = await callAuth({ method: 'DELETE', url: `/auth/me/skills-sources/${id}`, user: admin });
+  assert.equal(removed.statusCode, 200, removed._body);
+
+  const listAfter = await callAuth({ method: 'GET', url: '/auth/me/skills-sources', user: admin });
+  assert.ok(!listAfter.json().sources.some((s) => s.id === id), 'removed source no longer appears');
+
+  fs.rmSync(localSrc, { recursive: true, force: true });
+});

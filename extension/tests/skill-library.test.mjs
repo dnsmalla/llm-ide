@@ -131,7 +131,7 @@ test('readSkillInstructions refuses an unknown id and never reads an arbitrary p
 
 // Multi-source: a registered local source contributes its discovery skills,
 // tagged with sourceId/sourceName. Disable it (per-user) and it disappears.
-test('listSkillLibrary(userId) unions enabled sources and tags each skill', () => {
+test('listSkillLibrary(userId) unions enabled sources and tags each skill', async () => {
   // Isolate registry/state to a temp dir so the real skills-sources.json is untouched.
   const tmpReg = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-sl-'));
   process.env.LLMIDE_PLUGIN_DIR = path.join(tmpReg, 'plugins');
@@ -143,7 +143,7 @@ test('listSkillLibrary(userId) unions enabled sources and tags each skill', () =
     '---\nname: extra\ndescription: from another source\n---\n\n# extra\n');
   writeRegistry([]);
   seedBuiltinOnce();
-  addSource({ path: other, name: 'other' });
+  await addSource({ path: other, name: 'other' });
   const enabledUser = 'multi-1';
   setEnabled(enabledUser, BUILTIN_ID, true);
   setEnabled(enabledUser, 'other', true);
@@ -162,6 +162,60 @@ test('listSkillLibrary(userId) unions enabled sources and tags each skill', () =
   fs.rmSync(other, { recursive: true, force: true });
   fs.rmSync(tmpReg, { recursive: true, force: true });
   delete process.env.LLMIDE_PLUGIN_DIR;
+});
+
+// Regression: _cache used to be a single process-wide slot keyed by nothing,
+// so the FIRST caller's catalog (including which private sources they'd
+// enabled) leaked to every OTHER user's next request until an unrelated
+// add/update/remove/toggle happened to reset it. Now keyed per userId.
+test('listSkillLibrary caches per-user, not globally — one user cannot see another user\'s catalog', async () => {
+  const tmpReg = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-sl-cache-'));
+  process.env.LLMIDE_PLUGIN_DIR = path.join(tmpReg, 'plugins');
+  const other = path.join(__dirname, `_skill-library-cachecheck-${process.pid}`);
+  fs.mkdirSync(path.join(other, 'skills', 'private-skill'), { recursive: true });
+  fs.writeFileSync(path.join(other, 'registry.yaml'), 'registryVersion: "3.0.0"\n');
+  fs.writeFileSync(path.join(other, 'skills', 'private-skill', 'SKILL.md'),
+    '---\nname: private-skill\ndescription: only alice enabled this\n---\n\n# private-skill\n');
+  writeRegistry([]);
+  seedBuiltinOnce();
+  await addSource({ path: other, name: 'private' });
+
+  _resetSkillLibraryCache();
+  setEnabled('alice', BUILTIN_ID, true);
+  setEnabled('alice', 'private', true);
+  setEnabled('bob', BUILTIN_ID, true);
+  // bob never enables 'private'.
+
+  const aliceCatalog = listSkillLibrary('alice');
+  assert.ok(aliceCatalog.skills.some((s) => s.id === 'skills/private-skill'),
+    'alice sees the source she enabled');
+
+  // Calling for bob AFTER alice's call must not reuse alice's cached entry —
+  // this is exactly what a single unkeyed `_cache` slot would do.
+  const bobCatalog = listSkillLibrary('bob');
+  assert.ok(!bobCatalog.skills.some((s) => s.id === 'skills/private-skill'),
+    'bob must not see a source only alice enabled, even from a warm cache');
+
+  fs.rmSync(other, { recursive: true, force: true });
+  fs.rmSync(tmpReg, { recursive: true, force: true });
+  delete process.env.LLMIDE_PLUGIN_DIR;
+  _resetSkillLibraryCache();
+});
+
+test('readSkillInstructions(id, userId) reads from that user\'s own catalog', async () => {
+  const tmpReg = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-sl-rsi-'));
+  process.env.LLMIDE_PLUGIN_DIR = path.join(tmpReg, 'plugins');
+  writeRegistry([]);
+  seedBuiltinOnce();
+  process.env.SKILLS_REPO = repo;
+  _resetSkillLibraryCache();
+  setEnabled('carol', BUILTIN_ID, true);
+  const sk = readSkillInstructions('runtime/atomize-text', 'carol');
+  assert.ok(sk, 'expected a result when the user has the builtin source enabled');
+  assert.equal(sk.id, 'runtime/atomize-text');
+  fs.rmSync(tmpReg, { recursive: true, force: true });
+  delete process.env.LLMIDE_PLUGIN_DIR;
+  _resetSkillLibraryCache();
 });
 
 test('cleanup', () => {

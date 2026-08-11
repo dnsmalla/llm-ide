@@ -71,15 +71,15 @@ test('normalizeGitUrl rejects unsafe schemes and localhost, accepts https', () =
   assert.ok(!normalizeGitUrl('not a url').ok);
 });
 
-test('addSource rejects a non-valid directory at a local path', () => {
-  const res = addSource({ path: tmpRoot }); // no markers
+test('addSource rejects a non-valid directory at a local path', async () => {
+  const res = await addSource({ path: tmpRoot }); // no markers
   assert.ok(!res.source, 'no source created');
   assert.ok(res.error);
   assert.equal(res.status, 400);
 });
 
-test('addSource registers a local valid source and removeSource deletes it', () => {
-  const res = addSource({ path: fakeRepo, name: 'fake-local' });
+test('addSource registers a local valid source and removeSource deletes it', async () => {
+  const res = await addSource({ path: fakeRepo, name: 'fake-local' });
   assert.ok(res.source, 'source created');
   assert.equal(res.source.origin, 'local');
   assert.ok(res.source.location);
@@ -93,12 +93,23 @@ test('addSource registers a local valid source and removeSource deletes it', () 
   assert.equal(getSource(id), null);
 });
 
-test('addSource rejects a ref that looks like a git option (arg-injection guard)', () => {
+test('addSource rejects a ref that looks like a git option (arg-injection guard)', async () => {
   const before = readRegistry().length;
-  const res = addSource({ url: 'https://github.com/o/r.git', ref: '-cCore.fsMonitor=/tmp/x' });
+  const res = await addSource({ url: 'https://github.com/o/r.git', ref: '-cCore.fsMonitor=/tmp/x' });
   assert.ok(res.error, 'must return an error');
   assert.equal(res.status, 400);
   assert.equal(readRegistry().length, before, 'must not persist a rejected source');
+});
+
+test('addSource surfaces a clone failure instead of throwing (unreachable host)', async () => {
+  // No network access assumed reachable in CI/sandboxed environments — a
+  // bogus but well-formed https URL exercises the async cloneShallow
+  // failure path (previously untested) without needing a real network mock.
+  const before = readRegistry().length;
+  const res = await addSource({ url: 'https://example.invalid/nonexistent/repo.git' });
+  assert.ok(res.error, 'must return an error, not throw');
+  assert.equal(res.status, 400);
+  assert.equal(readRegistry().length, before, 'must not persist a failed clone');
 });
 
 import { listSourcesWithState } from '../skills-sources/registry.mjs';

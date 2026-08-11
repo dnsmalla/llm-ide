@@ -1022,7 +1022,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     try { body = await readJson(req, bodyLimit); }
     catch { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return; }
     const { addSource } = await import('../skills-sources/registry.mjs');
-    const result = addSource({ url: body?.url, path: body?.path, ref: body?.ref, name: body?.name });
+    const result = await addSource({ url: body?.url, path: body?.path, ref: body?.ref, name: body?.name });
     if (result.error) {
       safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
         action: 'skills-source.add', outcome: 'failure', detail: { error: result.error.slice(0, 200) } });
@@ -1046,7 +1046,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid source id' } }); return;
     }
     const { updateSource } = await import('../skills-sources/registry.mjs');
-    const result = updateSource(body.id);
+    const result = await updateSource(body.id);
     if (result.error) {
       send(res, result.status || 400, { error: { code: 'UPDATE_FAILED', message: result.error } }); return;
     }
