@@ -101,4 +101,21 @@ test('addSource rejects a ref that looks like a git option (arg-injection guard)
   assert.equal(readRegistry().length, before, 'must not persist a rejected source');
 });
 
+import { listSourcesWithState } from '../skills-sources/registry.mjs';
+import { setEnabled } from '../skills-sources/state.mjs';
+
+test('listSourcesWithState joins per-user enable + live metadata', () => {
+  writeRegistry([]); seedBuiltinOnce();
+  setEnabled('viewer', BUILTIN_ID, true);
+  const { sources } = listSourcesWithState('viewer');
+  const b = sources.find((s) => s.id === BUILTIN_ID);
+  assert.ok(b.enabled);
+  assert.equal(b.origin, 'builtin');
+  assert.ok(typeof b.skillCount === 'number');
+  // A user who disabled builtin sees enabled=false.
+  setEnabled('off', BUILTIN_ID, false);
+  const off = listSourcesWithState('off').sources.find((s) => s.id === BUILTIN_ID);
+  assert.equal(off.enabled, false);
+});
+
 test('cleanup', () => { fs.rmSync(tmpRoot, { recursive: true, force: true }); });

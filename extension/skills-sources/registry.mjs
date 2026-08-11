@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { resolveCentralSkillsRepo } from '../llm_agent/skills/skill-library.mjs';
+import { listEnabled } from './state.mjs';
 
 export const BUILTIN_ID = 'builtin';
 const LIBRARY_FAMILIES = ['skills', 'runtime'];
@@ -276,4 +277,14 @@ export function syncBuiltin() {
     writeRegistry(list);
   }
   return { ok: true, installed };
+}
+
+export function listSourcesWithState(userId) {
+  const enabled = listEnabled(userId);
+  return {
+    sources: listSources().map((s) => {
+      const snap = snapshotSource(s);
+      return { ...snap, enabled: enabled.has(s.id) };
+    }),
+  };
 }
