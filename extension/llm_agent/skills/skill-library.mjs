@@ -15,6 +15,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import * as yaml from 'js-yaml';
+// Circular import is SAFE: registry.mjs imports resolveCentralSkillsRepo from
+// here (a hoisted function declaration, so the live binding exists during the
+// cycle), and every export we consume below (listSources, snapshotSource,
+// BUILTIN_ID, seedBuiltinOnce) is referenced ONLY inside listSkillLibrary —
+// never at module top level.
+import { listSources, snapshotSource, BUILTIN_ID, seedBuiltinOnce } from '../../skills-sources/registry.mjs';
+import { listEnabled } from '../../skills-sources/state.mjs';
 
 // Families NOT already surfaced via /kb/agent/catalog (which covers
 // agent-globals + agent-tools). These are the "all the other skills".
@@ -24,7 +31,11 @@ const MAX_DESC = 200;
 // extension/llm_agent/skills/ → repo root (three levels up).
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 
-let _cache = null;
+// Keyed by userId (each user's enabled-sources set differs) — a single
+// shared slot here would leak one user's catalog (including which private
+// sources they've registered) to every other user's next request. The
+// no-user/test caller uses '' as its key.
+const _cache = new Map();
 
 // Locate the central skills checkout on disk. Marker: registry.yaml or an
 // agent-tools/ dir (mirrors sync-skills.sh). No network clone.
@@ -68,36 +79,51 @@ function readNameDesc(file) {
   }
 }
 
-// { repo: <path|null>, skills: [{ id, family, name, description, path }] }.
-// Cached for the process — the central repo doesn't change under a running
-// server; a server restart (or sync) picks up changes.
-export function listSkillLibrary() {
-  if (_cache) return _cache;
-  const repo = resolveCentralSkillsRepo();
-  if (!repo) { _cache = { repo: null, skills: [] }; return _cache; }
+// { repo: <builtin path|null>, skills: [{ id, family, name, description, path, sourceId, sourceName }] }.
+// Iterates the user's ENABLED skills sources (per-user state). Backward-compatible:
+// `repo` is the builtin source's resolved path (null if absent); skills gain
+// sourceId/sourceName. Cached per process; call _resetSkillLibraryCache() after
+// any add/update/remove/toggle.
+export function listSkillLibrary(userId) {
+  const cacheKey = userId || '';
+  if (_cache.has(cacheKey)) return _cache.get(cacheKey);
+  seedBuiltinOnce();
+  const enabled = userId
+    ? listEnabled(userId)
+    : new Set(listSources().map((s) => s.id)); // no user (tests/default) → all enabled
 
   const skills = [];
-  for (const family of LIBRARY_FAMILIES) {
-    let entries;
-    try { entries = readdirSync(join(repo, family), { withFileTypes: true }); }
-    catch { continue; }
-    for (const e of entries) {
-      if (!e.isDirectory()) continue;
-      const skillMd = join(repo, family, e.name, 'SKILL.md');
-      const fm = readNameDesc(skillMd);
-      if (!fm) continue;
-      skills.push({
-        id: `${family}/${e.name}`,
-        family,
-        name: fm.name,
-        description: fm.description,
-        path: skillMd,
-      });
+  let builtinRepo = null;
+  for (const src of listSources()) {
+    if (!enabled.has(src.id)) continue;
+    const snap = snapshotSource(src);
+    if (src.id === BUILTIN_ID) builtinRepo = src.location || null;
+    if (!snap.installed) continue;
+    for (const family of LIBRARY_FAMILIES) {
+      let entries;
+      try { entries = readdirSync(join(src.location, family), { withFileTypes: true }); }
+      catch { continue; }
+      for (const e of entries) {
+        if (!e.isDirectory()) continue;
+        const skillMd = join(src.location, family, e.name, 'SKILL.md');
+        const fm = readNameDesc(skillMd);
+        if (!fm) continue;
+        skills.push({
+          id: `${family}/${e.name}`,
+          family,
+          name: fm.name,
+          description: fm.description,
+          path: skillMd,
+          sourceId: src.id,
+          sourceName: src.name,
+        });
+      }
     }
   }
   skills.sort((a, b) => a.family.localeCompare(b.family) || a.name.localeCompare(b.name));
-  _cache = { repo, skills };
-  return _cache;
+  const result = { repo: builtinRepo, skills };
+  _cache.set(cacheKey, result);
+  return result;
 }
 
 // Max SKILL.md chars sent as followable instructions. Generous — a skill is a
@@ -114,9 +140,9 @@ const MAX_SKILL_CHARS = 24_000;
 // the caller frame the content as TRUSTED, followable instructions: it comes
 // from the user's own on-disk skills repo, not the wire, so a client can't
 // smuggle arbitrary "follow me" text through this channel.
-export function readSkillInstructions(id) {
+export function readSkillInstructions(id, userId) {
   if (typeof id !== 'string' || !id) return null;
-  const { skills } = listSkillLibrary();
+  const { skills } = listSkillLibrary(userId);
   const entry = skills.find((s) => s.id === id);
   if (!entry) return null;
   try {
@@ -128,4 +154,4 @@ export function readSkillInstructions(id) {
 }
 
 // Test hook — drop the cache so a test can point at a different repo via env.
-export function _resetSkillLibraryCache() { _cache = null; }
+export function _resetSkillLibraryCache() { _cache.clear(); }

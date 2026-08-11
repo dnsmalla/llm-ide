@@ -334,7 +334,7 @@ export async function handleAIRoutes(req, res) {
     let skillsText = '';
     for (const id of rawSkillIds) {
       if (typeof id !== 'string' || seenSkill.has(id)) continue;
-      const sk = readSkillInstructions(id);
+      const sk = readSkillInstructions(id, req.user?.id);
       if (!sk) continue;          // unknown id — silently ignored (no arbitrary reads)
       seenSkill.add(id);
       if (!skillsText) {

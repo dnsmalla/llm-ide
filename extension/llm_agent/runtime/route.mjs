@@ -252,7 +252,7 @@ export async function handleCodeAssist({
                      || sessionTasks.find((t) => t.status === 'pending');
     if (activeTask) {
       const skillId = classifyTaskType(activeTask.title);
-      const instructions = skillId ? readSkillInstructions(skillId) : null;
+      const instructions = skillId ? readSkillInstructions(skillId, userId) : null;
       if (instructions) {
         personaBase += `\n\n## Guidance for your current task ("${activeTask.title}")\n${instructions.content}`;
       }

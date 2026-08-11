@@ -115,6 +115,15 @@ extension Theme {
         default:         return Color(red: 0.42, green: 0.78, blue: 0.82) // dark
         }
     }
+    /// Skills Sources' hue — kept visually distinct from Plugins' teal since
+    /// both live in the Library sidebar as sibling sections.
+    var categoryAmber: Color {
+        switch id {
+        case "light":    return Color(red: 0.72, green: 0.48, blue: 0.08)
+        case "midnight": return Color(red: 0.95, green: 0.78, blue: 0.45)
+        default:         return Color(red: 0.90, green: 0.70, blue: 0.35) // dark
+        }
+    }
 
     /// Single source of truth for a Library file-tree section's tint, derived
     /// from the active palette. Sources/Notes read as the blue (info) family,
