@@ -352,6 +352,11 @@ final class AppConfig: ObservableObject {
     var gitHubActiveRepoId: Int? {
         gitHubSavedRepos.first(where: { $0.isActive })?.resolvedId
     }
+    /// Last-used repo ("owner/name") so the Gantt reopens on the same repo —
+    /// the GitHub counterpart of `gitLabLastProjectId`.
+    @Published var gitHubLastRepoFullName: String {
+        didSet { defaults.set(gitHubLastRepoFullName, forKey: "gitHubLastRepoFullName") }
+    }
 
     // ── Per-provider operation allow-list ─────────────────────────────
     /// Operations automation may perform / manual buttons may trigger for
@@ -729,6 +734,7 @@ final class AppConfig: ObservableObject {
         } else {
             self.gitHubSavedRepos = []
         }
+        self.gitHubLastRepoFullName = defaults.string(forKey: "gitHubLastRepoFullName") ?? ""
         // Allow-lists: absent key ⇒ default all-enabled; stored array (even
         // empty) is honored verbatim; unknown raw-strings are dropped.
         if let raw = defaults.array(forKey: "gitHubAllowedOps") as? [String] {

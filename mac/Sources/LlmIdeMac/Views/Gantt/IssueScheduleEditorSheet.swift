@@ -9,7 +9,10 @@ struct IssueScheduleEditorSheet: View {
     @EnvironmentObject var theme: ThemeStore
 
     let api: LlmIdeAPIClient
-    let provider: String            // "github"
+    /// Backend that owns the row — always the live client's `kind`, never a
+    /// literal, so the (provider, repo, number) key can't cross providers.
+    /// In practice "github": GitLab edits its native fields instead.
+    let provider: String
     let repo: String                // "owner/name"
     let issueNumber: Int
     let issueTitle: String

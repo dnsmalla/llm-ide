@@ -117,8 +117,9 @@ Once configured, GitHub enables:
 - Trigger workflows (if `workflow` scope enabled)
 
 #### Gantt View
-- **Not supported on GitHub** — Gantt is GitLab-only (for now)
-- If GitHub is active, Gantt shows: "You have GitHub configured, but Gantt currently only supports GitLab projects for timeline planning"
+- Fully supported — the same timeline GitLab gets (zoom, filters, milestones)
+- GitHub issues carry no start/due date, so LLM-IDE stores them for you: right-click a row → **Edit Schedule…** to set start, due, estimate and blocking issues
+- Issues in a milestone fall back to the milestone's due date until you schedule them
 
 ### Rotate Your Token
 
@@ -209,10 +210,8 @@ Once configured, GitLab enables:
 - Auto-create branches for fixes
 
 #### Gantt View
-- **Gantt is GitLab-only**
 - Shows project timeline with milestones
-- Drag-drop to reschedule tasks
-- Gantt requires GitLab to be the active provider
+- Uses GitLab's native issue due dates and milestone start/due dates
 
 ### Rotate Your Token
 
@@ -331,14 +330,14 @@ If you don't see these fields, contact support — your instance may need specia
 3. If still stuck, clear provider settings and reconfigure
 4. Contact support if the issue persists
 
-### "Gantt view disabled"
+### "Nothing to chart yet"
 
-**Cause:** GitHub is your active provider (Gantt only supports GitLab).
+**Cause:** No issue in the selected project has a date to place it on the timeline.
 
 **Fix:**
-1. Switch to GitLab: **Settings → GitLab**
-2. Verify and save your GitLab credentials
-3. Gantt view will appear and work
+1. GitLab — set a due date on an issue, or start/due dates on a milestone
+2. GitHub — right-click an issue row → **Edit Schedule…** and set a start or due date
+3. Uncheck **Hide undated** in the filter bar to see every issue regardless of dates
 
 ## Security Best Practices
 
@@ -375,17 +374,21 @@ If you don't see these fields, contact support — your instance may need specia
 - Create/update issues and MRs
 - Comments visible in-app
 
-### Gantt View (GitLab Only)
+### Gantt View (GitHub and GitLab)
 
-**Requirement:** GitLab must be the active provider.
+One timeline serves both providers — same chart, same controls.
 
 **Gantt features:**
-- Timeline view of milestones
-- Drag-to-reschedule tasks
-- Progress bars for each milestone
-- Critical path analysis
+- Day / week / month zoom, today marker, weekend shading
+- Milestone markers across the timeline
+- Filters: search, state, milestone, assignee, label, date range
+- Legend chips that toggle open / closed / overdue
 
-If you see "Gantt currently only supports GitLab", switch your active provider to GitLab.
+**Where the dates come from:**
+- **GitLab** — the issue's native due date, plus milestone start/due dates
+- **GitHub** — GitHub has no per-issue dates, so LLM-IDE stores start, due,
+  estimate and blocking issues locally. Right-click a row → **Edit Schedule…**
+  Until an issue is scheduled it falls back to its milestone's due date.
 
 ## Next Steps
 

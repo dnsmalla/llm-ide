@@ -609,21 +609,12 @@ struct AppShell: View {
         }
     }
 
-    // ── Issues / Gantt provider selection ───────────────────────
-    // Routing used to be GitLab-first by token presence, which hid the
-    // Mutual exclusivity: only one provider (GitHub OR GitLab) can be
-    // configured at a time. Setting one token clears the other in their
-    // respective Settings sections.
-    private var hasGitLab: Bool { !config.gitLabToken.isEmpty }
-    private var hasGitHub: Bool { !config.gitHubToken.isEmpty }
-
-    /// The provider actually shown: whichever token is configured (GitLab default
-    // if somehow both exist, which should never happen after the mutual-exclusivity
-    // change but is kept as a safety fallback).
-    private var effectiveRepoProvider: RepoBackendKind {
-        if hasGitHub && !hasGitLab { return .github }
-        return .gitlab
-    }
+    // ── Issues / Gantt routing ──────────────────────────────────
+    // Neither route branches on the provider any more: both views resolve the
+    // backend themselves (preferredRepoProvider, then whichever token exists)
+    // and render GitLab and GitHub through the same UI. Routing here used to
+    // pick a different Gantt per provider, which is why the two surfaces could
+    // look nothing alike.
 
     /// Issues — unified RepoIssuesView for both providers (GitHub + GitLab).
     @ViewBuilder
@@ -631,15 +622,13 @@ struct AppShell: View {
         RepoIssuesView(api: api)
     }
 
-    /// Gantt. GitLab → the rich GanttContainerView (per-issue rows, day/week/
-    /// month zoom, today marker, full filter bar — restored by request). GitHub
-    /// → RepoGanttView, backed by the scheduling overlay.
+    /// Gantt — one view for both providers, same as Issues. GanttContainerView
+    /// resolves the backend itself (per-issue rows, day/week/month zoom, today
+    /// marker, full filter bar for GitLab AND GitHub); `api` carries the
+    /// scheduling overlay that supplies GitHub's missing issue dates.
     @ViewBuilder
     private var ganttRoute: some View {
-        switch effectiveRepoProvider {
-        case .github where hasGitHub: RepoGanttView(api: api)
-        default:                      GanttContainerView()
-        }
+        GanttContainerView(api: api)
     }
 
     private func initEnv() {

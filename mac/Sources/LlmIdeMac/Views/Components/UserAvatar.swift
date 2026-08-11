@@ -104,4 +104,16 @@ extension UserAvatar {
         self.avatarUrl = user.avatarUrl
         self.size = size
     }
+
+    /// Backend-neutral user (GitLab or GitHub). `RepoUser.id` is a string —
+    /// GitLab's numeric id or a GitHub login — so the initials-fallback colour
+    /// is derived from its scalars. NOT `hashValue`: Swift seeds String hashing
+    /// per process, which would repaint every avatar a different colour on each
+    /// launch.
+    init(user: RepoUser, size: CGFloat = 24) {
+        self.name = user.displayName.isEmpty ? user.username : user.displayName
+        self.id = user.id.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) % 100_003 }
+        self.avatarUrl = user.avatarUrl
+        self.size = size
+    }
 }

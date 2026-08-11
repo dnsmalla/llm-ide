@@ -84,7 +84,7 @@ struct GanttFilterBar: View {
                             vm.selectedAssigneeIds.insert(u.id)
                         }
                     } label: {
-                        Label(u.name, systemImage: vm.selectedAssigneeIds.contains(u.id) ? "checkmark" : "")
+                        Label(u.displayName, systemImage: vm.selectedAssigneeIds.contains(u.id) ? "checkmark" : "")
                     }
                 }
             }

@@ -1,3 +1,14 @@
+// The Gantt chart — ONE view for every provider.
+//
+// It used to be GitLab-only (typed to GitLabIssue/GitLabClient) with a
+// separate, much thinner RepoGanttView for GitHub. Both are now this view,
+// driven by the neutral `RepoBackend` protocol: same zoom levels, today
+// marker, weekend tinting, milestone diamonds, legend and filter bar
+// regardless of backend. Where the providers genuinely differ — GitHub has no
+// native issue dates — the difference is absorbed by GanttViewModel (which
+// merges our /kb/issue-schedule overlay) and by the capability flag
+// `usesScheduleOverlay`, which decides whether "Edit schedule…" is offered.
+
 import SwiftUI
 import AppKit
 
@@ -32,15 +43,26 @@ enum GanttZoom: String, CaseIterable, Identifiable {
 
 struct GanttView: View {
     @ObservedObject var vm: GanttViewModel
-    let gitlab: GitLabClient
-    let project: GitLabProject
-    var projects: [GitLabProject] = []
-    var onProjectChange: (GitLabProject) -> Void = { _ in }
+    /// Provider client (GitLab or GitHub) — the view never inspects `kind`
+    /// except to label the "open in browser" action; behaviour differences go
+    /// through capability flags.
+    let client: RepoBackend
+    let project: RepoProject
+    /// Server API client, for the GitHub scheduling overlay. Nil hides the
+    /// schedule editor.
+    var api: LlmIdeAPIClient?
+    var projects: [RepoProject] = []
+    var onProjectChange: (RepoProject) -> Void = { _ in }
+    /// Provider switch, shown only when more than one backend is configured.
+    var backends: [RepoBackendKind] = []
+    var onBackendChange: (RepoBackendKind) -> Void = { _ in }
 
     @EnvironmentObject var theme: ThemeStore
 
     @State private var zoom: GanttZoom = .week
-    @State private var hoverIssueId: Int?
+    @State private var hoverIssueId: String?
+    @State private var detailIssue: RepoIssue?
+    @State private var schedulingIssue: RepoIssue?
 
     private let rowHeight: CGFloat = 32
     private let labelWidth: CGFloat = 320
@@ -48,6 +70,9 @@ struct GanttView: View {
     private let midBandHeight: CGFloat = 24
     private let bottomBandHeight: CGFloat = 16
     private let markerBandHeight: CGFloat = 36
+
+    /// True on backends whose issue dates come from our overlay (GitHub).
+    private var overlayEnabled: Bool { client.usesScheduleOverlay && api != nil }
 
     private var headerHeight: CGFloat {
         let base: CGFloat
@@ -60,6 +85,55 @@ struct GanttView: View {
     private var markerBandY: CGFloat { headerHeight - markerBandHeight }
 
     var body: some View {
+        chart
+            .background(theme.current.body)
+            .task(id: "\(client.kind.rawValue):\(project.id)") {
+                await vm.load(client: client, project: project, api: api)
+            }
+            .sheet(item: $detailIssue) { issue in
+                RepoIssueDetailSheet(
+                    issue: issue,
+                    client: client,
+                    projectId: project.id,
+                    projectFullName: project.fullName,
+                    api: api,
+                    onIssueChanged: { updated in
+                        if let i = vm.issues.firstIndex(where: { $0.id == updated.id }) {
+                            vm.issues[i] = updated
+                        }
+                    },
+                    onDismiss: { detailIssue = nil }
+                )
+            }
+            .sheet(item: $schedulingIssue) { issue in
+                scheduleSheet(for: issue)
+            }
+    }
+
+    @ViewBuilder
+    private func scheduleSheet(for issue: RepoIssue) -> some View {
+        if let api {
+            IssueScheduleEditorSheet(
+                api: api,
+                // Keyed by the live backend, never a hardcoded "github" — a
+                // GitLab row must not write into GitHub's overlay rows.
+                provider: client.kind.rawValue,
+                repo: project.fullName,
+                issueNumber: issue.number,
+                issueTitle: issue.title,
+                existing: vm.schedules[issue.number],
+                onSaved: { saved in
+                    if let s = saved { vm.schedules[issue.number] = s }
+                    else { vm.schedules.removeValue(forKey: issue.number) }
+                },
+                onDismiss: { schedulingIssue = nil }
+            )
+            .environmentObject(theme)
+        }
+    }
+
+    @ViewBuilder
+    private var chart: some View {
         let t = theme.current
         let issues = vm.filteredIssues
         let (start, end) = vm.timelineBounds
@@ -74,15 +148,15 @@ struct GanttView: View {
             Divider().background(t.border)
             GanttFilterBar(vm: vm)
             Divider().background(t.border)
-            if vm.isLoading {
+            if vm.isLoading && vm.issues.isEmpty {
                 loadingView(t: t)
             } else if let err = vm.errorMessage {
                 errorView(err, t: t)
             } else if issues.isEmpty {
                 EmptyStateView(
                     icon: "calendar.badge.exclamationmark",
-                    title: "No issues with dates",
-                    message: "Issues need a due date or milestone to appear on the chart. Uncheck \"Hide undated\" in the filter bar to see all issues."
+                    title: "No issues to chart",
+                    message: emptyMessage
                 )
             } else {
                 HStack(alignment: .top, spacing: 0) {
@@ -131,8 +205,19 @@ struct GanttView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(theme.current.body)
-        .task(id: project.id) { await vm.load(gitlab: gitlab, projectId: project.id) }
+    }
+
+    /// The empty state has to explain the right thing per provider: on GitHub
+    /// an issue with no overlay row and no milestone genuinely has no dates.
+    private var emptyMessage: String {
+        if vm.issues.isEmpty {
+            return overlayEnabled
+                ? "This project has no issues yet, or none matched. Set a start/due date on an issue to schedule it on the timeline."
+                : "This project has no issues yet, or none matched the current filter."
+        }
+        return vm.hideBlankRows
+            ? "No issue matches the current filter. Uncheck \"Hide undated\" in the filter bar to see issues without dates."
+            : "No issue matches the current filter."
     }
 
     private func scrollToToday(proxy: ScrollViewProxy, offset: Int, displayDays: Int) {
@@ -163,7 +248,7 @@ struct GanttView: View {
                 .foregroundStyle(t.danger.opacity(0.7))
             Text(msg).font(Typography.caption).foregroundStyle(t.danger)
                 .multilineTextAlignment(.center).frame(maxWidth: 360)
-            Button("Retry") { Task { await vm.load(gitlab: gitlab, projectId: project.id) } }
+            Button("Retry") { Task { await vm.load(client: client, project: project, api: api) } }
                 .buttonStyle(.borderedProminent).controlSize(.small)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -174,8 +259,20 @@ struct GanttView: View {
     private func headerBar(t: Theme) -> some View {
         let c = vm.counts
         return HStack(spacing: 0) {
+            if backends.count > 1 {
+                backendPicker(t: t)
+                Divider().frame(height: 20).padding(.horizontal, 10)
+            }
+
             // Project picker
-            projectDropdown(t: t)
+            RepoProjectDropdown(
+                projects: projects,
+                selected: .constant(project),
+                isLoading: false,
+                backendDisplayName: client.kind.displayName,
+                onSelect: { onProjectChange($0) }
+            )
+            .padding(.leading, backends.count > 1 ? 0 : 16)
 
             Divider().frame(height: 20).padding(.horizontal, 12)
 
@@ -205,37 +302,57 @@ struct GanttView: View {
                         .frame(width: 13, height: 13)
                     Text("Milestone").font(.system(size: 11)).foregroundStyle(t.textMuted)
                 }
+
+                refreshButton(t: t)
             }
-            .padding(.trailing, 20)
+            .padding(.trailing, 16)
         }
         .frame(height: 46)
         .background(t.surface)
     }
 
-    @ViewBuilder
-    private func projectDropdown(t: Theme) -> some View {
-        Menu {
-            if projects.isEmpty {
-                Label("No other projects", systemImage: "folder")
-            } else {
-                ForEach(projects) { p in
-                    Button(p.name) { onProjectChange(p) }
-                }
-            }
+    private func refreshButton(t: Theme) -> some View {
+        Button {
+            Task { await vm.load(client: client, project: project, api: api) }
         } label: {
-            HStack(spacing: 5) {
-                Text(project.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.text)
-                    .lineLimit(1)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+            if vm.isLoading {
+                ProgressView().controlSize(.small).scaleEffect(0.7)
+                    .frame(width: 26, height: 26)
+            } else {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(t.textMuted)
+                    .frame(width: 26, height: 26)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(t.surface2.opacity(0.8)))
             }
-            .fixedSize()
         }
-        .menuStyle(.borderlessButton)
-        .padding(.leading, 16)
+        .buttonStyle(.plain)
+        .disabled(vm.isLoading)
+        .help("Refresh  ⌘R")
+        .keyboardShortcut("r", modifiers: .command)
+    }
+
+    private func backendPicker(t: Theme) -> some View {
+        HStack(spacing: 4) {
+            ForEach(backends, id: \.self) { backend in
+                let active = (backend == client.kind)
+                Button {
+                    if !active { onBackendChange(backend) }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: backend.sfSymbol).font(.system(size: 10))
+                        Text(backend.displayName).font(Typography.captionStrong)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 7)
+                        .fill(active ? t.surface2.opacity(0.7) : Color.clear))
+                    .foregroundStyle(active ? t.text : t.textMuted)
+                    .opacity(active ? 1 : 0.7)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.leading, 14)
     }
 
     @ViewBuilder
@@ -288,7 +405,7 @@ struct GanttView: View {
 
     // MARK: - Left column
 
-    private func leftColumn(issues: [GitLabIssue], t: Theme) -> some View {
+    private func leftColumn(issues: [RepoIssue], t: Theme) -> some View {
         VStack(spacing: 0) {
             HStack {
                 SectionLabel("ISSUES", size: 11, tracking: 1.2)
@@ -313,7 +430,7 @@ struct GanttView: View {
         .background(t.body)
     }
 
-    private func issueRow(issue: GitLabIssue, index: Int, t: Theme) -> some View {
+    private func issueRow(issue: RepoIssue, index: Int, t: Theme) -> some View {
         let overdue = isOverdue(issue)
         return HStack(spacing: 10) {
             Image(systemName: issue.state == "closed"
@@ -323,12 +440,17 @@ struct GanttView: View {
                 .foregroundStyle(issue.state == "closed" ? t.accent3 : (overdue ? t.danger : t.accent2))
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text("#\(issue.iid)")
+                    Text("#\(issue.number)")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(t.textMuted)
                     if let ms = issue.milestone {
                         Text(ms.title).font(.system(size: 10))
                             .foregroundStyle(t.accent2).lineLimit(1)
+                    }
+                    // Estimate / blocking-issue note from the schedule overlay.
+                    if let note = vm.scheduleNote(for: issue) {
+                        Text(note).font(.system(size: 10))
+                            .foregroundStyle(t.accent4).lineLimit(1)
                     }
                 }
                 Text(issue.title).font(.system(size: 12, weight: .medium))
@@ -344,12 +466,12 @@ struct GanttView: View {
                     UserAvatar(user: issue.author, size: 20)
                         .opacity(0.45)
                         .overlay(Circle().stroke(t.body, lineWidth: 1.5))
-                        .help("\(issue.author.name) (author) — unassigned")
+                        .help("\(issue.author.displayName) (author) — unassigned")
                 } else {
                     ForEach(issue.assignees.prefix(3)) { a in
                         UserAvatar(user: a, size: 20)
                             .overlay(Circle().stroke(t.body, lineWidth: 1.5))
-                            .help(a.name)
+                            .help(a.displayName)
                     }
                     if issue.assignees.count > 3 {
                         Text("+\(issue.assignees.count - 3)")
@@ -365,7 +487,18 @@ struct GanttView: View {
         .background(index.isMultiple(of: 2) ? t.rowAlt : .clear)
         .contentShape(Rectangle())
         .onHover { h in hoverIssueId = h ? issue.id : nil }
-        .onTapGesture {
+        .onTapGesture { detailIssue = issue }
+        .contextMenu { rowMenu(for: issue) }
+    }
+
+    @ViewBuilder
+    private func rowMenu(for issue: RepoIssue) -> some View {
+        Button("Open Details") { detailIssue = issue }
+        if overlayEnabled {
+            Button("Edit Schedule…") { schedulingIssue = issue }
+        }
+        Divider()
+        Button("Open in \(client.kind.displayName)") {
             if let url = URL(string: issue.webUrl) { NSWorkspace.shared.open(url) }
         }
     }
@@ -411,13 +544,13 @@ struct GanttView: View {
     }
 
     private struct MilestoneMarker: Identifiable {
-        let id: Int; let dayOffset: Int; let title: String; let tooltip: String
+        let id: String; let dayOffset: Int; let title: String; let tooltip: String
     }
 
     private func milestoneMarkers(start: Date, days: Int, cal: Calendar) -> [MilestoneMarker] {
         let vm = self.vm
         return vm.milestones.compactMap { ms in
-            guard let dStr = ms.dueDate, let due = vm.parseDate(dStr) else { return nil }
+            guard let due = vm.parseDate(ms.dueDate) else { return nil }
             let off = cal.dateComponents([.day],
                 from: cal.startOfDay(for: start), to: cal.startOfDay(for: due)).day ?? -1
             guard off >= 0 && off <= days else { return nil }
@@ -535,7 +668,7 @@ struct GanttView: View {
 
     // MARK: - Canvas chart drawing
 
-    private func drawChart(ctx: GraphicsContext, size: CGSize, issues: [GitLabIssue],
+    private func drawChart(ctx: GraphicsContext, size: CGSize, issues: [RepoIssue],
                             start: Date, days: Int, dayWidth: CGFloat, cal: Calendar, t: Theme) {
         // Alternating row backgrounds
         for i in 0..<issues.count {
@@ -569,7 +702,7 @@ struct GanttView: View {
 
         // Milestone dashed vertical lines
         for ms in vm.milestones {
-            guard let dStr = ms.dueDate, let due = vm.parseDate(dStr) else { continue }
+            guard let due = vm.parseDate(ms.dueDate) else { continue }
             let off = cal.dateComponents([.day],
                 from: cal.startOfDay(for: start), to: cal.startOfDay(for: due)).day ?? -1
             guard off >= 0 && off <= days else { continue }
@@ -610,7 +743,7 @@ struct GanttView: View {
             ctx.stroke(bar, with: .color(t.isDark ? .white.opacity(0.18) : .black.opacity(0.18)), lineWidth: 0.5)
 
             if w > 60 {
-                let label = Text("#\(issue.iid) \(issue.title)")
+                let label = Text("#\(issue.number) \(issue.title)")
                     .font(.system(size: 10, weight: .medium)).foregroundColor(.white)
                 ctx.draw(ctx.resolve(label), at: CGPoint(x: x + 8, y: y + h / 2), anchor: .leading)
             }
@@ -623,21 +756,8 @@ struct GanttView: View {
 
     // MARK: - Helpers
 
-    private func isWeekend(_ d: Date, cal: Calendar) -> Bool {
-        let w = cal.component(.weekday, from: d); return w == 1 || w == 7
-    }
-
-    private func isOverdue(_ issue: GitLabIssue) -> Bool {
-        guard issue.state == "opened" else { return false }
-        return vm.parseDate(issue.dueDate) .map { $0 < Date() } ?? false
-    }
-
-    private func dayLabel(_ d: Date) -> String {
-        AppDateFormatter.dayOfMonth(d)
-    }
-
-    private func weekdayLabel(_ d: Date, cal: Calendar) -> String {
-        AppDateFormatter.weekdayAbbrev(d)
+    private func isOverdue(_ issue: RepoIssue) -> Bool {
+        vm.category(of: issue) == "overdue"
     }
 
     // MARK: - Segment helpers
