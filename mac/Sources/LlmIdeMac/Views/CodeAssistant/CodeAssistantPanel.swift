@@ -23,9 +23,9 @@ protocol ChipMenuOption: CaseIterable, Identifiable, Hashable {
 enum EditAcceptanceMode: String, CaseIterable, Identifiable, ChipMenuOption {
     /// Show the confirmation card + `UpdateFileSheet` for every edit.
     case review
-    /// Apply `update-file` edits immediately (to already-attached files,
-    /// enforced by `confirmUpdateFile`), auto-run write-tier git ops, and
-    /// auto-run proposed shell commands (still gated by
+    /// Apply `update-file` edits immediately (to any file `resolveEdit`
+    /// accepts — attached, or inside the open project), auto-run write-tier
+    /// git ops, and auto-run proposed shell commands (still gated by
     /// `BashService.validateCommand`); GitLab/GitHub actions always confirm.
     case auto
 
@@ -37,8 +37,8 @@ enum EditAcceptanceMode: String, CaseIterable, Identifiable, ChipMenuOption {
     var icon: String { self == .auto ? "bolt.fill" : "checklist" }
     var help: String {
         self == .auto
-            ? "Bypass review — apply file edits (attached files only) and run proposed shell commands immediately, no popup"
-            : "Manual review — confirm each file edit in a popup, and tap to run each proposed command"
+            ? "Bypass review — apply file edits (attached files, or anything in the open project) and run proposed shell commands immediately, no popup"
+            : "Manual review — Apply / Review diff / Skip each file edit in the chat, and tap to run each proposed command"
     }
 }
 
@@ -215,6 +215,10 @@ struct CodeAssistantPanel: View {
     /// on-appear) so restoring an old chat doesn't read its last message
     /// aloud as if the assistant had just replied.
     @State var suppressHistoryAnnounce = false
+    /// The current `update-file` proposal, resolved against the filesystem.
+    /// Cached because resolving reads the target file — see the `onChange` in
+    /// `body` that refreshes it, and `pendingUpdateFileDiff` that reads it.
+    @State var pendingEditPreview: ProposedEdit?
 
     /// Context passed to ReportFaultSheet — captured at the moment the
     /// user clicks "Report this" so the sheet sees the prompt + answer
@@ -244,6 +248,13 @@ struct CodeAssistantPanel: View {
             )
             .background(theme.current.body)
             .task { await loadLanguage() }
+            // Resolving an edit READS THE TARGET FILE, so it must happen when
+            // the proposal arrives — not inside `body`, where a card on screen
+            // would mean a synchronous disk read on every re-render (i.e. on
+            // every keystroke in the composer below it).
+            .onChange(of: agent.pendingTool, initial: true) { _, _ in
+                refreshPendingEditPreview()
+            }
             .task(id: activeRepoKey) {
                 completion.configure(api: api, repoRoot: activeRepoRoot)
                 await completion.loadMetaIfNeeded()
@@ -332,14 +343,13 @@ struct CodeAssistantPanel: View {
 
     // MARK: - Body Components
 
-    /// Diff stats for the current `update-file` pendingTool, if the agent
-    /// proposed one and its path matches an attached file. Computed once per
-    /// render rather than inside `ChatMessageList` so that view stays free of
-    /// attachment-matching logic.
+    /// Diff stats for the current `update-file` pendingTool — the +/− the user
+    /// sees on the card before deciding. Read from the cached resolution rather
+    /// than resolving here (see the `onChange` in `body`), and derived from the
+    /// SAME `ProposedEdit` the Apply button writes, so the preview can't
+    /// describe a different change than the one applied.
     private var pendingUpdateFileDiff: DiffStats? {
-        guard let args = agent.pendingTool?.updateFileArgs,
-              let match = matchingAttachment(for: args.path, allowBasenameFallback: editMode != .auto) else { return nil }
-        return DiffStats.compute(old: match.content, new: args.content)
+        pendingEditPreview?.stats
     }
 
     var baseContent: some View {
@@ -366,7 +376,9 @@ struct CodeAssistantPanel: View {
                 sheets: sheets,
                 loadBranchContext: { await buildAgentContext() },
                 onGitOp: { g in await runGitOpFlow(g) },
-                onBash: { args in await runBashCommand(args) }
+                onBash: { args in await runBashCommand(args) },
+                onApplyEdit: { await applyPendingEdit() },
+                onSkipEdit: { await skipPendingEdit() }
             )
             Divider().background(theme.current.border)
             if !attachmentState.selectedSkills.isEmpty { skillBar }

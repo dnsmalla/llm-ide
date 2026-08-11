@@ -286,9 +286,27 @@ struct PendingTool: Codable, Equatable {
         return try? AppJSON.decoder.decode(UpdateFileArgs.self, from: arguments.raw)
     }
 
+    /// Two mutually exclusive edit shapes (the server's validateEditShape
+    /// guarantees exactly one arrives):
+    ///  - `content` — a full-file rewrite. Only emitted when the agent could
+    ///    see the whole file, i.e. the user attached it.
+    ///  - `oldText`/`newText` — an anchored replacement of one unique region.
+    ///    This is what lets the agent edit a file it found itself and read
+    ///    only part of, without the rest of the file being at risk.
+    /// Resolution of either into the resulting file content is `ProposedEdit`'s
+    /// job — nothing else should interpret these fields.
     struct UpdateFileArgs: Codable, Equatable {
         var path: String
-        var content: String
+        var content: String?
+        var oldText: String?
+        var newText: String?
+
+        enum CodingKeys: String, CodingKey {
+            case path
+            case content
+            case oldText = "old_text"
+            case newText = "new_text"
+        }
     }
 
     /// Typed view for the git-op variant. Returns nil if `name`

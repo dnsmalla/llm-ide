@@ -324,11 +324,18 @@ The Code Assistant sends a `POST /code-assist` request and receives a `CodeAssis
 
 **Flow for `update-file` (the file-edit path):**
 
-1. `api.codeAssist(...)` returns a response; `self.pendingTool = resp.pendingTool` is set at `CodeAssistantPanel.swift` line 1669.
-2. **Auto mode** (`editMode == .auto`): `confirmUpdateFile(args, finalContent: args.content)` is called immediately (line 1677–1678), bypassing the sheet.
-3. **Manual mode**: A `PendingActionCard` is rendered in the chat bubble (line 669). When the user taps the card, `showingUpdateFileSheet = true` is set (line 676), presenting `UpdateFileSheet` as a `.sheet` (lines 302–361).
-4. `UpdateFileSheet` shows the original content alongside the proposed content (a diff view). The user can edit the proposed content before confirming.
-5. On confirm, `confirmUpdateFile(_:finalContent:)` (line 1781) is called: it validates the path against the `attachments` list (only files the user has attached can be written — defence in depth), writes the file to disk with `String.write(to:atomically:encoding:)`, refreshes the in-memory attachment, appends a synthetic `(applied update to <file>: ±N lines)` user turn to history, and calls `sendFollowup()` (line 1832).
+`update-file` carries **two mutually exclusive edit shapes** (the server's `validateEditShape` guarantees exactly one arrives):
+
+- `content` — a whole-file rewrite. Only emitted when the agent could see the entire file, i.e. the user attached it.
+- `old_text` + `new_text` — an anchored replacement of one region that must occur **exactly once** in the file. This is what lets the agent edit a file it located itself (via `find-code`) and read only part of, without the unseen remainder being at risk.
+
+`ProposedEditResolver` (`Agent/Models/ProposedEdit.swift`) is the single place that turns either shape plus a path into a concrete `ProposedEdit { absolutePath, displayPath, original, proposed, source }`. All three consumers — the card's diff preview, the review sheet, and the write — resolve through it, so the change the user is shown is by construction the change that gets written. It refuses: a path that is neither attached nor inside the open project, a path escaping the project root (checked after canonicalisation, so `..` and symlinks can't slip past), an anchor that matches zero times, and an anchor that matches more than once.
+
+1. `api.codeAssist(...)` returns a response; `self.pendingTool = resp.pendingTool` is set in `finishStreamingTurn`.
+2. **Auto mode** (`editMode == .auto`): `autoChainPendingAction` resolves the edit and calls `confirmUpdateFile(args, finalContent: edit.proposed)` immediately, bypassing the sheet. A whole-file rewrite of a file the server had to TRUNCATE is exempted (auto-applying it would drop the tail the agent never saw) and falls back to the card; anchored edits are not, since they only touch the matched region.
+3. **Review mode**: A `PendingActionCard` is rendered in the chat bubble with an inline **Apply** / **Review diff** / **Skip** row (`PendingActionCard.EditActions`). Apply writes immediately (`applyPendingEdit`); Review diff sets `showingUpdateFileSheet = true`, presenting `UpdateFileSheet`; Skip (`skipPendingEdit`) drops the card AND appends a synthetic "skipped" turn, so the agent learns the write was declined instead of re-proposing it. Apply is disabled when the proposal resolves to no change or doesn't resolve at all — Review still opens and shows why.
+4. `UpdateFileSheet` shows the original content alongside the resolved proposed content (a diff view). The user can edit the proposed content before confirming.
+5. On confirm, `confirmUpdateFile(_:finalContent:)` re-resolves the target, writes to the **resolved** `absolutePath` (never the LLM-emitted path — a relative path or a basename-fallback match makes them diverge) with `String.write(to:atomically:encoding:)`, retires the attachment chip if the target was an attachment, appends a synthetic `(applied update to <file>: ±N lines)` user turn to history, and calls `sendFollowup()`.
 6. `sendFollowup()` (line 1901) POSTs another `POST /code-assist` with `message: "(continue)"` and the updated history so the agent can acknowledge in natural language.
 7. `pendingTool` is set to `nil` (line 1810) after write; if the follow-up response contains another `pendingTool`, the cycle repeats.
 

@@ -1,9 +1,14 @@
 import SwiftUI
 
 /// Cursor-style editable confirmation sheet for the `update-file`
-/// write tool. The agent proposes new content for an attached file;
-/// this sheet renders a unified diff against the current file content
-/// and lets the user tweak the proposal before applying.
+/// write tool. The agent proposes a change to a file — attached to the chat or
+/// anywhere in the open project; this sheet renders a unified diff against the
+/// current file content and lets the user tweak the proposal before applying.
+///
+/// Both sides of the diff arrive already resolved (see `ProposedEdit`): the
+/// sheet does not know or care whether the agent sent a whole-file rewrite or
+/// an anchored old_text/new_text edit, which keeps that decision in exactly one
+/// place.
 ///
 /// The sheet itself never writes to disk — the owner does that on
 /// Apply via `onConfirm`. This keeps file I/O in the panel where the
@@ -17,30 +22,30 @@ struct UpdateFileSheet: View {
         case failure(String)
     }
 
-    /// The current on-disk content of the file the agent is proposing
-    /// to edit (taken from the matching attachment). Used as the LHS
-    /// of the diff.
+    /// The current content of the file the agent is proposing to edit — the
+    /// attachment's in-memory copy, or what was just read from disk. Used as
+    /// the LHS of the diff.
     let originalContent: String
-    /// Display path — same string the attachment chip shows. Surfaced
-    /// verbatim so the user recognises which file they're editing.
+    /// Display path — the attachment chip's label, or the project-relative
+    /// path. Surfaced verbatim so the user recognises which file they're editing.
     let displayPath: String
-    /// Absolute path that the panel will write to on Apply.
-    let absolutePath: String
     let onConfirm: (String) async -> ConfirmResult
 
     @State private var proposedContent: String
     @State private var submitting: Bool = false
     @State private var errorMessage: String?
 
-    init(initialArgs args: PendingTool.UpdateFileArgs,
+    /// `proposedContent` is the RESULT of the agent's edit, already applied to
+    /// `originalContent` by `ProposedEdit` — not the raw tool arguments. The
+    /// sheet then treats it as an editable starting point.
+    init(proposedContent: String,
          originalContent: String,
          displayPath: String,
          onConfirm: @escaping (String) async -> ConfirmResult) {
         self.originalContent = originalContent
         self.displayPath = displayPath
-        self.absolutePath = args.path
         self.onConfirm = onConfirm
-        _proposedContent = State(initialValue: args.content)
+        _proposedContent = State(initialValue: proposedContent)
     }
 
     var body: some View {

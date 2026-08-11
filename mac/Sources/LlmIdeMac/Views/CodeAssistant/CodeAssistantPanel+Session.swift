@@ -240,67 +240,47 @@ extension CodeAssistantPanel {
                                     allowBasenameFallback: Bool = true)
         -> LlmIdeAPIClient.CodeAttachment?
     {
-        let canonProposed = PathUtils.canonicalise(proposedPath)
-        let canonBasename = (canonProposed as NSString).lastPathComponent
-        // 1. Exact canonicalised match (handles ~, file://, symlinks, ./).
-        if let exact = attachmentState.attachments.first(where: {
-            PathUtils.canonicalise($0.path) == canonProposed
-        }) {
-            return exact
-        }
-        // 2. Basename match as a fallback when the agent emitted a
-        //    different parent path (e.g. it guessed /Users/.../README.md
-        //    while the user attached ~/Developer/.../README.md). The
-        //    agent is supposed to use the exact attachment path, but
-        //    LLMs slip — better to update the obviously-intended file
-        //    than refuse on a parent-dir difference.
-        //    DISABLED in auto-edit mode (allowBasenameFallback=false): with no
-        //    confirmation sheet, a poisoned/hallucinated path that merely
-        //    shares a basename with an attachment would silently overwrite that
-        //    file. Auto mode requires an exact path the agent explicitly chose.
-        if allowBasenameFallback && !canonBasename.isEmpty {
-            let matches = attachmentState.attachments.filter {
-                ($0.path as NSString).lastPathComponent == canonBasename
-            }
-            // Only fall back when there's exactly one candidate — if
-            // multiple attachments share the basename, the agent's
-            // ambiguous path means we can't pick safely.
-            if matches.count == 1 { return matches.first }
-        }
-        return nil
+        // The matching RULES live in ProposedEditResolver so that the resolver
+        // (and its tests) are the single definition of "which file did the
+        // agent mean"; this wrapper only maps the result back onto the
+        // attachment objects the rest of the panel works with.
+        guard let known = ProposedEditResolver.matchingAttachment(
+            for: proposedPath,
+            in: editableAttachments,
+            allowBasenameFallback: allowBasenameFallback
+        ) else { return nil }
+        return attachmentState.attachments.first { $0.path == known.path }
     }
-
-    // Path canonicalisation lives in `Utilities/PathUtils.swift` so the
-    // attachment match here uses the same rules as every other tilde-
-    // expansion / symlink-resolution site in the app.
 
     /// Writes the user-approved content to disk, then refreshes the
     /// in-memory attachment so subsequent chat turns see the new file.
     /// Append a synthetic ack turn and re-invoke the agent so it can
     /// acknowledge in natural language (matches createIssue flow).
+    ///
+    /// The target is resolved through `resolveEdit` — an attached file, or any
+    /// file inside the open project — so the write lands on the same file the
+    /// card and the review sheet described. `finalContent` is what the user
+    /// approved (the sheet lets them edit it), NOT `args`, which is why this
+    /// re-resolves rather than trusting the caller's path.
     @MainActor
     func confirmUpdateFile(_ args: PendingTool.UpdateFileArgs,
                                    finalContent: String)
         async -> UpdateFileSheet.ConfirmResult
     {
-        // In auto-edit mode the write happens with no confirmation sheet, so
-        // require an EXACT attached-path match — don't let the lenient basename
-        // fallback silently redirect a write onto a different attached file.
-        guard let match = matchingAttachment(for: args.path,
-                                             allowBasenameFallback: editMode != .auto) else {
-            return .failure(editMode == .auto
-                ? "Auto-edit can only write a file whose exact path is attached — refusing to write '\(args.path)'."
-                : "That file isn't attached to this chat — refusing to write.")
+        let edit: ProposedEdit
+        switch resolveEdit(args) {
+        case .failure(let err): return .failure(err.message)
+        case .success(let e): edit = e
         }
-        // Write to the authoritative attached path, not the LLM-emitted path.
-        // A basename-fallback match can make args.path diverge from match.path,
-        // which would overwrite the wrong file.
-        let absolute = PathUtils.canonicalise(match.path)
+        // Write to the resolved path, never the LLM-emitted one: a
+        // basename-fallback match or a relative path makes args.path diverge
+        // from the real target, and writing the former overwrites the wrong file.
+        let absolute = edit.absolutePath
         let url = URL(fileURLWithPath: absolute)
         do {
             try finalContent.write(to: url, atomically: true, encoding: .utf8)
             // Track this file for File → PR automation
-            attachmentState.modifiedFiles.insert(match.path)
+            attachmentState.modifiedFiles.insert(edit.displayPath)
         } catch {
             return .failure("Couldn't write \(absolute): \(error.localizedDescription)")
         }
@@ -308,15 +288,20 @@ extension CodeAssistantPanel {
         // to edit it — that's done — and leaving the (now-written) chip in place
         // just re-sends the whole file on every later turn. Remove only THIS
         // file's chip (other attachments stay), and clear the auto-attach
-        // bookkeeping if it was the auto-attached file. `match` is a value copy,
-        // so the line-delta math below still sees the pre-write content.
-        attachmentState.attachments.removeAll { $0.path == match.path }
-        if autoAttachedPath == match.path { autoAttachedPath = nil }
+        // bookkeeping if it was the auto-attached file. Only for an attached
+        // target: a workspace file has no chip to retire. `edit` holds a copy of
+        // the pre-write content, so the line-delta math below is unaffected.
+        if edit.source == .attachment {
+            attachmentState.attachments.removeAll { PathUtils.canonicalise($0.path) == absolute }
+            if let auto = autoAttachedPath, PathUtils.canonicalise(auto) == absolute {
+                autoAttachedPath = nil
+            }
+        }
         self.agent.pendingTool = nil
 
         // Synthetic acknowledgement turn so the agent can react.
         let basename = (absolute as NSString).lastPathComponent
-        let oldLineCount = match.content.components(separatedBy: "\n").count
+        let oldLineCount = edit.original.components(separatedBy: "\n").count
         let newLineCount = finalContent.components(separatedBy: "\n").count
         let delta = newLineCount - oldLineCount
         let deltaStr = delta == 0
@@ -526,9 +511,8 @@ extension CodeAssistantPanel {
     ) async {
         // Fast path: in Auto mode, apply a proposed file edit immediately
         // instead of surfacing the card + popup. Scoped to `update-file`
-        // (confirmUpdateFile enforces the attached-files-only guard, and
-        // leaves the card up if the file isn't attached); GitLab actions
-        // keep their confirmation.
+        // (confirmUpdateFile resolves and guards the target, and leaves the
+        // card up if it can't); GitLab actions keep their confirmation.
         if editMode == .auto, autoGitOpsThisTurn < Self.maxAutoGitOpsPerTurn,
            let pt = pendingTool, let args = pt.updateFileArgs {
             // Data-loss guard: if the server CUT this file to fit the prompt,
@@ -537,15 +521,31 @@ extension CodeAssistantPanel {
             // confirmation card (its diff makes the loss visible) instead of
             // applying. matchingAttachment uses the same exact-path rule
             // confirmUpdateFile enforces in auto mode.
+            //
+            // ONLY whole-file (`content`) proposals are at risk: an anchored
+            // old_text/new_text edit rewrites just the matched region, so a
+            // truncated view of the file can't cost the tail — and refusing
+            // those would block auto-edit for exactly the files it is most
+            // useful on (the large ones the agent read in slices).
             let truncated = Set(usage?.truncatedPaths ?? [])
-            if let match = matchingAttachment(for: args.path, allowBasenameFallback: false),
+            let isWholeFileRewrite = args.content != nil
+            if isWholeFileRewrite,
+               let match = matchingAttachment(for: args.path, allowBasenameFallback: false),
                truncated.contains(match.path) {
                 let basename = (match.path as NSString).lastPathComponent
                 self.error = "“\(basename)” was too large to send in full, so auto-edit is disabled for it — review the proposed change before applying."
                 // Leave pendingTool in place (already stored via finishStreamingTurn) so the card shows.
             } else {
-                autoGitOpsThisTurn += 1
-                _ = await confirmUpdateFile(args, finalContent: args.content)
+                switch resolveEdit(args) {
+                case .success(let edit):
+                    autoGitOpsThisTurn += 1
+                    _ = await confirmUpdateFile(args, finalContent: edit.proposed)
+                case .failure(let err):
+                    // Unresolvable (anchor missed, path outside the project, …).
+                    // Surface it and leave the card so the user can review,
+                    // rather than silently dropping the agent's edit.
+                    self.error = err.message
+                }
             }
         }
         // Auto-run the proposed git op when allowed (see shouldAutoRunGitOp);

@@ -73,11 +73,11 @@ extension CodeAssistantPanel {
         Group {
             if let pt = agent.pendingTool,
                let args = pt.updateFileArgs,
-               let match = matchingAttachment(for: args.path) {
+               let edit = pendingEdit {
                 UpdateFileSheet(
-                    initialArgs: args,
-                    originalContent: match.content,
-                    displayPath: match.path,
+                    proposedContent: edit.proposed,
+                    originalContent: edit.original,
+                    displayPath: edit.displayPath,
                     onConfirm: { editedContent in
                         await confirmUpdateFile(args, finalContent: editedContent)
                     }
@@ -86,9 +86,11 @@ extension CodeAssistantPanel {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("File update unavailable")
                         .font(.headline)
-                    Text("The agent proposed a path that doesn't match any attached file.")
+                    Text(pendingEditFailureReason
+                         ?? "The agent proposed a path that couldn't be resolved to a file.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if let pt = agent.pendingTool, let args = pt.updateFileArgs {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Agent's path").font(.caption).foregroundStyle(.secondary)

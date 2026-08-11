@@ -47,6 +47,12 @@ struct ChatMessageList: View {
     let onGitOp: (GitOpArgs) async -> Void
     /// Wraps `CodeAssistantPanel.runBashCommand(_:)`.
     let onBash: (BashArgs?) async -> Void
+    /// Wraps `CodeAssistantPanel.applyPendingEdit()` — writes the proposed file
+    /// edit with no review step (the card's inline Apply).
+    let onApplyEdit: () async -> Void
+    /// Wraps `CodeAssistantPanel.skipPendingEdit()` — declines it and tells the
+    /// agent so, so the loop isn't left holding an unanswered write.
+    let onSkipEdit: () async -> Void
 
     @EnvironmentObject var theme: ThemeStore
 
@@ -83,7 +89,20 @@ struct ChatMessageList: View {
                             if let pt = pendingTool,
                                turn.id == history.last?.id,
                                turn.role == .assistant {
-                                PendingActionCard(pendingTool: pt, diffPreview: diffPreview) {
+                                PendingActionCard(
+                                    pendingTool: pt,
+                                    diffPreview: diffPreview,
+                                    editActions: pt.kind == .updateFile
+                                        ? .init(apply: onApplyEdit,
+                                                skip: onSkipEdit,
+                                                // No resolvable diff (or a
+                                                // no-op one) means there is
+                                                // nothing to apply — Review
+                                                // still opens and explains why.
+                                                canApply: (diffPreview?.added ?? 0) > 0
+                                                       || (diffPreview?.removed ?? 0) > 0)
+                                        : nil
+                                ) {
                                     switch pt.kind {
                                     case .createIssue:
                                         sheets.showingIssueSheet = true
