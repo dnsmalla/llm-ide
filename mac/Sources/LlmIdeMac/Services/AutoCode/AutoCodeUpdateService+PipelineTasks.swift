@@ -542,7 +542,7 @@ extension AutoCodeUpdateService {
         } else {
             lines.append("Graph: not generated yet — auto-generates on open.")
         }
-        let memDir = repo.appendingPathComponent("graphify-out/memory")
+        let memDir = ProjectLayout(root: repo).memoryDir
         let mem = ((try? FileManager.default.contentsOfDirectory(atPath: memDir.path)) ?? [])
             .filter { $0.hasSuffix(".md") }.sorted()
         lines.append(mem.isEmpty ? "Memory: none yet." : "Memory: \(mem.joined(separator: ", "))")

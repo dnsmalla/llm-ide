@@ -46,6 +46,18 @@ struct ProjectLayout {
     var graphDir:    URL { systemDir.appendingPathComponent("graph", isDirectory: true) }
     // Code notes are written directly to graph/ (not graph/notes/) - graph OF notes
     var graphNotesDir: URL { graphDir }
+    /// Agent-facing memory artifacts (`graph-notes.md`, `doc-notes.md`, and the
+    /// extension-written `chat-memory.md`). Mirrors `graphkit/paths.mjs` on the
+    /// server side — one directory, one file per artifact, rewritten in place.
+    ///
+    /// NOT to be confused with `memorySubdir` below: that is the CONTAINER
+    /// (`system`) MemoryStore appends `faults/` and `q&a/` to. This is a
+    /// sibling of those, i.e. `system/memory`.
+    ///
+    /// Previously these files lived in `<repo>/graphify-out/memory/` — a
+    /// directory owned by the separate `/graphify` skill, which writes its own
+    /// `graphify-out/graph.json` there. Two producers in one tree; now one.
+    var memoryDir:   URL { systemDir.appendingPathComponent("memory", isDirectory: true) }
     var indexDB:     URL { systemDir.appendingPathComponent("index.sqlite") }
     var syncJSON:    URL { systemDir.appendingPathComponent("sync.json") }
     var cacheDir:    URL { systemDir.appendingPathComponent("cache", isDirectory: true) }

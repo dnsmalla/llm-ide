@@ -32,7 +32,7 @@ struct GraphMemorySettingsSection: View {
                         statusRow("Last generated", when, ok: true)
                     }
                     Divider().padding(.vertical, 2)
-                    Text("Agent memory files (graphify-out/memory)")
+                    Text("Agent memory files (system/memory)")
                         .font(Typography.caption)
                         .foregroundStyle(theme.current.textMuted)
                     ForEach(state.memoryFiles) { f in
@@ -141,11 +141,15 @@ struct GraphMemoryState {
         var s = GraphMemoryState()
         s.repoLabel = repo.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
 
-        let graphIndex = repo.appendingPathComponent("system/graph/index.md")
+        let layout = ProjectLayout(root: repo)
+        let graphIndex = layout.graphDir.appendingPathComponent("index.md")
         s.hasGraph = fm.fileExists(atPath: graphIndex.path)
 
-        let memDir = repo.appendingPathComponent("graphify-out/memory")
-        let names = ["repo.md", "graph-notes.md", "doc-notes.md", "chat-memory.md"]
+        // One directory, one file per artifact — see graphkit/paths.mjs. The
+        // repo overview is NOT listed here: it is `system/graph/index.md`
+        // (covered by `hasGraph` above), not a second copy in the memory dir.
+        let memDir = layout.memoryDir
+        let names = ["graph-notes.md", "doc-notes.md", "chat-memory.md"]
         var newestMtime: Date?
         for name in names {
             let url = memDir.appendingPathComponent(name)
@@ -166,27 +170,43 @@ struct GraphMemoryState {
             }
         }
 
-        // Node counts from repo.md's header line: "N code nodes · M doc nodes · E edges."
-        if let repoBody = try? String(contentsOf: memDir.appendingPathComponent("repo.md"), encoding: .utf8) {
-            s.counts = parseCounts(repoBody)
+        // Node counts come from graph-notes.md, which always carries
+        // "- Code nodes: N / - Doc nodes: M / - Edges: E". (This used to parse
+        // repo.md, which in the normal case was a copy of index.md — "# Codebase
+        // Index", no node counts — so the card read blank on exactly the repos
+        // that DID have a graph.)
+        if let body = try? String(contentsOf: memDir.appendingPathComponent("graph-notes.md"),
+                                  encoding: .utf8) {
+            s.counts = parseCounts(body)
         }
         if let mtime = newestMtime { s.lastGenerated = relativeAge(mtime) }
         return s
     }
 
-    private static func parseCounts(_ body: String) -> Counts? {
-        // Tolerant scan for "<int> code nodes ... <int> doc nodes ... <int> edges".
-        func firstInt(before keyword: String, in text: String) -> Int? {
-            guard let r = text.range(of: keyword) else { return nil }
-            let prefix = text[text.startIndex..<r.lowerBound]
-            let digits = prefix.reversed().prefix { $0 == " " || $0.isNumber }
-            let num = String(digits.reversed()).trimmingCharacters(in: .whitespaces)
-            return Int(num)
+    /// Reads counts written in either of the two shapes the memory artifact
+    /// produces, case-insensitively:
+    ///   • graph-notes.md — "- Code nodes: 12"  (number AFTER the label)
+    ///   • repo.md fallback — "12 code nodes · 3 doc nodes · 45 edges."
+    ///     (number BEFORE the label)
+    static func parseCounts(_ body: String) -> Counts? {
+        func intAfter(_ keyword: String) -> Int? {
+            guard let r = body.range(of: keyword, options: .caseInsensitive) else { return nil }
+            let rest = body[r.upperBound...].drop { $0 == "s" || $0 == ":" || $0 == " " }
+            let digits = rest.prefix { $0.isNumber }
+            return digits.isEmpty ? nil : Int(digits)
         }
-        guard let code = firstInt(before: "code node", in: body),
-              let doc = firstInt(before: "doc node", in: body) else { return nil }
-        let edges = firstInt(before: "edge", in: body) ?? 0
-        return Counts(code: code, doc: doc, edges: edges)
+        func intBefore(_ keyword: String) -> Int? {
+            guard let r = body.range(of: keyword, options: .caseInsensitive) else { return nil }
+            let digits = body[body.startIndex..<r.lowerBound].reversed().prefix { $0 == " " || $0.isNumber }
+            return Int(String(digits.reversed()).trimmingCharacters(in: .whitespaces))
+        }
+        func count(_ keyword: String) -> Int? { intAfter(keyword) ?? intBefore(keyword) }
+
+        guard let code = count("code node"), let doc = count("doc node") else { return nil }
+        // Plural deliberately: the fallback body opens with "# Repository
+        // knowledge graph", and the singular "edge" matches inside "knowledge"
+        // — which is why the edge count always read 0 there. "edges" doesn't.
+        return Counts(code: code, doc: doc, edges: count("edges") ?? 0)
     }
 
     private static func byteLabel(_ bytes: Int) -> String {

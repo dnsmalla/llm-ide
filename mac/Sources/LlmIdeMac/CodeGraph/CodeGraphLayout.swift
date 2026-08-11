@@ -35,14 +35,10 @@ public enum CodeGraphLayout {
                 let r = maxRadius * (0.5 + 0.5 * Double(ring + 1) / 3)
                 let x = center.x + cos(angle) * r
                 let y = center.y + sin(angle) * r
-                var placed = node
-                placed.position = CGPoint(x: x, y: y)
-                // CGNode.position is `var`; rebuild via init since other fields are `let`.
                 laidOut.append(CGNode(
                     id: node.id, title: node.title, kind: node.kind,
                     position: CGPoint(x: x, y: y), metadata: node.metadata
                 ))
-                _ = placed // silence unused warning
             }
         }
 

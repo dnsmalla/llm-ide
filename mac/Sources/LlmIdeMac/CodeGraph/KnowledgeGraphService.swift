@@ -78,9 +78,10 @@ final class KnowledgeGraphService: ObservableObject {
     ///   - codeRepoRoot: the git repo to scan for code (nil skips the code track).
     ///   - docRoots: folders whose docs feed InfiniteBrain (typically the
     ///     project's `llm-doc/` and `data/` dirs). Missing folders are skipped.
-    ///   - memoryRoot: when set, write the agent-facing memory artifact under
-    ///     `<memoryRoot>/graphify-out/memory/` (the path the extension reads).
-    ///     Pass the repo the user has indexed in the extension.
+    ///   - memoryRoot: when set, write the agent-facing memory artifacts under
+    ///     `<memoryRoot>/system/memory/` (the path the extension reads — see
+    ///     `graphkit/paths.mjs`). Pass the repo the user has indexed in the
+    ///     extension.
     func generate(codeRepoRoot: URL?, docRoots: [URL], memoryRoot: URL? = nil) async {
         // Coalesce: if a run is in flight, stash the latest request and replay
         // it once when the current run finishes — so a project switch (or any
@@ -154,8 +155,8 @@ final class KnowledgeGraphService: ObservableObject {
         // Stage 2 — unify code + doc into one graph, with doc→code cross-links.
         mergedGraph = Self.merge(code: codeGraph, doc: doc.graph, chunks: doc.chunks)
 
-        // Stage 4 — write the agent-facing memory artifact where the extension
-        // reads it (graphify-out/memory/), fixing the previously-empty memory.
+        // Stage 4 — write the agent-facing memory artifacts where the extension
+        // reads them (system/memory/), fixing the previously-empty memory.
         if let memoryRoot {
             let code = codeGraph, docData = docGraph, mg = mergedGraph
             let chunks = doc.chunks, dCount = doc.docCount
@@ -169,42 +170,97 @@ final class KnowledgeGraphService: ObservableObject {
         phase = .complete(codeNodes: codeGraph.nodes.count, docNodes: docGraph.nodes.count)
     }
 
-    /// Stage 4 — render the merged graph to the memory artifact the extension
-    /// agent reads (`<root>/graphify-out/memory/`): `repo.md` (reusing the code
-    /// graph's impact-ranked `system/graph/index.md` when present) and
-    /// `graph-notes.md` (a rendering of the merged graph). Writing these files
-    /// is what finally makes the agent's "Repository memory" block non-empty —
-    /// no extension change needed since the reader already targets this path.
+    /// Stage 4 — render the merged graph to the memory artifacts the extension
+    /// agent reads, in `<root>/system/memory/`: `graph-notes.md` (cross-links +
+    /// dependency hubs) and `doc-notes.md` (doc sections + module affinity).
+    /// Writing these is what makes the agent's "Repository memory" block
+    /// non-empty.
+    ///
+    /// Two things this deliberately does NOT do:
+    ///
+    ///  • It does not write a `repo.md`. That file used to be a byte-for-byte
+    ///    COPY of the code graph's `system/graph/index.md`, rewritten every
+    ///    generation — a second file with the same content that could only
+    ///    drift. The reader now reads `index.md`, the one file that owns it.
+    ///    (The old no-index fallback body carried node counts; `graph-notes.md`
+    ///    already carries the same counts, so nothing is lost.)
+    ///  • It does not write into `graphify-out/`. That tree belongs to the
+    ///    separate `/graphify` skill; `migrateLegacyMemoryDir` moves any
+    ///    leftovers out of it once.
+    ///
+    /// Writes are idempotent: a file whose content is unchanged is left
+    /// untouched, so mtimes only move on a real change (the extension surfaces
+    /// "updated N minutes ago" from them) and unchanged regenerations don't
+    /// churn the watcher or the disk.
     nonisolated static func writeMemoryArtifact(to repoRoot: URL, code: CGData, doc: CGData, merged: CGData,
                                                 docCount: Int, chunks: [MemoryChunk]) {
-        let memDir = repoRoot.appendingPathComponent("graphify-out", isDirectory: true)
-            .appendingPathComponent("memory", isDirectory: true)
+        let memDir = ProjectLayout(root: repoRoot).memoryDir
         do {
             try FileManager.default.createDirectory(at: memDir, withIntermediateDirectories: true)
         } catch {
             log.error("memory artifact: mkdir failed at \(memDir.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return
         }
-        // repo.md — reuse the code graph's index.md (impact-ranked summary) if
-        // it exists; otherwise a minimal generated summary.
-        let indexMD = ProjectLayout(root: repoRoot).graphDir.appendingPathComponent("index.md")
-        let repoBody: String
-        if let idx = try? String(contentsOf: indexMD, encoding: .utf8), !idx.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            repoBody = idx
-        } else {
-            repoBody = "# Repository knowledge graph\n\n\(code.nodes.count) code nodes · \(doc.nodes.count) doc nodes · \(merged.edges.count) edges.\n"
-        }
+        migrateLegacyMemoryDir(repoRoot: repoRoot, into: memDir)
+        // Self-ignoring marker, same as system/graph: these are generated files
+        // inside the USER's repo, whose .gitignore we don't control, so without
+        // this they'd flood their Source Control view. (`system/faults` and
+        // `system/q&a` are deliberately NOT covered — those are meant to be
+        // committed, which is why the marker sits here and not on `system/`.)
+        try? "*\n".write(to: memDir.appendingPathComponent(".gitignore"),
+                         atomically: true, encoding: .utf8)
         do {
-            try repoBody.write(to: memDir.appendingPathComponent("repo.md"), atomically: true, encoding: .utf8)
-            try renderGraphNotes(code: code, doc: doc, merged: merged, chunks: chunks)
-                .write(to: memDir.appendingPathComponent("graph-notes.md"), atomically: true, encoding: .utf8)
-            try renderDocNotes(docCount: docCount, chunks: chunks)
-                .write(to: memDir.appendingPathComponent("doc-notes.md"), atomically: true, encoding: .utf8)
+            try writeIfChanged(renderGraphNotes(code: code, doc: doc, merged: merged, chunks: chunks),
+                               to: memDir.appendingPathComponent("graph-notes.md"))
+            try writeIfChanged(renderDocNotes(docCount: docCount, chunks: chunks),
+                               to: memDir.appendingPathComponent("doc-notes.md"))
         } catch {
             // Don't fail silently — a write error means the agent keeps reading
             // stale/empty memory with no signal otherwise.
             log.error("memory artifact: write failed at \(memDir.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    /// Write `body` only when it differs from what's on disk. Returns true when
+    /// the file was actually written.
+    @discardableResult
+    nonisolated static func writeIfChanged(_ body: String, to url: URL) throws -> Bool {
+        if let existing = try? String(contentsOf: url, encoding: .utf8), existing == body { return false }
+        try body.write(to: url, atomically: true, encoding: .utf8)
+        return true
+    }
+
+    /// One-time move of pre-consolidation artifacts out of the `/graphify`
+    /// skill's tree and into `system/memory/`.
+    ///
+    /// Only `chat-memory.md` is carried over — it holds LLM-curated facts that
+    /// cannot be regenerated, and only when the destination doesn't already have
+    /// one (a newer file must never be clobbered by a stale one). The other
+    /// files are regenerated from the graph on this very run, and `repo.md` no
+    /// longer exists at all, so they're simply deleted. The legacy directory is
+    /// then removed if empty, leaving `graphify-out/` to its actual owner.
+    nonisolated static func migrateLegacyMemoryDir(repoRoot: URL, into memDir: URL) {
+        let fm = FileManager.default
+        let legacy = repoRoot.appendingPathComponent("graphify-out", isDirectory: true)
+            .appendingPathComponent("memory", isDirectory: true)
+        guard fm.fileExists(atPath: legacy.path) else { return }
+
+        let carried = "chat-memory.md"
+        let src = legacy.appendingPathComponent(carried)
+        let dst = memDir.appendingPathComponent(carried)
+        if fm.fileExists(atPath: src.path) && !fm.fileExists(atPath: dst.path) {
+            do { try fm.moveItem(at: src, to: dst) }
+            catch { log.error("memory migration: could not carry \(carried, privacy: .public) forward: \(error.localizedDescription, privacy: .public)") }
+        }
+        for name in ["repo.md", "graph-notes.md", "doc-notes.md", carried] {
+            try? fm.removeItem(at: legacy.appendingPathComponent(name))
+        }
+        // Only removes the directory when nothing else is in it — a `/graphify`
+        // artifact that happens to live under memory/ is not ours to delete.
+        if let rest = try? fm.contentsOfDirectory(atPath: legacy.path), rest.isEmpty {
+            try? fm.removeItem(at: legacy)
+        }
+        log.info("migrated legacy memory dir for \(repoRoot.lastPathComponent, privacy: .public)")
     }
 
     /// Render `graph-notes.md`: counts plus the doc→code cross-links (the
@@ -232,9 +288,16 @@ final class KnowledgeGraphService: ObservableObject {
             $0.kind == .references && docTitle[$0.fromId] != nil && codeIds.contains($0.toId)
         }
         if !crossLinks.isEmpty {
+            let shown = 50
             out += "## Doc → code references\n"
-            for e in crossLinks.prefix(50) {
+            for e in crossLinks.prefix(shown) {
                 out += "- \(docTitle[e.fromId] ?? e.fromId) → \(codeTitle[e.toId] ?? e.toId)\n"
+            }
+            // Say so when the list is cut off. Without this the agent reads a
+            // truncated list as the complete set of doc→code links and can
+            // conclude a real reference doesn't exist.
+            if crossLinks.count > shown {
+                out += "- …and \(crossLinks.count - shown) more (list truncated)\n"
             }
             out += "\n"
         }
@@ -247,11 +310,17 @@ final class KnowledgeGraphService: ObservableObject {
         for e in code.edges where e.kind == .imports {
             inDegree[e.toId, default: 0] += 1
         }
-        let hubs = inDegree.sorted { ($0.value, $1.key) > ($1.value, $0.key) }.prefix(10)
+        let ranked = inDegree.sorted { ($0.value, $1.key) > ($1.value, $0.key) }
+        let hubs = ranked.prefix(10)
         if !hubs.isEmpty {
             out += "## Dependency hubs\n"
             for (id, count) in hubs {
                 out += "- \(codeTitle[id] ?? id) — imported by \(count)\n"
+            }
+            // Ranked list — mark it as a top-N so the agent doesn't read the
+            // absence of a module here as "nothing imports it".
+            if ranked.count > hubs.count {
+                out += "- …top \(hubs.count) of \(ranked.count) imported modules\n"
             }
             out += "\n"
         }
@@ -389,6 +458,19 @@ final class KnowledgeGraphService: ObservableObject {
     /// doc-extension file under the roots, hashed. Stat-only (no file reads),
     /// so re-running when nothing changed is near-free; the doc track recomputes
     /// only when a doc is added, removed, or edited.
+    ///
+    /// The walk MUST mirror `MemoryGenerator.collectDocs` — same extension set,
+    /// same size cap, same file cap, and crucially the same `ExcludedDirs`
+    /// pruning. Omitting the exclusions made the fingerprint cover files the
+    /// generator never ingests, which broke the cache in both directions:
+    ///
+    ///   • every regen rewrites `graphify-out/memory/*.md` and one
+    ///     `system/graph/<path>.md` per code file — all doc-extension files —
+    ///     so the fingerprint changed on EVERY run and the cache never hit
+    ///     (nor did the view's manual-regenerate skip);
+    ///   • those generated notes (plus `node_modules` READMEs) could fill the
+    ///     500-entry cap before the walk reached a real doc, so an actual doc
+    ///     edit left the fingerprint unchanged and the doc graph went stale.
     nonisolated static func docSetFingerprint(roots: [URL]) -> String {
         // Bound the walk to the same window MemoryGenerator actually ingests
         // (maxFiles 500 / 2 MB per file) so the fingerprint covers exactly the
@@ -407,6 +489,11 @@ final class KnowledgeGraphService: ObservableObject {
             guard let en = fm.enumerator(at: root, includingPropertiesForKeys: keys,
                                          options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
             for case let url as URL in en {
+                // Same vendor/build/generated-output pruning collectDocs applies.
+                // Same vendor/build/generated-output pruning collectDocs applies.
+                if let name = url.pathComponents.last, ExcludedDirs.names.contains(name) {
+                    en.skipDescendants(); continue
+                }
                 guard FileClassifier.docExtensions.contains(url.pathExtension.lowercased()) else { continue }
                 let vals = try? url.resourceValues(forKeys: Set(keys))
                 guard vals?.isRegularFile == true else { continue }

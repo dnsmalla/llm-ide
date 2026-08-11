@@ -6,11 +6,14 @@ import os
 /// couple of seconds after an edit instead of waiting for `GraphAutoUpdater`'s
 /// periodic (15-min) timer.
 ///
-/// Feedback-loop safety: the regen itself WRITES to `system/`, `graphify-out/`,
-/// and `.code-notes/`. Events whose paths are *all* under a regen-output / VCS /
-/// build directory are ignored, so a regenerated graph or memory file can never
-/// retrigger the watcher. The debounce then coalesces a burst of saves into one
-/// regen, and the regen is content-hash incremental, so extra ticks are cheap.
+/// Feedback-loop safety: the regen itself WRITES to `system/` (graph + memory)
+/// and `.code-notes/` (the scan cache). Events whose paths are *all* under a
+/// generated-output / VCS / build directory are ignored, so a regenerated graph
+/// or memory file can never retrigger the watcher. `graphify-out/` stays on the
+/// list even though we no longer write there: it is the `/graphify` skill's
+/// output tree, and its rebuilds shouldn't drive ours either. The debounce then
+/// coalesces a burst of saves into one regen, and the regen is content-hash
+/// incremental, so extra ticks are cheap.
 ///
 /// Thread-safety: FSEvents delivers on `queue`; all mutable state is touched
 /// only on `queue` (callback) or via `queue.sync` (stop), so the
