@@ -1,6 +1,37 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ChatContainer, { type ChatMessage } from './ChatContainer';
 
+// Minimal shape of the Web Speech API surface this component uses. The DOM lib
+// ships no `SpeechRecognition` types (it is still vendor-prefixed), which is why
+// every handler here was typed `any`; declaring just the members we touch keeps
+// the callbacks checked without pulling in a dependency.
+interface SpeechRecognitionAlternative { transcript: string }
+interface SpeechRecognitionResult {
+  readonly isFinal: boolean;
+  readonly length: number;
+  [index: number]: SpeechRecognitionAlternative;
+}
+interface SpeechRecognitionResultList {
+  readonly length: number;
+  [index: number]: SpeechRecognitionResult;
+}
+interface SpeechRecognitionEventLike {
+  readonly resultIndex: number;
+  readonly results: SpeechRecognitionResultList;
+}
+interface SpeechRecognitionErrorEventLike { readonly error: string }
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  onstart: (() => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+}
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+
 interface ChatWithVoiceProps {
   messages: ChatMessage[];
   isLoading: boolean;
@@ -37,23 +68,30 @@ export default function ChatWithVoice({
 }: ChatWithVoiceProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [input, setInput] = useState('');
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const recognitionRef = useRef<any>(null);
+  // NOTE: transcription runs through the Web Speech API (`recognitionRef`), not
+  // MediaRecorder. The `mediaRecorderRef`/`audioChunksRef` that used to sit here
+  // were never assigned or read — leftovers of a raw-audio path this component
+  // no longer takes.
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
   // Initialize Web Speech API
   useEffect(() => {
-    const SpeechRecognition = window.webkitSpeechRecognition || (window as any).SpeechRecognition;
+    const w = window as unknown as {
+      webkitSpeechRecognition?: SpeechRecognitionCtor;
+      SpeechRecognition?: SpeechRecognitionCtor;
+    };
+    const SpeechRecognition = w.webkitSpeechRecognition || w.SpeechRecognition;
     if (SpeechRecognition) {
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = true;
-      recognitionRef.current.interimResults = true;
+      const recognition = new SpeechRecognition();
+      recognitionRef.current = recognition;
+      recognition.continuous = true;
+      recognition.interimResults = true;
 
-      recognitionRef.current.onstart = () => {
+      recognition.onstart = () => {
         setIsRecording(true);
       };
 
-      recognitionRef.current.onresult = (event: any) => {
+      recognition.onresult = (event: SpeechRecognitionEventLike) => {
         let interimTranscript = '';
         let finalTranscript = '';
 
@@ -80,12 +118,12 @@ export default function ChatWithVoice({
         }
       };
 
-      recognitionRef.current.onerror = (event: any) => {
+      recognition.onerror = (event: SpeechRecognitionErrorEventLike) => {
         console.error('Speech recognition error', event.error);
         setIsRecording(false);
       };
 
-      recognitionRef.current.onend = () => {
+      recognition.onend = () => {
         setIsRecording(false);
       };
     }
@@ -110,14 +148,6 @@ export default function ChatWithVoice({
       if (onMobileCommand) {
         onMobileCommand(`send:${cleanedMsg}`);
       }
-    }
-  };
-
-  const handleInputChange = (value: string) => {
-    setInput(value);
-    // Real-time feedback to mobile
-    if (onMobileCommand && value) {
-      onMobileCommand(`typing:${value}`);
     }
   };
 

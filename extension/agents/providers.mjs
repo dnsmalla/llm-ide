@@ -53,7 +53,11 @@ export const PROVIDERS = {
 export const PROVIDER_IDS = Object.keys(PROVIDERS);
 
 const DEFAULT_OPENAI_BASE = 'https://api.openai.com/v1';
-const DEFAULT_DEEPSEEK_BASE = 'https://api.deepseek.com';
+// DeepSeek's API root. Exported because the same literal was otherwise
+// re-typed at every call site (runtime.mjs's completeViaApi call,
+// llm_agent/runtime/route.mjs's native-loop base) — one of which is how this
+// constant ended up declared-but-unused in the first place.
+export const DEFAULT_DEEPSEEK_BASE = 'https://api.deepseek.com';
 
 // ── SSRF guard ────────────────────────────────────────────────────────
 //
@@ -850,7 +854,7 @@ const MODELS_ENDPOINT = {
     headers: { Authorization: `Bearer ${key}` } }),
   google: (key) => ({ url: `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`,
     headers: {} }),
-  deepseek: (key) => ({ url: 'https://api.deepseek.com/v1/models',
+  deepseek: (key) => ({ url: `${DEFAULT_DEEPSEEK_BASE}/v1/models`,
     headers: { Authorization: `Bearer ${key}` } }),
 };
 

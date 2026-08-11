@@ -1,8 +1,18 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
+
+/** Payload accompanying a mobile command — only `scroll` carries one today. */
+interface MobileCommandData { direction?: 'up' | 'down' }
+
+interface QuickAction {
+  id: string;
+  label: string;
+  command: string;
+  data?: MobileCommandData;
+}
 
 interface MobileControlProps {
   isConnected: boolean;
-  onCommand: (command: string, data?: any) => void;
+  onCommand: (command: string, data?: MobileCommandData) => void;
   onConnect: () => void;
   onDisconnect: () => void;
 }
@@ -15,7 +25,7 @@ export default function MobileControl({
 }: MobileControlProps) {
   const [showQuickActions, setShowQuickActions] = useState(false);
 
-  const quickActions = [
+  const quickActions: QuickAction[] = [
     { id: 'scroll-up', label: '⬆️ Scroll Up', command: 'mobile:scroll', data: { direction: 'up' } },
     { id: 'scroll-down', label: '⬇️ Scroll Down', command: 'mobile:scroll', data: { direction: 'down' } },
     { id: 'tap', label: '👆 Tap', command: 'mobile:tap' },
@@ -24,7 +34,7 @@ export default function MobileControl({
     { id: 'screenshot', label: '📸 Screenshot', command: 'mobile:screenshot' },
   ];
 
-  const handleQuickAction = (action: any) => {
+  const handleQuickAction = (action: QuickAction) => {
     onCommand(action.command, action.data);
   };
 

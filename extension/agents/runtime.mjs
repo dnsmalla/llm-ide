@@ -6,7 +6,7 @@ import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
-import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS, spawnCli, spawnCliStream, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch } from './providers.mjs';
+import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS, spawnCli, spawnCliStream, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch, DEFAULT_DEEPSEEK_BASE } from './providers.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 import { recordUsage, flagQuota, resolveModel as resolveUsageModel, recordRateLimits } from '../kb/usage.mjs';
 
@@ -169,7 +169,7 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
         return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl, signal, meter, tools });
       }
       if (provider === 'deepseek') {
-        return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl: 'https://api.deepseek.com', signal, meter, tools });
+        return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl: DEFAULT_DEEPSEEK_BASE, signal, meter, tools });
       }
       return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, signal, meter, tools });
     }
