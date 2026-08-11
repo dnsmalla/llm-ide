@@ -2386,3 +2386,388 @@ paths:
                         content:    { type: string }
                         seq:        { type: integer }
                         created_at: { type: string }
+
+  /kb/agent/catalog:
+    get:
+      summary: Executable skills + plugin subagents for the Code Assistant "/" menu
+      responses:
+        '200':
+          description: Catalog of skills the agent can actually dispatch
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  skills:
+                    type: object
+                    properties:
+                      global:   { type: array, items: { type: object } }
+                      internal: { type: array, items: { type: object } }
+                      plugins:  { type: array, items: { type: object } }
+                  subagents:
+                    type: object
+                    properties:
+                      plugins:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            pluginName:        { type: string }
+                            pluginDisplayName: { type: string }
+                            subagents:         { type: array, items: { type: object } }
+
+  /kb/agent/commands:
+    get:
+      summary: Slash-commands enabled for this user (powers the chat "/" autocomplete)
+      responses:
+        '200':
+          description: Commands, sorted by trigger
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  commands:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        trigger:     { type: string }
+                        description: { type: string }
+                        args:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name:     { type: string }
+                              required: { type: boolean }
+                        pluginName:  { type: string, nullable: true }
+
+  /kb/agent/skill-library:
+    get:
+      summary: Central skills-repo discovery catalog (skills the agent cannot execute)
+      description: >
+        The `skills/` + `runtime/` families NOT already in /kb/agent/catalog. The client
+        attaches a chosen skill's SKILL.md to the next request as context.
+      responses:
+        '200':
+          description: Skill library
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  repo: { type: string, nullable: true, description: Central skills repo path }
+                  skills:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:          { type: string }
+                        family:      { type: string }
+                        name:        { type: string }
+                        description: { type: string }
+                        path:        { type: string }
+
+  /kb/agent/project-memory:
+    get:
+      summary: Auto-captured chat-memory facts for a repo (project-memory viewer)
+      description: >
+        Send the client's indexedRepos candidate paths; the server resolves the FIRST
+        allow-listed one — the same target memory capture writes to — and returns its
+        absolute root so subsequent DELETEs address the same file. A repo that is not on
+        the caller's allow-list yields `{ facts: [], repo: null }` without touching disk.
+      parameters:
+        - in: query
+          name: repo
+          description: Candidate repo path; repeatable, tried in order.
+          schema: { type: array, items: { type: string } }
+        - in: query
+          name: workspaceRoot
+          description: Open Explorer folder, tried after the repo candidates.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Facts plus the resolved root
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  facts: { type: array, items: { type: string } }
+                  repo:  { type: string, nullable: true }
+    delete:
+      summary: Remove one captured fact, or clear a repo's captured facts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo]
+              properties:
+                repo:          { type: string, description: Absolute root from the GET above }
+                fact:          { type: string, description: Fact to remove (matched normalised) }
+                all:           { type: boolean, description: Clear every fact for the repo }
+                workspaceRoot: { type: string }
+      responses:
+        '200':
+          description: The remaining facts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  facts: { type: array, items: { type: string } }
+        '404': { description: Repo not on the caller's allow-list, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/agent/session-memory:
+    delete:
+      summary: Forget what one chat session taught the agent
+      description: >
+        Called when the user deletes a chat, so its captured memory does not outlive it.
+        Facts learned in other sessions are untouched — including a fact this session only
+        re-confirmed, since an update re-attributes the fact to its last writer. Facts
+        captured without a session id are never removed this way. An unresolvable repo is
+        not an error (a chat with no project attached captured nothing).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId]
+              properties:
+                sessionId:     { type: string, description: Chat session UUID (AgentContext.chatSessionId) }
+                repos:         { type: array, items: { type: string }, description: Candidate repo paths, tried in order }
+                repo:          { type: string, description: Single candidate, tried after `repos` }
+                workspaceRoot: { type: string }
+      responses:
+        '200':
+          description: Remaining facts and how many were dropped
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  facts:   { type: array, items: { type: string } }
+                  removed: { type: integer }
+                  repo:    { type: string, nullable: true }
+        '400': { description: sessionId missing, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/chat/sessions:
+    get:
+      summary: List unified chat sessions (shared by macOS + extension)
+      parameters:
+        - { in: query, name: surface, schema: { type: string } }
+        - { in: query, name: mode,    schema: { type: string } }
+        - { in: query, name: limit,   schema: { type: integer } }
+      responses:
+        '200':
+          description: Sessions, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions: { type: array, items: { type: object } }
+    post:
+      summary: Create a chat session
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:     { type: string }
+                surface:   { type: string }
+                mode:      { type: string }
+                projectId: { type: string, nullable: true }
+      responses:
+        '201':
+          description: The created session
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session: { type: object }
+
+  /kb/chat/sessions/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    get:
+      summary: Fetch one chat session with its messages
+      parameters:
+        - { in: query, name: limit, description: Max messages returned, schema: { type: integer } }
+      responses:
+        '200':
+          description: The session
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session: { type: object }
+        '404': { description: Session not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    patch:
+      summary: Rename a chat session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+      responses:
+        '200': { description: Renamed, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        '400': { description: title required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Session not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      summary: Delete a chat session and its messages
+      responses:
+        '200': { description: Deleted, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        '404': { description: Session not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/chat/sessions/{id}/messages:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string } }
+    post:
+      summary: Append a message to a chat session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:    { type: string, enum: [user, assistant, system] }
+                content: { type: string }
+                meta:    { type: object, nullable: true }
+      responses:
+        '201': { description: Appended, content: { application/json: { schema: { type: object } } } }
+        '400': { description: Invalid role or content, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Session not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      summary: Clear a session's messages, keeping the session
+      responses:
+        '200':
+          description: How many messages were cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cleared: { type: integer }
+
+  /kb/custom-providers:
+    post:
+      summary: Sync the Mac app's custom model providers to the server
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                providers: { type: array, items: { type: object } }
+      responses:
+        '200':
+          description: Synced
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  count:   { type: integer }
+        '400': { description: Invalid request body }
+        '405': { description: Method not allowed }
+
+  /kb/ingest-scip:
+    post:
+      summary: Ingest a SCIP index into the code-graph tables
+      description: >
+        `repoPath` must be on the caller's repo allow-list (compared after
+        `path.resolve`), since it is used as the graph's identity key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repoPath, scipPath]
+              properties:
+                repoPath: { type: string, description: Absolute, allow-listed repo root }
+                scipPath: { type: string, description: Path to the SCIP index file }
+                replace:  { type: boolean, default: true, description: Replace the repo's existing graph rows }
+      responses:
+        '200':
+          description: Ingest counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                additionalProperties: true
+        '400': { description: Missing args or SCIP index failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Repo path not on the allow-list, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/project/install-skills:
+    post:
+      summary: Install the central skills kit into a project folder
+      description: >
+        Used by New Project / Rebuild. The target must already contain
+        `system/project.json`, so an arbitrary path cannot be written to.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:     { type: string, description: Absolute project directory }
+                language: { type: string }
+                stacks:   { type: string }
+      responses:
+        '200': { description: Install result, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        '400': { description: INVALID_PATH / NOT_A_PROJECT, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: PATH_NOT_FOUND / KIT_MISSING, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: INSTALL_FAILED, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/project/{id}/export:
+    get:
+      summary: Export one project's knowledge-base content
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: 1–128 chars of alphanumerics / `_` / `-` (rejected otherwise, so a crafted id cannot traverse).
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,128}$' }
+      responses:
+        '200': { description: Export payload, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        '400': { description: INVALID_PROJECT_ID, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '500': { description: EXPORT_FAILED, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/slack/conversations:
+    get:
+      summary: List Slack conversations visible to the saved token
+      description: >
+        `complete: false` means pagination was cut short (a `slack_conversations_incomplete`
+        warning is logged); the returned channels are still usable.
+      responses:
+        '200':
+          description: Channels
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  channels: { type: array, items: { type: object } }
+                  complete: { type: boolean }
+        '400': { description: SLACK_NO_TOKEN — connect Slack first, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
