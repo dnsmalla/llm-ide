@@ -1,14 +1,14 @@
 import SwiftUI
 
-/// Add a skills source: a public Git URL (cloned server-side — see
-/// docs/superpowers/plans/2026-08-11-skills-sources-server.md's `addSource`)
-/// or a local directory already containing `registry.yaml` or
-/// `.claude-plugin/plugin.json` + `skills/`. Loose client-side validation
-/// only disables the submit button early; the server's
-/// `normalizeGitUrl`/`isValidSkillsSource` are the real gate, and their
+/// Add an LLM source: a public Git URL (cloned server-side — see
+/// extension/llm-sources/registry.mjs's `addSource`) or a local directory
+/// already containing `registry.yaml`, `.claude-plugin/plugin.json` +
+/// `skills/`, an `agents/` dir, or a hooks manifest. Loose client-side
+/// validation only disables the submit button early; the server's
+/// `normalizeGitUrl`/`isValidLlmSource` are the real gate, and their
 /// rejection message is what the caller (LibraryView) surfaces on failure —
 /// this sheet does not duplicate that logic.
-struct SkillsSourceAddSheet: View {
+struct LlmSourceAddSheet: View {
     let onSubmit: (_ url: String?, _ path: String?, _ ref: String?, _ name: String?) -> Void
     let onCancel: () -> Void
 
@@ -22,7 +22,7 @@ struct SkillsSourceAddSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Add skills source").font(.headline)
+            Text("Add LLM source").font(.headline)
             Picker("", selection: $kind) {
                 ForEach(Kind.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
@@ -46,7 +46,7 @@ struct SkillsSourceAddSheet: View {
                         .onSubmit { submitIfValid() }
                 }
             } else {
-                Text("A local directory containing registry.yaml, or .claude-plugin/plugin.json + skills/.")
+                Text("A local directory containing registry.yaml; .claude-plugin/plugin.json + skills/; an agents/ dir; or a hooks manifest.")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     TextField("/path/to/repo", text: $path)
@@ -89,7 +89,7 @@ struct SkillsSourceAddSheet: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.message = "Choose a skills source directory"
+        panel.message = "Choose an LLM source directory"
         panel.prompt = "Choose"
         if panel.runModal() == .OK, let chosen = panel.url {
             path = chosen.path

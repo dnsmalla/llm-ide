@@ -49,17 +49,17 @@ struct LibraryView: View {
     /// "go to Settings → Plugins to overwrite" punt now that management is
     /// wholly in Library.
     @State private var pendingReplaceInstall: ((Bool) async throws -> PluginInstallResponse)?
-    /// Registered skills sources for the current user. Loaded once on
+    /// Registered LLM sources for the current user. Loaded once on
     /// appear and refreshed after any add/toggle/update/remove — same
     /// pattern as `plugins`.
-    @State private var skillsSources: [LlmIdeAPIClient.SkillsSourceInfo] = []
-    @State private var showingSkillsSourceAddSheet = false
-    @State private var skillsSourceMessage: String?
+    @State private var llmSources: [LlmIdeAPIClient.LlmSourceInfo] = []
+    @State private var showingLlmSourceAddSheet = false
+    @State private var llmSourceMessage: String?
     /// Persisted set of COLLAPSED section ids (comma-joined). Absence ⇒
     /// expanded. One uniform mechanism drives every section's chevron.
     /// Every section is seeded collapsed so the library opens in a clean,
     /// fully-closed state; the user expands what they need. Survives relaunch.
-    @AppStorage("library.collapsedSections") private var collapsedSectionsRaw = "meetings,code,data,notes,plugins,skillsSources"
+    @AppStorage("library.collapsedSections") private var collapsedSectionsRaw = "meetings,code,data,notes,plugins,llmSources"
 
     var body: some View {
         Group {
@@ -78,7 +78,7 @@ struct LibraryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task { await load() }
         .task { await loadPlugins() }
-        .task { await loadSkillsSources() }
+        .task { await loadLlmSources() }
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
             Task { @MainActor in
                 // Refresh the meeting list. syncMeetingNotes is handled
@@ -223,12 +223,15 @@ struct LibraryView: View {
             // menu still discovers them.
             pluginsSection
 
-            // ── Skills Sources section ────────────────────────────────
-            // Registered skills repos (builtin .skills + user-added git/local
-            // sources). Discovery-only — contributes to the chat "/" menu via
-            // /kb/agent/skill-library, never to loadable agent tools. See
-            // docs/superpowers/specs/2026-08-11-skills-sources-design.md.
-            skillsSourcesSection
+            // ── LLM Sources section ────────────────────────────────────
+            // Registered LLM-resource repos (builtin .skills + user-added
+            // git/local sources), each contributing any mix of skills (chat
+            // "/" menu discovery via /kb/agent/skill-library), agents, and
+            // hooks. Agents/hooks are catalogued for display only — never
+            // invoked/executed. See
+            // docs/superpowers/specs/2026-08-11-skills-sources-design.md and
+            // docs/superpowers/specs/2026-08-12-llm-sources-rename-and-expand.md.
+            llmSourcesSection
         }
         .listStyle(.inset)
         .animation(.easeInOut(duration: 0.2), value: vm.groupedRows.map(\.group))
@@ -813,20 +816,20 @@ struct LibraryView: View {
         }
     }
 
-    // MARK: - Skills Sources section
+    // MARK: - LLM Sources section
 
     @ViewBuilder
-    private var skillsSourcesSection: some View {
+    private var llmSourcesSection: some View {
         Section {
-            if sectionExpanded("skillsSources").wrappedValue {
-                if skillsSources.isEmpty {
-                    emptyRow("No skills sources registered yet.", icon: "books.vertical")
+            if sectionExpanded("llmSources").wrappedValue {
+                if llmSources.isEmpty {
+                    emptyRow("No LLM sources registered yet.", icon: "books.vertical")
                 } else {
-                    ForEach(skillsSources) { s in
-                        SkillsSourceRow(source: s) { enabled in
+                    ForEach(llmSources) { s in
+                        LlmSourceRow(source: s) { enabled in
                             Task { await toggleSource(s.id, enabled: enabled) }
                         }
-                        .tag(ShellState.LibrarySelection.skillsSource(s.id))
+                        .tag(ShellState.LibrarySelection.llmSource(s.id))
                         .contextMenu {
                             if !s.builtin {
                                 Button(role: .destructive) {
@@ -838,21 +841,21 @@ struct LibraryView: View {
                 }
             }
         } header: {
-            skillsSourcesHeader
+            llmSourcesHeader
         }
     }
 
     /// Section header row with the "+" add menu.
     @ViewBuilder
-    private var skillsSourcesHeader: some View {
+    private var llmSourcesHeader: some View {
         unifiedSectionHeader(
-            id: "skillsSources", title: "Skills Sources", icon: "books.vertical",
-            tint: theme.current.categoryAmber, count: skillsSources.count
+            id: "llmSources", title: "LLM Sources", icon: "books.vertical",
+            tint: theme.current.categoryAmber, count: llmSources.count
         ) {
             Menu {
                 Button {
-                    showingSkillsSourceAddSheet = true
-                } label: { Label("Add skills source…", systemImage: "plus.circle") }
+                    showingLlmSourceAddSheet = true
+                } label: { Label("Add LLM source…", systemImage: "plus.circle") }
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 10, weight: .semibold))
@@ -863,64 +866,64 @@ struct LibraryView: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .frame(width: 20)
-            .help("Add a skills source")
+            .help("Add an LLM source")
         }
-        .sheet(isPresented: $showingSkillsSourceAddSheet) {
-            SkillsSourceAddSheet(onSubmit: { url, path, ref, name in
-                showingSkillsSourceAddSheet = false
+        .sheet(isPresented: $showingLlmSourceAddSheet) {
+            LlmSourceAddSheet(onSubmit: { url, path, ref, name in
+                showingLlmSourceAddSheet = false
                 Task { await addSource(url: url, path: path, ref: ref, name: name) }
             }, onCancel: {
-                showingSkillsSourceAddSheet = false
+                showingLlmSourceAddSheet = false
             })
         }
-        .alert("Skills source", isPresented: Binding(
-            get: { skillsSourceMessage != nil },
-            set: { if !$0 { skillsSourceMessage = nil } }
+        .alert("LLM source", isPresented: Binding(
+            get: { llmSourceMessage != nil },
+            set: { if !$0 { llmSourceMessage = nil } }
         )) {
-            Button("OK") { skillsSourceMessage = nil }
+            Button("OK") { llmSourceMessage = nil }
         } message: {
-            Text(skillsSourceMessage ?? "")
+            Text(llmSourceMessage ?? "")
         }
     }
 
-    /// Load registered skills sources for the Library section. Errors are
+    /// Load registered LLM sources for the Library section. Errors are
     /// swallowed — the section stays empty on failure, matching `loadPlugins`.
-    private func loadSkillsSources() async {
-        skillsSources = (try? await api.listSkillsSources()) ?? []
+    private func loadLlmSources() async {
+        llmSources = (try? await api.listLlmSources()) ?? []
     }
 
-    private func refreshSkillsSources() async {
-        skillsSources = (try? await api.listSkillsSources()) ?? []
+    private func refreshLlmSources() async {
+        llmSources = (try? await api.listLlmSources()) ?? []
     }
 
     private func toggleSource(_ id: String, enabled: Bool) async {
         do {
-            _ = try await api.toggleSkillsSource(id: id, enabled: enabled)
-            await refreshSkillsSources()
+            _ = try await api.toggleLlmSource(id: id, enabled: enabled)
+            await refreshLlmSources()
         } catch {
-            skillsSourceMessage = error.localizedDescription
+            llmSourceMessage = error.localizedDescription
         }
     }
 
     private func addSource(url: String?, path: String?, ref: String?, name: String?) async {
         do {
-            let added = try await api.addSkillsSource(url: url, path: path, ref: ref, name: name)
-            skillsSourceMessage = "Added \(added.name)."
-            await refreshSkillsSources()
+            let added = try await api.addLlmSource(url: url, path: path, ref: ref, name: name)
+            llmSourceMessage = "Added \(added.name)."
+            await refreshLlmSources()
         } catch {
-            skillsSourceMessage = error.localizedDescription
+            llmSourceMessage = error.localizedDescription
         }
     }
 
     private func removeSource(_ id: String) async {
         do {
-            try await api.removeSkillsSource(id: id)
-            if case .skillsSource(let sel) = shell.librarySelection, sel == id {
+            try await api.removeLlmSource(id: id)
+            if case .llmSource(let sel) = shell.librarySelection, sel == id {
                 shell.librarySelection = nil
             }
-            await refreshSkillsSources()
+            await refreshLlmSources()
         } catch {
-            skillsSourceMessage = error.localizedDescription
+            llmSourceMessage = error.localizedDescription
         }
     }
 

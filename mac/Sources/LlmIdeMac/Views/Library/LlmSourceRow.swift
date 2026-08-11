@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// Sidebar row for a registered skills source. Unlike `PluginLibraryRow`
+/// Sidebar row for a registered LLM source. Unlike `PluginLibraryRow`
 /// (enable toggle lives only in the detail pane), the enable toggle is
 /// INLINE here — per the design doc, since toggling a source is the single
 /// most common action (it directly gates what shows up in the chat "/" menu).
-struct SkillsSourceRow: View {
-    let source: LlmIdeAPIClient.SkillsSourceInfo
+struct LlmSourceRow: View {
+    let source: LlmIdeAPIClient.LlmSourceInfo
     let onToggle: (Bool) -> Void
 
     var body: some View {
@@ -62,6 +62,8 @@ struct SkillsSourceRow: View {
     private var subtitle: String {
         var parts: [String] = []
         if source.skillCount > 0 { parts.append("\(source.skillCount) skill\(source.skillCount == 1 ? "" : "s")") }
+        if source.agentCount > 0 { parts.append("\(source.agentCount) agent\(source.agentCount == 1 ? "" : "s")") }
+        if source.hookCount > 0 { parts.append("\(source.hookCount) hook\(source.hookCount == 1 ? "" : "s")") }
         if let v = source.version, !v.isEmpty { parts.append("v\(v)") }
         return parts.isEmpty ? "—" : parts.joined(separator: " · ")
     }
