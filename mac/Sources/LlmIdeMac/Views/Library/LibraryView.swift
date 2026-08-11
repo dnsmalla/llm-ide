@@ -49,11 +49,17 @@ struct LibraryView: View {
     /// "go to Settings → Plugins to overwrite" punt now that management is
     /// wholly in Library.
     @State private var pendingReplaceInstall: ((Bool) async throws -> PluginInstallResponse)?
+    /// Registered skills sources for the current user. Loaded once on
+    /// appear and refreshed after any add/toggle/update/remove — same
+    /// pattern as `plugins`.
+    @State private var skillsSources: [LlmIdeAPIClient.SkillsSourceInfo] = []
+    @State private var showingSkillsSourceAddSheet = false
+    @State private var skillsSourceMessage: String?
     /// Persisted set of COLLAPSED section ids (comma-joined). Absence ⇒
     /// expanded. One uniform mechanism drives every section's chevron.
     /// Every section is seeded collapsed so the library opens in a clean,
     /// fully-closed state; the user expands what they need. Survives relaunch.
-    @AppStorage("library.collapsedSections") private var collapsedSectionsRaw = "meetings,code,data,notes,plugins"
+    @AppStorage("library.collapsedSections") private var collapsedSectionsRaw = "meetings,code,data,notes,plugins,skillsSources"
 
     var body: some View {
         Group {
@@ -72,6 +78,7 @@ struct LibraryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task { await load() }
         .task { await loadPlugins() }
+        .task { await loadSkillsSources() }
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
             Task { @MainActor in
                 // Refresh the meeting list. syncMeetingNotes is handled
@@ -215,6 +222,13 @@ struct LibraryView: View {
             // the project via the central kit, and the Code Assistant "/"
             // menu still discovers them.
             pluginsSection
+
+            // ── Skills Sources section ────────────────────────────────
+            // Registered skills repos (builtin .skills + user-added git/local
+            // sources). Discovery-only — contributes to the chat "/" menu via
+            // /kb/agent/skill-library, never to loadable agent tools. See
+            // docs/superpowers/specs/2026-08-11-skills-sources-design.md.
+            skillsSourcesSection
         }
         .listStyle(.inset)
         .animation(.easeInOut(duration: 0.2), value: vm.groupedRows.map(\.group))
@@ -796,6 +810,117 @@ struct LibraryView: View {
             await refreshPlugins()
         } catch {
             pluginInstallMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Skills Sources section
+
+    @ViewBuilder
+    private var skillsSourcesSection: some View {
+        Section {
+            if sectionExpanded("skillsSources").wrappedValue {
+                if skillsSources.isEmpty {
+                    emptyRow("No skills sources registered yet.", icon: "books.vertical")
+                } else {
+                    ForEach(skillsSources) { s in
+                        SkillsSourceRow(source: s) { enabled in
+                            Task { await toggleSource(s.id, enabled: enabled) }
+                        }
+                        .tag(ShellState.LibrarySelection.skillsSource(s.id))
+                        .contextMenu {
+                            if !s.builtin {
+                                Button(role: .destructive) {
+                                    Task { await removeSource(s.id) }
+                                } label: { Label("Remove", systemImage: "trash") }
+                            }
+                        }
+                    }
+                }
+            }
+        } header: {
+            skillsSourcesHeader
+        }
+    }
+
+    /// Section header row with the "+" add menu.
+    @ViewBuilder
+    private var skillsSourcesHeader: some View {
+        unifiedSectionHeader(
+            id: "skillsSources", title: "Skills Sources", icon: "books.vertical",
+            tint: theme.current.categoryAmber, count: skillsSources.count
+        ) {
+            Menu {
+                Button {
+                    showingSkillsSourceAddSheet = true
+                } label: { Label("Add skills source…", systemImage: "plus.circle") }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(theme.current.categoryAmber.opacity(0.6))
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 20)
+            .help("Add a skills source")
+        }
+        .sheet(isPresented: $showingSkillsSourceAddSheet) {
+            SkillsSourceAddSheet(onSubmit: { url, path, ref, name in
+                showingSkillsSourceAddSheet = false
+                Task { await addSource(url: url, path: path, ref: ref, name: name) }
+            }, onCancel: {
+                showingSkillsSourceAddSheet = false
+            })
+        }
+        .alert("Skills source", isPresented: Binding(
+            get: { skillsSourceMessage != nil },
+            set: { if !$0 { skillsSourceMessage = nil } }
+        )) {
+            Button("OK") { skillsSourceMessage = nil }
+        } message: {
+            Text(skillsSourceMessage ?? "")
+        }
+    }
+
+    /// Load registered skills sources for the Library section. Errors are
+    /// swallowed — the section stays empty on failure, matching `loadPlugins`.
+    private func loadSkillsSources() async {
+        skillsSources = (try? await api.listSkillsSources()) ?? []
+    }
+
+    private func refreshSkillsSources() async {
+        skillsSources = (try? await api.listSkillsSources()) ?? []
+    }
+
+    private func toggleSource(_ id: String, enabled: Bool) async {
+        do {
+            _ = try await api.toggleSkillsSource(id: id, enabled: enabled)
+            await refreshSkillsSources()
+        } catch {
+            skillsSourceMessage = error.localizedDescription
+        }
+    }
+
+    private func addSource(url: String?, path: String?, ref: String?, name: String?) async {
+        do {
+            let added = try await api.addSkillsSource(url: url, path: path, ref: ref, name: name)
+            skillsSourceMessage = "Added \(added.name)."
+            await refreshSkillsSources()
+        } catch {
+            skillsSourceMessage = error.localizedDescription
+        }
+    }
+
+    private func removeSource(_ id: String) async {
+        do {
+            try await api.removeSkillsSource(id: id)
+            if case .skillsSource(let sel) = shell.librarySelection, sel == id {
+                shell.librarySelection = nil
+            }
+            await refreshSkillsSources()
+        } catch {
+            skillsSourceMessage = error.localizedDescription
         }
     }
 
