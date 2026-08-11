@@ -8,7 +8,9 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { getDb, ingestSources } from '../kb/db.mjs';
-import { writeCodeGraph, clearCodeGraph, deleteScipSources } from '../kb/code-graph.mjs';
+import {
+  writeCodeGraph, clearCodeGraph, deleteScipSources, GRAPH_SOURCE_SCIP,
+} from '../kb/code-graph.mjs';
 import { loadScipIndex, parseScipJson } from './scip-scanner.mjs';
 
 export async function indexScip(userId, repoPath, scipPath, opts = {}) {
@@ -52,10 +54,12 @@ export async function indexScip(userId, repoPath, scipPath, opts = {}) {
   return getDb().transaction(() => {
     if (replace) {
       deleteScipSources(userId, repoId);
-      clearCodeGraph(userId, repoId);
+      // Scoped to this producer — a structural graph for the same repo (written
+      // by the Mac app every few minutes) must survive a SCIP re-index.
+      clearCodeGraph(userId, repoId, { source: GRAPH_SOURCE_SCIP });
     }
     const written = ingestSources(userId, items);
-    const graph = writeCodeGraph(userId, repoId, cg);
+    const graph = writeCodeGraph(userId, repoId, cg, { source: GRAPH_SOURCE_SCIP });
     return { repo: repoId, symbols: written, nodes: graph.nodes, edges: graph.edges };
   })();
 }

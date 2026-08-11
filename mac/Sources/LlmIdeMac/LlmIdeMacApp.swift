@@ -178,6 +178,10 @@ public struct LlmIdeMacApp: App {
         // report events without a global singleton. Mirrors weak var config
         // on RegressionRunner.
         autoUpdater.activity = activity
+        // Lets the auto-updater ship each generated code graph to the backend
+        // (/kb/ingest-code-graph) — the server's only source of symbol-graph
+        // data for agent grounding.
+        autoUpdater.uploader.api = client
         autoCode.activity = activity
         self._autoTaskSettings = StateObject(wrappedValue: autoTaskSettingsInstance)
         self.api = client

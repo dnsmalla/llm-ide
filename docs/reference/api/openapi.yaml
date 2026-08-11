@@ -1292,6 +1292,64 @@ paths:
         '400': { description: Missing path, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '403': { description: Path not on user allow-list, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
+  /kb/ingest-code-graph:
+    post:
+      summary: Store a repo's structural code graph (nodes/edges) for agent traversal
+      description: >
+        Written by the macOS app after each knowledge-graph generation. Populates
+        `code_graph_nodes`/`code_graph_edges` with `source='structure'`, which
+        backs `findRelatedSymbols` and the code-sync agent's symbol grounding.
+        Large graphs arrive in batches — set `replace` on the first batch only,
+        otherwise each batch discards the previous one. One request accepts at
+        most 5000 nodes and 20000 edges.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repoPath, graph]
+              properties:
+                repoPath: { type: string, description: 'Absolute path to the repo root (must be on user allow-list)' }
+                replace:  { type: boolean, default: false, description: 'Clear this producer''s existing rows for the repo first (first batch only)' }
+                graph:
+                  type: object
+                  properties:
+                    nodes:
+                      type: array
+                      items:
+                        type: object
+                        required: [id]
+                        properties:
+                          id:       { type: string }
+                          title:    { type: string }
+                          kind:     { type: string, description: 'CGNodeKind raw value, e.g. file / function / classType' }
+                          metadata:
+                            type: object
+                            properties:
+                              source_file: { type: string, description: 'Repo-relative path; absolute or ..-bearing values are discarded' }
+                              line:        { type: string, description: '"L12" (a bare integer is also accepted)' }
+                              language:    { type: string }
+                              doc:         { type: string }
+                    edges:
+                      type: array
+                      items:
+                        type: object
+                        required: [fromId, toId, kind]
+                        properties:
+                          fromId:     { type: string }
+                          toId:       { type: string }
+                          kind:       { type: string, description: 'CGEdgeKind raw value, e.g. imports / calls / contains' }
+                          confidence: { type: string, default: EXTRACTED }
+      responses:
+        '200':
+          description: Stored counts for this batch, plus entries dropped as malformed
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean }, repo: { type: string }, nodes: { type: integer }, edges: { type: integer }, droppedNodes: { type: integer }, droppedEdges: { type: integer }, replaced: { type: boolean } } }
+        '400': { description: Missing fields or batch over the per-request cap, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Path not on user allow-list, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /kb/connect-github-issues:
     post:
       summary: Fetch and index GitHub issues for a repo

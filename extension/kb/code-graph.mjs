@@ -6,47 +6,75 @@
 import path from 'node:path';
 import { getDb, requireUser } from './db.mjs';
 
-const DEFAULT_EDGE_KINDS = ['implements', 'references', 'imports'];
+// Edge kinds traversed by expandSymbols. The first three are everything the
+// SCIP parser emits, so its behaviour is unchanged; `calls` exists only in the
+// structural graph, where it is the natural symbol→symbol hop ("what does this
+// function reach"). `contains` is deliberately excluded: it is file→symbol, so
+// one file seed would flood the (post-expand, pre-rank) result with every
+// symbol that file declares and crowd out genuinely related code.
+const DEFAULT_EDGE_KINDS = ['implements', 'references', 'imports', 'calls'];
 
-/** Upsert CGData { nodes, edges } for a repo. Idempotent (INSERT OR IGNORE). */
-export function writeCodeGraph(userId, repoId, cg) {
+// Graph producers (the `source` column, migration 0027). Each replaces only its
+// OWN rows, so a Mac-app regeneration can't wipe a SCIP index and vice versa.
+export const GRAPH_SOURCE_SCIP = 'scip';
+export const GRAPH_SOURCE_STRUCTURE = 'structure';
+const KNOWN_GRAPH_SOURCES = new Set([GRAPH_SOURCE_SCIP, GRAPH_SOURCE_STRUCTURE]);
+
+function requireGraphSource(source) {
+  if (!KNOWN_GRAPH_SOURCES.has(source)) throw new Error(`unknown graph source: ${source}`);
+  return source;
+}
+
+/**
+ * Upsert CGData { nodes, edges } for a repo. Idempotent (INSERT OR IGNORE).
+ * `source` tags provenance so each producer can replace only its own rows.
+ */
+export function writeCodeGraph(userId, repoId, cg, { source = GRAPH_SOURCE_SCIP } = {}) {
   requireUser(userId);
   if (!repoId || typeof repoId !== 'string') throw new Error('repoId is required');
+  requireGraphSource(source);
   const nodes = (cg && cg.nodes) || [];
   const edges = (cg && cg.edges) || [];
   const db = getDb();
   const upsertNode = db.prepare(
     `INSERT OR IGNORE INTO code_graph_nodes
-       (user_id, repo_id, symbol_id, title, kind, source_file, line, language, doc)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (user_id, repo_id, symbol_id, title, kind, source_file, line, language, doc, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const upsertEdge = db.prepare(
     `INSERT OR IGNORE INTO code_graph_edges
-       (user_id, repo_id, from_id, to_id, kind, confidence)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+       (user_id, repo_id, from_id, to_id, kind, confidence, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   const tx = db.transaction(() => {
     for (const n of nodes) {
       const m = n.metadata || {};
       const lineNum = Number(String(m.line || 'L0').replace(/^L/, '')) || 0;
       upsertNode.run(userId, repoId, n.id, n.title || n.id, n.kind || 'symbol',
-        m.source_file || '', lineNum, m.language || null, m.doc || null);
+        m.source_file || '', lineNum, m.language || null, m.doc || null, source);
     }
     for (const e of edges) {
-      upsertEdge.run(userId, repoId, e.fromId, e.toId, e.kind, e.confidence || 'EXTRACTED');
+      upsertEdge.run(userId, repoId, e.fromId, e.toId, e.kind, e.confidence || 'EXTRACTED', source);
     }
   });
   tx();
   return { nodes: nodes.length, edges: edges.length };
 }
 
-/** Delete both graph tables for a repo (used by `replace`). */
-export function clearCodeGraph(userId, repoId) {
+/**
+ * Delete graph rows for a repo (used by `replace`). Scoped to one producer's
+ * `source` — passing null clears EVERY source for the repo, which only a
+ * whole-repo teardown should do.
+ */
+export function clearCodeGraph(userId, repoId, { source = GRAPH_SOURCE_SCIP } = {}) {
   requireUser(userId);
+  if (source !== null) requireGraphSource(source);
   const db = getDb();
+  const where = source === null ? '' : ' AND source=?';
+  const args = source === null ? [userId, repoId] : [userId, repoId, source];
   const tx = db.transaction(() => {
-    db.prepare('DELETE FROM code_graph_nodes WHERE user_id=? AND repo_id=?').run(userId, repoId);
-    db.prepare('DELETE FROM code_graph_edges WHERE user_id=? AND repo_id=?').run(userId, repoId);
+    db.prepare(`DELETE FROM code_graph_nodes WHERE user_id=? AND repo_id=?${where}`).run(...args);
+    db.prepare(`DELETE FROM code_graph_edges WHERE user_id=? AND repo_id=?${where}`).run(...args);
   });
   tx();
 }

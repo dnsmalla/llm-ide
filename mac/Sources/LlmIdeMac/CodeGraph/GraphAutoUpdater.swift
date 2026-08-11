@@ -31,6 +31,12 @@ final class GraphAutoUpdater: ObservableObject {
     /// `weak var config` pattern on `RegressionRunner`.
     weak var activity: ActivityStore?
 
+    /// Ships the generated code graph to the backend so server-side agents can
+    /// traverse it. Owned here (not weak) because nothing else references it;
+    /// its `api` is wired by the app entry. Uploads are content-deduped and
+    /// best-effort — see CodeGraphUploadService.
+    let uploader = CodeGraphUploadService()
+
     private weak var projectStore: ProjectStore?
     private var intervalSeconds: TimeInterval
     private var timer: Timer?
@@ -157,6 +163,11 @@ final class GraphAutoUpdater: ObservableObject {
             guard let self else { return }
             await self.graph.generate(codeRepoRoot: repoRoot, docRoots: docRoots, memoryRoot: repoRoot)
             self.publishToSession(repoRoot: repoRoot)
+            // Ship the symbol graph to the backend. Awaited inside this task
+            // (not spawned separately) so two ticks can't upload concurrently;
+            // the service no-ops when the graph is unchanged, which is the
+            // common case for a periodic tick.
+            await self.uploader.upload(graph: self.graph.codeGraph, repoRoot: repoRoot)
         }
     }
 

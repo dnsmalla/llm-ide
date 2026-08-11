@@ -6,6 +6,7 @@
 import * as kb from './db.mjs';
 import { indexLocalRepo } from '../connectors/git.mjs';
 import { indexScip } from '../connectors/scip.mjs';
+import { ingestStructureGraph } from '../connectors/structure-graph.mjs';
 import { indexGithubIssues, indexTicketsJson } from '../connectors/issues.mjs';
 import { indexJUnit } from '../connectors/qa.mjs';
 import { indexBoxFolder, boxTest } from '../connectors/box.mjs';
@@ -392,6 +393,35 @@ export async function handleKB(req, res) {
         sendJSON(res, 200, { ok: true, ...result });
       } catch (err) {
         sendJSON(res, 400, { error: { code: 'SCIP_INDEX_FAILED', message: err.message } });
+      }
+      return true;
+    }
+
+    // Structural code graph from the Mac app (StructureGraphBuilder output).
+    // Same allow-list gate as /kb/ingest-scip — the repo path is used as the
+    // storage key and is echoed back to agents, so it must be a repo the user
+    // has explicitly registered. Large graphs arrive in batches: the client
+    // sets `replace` on the first batch only.
+    if (req.method === 'POST' && url === '/kb/ingest-code-graph') {
+      const body = parseJSON(await readBody(req));
+      if (!body?.repoPath || typeof body.repoPath !== 'string' ||
+          !body?.graph || typeof body.graph !== 'object') {
+        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'repoPath and graph are required' } });
+        return true;
+      }
+      const nodePath = await import('node:path');
+      const normalized = nodePath.resolve(body.repoPath);
+      const allowlist = kb.userRepoAllowlist(userId);
+      if (!allowlist.includes(normalized)) {
+        sendJSON(res, 403, { error: { code: 'PATH_NOT_APPROVED', message: 'Repo path is not on your allow-list' } });
+        return true;
+      }
+      try {
+        const result = ingestStructureGraph(userId, normalized, body.graph,
+          { replace: body.replace === true });
+        sendJSON(res, 200, { ok: true, ...result });
+      } catch (err) {
+        sendJSON(res, 400, { error: { code: 'CODE_GRAPH_INGEST_FAILED', message: err.message } });
       }
       return true;
     }
