@@ -82,6 +82,8 @@ final class ShellState {
         case file(URL)
         /// A plugin row. String is the plugin's `name` field.
         case plugin(String)
+        /// A skills-source row. String is the source's `id` field.
+        case skillsSource(String)
     }
 
     var section: Section = .explorer
