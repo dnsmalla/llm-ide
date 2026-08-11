@@ -35,7 +35,7 @@ public enum CodeNoteGenerator {
                          atomically: true, encoding: .utf8)
 
         let usedBy = buildUsedBy(scan: scan)
-        let codeFiles = scan.files.filter { $0.language != "other" }
+        let codeFiles = Self.codeFiles(from: scan)
 
         var written = 0
         for file in codeFiles {
@@ -143,7 +143,7 @@ public enum CodeNoteGenerator {
         let codeDir = ProjectLayout(root: repoRoot).graphDir
         try? FileManager.default.createDirectory(at: codeDir, withIntermediateDirectories: true)
 
-        let codeFiles = scan.files.filter { $0.language != "other" }
+        let codeFiles = Self.codeFiles(from: scan)
         let langs = Array(Set(codeFiles.map(\.language))).sorted().joined(separator: ", ")
 
         var out: [String] = []
@@ -215,7 +215,7 @@ public enum CodeNoteGenerator {
         struct Summary: Encodable { let totalFiles: Int; let totalEdges: Int }
         struct Graph: Encodable { let version: String; let summary: Summary; let files: [FileNode] }
 
-        let codeFiles = scan.files.filter { $0.language != "other" }
+        let codeFiles = Self.codeFiles(from: scan)
         let nodes: [FileNode] = codeFiles.map { f in
             let syms  = scan.symbols[f.path] ?? []
             let types = syms.filter { $0.kind == "class" }
@@ -244,6 +244,21 @@ public enum CodeNoteGenerator {
 
     // MARK: - Helpers
 
+    /// Files the CODE track owns. Two exclusions:
+    ///   • `other` — unrecognised languages the scanner couldn't parse.
+    ///   • doc extensions (md/markdown/mdx/txt) — "md is doc": markdown belongs
+    ///     to the InfiniteBrain track, which already renders it into
+    ///     `doc-notes.md`. `FileClassifier.strippingDocNodes` applies the same
+    ///     rule to the graph; without it here, every doc was ALSO emitted as a
+    ///     per-file code note (`README.md.md`) and counted in the Codebase
+    ///     Index — the same content in two places.
+    static func codeFiles(from scan: ScanResult) -> [ScanResult.FileEntry] {
+        scan.files.filter {
+            $0.language != "other"
+                && !FileClassifier.docExtensions.contains(($0.path as NSString).pathExtension.lowercased())
+        }
+    }
+
     /// Inverts scan.imports: filePath → [files that import it].
     public static func buildUsedBy(scan: ScanResult) -> [String: [String]] {
         var usedBy: [String: [String]] = [:]
@@ -253,16 +268,33 @@ public enum CodeNoteGenerator {
         return usedBy
     }
 
+    /// Files in `notesRoot` that this generator writes itself and which are NOT
+    /// per-file notes. They must never be treated as orphans: `index.md` maps to
+    /// a "source path" of `index`, which is in no repo, so it would always be
+    /// deleted. (It survived only because `writeIndex` happens to run after the
+    /// prune — a call-order accident, not a guarantee.)
+    private static let ownOutputNames: Set<String> = ["index.md"]
+
     /// Remove note .md files whose source file is no longer present.
+    ///
+    /// Enumerates by PATH, which yields entries already relative to `notesRoot`.
+    /// The previous version enumerated URLs and derived the relative path by
+    /// stripping a prefix, falling back to `lastPathComponent` when the prefix
+    /// didn't match — and it didn't match, so every note in a subdirectory was
+    /// reduced to its filename ("src/Database.swift.md" → "Database.swift"),
+    /// missed the valid set, and was deleted on the same run that wrote it.
+    /// Only root-level notes survived, so on any real repo the per-file notes
+    /// silently produced nothing.
     static func pruneOrphanNotes(notesRoot: URL, validPaths: Set<String>) {
         let fm = FileManager.default
-        guard let en = fm.enumerator(at: notesRoot, includingPropertiesForKeys: nil) else { return }
-        for case let url as URL in en where url.pathExtension == "md" {
-            let rel = url.path.hasPrefix(notesRoot.path + "/")
-                ? String(url.path.dropFirst(notesRoot.path.count + 1)) : url.lastPathComponent
+        guard let en = fm.enumerator(atPath: notesRoot.path) else { return }
+        for case let rel as String in en {
+            guard rel.hasSuffix(".md"), !ownOutputNames.contains(rel) else { continue }
             // Note path is "<source path>.md" → strip the .md to get the source path.
-            let sourcePath = rel.hasSuffix(".md") ? String(rel.dropLast(3)) : rel
-            if !validPaths.contains(sourcePath) { try? fm.removeItem(at: url) }
+            let sourcePath = String(rel.dropLast(3))
+            if !validPaths.contains(sourcePath) {
+                try? fm.removeItem(at: notesRoot.appendingPathComponent(rel))
+            }
         }
     }
 
