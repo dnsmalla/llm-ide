@@ -189,6 +189,22 @@ export const config = Object.freeze({
   // accepted chrome-extension://* / localhost / 127.0.0.1 set.
   extraCorsOrigins: envStr('LLMIDE_CORS_ORIGINS', '').split(',').map((s) => s.trim()).filter(Boolean),
 
+  // Replayed conversation history (llm_agent/runtime/loop.mjs). Sized in CHARS,
+  // not turns: the old fixed "last 8 turns" window was blown by tool-call
+  // round-trips (each one appends a synthetic result turn plus a reply), so a
+  // multi-step task lost the user's original request after ~4 steps and the
+  // agent forgot what it was doing.
+  //
+  // `promptBudgetChars` is the ceiling for the WHOLE composed prompt and must
+  // stay under runClaude's hard 500 000-char throw (agents/runtime.mjs) — the
+  // history budget is whatever that leaves after the system prompt and the user
+  // message, so history can never be the thing that fails a turn.
+  history: Object.freeze({
+    promptBudgetChars: envIntClamped('LLMIDE_HISTORY_PROMPT_BUDGET', 460_000, 20_000, 490_000),
+    maxChars:          envIntClamped('LLMIDE_HISTORY_MAX_CHARS',     240_000,  1_000, 490_000),
+    perTurnChars:      envIntClamped('LLMIDE_HISTORY_PER_TURN_CHARS', 24_000,    200, 240_000),
+  }),
+
   // Repo-grounding memory block (graphkit/memory.mjs + memory-writer.mjs).
   // Tunable so an operator can trade prompt-token budget against grounding
   // depth without a rebuild.

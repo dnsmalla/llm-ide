@@ -1,6 +1,8 @@
 import { runClaude, runClaudeStream, streamModelReply, resolveLanguage } from '../agents/runtime.mjs';
 import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON } from '../core/utils.mjs';
 import { handleCodeAssist } from '../llm_agent/runtime/route.mjs';
+import { selectHistoryTurns } from '../llm_agent/runtime/loop.mjs';
+import { config } from '../core/config.mjs';
 import { readSkillInstructions } from '../llm_agent/skills/index.mjs';
 import { resolveTierModel } from '../llm_agent/runtime/model-tier.mjs';
 import * as kb from '../kb/db.mjs';
@@ -362,11 +364,32 @@ export async function handleAIRoutes(req, res) {
     if (skillsText) prompt += skillsText + '\n';
 
     if (Array.isArray(body.history) && body.history.length > 0) {
-      prompt += '# Previous conversation\n';
-      for (const msg of body.history.slice(-8)) {
-        const role = msg.role === 'user' ? 'User' : 'Assistant';
-        const content = sanitizeForPrompt(typeof msg.content === 'string' ? msg.content : '').slice(0, 6000);
-        if (content) prompt += `${role}: ${content}\n\n`;
+      // Same char-budget window as the agent loops (and the same
+      // keep-the-original-request anchor), sized against what this prompt has
+      // already accumulated so it stays under runClaude's hard cap. Keeps its
+      // own sanitizeForPrompt sanitiser rather than the loop's fence redaction.
+      const historyBudget = Math.max(
+        0,
+        Math.min(config.history.maxChars,
+                 config.history.promptBudgetChars - prompt.length - message.length),
+      );
+      const { turns, omitted, gapAt } = selectHistoryTurns(body.history, {
+        budget: historyBudget,
+        sanitize: sanitizeForPrompt,
+      });
+      if (turns.length > 0) {
+        prompt += '# Previous conversation\n';
+        turns.forEach((turn, i) => {
+          // `gapAt` (not a hardcoded index) so the note marks where the dropped
+          // turns actually were — see selectHistoryTurns.
+          if (i === gapAt) {
+            prompt += `_(${omitted} earlier turn(s) omitted to fit the context budget)_\n\n`;
+          }
+          prompt += `${turn.role === 'user' ? 'User' : 'Assistant'}: ${turn.content}\n\n`;
+        });
+        if (gapAt === turns.length) {
+          prompt += `_(${omitted} earlier turn(s) omitted to fit the context budget)_\n\n`;
+        }
       }
     }
 

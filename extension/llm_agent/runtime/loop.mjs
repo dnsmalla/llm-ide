@@ -6,6 +6,7 @@ import { parseFence, validateArgs } from './fence.mjs';
 import { composeSystemContext } from '../internal/context/compose.mjs';
 import { redactFence } from './redaction.mjs';
 import { logger } from '../../core/logger.mjs';
+import { config } from '../../core/config.mjs';
 
 // Recursively redact fence sentinels from any value that will be
 // JSON-embedded into the next-iteration prompt.  Without this, a KB
@@ -96,22 +97,94 @@ export function buildSystemPrompt({ base, skills, agentContextBlock }) {
   ].filter((s) => s && s.length > 0).join('\n\n');
 }
 
-function renderHistoryBlock(history) {
-  if (!Array.isArray(history) || history.length === 0) return '';
-  const recent = history.slice(-8);
-  const lines = ['# Previous conversation'];
-  for (const msg of recent) {
-    const role = msg.role === 'user' ? 'User' : 'Assistant';
-    // Sanitise fence sentinels in replayed client history so a past
-    // assistant or user turn cannot forge a <<<TOOL_RESULT>>> block.
-    const content = typeof msg.content === 'string' ? redactFence(msg.content.slice(0, 6000)) : '';
-    if (content) lines.push(`${role}: ${content}`);
+// Per-turn label overhead ("User: " / "Assistant: " + the blank line joining
+// blocks). Counted so the packing below can't overshoot its char budget by the
+// framing it adds around each turn.
+const TURN_OVERHEAD_CHARS = 14;
+
+// Pick the turns to replay under a CHAR budget, newest-first, and always keep
+// the first user turn — the original request. That anchor is the whole point:
+// a tool-using task appends two turns per step (synthetic result + reply), so
+// a fixed turn-count window silently evicted the user's actual ask partway
+// through a long task and the agent started answering the last tool result
+// instead of the question.
+//
+// Returns `{ turns, omitted, gapAt }` with each turn already clipped AND
+// fence-redacted (replayed client content must never be parseable as a
+// `<<<TOOL_RESULT>>>` block). `gapAt` is the index in `turns` that dropped
+// turns sat BEFORE — 1 when the anchor was kept (the gap falls after it), 0
+// when it wasn't (everything dropped is older than what's left) — or null when
+// nothing was dropped. Callers use it to place the "N turns omitted" note;
+// getting it wrong claims the gap is somewhere it isn't. Pure — exported for
+// unit tests.
+export function selectHistoryTurns(history, {
+  budget = config.history.maxChars,
+  perTurnChars = config.history.perTurnChars,
+  sanitize = redactFence,
+} = {}) {
+  const clip = (s) => (s.length > perTurnChars
+    ? `${s.slice(0, perTurnChars)}\n…(turn clipped)`
+    : s);
+  const all = (Array.isArray(history) ? history : [])
+    .map((m) => ({
+      role: m?.role === 'user' ? 'user' : m?.role === 'assistant' ? 'assistant' : null,
+      content: typeof m?.content === 'string' ? sanitize(clip(m.content)) : '',
+    }))
+    .filter((t) => t.role && t.content);
+  if (all.length === 0 || budget <= 0) {
+    return { turns: [], omitted: all.length, gapAt: all.length > 0 ? 0 : null };
   }
-  return lines.join('\n\n');
+
+  const cost = (t) => t.content.length + TURN_OVERHEAD_CHARS;
+  // Reserve the anchor's cost BEFORE packing the tail, so a long tail can
+  // never be what pushes the original request out.
+  const anchorIdx = all.findIndex((t) => t.role === 'user');
+  const anchor = anchorIdx >= 0 && cost(all[anchorIdx]) <= budget ? all[anchorIdx] : null;
+  let remaining = budget - (anchor ? cost(anchor) : 0);
+
+  // Newest-first walk back toward (but not including) the anchor.
+  const tail = [];
+  const stopAt = anchor ? anchorIdx : -1;
+  for (let i = all.length - 1; i > stopAt; i--) {
+    const c = cost(all[i]);
+    if (c > remaining) break;
+    remaining -= c;
+    tail.push(all[i]);
+  }
+  tail.reverse();
+  const turns = anchor ? [anchor, ...tail] : tail;
+  const omitted = all.length - turns.length;
+  return { turns, omitted, gapAt: omitted > 0 ? (anchor ? 1 : 0) : null };
+}
+
+function renderHistoryBlock(history, budget) {
+  const { turns, omitted, gapAt } = selectHistoryTurns(history, { budget });
+  if (turns.length === 0) return '';
+  const body = turns.map((t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`);
+  // Make the gap explicit rather than letting the model assume two adjacent
+  // turns were consecutive. Spliced at `gapAt` so the note sits where the
+  // missing turns actually were — including at the very end, when the anchor
+  // was kept but nothing after it fit.
+  if (gapAt !== null) {
+    body.splice(gapAt, 0, `_(${omitted} earlier turn(s) omitted to fit the context budget)_`);
+  }
+  return ['# Previous conversation', ...body].join('\n\n');
 }
 
 function buildIterationPrompt({ systemPrompt, history, userMessage, prevOutput, toolResult, toolError }) {
-  const historyBlock = renderHistoryBlock(history);
+  // History gets whatever the rest of the prompt leaves under the global
+  // budget, capped by config.history.maxChars. Sized here (not inside
+  // renderHistoryBlock) because this is the only place that knows how big the
+  // system prompt and user message actually are — which is what makes "replay
+  // as much as fits" safe: runClaude THROWS above 500 000 chars, so history
+  // must yield to the parts of the prompt that can't be dropped.
+  const fixedChars = (systemPrompt?.length || 0) + (userMessage?.length || 0)
+    + (prevOutput?.length || 0);
+  const historyBudget = Math.max(
+    0,
+    Math.min(config.history.maxChars, config.history.promptBudgetChars - fixedChars),
+  );
+  const historyBlock = renderHistoryBlock(history, historyBudget);
   const blocks = [systemPrompt];
   if (historyBlock) blocks.push(historyBlock);
   // Redact fence sentinels from the user message — it is repeated in
@@ -394,15 +467,31 @@ export async function runNativeAgentLoop({
   const startTs = Date.now();
 
   // Seed the conversation: system + prior turns (so multi-turn follow-ups keep
-  // context) + the current user turn. Mirrors the fence loop's renderHistoryBlock
-  // window (last 8) and its redactFence sanitising of replayed client content.
-  const messages = [{ role: 'system', content: systemPrompt }];
-  if (Array.isArray(history)) {
-    for (const msg of history.slice(-8)) {
-      const role = msg?.role === 'user' ? 'user' : msg?.role === 'assistant' ? 'assistant' : null;
-      const content = typeof msg?.content === 'string' ? redactFence(msg.content.slice(0, 6000)) : '';
-      if (role && content) messages.push({ role, content });
-    }
+  // context) + the current user turn. Shares the fence loop's char-budget
+  // window (selectHistoryTurns), including its anchor-on-the-original-request
+  // rule and its redactFence sanitising of replayed client content.
+  const historyBudget = Math.max(
+    0,
+    Math.min(
+      config.history.maxChars,
+      config.history.promptBudgetChars
+        - (systemPrompt?.length || 0) - (userMessage?.length || 0),
+    ),
+  );
+  const { turns: replayed, omitted } = selectHistoryTurns(history, { budget: historyBudget });
+  // The omission note is appended to the SYSTEM message rather than inserted as
+  // a second one: several OpenAI-compatible providers only accept `system` as
+  // the leading message, and a mid-conversation one is either rejected or
+  // silently reordered. Position isn't lost — the note says these are *earlier*
+  // turns, and the anchor-first ordering below makes that unambiguous.
+  const messages = [{
+    role: 'system',
+    content: omitted > 0
+      ? `${systemPrompt}\n\n(${omitted} earlier conversation turn(s) were omitted to fit the context budget.)`
+      : systemPrompt,
+  }];
+  for (const turn of replayed) {
+    messages.push({ role: turn.role, content: turn.content });
   }
   messages.push({ role: 'user', content: userMessage });
 

@@ -85,7 +85,7 @@ Each iteration of the `for` loop (loop.mjs:195–295) executes the following ste
 1. **Deadline check** — if wall-clock elapsed exceeds `deadline`, return `{ reply, pendingTool: null }` with a deadline-expired annotation (loop.mjs:196–197).
 2. **Prompt assembly** — `buildIterationPrompt` (loop.mjs:109–130) concatenates:
    - The composed system prompt (base role + optional context block + skill bodies)
-   - Up to 8 recent history messages (loop.mjs:97), each truncated to 6 000 chars, with fence sentinels redacted
+   - Replayed history, selected by `selectHistoryTurns` (loop.mjs) under a **char budget** rather than a turn count, each turn clipped to `config.history.perTurnChars` (24 000) with fence sentinels redacted. The budget is `config.history.promptBudgetChars` (460 000, safely under `runClaude`'s hard 500 000-char throw) minus the system prompt, user message, and `prevOutput`, capped by `config.history.maxChars` (240 000) — so history yields to the parts of the prompt that cannot be dropped, and can never be what fails a turn. The **first user turn is always kept** as an anchor and any gap is disclosed inline (`_(N earlier turn(s) omitted…)_`). Replaced a fixed "last 8 turns" window: each client-executed tool call appends a synthetic result turn plus a reply, so a four-step task evicted the user's original request and the agent lost track of what it had been asked. `runNativeAgentLoop` and the non-agent `/code-assist` prompt in `server/ai-routes.mjs` share the same selector.
    - The user message (fence-redacted, loop.mjs:116)
    - The previous assistant output `prevOutput`, if any
    - A `<<<TOOL_RESULT>>>` block (or tool-error block), if the previous iteration produced one (loop.mjs:124–126)

@@ -132,9 +132,10 @@ extension CodeAssistantPanel {
         // catch fires after a session switch started a newer turn.
         let streamingID = beginStreamingTurn()
         do {
-            // Send the most recent ~8 turns as history — server caps too
-            // but we'd rather not push a huge payload over the wire.
-            let recent = history.count > 8 ? Array(history.suffix(8)) : history
+            // Replay as much of the conversation as fits (see
+            // historyForRequest); the server applies its own prompt-aware
+            // budget on top.
+            let recent = historyForRequest(history)
             // Stream so the user sees live progress ("Searching the web…",
             // "Writing the answer…") instead of a frozen spinner for the
             // 60–90s an agent turn can take. Falls back to buffered on a
@@ -403,7 +404,7 @@ extension CodeAssistantPanel {
         // of re-reading the (possibly now-different) global `revealingTurnID`.
         let streamingID = beginStreamingTurn()
         do {
-            let recent = history.count > 8 ? Array(history.suffix(8)) : history
+            let recent = historyForRequest(history)
             // The synthetic "(executed create-gitlab-issue …)" turn we
             // pushed before this call IS the signal the agent needs to
             // see. Keep it in `history`; pass "(continue)" as the user
@@ -446,6 +447,56 @@ extension CodeAssistantPanel {
             }
             self.error = error.localizedDescription
         }
+    }
+
+    /// Total characters of chat history sent per request. The server applies
+    /// its own (smaller, prompt-aware) budget — see `config.history` and
+    /// `selectHistoryTurns` in `llm_agent/runtime/loop.mjs` — so this only has
+    /// to keep the POST body clear of the server's 8 MB request-body limit.
+    static let maxHistoryChars = 400_000
+    /// Per-turn clip. One runaway turn (a big command output, a whole file)
+    /// must not be able to consume the entire budget by itself.
+    static let maxHistoryTurnChars = 24_000
+
+    /// The history to replay on the wire: as much as fits `maxHistoryChars`,
+    /// newest-first, ALWAYS including the first user turn.
+    ///
+    /// Replaces a flat `history.suffix(8)`. Eight turns sounds generous until
+    /// you count tool calls: every client-executed tool (bash / update-file /
+    /// git-op) appends a synthetic result turn plus the agent's reply, so a
+    /// four-step task pushed the user's original request out of the window and
+    /// the agent carried on with no idea what it had been asked to do.
+    func historyForRequest(_ turns: [LlmIdeAPIClient.CodeAssistTurn])
+        -> [LlmIdeAPIClient.CodeAssistTurn]
+    {
+        let clipped = turns.map { turn -> LlmIdeAPIClient.CodeAssistTurn in
+            guard turn.content.count > Self.maxHistoryTurnChars else { return turn }
+            return .init(role: turn.role,
+                         content: String(turn.content.prefix(Self.maxHistoryTurnChars))
+                             + "\n…(turn clipped)")
+        }
+        let total = clipped.reduce(0) { $0 + $1.content.count }
+        if total <= Self.maxHistoryChars { return clipped }
+
+        // Reserve the anchor (first user turn) before packing the tail.
+        let anchorIdx = clipped.firstIndex { $0.role == .user }
+        var budget = Self.maxHistoryChars
+        var anchor: LlmIdeAPIClient.CodeAssistTurn?
+        if let idx = anchorIdx, clipped[idx].content.count <= budget {
+            anchor = clipped[idx]
+            budget -= clipped[idx].content.count
+        }
+        var tail: [LlmIdeAPIClient.CodeAssistTurn] = []
+        let stopAt = anchor == nil ? -1 : (anchorIdx ?? -1)
+        var i = clipped.count - 1
+        while i > stopAt {
+            let cost = clipped[i].content.count
+            if cost > budget { break }
+            budget -= cost
+            tail.append(clipped[i])
+            i -= 1
+        }
+        return (anchor.map { [$0] } ?? []) + tail.reversed()
     }
 
     /// Auto-chain the next pending action (file edit or git op) when the
