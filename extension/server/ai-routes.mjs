@@ -493,6 +493,11 @@ export async function handleAIRoutes(req, res) {
                   maxTokens: opts.maxTokens,
                   tools: opts.tools,
                   signal: opts.signal ? AbortSignal.any([opts.signal, ac.signal]) : ac.signal,
+                  // The agent loop's mode-gated MCP config (route.mjs) — without
+                  // this the whole MCP-plugin feature never reaches the real
+                  // runClaude/streamModelReply, since this wrapper's `callOpts`
+                  // is the actual bridge from loop.mjs's options to them.
+                  mcpConfig: opts.mcpConfig,
                 };
                 // The agent loop's sniffing wrapper (loop.mjs) only passes
                 // onChunk for a call it wants streamed live — when present,
@@ -544,6 +549,7 @@ export async function handleAIRoutes(req, res) {
             maxTokens: opts.maxTokens,
             tools: opts.tools,
             signal: opts.signal,
+            mcpConfig: opts.mcpConfig,
           }),
           kb,
           userId: req.user?.id,

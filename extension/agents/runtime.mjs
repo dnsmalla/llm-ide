@@ -6,7 +6,7 @@ import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
-import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS, spawnCli, spawnCliStream, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch, DEFAULT_DEEPSEEK_BASE } from './providers.mjs';
+import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS, spawnCli, spawnCliStream, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch, DEFAULT_DEEPSEEK_BASE, buildAnthropicCliArgs } from './providers.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 import { recordUsage, flagQuota, resolveModel as resolveUsageModel, recordRateLimits } from '../kb/usage.mjs';
 
@@ -105,7 +105,7 @@ const MAX_PROMPT_CHARS = 500_000;
 // so multi-user deployments charge each user's own Anthropic account
 // rather than the operator's CLI login.  When userId is omitted (or
 // the user has no stored key) we fall back to the operator's CLI auth.
-export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, tools, autoFallback = true } = {}) {
+export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, tools, autoFallback = true, mcpConfig } = {}) {
   if (typeof prompt !== 'string') {
     throw new Error('runClaude: prompt must be a string');
   }
@@ -420,6 +420,14 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
         env,
         timeoutMs: CLAUDE_TIMEOUT_MS,
         signal,
+        // When mcpConfig is present ({ mcpConfigJson }), register the user's
+        // enabled+consented MCP servers via `--mcp-config` and allow mcp__*
+        // tools; otherwise buildAnthropicCliArgs returns today's exact argv
+        // (--strict-mcp-config, zero servers) — no behavior change for the
+        // common no-MCP case. SP1: MCP reaches the CLI fallback only; the
+        // Anthropic HTTP API (the fetch branch above) cannot carry
+        // --mcp-config, so this argsOverride is deliberately NOT applied there.
+        args: buildAnthropicCliArgs(prompt, mcpConfig),
       });
       // Subscription/CLI mode can't report tokens — record one run so it still
       // counts toward run-based limits and the dashboard.
@@ -583,14 +591,14 @@ export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheT
  */
 export async function streamModelReply(prompt, {
   userId, model, maxTokens, cacheTranscript, onChunk, signal,
-  provider: explicitProvider, images, tools,
+  provider: explicitProvider, images, tools, mcpConfig,
   _testSpawnCliStream, _testRunClaude,
 } = {}) {
   const runBuffered = _testRunClaude || runClaude;
   const doSpawnCliStream = _testSpawnCliStream || spawnCliStream;
 
   if (Array.isArray(images) && images.length > 0) {
-    const text = await runBuffered(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, tools });
+    const text = await runBuffered(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, tools, mcpConfig });
     if (typeof onChunk === 'function') onChunk(text);
     return text;
   }
@@ -598,7 +606,9 @@ export async function streamModelReply(prompt, {
   const { provider, apiKey } = resolveClaudeCall({ userId, model, provider: explicitProvider });
 
   if (provider === 'anthropic' && apiKey) {
-    // Direct-API path already streams for real — unmodified.
+    // Direct-API path already streams for real — unmodified. SP1: the
+    // Anthropic HTTP API can't carry --mcp-config, so mcpConfig is
+    // deliberately dropped here (same scoping as runClaude's HTTP branch).
     return runClaudeStream(prompt, { userId, model, maxTokens, cacheTranscript, onChunk, signal, provider: explicitProvider });
   }
 
@@ -607,11 +617,14 @@ export async function streamModelReply(prompt, {
     const wrappedOnChunk = typeof onChunk === 'function'
       ? (text) => { deliveredAnyChunk = true; onChunk(text); }
       : undefined;
+    // mcpConfig only means anything for the anthropic CLI's own argv shape
+    // (buildAnthropicCliArgs); openai/google keep their default argv.
+    const argsOverride = provider === 'anthropic' ? buildAnthropicCliArgs(prompt, mcpConfig) : undefined;
     try {
       // apiKey is never truthy here for the anthropic case — if it were, the
       // direct-API branch above would already have returned. No provider's
       // CLI needs ANTHROPIC_API_KEY injected via this path.
-      const { stdoutText } = await doSpawnCliStream(provider, prompt, { env: minimalCliEnv(), signal, onChunk: wrappedOnChunk });
+      const { stdoutText } = await doSpawnCliStream(provider, prompt, { env: minimalCliEnv(), signal, onChunk: wrappedOnChunk, argsOverride });
       return stdoutText;
     } catch (err) {
       if (deliveredAnyChunk) {
@@ -629,7 +642,7 @@ export async function streamModelReply(prompt, {
     }
   }
 
-  const text = await runBuffered(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, tools });
+  const text = await runBuffered(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, tools, mcpConfig });
   if (typeof onChunk === 'function') onChunk(text);
   return text;
 }

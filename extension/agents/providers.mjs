@@ -432,6 +432,41 @@ export async function completeViaApi(provider, { apiKey, model, prompt, maxToken
 // LLMIDE_<PROVIDER>_CLI (e.g. LLMIDE_OPENAI_CLI=codex) for installs that
 // differ. (Anthropic's own CLI fallback still lives in runtime.mjs.)
 
+const ANTHROPIC_DEFAULT_PROMPT = 'You are a helpful AI assistant.';
+
+// The argv passed to `claude -p`. With `mcpConfigJson`, register the user's
+// enabled+consented MCP servers and let the model call them; without it,
+// keep today's behavior (strict-mcp-config = zero servers). Built as a pure
+// function so the arg shape is unit-testable without spawning claude.
+//
+// The allow rule can't be a bare `mcp__*` — the CLI rejects a wildcard that
+// doesn't name a scope ("Wildcard tool name ... is not supported in allow
+// rules. An allow pattern must name the scope it widens ... after a literal
+// mcp__<server>__ prefix", confirmed against a real `claude -p` run) — so
+// build one `mcp__<serverId>__*` rule per configured server instead.
+//
+// `--strict-mcp-config` stays on even with `--mcp-config` set (confirmed
+// against a real `claude -p` run to still load the given config): without
+// it the CLI also boots every MCP server from the OPERATOR's own
+// `~/.claude.json`/project config, defeating the whole point of gating
+// dispatch on this user's own enabled+consented set.
+export function buildAnthropicCliArgs(prompt, mcpConfig) {
+  // Callers pass `null` for "no MCP this turn" (buildMcpConfigForUser's
+  // return value for a restricted mode or zero enabled+consented plugins —
+  // i.e. the common case) as well as `undefined`/omitted — a destructured
+  // default parameter only covers the latter, so read via optional chaining
+  // instead of `{ mcpConfigJson } = {}`, which throws on a literal `null`.
+  const mcpConfigJson = mcpConfig?.mcpConfigJson;
+  const tail = ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '--system-prompt', ANTHROPIC_DEFAULT_PROMPT, '-p', prompt];
+  if (typeof mcpConfigJson === 'string' && mcpConfigJson.length > 0) {
+    let serverIds = [];
+    try { serverIds = Object.keys(JSON.parse(mcpConfigJson)?.mcpServers || {}); } catch { /* malformed → no servers allowed */ }
+    const allowedTools = serverIds.map((id) => `mcp__${id}__*`).join(',');
+    return ['--mcp-config', mcpConfigJson, '--allowedTools', allowedTools, ...tail];
+  }
+  return tail;
+}
+
 const CLI_ARG_BUILDERS = {
   // `--strict-mcp-config` with no `--mcp-config` loads ZERO MCP servers, so a
   // cold `claude` spawn skips booting every MCP server the user has configured
@@ -463,7 +498,7 @@ const CLI_ARG_BUILDERS = {
   // the real system prompt (persona, skills, tool defs) arrives in the user
   // message where the agent loop embeds it; this flag only clears the identity
   // conflict.
-  anthropic: (p) => ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '--system-prompt', 'You are a helpful AI assistant.', '-p', p],
+  anthropic: (p) => buildAnthropicCliArgs(p),
   openai:    (p) => ['exec', p],   // codex exec "<prompt>"
   google:    (p) => ['-p', p],     // gemini -p "<prompt>"
 };
@@ -685,9 +720,16 @@ const STREAM_ARG_EXTRAS = {
  * `result` text when one was reported, so a non-streaming caller still gets
  * the CLI's own canonical answer rather than a delta-reconstruction.
  *
- * `binOverride`/`argsOverride` are test seams only (real callers never pass
- * them) — they let tests run a fast, deterministic `node -e "..."` child
- * instead of shelling out to the real provider CLI.
+ * `binOverride` is a test seam only (real callers never pass it) — combined
+ * with `argsOverride`, it lets tests run a fast, deterministic `node -e
+ * "..."` child instead of shelling out to the real provider CLI.
+ *
+ * `argsOverride` alone (no `binOverride`) IS used by real callers —
+ * `streamModelReply` passes `buildAnthropicCliArgs(prompt, mcpConfig)` here
+ * to carry the user's MCP config into a streamed anthropic-CLI call, the
+ * same way `spawnCli`'s `args` override does for the buffered path. It
+ * replaces `cliInvocation`'s default argv; `STREAM_ARG_EXTRAS` is still
+ * layered on top so streaming output stays parseable.
  */
 export function spawnCliStream(provider, prompt, {
   env, timeoutMs = CLI_TIMEOUT_MS, signal, onChunk,
@@ -700,7 +742,7 @@ export function spawnCliStream(provider, prompt, {
   const parser = STREAM_PARSERS[provider];
   const args = binOverride
     ? argsOverride
-    : [...inv.args, ...(STREAM_ARG_EXTRAS[provider] || [])];
+    : [...(argsOverride || inv.args), ...(STREAM_ARG_EXTRAS[provider] || [])];
 
   return cliSemaphore.run(() => {
     if (signal?.aborted) {

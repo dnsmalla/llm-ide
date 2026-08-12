@@ -325,6 +325,7 @@ export function makeSniffingChunkHandler(outerOnChunk) {
 export async function runAgentLoop({
   skills, userMessage, history, agentContext, runClaude, kb, userId, handlers,
   maxIterations, deadlineMs, model, maxTokens, depth = 0, onProgress, onChunk,
+  mcpConfig,
 }) {
   // onProgress is an optional best-effort callback used to surface live
   // status to the client (the macOS Code Assistant turns these into a status
@@ -420,6 +421,7 @@ export async function runAgentLoop({
         model,
         maxTokens: (Number.isFinite(maxTokens) && maxTokens > 0) ? maxTokens : 2048,
         signal: callSignal,
+        mcpConfig,
         ...(sniff ? { onChunk: sniff.onChunk } : {}),
       });
     } catch (err) {
@@ -532,6 +534,7 @@ export async function runAgentLoop({
 export async function runNativeAgentLoop({
   systemPrompt, userMessage, history, skills, tools, complete,
   userId, handlers, kb, maxIterations, deadlineMs, depth = 0, onProgress,
+  mcpConfig, // accepted, unused — MCP-via-native-loop is SP1b
 }) {
   const emit = (event) => { try { onProgress?.(event); } catch { /* ignore */ } };
   if (depth > MAX_LOOP_DEPTH) throw new Error(`agent loop nesting exceeds depth ${MAX_LOOP_DEPTH}`);

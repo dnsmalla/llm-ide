@@ -109,6 +109,8 @@ extension/tests/plugin-state.json
 extension/tests/llm-sources.json
 extension/tests/llm-sources-state.json
 extension/tests/_llm-sources-http-fixture-*/
+extension/tests/mcp-plugins.json
+extension/tests/mcp-plugins-state.json
 
 # Top-level copy of the external computer-agent (lives at
 # ~/Desktop/auto_sys/swift_apps/auto_swift_aicontrol/). Anchored to the repo

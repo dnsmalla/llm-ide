@@ -84,6 +84,8 @@ final class ShellState {
         case plugin(String)
         /// An LLM-source row. String is the source's `id` field.
         case llmSource(String)
+        /// An MCP-plugin row. String is the plugin's `id` field.
+        case mcpPlugin(String)
     }
 
     var section: Section = .explorer

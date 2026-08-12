@@ -745,3 +745,93 @@ test('GET /auth/me/llm-sources reports agentCount + hookCount + mcpCount alongsi
   await callAuth({ method: 'DELETE', url: `/auth/me/llm-sources/${id}`, user: admin });
   fs.rmSync(localSrc, { recursive: true, force: true });
 });
+
+// ---- MCP plugins (SP1) --------------------------------------------------
+
+test('mcp-plugins admin-gated routes reject a non-admin caller', async () => {
+  const { user } = await registerAndLogin();
+  const u = { id: user.id }; // not admin
+  const scan = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins/claude-sources', user: u });
+  assert.equal(scan.statusCode, 403);
+  const add = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: u, body: { command: 'npx', args: [] } });
+  assert.equal(add.statusCode, 403);
+});
+
+test('POST /auth/me/mcp-plugins/add (admin) + consent + toggle + list + delete', async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
+    body: { command: 'npx', args: ['-y', '@slack/mcp'], name: 'slack', source: 'manual' } });
+  assert.equal(added.statusCode, 200, added._body);
+  const id = added.json().plugin.id;
+
+  const consent = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/consent', user: admin, body: { id, consented: true } });
+  assert.equal(consent.statusCode, 200);
+  const toggle = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/toggle', user: admin, body: { id, enabled: true } });
+  assert.equal(toggle.statusCode, 200);
+
+  const list = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins', user: admin });
+  const row = list.json().plugins.find((p) => p.id === id);
+  assert.equal(row.enabled, true);
+  assert.equal(row.consented, true);
+
+  const del = await callAuth({ method: 'DELETE', url: `/auth/me/mcp-plugins/${id}`, user: admin });
+  assert.equal(del.statusCode, 200);
+});
+
+test('GET /auth/me/mcp-plugins redacts env VALUES (key names only) — a non-admin caller never sees another plugin\'s real secret', async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
+    body: { command: 'npx', args: [], name: 'slack', source: 'manual', env: { SLACK_TOKEN: 'xoxb-real-secret-value' } } });
+  assert.equal(added.statusCode, 200, added._body);
+  const id = added.json().plugin.id;
+
+  const { user: other } = await registerAndLogin();
+  const plain = { id: other.id }; // not admin, never consented/enabled
+
+  const list = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins', user: plain });
+  const row = list.json().plugins.find((p) => p.id === id);
+  assert.ok(row, 'plugin should still be listed (registry, not per-user, is what gates visibility)');
+  assert.ok('SLACK_TOKEN' in row.env, 'key name is kept — the Mac client only ever displays key names');
+  assert.notEqual(row.env.SLACK_TOKEN, 'xoxb-real-secret-value');
+
+  await callAuth({ method: 'DELETE', url: `/auth/me/mcp-plugins/${id}`, user: admin });
+});
+
+test('POST /auth/me/mcp-plugins/consent + toggle are per-user, not admin-gated, and validate the body', async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
+    body: { command: 'npx', args: [], name: 'linear', source: 'manual' } });
+  const id = added.json().plugin.id;
+
+  const { user: other } = await registerAndLogin();
+  const plain = { id: other.id }; // not admin
+
+  const badId = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/consent', user: plain, body: { id: '../evil', consented: true } });
+  assert.equal(badId.statusCode, 400);
+  const badType = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/toggle', user: plain, body: { id, enabled: 'yes' } });
+  assert.equal(badType.statusCode, 400);
+
+  const consent = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/consent', user: plain, body: { id, consented: true } });
+  assert.equal(consent.statusCode, 200);
+  const toggle = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/toggle', user: plain, body: { id, enabled: true } });
+  assert.equal(toggle.statusCode, 200);
+
+  // Per-user isolation: the admin who registered it never consented/enabled it themselves.
+  const adminList = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins', user: admin });
+  const adminRow = adminList.json().plugins.find((p) => p.id === id);
+  assert.equal(adminRow.enabled, false);
+  assert.equal(adminRow.consented, false);
+
+  await callAuth({ method: 'DELETE', url: `/auth/me/mcp-plugins/${id}`, user: admin });
+});
+
+test('POST /auth/me/mcp-plugins/add with an unmatched claudeName fails with a clear message', async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const miss = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin, body: { claudeName: 'definitely-not-registered' } });
+  assert.equal(miss.statusCode, 400);
+  assert.match(miss.json().error.message, /no Claude MCP server named/);
+});

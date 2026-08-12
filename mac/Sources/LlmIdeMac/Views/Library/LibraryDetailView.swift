@@ -2,11 +2,12 @@ import SwiftUI
 
 /// Routes the Library section's detail column.
 ///
-/// - Meeting selected    → MeetingDetailView (summary + transcript)
-/// - File selected       → FileDetailView
-/// - Plugin selected     → PluginDetailView
-/// - LLM source selected → LlmSourceDetailView
-/// - Nothing selected    → placeholder
+/// - Meeting selected     → MeetingDetailView (summary + transcript)
+/// - File selected        → FileDetailView
+/// - Plugin selected      → PluginDetailView
+/// - LLM source selected  → LlmSourceDetailView
+/// - MCP plugin selected  → McpPluginDetailView
+/// - Nothing selected     → placeholder
 struct LibraryDetailView: View {
     let api: LlmIdeAPIClient
     @Environment(ShellState.self) private var shell
@@ -24,6 +25,9 @@ struct LibraryDetailView: View {
 
         case .llmSource(let id):
             LlmSourceDetailView(api: api, sourceId: id)
+
+        case .mcpPlugin(let id):
+            McpPluginDetailView(api: api, pluginId: id)
 
         case nil:
             ContentUnavailableView {
