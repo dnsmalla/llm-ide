@@ -534,7 +534,7 @@ export async function runAgentLoop({
 export async function runNativeAgentLoop({
   systemPrompt, userMessage, history, skills, tools, complete,
   userId, handlers, kb, maxIterations, deadlineMs, depth = 0, onProgress,
-  mcpConfig, // accepted, unused — MCP-via-native-loop is SP1b
+  mcpConfig: _mcpConfig, // accepted, unused — MCP-via-native-loop is SP1b
 }) {
   const emit = (event) => { try { onProgress?.(event); } catch { /* ignore */ } };
   if (depth > MAX_LOOP_DEPTH) throw new Error(`agent loop nesting exceeds depth ${MAX_LOOP_DEPTH}`);

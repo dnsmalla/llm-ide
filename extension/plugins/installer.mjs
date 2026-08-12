@@ -33,7 +33,7 @@
 //     zip filename, so an attacker can't pick the install path.
 
 import { spawn } from 'node:child_process';
-import { mkdtemp, writeFile, readFile, rm, rename, stat, lstat, readdir, mkdir } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, rename, lstat, readdir, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

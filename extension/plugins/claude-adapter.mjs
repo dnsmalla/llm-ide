@@ -373,25 +373,21 @@ function adaptSkillFrontmatter(raw, expectedName) {
 
   let frontmatter = fmMatch[1];
   const body = fmMatch[2];
-  let changed = false;
 
   // Inject `name` if missing or wrong
   if (!/^name:/m.test(frontmatter)) {
     frontmatter = `name: ${expectedName}\n${frontmatter}`;
-    changed = true;
   } else {
     // Fix name to match expected filename
     const nameMatch = frontmatter.match(/^name:\s*(.+)$/m);
     if (nameMatch && nameMatch[1].trim() !== expectedName) {
       frontmatter = frontmatter.replace(/^name:\s*.+$/m, `name: ${expectedName}`);
-      changed = true;
     }
   }
 
   // Inject `kind` if missing — Claude Code skills default to 'read'
   if (!/^kind:/m.test(frontmatter)) {
     frontmatter = `${frontmatter}\nkind: read`;
-    changed = true;
   }
 
   return `---\n${frontmatter}\n---\n${body}`;

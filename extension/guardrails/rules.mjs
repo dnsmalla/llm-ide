@@ -45,9 +45,9 @@ export const SECRET_PATTERNS = [
   { name: 'Generic sk- API key', re: /\bsk-(?!ant-|proj-)[A-Za-z0-9]{20,}\b/ },
   // Separator limited to 1-3 chars to prevent catastrophic backtracking
   // on inputs like 'api_key:::::::::::::::::' (unbounded '+' was exploitable).
-  { name: 'Generic API key', re: /\b(api[_-]?key|secret[_-]?key|access[_-]?token)["'\s:=]{1,3}[A-Za-z0-9_\-]{16,}\b/i },
+  { name: 'Generic API key', re: /\b(api[_-]?key|secret[_-]?key|access[_-]?token)["'\s:=]{1,3}[A-Za-z0-9_-]{16,}\b/i },
   { name: 'Private key',    re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/ },
-  { name: 'Bearer token',   re: /Bearer\s+[A-Za-z0-9._\-]{20,}\b/i },
+  { name: 'Bearer token',   re: /Bearer\s+[A-Za-z0-9._-]{20,}\b/i },
 ];
 
 const PII_PATTERNS = [
@@ -112,7 +112,7 @@ function findMatches(text, patterns, { redact = false } = {}) {
   // The snippet we surface is always drawn from the raw text so the reviewer
   // sees the real shape (modulo redaction, when requested).
   const wsCollapsed = text.replace(/\s+/g, '');
-  const zwCollapsed = text.replace(/[​‌‍⁠﻿]+/g, '');
+  const zwCollapsed = text.replace(/(?:\u200B|\u200C|\u200D|\u2060|\uFEFF)+/g, '');
   const hits = [];
   for (const { name, re } of patterns) {
     let m = text.match(re);

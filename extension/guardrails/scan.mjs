@@ -31,7 +31,7 @@ export function scanForSecrets(text) {
   //                 preserves surrounding spaces and keeps \b word-boundaries
   //                 intact for the secret patterns.
   const wsCollapsed = text.replace(/\s+/g, '');
-  const zwCollapsed = text.replace(/[​‌‍⁠﻿]+/g, '');
+  const zwCollapsed = text.replace(/(?:\u200B|\u200C|\u200D|\u2060|\uFEFF)+/g, '');
   for (const re of SECRET_PATTERNS) {
     if (re.test(text) || re.test(wsCollapsed) || re.test(zwCollapsed)) return true;
   }
