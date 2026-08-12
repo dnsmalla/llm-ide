@@ -432,6 +432,20 @@ export async function completeViaApi(provider, { apiKey, model, prompt, maxToken
 // LLMIDE_<PROVIDER>_CLI (e.g. LLMIDE_OPENAI_CLI=codex) for installs that
 // differ. (Anthropic's own CLI fallback still lives in runtime.mjs.)
 
+const ANTHROPIC_DEFAULT_PROMPT = 'You are a helpful AI assistant.';
+
+// The argv passed to `claude -p`. With `mcpConfigJson`, register the user's
+// enabled+consented MCP servers and let the model call them (mcp__*); without
+// it, keep today's behavior (strict-mcp-config = zero servers). Built as a
+// pure function so the arg shape is unit-testable without spawning claude.
+export function buildAnthropicCliArgs(prompt, { mcpConfigJson } = {}) {
+  const tail = ['--setting-sources', '', '--tools', '', '--system-prompt', ANTHROPIC_DEFAULT_PROMPT, '-p', prompt];
+  if (typeof mcpConfigJson === 'string' && mcpConfigJson.length > 0) {
+    return ['--mcp-config', mcpConfigJson, '--allowedTools', 'mcp__*', ...tail];
+  }
+  return ['--strict-mcp-config', ...tail];
+}
+
 const CLI_ARG_BUILDERS = {
   // `--strict-mcp-config` with no `--mcp-config` loads ZERO MCP servers, so a
   // cold `claude` spawn skips booting every MCP server the user has configured
@@ -463,7 +477,7 @@ const CLI_ARG_BUILDERS = {
   // the real system prompt (persona, skills, tool defs) arrives in the user
   // message where the agent loop embeds it; this flag only clears the identity
   // conflict.
-  anthropic: (p) => ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '--system-prompt', 'You are a helpful AI assistant.', '-p', p],
+  anthropic: (p) => buildAnthropicCliArgs(p),
   openai:    (p) => ['exec', p],   // codex exec "<prompt>"
   google:    (p) => ['-p', p],     // gemini -p "<prompt>"
 };
