@@ -435,15 +435,30 @@ export async function completeViaApi(provider, { apiKey, model, prompt, maxToken
 const ANTHROPIC_DEFAULT_PROMPT = 'You are a helpful AI assistant.';
 
 // The argv passed to `claude -p`. With `mcpConfigJson`, register the user's
-// enabled+consented MCP servers and let the model call them (mcp__*); without
-// it, keep today's behavior (strict-mcp-config = zero servers). Built as a
-// pure function so the arg shape is unit-testable without spawning claude.
+// enabled+consented MCP servers and let the model call them; without it,
+// keep today's behavior (strict-mcp-config = zero servers). Built as a pure
+// function so the arg shape is unit-testable without spawning claude.
+//
+// The allow rule can't be a bare `mcp__*` — the CLI rejects a wildcard that
+// doesn't name a scope ("Wildcard tool name ... is not supported in allow
+// rules. An allow pattern must name the scope it widens ... after a literal
+// mcp__<server>__ prefix", confirmed against a real `claude -p` run) — so
+// build one `mcp__<serverId>__*` rule per configured server instead.
+//
+// `--strict-mcp-config` stays on even with `--mcp-config` set (confirmed
+// against a real `claude -p` run to still load the given config): without
+// it the CLI also boots every MCP server from the OPERATOR's own
+// `~/.claude.json`/project config, defeating the whole point of gating
+// dispatch on this user's own enabled+consented set.
 export function buildAnthropicCliArgs(prompt, { mcpConfigJson } = {}) {
-  const tail = ['--setting-sources', '', '--tools', '', '--system-prompt', ANTHROPIC_DEFAULT_PROMPT, '-p', prompt];
+  const tail = ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '--system-prompt', ANTHROPIC_DEFAULT_PROMPT, '-p', prompt];
   if (typeof mcpConfigJson === 'string' && mcpConfigJson.length > 0) {
-    return ['--mcp-config', mcpConfigJson, '--allowedTools', 'mcp__*', ...tail];
+    let serverIds = [];
+    try { serverIds = Object.keys(JSON.parse(mcpConfigJson)?.mcpServers || {}); } catch { /* malformed → no servers allowed */ }
+    const allowedTools = serverIds.map((id) => `mcp__${id}__*`).join(',');
+    return ['--mcp-config', mcpConfigJson, '--allowedTools', allowedTools, ...tail];
   }
-  return ['--strict-mcp-config', ...tail];
+  return tail;
 }
 
 const CLI_ARG_BUILDERS = {
