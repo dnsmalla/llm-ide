@@ -12,7 +12,7 @@ process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
 const { resolveProvider, providerApiKey, completeViaApi, callOpenAI, verifyProvider, cliInvocation, listProviderModels, chatModels, customBaseUrl, spawnCli, runViaCli, anthropicWebCliArgs, formatCliSpawnError, resolveCustomProviderDispatch } =
-  await import('../agents/providers.mjs');
+  await import('../providers/providers.mjs');
 const { setSecret } = await import('../server/vault.mjs');
 const { syncCustomProviders } = await import('../server/custom-providers.mjs');
 import Database from 'better-sqlite3';

@@ -1,4 +1,4 @@
-import { runClaude, resolveLanguage } from '../agents/runtime.mjs';
+import { runClaude, resolveLanguage } from '../providers/runtime.mjs';
 import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON } from '../core/utils.mjs';
 import { Document, Packer, Paragraph, HeadingLevel, TextRun } from 'docx';
 import * as kb from '../kb/db.mjs';

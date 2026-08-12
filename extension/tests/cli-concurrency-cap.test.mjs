@@ -12,7 +12,7 @@ process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
 const { Semaphore } = await import('../core/semaphore.mjs');
-const { spawnCli } = await import('../agents/providers.mjs');
+const { spawnCli } = await import('../providers/providers.mjs');
 
 const defer = () => {
   let resolve;

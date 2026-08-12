@@ -4,7 +4,7 @@
 // Semaphore bounds concurrency *across independent callers* over the whole
 // process lifetime. Used to cap how many heavyweight CLI subprocesses can be
 // in flight at once regardless of which code path spawned them — see
-// `agents/providers.mjs` `spawnCli`.
+// `providers/providers.mjs` `spawnCli`.
 //
 // Single-threaded JS, so no locking: a slot is either taken (`active++` in
 // acquire) or, on release, handed directly to the next waiter without ever

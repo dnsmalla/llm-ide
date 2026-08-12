@@ -31,7 +31,7 @@ const unauthorized = { status: 401, body: { error: { type: 'auth' } } };
 test('runClaude: 529 then 200 → returns content (one retry)', async () => {
   globalThis.fetch = mockFetchSequence([overloaded, okResponse]);
   process.env.ANTHROPIC_API_KEY = 'sk-test';
-  const { runClaude } = await import(`../agents/runtime.mjs?cb=${Date.now()}`);
+  const { runClaude } = await import(`../providers/runtime.mjs?cb=${Date.now()}`);
   const out = await runClaude('hello');
   assert.equal(out, 'final answer');
   delete process.env.ANTHROPIC_API_KEY;
@@ -41,7 +41,7 @@ test('runClaude: 529 then 200 → returns content (one retry)', async () => {
 test('runClaude: 503 then 200 → returns content', async () => {
   globalThis.fetch = mockFetchSequence([unavailable, okResponse]);
   process.env.ANTHROPIC_API_KEY = 'sk-test';
-  const { runClaude } = await import(`../agents/runtime.mjs?cb=${Date.now() + 1}`);
+  const { runClaude } = await import(`../providers/runtime.mjs?cb=${Date.now() + 1}`);
   const out = await runClaude('hello');
   assert.equal(out, 'final answer');
   delete process.env.ANTHROPIC_API_KEY;
@@ -59,7 +59,7 @@ test('runClaude: 200 first call → no retries needed', async () => {
     };
   };
   process.env.ANTHROPIC_API_KEY = 'sk-test';
-  const { runClaude } = await import(`../agents/runtime.mjs?cb=${Date.now() + 2}`);
+  const { runClaude } = await import(`../providers/runtime.mjs?cb=${Date.now() + 2}`);
   const out = await runClaude('hello');
   assert.equal(out, 'final answer');
   assert.equal(calls, 1);

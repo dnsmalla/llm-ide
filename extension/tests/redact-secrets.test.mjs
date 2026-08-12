@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
-import { redact as auditRedact } from '../server/audit.mjs';
+import { redact as auditRedact } from '../core/redact-object.mjs';
 
 test('redactSecrets scrubs every known token shape', () => {
   const cases = [

@@ -17,7 +17,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // This test therefore documents the contract: read the source and confirm
 // runClaude's spawnCli call uses buildAnthropicCliArgs(prompt, mcpConfig).
 test('runClaude threads mcpConfig into the spawnCli argsOverride (source-level contract)', () => {
-  const src = readFileSync(join(__dirname, '..', 'agents', 'runtime.mjs'), 'utf8');
+  const src = readFileSync(join(__dirname, '..', 'providers', 'runtime.mjs'), 'utf8');
   assert.match(src, /buildAnthropicCliArgs/, 'runtime.mjs must import + use buildAnthropicCliArgs');
   assert.match(src, /mcpConfig/, 'runClaude must accept an mcpConfig option');
   assert.match(src, /args:\s*buildAnthropicCliArgs\(prompt,\s*mcpConfig\)/,

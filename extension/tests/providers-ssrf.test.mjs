@@ -1,6 +1,6 @@
 // AGT-1: SSRF guard on custom provider base URLs.
 // TDD: these tests were written first; they drove the implementation of
-// assertSafeBaseUrl() in extension/agents/providers.mjs.
+// assertSafeBaseUrl() in extension/providers/providers.mjs.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,7 +10,7 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
-const { assertSafeBaseUrl, assertSafeBaseUrlResolved, minimalCliEnv } = await import('../agents/providers.mjs');
+const { assertSafeBaseUrl, assertSafeBaseUrlResolved, minimalCliEnv } = await import('../providers/providers.mjs');
 
 // ── assertSafeBaseUrl: URLs that MUST pass ────────────────────────────
 

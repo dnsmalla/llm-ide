@@ -1,6 +1,6 @@
 // Multi-provider model routing.
 //
-// `agents/runtime.mjs` keeps the hardened Anthropic HTTP + CLI path. This
+// `providers/runtime.mjs` keeps the hardened Anthropic HTTP + CLI path. This
 // module adds the model→provider routing plus OpenAI and Google HTTP
 // adapters so the same agent prompts can run against whichever provider a
 // user has configured. Credentials per provider come from the vault
@@ -181,7 +181,7 @@ export function providerApiKey(userId, provider) {
 // in the in-memory registry, then read its API key from the vault. This is the
 // SINGLE source of truth used by both dispatch paths — the Code Assistant
 // native tool-loop (llm_agent/runtime/route.mjs) and the legacy single-shot
-// `runClaude` path (agents/runtime.mjs) — so they can't drift.
+// `runClaude` path (providers/runtime.mjs) — so they can't drift.
 //
 // Returns `{ apiKey, baseUrl, name }` on success, or `{ error, message }`
 // (error ∈ 'not_found' | 'disabled' | 'no_key'); the caller surfaces `message`.

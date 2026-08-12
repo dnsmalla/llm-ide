@@ -2,8 +2,8 @@ import {
   fetchUrlViaAnthropic,
   fetchUrlViaCli,
   fetchUrl,
-} from '../../../agents/web-client.mjs';
-import { assertSafeBaseUrlResolved, providerApiKey } from '../../../agents/providers.mjs';
+} from '../../../providers/web-client.mjs';
+import { assertSafeBaseUrlResolved, providerApiKey } from '../../../providers/providers.mjs';
 
 /**
  * Handler for the fetch-url read-skill. Reads a URL "like Claude does":

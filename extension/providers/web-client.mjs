@@ -1,7 +1,7 @@
 // Web utilities for the agent.
 //
 // Two families of backend, mirroring how runClaude already resolves Anthropic
-// credentials (see agents/runtime.mjs):
+// credentials (see providers/runtime.mjs):
 //   1. Anthropic-native (preferred) — "like Claude does web search". The
 //      Messages API has built-in server-side `web_search` / `web_fetch` tools
 //      (searchWebViaAnthropic / fetchUrlViaAnthropic, reuse the Anthropic API

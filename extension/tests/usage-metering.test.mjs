@@ -25,7 +25,7 @@ const db = await import('../kb/db.mjs');
 const vault = await import('../server/vault.mjs');
 const users = await import('../server/users.mjs');
 const usage = await import('../kb/usage.mjs');
-const { runClaude } = await import('../agents/runtime.mjs');
+const { runClaude } = await import('../providers/runtime.mjs');
 
 function freshUser() {
   db.closeDb();

@@ -1,4 +1,4 @@
-// Tests for agents/runtime.mjs — specifically the "user-scoped key
+// Tests for providers/runtime.mjs — specifically the "user-scoped key
 // must not silently fall back to the operator CLI on HTTP failure"
 // guarantee.  Without it, a 401 from a user's own Anthropic key
 // would cause runClaude to spawn `claude -p ...` under the operator's
@@ -61,7 +61,7 @@ test('runClaude does NOT fall back to operator CLI when user-scoped key returns 
   // Re-import runtime to pick up the spied execFile (it captures the
   // import binding at evaluation time, so it should already see
   // childProcess.execFile via the module reference).
-  const { runClaude } = await import('../agents/runtime.mjs');
+  const { runClaude } = await import('../providers/runtime.mjs');
 
   try {
     await assert.rejects(

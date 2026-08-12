@@ -3,7 +3,7 @@
 // dependencies.  Grounded by KB context so estimates can reflect past
 // projects rather than being pulled from thin air.
 
-import { runClaude, tryParseJSON, languageDirective, formatContext } from './runtime.mjs';
+import { runClaude, tryParseJSON, languageDirective, formatContext } from '../providers/runtime.mjs';
 import { getMeeting, getMeetingTranscript } from '../kb/db.mjs';
 import { findGraphContext } from '../graphkit/index.mjs';
 import { sanitizeLine as sanitizeStr } from '../core/utils.mjs';

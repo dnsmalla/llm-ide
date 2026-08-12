@@ -7,7 +7,7 @@
 // "what should we ask, if anything?"
 //
 // Per the project's standing rule: LLM access goes through
-// `runClaude` from agents/runtime.mjs, which `execFile`s the local
+// `runClaude` from providers/runtime.mjs, which `execFile`s the local
 // `claude` CLI.  No Anthropic SDK, no API-key plumbing here — same
 // path as planner.mjs, risk.mjs, codegen.mjs.
 //
@@ -15,8 +15,8 @@
 // It currently returns deterministically structured drafts; the
 // loop integration in meeting-agent.mjs will land in the same slice.
 
-import { runClaude, tryParseJSON, languageDirective } from './runtime.mjs';
-import { sanitizePersonaSuffix, personaConfigBlock } from './prompt-utils.mjs';
+import { runClaude, tryParseJSON, languageDirective } from '../providers/runtime.mjs';
+import { sanitizePersonaSuffix, personaConfigBlock } from '../providers/prompt-utils.mjs';
 
 const MAX_TRANSCRIPT_CHARS = 6000;          // ~1500 tokens of context
 const MAX_RECENT_QUESTIONS = 5;

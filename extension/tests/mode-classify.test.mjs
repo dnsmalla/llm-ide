@@ -1,7 +1,7 @@
 // extension/tests/mode-classify.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyCodeAssistMode } from '../agents/mode-classify.mjs';
+import { classifyCodeAssistMode } from '../llm_agent/runtime/mode-classify.mjs';
 
 test('classifyCodeAssistMode returns the model-chosen mode when valid JSON comes back', async () => {
   const result = await classifyCodeAssistMode('how would you approach fixing this?', {

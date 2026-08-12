@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { completeViaApi } from '../agents/providers.mjs';
+import { completeViaApi } from '../providers/providers.mjs';
 import { parseFence } from '../llm_agent/runtime/fence.mjs';
 
 // deepseek/openai/custom speak the OpenAI function-calling API. When the model

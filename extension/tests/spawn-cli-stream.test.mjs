@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseClaudeStreamJSON, spawnCliStream } from '../agents/providers.mjs';
+import { parseClaudeStreamJSON, spawnCliStream } from '../providers/providers.mjs';
 
 test('parseClaudeStreamJSON extracts text deltas from real Claude CLI NDJSON output', () => {
   const lines = [

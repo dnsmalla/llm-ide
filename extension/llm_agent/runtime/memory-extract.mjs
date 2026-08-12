@@ -11,7 +11,7 @@
 //    stable facts ("uses pnpm workspaces", "deploys via X"), not transient
 //    chatter ("fix this typo", "what does foo do").
 
-import { tryParseJSON } from '../../agents/runtime.mjs';
+import { tryParseJSON } from '../../providers/runtime.mjs';
 import { factKey, factIndex } from '../../graphkit/memory-writer.mjs';
 
 const EXTRACT_MODEL = process.env.LLMIDE_SUMMARIZE_MODEL || process.env.LLMIDE_MODEL || undefined;

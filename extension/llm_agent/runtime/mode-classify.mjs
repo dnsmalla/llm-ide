@@ -1,4 +1,4 @@
-// extension/agents/mode-classify.mjs
+// extension/llm_agent/runtime/mode-classify.mjs
 // Stateless Code Assistant mode classifier. One Claude call → JSON.
 // Modeled on agents/email-classify.mjs. Never throws — any failure
 // (bad JSON, unrecognised value, the underlying call itself throwing)
@@ -6,8 +6,8 @@
 // classification hiccup never surprises the user with restricted
 // behavior they didn't ask for.
 
-import { runClaude as defaultRunClaude, tryParseJSON } from './runtime.mjs';
-import { logger } from '../core/logger.mjs';
+import { runClaude as defaultRunClaude, tryParseJSON } from '../../providers/runtime.mjs';
+import { logger } from '../../core/logger.mjs';
 
 const log = logger.child({ component: 'mode-classify' });
 

@@ -196,7 +196,7 @@ export const config = Object.freeze({
   // agent forgot what it was doing.
   //
   // `promptBudgetChars` is the ceiling for the WHOLE composed prompt and must
-  // stay under runClaude's hard 500 000-char throw (agents/runtime.mjs) — the
+  // stay under runClaude's hard 500 000-char throw (providers/runtime.mjs) — the
   // history budget is whatever that leaves after the system prompt and the user
   // message, so history can never be the thing that fails a turn.
   history: Object.freeze({

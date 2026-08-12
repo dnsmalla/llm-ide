@@ -10,10 +10,10 @@
 
 import * as kb from '../db.mjs';
 import { dispatchAgent, stopAgent, listRuns, getDiagnostics } from '../../agents/meeting-agent.mjs';
-import { runClaude } from '../../agents/runtime.mjs';
+import { runClaude } from '../../providers/runtime.mjs';
 import { sendJSON, readBody, parseJSON, sanitizeForPrompt } from '../../core/utils.mjs';
 import { listAllSkills, listInstalledPlugins, buildPerUserSkillSet, listSkillLibrary } from '../../llm_agent/skills/index.mjs';
-import { sanitizePersonaSuffix, personaConfigBlock } from '../../agents/prompt-utils.mjs';
+import { sanitizePersonaSuffix, personaConfigBlock } from '../../providers/prompt-utils.mjs';
 import {
   buildAllowedRoots,
   resolveAllowedRepoRoot,

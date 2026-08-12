@@ -70,7 +70,7 @@ function resolveModel(model) {
 
 // Anthropic 529 "overloaded" responses usually clear within 5-30s. Retry
 // transient capacity errors (529, 503) with the shared jittered backoff
-// (agents/backoff.mjs) before bubbling up. Other errors (auth, 4xx, malformed
+// (providers/backoff.mjs) before bubbling up. Other errors (auth, 4xx, malformed
 // JSON) throw on first attempt — masking those would hide real bugs.
 // `jittered` is re-exported so the dispatcher keeps importing it from here.
 export { jittered };

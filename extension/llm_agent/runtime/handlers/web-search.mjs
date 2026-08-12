@@ -2,8 +2,8 @@ import {
   searchWebViaAnthropic,
   searchWebViaCli,
   searchWeb,
-} from '../../../agents/web-client.mjs';
-import { providerApiKey } from '../../../agents/providers.mjs';
+} from '../../../providers/web-client.mjs';
+import { providerApiKey } from '../../../providers/providers.mjs';
 import { getSecret } from '../../../server/vault.mjs';
 import { getDb } from '../../../kb/db.mjs';
 
