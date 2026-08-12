@@ -129,6 +129,15 @@ function safeAudit(db, fields) {
   }
 }
 
+// Redact an MCP plugin's env VALUES for a client response — key names are
+// harmless (they're identifiers like "SLACK_TOKEN", not secrets) and the
+// Mac client only ever displays the key list, but the values are real
+// credentials that must never leave the server for a plain GET.
+function redactEnvValues(env) {
+  if (!env || typeof env !== 'object') return env;
+  return Object.fromEntries(Object.keys(env).map((k) => [k, '••••']));
+}
+
 // Returns true when the request URL is one this module owns.  Caller
 // dispatches us before falling through to the KB router.  The query
 // string is stripped before matching so /auth/me/audit?limit=N still
@@ -1112,7 +1121,16 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   // DELETE /auth/me/mcp-plugins/<id>                                       (admin)
   if (method === 'GET' && url.split('?')[0] === '/auth/me/mcp-plugins') {
     const { listMcpPluginsWithState } = await import('../mcp/state.mjs');
-    send(res, 200, listMcpPluginsWithState(req.user.id));
+    const { plugins } = listMcpPluginsWithState(req.user.id);
+    // Redact env VALUES before this reaches a non-admin caller — every
+    // plugin's env is userId-independent (stored once on the shared
+    // registry record, not per-user), so an unredacted spread here would
+    // hand any authenticated user another plugin's real credentials
+    // (e.g. a Slack/Linear bearer token) merely by hitting this endpoint,
+    // whether or not they've ever consented to or enabled that plugin.
+    // Key NAMES are kept (mirrors vault's listSecretKeys) since the Mac
+    // detail view only ever displays the key list, never a value.
+    send(res, 200, { plugins: plugins.map((p) => ({ ...p, env: redactEnvValues(p.env) })) });
     return;
   }
 

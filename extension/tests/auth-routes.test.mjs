@@ -779,6 +779,26 @@ test('POST /auth/me/mcp-plugins/add (admin) + consent + toggle + list + delete',
   assert.equal(del.statusCode, 200);
 });
 
+test('GET /auth/me/mcp-plugins redacts env VALUES (key names only) — a non-admin caller never sees another plugin\'s real secret', async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
+    body: { command: 'npx', args: [], name: 'slack', source: 'manual', env: { SLACK_TOKEN: 'xoxb-real-secret-value' } } });
+  assert.equal(added.statusCode, 200, added._body);
+  const id = added.json().plugin.id;
+
+  const { user: other } = await registerAndLogin();
+  const plain = { id: other.id }; // not admin, never consented/enabled
+
+  const list = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins', user: plain });
+  const row = list.json().plugins.find((p) => p.id === id);
+  assert.ok(row, 'plugin should still be listed (registry, not per-user, is what gates visibility)');
+  assert.ok('SLACK_TOKEN' in row.env, 'key name is kept — the Mac client only ever displays key names');
+  assert.notEqual(row.env.SLACK_TOKEN, 'xoxb-real-secret-value');
+
+  await callAuth({ method: 'DELETE', url: `/auth/me/mcp-plugins/${id}`, user: admin });
+});
+
 test('POST /auth/me/mcp-plugins/consent + toggle are per-user, not admin-gated, and validate the body', async () => {
   const { user } = await registerAndLogin();
   const admin = { id: user.id, role: 'admin' };
