@@ -55,11 +55,21 @@ struct LibraryView: View {
     @State private var llmSources: [LlmIdeAPIClient.LlmSourceInfo] = []
     @State private var showingLlmSourceAddSheet = false
     @State private var llmSourceMessage: String?
+    /// Registered MCP plugins for the current user. Loaded once on appear
+    /// and refreshed after any add/consent/toggle/remove — same pattern as
+    /// `llmSources`, except load/refresh surface errors instead of
+    /// swallowing them: an empty section from a real fetch failure (e.g. the
+    /// server down) looks identical to "nothing registered yet" otherwise,
+    /// which hides an actionable problem from the user.
+    @State private var mcpPlugins: [LlmIdeAPIClient.McpPluginInfo] = []
+    @State private var mcpPluginsError: String?
+    @State private var mcpPluginMessage: String?
+    @State private var mcpClaudeSources: [LlmIdeAPIClient.ClaudeMcpSource] = []
     /// Persisted set of COLLAPSED section ids (comma-joined). Absence ⇒
     /// expanded. One uniform mechanism drives every section's chevron.
     /// Every section is seeded collapsed so the library opens in a clean,
     /// fully-closed state; the user expands what they need. Survives relaunch.
-    @AppStorage("library.collapsedSections") private var collapsedSectionsRaw = "meetings,code,data,notes,plugins,llmSources"
+    @AppStorage("library.collapsedSections") private var collapsedSectionsRaw = "meetings,code,data,notes,plugins,llmSources,mcpPlugins"
 
     var body: some View {
         Group {
@@ -79,6 +89,7 @@ struct LibraryView: View {
         .task { await load() }
         .task { await loadPlugins() }
         .task { await loadLlmSources() }
+        .task { await loadMcpPlugins() }
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
             Task { @MainActor in
                 // Refresh the meeting list. syncMeetingNotes is handled
@@ -232,6 +243,13 @@ struct LibraryView: View {
             // docs/superpowers/specs/2026-08-11-skills-sources-design.md and
             // docs/superpowers/specs/2026-08-12-llm-sources-rename-and-expand.md.
             llmSourcesSection
+
+            // ── MCP Plugins section ────────────────────────────────────
+            // Servers imported from ~/.claude.json or registered manually,
+            // gated by per-user consent + enable before they reach the
+            // Claude CLI's --mcp-config. See
+            // docs/superpowers/specs/2026-08-12-mcp-plugin-runtime-design.md.
+            mcpPluginsSection
         }
         .listStyle(.inset)
         .animation(.easeInOut(duration: 0.2), value: vm.groupedRows.map(\.group))
@@ -924,6 +942,144 @@ struct LibraryView: View {
             await refreshLlmSources()
         } catch {
             llmSourceMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - MCP Plugins
+
+    @ViewBuilder
+    private var mcpPluginsSection: some View {
+        Section {
+            if sectionExpanded("mcpPlugins").wrappedValue {
+                if let mcpPluginsError {
+                    HStack(spacing: 6) {
+                        Text(mcpPluginsError).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        Button("Retry") { Task { await loadMcpPlugins() } }
+                            .font(.caption)
+                    }
+                    .padding(.vertical, 2)
+                } else if mcpPlugins.isEmpty {
+                    emptyRow("No MCP plugins registered yet.", icon: "bolt.horizontal.circle")
+                } else {
+                    ForEach(mcpPlugins) { p in
+                        McpPluginRow(
+                            plugin: p,
+                            onToggleConsent: { consented in Task { await consentPlugin(p.id, consented: consented) } },
+                            onToggleEnabled: { enabled in Task { await togglePlugin(p.id, enabled: enabled) } }
+                        )
+                        .tag(ShellState.LibrarySelection.mcpPlugin(p.id))
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                Task { await removePlugin(p.id) }
+                            } label: { Label("Remove", systemImage: "trash") }
+                        }
+                    }
+                }
+            }
+        } header: {
+            mcpPluginsHeader
+        }
+    }
+
+    /// Section header row with the "Add from Claude Code…" menu.
+    @ViewBuilder
+    private var mcpPluginsHeader: some View {
+        unifiedSectionHeader(
+            id: "mcpPlugins", title: "MCP Plugins", icon: "bolt.horizontal.circle",
+            tint: theme.current.categoryPurple, count: mcpPlugins.count
+        ) {
+            Menu {
+                Menu("Add from Claude Code…") {
+                    if mcpClaudeSources.isEmpty {
+                        Button("No servers found in ~/.claude.json") {}.disabled(true)
+                    } else {
+                        ForEach(mcpClaudeSources) { s in
+                            Button(s.name) {
+                                Task { await addPluginFromClaude(s.name) }
+                            }
+                        }
+                    }
+                    Divider()
+                    Button("Rescan") { Task { await scanClaudeSources() } }
+                }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(theme.current.categoryPurple.opacity(0.6))
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 20)
+            .help("Add an MCP plugin")
+            .task { await scanClaudeSources() }
+        }
+        .alert("MCP plugin", isPresented: Binding(
+            get: { mcpPluginMessage != nil },
+            set: { if !$0 { mcpPluginMessage = nil } }
+        )) {
+            Button("OK") { mcpPluginMessage = nil }
+        } message: {
+            Text(mcpPluginMessage ?? "")
+        }
+    }
+
+    private func loadMcpPlugins() async {
+        do {
+            mcpPlugins = try await api.listMcpPlugins()
+            mcpPluginsError = nil
+        } catch {
+            mcpPluginsError = error.localizedDescription
+        }
+    }
+
+    private func refreshMcpPlugins() async { await loadMcpPlugins() }
+
+    /// Admin-only scan; a non-admin caller's 403 is swallowed here — the
+    /// submenu just stays empty, matching the read-only nature of the scan
+    /// (nothing actionable for a non-admin to retry).
+    private func scanClaudeSources() async {
+        mcpClaudeSources = (try? await api.scanClaudeMcpSources()) ?? []
+    }
+
+    private func addPluginFromClaude(_ claudeName: String) async {
+        do {
+            let added = try await api.addMcpPlugin(claudeName: claudeName)
+            mcpPluginMessage = "Added \(added.name)."
+            await refreshMcpPlugins()
+        } catch {
+            mcpPluginMessage = error.localizedDescription
+        }
+    }
+
+    private func consentPlugin(_ id: String, consented: Bool) async {
+        do {
+            _ = try await api.consentMcpPlugin(id: id, consented: consented)
+            await refreshMcpPlugins()
+        } catch {
+            mcpPluginMessage = error.localizedDescription
+        }
+    }
+
+    private func togglePlugin(_ id: String, enabled: Bool) async {
+        do {
+            _ = try await api.toggleMcpPlugin(id: id, enabled: enabled)
+            await refreshMcpPlugins()
+        } catch {
+            mcpPluginMessage = error.localizedDescription
+        }
+    }
+
+    private func removePlugin(_ id: String) async {
+        do {
+            try await api.removeMcpPlugin(id: id)
+            if case .mcpPlugin(let sel) = shell.librarySelection, sel == id {
+                shell.librarySelection = nil
+            }
+            await refreshMcpPlugins()
+        } catch {
+            mcpPluginMessage = error.localizedDescription
         }
     }
 
