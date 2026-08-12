@@ -37,10 +37,20 @@ export function getMcpPlugin(id) { return readMcpRegistry().find((s) => s.id ===
 export function slugifyMcp(name, existing) {
   let base = String(name || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
   if (!/^[a-z]/.test(base)) base = `s-${base}`;
-  base = base.slice(0, 40);
   if (!SLUG_RE.test(base)) base = `mcp-${Date.now().toString(36)}`;
   let id = base, i = 2;
-  while (existing.has(id)) { id = `${base}-${i++}`; }
+  // On collision, truncate base to leave room for '-{suffix}' so id always fits SLUG_RE (max 40).
+  while (existing.has(id)) {
+    const suffix = `-${i}`;
+    const maxBaseLen = 40 - suffix.length;
+    const truncated = base.slice(0, maxBaseLen);
+    id = `${truncated}${suffix}`;
+    i++;
+  }
+  // Final guard: if we somehow produced an invalid id, fall back to timestamp.
+  if (!SLUG_RE.test(id)) {
+    id = `mcp-${Date.now().toString(36)}`;
+  }
   return id;
 }
 
@@ -66,6 +76,8 @@ export function removeMcpPlugin(id) {
   const next = list.filter((s) => s.id !== id);
   if (next.length === list.length) return { error: 'not found', status: 404 };
   writeMcpRegistry(next);
+  // Drop removed id from every user's enable/consent state — prevents resurrection on re-add.
+  pruneMcpState(new Set(next.map((p) => p.id)));
   return { ok: true };
 }
 
@@ -88,6 +100,30 @@ function userEntry(userId) {
   if (!st[userId]) st[userId] = {};
   return st;
 }
+
+export function pruneMcpState(validIds) {
+  const all = readState();
+  let touched = false;
+  for (const [userId, entry] of Object.entries(all)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const pruned = {};
+    for (const [pluginId, state] of Object.entries(entry)) {
+      if (validIds.has(pluginId)) {
+        pruned[pluginId] = state;
+      } else {
+        touched = true;
+      }
+    }
+    if (Object.keys(pruned).length === 0) {
+      delete all[userId];
+      touched = true;
+    } else {
+      all[userId] = pruned;
+    }
+  }
+  if (touched) writeState(all);
+}
+
 export function setConsented(userId, id, consented) {
   if (!SLUG_RE.test(id)) return;
   const st = readState();
