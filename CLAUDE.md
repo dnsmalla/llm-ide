@@ -99,6 +99,7 @@ llm-ide/
 │   ├── core/            # Framework-free primitives (config, utils, errors, logger)
 │   ├── server/          # HTTP server (no framework), routing, middleware
 │   ├── kb/              # SQLite knowledge base, migrations, FTS5; sources.mjs = source hub
+│   ├── providers/       # Model-provider layer: dispatch, CLI spawn, retry/backoff, web client
 │   ├── agents/          # Server pipeline agents (planner, risk, codegen, …) — not skills
 │   ├── llm_agent/       # Claude CLI orchestrator + synced agent-tool defs
 │   ├── connectors/      # Outbound dispatch (GitHub/GitLab/Backlog/Linear/Slack) + source adapters (box, git, issues, qa, scip)
@@ -145,6 +146,7 @@ Five layers — arrows indicate "may import". **Enforced by ESLint** (`no-restri
 L0 core         → nothing internal
 L1 kb           → core                          (data access only)
 L2 server libs  → core, kb                      (auth/vault/jwt/rate-limit/metrics)
+   providers    → core, kb, server libs         (model dispatch/CLI/retry/web client)
 L3 agents · llm_agent · connectors · graphkit · guardrails · plugins ·
    llm-sources · mcp → L0–L2
 L4 routes       → anything                      (server.mjs, kb/router.mjs,

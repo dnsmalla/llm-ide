@@ -204,7 +204,7 @@ mac untouched phases skip `make test-mac`.
 - [ ] Document the corrected layer diagram in CLAUDE.md + `docs/explanation/architecture.md`
 
 ### Phase 2 — Logical extraction, no directory earthquake (1–2 weeks, incremental PRs)
-- [ ] 2.1 Extract `extension/providers/` per §4.3; update `agents/` + `llm_agent/` imports; delete the allowlisted `llm_agent → agents` exceptions
+- [x] 2.1 Extract `extension/providers/` per §4.3 — done. `providers/{providers,runtime,backoff,web-client,prompt-utils}.mjs` moved from `agents/`; `mode-classify.mjs` moved into `llm_agent/runtime/` (its only consumer); `redact` → `core/redact-object.mjs`; `resolveCentralSkillsRepo` → `core/skills-repo.mjs` (killed the registry↔skill-library cycle). **Grandfather list is now empty.**
 - [ ] 2.2 Move `kb/routes/*` + `kb/router.mjs` contents into the unified route convention (§4.2); `kb/` becomes data-only
 - [ ] 2.3 Regroup sources vs dispatch (§4.4) — one PR per source, Box first (it's the reference connector)
 - [ ] 2.4 Mirror `tests/` into per-layer subdirectories as files move (keep the flat Node-test-runner glob working)

@@ -8,13 +8,14 @@ import globals from 'globals';
 //   L0 core        → nothing internal
 //   L1 kb          → core                       (data access only)
 //   L2 server libs → core, kb                   (auth/vault/jwt/rate-limit/…)
+//      providers   → core, kb, server libs     (model dispatch/CLI/retry/web)
 //   L3 agents, llm_agent, connectors, graphkit, guardrails, plugins,
 //      llm-sources, mcp → L0–L2 (agents may also use graphkit/guardrails/connectors)
 //   L4 routes      → anything; NOTHING imports a route module
 //
-// Enforced with no-restricted-imports regex patterns. This is a RATCHET:
-// current violations are grandfathered in per-file overrides below — do not
-// add new files to those lists; Phase 2 of RESTRUCTURE_PLAN.md removes them.
+// Enforced with no-restricted-imports regex patterns. This is a RATCHET —
+// keep it at zero violations; never add per-file overrides to exempt a new
+// cross-layer import.
 // Note: the core rule does not see dynamic import() — best-effort by design.
 // ---------------------------------------------------------------------------
 const ROUTE_MODULES = {
@@ -75,14 +76,18 @@ export default tseslint.config(
   // --- Layering boundaries (see header comment) ----------------------------
   {
     files: ['core/**/*.mjs'],
-    rules: forbidLayers(['kb', 'server', 'agents', 'llm_agent', 'connectors', 'graphkit', 'guardrails', 'plugins', 'llm-sources', 'mcp', 'src']),
+    rules: forbidLayers(['kb', 'server', 'providers', 'agents', 'llm_agent', 'connectors', 'graphkit', 'guardrails', 'plugins', 'llm-sources', 'mcp', 'src']),
   },
   {
     files: ['kb/**/*.mjs'],
-    rules: forbidLayers(['server', 'agents', 'llm_agent', 'connectors', 'graphkit', 'guardrails', 'plugins', 'llm-sources', 'mcp', 'src']),
+    rules: forbidLayers(['server', 'providers', 'agents', 'llm_agent', 'connectors', 'graphkit', 'guardrails', 'plugins', 'llm-sources', 'mcp', 'src']),
   },
   {
     files: ['server/**/*.mjs'],
+    rules: forbidLayers(['agents', 'llm_agent', 'connectors', 'graphkit', 'guardrails', 'plugins', 'llm-sources', 'mcp', 'src']),
+  },
+  {
+    files: ['providers/**/*.mjs'],
     rules: forbidLayers(['agents', 'llm_agent', 'connectors', 'graphkit', 'guardrails', 'plugins', 'llm-sources', 'mcp', 'src']),
   },
   {
@@ -108,27 +113,10 @@ export default tseslint.config(
     files: ['kb/router.mjs', 'kb/routes/**/*.mjs', 'server/ai-routes.mjs', 'server/auth-routes.mjs', 'server/export-routes.mjs', 'server/control-plane.mjs'],
     rules: { 'no-restricted-imports': 'off' },
   },
-  {
-    // GRANDFATHERED violations — the Phase-2 ratchet (RESTRUCTURE_PLAN.md).
-    // Do NOT add files here; each entry dies when its edge is refactored:
-    //  - kb/activity.mjs → server/audit.mjs        (redact belongs in core/)
-    //  - kb/install-project-skills.mjs → llm_agent/skills/skill-library.mjs
-    //  - llm_agent/runtime/{route,memory-extract}.mjs,
-    //    llm_agent/runtime/handlers/{fetch-url,web-search}.mjs → agents/*
-    //    (dies when the shared provider layer is extracted)
-    //  - llm-sources/registry.mjs ↔ llm_agent/skills/skill-library.mjs
-    //    (real import CYCLE — resolveCentralSkillsRepo must move down a layer)
-    files: [
-      'kb/activity.mjs',
-      'kb/install-project-skills.mjs',
-      'llm_agent/runtime/route.mjs',
-      'llm_agent/runtime/memory-extract.mjs',
-      'llm_agent/runtime/handlers/fetch-url.mjs',
-      'llm_agent/runtime/handlers/web-search.mjs',
-      'llm-sources/registry.mjs',
-    ],
-    rules: { 'no-restricted-imports': 'off' },
-  },
+  // No grandfathered violations — every cross-layer edge found when this
+  // ratchet was introduced has been refactored away (provider-layer
+  // extraction, core/redact-object.mjs, core/skills-repo.mjs). Keep it that
+  // way: never add per-file exemptions.
   {
     ignores: ['dist/', 'node_modules/', '*.d.ts'],
   },
