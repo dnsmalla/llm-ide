@@ -7,7 +7,6 @@ import { homedir } from 'node:os';
 
 export const SLUG_RE = /^[a-z][a-z0-9-]{1,40}$/;
 
-function dirnameOf(p) { return p.split('/').slice(0, -1).join('/') || '/'; }
 function baseDir() {
   return process.env.LLMIDE_PLUGIN_DIR
     || (process.platform === 'darwin'
@@ -37,6 +36,11 @@ export function getMcpPlugin(id) { return readMcpRegistry().find((s) => s.id ===
 export function slugifyMcp(name, existing) {
   let base = String(name || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
   if (!/^[a-z]/.test(base)) base = `s-${base}`;
+  // Truncate BEFORE testing SLUG_RE (mirrors llm-sources/registry.mjs's
+  // slugify) — testing the untruncated base first meant any name whose
+  // sanitized form exceeded 41 chars fell straight to an opaque
+  // `mcp-<timestamp>` id, discarding the name entirely.
+  base = base.slice(0, 40);
   if (!SLUG_RE.test(base)) base = `mcp-${Date.now().toString(36)}`;
   let id = base, i = 2;
   // On collision, truncate base to leave room for '-{suffix}' so id always fits SLUG_RE (max 40).
@@ -95,10 +99,10 @@ function writeState(st) {
   writeFileSync(tmp, JSON.stringify(st, null, 2), 'utf8');
   renameSync(tmp, p);
 }
-function userEntry(userId) {
-  const st = readState();
+function ensurePluginEntry(st, userId, id) {
   if (!st[userId]) st[userId] = {};
-  return st;
+  if (!st[userId][id]) st[userId][id] = {};
+  return st[userId][id];
 }
 
 export function pruneMcpState(validIds) {
@@ -127,17 +131,13 @@ export function pruneMcpState(validIds) {
 export function setConsented(userId, id, consented) {
   if (!SLUG_RE.test(id)) return;
   const st = readState();
-  if (!st[userId]) st[userId] = {};
-  if (!st[userId][id]) st[userId][id] = {};
-  st[userId][id].consented = !!consented;
+  ensurePluginEntry(st, userId, id).consented = !!consented;
   writeState(st);
 }
 export function setEnabledMcp(userId, id, enabled) {
   if (!SLUG_RE.test(id)) return;
   const st = readState();
-  if (!st[userId]) st[userId] = {};
-  if (!st[userId][id]) st[userId][id] = {};
-  st[userId][id].enabled = !!enabled;
+  ensurePluginEntry(st, userId, id).enabled = !!enabled;
   writeState(st);
 }
 
