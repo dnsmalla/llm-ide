@@ -148,21 +148,24 @@ This is the corrected version of the original plan's "unified agent-runtime": un
 the *provider mechanics* both systems share; do **not** merge two agents with
 different jobs into one runtime.
 
-### 4.4 Source & connector consolidation
+### 4.4 Source & connector consolidation — CORRECTED after implementation
 
-Split by direction, which is the axis that actually matters operationally:
+Two of this section's original premises turned out wrong once verified in code:
 
-```
-extension/sources/            inbound  (Pattern A: index → sources table; Pattern B: fetch → note)
-  ├── registry.mjs, state.mjs      ← from llm-sources/
-  ├── box.mjs, git.mjs, scip*.mjs  ← from connectors/
-  ├── email/, slack/               ← agents/email-source.mjs, slack-source.mjs, *-oauth.mjs
-  └── mcp/                         ← from mcp/
-extension/dispatch/           outbound (issues.mjs → github/gitlab/backlog/linear, slack.mjs, qa.mjs)
-```
+1. **`connectors/` was already purely inbound** — every module is an indexer
+   (`box`, `git`, `issues` = `indexGithubIssues`, `qa` = `indexJUnit`, `scip`,
+   `structure-graph`). The "outbound dispatch lives in connectors" description
+   came from a stale CLAUDE.md line, not the code. Outbound ticket/PR/Slack
+   dispatch lives in `agents/` (`dispatcher`, `github-pr`, `slack`) — defensible
+   as pipeline *actions*; no `dispatch/` directory is needed.
+2. **`llm-sources/` is NOT a data-source module** — it's the registry of *skill*
+   sources (central skills repos). Merging it into a data-ingestion directory
+   would have been semantically wrong. It stays. Same for `mcp/` (agent tooling).
 
-`kb/sources.mjs` remains the hub (per the documented Pattern A/B architecture); it
-gains no new responsibilities, only cleaner imports.
+What was actually done: the four inbound source adapters that lived in
+`agents/` (`email-source`, `slack-source`, `google-oauth`, `slack-oauth`)
+moved to `connectors/`, so `connectors/` = all inbound adapters and
+`agents/` = pipeline agents only. `kb/sources.mjs` remains the hub.
 
 ### 4.5 Eventual physical layout (Phase 3, gated)
 
@@ -206,8 +209,8 @@ mac untouched phases skip `make test-mac`.
 ### Phase 2 — Logical extraction, no directory earthquake (1–2 weeks, incremental PRs)
 - [x] 2.1 Extract `extension/providers/` per §4.3 — done. `providers/{providers,runtime,backoff,web-client,prompt-utils}.mjs` moved from `agents/`; `mode-classify.mjs` moved into `llm_agent/runtime/` (its only consumer); `redact` → `core/redact-object.mjs`; `resolveCentralSkillsRepo` → `core/skills-repo.mjs` (killed the registry↔skill-library cycle). **Grandfather list is now empty.**
 - [ ] 2.2 Move `kb/routes/*` + `kb/router.mjs` contents into the unified route convention (§4.2); `kb/` becomes data-only
-- [ ] 2.3 Regroup sources vs dispatch (§4.4) — one PR per source, Box first (it's the reference connector)
-- [ ] 2.4 Mirror `tests/` into per-layer subdirectories as files move (keep the flat Node-test-runner glob working)
+- [x] 2.3 Regroup sources vs dispatch (§4.4, as corrected) — `email-source`, `slack-source`, `google-oauth`, `slack-oauth` moved from `agents/` to `connectors/`; connectors got their own lint block (they legitimately reach `server/vault`). No `dispatch/` dir — outbound is pipeline actions in `agents/`.
+- [~] 2.4 Tests stay a flat pool — deliberate. 147 files move cleanly with the glob today; per-layer subdirectories would churn every historical reference for zero enforcement gain (the lint ratchet, not test location, guards the boundaries).
 - [ ] Each PR updates: invariants.md sections it touches, `docs/spec/` drift-guards, CLAUDE.md "Where to Add X" table
 
 ### Phase 3 — Physical workspace split (gated; only with a concrete driver)

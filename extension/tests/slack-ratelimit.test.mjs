@@ -6,7 +6,7 @@ import {
   fetchChannelHistory,
   _setSleepForTest,
   _resetUserCache,
-} from '../agents/slack-source.mjs';
+} from '../connectors/slack-source.mjs';
 
 // Build a fake fetch Response. `retryAfter` (seconds, string) is exposed via a
 // minimal headers.get shim; undefined → header absent.

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAuthUrl, exchangeCode, putState, getState, completeState, takeStatus } from '../agents/slack-oauth.mjs';
+import { buildAuthUrl, exchangeCode, putState, getState, completeState, takeStatus } from '../connectors/slack-oauth.mjs';
 
 test('buildAuthUrl includes client_id, redirect_uri, user_scope (no bot scope), state', () => {
   const u = new URL(buildAuthUrl({ clientId: 'cid', redirectUri: 'http://127.0.0.1:3456/auth/slack/callback', state: 'st' }));

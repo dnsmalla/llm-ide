@@ -32,8 +32,8 @@ import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatM
 import { handleCustomProvidersSync } from '../server/custom-providers.mjs';
 import { iterateUserMeetings } from '../kb/exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
-import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../agents/email-source.mjs';
-import { testConnection as slackTest, fetchChannelHistory, listUserConversations } from '../agents/slack-source.mjs';
+import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../connectors/email-source.mjs';
+import { testConnection as slackTest, fetchChannelHistory, listUserConversations } from '../connectors/slack-source.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';

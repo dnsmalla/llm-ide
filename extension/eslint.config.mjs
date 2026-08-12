@@ -91,8 +91,14 @@ export default tseslint.config(
     rules: forbidLayers(['agents', 'llm_agent', 'connectors', 'graphkit', 'guardrails', 'plugins', 'llm-sources', 'mcp', 'src']),
   },
   {
-    files: ['connectors/**/*.mjs', 'graphkit/**/*.mjs', 'guardrails/**/*.mjs', 'plugins/**/*.mjs', 'llm-sources/**/*.mjs', 'mcp/**/*.mjs'],
+    files: ['graphkit/**/*.mjs', 'guardrails/**/*.mjs', 'plugins/**/*.mjs', 'llm-sources/**/*.mjs', 'mcp/**/*.mjs'],
     rules: forbidLayers(['server', 'agents', 'llm_agent', 'src']),
+  },
+  {
+    // connectors are L3 like the block above, but the source adapters
+    // legitimately reach L2 (email-source reads creds via server/vault).
+    files: ['connectors/**/*.mjs'],
+    rules: forbidLayers(['agents', 'llm_agent', 'plugins', 'llm-sources', 'mcp', 'src']),
   },
   {
     files: ['agents/**/*.mjs'],

@@ -1,5 +1,5 @@
 // Tests for getGoogleAccessToken's client-credential resolution
-// (agents/email-source.mjs) — proves BYO always wins as an atomic pair when
+// (connectors/email-source.mjs) — proves BYO always wins as an atomic pair when
 // present, hosted config is used only when neither per-user field is set,
 // and the missing-refresh-token guard fires before any network call.
 import { test } from 'node:test';
@@ -22,7 +22,7 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 const kb = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
 const { setSecret } = await import('../server/vault.mjs');
-const { getGoogleAccessToken } = await import('../agents/email-source.mjs');
+const { getGoogleAccessToken } = await import('../connectors/email-source.mjs');
 
 function stubTokenFetch(expectClientId, expectClientSecret) {
   const orig = global.fetch;

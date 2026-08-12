@@ -2,7 +2,7 @@
 // Client-Credentials-Grant auth → recursive folder list → per-file
 // extracted_text representation → chunk → ingest into `sources` (kind='doc').
 // Network is global fetch (fixed host api.box.com, so no SSRF surface),
-// mirroring agents/slack-source.mjs. Tests stub global.fetch.
+// mirroring connectors/slack-source.mjs. Tests stub global.fetch.
 import { chunkLines, } from './git.mjs';
 import { ingestSources, deleteSourcesByPrefix } from '../kb/db.mjs';
 

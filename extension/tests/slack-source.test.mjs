@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stripMrkdwn, normalizeMessage, fetchChannelHistory, resolveOldestTs, listUserConversations } from '../agents/slack-source.mjs';
+import { stripMrkdwn, normalizeMessage, fetchChannelHistory, resolveOldestTs, listUserConversations } from '../connectors/slack-source.mjs';
 
 test('resolveOldestTs: high-water wins; else lookbackDays, clamped 1..60', () => {
   // Forward-only high-water always wins, verbatim.

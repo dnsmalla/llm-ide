@@ -149,7 +149,7 @@ export const config = Object.freeze({
   // Vault
   vaultKey:     _vaultKey,
 
-  // Slack hosted OAuth app (agents/slack-oauth.mjs). LLM-IDE owns ONE Slack
+  // Slack hosted OAuth app (connectors/slack-oauth.mjs). LLM-IDE owns ONE Slack
   // App registration — these are the app's own client id/secret, never
   // per-user, never in the vault. Optional: /auth/slack/start returns a
   // clear "not configured" error when unset instead of proceeding with
@@ -157,7 +157,7 @@ export const config = Object.freeze({
   slackClientId:     envStr('LLMIDE_SLACK_CLIENT_ID'),
   slackClientSecret: envStr('LLMIDE_SLACK_CLIENT_SECRET'),
 
-  // Gmail hosted OAuth app (agents/google-oauth.mjs). LLM-IDE owns ONE
+  // Gmail hosted OAuth app (connectors/google-oauth.mjs). LLM-IDE owns ONE
   // Google Cloud OAuth client (Testing-mode) — these are the app's own
   // client id/secret, never per-user, never in the vault. Optional:
   // /auth/google/start falls back to per-request BYO credentials (the

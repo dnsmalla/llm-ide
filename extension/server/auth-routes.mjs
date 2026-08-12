@@ -17,12 +17,12 @@ import { listSecretKeys, setSecret, VAULT_KEYS, isVaultError } from './vault.mjs
 import {
   pkcePair, buildAuthUrl, exchangeCode, fetchEmailAddress,
   putState, getState, completeState, takeStatus,
-} from '../agents/google-oauth.mjs';
+} from '../connectors/google-oauth.mjs';
 import {
   buildAuthUrl as buildSlackAuthUrl, exchangeCode as exchangeSlackCode,
   putState as putSlackState, getState as getSlackState,
   completeState as completeSlackState, takeStatus as takeSlackStatus,
-} from '../agents/slack-oauth.mjs';
+} from '../connectors/slack-oauth.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
 
 // Map any error (including VaultError) to a client-safe message.
@@ -385,7 +385,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
         // This flow used the hosted client, so the new refresh token is
         // minted under it — clear any stale per-user clientId/clientSecret
         // left over from a PREVIOUS bring-your-own setup. Otherwise the
-        // token-refresh resolver (agents/email-source.mjs) would find the
+        // token-refresh resolver (connectors/email-source.mjs) would find the
         // old BYO client still present, prefer it, and try to refresh a
         // hosted-minted token with the wrong client — Google rejects that
         // outright (invalid_grant), permanently breaking the connection.

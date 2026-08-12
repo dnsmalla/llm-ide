@@ -101,9 +101,9 @@ llm-ide/
 │   ├── kb/              # SQLite knowledge base, migrations, FTS5; sources.mjs = source hub
 │   ├── routes/          # HTTP route modules (router.mjs + agent/chat/live/planning/review/…)
 │   ├── providers/       # Model-provider layer: dispatch, CLI spawn, retry/backoff, web client
-│   ├── agents/          # Server pipeline agents (planner, risk, codegen, …) — not skills
+│   ├── agents/          # Server pipeline agents (planner, risk, codegen, dispatcher, …) — not skills
 │   ├── llm_agent/       # Claude CLI orchestrator + synced agent-tool defs
-│   ├── connectors/      # Outbound dispatch (GitHub/GitLab/Backlog/Linear/Slack) + source adapters (box, git, issues, qa, scip)
+│   ├── connectors/      # Inbound source adapters (box, git, issues, qa, scip, email, slack + OAuth)
 │   ├── llm-sources/     # LLM source registry + state (feeds kb/sources.mjs hub)
 │   ├── mcp/             # MCP server config + Claude MCP source adapter
 │   ├── graphkit/        # Code-graph engine (graph.mjs, layouts, 2D/3D renderers, memory-writer)

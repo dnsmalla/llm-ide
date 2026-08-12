@@ -41,7 +41,7 @@ test('slack.botToken is an allowed vault key and round-trips', () => {
   assert.equal(getSecret(db, userId, 'slack.botToken'), 'xoxb-abc-123');
 });
 
-// The hosted Slack OAuth flow (agents/slack-oauth.mjs, /auth/slack/callback)
+// The hosted Slack OAuth flow (connectors/slack-oauth.mjs, /auth/slack/callback)
 // stores the connected user's token under `slack.userToken`. If the key is
 // not allow-listed, the callback's setSecret throws and every "Connect
 // Slack" attempt fails after a successful browser consent.
