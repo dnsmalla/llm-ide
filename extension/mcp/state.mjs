@@ -1,0 +1,117 @@
+// extension/mcp/state.mjs
+// MCP-plugin registry + per-user consent/enable. Atomic JSON writes; per-user
+// state keyed by userId. Mirrors llm-sources/registry.mjs + state.mjs.
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
+
+export const SLUG_RE = /^[a-z][a-z0-9-]{1,40}$/;
+
+function dirnameOf(p) { return p.split('/').slice(0, -1).join('/') || '/'; }
+function baseDir() {
+  return process.env.LLMIDE_PLUGIN_DIR
+    || (process.platform === 'darwin'
+        ? join(homedir(), 'Library', 'Application Support', 'llm-ide', 'plugins')
+        : join(homedir(), '.local', 'share', 'llm-ide', 'plugins'));
+}
+function registryPath() { return join(dirname(baseDir()), 'mcp-plugins.json'); }
+function statePath() { return join(dirname(baseDir()), 'mcp-plugins-state.json'); }
+
+export function readMcpRegistry() {
+  const p = registryPath();
+  if (!existsSync(p)) return [];
+  try {
+    const data = JSON.parse(readFileSync(p, 'utf8'));
+    return Array.isArray(data?.plugins) ? data.plugins.filter((s) => s && typeof s === 'object') : [];
+  } catch { return []; }
+}
+export function writeMcpRegistry(list) {
+  const p = registryPath();
+  mkdirSync(dirname(p), { recursive: true });
+  const tmp = `${p}.tmp`;
+  writeFileSync(tmp, JSON.stringify({ plugins: list }, null, 2), 'utf8');
+  renameSync(tmp, p);
+}
+export function getMcpPlugin(id) { return readMcpRegistry().find((s) => s.id === id) || null; }
+
+export function slugifyMcp(name, existing) {
+  let base = String(name || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!/^[a-z]/.test(base)) base = `s-${base}`;
+  base = base.slice(0, 40);
+  if (!SLUG_RE.test(base)) base = `mcp-${Date.now().toString(36)}`;
+  let id = base, i = 2;
+  while (existing.has(id)) { id = `${base}-${i++}`; }
+  return id;
+}
+
+export function addMcpPlugin({ name, command, args, env, source }) {
+  if (typeof command !== 'string' || !command.trim()) return { error: 'command is required', status: 400 };
+  const list = readMcpRegistry();
+  const id = slugifyMcp(name || command, new Set(list.map((s) => s.id)));
+  const plugin = {
+    id, name: name || id, command,
+    args: Array.isArray(args) ? args.filter((a) => typeof a === 'string') : [],
+    env: env && typeof env === 'object' ? env : undefined,
+    source: source === 'claude' ? 'claude' : 'manual',
+    builtin: false,
+  };
+  list.push(plugin);
+  writeMcpRegistry(list);
+  return { plugin };
+}
+
+export function removeMcpPlugin(id) {
+  if (!SLUG_RE.test(id)) return { error: 'invalid id', status: 400 };
+  const list = readMcpRegistry();
+  const next = list.filter((s) => s.id !== id);
+  if (next.length === list.length) return { error: 'not found', status: 404 };
+  writeMcpRegistry(next);
+  return { ok: true };
+}
+
+// ---- per-user state ----
+function readState() {
+  const p = statePath();
+  if (!existsSync(p)) return {};
+  try { const d = JSON.parse(readFileSync(p, 'utf8')); return d && typeof d === 'object' ? d : {}; }
+  catch { return {}; }
+}
+function writeState(st) {
+  const p = statePath();
+  mkdirSync(dirname(p), { recursive: true });
+  const tmp = `${p}.tmp`;
+  writeFileSync(tmp, JSON.stringify(st, null, 2), 'utf8');
+  renameSync(tmp, p);
+}
+function userEntry(userId) {
+  const st = readState();
+  if (!st[userId]) st[userId] = {};
+  return st;
+}
+export function setConsented(userId, id, consented) {
+  if (!SLUG_RE.test(id)) return;
+  const st = readState();
+  if (!st[userId]) st[userId] = {};
+  if (!st[userId][id]) st[userId][id] = {};
+  st[userId][id].consented = !!consented;
+  writeState(st);
+}
+export function setEnabledMcp(userId, id, enabled) {
+  if (!SLUG_RE.test(id)) return;
+  const st = readState();
+  if (!st[userId]) st[userId] = {};
+  if (!st[userId][id]) st[userId][id] = {};
+  st[userId][id].enabled = !!enabled;
+  writeState(st);
+}
+
+export function listMcpPluginsWithState(userId) {
+  const st = readState()[userId] || {};
+  return {
+    plugins: readMcpRegistry().map((p) => ({
+      ...p,
+      enabled: !!(st[p.id]?.enabled),
+      consented: !!(st[p.id]?.consented),
+    })),
+  };
+}
