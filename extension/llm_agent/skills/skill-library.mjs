@@ -10,50 +10,30 @@
 // but READ-ONLY and network-free: if no local clone exists we return an empty
 // catalog rather than cloning. All I/O is best-effort and never throws.
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { homedir } from 'node:os';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import * as yaml from 'js-yaml';
-// Circular import is SAFE: registry.mjs imports resolveCentralSkillsRepo from
-// here (a hoisted function declaration, so the live binding exists during the
-// cycle), and every export we consume below (listSources, snapshotSource,
-// BUILTIN_ID, seedBuiltinOnce) is referenced ONLY inside listSkillLibrary —
-// never at module top level.
+import { resolveCentralSkillsRepo } from '../../core/skills-repo.mjs';
 import { listSources, snapshotSource, BUILTIN_ID, seedBuiltinOnce } from '../../llm-sources/registry.mjs';
 import { listEnabled } from '../../llm-sources/state.mjs';
+
+// Locate the central skills checkout on disk ($SKILLS_REPO → <repo>/.skills →
+// ~/skills → …). Lives in core/skills-repo.mjs — the LLM-sources registry and
+// kb/install-project-skills.mjs need the same resolution, and importing it
+// from here made registry.mjs ↔ skill-library.mjs a real import cycle.
+// Re-exported for existing callers of this module's public surface.
+export { resolveCentralSkillsRepo };
 
 // Families NOT already surfaced via /kb/agent/catalog (which covers
 // agent-globals + agent-tools). These are the "all the other skills".
 const LIBRARY_FAMILIES = ['skills', 'runtime'];
 const MAX_DESC = 200;
 
-// extension/llm_agent/skills/ → repo root (three levels up).
-const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../..');
-
 // Keyed by userId (each user's enabled-sources set differs) — a single
 // shared slot here would leak one user's catalog (including which private
 // sources they've registered) to every other user's next request. The
 // no-user/test caller uses '' as its key.
 const _cache = new Map();
-
-// Locate the central skills checkout on disk. Marker: registry.yaml or an
-// agent-tools/ dir (mirrors sync-skills.sh). No network clone.
-// Prefer the pinned project submodule at <repo>/.skills when present.
-export function resolveCentralSkillsRepo() {
-  const candidates = [];
-  if (process.env.SKILLS_REPO) candidates.push(process.env.SKILLS_REPO);
-  candidates.push(join(REPO_ROOT, '.skills'));
-  candidates.push(join(homedir(), 'skills'));
-  candidates.push(join(homedir(), 'Desktop', 'skills'));
-  candidates.push(join(homedir(), '.cache', 'dnsmalla-skills'));
-  for (const c of candidates) {
-    try {
-      if (existsSync(join(c, 'registry.yaml')) || existsSync(join(c, 'agent-tools'))) return c;
-    } catch { /* skip */ }
-  }
-  return null;
-}
 
 // Pull name + description from a SKILL.md frontmatter block. Parses the YAML
 // with js-yaml — the SAME parser the skill loader uses — so a quoted or folded
