@@ -87,7 +87,7 @@ LLM-IDE is a **local-first AI meeting intelligence system** comprising four surf
 - **Pure Node HTTP** — No framework (Express/Fastify); reduces dependency surface
 - **SQLite WAL+FTS5** — Single database per install, full-text search across meetings/code/tickets
 - **Per-user tenancy** — Every owned row carries `user_id`; FTS5 hits are hydrated with user-scoped queries
-- **Append-only migrations** — Numbered SQL migrations under `extension/kb/migrations/` (0001–0024)
+- **Append-only migrations** — Numbered SQL migrations under `extension/kb/migrations/` (0001–0027)
 
 ## Project Structure
 
@@ -101,7 +101,9 @@ llm-ide/
 │   ├── kb/              # SQLite knowledge base, migrations, FTS5; sources.mjs = source hub
 │   ├── agents/          # Server pipeline agents (planner, risk, codegen, …) — not skills
 │   ├── llm_agent/       # Claude CLI orchestrator + synced agent-tool defs
-│   ├── connectors/      # Outbound dispatch (GitHub/GitLab/Backlog/Linear/Slack) + source adapters (box, git, issues, qa)
+│   ├── connectors/      # Outbound dispatch (GitHub/GitLab/Backlog/Linear/Slack) + source adapters (box, git, issues, qa, scip)
+│   ├── llm-sources/     # LLM source registry + state (feeds kb/sources.mjs hub)
+│   ├── mcp/             # MCP server config + Claude MCP source adapter
 │   ├── graphkit/        # Code-graph engine (graph.mjs, layouts, 2D/3D renderers, memory-writer)
 │   ├── guardrails/      # Secret/PII/destructive-op pattern scanners
 │   ├── plugins/         # Extension plugin loader/installer (claude-adapter, loader, installer, state)
