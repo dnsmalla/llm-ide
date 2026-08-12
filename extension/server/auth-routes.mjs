@@ -164,6 +164,12 @@ export function isAuthRoute(url) {
       || path === '/auth/me/llm-sources/add'
       || path === '/auth/me/llm-sources/update'
       || path.startsWith('/auth/me/llm-sources/')
+      || path === '/auth/me/mcp-plugins'
+      || path === '/auth/me/mcp-plugins/claude-sources'
+      || path === '/auth/me/mcp-plugins/add'
+      || path === '/auth/me/mcp-plugins/consent'
+      || path === '/auth/me/mcp-plugins/toggle'
+      || path.startsWith('/auth/me/mcp-plugins/')
       || path === '/auth/google/start'
       || path === '/auth/google/callback'
       || path === '/auth/google/status'
@@ -1090,6 +1096,98 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     const detail = sourceDiscoveryDetail(id);
     if (!detail) { send(res, 404, { error: { code: 'NOT_FOUND', message: 'source not found or not installed' } }); return; }
     send(res, 200, detail);
+    return;
+  }
+
+  // MCP plugins (SP1): servers imported from ~/.claude.json or registered
+  // manually, gated by per-user consent + enable before they reach the
+  // Claude CLI's --mcp-config. Admin registers/scans/removes; any user
+  // consents + enables their own dispatch. See docs/superpowers/specs/
+  // 2026-08-12-mcp-plugin-runtime-design.md.
+  // GET    /auth/me/mcp-plugins                 → list + per-user consent/enable
+  // GET    /auth/me/mcp-plugins/claude-sources   → scan ~/.claude.json      (admin)
+  // POST   /auth/me/mcp-plugins/add              → { command,args,env,name,source } | { claudeName } (admin)
+  // POST   /auth/me/mcp-plugins/consent          → { id, consented }
+  // POST   /auth/me/mcp-plugins/toggle           → { id, enabled }
+  // DELETE /auth/me/mcp-plugins/<id>                                       (admin)
+  if (method === 'GET' && url.split('?')[0] === '/auth/me/mcp-plugins') {
+    const { listMcpPluginsWithState } = await import('../mcp/state.mjs');
+    send(res, 200, listMcpPluginsWithState(req.user.id));
+    return;
+  }
+
+  if (method === 'GET' && url.split('?')[0] === '/auth/me/mcp-plugins/claude-sources') {
+    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    const { scanClaudeMcpServers } = await import('../mcp/claude-source.mjs');
+    send(res, 200, { servers: scanClaudeMcpServers() });
+    return;
+  }
+
+  if (method === 'POST' && url === '/auth/me/mcp-plugins/add') {
+    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    let body;
+    try { body = await readJson(req, bodyLimit); }
+    catch { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return; }
+    if (body?.claudeName) {
+      const { scanClaudeMcpServers } = await import('../mcp/claude-source.mjs');
+      const found = scanClaudeMcpServers().find((s) => s.name === body.claudeName);
+      if (!found) { send(res, 400, { error: { code: 'ADD_FAILED', message: `no Claude MCP server named '${body.claudeName}'` } }); return; }
+      body = { command: found.command, args: found.args, env: found.env, name: body.name || found.name, source: 'claude' };
+    }
+    const { addMcpPlugin } = await import('../mcp/state.mjs');
+    const result = addMcpPlugin(body || {});
+    if (result.error) {
+      safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
+        action: 'mcp-plugin.add', outcome: 'failure', detail: { error: String(result.error).slice(0, 200) } });
+      send(res, result.status || 400, { error: { code: 'ADD_FAILED', message: result.error } });
+      return;
+    }
+    safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua, action: 'mcp-plugin.add', resource: result.plugin.id, outcome: 'success' });
+    send(res, 200, result);
+    return;
+  }
+
+  if (method === 'POST' && url === '/auth/me/mcp-plugins/consent') {
+    let body;
+    try { body = await readJson(req, bodyLimit); }
+    catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
+    if (!body || typeof body.id !== 'string' || !/^[a-z][a-z0-9-]{1,40}$/.test(body.id) || typeof body.consented !== 'boolean') {
+      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'id + consented required' } }); return;
+    }
+    const { setConsented } = await import('../mcp/state.mjs');
+    setConsented(req.user.id, body.id, body.consented);
+    safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
+      action: body.consented ? 'mcp-plugin.consent' : 'mcp-plugin.revoke-consent', resource: body.id, outcome: 'success' });
+    send(res, 200, { ok: true, consented: body.consented });
+    return;
+  }
+
+  if (method === 'POST' && url === '/auth/me/mcp-plugins/toggle') {
+    let body;
+    try { body = await readJson(req, bodyLimit); }
+    catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
+    if (!body || typeof body.id !== 'string' || !/^[a-z][a-z0-9-]{1,40}$/.test(body.id) || typeof body.enabled !== 'boolean') {
+      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'id + enabled required' } }); return;
+    }
+    const { setEnabledMcp } = await import('../mcp/state.mjs');
+    setEnabledMcp(req.user.id, body.id, body.enabled);
+    safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
+      action: body.enabled ? 'mcp-plugin.enable' : 'mcp-plugin.disable', resource: body.id, outcome: 'success' });
+    send(res, 200, { ok: true, enabled: body.enabled });
+    return;
+  }
+
+  if (method === 'DELETE' && url.startsWith('/auth/me/mcp-plugins/')) {
+    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    const id = decodeURIComponent(url.slice('/auth/me/mcp-plugins/'.length).split('?')[0]);
+    if (!/^[a-z][a-z0-9-]{1,40}$/.test(id)) {
+      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid id' } }); return;
+    }
+    const { removeMcpPlugin } = await import('../mcp/state.mjs');
+    const result = removeMcpPlugin(id);
+    if (result.error) { send(res, result.status || 400, { error: { code: 'REMOVE_FAILED', message: result.error } }); return; }
+    safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua, action: 'mcp-plugin.remove', resource: id, outcome: 'success' });
+    send(res, 200, result);
     return;
   }
 

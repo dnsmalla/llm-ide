@@ -44,7 +44,11 @@ const HOST = config.host;
 // 28: llm-sources gained a 4th discoverable kind (MCP servers, via .mcp.json)
 //     — GET /auth/me/llm-sources and .../<id>/discovery responses gained
 //     mcpCount / mcpServers fields an older client doesn't decode.
-const SERVER_API_VERSION = 28;
+// 29: added the /auth/me/mcp-plugins/* management endpoints (list, scan
+//     claude-sources, add, consent, toggle, remove) — not tracked in
+//     ENDPOINTS below since /auth/* routes are excluded from that list by
+//     convention.
+const SERVER_API_VERSION = 29;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
