@@ -524,6 +524,10 @@ git commit -m "feat(mcp): claude-CLI arg builder with optional --mcp-config"
 // extension/tests/mcp-runclaude-args.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // runClaude's CLI fallback calls spawnCli('anthropic', prompt, { args, ... }).
 // We capture the argsOverride by mocking spawnCli via the providers module's
@@ -537,8 +541,7 @@ import assert from 'node:assert/strict';
 // This test therefore documents the contract: read the source and confirm
 // runClaude's spawnCli call uses buildAnthropicCliArgs(prompt, mcpConfig).
 test('runClaude threads mcpConfig into the spawnCli argsOverride (source-level contract)', () => {
-  const src = require('node:fs').readFileSync(
-    require('node:path').join(__dirname, '..', 'agents', 'runtime.mjs'), 'utf8');
+  const src = readFileSync(join(__dirname, '..', 'agents', 'runtime.mjs'), 'utf8');
   assert.match(src, /buildAnthropicCliArgs/, 'runtime.mjs must import + use buildAnthropicCliArgs');
   assert.match(src, /mcpConfig/, 'runClaude must accept an mcpConfig option');
   assert.match(src, /args:\s*buildAnthropicCliArgs\(prompt,\s*mcpConfig\)/,
