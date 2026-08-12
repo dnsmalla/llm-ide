@@ -10,13 +10,13 @@
 //     true  = route handled (response written)
 //     false = not a planning route — caller continues dispatch
 
-import * as kb from '../db.mjs';
-import { generatePlan } from '../../agents/planner.mjs';
-import { analyzeRisks } from '../../agents/risk.mjs';
-import { codeSync } from '../../agents/code-sync.mjs';
-import { dispatchPlan } from '../../agents/dispatcher.mjs';
-import { generateCodeForTask } from '../../agents/codegen.mjs';
-import { sendJSON, readBody, parseJSON } from '../../core/utils.mjs';
+import * as kb from '../kb/db.mjs';
+import { generatePlan } from '../agents/planner.mjs';
+import { analyzeRisks } from '../agents/risk.mjs';
+import { codeSync } from '../agents/code-sync.mjs';
+import { dispatchPlan } from '../agents/dispatcher.mjs';
+import { generateCodeForTask } from '../agents/codegen.mjs';
+import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 
 export async function handlePlanningRoutes(req, res, ctx) {
   const { userId, url } = ctx;

@@ -1,5 +1,5 @@
 // /kb/chat/* — unified chat sessions shared by macOS + extension.
-import { sendJSON, readBody, parseJSON } from '../../core/utils.mjs';
+import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import {
   createChatSession,
   listChatSessions,
@@ -8,7 +8,7 @@ import {
   deleteChatSession,
   clearChatMessages,
   appendChatMessage,
-} from '../chat-sessions.mjs';
+} from '../kb/chat-sessions.mjs';
 
 export async function handleChatRoutes(req, res, ctx) {
   const { userId, url } = ctx;

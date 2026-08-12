@@ -8,19 +8,19 @@
 //     true  = route handled (response written)
 //     false = not an /kb/agent/* request — caller continues dispatch
 
-import * as kb from '../db.mjs';
-import { dispatchAgent, stopAgent, listRuns, getDiagnostics } from '../../agents/meeting-agent.mjs';
-import { runClaude } from '../../providers/runtime.mjs';
-import { sendJSON, readBody, parseJSON, sanitizeForPrompt } from '../../core/utils.mjs';
-import { listAllSkills, listInstalledPlugins, buildPerUserSkillSet, listSkillLibrary } from '../../llm_agent/skills/index.mjs';
-import { sanitizePersonaSuffix, personaConfigBlock } from '../../providers/prompt-utils.mjs';
+import * as kb from '../kb/db.mjs';
+import { dispatchAgent, stopAgent, listRuns, getDiagnostics } from '../agents/meeting-agent.mjs';
+import { runClaude } from '../providers/runtime.mjs';
+import { sendJSON, readBody, parseJSON, sanitizeForPrompt } from '../core/utils.mjs';
+import { listAllSkills, listInstalledPlugins, buildPerUserSkillSet, listSkillLibrary } from '../llm_agent/skills/index.mjs';
+import { sanitizePersonaSuffix, personaConfigBlock } from '../providers/prompt-utils.mjs';
 import {
   buildAllowedRoots,
   resolveAllowedRepoRoot,
   readChatMemoryFacts,
   writeChatMemoryFacts,
   forgetSessionMemory,
-} from '../../graphkit/index.mjs';
+} from '../graphkit/index.mjs';
 
 // Normalised key for matching a fact line (mirrors memory-writer.factKey).
 const normFact = (s) => String(s).trim().replace(/\s+/g, ' ').toLowerCase();

@@ -59,7 +59,7 @@ Every owned row carries a `user_id` foreign key. Three invariants:
 
 1. **No bare-user functions.** Every state-mutating helper in `kb/db.mjs` takes `userId` as its first parameter. `requireUser` panics if missing.
 2. **FTS5 is shared but hydration is scoped.** Cross-tenant hits exist in the index; the `findContext` / `search` paths drop any hit whose hydration query (filtered by `user_id`) returns nothing.
-3. **The router enforces the gate.** `kb/router.mjs` reads `req.user.id` and threads it through every call. Missing user → 401.
+3. **The router enforces the gate.** `routes/router.mjs` reads `req.user.id` and threads it through every call. Missing user → 401.
 
 Pre-existing rows from earlier single-user installs are back-filled to `user_id = 'legacy'` by migration `0002_multitenancy.sql`.
 
@@ -107,7 +107,7 @@ description says to start.
 - **`extension/server/`** — local HTTP server (Node 20+, pure `http`,
   no framework). Owns the CORS → JWT → rate-limit → route pipeline,
   config (`config.mjs`), and request middleware. Start at
-  `server.mjs` and follow the router into `kb/router.mjs`.
+  `server.mjs` and follow the router into `routes/router.mjs`.
 - **`extension/kb/`** — SQLite knowledge base. WAL+FTS5, per-user
   vault, append-only migrations under `migrations/`. Start at
   `db.mjs`; every state-mutating helper takes `userId` first.

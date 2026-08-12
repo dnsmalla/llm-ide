@@ -84,7 +84,7 @@ const DESTRUCTIVE_PATTERNS = [
 // the matched token itself is scrubbed out of the returned snippet before
 // it's returned. Findings from this function get persisted verbatim into
 // the review_items.guardrails column and echoed back in API responses
-// (kb/routes/review.mjs submit/approve), so a raw secret value here would
+// (routes/review.mjs submit/approve), so a raw secret value here would
 // leak into the DB, logs, and any client that reads the review item —
 // exactly the credential-exposure the guardrail is supposed to prevent.
 function findMatches(text, patterns, { redact = false } = {}) {

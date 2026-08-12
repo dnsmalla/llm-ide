@@ -11,8 +11,8 @@
 //
 // All operations are user_id-scoped in kb/issue-schedule.mjs (IDOR-safe).
 
-import * as kb from '../db.mjs';
-import { sendJSON, readBody, parseJSON } from '../../core/utils.mjs';
+import * as kb from '../kb/db.mjs';
+import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 
 const BASE = '/kb/issue-schedule';
 

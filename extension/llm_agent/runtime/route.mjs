@@ -35,7 +35,7 @@ import { readSkillInstructions } from '../skills/skill-library.mjs';
 import { buildMcpConfigForUser } from '../../mcp/mcp-config.mjs';
 
 // Re-exported for the HTTP routes that historically imported these
-// from here (server/auth-routes.mjs, kb/routes/agent.mjs import the
+// from here (server/auth-routes.mjs, routes/agent.mjs import the
 // skills module directly now; this re-export keeps any stragglers and
 // external integrations working).
 export { reloadPlugins, listAllSkills, listInstalledPlugins } from '../skills/index.mjs';

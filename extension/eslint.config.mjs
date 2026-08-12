@@ -19,7 +19,7 @@ import globals from 'globals';
 // Note: the core rule does not see dynamic import() — best-effort by design.
 // ---------------------------------------------------------------------------
 const ROUTE_MODULES = {
-  regex: '(^|/)(kb/router\\.mjs|kb/routes/|server/(ai|auth|export)-routes\\.mjs|server/control-plane\\.mjs)',
+  regex: '(^|/)(routes/|server/(ai|auth|export)-routes\\.mjs|server/control-plane\\.mjs)',
   message: 'Route modules are the top layer — nothing imports them. Move the shared helper into a library module.',
 };
 const forbidLayers = (layers) => ({
@@ -109,8 +109,9 @@ export default tseslint.config(
   },
   {
     // Routes layer (L4): may import anything; nothing imports it (enforced
-    // above via ROUTE_MODULES).
-    files: ['kb/router.mjs', 'kb/routes/**/*.mjs', 'server/ai-routes.mjs', 'server/auth-routes.mjs', 'server/export-routes.mjs', 'server/control-plane.mjs'],
+    // above via ROUTE_MODULES). routes/ matches no forbid block; the server/
+    // route files need the explicit opt-out from the server-libs block.
+    files: ['routes/**/*.mjs', 'server/ai-routes.mjs', 'server/auth-routes.mjs', 'server/export-routes.mjs', 'server/control-plane.mjs'],
     rules: { 'no-restricted-imports': 'off' },
   },
   // No grandfathered violations — every cross-layer edge found when this

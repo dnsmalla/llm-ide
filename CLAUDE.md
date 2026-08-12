@@ -99,6 +99,7 @@ llm-ide/
 │   ├── core/            # Framework-free primitives (config, utils, errors, logger)
 │   ├── server/          # HTTP server (no framework), routing, middleware
 │   ├── kb/              # SQLite knowledge base, migrations, FTS5; sources.mjs = source hub
+│   ├── routes/          # HTTP route modules (router.mjs + agent/chat/live/planning/review/…)
 │   ├── providers/       # Model-provider layer: dispatch, CLI spawn, retry/backoff, web client
 │   ├── agents/          # Server pipeline agents (planner, risk, codegen, …) — not skills
 │   ├── llm_agent/       # Claude CLI orchestrator + synced agent-tool defs
@@ -149,8 +150,8 @@ L2 server libs  → core, kb                      (auth/vault/jwt/rate-limit/met
    providers    → core, kb, server libs         (model dispatch/CLI/retry/web client)
 L3 agents · llm_agent · connectors · graphkit · guardrails · plugins ·
    llm-sources · mcp → L0–L2
-L4 routes       → anything                      (server.mjs, kb/router.mjs,
-                                                 kb/routes/*, server/*-routes.mjs)
+L4 routes       → anything                      (server.mjs, routes/*,
+                                                 server/*-routes.mjs)
                   — nothing may import a route module
 ```
 
@@ -293,7 +294,7 @@ ios_app/MyApp/Services/
 
 ### Starting Points for Reading
 
-- **Server internals** — `extension/server.mjs` → follow router into `extension/kb/router.mjs`
+- **Server internals** — `extension/server.mjs` → follow router into `extension/routes/router.mjs`
 - **KB operations** — `extension/kb/db.mjs` (every state-mutating helper takes `userId` first)
 - **Caption capture** — `extension/src/content/caption-scraper.ts` → `extension/src/sidepanel/hooks/useTranscript.ts`
 - **Central skills kit** — `.skills/` submodule + `docs/how-to/install-central-skills.md`

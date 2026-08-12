@@ -25,7 +25,7 @@ The following files are governed by this document.
 - `extension/llm_agent/runtime/handlers/ask-subagent.mjs`
 - `extension/llm_agent/runtime/handlers/search-kb.mjs`
 - `extension/llm_agent/runtime/handlers/find-code.mjs` — index→graph code search (`find-code`); staged query in `extension/graphkit/graph.mjs` (`searchCodeIndex`), paths gated on the same readable roots as `read-file`
-- `extension/llm_agent/runtime/handlers/web-search.mjs` — web search; backed by `extension/agents/web-client.mjs`
+- `extension/llm_agent/runtime/handlers/web-search.mjs` — web search; backed by `extension/providers/web-client.mjs`
 - `extension/llm_agent/runtime/handlers/fetch-url.mjs` — URL fetch (SSRF-guarded); same backend
 
 **Skill loading and registry**
@@ -46,7 +46,7 @@ The following files are governed by this document.
 
 **Covered in a later section (named here for completeness)**
 
-- `extension/agents/runtime.mjs`
+- `extension/providers/runtime.mjs`
 - `extension/agents/dispatcher.mjs`
 - `extension/agents/outcome-watcher.mjs`
 
@@ -322,7 +322,7 @@ These are joined with `\n\n` and passed as `agentContext.base` to the internal `
 
 ## §5 Sub-model routing
 
-Sources: `extension/llm_agent/runtime/model-tier.mjs`, `extension/llm_agent/runtime/route.mjs`, `extension/agents/runtime.mjs`
+Sources: `extension/llm_agent/runtime/model-tier.mjs`, `extension/llm_agent/runtime/route.mjs`, `extension/providers/runtime.mjs`
 
 ### Tier→env mapping
 
@@ -373,7 +373,7 @@ Since multi-provider routing landed (see §6 *Provider routing* below), this fal
 
 ## §6 `runClaude`
 
-Source: `extension/agents/runtime.mjs`
+Source: `extension/providers/runtime.mjs`
 
 `runClaude(prompt, { userId, model, maxTokens, cacheTranscript, provider })` is the shared LLM call primitive used by every Phase-4+ agent. Within a chosen provider it has two execution paths: an HTTP API path and a CLI fallback path.
 
@@ -404,7 +404,7 @@ This cap is aligned with the server-level body cap documented in [`api-server.md
 
 **Per-attempt HTTP timeout:** `AbortSignal.timeout(60_000)` — a 60-second ceiling per HTTP attempt (runtime.mjs:200). `TimeoutError` and `AbortError` are treated as transient and enter the retry path.
 
-**Retry schedule:** transient errors (HTTP 529, 503, or 60-second timeout) retry using `RETRY_DELAYS_MS = [1_000, 3_000]` from `agents/backoff.mjs` (backoff.mjs:7) — two retry delays giving three total attempts. Delay is jittered ±25% (`jittered`, backoff.mjs:12–15).
+**Retry schedule:** transient errors (HTTP 529, 503, or 60-second timeout) retry using `RETRY_DELAYS_MS = [1_000, 3_000]` from `providers/backoff.mjs` (backoff.mjs:7) — two retry delays giving three total attempts. Delay is jittered ±25% (`jittered`, backoff.mjs:12–15).
 
 **Context-overflow retry:** a 400 response whose body matches `/max_tokens|too long|context/i` triggers a single retry with `attemptMaxTokens` halved (runtime.mjs:246–250). Retrying stops if `attemptMaxTokens` would fall below `MIN_OVERFLOW_TOKENS = 256` (runtime.mjs:27, 246).
 
@@ -457,7 +457,7 @@ All writes are best-effort and must never throw into a live model call.
   activity event (`recordActivity`). The Anthropic HTTP path flags the quota and
   falls through to the CLI path instead of an in-request model swap.
 
-Source: `extension/agents/runtime.mjs`, `extension/agents/providers.mjs`, `extension/kb/usage.mjs`.
+Source: `extension/providers/runtime.mjs`, `extension/providers/providers.mjs`, `extension/kb/usage.mjs`.
 
 ---
 

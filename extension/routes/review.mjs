@@ -10,12 +10,12 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import * as kb from '../db.mjs';
-import { dispatchPlan } from '../../agents/dispatcher.mjs';
-import { applyCodegen } from '../../agents/codegen-apply.mjs';
-import { openPullRequest } from '../../agents/github-pr.mjs';
-import { runGuardrails } from '../../guardrails/rules.mjs';
-import { sendJSON, readBody, parseJSON } from '../../core/utils.mjs';
+import * as kb from '../kb/db.mjs';
+import { dispatchPlan } from '../agents/dispatcher.mjs';
+import { applyCodegen } from '../agents/codegen-apply.mjs';
+import { openPullRequest } from '../agents/github-pr.mjs';
+import { runGuardrails } from '../guardrails/rules.mjs';
+import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 
 export async function handleReviewRoutes(req, res, ctx) {
   const { userId, url } = ctx;

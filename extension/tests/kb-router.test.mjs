@@ -21,7 +21,7 @@ const tmpDb = path.join(__dirname, '_kb-router-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 
 const db = await import('../kb/db.mjs');
-const { handleKB } = await import('../kb/router.mjs');
+const { handleKB } = await import('../routes/router.mjs');
 const { appendCaptions, _resetForTests: resetLive } = await import('../agents/live-sessions.mjs');
 
 function resetDb() {

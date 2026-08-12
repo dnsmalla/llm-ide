@@ -119,7 +119,7 @@ const ALLOWED_KEYS = new Set([
   // Slack user token (xoxp-…), minted by the hosted OAuth flow
   // (agents/slack-oauth.mjs, /auth/slack/callback) after the user connects via
   // "Connect Slack". Preferred over slack.botToken when both are present (see
-  // kb/router.mjs resolveSlackToken) — reads channels/groups the user already
+  // routes/router.mjs resolveSlackToken) — reads channels/groups the user already
   // belongs to, no bot-invite step required.
   'slack.userToken',
   // Box Client-Credentials-Grant app client secret for the Box document

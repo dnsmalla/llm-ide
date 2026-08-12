@@ -17,7 +17,7 @@ const tmpDb = path.join(__dirname, '_providers-route-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 
 const db = await import('../kb/db.mjs');
-const { handleKB } = await import('../kb/router.mjs');
+const { handleKB } = await import('../routes/router.mjs');
 
 function resetDb() {
   db.closeDb();

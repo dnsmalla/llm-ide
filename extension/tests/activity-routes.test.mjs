@@ -50,7 +50,7 @@ function makeRes() {
 }
 
 const db = await import('../kb/db.mjs');
-const { handleKB } = await import('../kb/router.mjs');
+const { handleKB } = await import('../routes/router.mjs');
 
 function resetDb() {
   db.closeDb();

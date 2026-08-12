@@ -22,7 +22,7 @@ const tmpDb = path.join(__dirname, '_box-routes-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 
 const db = await import('../kb/db.mjs');
-const { handleKB } = await import('../kb/router.mjs');
+const { handleKB } = await import('../routes/router.mjs');
 const users = await import('../server/users.mjs');
 const vault = await import('../server/vault.mjs');
 const { logger } = await import('../core/logger.mjs');
@@ -227,7 +227,7 @@ test('POST /kb/box/test redacts the secret from the logged failure reason', asyn
     return { ok: false, status: 500, json: async () => ({}), text: async () => '' };
   };
 
-  // Spy on the shared logger singleton (kb/router.mjs imports the same instance).
+  // Spy on the shared logger singleton (routes/router.mjs imports the same instance).
   const captured = [];
   const origError = logger.error;
   logger.error = (event, fields) => { captured.push({ event, fields }); };

@@ -16,7 +16,7 @@ const tmpDb = path.join(__dirname, '_kb-router-slack-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 
 const db = await import('../kb/db.mjs');
-const { handleKB } = await import('../kb/router.mjs');
+const { handleKB } = await import('../routes/router.mjs');
 const users = await import('../server/users.mjs');
 const { setSecret } = await import('../server/vault.mjs');
 

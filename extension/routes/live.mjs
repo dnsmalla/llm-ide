@@ -15,9 +15,9 @@
 import crypto from 'node:crypto';
 import {
   appendCaptions, getCaptionsSince, listActiveSessions, finalizeSession, liveEvents,
-} from '../../agents/live-sessions.mjs';
-import { sendJSON, readBody, parseJSON } from '../../core/utils.mjs';
-import { tryConsume } from '../../server/rate-limit.mjs';
+} from '../agents/live-sessions.mjs';
+import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
+import { tryConsume } from '../server/rate-limit.mjs';
 
 // Per-user cap on concurrent SSE streams. A hostile or buggy client
 // opening N streams pins N idle timers + listener pairs; we cap so a

@@ -1,4 +1,4 @@
-// HTTP routes for /auth/*.  Kept separate from kb/router.mjs because
+// HTTP routes for /auth/*.  Kept separate from routes/router.mjs because
 // (a) these are public-or-semi-public and have different threat
 // posture, and (b) they take a direct DB handle rather than going
 // through the kb facade.

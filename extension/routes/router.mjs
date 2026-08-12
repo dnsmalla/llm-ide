@@ -3,7 +3,7 @@
 // on better-sqlite3 at the top level — if the DB fails to open the rest
 // of the server keeps working.
 
-import * as kb from './db.mjs';
+import * as kb from '../kb/db.mjs';
 import { indexLocalRepo } from '../connectors/git.mjs';
 import { indexScip } from '../connectors/scip.mjs';
 import { ingestStructureGraph } from '../connectors/structure-graph.mjs';
@@ -18,28 +18,28 @@ import { refreshAllOutcomes } from '../agents/outcome-watcher.mjs';
 import { listActiveSessions } from '../agents/live-sessions.mjs';
 import { listRuns } from '../agents/meeting-agent.mjs';
 // live-sessions imports moved into routes/live.mjs.
-import { handleAgentRoutes } from './routes/agent.mjs';
-import { handlePlanningRoutes } from './routes/planning.mjs';
-import { handleIssueScheduleRoutes } from './routes/issue-schedule.mjs';
-import { handleLiveRoutes } from './routes/live.mjs';
-import { handleReviewRoutes } from './routes/review.mjs';
-import { handleChatRoutes } from './routes/chat.mjs';
+import { handleAgentRoutes } from './agent.mjs';
+import { handlePlanningRoutes } from './planning.mjs';
+import { handleIssueScheduleRoutes } from './issue-schedule.mjs';
+import { handleLiveRoutes } from './live.mjs';
+import { handleReviewRoutes } from './review.mjs';
+import { handleChatRoutes } from './chat.mjs';
 // runGuardrails moved into routes/review.mjs.
 import { summarizeTranscript } from '../agents/summarize.mjs';
 import { classifyEmail } from '../agents/email-classify.mjs';
 import { runClaude } from '../providers/runtime.mjs';
 import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatModels, customBaseUrl } from '../providers/providers.mjs';
 import { handleCustomProvidersSync } from '../server/custom-providers.mjs';
-import { iterateUserMeetings } from './exporter.mjs';
+import { iterateUserMeetings } from '../kb/exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../agents/email-source.mjs';
 import { testConnection as slackTest, fetchChannelHistory, listUserConversations } from '../agents/slack-source.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
-import { recordActivity, listActivity, unreadCount, markSeen, ACTIVITY_KINDS } from './activity.mjs';
-import { getLimits, setLimits, usageSummary, resolveModel, recordUsage, getRateLimits, PROVIDERS as USAGE_PROVIDERS } from './usage.mjs';
-import { installProjectSkills } from './install-project-skills.mjs';
+import { recordActivity, listActivity, unreadCount, markSeen, ACTIVITY_KINDS } from '../kb/activity.mjs';
+import { getLimits, setLimits, usageSummary, resolveModel, recordUsage, getRateLimits, PROVIDERS as USAGE_PROVIDERS } from '../kb/usage.mjs';
+import { installProjectSkills } from '../kb/install-project-skills.mjs';
 
 // SSE concurrency tracking now lives in routes/live.mjs alongside
 // the stream route itself.
