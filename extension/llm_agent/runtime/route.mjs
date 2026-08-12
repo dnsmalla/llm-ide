@@ -32,6 +32,7 @@ import { classifyCodeAssistMode } from '../../agents/mode-classify.mjs';
 import { personaForMode, restrictsTools, allowedToolNames } from './mode-personas.mjs';
 import { classifyTaskType } from './task-skill-routing.mjs';
 import { readSkillInstructions } from '../skills/skill-library.mjs';
+import { buildMcpConfigForUser } from '../../mcp/mcp-config.mjs';
 
 // Re-exported for the HTTP routes that historically imported these
 // from here (server/auth-routes.mjs, kb/routes/agent.mjs import the
@@ -122,6 +123,11 @@ export async function handleCodeAssist({
   const resolvedMode = requestedMode === 'auto'
     ? (await _classifyMode(message, { userId })).mode
     : (requestedMode || 'execute');
+
+  // MCP plugins (Claude CLI path only). Restricted modes get none; execute
+  // modes get the user's enabled+consented servers as --mcp-config. Subagents
+  // and the internal agent never receive MCP (global-agent-only for SP1).
+  const mcpConfig = buildMcpConfigForUser(userId, { mode: resolvedMode, restrictsToolsFn: restrictsTools });
 
   // Slash-command expansion. If the user's message starts with /foo,
   // look it up against the enabled command set and expand the prompt
@@ -458,6 +464,7 @@ export async function handleCodeAssist({
       handlers,
       kb,
       onProgress,
+      mcpConfig,
       maxIterations: maxIterationsOverride ?? 50,
       // No deadlineMs: a chat turn is bounded by its call budget and by the
       // user's cancel, not by a clock. See loop.mjs's DEFAULT_DEADLINE_MS.
@@ -476,6 +483,7 @@ export async function handleCodeAssist({
       onProgress,
       onChunk,
       model: GLOBAL_AGENT_MODEL,
+      mcpConfig,
       maxIterations: maxIterationsOverride ?? 1000,  // global cap raised; see runAgentLoop DEFAULT_MAX_ITERATIONS (10)
       // No deadlineMs. This is the call that produced "reached the 360s
       // deadline — try again": a deep multi-hop turn legitimately outran the
