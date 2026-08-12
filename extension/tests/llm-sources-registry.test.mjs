@@ -141,7 +141,26 @@ test('sourceDiscoveryDetail returns the agents+hooks+mcpServers for a registered
   assert.equal(sourceDiscoveryDetail('not-a-real-id'), null);
 });
 
-import { normalizeGitUrl, addSource, removeSource, updateSource, syncBuiltin } from '../llm-sources/registry.mjs';
+test('discovery readers skip an oversize manifest and cap entry count', () => {
+  // Oversize manifest (>1 MB) is skipped via statSync, never parsed — guards
+  // the list/discovery endpoints against a hostile admin-registered source
+  // OOM'ing the single-threaded server for every tenant.
+  const big = path.join(tmpRoot, `big-manifest-${process.pid}`);
+  fs.mkdirSync(path.join(big, 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(big, 'hooks', 'hooks.json'),
+    JSON.stringify({ PreToolUse: [] }) + '\n' + 'x'.repeat(1_100_000));
+  assert.equal(listDiscoveryHooks(big).length, 0, 'oversize manifest is skipped');
+
+  // Many-entry manifest is capped at MAX_DISCOVERY_ENTRIES, not iterated fully.
+  const many = path.join(tmpRoot, `many-hooks-${process.pid}`);
+  fs.mkdirSync(path.join(many, 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(many, 'hooks', 'hooks.json'), JSON.stringify({
+    PreToolUse: Array.from({ length: 5000 }, (_, i) => ({ hooks: [{ type: 'command', command: `echo ${i}` }] })),
+  }));
+  assert.equal(listDiscoveryHooks(many).length, 1000, 'listing capped at 1000 entries');
+});
+
+import { normalizeGitUrl, addSource, removeSource, updateSource, syncBuiltin, __setGitRunner } from '../llm-sources/registry.mjs';
 
 test('normalizeGitUrl rejects unsafe schemes and localhost, accepts https', () => {
   assert.ok(normalizeGitUrl('https://github.com/o/r.git').ok);
@@ -192,6 +211,58 @@ test('addSource surfaces a clone failure instead of throwing (unreachable host)'
   assert.ok(res.error, 'must return an error, not throw');
   assert.equal(res.status, 400);
   assert.equal(readRegistry().length, before, 'must not persist a failed clone');
+});
+
+test('addSource does not lose a concurrent add that lands during the clone', async () => {
+  // Regression: addSource's git branch used to capture the registry snapshot
+  // BEFORE awaiting the clone, then write that stale snapshot afterward —
+  // silently dropping any add/remove that landed during the clone. Simulate a
+  // slow-but-successful clone via the test-only git-runner seam, interleave a
+  // synchronous local-path add while it's "cloning", and assert both survive.
+  writeRegistry([]); seedBuiltinOnce(); // [builtin]
+
+  const localSrc = path.join(tmpRoot, `_concurrent-local-${process.pid}`);
+  fs.mkdirSync(path.join(localSrc, 'skills', 'demo'), { recursive: true });
+  fs.writeFileSync(path.join(localSrc, 'registry.yaml'), 'registryVersion: "3.0.0"\n');
+  fs.writeFileSync(path.join(localSrc, 'skills', 'demo', 'SKILL.md'),
+    '---\nname: demo\ndescription: d\n---\n\n# demo\n');
+
+  // Stub: a "clone" yields once (letting the sync local add interleave on the
+  // event loop), then materializes a valid source dir at the clone dest so the
+  // post-clone validity check passes. fetch/checkout/submodule resolve no-op.
+  __setGitRunner(async (_bin, args) => {
+    if (args[0] === 'clone') {
+      const dest = args[args.length - 1];
+      await new Promise((r) => setImmediate(r));
+      fs.mkdirSync(path.join(dest, 'skills', 'cloned'), { recursive: true });
+      fs.writeFileSync(path.join(dest, 'registry.yaml'), 'registryVersion: "9.9.9"\n');
+      fs.writeFileSync(path.join(dest, 'skills', 'cloned', 'SKILL.md'),
+        '---\nname: cloned\ndescription: c\n---\n\n# cloned\n');
+    }
+    return { stdout: '', stderr: '' };
+  });
+
+  let localId, gitId;
+  try {
+    // Start the (stubbed, slow) git add — reads [builtin], then awaits clone.
+    const gitAddP = addSource({ url: 'https://github.com/example/repo.git', name: 'git-src' });
+    // While it's "cloning", run a synchronous local-path add (no await in the
+    // local branch → its write lands during the clone window).
+    const localRes = await addSource({ path: localSrc, name: 'local-src' });
+    localId = localRes.source?.id;
+    const gitRes = await gitAddP;
+    gitId = gitRes.source?.id;
+
+    const afterIds = readRegistry().map((s) => s.id);
+    assert.ok(afterIds.includes(BUILTIN_ID), 'builtin preserved');
+    assert.ok(localId && afterIds.includes(localId), 'concurrent local add preserved (was lost pre-fix)');
+    assert.ok(gitId && afterIds.includes(gitId), 'git add preserved');
+    assert.equal(new Set(afterIds).size, afterIds.length, 'no duplicate ids');
+  } finally {
+    __setGitRunner(null);
+    for (const s of readRegistry()) if (s.id !== BUILTIN_ID) removeSource(s.id);
+    fs.rmSync(localSrc, { recursive: true, force: true });
+  }
 });
 
 import { listSourcesWithState } from '../llm-sources/registry.mjs';
