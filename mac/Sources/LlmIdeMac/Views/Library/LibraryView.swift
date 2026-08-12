@@ -90,6 +90,7 @@ struct LibraryView: View {
         .task { await loadPlugins() }
         .task { await loadLlmSources() }
         .task { await loadMcpPlugins() }
+        .task { await scanClaudeSources() }
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
             Task { @MainActor in
                 // Refresh the meeting list. syncMeetingNotes is handled
@@ -1013,7 +1014,6 @@ struct LibraryView: View {
             .menuIndicator(.hidden)
             .frame(width: 20)
             .help("Add an MCP plugin")
-            .task { await scanClaudeSources() }
         }
         .alert("MCP plugin", isPresented: Binding(
             get: { mcpPluginMessage != nil },
