@@ -450,7 +450,13 @@ const ANTHROPIC_DEFAULT_PROMPT = 'You are a helpful AI assistant.';
 // it the CLI also boots every MCP server from the OPERATOR's own
 // `~/.claude.json`/project config, defeating the whole point of gating
 // dispatch on this user's own enabled+consented set.
-export function buildAnthropicCliArgs(prompt, { mcpConfigJson } = {}) {
+export function buildAnthropicCliArgs(prompt, mcpConfig) {
+  // Callers pass `null` for "no MCP this turn" (buildMcpConfigForUser's
+  // return value for a restricted mode or zero enabled+consented plugins —
+  // i.e. the common case) as well as `undefined`/omitted — a destructured
+  // default parameter only covers the latter, so read via optional chaining
+  // instead of `{ mcpConfigJson } = {}`, which throws on a literal `null`.
+  const mcpConfigJson = mcpConfig?.mcpConfigJson;
   const tail = ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '--system-prompt', ANTHROPIC_DEFAULT_PROMPT, '-p', prompt];
   if (typeof mcpConfigJson === 'string' && mcpConfigJson.length > 0) {
     let serverIds = [];
@@ -714,9 +720,16 @@ const STREAM_ARG_EXTRAS = {
  * `result` text when one was reported, so a non-streaming caller still gets
  * the CLI's own canonical answer rather than a delta-reconstruction.
  *
- * `binOverride`/`argsOverride` are test seams only (real callers never pass
- * them) — they let tests run a fast, deterministic `node -e "..."` child
- * instead of shelling out to the real provider CLI.
+ * `binOverride` is a test seam only (real callers never pass it) — combined
+ * with `argsOverride`, it lets tests run a fast, deterministic `node -e
+ * "..."` child instead of shelling out to the real provider CLI.
+ *
+ * `argsOverride` alone (no `binOverride`) IS used by real callers —
+ * `streamModelReply` passes `buildAnthropicCliArgs(prompt, mcpConfig)` here
+ * to carry the user's MCP config into a streamed anthropic-CLI call, the
+ * same way `spawnCli`'s `args` override does for the buffered path. It
+ * replaces `cliInvocation`'s default argv; `STREAM_ARG_EXTRAS` is still
+ * layered on top so streaming output stays parseable.
  */
 export function spawnCliStream(provider, prompt, {
   env, timeoutMs = CLI_TIMEOUT_MS, signal, onChunk,
@@ -729,7 +742,7 @@ export function spawnCliStream(provider, prompt, {
   const parser = STREAM_PARSERS[provider];
   const args = binOverride
     ? argsOverride
-    : [...inv.args, ...(STREAM_ARG_EXTRAS[provider] || [])];
+    : [...(argsOverride || inv.args), ...(STREAM_ARG_EXTRAS[provider] || [])];
 
   return cliSemaphore.run(() => {
     if (signal?.aborted) {

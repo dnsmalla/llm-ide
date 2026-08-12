@@ -23,6 +23,36 @@ test('streamModelReply uses the CLI streaming path when no API key resolves', as
   assert.equal(result, 'streamed via CLI');
 });
 
+test('streamModelReply threads mcpConfig into spawnCliStream\'s argsOverride for the anthropic CLI path', async () => {
+  const mcpConfig = { mcpConfigJson: '{"mcpServers":{"slack":{"command":"npx","args":[]}}}' };
+  let capturedArgsOverride;
+  await streamModelReply('hi', {
+    provider: 'anthropic',
+    mcpConfig,
+    _testSpawnCliStream: async (_provider, _prompt, opts) => {
+      capturedArgsOverride = opts.argsOverride;
+      return { stdoutText: 'ok', stderr: '', bin: 'claude' };
+    },
+  });
+  assert.ok(capturedArgsOverride, 'argsOverride must be passed to spawnCliStream');
+  assert.ok(capturedArgsOverride.includes('--mcp-config'));
+  assert.equal(capturedArgsOverride[capturedArgsOverride.indexOf('--mcp-config') + 1], mcpConfig.mcpConfigJson);
+  assert.equal(capturedArgsOverride[capturedArgsOverride.indexOf('--allowedTools') + 1], 'mcp__slack__*');
+});
+
+test('streamModelReply omits argsOverride for a non-anthropic CLI provider even with mcpConfig set', async () => {
+  let capturedArgsOverride = 'unset';
+  await streamModelReply('hi', {
+    provider: 'openai',
+    mcpConfig: { mcpConfigJson: '{"mcpServers":{"slack":{"command":"npx","args":[]}}}' },
+    _testSpawnCliStream: async (_provider, _prompt, opts) => {
+      capturedArgsOverride = opts.argsOverride;
+      return { stdoutText: 'ok', stderr: '', bin: 'codex' };
+    },
+  });
+  assert.equal(capturedArgsOverride, undefined);
+});
+
 test('streamModelReply falls back to fully-buffered runClaude when the CLI stream throws', async () => {
   const chunks = [];
   const result = await streamModelReply('hi', {

@@ -591,14 +591,14 @@ export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheT
  */
 export async function streamModelReply(prompt, {
   userId, model, maxTokens, cacheTranscript, onChunk, signal,
-  provider: explicitProvider, images, tools,
+  provider: explicitProvider, images, tools, mcpConfig,
   _testSpawnCliStream, _testRunClaude,
 } = {}) {
   const runBuffered = _testRunClaude || runClaude;
   const doSpawnCliStream = _testSpawnCliStream || spawnCliStream;
 
   if (Array.isArray(images) && images.length > 0) {
-    const text = await runBuffered(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, tools });
+    const text = await runBuffered(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, tools, mcpConfig });
     if (typeof onChunk === 'function') onChunk(text);
     return text;
   }
@@ -606,7 +606,9 @@ export async function streamModelReply(prompt, {
   const { provider, apiKey } = resolveClaudeCall({ userId, model, provider: explicitProvider });
 
   if (provider === 'anthropic' && apiKey) {
-    // Direct-API path already streams for real — unmodified.
+    // Direct-API path already streams for real — unmodified. SP1: the
+    // Anthropic HTTP API can't carry --mcp-config, so mcpConfig is
+    // deliberately dropped here (same scoping as runClaude's HTTP branch).
     return runClaudeStream(prompt, { userId, model, maxTokens, cacheTranscript, onChunk, signal, provider: explicitProvider });
   }
 
@@ -615,11 +617,14 @@ export async function streamModelReply(prompt, {
     const wrappedOnChunk = typeof onChunk === 'function'
       ? (text) => { deliveredAnyChunk = true; onChunk(text); }
       : undefined;
+    // mcpConfig only means anything for the anthropic CLI's own argv shape
+    // (buildAnthropicCliArgs); openai/google keep their default argv.
+    const argsOverride = provider === 'anthropic' ? buildAnthropicCliArgs(prompt, mcpConfig) : undefined;
     try {
       // apiKey is never truthy here for the anthropic case — if it were, the
       // direct-API branch above would already have returned. No provider's
       // CLI needs ANTHROPIC_API_KEY injected via this path.
-      const { stdoutText } = await doSpawnCliStream(provider, prompt, { env: minimalCliEnv(), signal, onChunk: wrappedOnChunk });
+      const { stdoutText } = await doSpawnCliStream(provider, prompt, { env: minimalCliEnv(), signal, onChunk: wrappedOnChunk, argsOverride });
       return stdoutText;
     } catch (err) {
       if (deliveredAnyChunk) {
@@ -637,7 +642,7 @@ export async function streamModelReply(prompt, {
     }
   }
 
-  const text = await runBuffered(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, tools });
+  const text = await runBuffered(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, tools, mcpConfig });
   if (typeof onChunk === 'function') onChunk(text);
   return text;
 }

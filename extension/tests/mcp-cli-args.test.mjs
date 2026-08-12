@@ -28,3 +28,8 @@ test('mcpConfigJson with multiple servers → one mcp__<id>__* rule per server',
   const args = buildAnthropicCliArgs('hello', { mcpConfigJson: json });
   assert.equal(args[args.indexOf('--allowedTools') + 1], 'mcp__slack__*,mcp__linear__*');
 });
+
+test('a literal null mcpConfig (buildMcpConfigForUser\'s "no MCP" return value) does not throw', () => {
+  const args = buildAnthropicCliArgs('hello', null);
+  assert.deepEqual(args, ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '--system-prompt', 'You are a helpful AI assistant.', '-p', 'hello']);
+});
