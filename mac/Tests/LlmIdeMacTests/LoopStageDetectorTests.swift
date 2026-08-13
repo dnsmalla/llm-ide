@@ -95,4 +95,111 @@ final class LoopStageDetectorTests: XCTestCase {
         XCTAssertNotNil(testStage)
         XCTAssertEqual(testStage?.isDefault, true)
     }
+
+    // MARK: - System Check markers (llm-ide's own layout, gated per-check)
+
+    private func writeNested(_ relativePath: String, _ contents: String = "") throws {
+        let url = tempDir.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try contents.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    func testNoSystemCheckMarkersYieldsNoExtraStages() {
+        // A repo with none of llm-ide's own files must see exactly what it saw
+        // before this existed — this is what makes it safe for the check to
+        // live in the GLOBAL detector rather than a special case.
+        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        XCTAssertEqual(stages.count, 1)
+    }
+
+    func testSkillsMarkerAddsSkillsStage() throws {
+        try writeNested("extension/tests/agent-skills.test.mjs")
+        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let skills = stages.first { $0.name == "Skills" }
+        XCTAssertNotNil(skills)
+        XCTAssertEqual(skills?.kind, .shellCommand)
+        XCTAssertEqual(skills?.isDefault, true)
+        XCTAssertTrue(skills?.command?.contains("agent-skills.test.mjs") ?? false)
+    }
+
+    func testPluginsMarkerAddsPluginsStage() throws {
+        try writeNested("extension/tests/plugins-loader.test.mjs")
+        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        XCTAssertNotNil(stages.first { $0.name == "Plugins" })
+    }
+
+    func testConnectorsMarkerAddsConnectorsStage() throws {
+        try writeNested("extension/tests/box-connector.test.mjs")
+        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        XCTAssertNotNil(stages.first { $0.name == "Connectors" })
+    }
+
+    func testDispatchMarkerAddsGitHubDispatchStage() throws {
+        try writeNested("extension/tests/dispatch-preview.test.mjs")
+        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        XCTAssertNotNil(stages.first { $0.name == "GitHub dispatch" })
+    }
+
+    func testExtensionPackageJSONAddsBackendStage() throws {
+        try writeNested("extension/package.json", "{}")
+        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let backend = stages.first { $0.name == "Backend" }
+        XCTAssertEqual(backend?.command, "cd extension && npm test")
+    }
+
+    func testSharedProtocolMakeTargetAddsProtocolStage() throws {
+        try write("Makefile", "test-shared-protocol:\n\techo hi\n")
+        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stage = stages.first { $0.name == "iOS ↔ Mac shared protocol" }
+        XCTAssertEqual(stage?.command, "make test-shared-protocol")
+    }
+
+    func testMacPackageSwiftAddsMacAppStage() throws {
+        try writeNested("mac/Package.swift")
+        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stage = stages.first { $0.name == "Mac app" }
+        XCTAssertEqual(stage?.command, "cd mac && swift test")
+    }
+
+    func testAllSystemCheckMarkersTogetherYieldEveryStageExactlyOnce() throws {
+        try writeNested("extension/tests/agent-skills.test.mjs")
+        try writeNested("extension/tests/plugins-loader.test.mjs")
+        try writeNested("extension/tests/box-connector.test.mjs")
+        try writeNested("extension/tests/dispatch-preview.test.mjs")
+        try writeNested("extension/package.json", "{}")
+        try write("Makefile", "test-shared-protocol:\n\techo hi\n")
+        try writeNested("mac/Package.swift")
+        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let names = stages.map(\.name)
+        XCTAssertEqual(Set(names).count, names.count, "no duplicate stage names")
+        XCTAssertEqual(Set(names), [
+            "Regression", "Skills", "Plugins", "Connectors", "GitHub dispatch",
+            "Backend", "iOS ↔ Mac shared protocol", "Mac app",
+        ])
+        XCTAssertTrue(stages.allSatisfy { $0.isDefault })
+    }
+
+    /// Regression guard for the bug this change set actually fixed: once there
+    /// is more than one `.shellCommand` default, matching by kind alone in
+    /// `ensureDefaultStages` would collapse them all into whichever one
+    /// `firstIndex` happened to find first. Skills/Plugins/etc. must each be
+    /// pinned to THEIR OWN existing stage by name, not the first shell stage
+    /// in the list.
+    func testEnsureDefaultStagesDoesNotMergeDistinctShellCommandDefaults() throws {
+        try writeNested("extension/tests/agent-skills.test.mjs")
+        try writeNested("extension/tests/plugins-loader.test.mjs")
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "s1", name: "Skills", kind: .shellCommand, command: "custom skills cmd", order: 0),
+            LoopStage(id: "s2", name: "Plugins", kind: .shellCommand, command: "custom plugins cmd", order: 1),
+        ])
+        let ensured = LoopStageDetector.ensureDefaultStages(in: config, gitRoot: tempDir)
+        XCTAssertEqual(ensured.stages.count, 3, "Regression must be appended; Skills/Plugins pinned in place, not duplicated")
+        let skills = ensured.stages.first { $0.name == "Skills" }
+        let plugins = ensured.stages.first { $0.name == "Plugins" }
+        XCTAssertEqual(skills?.command, "custom skills cmd", "must be pinned in place, not overwritten")
+        XCTAssertEqual(plugins?.command, "custom plugins cmd")
+        XCTAssertEqual(skills?.isDefault, true)
+        XCTAssertEqual(plugins?.isDefault, true)
+    }
 }
