@@ -76,6 +76,12 @@ struct LoopEngineView: View {
     @State private var skillCatalog: [LlmIdeAPIClient.SkillLibraryEntry] = []
     @State private var skillsLoaded = false
     @State private var pastRuns: [LoopRunIndexEntry] = []
+    /// The in-flight `Task { await runLoop() }`, held only so Stop has
+    /// something to cancel. `runner.running` alone can't be acted on — it's
+    /// a `@Published` observation, not a handle — and cancelling this Task
+    /// is what makes `Task.isCancelled` true everywhere down the call tree
+    /// `runner.run` awaits through, including inside `ShellFaultVerifier`.
+    @State private var runTask: Task<Void, Never>?
 
     /// App-wide template library (built-in starters + the user's saved recipes).
     /// A `@StateObject` so the picker updates the moment one is saved or deleted.
@@ -288,11 +294,23 @@ struct LoopEngineView: View {
     private var toolbar: some View {
         HStack(spacing: Spacing.md) {
             Button(runner.running ? "Running… (iteration \(runner.iteration))" : "Run") {
-                Task { await runLoop() }
+                runTask = Task {
+                    await runLoop()
+                    runTask = nil
+                }
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
             .disabled(runner.running || stages.isEmpty || activeGitRootURL == nil)
+            if runner.running {
+                // Cancelling `runTask` makes `Task.isCancelled` true on the
+                // same task `runner.run` is awaiting on, which is how a
+                // shell-command stage in progress actually notices — see
+                // `ShellFaultVerifier`. The runner reports `.aborted` and
+                // still journals the run, same as any other terminal status.
+                Button("Stop") { runTask?.cancel() }
+                    .controlSize(.small)
+            }
             if let lastStatus {
                 Text(lastStatus.summary)
                     .font(Typography.caption)

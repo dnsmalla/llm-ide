@@ -200,6 +200,30 @@ final class ResourceGuardServiceTests: XCTestCase {
         token.cancel()
     }
 
+    /// `stopAll` is the app-termination path, not the memory-pressure one —
+    /// every registered job must be stopped regardless of pressure level, and
+    /// deregistered so a stale handler isn't kept around after the app is
+    /// already on its way out.
+    func testStopAllStopsEveryJobRegardlessOfPressure() {
+        let guardService = instantGuard()
+        var reasons: [String] = []
+        let lock = NSLock()
+        let a = guardService.register(label: "a") { r in lock.lock(); reasons.append(r); lock.unlock() }
+        let b = guardService.register(label: "b") { r in lock.lock(); reasons.append(r); lock.unlock() }
+        guardService.stopAll(reason: "app is quitting")
+        lock.lock(); let observed = reasons; lock.unlock()
+        XCTAssertEqual(observed, ["app is quitting", "app is quitting"])
+        XCTAssertEqual(guardService._registeredCountForTesting, 0)
+        a.cancel()
+        b.cancel()
+    }
+
+    func testStopAllOnAnEmptyGuardIsHarmless() {
+        let guardService = instantGuard()
+        guardService.stopAll(reason: "app is quitting")
+        XCTAssertEqual(guardService._registeredCountForTesting, 0)
+    }
+
     func testRecoveryBetweenSpikesSparesEveryJob() {
         let guardService = instantGuard()
         let stopped = expectation(description: "must not be called")

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import CryptoKit
 
@@ -65,6 +66,19 @@ final class LoopEngineRunner: ObservableObject {
     /// to it; `@MainActor` makes that safe.
     private var iterationRecords: [LoopIterationRecord] = []
 
+    /// The identifying parameters of `run`'s current call, or `nil` between
+    /// runs. `run`'s own parameters are locals, invisible to
+    /// `handleAppTerminating()` — which fires from a notification, not from
+    /// inside `run` — so this is the only way that method can find them.
+    private struct RunContext {
+        let config: LoopEngineConfig
+        let faultsRoot: URL
+        let gitRoot: URL
+        let projectId: String?
+        let startedAt: Date
+    }
+    private var currentRunContext: RunContext?
+
     init(verifier: FaultVerifier = ShellFaultVerifier(),
          stageRepairer: LoopStageRepairer,
          regressionSweep: RegressionSweepRunning,
@@ -85,6 +99,52 @@ final class LoopEngineRunner: ObservableObject {
         self.summaryWriter = summaryWriter
         self.scopeGuard = scopeGuard
         self.trigger = trigger
+        // Same idiom as `BackendManager.init` — best-effort cleanup so an
+        // in-flight run leaves a trace instead of vanishing on Cmd-Q/logout.
+        // `[weak self]` means a runner that's already been deallocated (e.g.
+        // its owning view was closed) makes this a no-op rather than a crash.
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.handleAppTerminating()
+            }
+        }
+    }
+
+    private var terminationObserver: NSObjectProtocol?
+
+    deinit {
+        if let terminationObserver {
+            NotificationCenter.default.removeObserver(terminationObserver)
+        }
+    }
+
+    /// Best-effort, fully synchronous interruption path for app termination
+    /// (Cmd-Q, logout) — the counterpart to `finish()` for the one exit `run`
+    /// itself can never take. `willTerminate` runs on the main thread with a
+    /// tight budget before the OS reaps the process, so this cannot `await`
+    /// anything: it snapshots whatever `iterationRecords` already hold and
+    /// writes them directly through the (synchronous) `journal.write`. Without
+    /// this, a run cut off mid-stage left no trace at all — `finish()`, the
+    /// run's only journal write, is reached by cooperative cancellation or a
+    /// normal exit, neither of which fires when the process is simply killed
+    /// out from under the `Task` that was awaiting `run`.
+    func handleAppTerminating() {
+        guard running, let ctx = currentRunContext else { return }
+        // Kill whatever shell command is currently running (e.g. a `swift
+        // test`/`npm test` stage) so it doesn't outlive the app as an orphan —
+        // `ShellFaultVerifier` registered it with this guard for exactly this.
+        ResourceGuardService.shared.stopAll(reason: "app is quitting")
+        let record = LoopRunRecord(
+            id: UUID().uuidString, projectId: ctx.projectId, trigger: trigger,
+            gitRoot: ctx.gitRoot.path, startedAt: ctx.startedAt, endedAt: Date(),
+            iterationsUsed: iteration, config: LoopRunConfigSnapshot(ctx.config),
+            iterations: iterationRecords, statusCode: LoopEngineStatus.aborted.code,
+            statusSummary: LoopEngineStatus.aborted.summary)
+        _ = journal.write(record, root: ctx.faultsRoot)
     }
 
     func clearLog() { log.removeAll() }
@@ -149,9 +209,12 @@ final class LoopEngineRunner: ObservableObject {
         iteration = 0
         iterationRecords = []
         let startedAt = Date()
+        currentRunContext = RunContext(config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                                       projectId: projectId, startedAt: startedAt)
         defer {
             running = false
             Self.activeRoots.remove(rootKey)
+            currentRunContext = nil
         }
 
         let orderedStages = config.stages.sorted { ($0.order, $0.id) < ($1.order, $1.id) }

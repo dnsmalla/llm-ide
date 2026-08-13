@@ -457,6 +457,61 @@ final class LoopEngineRunnerTests: XCTestCase {
         _ = await task1.value
     }
 
+    /// `handleAppTerminating` is the synchronous path `willTerminate` calls —
+    /// it must never be reachable through `run`'s own cooperative-cancellation
+    /// exit, since the whole point is to cover the case where the process is
+    /// killed out from under the awaiting `Task` and `finish()` is never
+    /// reached at all. Simulated here by calling it directly mid-repair,
+    /// exactly like the OS would if it fired while a stage was in flight.
+    func testHandleAppTerminatingJournalsAnInterruptedRunMidRepair() async {
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") }
+        let repairer = BlockingRepairer()
+        let journal = InMemoryJournal()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5, consecutiveFailureStop: 5)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            journal: journal
+        )
+        let task = Task { await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot, projectId: "proj-1") }
+        await repairer.started.wait()
+
+        XCTAssertTrue(runner.running)
+        XCTAssertTrue(journal.written.isEmpty, "must not journal until termination actually happens")
+        runner.handleAppTerminating()
+
+        XCTAssertEqual(journal.written.count, 1)
+        let record = journal.written[0]
+        XCTAssertEqual(record.statusCode, LoopEngineStatus.aborted.code)
+        XCTAssertEqual(record.projectId, "proj-1")
+        XCTAssertEqual(record.gitRoot, repoRoot.path)
+        XCTAssertEqual(record.iterations.count, 1, "the in-progress iteration's record must be included as-is")
+
+        // The run itself is still suspended in the repairer — release it so
+        // the test doesn't leak a task, but its own eventual `finish()` (a
+        // SECOND journal write) is not what this test is about.
+        await repairer.release.fire()
+        _ = await task.value
+    }
+
+    func testHandleAppTerminatingIsANoOpWhenNoRunIsInFlight() async {
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(),
+            journal: journal
+        )
+        runner.handleAppTerminating()
+        XCTAssertTrue(journal.written.isEmpty)
+    }
+
     // MARK: - Fix 2/3: verify timeout and cancellation handling
 
     func testTimeoutCountsAsIterationFailureAndRetries() async {

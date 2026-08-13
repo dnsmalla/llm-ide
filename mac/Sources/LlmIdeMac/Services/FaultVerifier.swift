@@ -90,6 +90,29 @@ struct ShellFaultVerifier: FaultVerifier {
             p.terminate()
         }
         defer { guardToken.cancel() }
+        // Every path below that ends this call after the process has already
+        // exited calls `waitUntilExit()` first, so `isRunning` is false and this
+        // is a no-op there. The path it actually exists for is cancellation: the
+        // plain `try await Task.sleep` in the poll loop below throws
+        // `CancellationError` on its own the moment the task is cancelled, with
+        // no code of ours in between — so without this, a cancelled Loop run (Stop,
+        // or the app quitting) walked away from the loop instantly but left the
+        // shell command (a `swift test`/`npm test`) running as an orphan. Fire
+        // SIGTERM immediately and don't wait for it: a `defer` in an async
+        // function cannot `await`, and blocking here would defeat the point of
+        // reacting to cancellation promptly.
+        defer {
+            if process.isRunning {
+                process.terminate()
+                // Re-check `isRunning` right before the kill, same as the timeout
+                // path below — SIGTERM alone is usually enough, and skipping this
+                // check would risk SIGKILLing whatever unrelated process the OS
+                // has since handed this pid to, once this one has already exited.
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.0) {
+                    if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+                }
+            }
+        }
         while process.isRunning {
             if let deadline, Date() >= deadline {
                 process.terminate()                       // SIGTERM

@@ -155,4 +155,41 @@ final class NoWallClockDefaultsTests: XCTestCase {
             XCTFail("expected VerifyError, got \(error)")
         }
     }
+
+    /// Cancelling the calling `Task` (the Loop's Stop button, or the app
+    /// quitting) must not just walk away from `verify()` — it must kill the
+    /// shell command too, or a `swift test`/`npm test` a Loop stage started
+    /// keeps running as an orphan with nothing left watching it.
+    func testCancellationTerminatesTheChildProcessRatherThanLeavingItOrphaned() async {
+        let marker = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("loop-cancel-marker-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: marker) }
+
+        let task = Task {
+            try await ShellFaultVerifier().verify(
+                command: "sleep 5; touch \(marker.path)",
+                repoRoot: URL(fileURLWithPath: NSTemporaryDirectory()),
+                timeout: 0)
+        }
+        // Let the shell actually launch `sleep` before cancelling.
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("expected cancellation to throw")
+        } catch is CancellationError {
+            // expected
+        } catch {
+            XCTFail("expected CancellationError, got \(error)")
+        }
+
+        // If the process were left running, `touch` would create this file
+        // ~5s after it started. Checking well before that (and well after
+        // cancellation) is what actually distinguishes "killed" from
+        // "orphaned and still running".
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path),
+                       "cancellation must terminate the child process, not just stop awaiting it")
+    }
 }

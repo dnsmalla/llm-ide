@@ -119,6 +119,28 @@ final class ResourceGuardService: @unchecked Sendable {
         if jobs.isEmpty { stopMonitoringLocked() }
     }
 
+    /// Stop every registered job right now, regardless of memory pressure.
+    ///
+    /// For the one case the class-level doc's "memory pressure only" rule
+    /// deliberately doesn't cover: the app process itself is about to go away
+    /// (Cmd-Q, logout). That isn't a policy decision about how long work may
+    /// run — the thing supervising the work is disappearing — so it isn't the
+    /// deadline this file argues against. Registrants (e.g. `ShellFaultVerifier`)
+    /// still own the actual kill; this only fires the callback each already
+    /// provided for exactly this purpose.
+    func stopAll(reason: String) {
+        lock.lock()
+        let victims = jobs
+        jobs = []
+        // Same invariant `deregister` already keeps: an empty `jobs` means no
+        // monitoring should be running. Skipping this would leak the memory-
+        // pressure dispatch source and its 5s poll timer for the rest of the
+        // process's life in any caller that doesn't immediately exit.
+        stopMonitoringLocked()
+        lock.unlock()
+        for victim in victims { victim.stop(reason) }
+    }
+
     // MARK: - Monitoring
 
     /// Caller MUST hold `lock`.
