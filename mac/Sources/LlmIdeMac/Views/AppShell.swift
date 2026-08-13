@@ -137,17 +137,7 @@ struct AppShell: View {
             // (e.g., during SwiftUI re-renders) without a matching onDisappear.
             guard keyMonitor == nil else { return }
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [terminalPanelState, projectDirectory] event in
-                // Compare by character rather than keyCode so the shortcut works
-                // on all keyboard layouts (keyCode 50 is layout-specific to US).
-                if event.charactersIgnoringModifiers == "`" && event.modifierFlags.contains(.control) {
-                    if registry.isEnabled(.terminal) {
-                        Task { @MainActor in
-                            terminalPanelState.toggle(projectDirectory: projectDirectory)
-                        }
-                    }
-                    return nil // consume the event
-                }
-                return event
+                handleGlobalKeyDown(event, terminalPanelState: terminalPanelState, projectDirectory: projectDirectory)
             }
         }
         .onDisappear {
@@ -156,6 +146,37 @@ struct AppShell: View {
                 keyMonitor = nil
             }
         }
+    }
+
+    /// The app-wide keyDown monitor's handler, pulled out of `body` as a named
+    /// method — inlined as a closure it pushed the surrounding view's type
+    /// inference past the compiler's timeout (an unrelated cost of adding a
+    /// second condition to what was a one-`if` closure).
+    ///
+    /// Compares by character rather than keyCode so shortcuts work on all
+    /// keyboard layouts (keyCode 50 for backtick is layout-specific to US).
+    private func handleGlobalKeyDown(
+        _ event: NSEvent, terminalPanelState: TerminalPanelState, projectDirectory: URL
+    ) -> NSEvent? {
+        if event.charactersIgnoringModifiers == "`" && event.modifierFlags.contains(.control) {
+            if registry.isEnabled(.terminal) {
+                Task { @MainActor in
+                    terminalPanelState.toggle(projectDirectory: projectDirectory)
+                }
+            }
+            return nil // consume the event
+        }
+        // Only claim ⌘F while Library is the visible section — LibraryView's
+        // .focusLibraryFilter listener was previously unreachable (nothing
+        // ever posted it), so this shortcut silently did nothing. Scoped to
+        // .library so it doesn't shadow ⌘F in other sections that may want
+        // their own find/filter behavior.
+        if event.charactersIgnoringModifiers == "f" && event.modifierFlags.contains(.command)
+            && shell.section == .library {
+            NotificationCenter.default.post(name: .focusLibraryFilter, object: nil)
+            return nil // consume the event
+        }
+        return event
     }
 
     /// Working directory for new terminal tabs.

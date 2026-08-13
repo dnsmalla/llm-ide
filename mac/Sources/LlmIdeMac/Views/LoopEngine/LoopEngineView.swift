@@ -378,7 +378,12 @@ struct LoopEngineView: View {
         .background(selectedStageId == stage.id ? t.accent.opacity(0.08) : t.surface)
         .cornerRadius(8)
         .id(stage.id)
-        .onTapGesture { selectedStageId = stage.id }
+        // `simultaneousGesture`, not `.onTapGesture` — a plain tap gesture on
+        // this container would compete with the nested TextFields/Pickers/
+        // Buttons in `stageDetail`, swallowing the first click instead of
+        // focusing/activating them. `simultaneous` lets this fire alongside
+        // whichever child control the click actually landed on.
+        .simultaneousGesture(TapGesture().onEnded { selectedStageId = stage.id })
     }
 
     private var toolbar: some View {
@@ -478,11 +483,16 @@ struct LoopEngineView: View {
                 }
 
                 Text("Input (optional) — file or folder under the project root").font(Typography.caption).foregroundStyle(t.textMuted)
-                PathPickerField(root: activeGitRootURL ?? workspaceContext?.projectRoot,
+                // Rooted at the git root ONLY (no projectRoot fallback) to match
+                // targetPath/outputPath's documented contract ("relative to the
+                // project's git root") and the New Loop wizard's PathPickerField —
+                // a projectRoot fallback here would silently store paths relative
+                // to the wrong base on a project with no git repo.
+                PathPickerField(root: activeGitRootURL,
                                 path: $stages[index].targetPath)
 
                 Text("Output (optional) — where the skill should write its result").font(Typography.caption).foregroundStyle(t.textMuted)
-                PathPickerField(root: activeGitRootURL ?? workspaceContext?.projectRoot,
+                PathPickerField(root: activeGitRootURL,
                                 path: $stages[index].outputPath)
                 Text("Input and output are hints included in the skill's prompt — the skill decides how to use them via its own tool calls.")
                     .font(Typography.caption).foregroundStyle(t.textMuted)
