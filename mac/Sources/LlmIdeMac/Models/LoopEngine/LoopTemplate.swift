@@ -59,7 +59,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
 
     /// Ordered most-general first — the picker shows them in this order, and
     /// `testAndFix` is what a project with no template history should reach for.
-    static let builtIns: [LoopTemplate] = [testAndFix, fullVerify, skillLoop, docsRefresh]
+    static let builtIns: [LoopTemplate] = [testAndFix, fullVerify, skillLoop, docsRefresh, systemCheck]
 
     /// The default recipe, and the one that matches what the loop did before
     /// templates existed: verify the known faults, then the test suite.
@@ -128,5 +128,57 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                           order: 1)
             ],
             maxIterations: 4, consecutiveFailureStop: 2, maxRepairsPerStage: 2),
+        isBuiltIn: true)
+
+    /// llm-ide-specific: one stage per subsystem (skills, plugins, connectors,
+    /// dispatch, backend, iOS↔Mac shared protocol, Mac app, known faults) instead
+    /// of one monolithic `npm test`. A single suite would tell the repair agent
+    /// only "something broke" and hand it the whole repo as scope; a stage per
+    /// subsystem tells it which one, which is what `RepairScopeGuard` needs to
+    /// keep a fix's blast radius to the failing area. Unlike the other built-ins,
+    /// this one is not meant to be portable to other projects — every command
+    /// names an llm-ide test file or Makefile target directly, mirroring how
+    /// `make lint`/`make docs-check` above already assume this repo's layout.
+    static let systemCheck = LoopTemplate(
+        id: UUID(uuidString: "1E7B0A00-0000-4000-8000-0000000000A5")!,
+        name: "System Check",
+        summary: "Verify skills, plugins, connectors, GitHub dispatch, backend, the iOS↔Mac shared "
+            + "protocol, and the Mac app itself, repairing whichever subsystem breaks.",
+        config: LoopEngineConfig(
+            stages: [
+                LoopStage(name: "Skills", kind: .shellCommand,
+                          command: "cd extension && node --test tests/agent-skills.test.mjs "
+                              + "tests/agent-skill-telemetry.test.mjs tests/skill-library.test.mjs "
+                              + "tests/install-project-skills.test.mjs tests/task-skill-routing.test.mjs",
+                          order: 0),
+                LoopStage(name: "Plugins", kind: .shellCommand,
+                          command: "cd extension && node --test tests/plugins-loader.test.mjs "
+                              + "tests/plugins-installer.test.mjs",
+                          order: 1),
+                LoopStage(name: "Connectors", kind: .shellCommand,
+                          command: "cd extension && node --test tests/box-connector.test.mjs "
+                              + "tests/box-routes.test.mjs tests/slack-source.test.mjs "
+                              + "tests/slack-oauth.test.mjs tests/slack-oauth-routes.test.mjs "
+                              + "tests/email-source.test.mjs tests/scip-connector.test.mjs "
+                              + "tests/scip-scanner.test.mjs tests/git-connector-chunking.test.mjs",
+                          order: 2),
+                LoopStage(name: "GitHub dispatch", kind: .shellCommand,
+                          command: "cd extension && node --test tests/dispatch-concurrency.test.mjs "
+                              + "tests/dispatch-preview.test.mjs tests/github-pr-secrets.test.mjs "
+                              + "tests/outcome-dispatch-sentinel.test.mjs",
+                          order: 3),
+                // No per-stage timeout on the three below: same reasoning as
+                // Lint/Docs check — a full backend suite, the shared-protocol
+                // package, and the Mac app's XCTest suite routinely run past any
+                // figure worth shipping as a default.
+                LoopStage(name: "Backend", kind: .shellCommand,
+                          command: "cd extension && npm test", order: 4),
+                LoopStage(name: "iOS ↔ Mac shared protocol", kind: .shellCommand,
+                          command: "make test-shared-protocol", order: 5),
+                LoopStage(name: "Mac app", kind: .shellCommand,
+                          command: "cd mac && swift test", order: 6),
+                LoopStage(name: "Regression", kind: .regressionSweep, order: 7)
+            ],
+            maxIterations: 8, consecutiveFailureStop: 2),
         isBuiltIn: true)
 }
