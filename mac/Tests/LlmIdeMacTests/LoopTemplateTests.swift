@@ -115,6 +115,27 @@ final class LoopTemplateTests: XCTestCase {
         XCTAssertTrue(applied.stages.allSatisfy { $0.command != LoopTemplate.detectedTestCommand })
     }
 
+    /// `testOnly`'s single stage IS the placeholder, unlike `testAndFix`/
+    /// `fullVerify` which keep a non-placeholder safety-net stage — so with no
+    /// detectable tooling it applies to an empty stage list. The UI must be able
+    /// to tell this apart from "nothing configured yet" (see `wouldApplyEmpty`).
+    func testApplyOfTestOnlyWithNoToolingYieldsEmptyStages() {
+        let applied = LoopTemplate.testOnly.applied(to: repoRoot)   // empty dir
+        XCTAssertTrue(applied.stages.isEmpty)
+    }
+
+    func testWouldApplyEmptyIsTrueOnlyWhenEveryStageIsAnUnresolvedPlaceholder() {
+        // testOnly: one stage, all placeholder, no tooling detected → true.
+        XCTAssertTrue(LoopTemplate.testOnly.wouldApplyEmpty(to: repoRoot))
+        // testAndFix: has the same placeholder AND a regression stage → false,
+        // the regression stage survives.
+        XCTAssertFalse(LoopTemplate.testAndFix.wouldApplyEmpty(to: repoRoot))
+        // Tooling present → the placeholder resolves, so still false.
+        FileManager.default.createFile(atPath: repoRoot.appendingPathComponent("Package.swift").path,
+                                       contents: nil)
+        XCTAssertFalse(LoopTemplate.testOnly.wouldApplyEmpty(to: repoRoot))
+    }
+
     /// `isDefault` is `LoopStageDetector`'s to assign — it re-pins the real
     /// defaults on load. A template that carried the flag in would make a stage
     /// undeletable in a project where it is not actually a default.

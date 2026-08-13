@@ -96,6 +96,11 @@ struct LoopEngineView: View {
     /// A `@StateObject` so the picker updates the moment one is saved or deleted.
     @StateObject var templateStore = LoopTemplateStore()
     @State var selectedTemplateId: UUID?
+    /// Set by `applySelectedTemplate()` when the applied template's stages were
+    /// all `detectedTestCommand` placeholders and none resolved — so an empty
+    /// `stages` reads as "no test tooling found here", not "nothing configured".
+    /// Cleared as soon as the user edits stages manually.
+    @State var appliedTemplateHadNoTooling = false
     @State var isNamingTemplate = false
     @State var newTemplateName = ""
     @State var newTemplateSummary = ""
@@ -179,14 +184,17 @@ struct LoopEngineView: View {
                     Button("Shell command") {
                         let nextOrder = (stages.map(\.order).max() ?? -1) + 1
                         stages.append(LoopStage(name: "New Stage", kind: .shellCommand, command: "", order: nextOrder))
+                        appliedTemplateHadNoTooling = false
                     }
                     Button("Regression sweep") {
                         let nextOrder = (stages.map(\.order).max() ?? -1) + 1
                         stages.append(LoopStage(name: "Regression", kind: .regressionSweep, command: nil, order: nextOrder))
+                        appliedTemplateHadNoTooling = false
                     }
                     Button("Skill (generate)") {
                         let nextOrder = (stages.map(\.order).max() ?? -1) + 1
                         stages.append(LoopStage(name: "New Skill Stage", kind: .skill, command: nil, order: nextOrder))
+                        appliedTemplateHadNoTooling = false
                     }
                 } label: {
                     Image(systemName: "plus")
@@ -312,7 +320,11 @@ struct LoopEngineView: View {
         let t = theme.current
         VStack(alignment: .leading, spacing: Spacing.md) {
             SectionLabel("PROCESS")
-            if stages.isEmpty {
+            if stages.isEmpty && appliedTemplateHadNoTooling {
+                Text("No test tooling detected in this project, so the applied template has nothing to run. Pick another template, or add a stage manually with +.")
+                    .font(Typography.body)
+                    .foregroundStyle(t.accent4)
+            } else if stages.isEmpty {
                 Text("No stages yet. Add one with + on the left, or apply a template above.")
                     .font(Typography.body)
                     .foregroundStyle(t.textMuted)
@@ -839,6 +851,7 @@ struct LoopEngineView: View {
     /// without having overwritten their config. `Run` and `Save` persist, as before.
     func applySelectedTemplate() {
         guard let template = selectedTemplate else { return }
+        appliedTemplateHadNoTooling = template.wouldApplyEmpty(to: activeGitRootURL)
         assignConfig(template.applied(to: activeGitRootURL))
     }
 

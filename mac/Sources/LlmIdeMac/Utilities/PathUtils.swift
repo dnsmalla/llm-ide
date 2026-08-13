@@ -48,9 +48,16 @@ enum PathUtils {
     /// resolves the same relative location instead of a frozen, machine-specific
     /// absolute path. Falls back to the canonicalised absolute path when `raw`
     /// does not lie under `root`.
+    ///
+    /// Both sides are symlink-resolved before comparing — `canonicalise` alone
+    /// does not do this (`URL.standardizedFileURL` only collapses `.`/`..`),
+    /// so a project rooted at a symlinked path (e.g. macOS's `/tmp` →
+    /// `/private/tmp`) would otherwise never match and always fall back to
+    /// the absolute path.
     static func relative(_ raw: String, to root: URL) -> String {
-        let rootPath = canonicalise(root.path)
-        let path = canonicalise(raw)
+        let rootPath = URL(fileURLWithPath: canonicalise(root.path)).resolvingSymlinksInPath().path
+        let path = URL(fileURLWithPath: canonicalise(raw)).resolvingSymlinksInPath().path
+        if path == rootPath { return "." }
         guard path.hasPrefix(rootPath + "/") else { return path }
         return String(path.dropFirst(rootPath.count + 1))
     }

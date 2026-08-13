@@ -39,6 +39,11 @@ struct NewLoopWizardView: View {
 
     @State private var selectedTemplateId: UUID?
     @State private var stages: [LoopStage] = []
+    /// Set when the selected template's stages were all `detectedTestCommand`
+    /// placeholders and none resolved — the reason `stages` is empty is "no
+    /// test tooling found here", not "nothing configured yet". Cleared as
+    /// soon as the user takes manual control by adding a stage.
+    @State private var noToolingDetectedForTemplate = false
     @State private var writeSummaryNote = false
     @State private var isNamingTemplate = false
     @State private var newTemplateName = ""
@@ -120,8 +125,10 @@ struct NewLoopWizardView: View {
             guard let template = newValue.flatMap({ id in templateStore.templates.first { $0.id == id } })
             else {
                 stages = []
+                noToolingDetectedForTemplate = false
                 return
             }
+            noToolingDetectedForTemplate = template.wouldApplyEmpty(to: gitRoot)
             stages = template.applied(to: gitRoot).stages
             writeSummaryNote = template.config.writeSummaryNote
         }
@@ -164,7 +171,11 @@ struct NewLoopWizardView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
-                if stages.isEmpty {
+                if stages.isEmpty && noToolingDetectedForTemplate {
+                    Text("No test tooling detected in this project, so this template has nothing to run. Pick another template, or add a stage manually with +.")
+                        .font(Typography.body)
+                        .foregroundStyle(t.accent4)
+                } else if stages.isEmpty {
                     Text("No stages yet. Pick a template on the left, or add stages one at a time with +.")
                         .font(Typography.body)
                         .foregroundStyle(t.textMuted)
@@ -197,6 +208,7 @@ struct NewLoopWizardView: View {
         }
         stages.append(LoopStage(name: name, kind: kind,
                                  command: kind == .shellCommand ? "" : nil, order: nextOrder))
+        noToolingDetectedForTemplate = false
     }
 
     @ViewBuilder
