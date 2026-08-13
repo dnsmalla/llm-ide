@@ -24,15 +24,6 @@ final class DeepLinkRouter: ObservableObject {
     /// Set by `handle(_:)` and consumed by ContentView via .onChange.
     @Published var pendingEvent: Event?
 
-    /// Back-compat shim — callers that only need the tab string keep
-    /// reading `pendingTab`. READ-ONLY: writing through pendingTab
-    /// would silently drop the `session` field of the current Event
-    /// (since the setter has no way to know what session a non-nil
-    /// caller intends), losing a fresh deep link's session subscription.
-    /// Callers that want to clear should write `pendingEvent = nil`
-    /// directly.
-    var pendingTab: String? { pendingEvent?.tab }
-
     private var lastEventId: UInt64 = 0
     private func nextEventId() -> UInt64 {
         lastEventId &+= 1

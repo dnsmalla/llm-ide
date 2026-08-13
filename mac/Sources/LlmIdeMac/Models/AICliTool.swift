@@ -77,19 +77,6 @@ enum AICliTool: String, CaseIterable, Identifiable {
         }
     }
 
-    var description: String {
-        switch self {
-        case .claudeCode: return "Anthropic Claude (API key, or your logged-in claude CLI)"
-        case .openai:     return "OpenAI GPT / Codex models (API key)"
-        case .cursor:     return "AI-first code editor by Anysphere"
-        case .copilot:    return "GitHub's AI coding assistant"
-        case .gemini:     return "Google Gemini models (API key)"
-        case .deepseek:   return "DeepSeek Chat and Reasoner models (API key)"
-        case .glm:        return "Zhipu GLM models (API key)"
-        case .custom:     return "Any OpenAI-compatible endpoint (OpenRouter, Ollama, …)"
-        }
-    }
-
     var models: [AIModel] {
         switch self {
         case .claudeCode:

@@ -26,7 +26,5 @@ struct Caption: Codable, Identifiable, Equatable {
 enum CaptureSource: String, Codable {
     case zoomDesktop = "zoom-desktop"
     case teamsDesktop = "teams-desktop"
-    case audioFallback = "audio-fallback"
-    case microphone = "microphone"
     case unknown = "unknown"
 }

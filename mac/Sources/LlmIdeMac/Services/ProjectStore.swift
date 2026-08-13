@@ -327,15 +327,6 @@ final class ProjectStore: ObservableObject {
         return result
     }
 
-    #if DEBUG
-    /// Test-only seam to inject an ActiveProject without touching disk.
-    /// Used by unit tests that exercise resolveBackendAndProject-style
-    /// logic. Don't call from production code.
-    func setActiveForTesting(_ active: ActiveProject?) {
-        activeProject = active
-    }
-    #endif
-
     // MARK: - Internals
 
     private func createFromDefaults(folder: URL) -> Project {

@@ -432,23 +432,6 @@ final class LibraryItemStore {
         rescan()
     }
 
-    /// Un-link the external code folder(s) at (or under) a specific
-    /// directory path.  Keyed on the absolute path — not the basename —
-    /// so two distinct folders sharing a name (`/a/proj`, `/b/proj`) are
-    /// removed independently.  Like `removeFolder(folderOrigin:)` this is
-    /// authoritative: it clears the matching `externalCodeFolders`
-    /// reference(s), notifies the owner, then rescans.
-    func removeFolder(underPath path: String) {
-        let prefix = path.hasSuffix("/") ? path : path + "/"
-        let remaining = externalCodeFolders.filter {
-            $0 != path && !$0.hasPrefix(prefix)
-        }
-        guard remaining.count != externalCodeFolders.count else { return }
-        externalCodeFolders = remaining
-        onExternalCodeFoldersChanged?(externalCodeFolders)
-        rescan()
-    }
-
     /// On-disk envelope used ONLY to DECODE the legacy `library_items.json`
     /// during the one-time migration (see `decodeLegacyItems`).  The live
     /// index no longer persists, so nothing encodes this anymore.

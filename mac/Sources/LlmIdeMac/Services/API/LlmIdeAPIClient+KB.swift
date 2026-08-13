@@ -86,15 +86,8 @@ extension LlmIdeAPIClient {
         return try await post("/kb/ingest", body: stamped, authenticated: true)
     }
 
-    func listPlans() async throws -> [PlanSummary] {
-        struct Wrap: Decodable { let plans: [PlanSummary] }
-        let r: Wrap = try await get("/kb/plans", authenticated: true)
-        return r.plans
-    }
-
-    func getPlan(id: String) async throws -> Plan {
-        try await get("/kb/plan/\(percentEncoded(id))", authenticated: true)
-    }
+    // listPlans() / getPlan(id:) were removed — no Mac call site invoked
+    // them (same reasoning as the extractEntities removal above).
 
     func search(q: String?, kind: String? = nil, limit: Int = 30) async throws -> [SearchHit] {
         struct Wrap: Decodable { let results: [SearchHit] }

@@ -137,31 +137,6 @@ final class DocTemplateStore: ObservableObject {
         save()
     }
 
-    @discardableResult
-    func duplicate(_ template: DocTemplate) -> DocTemplate {
-        let copyName = "\(template.name) (copy)"
-        if let root = currentProjectRoot {
-            let slug = uniqueFolderSlug(base: DocTemplate.slug(for: copyName), root: root)
-            let copy = DocTemplate(
-                id: DocTemplate.stableID(forFolder: slug),
-                name: copyName,
-                sections: template.sections,
-                rawContent: template.renderedMarkdown(),
-                folderName: slug,
-                isProjectTemplate: true)
-            writeProjectTemplate(copy, at: root, folderName: slug)
-            reloadProjectTemplates(at: root)
-            return projectTemplates.first { $0.folderName == slug } ?? copy
-        }
-        let copy = DocTemplate(
-            id: UUID(),
-            name: copyName,
-            sections: template.sections,
-            isBuiltin: false)
-        add(copy)
-        return copy
-    }
-
     // MARK: - Project disk I/O
 
     private func scanProjectTemplates(at root: URL) -> [DocTemplate] {

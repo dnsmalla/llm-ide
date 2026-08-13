@@ -115,30 +115,6 @@ struct IssueUtilities {
         return try await client.updateIssue(projectId: projectId, number: issue.number, payload: payload)
     }
 
-    // MARK: - Common Workflows
-
-    /// Auto-close an issue after code merge.
-    /// Idempotent: if already closed, does nothing.
-    func closeAfterMerge(_ issue: RepoIssue, commitSha: String? = nil) async throws {
-        guard issue.isOpen else {
-            logHandler("Issue #\(issue.number) already closed, skipping")
-            return
-        }
-        try await closeIssue(issue)
-    }
-
-    /// Find and reopen issue if it's stale.
-    /// Returns true if reopened, false if already open.
-    func reopenIfStale(_ issue: RepoIssue, reason: String) async throws -> Bool {
-        guard !issue.isOpen else {
-            logHandler("Issue #\(issue.number) already open")
-            return false
-        }
-        logHandler("Reopening stale issue #\(issue.number): \(reason)")
-        try await reopenIssue(issue)
-        return true
-    }
-
     // MARK: - Error Recovery
 
     /// Retry an operation up to `maxAttempts` times with exponential backoff.
