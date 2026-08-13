@@ -7,7 +7,7 @@ process.env.LLMIDE_VAULT_KEY = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
 const { searchWeb, fetchUrl, searchWebViaAnthropic, fetchUrlViaAnthropic } =
-  await import('../agents/web-client.mjs');
+  await import('../providers/web-client.mjs');
 
 function mockFetch(handler) {
   const original = globalThis.fetch;

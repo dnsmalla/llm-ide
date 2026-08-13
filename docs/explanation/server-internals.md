@@ -66,15 +66,15 @@ under `kb/` and is re-exported through db.mjs:
 | `kb/outcomes.mjs`   | Task outcome polling history + aggregate stats             |
 | `kb/user.mjs`       | Repo allow-list, UI prefs, JWT revocation list             |
 
-HTTP routing follows the same pattern: `kb/router.mjs` is the
-dispatch shell, with route families lifted out under `kb/routes/`:
+HTTP routing follows the same pattern: `routes/router.mjs` is the
+dispatch shell, with route families lifted out under `routes/`:
 
 | Route module               | URL prefix             |
 |----------------------------|------------------------|
-| `kb/routes/agent.mjs`      | `/kb/agent/*`          |
-| `kb/routes/planning.mjs`   | `/kb/generate-plan`, `/kb/analyze-risks`, `/kb/code-sync`, `/kb/plan/*`, `/kb/plan-task/update`, `/kb/dispatch`, `/kb/generate-code` |
-| `kb/routes/live.mjs`       | `/kb/live/*` (incl. SSE stream + per-user concurrency cap) |
-| `kb/routes/review.mjs`     | `/kb/review/*`         |
+| `routes/agent.mjs`      | `/kb/agent/*`          |
+| `routes/planning.mjs`   | `/kb/generate-plan`, `/kb/analyze-risks`, `/kb/code-sync`, `/kb/plan/*`, `/kb/plan-task/update`, `/kb/dispatch`, `/kb/generate-code` |
+| `routes/live.mjs`       | `/kb/live/*` (incl. SSE stream + per-user concurrency cap) |
+| `routes/review.mjs`     | `/kb/review/*`         |
 
 Every sub-module defines its own (identical) `requireUser` rather
 than importing one from db.mjs — that's intentional, sub-modules
@@ -92,7 +92,7 @@ Every owned row carries a `user_id` foreign key.  The tenancy contract:
 - **FTS5 is shared but hydration is scoped.**  Cross-tenant FTS hits
   exist in the index, but the `findContext` / `search` paths drop any
   hit whose hydration query (filtered by `user_id`) returns nothing.
-- **The router enforces the gate.**  `kb/router.mjs` reads `req.user.id`
+- **The router enforces the gate.**  `routes/router.mjs` reads `req.user.id`
   and passes it to every call.  Without it, the router returns 401.
 - **Pre-existing data goes to `legacy`.**  The 0002 migration
   back-fills `user_id = 'legacy'` and provisions a corresponding

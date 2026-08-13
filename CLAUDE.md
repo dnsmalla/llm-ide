@@ -87,7 +87,7 @@ LLM-IDE is a **local-first AI meeting intelligence system** comprising four surf
 - **Pure Node HTTP** — No framework (Express/Fastify); reduces dependency surface
 - **SQLite WAL+FTS5** — Single database per install, full-text search across meetings/code/tickets
 - **Per-user tenancy** — Every owned row carries `user_id`; FTS5 hits are hydrated with user-scoped queries
-- **Append-only migrations** — Numbered SQL migrations under `extension/kb/migrations/` (0001–0024)
+- **Append-only migrations** — Numbered SQL migrations under `extension/kb/migrations/` (0001–0027)
 
 ## Project Structure
 
@@ -99,9 +99,13 @@ llm-ide/
 │   ├── core/            # Framework-free primitives (config, utils, errors, logger)
 │   ├── server/          # HTTP server (no framework), routing, middleware
 │   ├── kb/              # SQLite knowledge base, migrations, FTS5; sources.mjs = source hub
-│   ├── agents/          # Server pipeline agents (planner, risk, codegen, …) — not skills
+│   ├── routes/          # HTTP route modules (router.mjs + agent/chat/live/planning/review/…)
+│   ├── providers/       # Model-provider layer: dispatch, CLI spawn, retry/backoff, web client
+│   ├── agents/          # Server pipeline agents (planner, risk, codegen, dispatcher, …) — not skills
 │   ├── llm_agent/       # Claude CLI orchestrator + synced agent-tool defs
-│   ├── connectors/      # Outbound dispatch (GitHub/GitLab/Backlog/Linear/Slack) + source adapters (box, git, issues, qa)
+│   ├── connectors/      # Inbound source adapters (box, git, issues, qa, scip, email, slack + OAuth)
+│   ├── llm-sources/     # LLM source registry + state (feeds kb/sources.mjs hub)
+│   ├── mcp/             # MCP server config + Claude MCP source adapter
 │   ├── graphkit/        # Code-graph engine (graph.mjs, layouts, 2D/3D renderers, memory-writer)
 │   ├── guardrails/      # Secret/PII/destructive-op pattern scanners
 │   ├── plugins/         # Extension plugin loader/installer (claude-adapter, loader, installer, state)
@@ -137,10 +141,19 @@ loads the same kit. Agent-loop tool **definitions** still sync with
 
 ### Module Boundaries (Extension)
 
-Strict layering rule — arrows indicate "imports":
+Arrows indicate "may import". **Enforced by ESLint** (the allow-table in `extension/eslint.config.mjs`); the ratchet is at **zero violations** — never add per-file exemptions; refactor the edge instead.
 
 ```
-core  ←  kb  ←  server  ←  agents / llm_agent / connectors / guardrails / graphkit / plugins
+L0 core         → nothing internal
+L1 kb           → core                          (data access only)
+L2 server libs  → core, kb                      (auth/vault/jwt/rate-limit/metrics)
+   providers    → core, kb, server libs         (model dispatch/CLI/retry/web client)
+L3 connectors · graphkit · guardrails · plugins · llm-sources · mcp → L0–L2
+   agents       → L0–L2 + connectors/graphkit/guardrails   (pipeline orchestration)
+   llm_agent    → L0–L2 + graphkit/plugins/llm-sources/mcp (skill/plugin surface)
+L4 routes       → any Node layer, never src/    (server.mjs, routes/*,
+                                                 server/*-routes.mjs)
+                  — nothing may import a route module
 ```
 
 - **`core/`** — Framework-free primitives only (Node built-ins + 3rd-party libs)
@@ -282,7 +295,7 @@ ios_app/MyApp/Services/
 
 ### Starting Points for Reading
 
-- **Server internals** — `extension/server.mjs` → follow router into `extension/kb/router.mjs`
+- **Server internals** — `extension/server.mjs` → follow router into `extension/routes/router.mjs`
 - **KB operations** — `extension/kb/db.mjs` (every state-mutating helper takes `userId` first)
 - **Caption capture** — `extension/src/content/caption-scraper.ts` → `extension/src/sidepanel/hooks/useTranscript.ts`
 - **Central skills kit** — `.skills/` submodule + `docs/how-to/install-central-skills.md`

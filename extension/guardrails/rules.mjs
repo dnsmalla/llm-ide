@@ -16,6 +16,14 @@
 // findMatches(..., { redact: true }) below.
 import { redactSecrets } from '../core/redact-secrets.mjs';
 
+// Zero-width characters an attacker can embed inside a token to defeat the
+// whitespace-collapse evasion pass: U+200B ZWSP, U+200C ZWNJ, U+200D ZWJ,
+// U+2060 word-joiner, U+FEFF BOM/ZWNBSP. Written as an escaped alternation
+// (not a character class) because invisible literals are editor-fragile and
+// escaped ZWJ inside a class trips no-misleading-character-class. Exported so
+// scan.mjs strips the exact same set — the two evasion passes must not drift.
+export const ZERO_WIDTH_RE = /(?:\u200B|\u200C|\u200D|\u2060|\uFEFF)+/g;
+
 // Exported so scan.mjs can import the same list instead of maintaining
 // a parallel copy that could silently drift out of sync.
 export const SECRET_PATTERNS = [
@@ -45,9 +53,9 @@ export const SECRET_PATTERNS = [
   { name: 'Generic sk- API key', re: /\bsk-(?!ant-|proj-)[A-Za-z0-9]{20,}\b/ },
   // Separator limited to 1-3 chars to prevent catastrophic backtracking
   // on inputs like 'api_key:::::::::::::::::' (unbounded '+' was exploitable).
-  { name: 'Generic API key', re: /\b(api[_-]?key|secret[_-]?key|access[_-]?token)["'\s:=]{1,3}[A-Za-z0-9_\-]{16,}\b/i },
+  { name: 'Generic API key', re: /\b(api[_-]?key|secret[_-]?key|access[_-]?token)["'\s:=]{1,3}[A-Za-z0-9_-]{16,}\b/i },
   { name: 'Private key',    re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/ },
-  { name: 'Bearer token',   re: /Bearer\s+[A-Za-z0-9._\-]{20,}\b/i },
+  { name: 'Bearer token',   re: /Bearer\s+[A-Za-z0-9._-]{20,}\b/i },
 ];
 
 const PII_PATTERNS = [
@@ -84,7 +92,7 @@ const DESTRUCTIVE_PATTERNS = [
 // the matched token itself is scrubbed out of the returned snippet before
 // it's returned. Findings from this function get persisted verbatim into
 // the review_items.guardrails column and echoed back in API responses
-// (kb/routes/review.mjs submit/approve), so a raw secret value here would
+// (routes/review.mjs submit/approve), so a raw secret value here would
 // leak into the DB, logs, and any client that reads the review item —
 // exactly the credential-exposure the guardrail is supposed to prevent.
 function findMatches(text, patterns, { redact = false } = {}) {
@@ -112,7 +120,7 @@ function findMatches(text, patterns, { redact = false } = {}) {
   // The snippet we surface is always drawn from the raw text so the reviewer
   // sees the real shape (modulo redaction, when requested).
   const wsCollapsed = text.replace(/\s+/g, '');
-  const zwCollapsed = text.replace(/[​‌‍⁠﻿]+/g, '');
+  const zwCollapsed = text.replace(ZERO_WIDTH_RE, '');
   const hits = [];
   for (const { name, re } of patterns) {
     let m = text.match(re);

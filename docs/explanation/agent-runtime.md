@@ -41,7 +41,7 @@ In plain terms: user turn → global (depth 0) → internal (depth 1) → result
 
 ## Co-pilot stance and the meeting agent
 
-The meeting agent follows the same CLI-based LLM access pattern as the rest of the runtime — every LLM call goes through `runClaude` in `extension/agents/runtime.mjs`, which `execFile`s the local `claude` CLI rather than calling the Anthropic API directly. No Anthropic SDK, no API key in the meeting-agent path.
+The meeting agent follows the same CLI-based LLM access pattern as the rest of the runtime — every LLM call goes through `runClaude` in `extension/providers/runtime.mjs`, which `execFile`s the local `claude` CLI rather than calling the Anthropic API directly. No Anthropic SDK, no API key in the meeting-agent path.
 
 The co-pilot stance is enforced at the design level: the meeting agent **never auto-types text into the meeting**. When it drafts a question, it appends it to the `/kb/live/:sessionId` stream with `source: "agent-question"`. Both surfaces (Chrome extension side panel, Mac app TranscriptView) render these rows visually distinct — styled with a different color or icon — so the user can read them and choose to ask the question themselves. The agent is invisible to other meeting participants.
 

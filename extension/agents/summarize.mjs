@@ -1,7 +1,7 @@
 // Stateless 3-level summary generator.  Single Claude call → JSON.
 // Retries once with a stricter prompt if the first attempt isn't parseable.
 
-import { runClaude as defaultRunClaude, tryParseJSON } from './runtime.mjs';
+import { runClaude as defaultRunClaude, tryParseJSON } from '../providers/runtime.mjs';
 
 // Prefer the summarize-specific model override, fall back to the global
 // model env-var, then the hard-coded default.  This keeps summarize.mjs

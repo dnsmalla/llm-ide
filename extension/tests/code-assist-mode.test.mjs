@@ -16,7 +16,7 @@
 // --experimental-test-module-mocks, unavailable on the Node 20 this repo's
 // CI runs. So instead of mocking the import, we let the real call chain run
 // and stub the ONE seam that's actually mockable this deep — the Anthropic
-// HTTP call in agents/runtime.mjs's runClaude, via globalThis.fetch — the
+// HTTP call in providers/runtime.mjs's runClaude, via globalThis.fetch — the
 // same technique tests/agent-loop.test.mjs and tests/agents-runtime.test.mjs
 // already use for exactly this reason.
 //

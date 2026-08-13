@@ -13,7 +13,7 @@
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { join, isAbsolute, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { resolveCentralSkillsRepo } from '../llm_agent/skills/skill-library.mjs';
+import { resolveCentralSkillsRepo } from '../core/skills-repo.mjs';
 
 const TOOLS = ['claude', 'cursor', 'codex', 'agents', 'gemini'];
 const DEFAULT_STACKS = 'typescript,swift';

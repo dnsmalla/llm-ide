@@ -13,7 +13,7 @@
 import { getPlan, mergeTaskMeta, getTaskById, getDb, claimTaskForDispatch, releaseTaskDispatchClaim } from '../kb/db.mjs';
 import { pMap } from '../core/p-map.mjs';
 import { redactSecrets } from '../core/redact-secrets.mjs';
-import { jittered } from './runtime.mjs';
+import { jittered } from '../providers/runtime.mjs';
 import { logger } from '../core/logger.mjs';
 import { recordActivity } from '../kb/activity.mjs';
 

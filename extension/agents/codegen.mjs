@@ -8,7 +8,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { runClaude, tryParseJSON, languageDirective } from './runtime.mjs';
+import { runClaude, tryParseJSON, languageDirective } from '../providers/runtime.mjs';
 import { getTaskById, getPlan, mergeTaskMeta } from '../kb/db.mjs';
 
 const MAX_FILES = 8;

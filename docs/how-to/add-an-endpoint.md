@@ -11,7 +11,7 @@ Add an authenticated HTTP endpoint that the side panel can call.
 
 ## Steps
 
-1. **Pick the route family.** AI endpoint? → `extension/server/ai-routes.mjs`. KB endpoint? → `extension/kb/router.mjs`. Auth-related? → `extension/server/auth-routes.mjs`.
+1. **Pick the route family.** AI endpoint? → `extension/server/ai-routes.mjs`. KB endpoint? → `extension/routes/router.mjs`. Auth-related? → `extension/server/auth-routes.mjs`.
 2. **Write the handler.** Use `req.user.id` for tenancy. Wrap user content in `<<<BEGIN>>>…<<<END>>>` fences before any LLM call. Apply rate-limit profile.
 3. **Register the route in `ENDPOINTS`** (`server.mjs`).
 4. **Bump `SERVER_API_VERSION`** in `server.mjs`.

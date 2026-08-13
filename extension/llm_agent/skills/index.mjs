@@ -15,4 +15,4 @@ export {
   buildPerUserSkillSet,
   assertReadSkillsWired,
 } from './registry.mjs';
-export { listSkillLibrary, readSkillInstructions, resolveCentralSkillsRepo, _resetSkillLibraryCache } from './skill-library.mjs';
+export { listSkillLibrary, readSkillInstructions, _resetSkillLibraryCache } from './skill-library.mjs';

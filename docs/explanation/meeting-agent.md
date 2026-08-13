@@ -118,7 +118,7 @@ Key properties:
 
 This codebase **does not call the Anthropic API directly**. Every
 LLM call goes through `runClaude(prompt, { userId? })` exported by
-`extension/agents/runtime.mjs`, which `execFile`s the local `claude`
+`extension/providers/runtime.mjs`, which `execFile`s the local `claude`
 CLI authenticated as the user via `claude login`. See [ADR
 0001](../decisions/0001-claude-cli-not-api-key.md).
 

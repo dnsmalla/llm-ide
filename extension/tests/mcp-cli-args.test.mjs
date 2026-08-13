@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAnthropicCliArgs } from '../agents/providers.mjs';
+import { buildAnthropicCliArgs } from '../providers/providers.mjs';
 
 test('no mcpConfigJson → today\'s argv (strict-mcp-config, no mcp flags)', () => {
   const args = buildAnthropicCliArgs('hello');

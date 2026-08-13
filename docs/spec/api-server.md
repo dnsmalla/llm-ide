@@ -18,7 +18,7 @@ The following source files together constitute the server and its API:
 | Entry point | `extension/server.mjs` |
 | Auth middleware | `extension/server/auth.mjs`, `extension/server/jwt.mjs` |
 | Route handlers | `extension/server/auth-routes.mjs`, `extension/server/ai-routes.mjs`, `extension/server/export-routes.mjs` |
-| KB router | `extension/kb/router.mjs` (mounted under `/kb`) |
+| KB router | `extension/routes/router.mjs` (mounted under `/kb`) |
 | Rate limiting | `extension/server/rate-limit.mjs` |
 | Observability | `extension/server/audit.mjs`, `extension/server/metrics.mjs` |
 | User / token store | `extension/server/users.mjs`, `extension/server/vault.mjs` |
@@ -200,9 +200,9 @@ The full table with descriptions is in [`../reference/error-codes.md`](../refere
 - `GUARDRAIL_FAILED`: No `AppError` factory and no `throw` of this code exists anywhere in the server source (grepped all `.mjs` and `.ts` files excluding `dist/` and `node_modules/`). It appears only in comment lines in `extension/core/errors.mjs:7,10`. **This code is never actually emitted by the server.** The `overview.md` entry is aspirational/stale for this code.
 
 - `UPSTREAM_ERROR`: No factory in `errors.mjs`. The code is emitted in **three places** via raw `sendJSON` (bypassing `AppError`/`sendError`):
-  - `extension/kb/router.mjs:571` — catch-all for unexpected errors in the `/kb/summarize` handler
-  - `extension/kb/router.mjs:771` — catch-all for unexpected errors in the `/kb/email/classify` handler
-  - `extension/kb/router.mjs:828` — catch-all for unexpected errors in the `/kb/conflict-questions` handler
+  - `extension/routes/router.mjs:571` — catch-all for unexpected errors in the `/kb/summarize` handler
+  - `extension/routes/router.mjs:771` — catch-all for unexpected errors in the `/kb/email/classify` handler
+  - `extension/routes/router.mjs:828` — catch-all for unexpected errors in the `/kb/conflict-questions` handler
 
   In all three cases the response is written directly via `sendJSON(res, 500, { error: { code: 'UPSTREAM_ERROR', … } })`, not through `sendError`. This means the `overview.md` description ("Claude CLI, GitHub, or another upstream failed") is partially accurate — these handlers use it as a generic upstream-failure fallback — but it is not a first-class `AppError` code and has no factory.
 
@@ -238,12 +238,12 @@ When a bucket is exhausted, `tryConsume()` returns `{ ok: false, retryAfterSec: 
 | `dispatch` | 4 | 1/10 s | `/kb/dispatch`, `/kb/notify/slack`, `/kb/email/test`, `/kb/email/fetch`, `/kb/slack/test`, `/kb/slack/fetch`, `/kb/box/test`, `/kb/slack/conversations`, `/kb/connect-box` (full external crawl — special-cased before the generic connect prefix) |
 | `outcomePoll` | 6 | 1/30 s | `/kb/outcomes/refresh` |
 | `kbWrite` | 30 | 5/s | `/kb/ingest`, `/kb/connect-*`, `/kb/review/*`, `/kb/plan-task/*`, `/kb/issue-schedule*`, `/kb/usage/limits`, `/kb/usage/record`, `/kb/email/seen`, `/kb/slack/seen`, `POST /kb/activity`, `POST /kb/activity/seen`, `/kb/project/install-skills` |
-| `liveAppend` | 30 | 5/s | `/kb/live/:id/append` (applied inside `kb/routes/live.mjs:62`) |
+| `liveAppend` | 30 | 5/s | `/kb/live/:id/append` (applied inside `routes/live.mjs:62`) |
 | `kbExport` | 5 | 1/10 s | `GET /kb/export-all` |
 | `authPublic` | 10 | 1/s | `/auth/login`, `/auth/refresh`, password-reset confirm/request |
 | `authRegister` | 3 | 1/60 s | `/auth/register` |
 
-Profile **definitions** (capacity + refill) are in `rate-limit.mjs:59–129`. The **URL→profile mapping** above is authoritative in `rateLimitProfile()` (`server.mjs:116–180`) — `rateLimitProfile()` returns the *first* match, so each URL has exactly one profile. The three `auth*`/`liveAppend` profiles are **not** dispatched by `rateLimitProfile()`; they are applied inside their own handlers (`server/auth-routes.mjs` for `authPublic`/`authRegister`, `kb/routes/live.mjs` for `liveAppend`). This mapping is drift-guarded by `docs/_scripts/check_rate_limit_mapping.py`.
+Profile **definitions** (capacity + refill) are in `rate-limit.mjs:59–129`. The **URL→profile mapping** above is authoritative in `rateLimitProfile()` (`server.mjs:116–180`) — `rateLimitProfile()` returns the *first* match, so each URL has exactly one profile. The three `auth*`/`liveAppend` profiles are **not** dispatched by `rateLimitProfile()`; they are applied inside their own handlers (`server/auth-routes.mjs` for `authPublic`/`authRegister`, `routes/live.mjs` for `liveAppend`). This mapping is drift-guarded by `docs/_scripts/check_rate_limit_mapping.py`.
 
 ### Bucket persistence
 

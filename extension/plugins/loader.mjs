@@ -20,7 +20,7 @@
 // names). Discovery returns every installed plugin; the agent runtime
 // only loads the enabled ones.
 
-import { readdirSync, readFileSync, statSync, lstatSync, existsSync } from 'node:fs';
+import { readdirSync, readFileSync, lstatSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import os from 'node:os';
 import * as yaml from 'js-yaml';

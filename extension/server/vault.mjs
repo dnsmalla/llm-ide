@@ -117,9 +117,9 @@ const ALLOWED_KEYS = new Set([
   // /kb/slack/test and /kb/slack/fetch to read channel messages.
   'slack.botToken',
   // Slack user token (xoxp-…), minted by the hosted OAuth flow
-  // (agents/slack-oauth.mjs, /auth/slack/callback) after the user connects via
+  // (connectors/slack-oauth.mjs, /auth/slack/callback) after the user connects via
   // "Connect Slack". Preferred over slack.botToken when both are present (see
-  // kb/router.mjs resolveSlackToken) — reads channels/groups the user already
+  // routes/router.mjs resolveSlackToken) — reads channels/groups the user already
   // belongs to, no bot-invite step required.
   'slack.userToken',
   // Box Client-Credentials-Grant app client secret for the Box document
@@ -135,7 +135,7 @@ const ALLOWED_KEYS = new Set([
   // ANTHROPIC_API_KEY=<this> so each user's LLM spend is attributed
   // to their own account instead of the operator's Claude CLI login.
   'claude.apiKey',
-  // Per-user keys for the other model providers (see agents/providers.mjs).
+  // Per-user keys for the other model providers (see providers/providers.mjs).
   // A configured key routes that provider's models over the fast HTTP API
   // instead of the local CLI subprocess.
   'openai.apiKey',
@@ -147,7 +147,7 @@ const ALLOWED_KEYS = new Set([
   'custom.apiKey',
   'custom.baseUrl',
   'serpapi.apiKey',
-  // Gmail Google Sign-In (OAuth2 PKCE, agents/google-oauth.mjs). clientId/
+  // Gmail Google Sign-In (OAuth2 PKCE, connectors/google-oauth.mjs). clientId/
   // clientSecret come from the user's own Google Cloud "Desktop app" OAuth
   // client; refreshToken is minted by /auth/google/callback after consent
   // and used to mint short-lived XOAUTH2 access tokens for IMAP.

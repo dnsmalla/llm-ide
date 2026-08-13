@@ -29,7 +29,7 @@ const memory  = await import('../graphkit/memory.mjs');
 const persist = await import('../llm_agent/runtime/memory-persist.mjs');
 const db      = await import('../kb/db.mjs');
 const users   = await import('../server/users.mjs');
-const { handleAgentRoutes } = await import('../kb/routes/agent.mjs');
+const { handleAgentRoutes } = await import('../routes/agent.mjs');
 
 function reset() {
   db.closeDb();

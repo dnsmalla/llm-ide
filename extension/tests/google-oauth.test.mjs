@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { pkcePair, buildAuthUrl, exchangeCode, refreshAccessToken, putState, getState, completeState, takeStatus } from '../agents/google-oauth.mjs';
+import { pkcePair, buildAuthUrl, exchangeCode, refreshAccessToken, putState, getState, completeState, takeStatus } from '../connectors/google-oauth.mjs';
 
 test('pkcePair: challenge is base64url(SHA256(verifier))', () => {
   const { verifier, challenge } = pkcePair();

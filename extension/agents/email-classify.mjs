@@ -3,7 +3,7 @@
 // Retries once with a stricter prompt if the first attempt isn't parseable.
 // Modeled on agents/summarize.mjs.
 
-import { runClaude as defaultRunClaude, tryParseJSON } from './runtime.mjs';
+import { runClaude as defaultRunClaude, tryParseJSON } from '../providers/runtime.mjs';
 
 // Default to the same model summarize uses (proven to work with whatever
 // provider/key the deployment has) — a wrong/inaccessible model surfaces as a

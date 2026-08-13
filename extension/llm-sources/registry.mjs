@@ -28,7 +28,7 @@ import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as yaml from 'js-yaml';
-import { resolveCentralSkillsRepo } from '../llm_agent/skills/skill-library.mjs';
+import { resolveCentralSkillsRepo } from '../core/skills-repo.mjs';
 import { listEnabled, pruneOrphans } from './state.mjs';
 
 // Git operations (clone/fetch/checkout/submodule-update) run async — the

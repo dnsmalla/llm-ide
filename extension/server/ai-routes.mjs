@@ -1,4 +1,4 @@
-import { runClaude, runClaudeStream, streamModelReply, resolveLanguage } from '../agents/runtime.mjs';
+import { runClaude, runClaudeStream, streamModelReply, resolveLanguage } from '../providers/runtime.mjs';
 import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON } from '../core/utils.mjs';
 import { handleCodeAssist } from '../llm_agent/runtime/route.mjs';
 import { selectHistoryTurns } from '../llm_agent/runtime/loop.mjs';
@@ -7,7 +7,7 @@ import { readSkillInstructions } from '../llm_agent/skills/index.mjs';
 import { resolveTierModel } from '../llm_agent/runtime/model-tier.mjs';
 import * as kb from '../kb/db.mjs';
 import { scanForSecrets } from '../guardrails/scan.mjs';
-import { sanitizePersonaSuffix } from '../agents/prompt-utils.mjs';
+import { sanitizePersonaSuffix } from '../providers/prompt-utils.mjs';
 
 // Copy the per-request memory-block overhead (set by handleCodeAssist) onto the
 // response `usage` so the client can show how many tokens the always-on project

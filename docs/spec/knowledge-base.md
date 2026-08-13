@@ -46,7 +46,7 @@ Notable tables added in recent migrations:
   for the unread badge. Both cascade-delete with the user. The store module is
   `extension/kb/activity.mjs`; the HTTP routes are `GET /kb/activity`,
   `POST /kb/activity`, and `POST /kb/activity/seen`, all handled in
-  `extension/kb/router.mjs`. Allowed event kinds are the `ACTIVITY_KINDS` set in
+  `extension/routes/router.mjs`. Allowed event kinds are the `ACTIVITY_KINDS` set in
   `extension/kb/activity.mjs` (mirrored by the Swift `ActivityKind` enum in
   `mac/Sources/LlmIdeMac/Services/ActivityStore.swift`); `model_fallback` is
   emitted when an auto-switch fires (see below).
@@ -73,7 +73,7 @@ Notable tables added in recent migrations:
   backend never calls GitHub; the Mac app reads issues from the provider API and
   merges this overlay client-side. Cascade-deletes with the user. Store module
   `extension/kb/issue-schedule.mjs`; routes `GET`/`PUT`/`DELETE /kb/issue-schedule`
-  in `extension/kb/routes/issue-schedule.mjs`.
+  in `extension/routes/issue-schedule.mjs`.
 
 **Model usage limits — resolution**
 
@@ -92,13 +92,13 @@ caps changes nothing. Source: `extension/kb/usage.mjs`.
 
 | File | Role |
 |---|---|
-| `extension/kb/router.mjs` | `handleKB()` — top-level `/kb/*` dispatcher |
-| `extension/kb/routes/agent.mjs` | Agent-persona and ask-history routes |
-| `extension/kb/routes/live.mjs` | SSE live-session routes |
-| `extension/kb/routes/planning.mjs` | Planning-agent routes |
-| `extension/kb/routes/review.mjs` | Codegen-apply and review-queue routes |
+| `extension/routes/router.mjs` | `handleKB()` — top-level `/kb/*` dispatcher |
+| `extension/routes/agent.mjs` | Agent-persona and ask-history routes |
+| `extension/routes/live.mjs` | SSE live-session routes |
+| `extension/routes/planning.mjs` | Planning-agent routes |
+| `extension/routes/review.mjs` | Codegen-apply and review-queue routes |
 
-Model usage-limit routes are handled inline in `extension/kb/router.mjs`:
+Model usage-limit routes are handled inline in `extension/routes/router.mjs`:
 `GET`/`PUT /kb/usage/limits` (read/write the per-model caps),
 `GET /kb/usage/summary` (live per-model usage + resolved active model, for the
 dashboard), `GET /kb/usage/resolve?provider=&prefer=` (which model to run next —
@@ -232,7 +232,7 @@ In `findContext()`, an overshoot strategy is used to handle multi-tenant databas
 
 ### (c) Router reads `req.user.id`; returns 401 if absent
 
-`extension/kb/router.mjs:63–67`:
+`extension/routes/router.mjs:63–67`:
 
 ```js
 const userId = req.user?.id;

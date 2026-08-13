@@ -4,7 +4,7 @@ import http from 'http';
 import { execFile } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import { handleKB } from './kb/router.mjs';
+import { handleKB } from './routes/router.mjs';
 import { handleAIRoutes } from './server/ai-routes.mjs';
 import { handleExportRoutes } from './server/export-routes.mjs';
 

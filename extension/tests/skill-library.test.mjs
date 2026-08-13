@@ -42,8 +42,9 @@ fs.mkdirSync(path.join(repo, 'skills', 'broken'), { recursive: true });
 writeSkill('agent-tools', 'search-kb', 'search-kb', 'should be ignored');
 
 process.env.SKILLS_REPO = repo;
-const { listSkillLibrary, readSkillInstructions, resolveCentralSkillsRepo, _resetSkillLibraryCache } =
+const { listSkillLibrary, readSkillInstructions, _resetSkillLibraryCache } =
   await import('../llm_agent/skills/skill-library.mjs');
+const { resolveCentralSkillsRepo } = await import('../core/skills-repo.mjs');
 const { writeRegistry, addSource, seedBuiltinOnce, BUILTIN_ID } =
   await import('../llm-sources/registry.mjs');
 const { setEnabled } = await import('../llm-sources/state.mjs');

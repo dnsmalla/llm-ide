@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 
 import { appendCaptions, getCaptionsSince, _resetForTests as resetLive }
   from '../agents/live-sessions.mjs';
-import { runClaude } from '../agents/runtime.mjs';
+import { runClaude } from '../providers/runtime.mjs';
 import { applyCodegen } from '../agents/codegen-apply.mjs';
 import { dispatchPlan } from '../agents/dispatcher.mjs';
 import fs from 'node:fs';

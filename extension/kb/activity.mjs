@@ -4,7 +4,7 @@
 //
 // All functions are best-effort: callers wrap in try/catch and a failure here
 // must never throw into the operation that triggered the event.
-import { redact } from '../server/audit.mjs';
+import { redact } from '../core/redact-object.mjs';
 
 // The v1 event-kind allow-list (shared contract; Swift mirrors this).
 export const ACTIVITY_KINDS = new Set([
