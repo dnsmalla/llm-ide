@@ -675,12 +675,19 @@ final class LoopEngineRunner: ObservableObject {
             ? stage.prompt!
             : "Apply the skill for stage \"\(stage.name)\"."
         if let target = stage.targetPath, !target.isEmpty {
-            msg += " Input: \(target)."
+            msg += " Input: \(Self.describePath(target))."
         }
         if let output = stage.outputPath, !output.isEmpty {
-            msg += " Write output to: \(output)."
+            msg += " Write output to: \(Self.describePath(output))."
         }
         return msg
+    }
+
+    /// `PathUtils.relative` returns "." for the project root itself — read
+    /// naturally in a sentence ("Input: .." reads as a typo/ambiguous
+    /// double-dot, not "the project root").
+    private static func describePath(_ path: String) -> String {
+        path == "." ? "the project root" : path
     }
 
     private func appendLog(_ level: LogLine.Level, _ text: String) {

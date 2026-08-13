@@ -171,7 +171,11 @@ struct AppShell: View {
         // ever posted it), so this shortcut silently did nothing. Scoped to
         // .library so it doesn't shadow ⌘F in other sections that may want
         // their own find/filter behavior.
-        if event.charactersIgnoringModifiers == "f" && event.modifierFlags.contains(.command)
+        // Exact modifier match (not just `.contains(.command)`) so a chord
+        // like ⌘⇧F — a "find in files" shortcut in other apps a user might
+        // expect to keep working — isn't also swallowed by this ⌘F check.
+        if event.charactersIgnoringModifiers == "f"
+            && event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
             && shell.section == .library {
             NotificationCenter.default.post(name: .focusLibraryFilter, object: nil)
             return nil // consume the event

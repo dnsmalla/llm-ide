@@ -704,6 +704,12 @@ struct LoopEngineView: View {
     }
 
     private func loadConfig() {
+        // Reset up front: this flag is set by applySelectedTemplate() for
+        // THIS project's Template section, and a project switch (the sole
+        // caller of loadConfig(), via .task(id: activeProjectId)) must not
+        // let it survive into a different project's empty-stages state for
+        // an unrelated reason (no saved config, no git root).
+        appliedTemplateHadNoTooling = false
         guard let projectId = activeProjectId else {
             resetStagesToDefaults()
             return
@@ -861,8 +867,11 @@ struct LoopEngineView: View {
     /// without having overwritten their config. `Run` and `Save` persist, as before.
     func applySelectedTemplate() {
         guard let template = selectedTemplate else { return }
-        appliedTemplateHadNoTooling = template.wouldApplyEmpty(to: activeGitRootURL)
-        assignConfig(template.applied(to: activeGitRootURL))
+        // One `applied(to:)` call, not two — `wouldApplyEmpty` would run the
+        // same LoopStageDetector probing a second time for no reason.
+        let applied = template.applied(to: activeGitRootURL)
+        appliedTemplateHadNoTooling = !template.config.stages.isEmpty && applied.stages.isEmpty
+        assignConfig(applied)
     }
 
     /// Applies a config assembled by the New Loop wizard and saves it right

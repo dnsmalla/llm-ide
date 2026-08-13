@@ -128,8 +128,11 @@ struct NewLoopWizardView: View {
                 noToolingDetectedForTemplate = false
                 return
             }
-            noToolingDetectedForTemplate = template.wouldApplyEmpty(to: gitRoot)
-            stages = template.applied(to: gitRoot).stages
+            // One `applied(to:)` call, not two — `wouldApplyEmpty` would run
+            // the same LoopStageDetector probing a second time for no reason.
+            let applied = template.applied(to: gitRoot)
+            noToolingDetectedForTemplate = !template.config.stages.isEmpty && applied.stages.isEmpty
+            stages = applied.stages
             writeSummaryNote = template.config.writeSummaryNote
         }
     }
