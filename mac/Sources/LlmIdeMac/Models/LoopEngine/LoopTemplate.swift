@@ -59,7 +59,10 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
 
     /// Ordered most-general first — the picker shows them in this order, and
     /// `testAndFix` is what a project with no template history should reach for.
-    static let builtIns: [LoopTemplate] = [testAndFix, fullVerify, skillLoop, docsRefresh, systemCheck]
+    static let builtIns: [LoopTemplate] = [
+        testAndFix, fullVerify, regressionOnly, testOnly, skillLoop, docsRefresh,
+        operationDiagnosis, systemCheck
+    ]
 
     /// The default recipe, and the one that matches what the loop did before
     /// templates existed: verify the known faults, then the test suite.
@@ -128,6 +131,57 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                           order: 1)
             ],
             maxIterations: 4, consecutiveFailureStop: 2, maxRepairsPerStage: 2),
+        isBuiltIn: true)
+
+    /// Isolates the fault sweep alone — for re-checking known regressions
+    /// without paying for a full test run every iteration (e.g. after a repair
+    /// elsewhere, to confirm nothing already-fixed came back).
+    static let regressionOnly = LoopTemplate(
+        id: UUID(uuidString: "1E7B0A00-0000-4000-8000-0000000000A6")!,
+        name: "Regression",
+        summary: "Re-check known faults only, repairing until the sweep is green.",
+        config: LoopEngineConfig(
+            stages: [
+                LoopStage(name: "Regression", kind: .regressionSweep, order: 0)
+            ],
+            maxIterations: 5, consecutiveFailureStop: 2),
+        isBuiltIn: true)
+
+    /// Isolates the test suite alone — for chasing a test failure without the
+    /// fault sweep also gating the run.
+    static let testOnly = LoopTemplate(
+        id: UUID(uuidString: "1E7B0A00-0000-4000-8000-0000000000A7")!,
+        name: "Test",
+        summary: "Run just the test suite, repairing until it's green.",
+        config: LoopEngineConfig(
+            stages: [
+                LoopStage(name: "Test", kind: .shellCommand,
+                          command: detectedTestCommand, order: 0)
+            ],
+            maxIterations: 10, consecutiveFailureStop: 2),
+        isBuiltIn: true)
+
+    /// llm-ide-specific, like `systemCheck`: whether the app itself runs, not
+    /// whether its test suites pass. Assumes the local dev server is already
+    /// started (`cd extension && node server.mjs`) — the point of this loop is
+    /// to diagnose the running app, so a stage failing here because nothing is
+    /// listening on :3456 is real signal, not a false alarm.
+    static let operationDiagnosis = LoopTemplate(
+        id: UUID(uuidString: "1E7B0A00-0000-4000-8000-0000000000A8")!,
+        name: "Operation App Diagnosis",
+        summary: "Check the local server responds and the extension and Mac app build cleanly, "
+            + "then the fault sweep — for diagnosing the running app, not its test suites.",
+        config: LoopEngineConfig(
+            stages: [
+                LoopStage(name: "Server health", kind: .shellCommand,
+                          command: "curl -sf http://127.0.0.1:3456/health", order: 0),
+                LoopStage(name: "Extension build", kind: .shellCommand,
+                          command: "cd extension && npm run build", order: 1),
+                LoopStage(name: "Mac app build", kind: .shellCommand,
+                          command: "cd mac && swift build", order: 2),
+                LoopStage(name: "Regression", kind: .regressionSweep, order: 3)
+            ],
+            maxIterations: 6, consecutiveFailureStop: 2),
         isBuiltIn: true)
 
     /// llm-ide-specific: one stage per subsystem (skills, plugins, connectors,

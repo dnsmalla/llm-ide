@@ -38,10 +38,6 @@ struct SettingsView: View {
                         PreferencesSettingsSection(api: api)
                         ProvidersSettingsSection(api: api)
                         CustomProvidersSection(api: api)
-                        // App-scoped, not Project: these are the values a NEW
-                        // project's Loop config inherits. A project already opened
-                        // in the Loop keeps its own, edited on that page.
-                        LoopSettingsSection()
                     }
 
                     // Project-scoped settings — only visible when a project is

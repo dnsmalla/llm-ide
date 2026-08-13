@@ -47,4 +47,27 @@ final class LoopStageTests: XCTestCase {
         let decoded = try JSONDecoder().decode(LoopStage.self, from: json)
         XCTAssertEqual(decoded.isDefault, false)
     }
+
+    func testOutputPathRoundTripsThroughJSON() throws {
+        let stage = LoopStage(id: "s2", name: "Write docs", kind: .skill,
+                              command: nil, order: 0,
+                              skillId: "skills/write-docs", targetPath: "src/payments",
+                              outputPath: "docs/payments.md", prompt: "Document this module")
+        let data = try JSONEncoder().encode(stage)
+        let decoded = try JSONDecoder().decode(LoopStage.self, from: data)
+        XCTAssertEqual(decoded, stage)
+        XCTAssertEqual(decoded.outputPath, "docs/payments.md")
+    }
+
+    func testOldPayloadWithoutOutputPathDecodesNil() throws {
+        // A stage saved before outputPath existed must decode with no output set,
+        // not fail to decode (same rule as isDefault above).
+        let json = """
+        {"id":"s1","name":"Fix Skill","kind":"skill","command":null,"order":2,
+         "skillId":"skills/fix-code","targetPath":"~/src/App.swift","prompt":"Fix the bug"}
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(LoopStage.self, from: json)
+        XCTAssertNil(decoded.outputPath)
+        XCTAssertEqual(decoded.targetPath, "~/src/App.swift")
+    }
 }

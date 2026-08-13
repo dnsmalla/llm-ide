@@ -4,10 +4,10 @@
 //   │ Stages         │ Run + the loop's contract    │ Log            │
 //   │  • ordered list│   OVERVIEW  what runs, where │ Streamed lines │
 //   │  • add stages  │   TEMPLATE  pick/save recipe │ from the most  │
-//   │                │   SELECTED  stage editor     │ recent run,    │
-//   │                │   SETTINGS  budgets + policy │ live while it  │
-//   │                │   OUTPUT    what it writes   │ runs, then     │
-//   │                │                              │ PAST RUNS      │
+//   │                │   PROCESS   every stage,      │ recent run,    │
+//   │                │             editable in place │ live while it  │
+//   │                │   SETTINGS  budgets + policy │ runs, then     │
+//   │                │   OUTPUT    what it writes   │ PAST RUNS      │
 //   └────────────────┴──────────────────────────────┴────────────────┘
 //
 // Panel 2 exists to answer, before a run starts: what will this loop do, in
@@ -17,8 +17,14 @@
 // which is why those members are internal rather than private — same split as
 // CodeAssistantPanel / CodeAssistantPanel+LoopEngine.swift.
 //
-// Selecting a stage on the left drives what the middle pane's SELECTED STAGE
-// section edits.
+// PROCESS shows every stage as its own editable card, in run order — a
+// generate stage's skill+input picker, a shell stage's command, a regression
+// stage's description, all inline, all at once. It used to be "select ONE
+// stage on the left, then scroll down to a single SELECTED STAGE editor" —
+// that hid skill/input pickers behind a click and made it look like most
+// templates had nothing to configure. Clicking a row in the left list still
+// scrolls PROCESS to (and highlights) that stage's card; it no longer gates
+// what's visible.
 // Shell-command stages must be approved (VerifyApprovalStore) before a
 // run will actually execute them — LoopEngineRunner's own preflight
 // enforces this again server-side, so the approve button here is a
@@ -36,7 +42,6 @@ struct LoopEngineView: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
-    @Environment(LibraryItemStore.self) private var itemStore
 
     /// Owns the run — a `@StateObject` (not a locally-constructed value
     /// per run) so its `@Published log`/`running`/`iteration` actually
@@ -82,6 +87,10 @@ struct LoopEngineView: View {
     /// is what makes `Task.isCancelled` true everywhere down the call tree
     /// `runner.run` awaits through, including inside `ShellFaultVerifier`.
     @State private var runTask: Task<Void, Never>?
+    /// Drives the "New Loop" sheet — the top-level create-from-template flow,
+    /// distinct from the stages pane's `+` (adds one bare stage) and the
+    /// Template section's Apply (overwrites with an un-configured template).
+    @State private var isPresentingNewLoopWizard = false
 
     /// App-wide template library (built-in starters + the user's saved recipes).
     /// A `@StateObject` so the picker updates the moment one is saved or deleted.
@@ -148,6 +157,13 @@ struct LoopEngineView: View {
             didRejectLastRun = false
             loadConfig()
             Task { await loadSkillsIfNeeded() }
+        }
+        .sheet(isPresented: $isPresentingNewLoopWizard) {
+            NewLoopWizardView(
+                templateStore: templateStore,
+                skillCatalog: skillCatalog,
+                gitRoot: activeGitRootURL,
+                onCreate: applyNewLoopConfig)
         }
     }
 
@@ -257,42 +273,113 @@ struct LoopEngineView: View {
         return VStack(alignment: .leading, spacing: 0) {
             toolbar
             Divider().background(t.border)
-            ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.lg) {
-                    overviewSection
-                    Divider().background(t.border)
-                    templateSection
-                    Divider().background(t.border)
-                    selectedStageSection
-                    Divider().background(t.border)
-                    settingsSection
-                    Divider().background(t.border)
-                    outputSection
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Spacing.lg) {
+                        overviewSection
+                        Divider().background(t.border)
+                        templateSection
+                        Divider().background(t.border)
+                        processSection
+                        Divider().background(t.border)
+                        settingsSection
+                        Divider().background(t.border)
+                        outputSection
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(Spacing.lg)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(Spacing.lg)
+                // Clicking a row in the left list still means something: it
+                // scrolls PROCESS to that stage's card instead of swapping
+                // out what's shown, since every card is visible at once now.
+                .onChange(of: selectedStageId) { _, newValue in
+                    guard let id = newValue else { return }
+                    withAnimation(.linear(duration: 0.15)) {
+                        proxy.scrollTo(id, anchor: .top)
+                    }
+                }
             }
         }
         .background(t.body)
     }
 
+    /// Every stage in run order, each in its own editable card — the
+    /// "what to do" of the loop. No stage is hidden behind a selection: a
+    /// generate stage's skill+input picker, a shell stage's command, a
+    /// regression stage's fixed scope, all visible and editable together.
     @ViewBuilder
-    private var selectedStageSection: some View {
+    private var processSection: some View {
         let t = theme.current
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            SectionLabel("SELECTED STAGE")
-            if let id = selectedStageId, let index = stages.firstIndex(where: { $0.id == id }) {
-                stageDetail(index: index)
-            } else {
-                Text("Select a stage on the left to edit it, or add one with +.")
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            SectionLabel("PROCESS")
+            if stages.isEmpty {
+                Text("No stages yet. Add one with + on the left, or apply a template above.")
                     .font(Typography.body)
                     .foregroundStyle(t.textMuted)
+            } else {
+                ForEach(Array(sortedStages.enumerated()), id: \.element.id) { position, stage in
+                    if let index = stages.firstIndex(where: { $0.id == stage.id }) {
+                        processCard(position: position, index: index)
+                    }
+                }
             }
         }
     }
 
+    @ViewBuilder
+    private func processCard(position: Int, index: Int) -> some View {
+        let t = theme.current
+        let stage = stages[index]
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: 6) {
+                Text("\(position + 1)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(t.textMuted)
+                    .frame(width: 14, alignment: .trailing)
+                Image(systemName: stage.kind == .regressionSweep ? "arrow.uturn.backward.circle"
+                      : stage.kind == .shellCommand ? "terminal" : "sparkles")
+                    .foregroundStyle(t.textMuted)
+                Text(stage.kind == .skill ? "Generate" : "Verify")
+                    .font(Typography.captionStrong)
+                    .foregroundStyle(stage.kind == .skill ? t.accent2 : t.accent)
+                if stage.isDefault {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(t.textMuted)
+                        .help("Default stage — can't be deleted")
+                }
+                Spacer()
+                Menu {
+                    Button("Duplicate") { duplicateStage(stage) }
+                    if !stage.isDefault {
+                        Button("Delete", role: .destructive) { deleteStage(stage) }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .foregroundStyle(t.textMuted)
+                }
+                .buttonStyle(.borderless)
+            }
+            stageDetail(index: index)
+        }
+        .padding(Spacing.sm)
+        .background(selectedStageId == stage.id ? t.accent.opacity(0.08) : t.surface)
+        .cornerRadius(8)
+        .id(stage.id)
+        .onTapGesture { selectedStageId = stage.id }
+    }
+
     private var toolbar: some View {
         HStack(spacing: Spacing.md) {
+            Button {
+                isPresentingNewLoopWizard = true
+            } label: {
+                Label("New Loop", systemImage: "plus.circle")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Create a loop from a template — choose the recipe, then each stage's skill and input")
+            Divider().frame(height: 16)
             Button(runner.running ? "Running… (iteration \(runner.iteration))" : "Run") {
                 runTask = Task {
                     await runLoop()
@@ -378,17 +465,16 @@ struct LoopEngineView: View {
                     }
                 }
 
-                Text("Target source (optional)").font(Typography.caption).foregroundStyle(t.textMuted)
-                let allItems = LibraryItem.Category.allCases.flatMap { itemStore.items(for: $0) }
-                Picker("Target", selection: Binding(
-                    get: { stages[index].targetPath ?? "" },
-                    set: { stages[index].targetPath = $0.isEmpty ? nil : $0 }
-                )) {
-                    Text("None").tag("")
-                    ForEach(allItems) { item in
-                        Text(item.name).tag(item.path)
-                    }
-                }
+                Text("Input (optional) — file or folder under the project root").font(Typography.caption).foregroundStyle(t.textMuted)
+                PathPickerField(root: activeGitRootURL ?? workspaceContext?.projectRoot,
+                                path: $stages[index].targetPath)
+
+                Text("Output (optional) — where the skill should write its result").font(Typography.caption).foregroundStyle(t.textMuted)
+                PathPickerField(root: activeGitRootURL ?? workspaceContext?.projectRoot,
+                                path: $stages[index].outputPath)
+                Text("Input and output are hints included in the skill's prompt — the skill decides how to use them via its own tool calls.")
+                    .font(Typography.caption).foregroundStyle(t.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Text("Prompt (optional)").font(Typography.caption).foregroundStyle(t.textMuted)
                 TextField("Defaults to: apply this skill", text: Binding(
@@ -728,14 +814,12 @@ struct LoopEngineView: View {
         selectedTemplateId.flatMap { templateStore.template(id: $0) }
     }
 
-    /// Replaces the current stage list and budgets with the selected template's.
-    ///
-    /// Does NOT save: applying is an edit like any other, and a user who applies a
-    /// template to compare it against what they had must be able to switch away
-    /// without having overwritten their config. `Run` and `Save` persist, as before.
-    func applySelectedTemplate() {
-        guard let template = selectedTemplate else { return }
-        let applied = template.applied(to: activeGitRootURL)
+    /// Copies every field of `applied` into this view's state — the one place
+    /// an applied config is assigned, so a field added to `LoopEngineConfig`
+    /// can't be silently dropped by one of the two apply paths below forgetting
+    /// to thread it through (the same hazard `currentConfig`'s own doc comment
+    /// calls out for the save/run direction).
+    private func assignConfig(_ applied: LoopEngineConfig) {
         stages = applied.stages
         maxIterations = applied.maxIterations
         consecutiveFailureStop = applied.consecutiveFailureStop
@@ -746,6 +830,29 @@ struct LoopEngineView: View {
         writeSummaryNote = applied.writeSummaryNote
         // Stage ids are regenerated on apply, so the old selection no longer exists.
         selectedStageId = nil
+    }
+
+    /// Replaces the current stage list and budgets with the selected template's.
+    ///
+    /// Does NOT save: applying is an edit like any other, and a user who applies a
+    /// template to compare it against what they had must be able to switch away
+    /// without having overwritten their config. `Run` and `Save` persist, as before.
+    func applySelectedTemplate() {
+        guard let template = selectedTemplate else { return }
+        assignConfig(template.applied(to: activeGitRootURL))
+    }
+
+    /// Applies a config assembled by the New Loop wizard and saves it right
+    /// away. Unlike `applySelectedTemplate` — an edit the user must still
+    /// confirm with Save, so switching templates to compare them can't
+    /// silently overwrite what they had — finishing the wizard already IS the
+    /// confirmation: the user picked a recipe and configured its stages in a
+    /// dedicated flow, so there is nothing left to reconsider before it takes
+    /// effect as this project's active loop.
+    func applyNewLoopConfig(_ applied: LoopEngineConfig) {
+        assignConfig(applied)
+        selectedTemplateId = nil
+        saveConfig()
     }
 
     func saveCurrentAsTemplate() {

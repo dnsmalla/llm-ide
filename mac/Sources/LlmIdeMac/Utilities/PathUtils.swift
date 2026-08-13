@@ -40,4 +40,18 @@ enum PathUtils {
         if raw.hasPrefix(home) { return "~" + raw.dropFirst(home.count) }
         return raw
     }
+
+    /// Rewrites `raw` relative to `root` when it lies under it — e.g. a path
+    /// picked via `NSOpenPanel` scoped to a project's root — so what's stored
+    /// stays portable: the same project reopened from a different absolute
+    /// location, or a saved template applied to a different project, still
+    /// resolves the same relative location instead of a frozen, machine-specific
+    /// absolute path. Falls back to the canonicalised absolute path when `raw`
+    /// does not lie under `root`.
+    static func relative(_ raw: String, to root: URL) -> String {
+        let rootPath = canonicalise(root.path)
+        let path = canonicalise(raw)
+        guard path.hasPrefix(rootPath + "/") else { return path }
+        return String(path.dropFirst(rootPath.count + 1))
+    }
 }

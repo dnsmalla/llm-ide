@@ -44,9 +44,17 @@ struct LoopStage: Identifiable, Codable, Equatable {
     /// `.skill` only — the central-skill id ("<family>/<dir>") the server resolves
     /// to its SKILL.md and frames as a trusted instruction via /code-assist.
     var skillId: String? = nil
-    /// `.skill` only — optional Library path the skill is scoped to (included in
-    /// the agent message). Phase 3 may attach its content as a CodeAttachment.
+    /// `.skill` only — optional input path (relative to the project's git root
+    /// when it lies under it, via `PathUtils.relative`) the skill is scoped to,
+    /// included in the agent message. Phase 3 may attach its content as a
+    /// CodeAttachment; today it is a text hint only, same as `outputPath`.
     var targetPath: String? = nil
+    /// `.skill` only — optional path (same relative-path convention as
+    /// `targetPath`) describing where the skill's generated output should go,
+    /// included in the agent message. Like `targetPath`, this is a hint the
+    /// skill acts on via its own tool calls, not a mechanically enforced
+    /// redirect — the runner does not read or write this path itself.
+    var outputPath: String? = nil
     /// `.skill` only — optional task text; empty → a built-in default message.
     var prompt: String? = nil
     /// True for the detector-seeded default stages (Regression + Test). Default stages are
@@ -64,8 +72,8 @@ struct LoopStage: Identifiable, Codable, Equatable {
 
     // Explicit memberwise initializer (preserved for existing call sites)
     init(id: String = UUID().uuidString, name: String, kind: Kind, command: String? = nil, order: Int,
-         skillId: String? = nil, targetPath: String? = nil, prompt: String? = nil, isDefault: Bool = false,
-         severity: LoopStageSeverity = .blocking, timeoutSeconds: Int? = nil) {
+         skillId: String? = nil, targetPath: String? = nil, outputPath: String? = nil, prompt: String? = nil,
+         isDefault: Bool = false, severity: LoopStageSeverity = .blocking, timeoutSeconds: Int? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
@@ -73,6 +81,7 @@ struct LoopStage: Identifiable, Codable, Equatable {
         self.order = order
         self.skillId = skillId
         self.targetPath = targetPath
+        self.outputPath = outputPath
         self.prompt = prompt
         self.isDefault = isDefault
         self.severity = severity
@@ -82,7 +91,7 @@ struct LoopStage: Identifiable, Codable, Equatable {
     // MARK: - Codable backward compatibility
 
     enum CodingKeys: String, CodingKey {
-        case id, name, kind, command, order, skillId, targetPath, prompt, isDefault
+        case id, name, kind, command, order, skillId, targetPath, outputPath, prompt, isDefault
         case severity, timeoutSeconds
     }
 
@@ -101,6 +110,7 @@ struct LoopStage: Identifiable, Codable, Equatable {
         order = try container.decode(Int.self, forKey: .order)
         skillId = try container.decodeIfPresent(String.self, forKey: .skillId)
         targetPath = try container.decodeIfPresent(String.self, forKey: .targetPath)
+        outputPath = try container.decodeIfPresent(String.self, forKey: .outputPath)
         prompt = try container.decodeIfPresent(String.self, forKey: .prompt)
         isDefault = try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
         severity = try container.decodeIfPresent(LoopStageSeverity.self, forKey: .severity) ?? .blocking

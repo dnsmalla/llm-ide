@@ -2,7 +2,9 @@
 //
 //   OVERVIEW   what this run will do, in order, and where it will do it
 //   TEMPLATE   pick a recipe, or save this stage list as one
-//   SELECTED   the stage editor (in LoopEngineView.swift, next to stageDetail)
+//   PROCESS    every stage as its own editable card (in LoopEngineView.swift,
+//              next to stageDetail/processCard) — no stage hidden behind a
+//              selection
 //   SETTINGS   the four budgets + the protected-path policy
 //   OUTPUT     every artifact a run writes, with a link, plus the summary note
 //

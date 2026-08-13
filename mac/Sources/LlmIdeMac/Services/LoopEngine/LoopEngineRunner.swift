@@ -485,7 +485,7 @@ final class LoopEngineRunner: ObservableObject {
     private func runSkillStage(_ stage: LoopStage, config: LoopEngineConfig,
                               gitRoot: URL) async -> StageDecision {
         let skillId = stage.skillId ?? ""
-        let message = (stage.prompt?.isEmpty == false) ? stage.prompt! : Self.defaultSkillMessage(stage)
+        let message = Self.composeSkillMessage(stage)
         let startedAt = Date()
         appendLog(.info, "  [\(stage.name)] running skill \(skillId.isEmpty ? "(none set)" : skillId) (generate)")
 
@@ -665,10 +665,20 @@ final class LoopEngineRunner: ObservableObject {
 
     /// Default agent message for a `.skill` stage with no user-written prompt:
     /// names the stage and, if set, the target source the skill is scoped to.
-    private static func defaultSkillMessage(_ stage: LoopStage) -> String {
-        var msg = "Apply the skill for stage \"\(stage.name)\"."
+    /// The custom prompt when set, else a built-in default — either way with
+    /// the input/output paths appended, so a user's own prompt text doesn't
+    /// silently drop what they picked in the Input/Output fields. Both are
+    /// text hints for the skill's own tool calls, not a mechanical redirect —
+    /// the runner never reads or writes either path itself.
+    private static func composeSkillMessage(_ stage: LoopStage) -> String {
+        var msg = (stage.prompt?.isEmpty == false)
+            ? stage.prompt!
+            : "Apply the skill for stage \"\(stage.name)\"."
         if let target = stage.targetPath, !target.isEmpty {
-            msg += " Target: \(target)."
+            msg += " Input: \(target)."
+        }
+        if let output = stage.outputPath, !output.isEmpty {
+            msg += " Write output to: \(output)."
         }
         return msg
     }

@@ -8,7 +8,7 @@ final class LoopEngineRunnerTests: XCTestCase {
     /// call-count-based sequencing the earlier tests need via a captured
     /// mutable counter inside the handler closure.
     private final class StubVerifier: FaultVerifier {
-        var handler: (String) throws -> VerifyOutcome
+        let handler: (String) throws -> VerifyOutcome
         private(set) var calls: [String] = []
         init(handler: @escaping (String) throws -> VerifyOutcome) { self.handler = handler }
         func verify(command: String, repoRoot: URL, timeout: TimeInterval) async throws -> VerifyOutcome {
