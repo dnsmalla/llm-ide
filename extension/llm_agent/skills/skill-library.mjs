@@ -13,16 +13,12 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
-import { resolveCentralSkillsRepo } from '../../core/skills-repo.mjs';
-import { listSources, snapshotSource, BUILTIN_ID, seedBuiltinOnce } from '../../llm-sources/registry.mjs';
-import { listEnabled } from '../../llm-sources/state.mjs';
-
-// Locate the central skills checkout on disk ($SKILLS_REPO → <repo>/.skills →
-// ~/skills → …). Lives in core/skills-repo.mjs — the LLM-sources registry and
+// Repo location resolution ($SKILLS_REPO → <repo>/.skills → ~/skills → …)
+// lives in core/skills-repo.mjs — the LLM-sources registry and
 // kb/install-project-skills.mjs need the same resolution, and importing it
 // from here made registry.mjs ↔ skill-library.mjs a real import cycle.
-// Re-exported for existing callers of this module's public surface.
-export { resolveCentralSkillsRepo };
+import { listSources, snapshotSource, BUILTIN_ID, seedBuiltinOnce } from '../../llm-sources/registry.mjs';
+import { listEnabled } from '../../llm-sources/state.mjs';
 
 // Families NOT already surfaced via /kb/agent/catalog (which covers
 // agent-globals + agent-tools). These are the "all the other skills".

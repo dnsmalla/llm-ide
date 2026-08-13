@@ -6,9 +6,9 @@
 // pipeline step that needs a quick "does this look like it contains a
 // secret?" answer without wanting the structured findings array.
 //
-// Secret patterns are imported from rules.mjs (single source of truth)
-// to prevent the two lists drifting out of sync.
-import { SECRET_PATTERNS as _namedPatterns } from './rules.mjs';
+// Secret patterns and the zero-width strip regex are imported from rules.mjs
+// (single source of truth) to prevent the evasion defenses drifting out of sync.
+import { SECRET_PATTERNS as _namedPatterns, ZERO_WIDTH_RE } from './rules.mjs';
 
 // scan.mjs callers only need the regex objects, not the { name, re } shape.
 const SECRET_PATTERNS = _namedPatterns.map((p) => p.re);
@@ -31,7 +31,7 @@ export function scanForSecrets(text) {
   //                 preserves surrounding spaces and keeps \b word-boundaries
   //                 intact for the secret patterns.
   const wsCollapsed = text.replace(/\s+/g, '');
-  const zwCollapsed = text.replace(/(?:\u200B|\u200C|\u200D|\u2060|\uFEFF)+/g, '');
+  const zwCollapsed = text.replace(ZERO_WIDTH_RE, '');
   for (const re of SECRET_PATTERNS) {
     if (re.test(text) || re.test(wsCollapsed) || re.test(zwCollapsed)) return true;
   }

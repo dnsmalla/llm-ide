@@ -3,36 +3,47 @@ import tseslint from 'typescript-eslint';
 import globals from 'globals';
 
 // ---------------------------------------------------------------------------
-// Module layering boundaries (CLAUDE.md "Module Boundaries" + RESTRUCTURE_PLAN.md §4.1)
+// Module layering boundaries — the allowOnly() calls below ARE the layer
+// diagram in CLAUDE.md "Module Boundaries"; edit the two together.
 //
-//   L0 core        → nothing internal
-//   L1 kb          → core                       (data access only)
-//   L2 server libs → core, kb                   (auth/vault/jwt/rate-limit/…)
-//      providers   → core, kb, server libs     (model dispatch/CLI/retry/web)
-//   L3 agents, llm_agent, connectors, graphkit, guardrails, plugins,
-//      llm-sources, mcp → L0–L2 (agents may also use graphkit/guardrails/connectors)
-//   L4 routes      → anything; NOTHING imports a route module
-//
-// Enforced with no-restricted-imports regex patterns. This is a RATCHET —
-// keep it at zero violations; never add per-file overrides to exempt a new
-// cross-layer import.
+// Enforced with no-restricted-imports regex patterns, anchored to RELATIVE
+// specifiers ('./…', '../…') so npm package subpaths that happen to contain a
+// layer-named segment (e.g. '@scope/core/tokens') can't false-positive.
+// This is a RATCHET at zero violations — never add per-file exemptions;
+// refactor the offending edge instead.
 // Note: the core rule does not see dynamic import() — best-effort by design.
 // ---------------------------------------------------------------------------
+
+// Every internal layer directory (plus src, the browser bundle).
+const LAYERS = ['core', 'kb', 'server', 'providers', 'routes', 'agents', 'llm_agent', 'connectors', 'graphkit', 'guardrails', 'plugins', 'llm-sources', 'mcp', 'src'];
+
+// Matches only relative specifiers, at any ../ depth.
+const REL = '^(\\./|(\\.\\./)+)';
+
 const ROUTE_MODULES = {
-  regex: '(^|/)(routes/|server/(ai|auth|export)-routes\\.mjs|server/control-plane\\.mjs)',
+  // Nothing imports a route module — including a server-lib importing a
+  // sibling route file ('./auth-routes.mjs', no directory in the specifier).
+  regex: `${REL}(.*/)?(routes/.+|(ai|auth|export)-routes\\.mjs$|control-plane\\.mjs$)`,
   message: 'Route modules are the top layer — nothing imports them. Move the shared helper into a library module.',
 };
+
 const forbidLayers = (layers) => ({
   'no-restricted-imports': ['error', {
     patterns: [
       {
-        regex: `(^|/)(${layers.join('|')})/`,
+        regex: `${REL}(${layers.join('|')})/`,
         message: `This layer must not import from: ${layers.join(', ')} (see CLAUDE.md "Module Boundaries").`,
       },
       ROUTE_MODULES,
     ],
   }],
 });
+
+// The block's files may import ONLY the named layers (plus npm packages,
+// node built-ins, and same-directory siblings). Forbid = complement, so a
+// newly added layer directory is forbidden everywhere until explicitly
+// allowed — additions to LAYERS ratchet automatically.
+const allowOnly = (...allowed) => forbidLayers(LAYERS.filter((l) => !allowed.includes(l)));
 
 export default tseslint.config(
   js.configs.recommended,
@@ -74,51 +85,37 @@ export default tseslint.config(
   },
 
   // --- Layering boundaries (see header comment) ----------------------------
-  {
-    files: ['core/**/*.mjs'],
-    rules: forbidLayers(['kb', 'server', 'providers', 'agents', 'llm_agent', 'connectors', 'graphkit', 'guardrails', 'plugins', 'llm-sources', 'mcp', 'src']),
-  },
-  {
-    files: ['kb/**/*.mjs'],
-    rules: forbidLayers(['server', 'providers', 'agents', 'llm_agent', 'connectors', 'graphkit', 'guardrails', 'plugins', 'llm-sources', 'mcp', 'src']),
-  },
-  {
-    files: ['server/**/*.mjs'],
-    rules: forbidLayers(['agents', 'llm_agent', 'connectors', 'graphkit', 'guardrails', 'plugins', 'llm-sources', 'mcp', 'src']),
-  },
-  {
-    files: ['providers/**/*.mjs'],
-    rules: forbidLayers(['agents', 'llm_agent', 'connectors', 'graphkit', 'guardrails', 'plugins', 'llm-sources', 'mcp', 'src']),
-  },
+  // L0–L2
+  { files: ['core/**/*.mjs'],      rules: allowOnly('core') },
+  { files: ['kb/**/*.mjs'],        rules: allowOnly('core', 'kb') },
+  { files: ['server/**/*.mjs'],    rules: allowOnly('core', 'kb', 'server') },
+  { files: ['providers/**/*.mjs'], rules: allowOnly('core', 'kb', 'server', 'providers') },
+  // L3 — leaf libraries reach only downward…
   {
     files: ['graphkit/**/*.mjs', 'guardrails/**/*.mjs', 'plugins/**/*.mjs', 'llm-sources/**/*.mjs', 'mcp/**/*.mjs'],
-    rules: forbidLayers(['server', 'agents', 'llm_agent', 'src']),
+    rules: allowOnly('core', 'kb', 'providers'),
   },
+  // …connectors additionally read credentials via server/vault (L2 — legal)…
+  { files: ['connectors/**/*.mjs'], rules: allowOnly('core', 'kb', 'server', 'providers') },
+  // …and the two agent systems orchestrate designated L3 peers.
+  { files: ['agents/**/*.mjs'],    rules: allowOnly('core', 'kb', 'server', 'providers', 'connectors', 'graphkit', 'guardrails') },
+  { files: ['llm_agent/**/*.mjs'], rules: allowOnly('core', 'kb', 'server', 'providers', 'graphkit', 'plugins', 'llm-sources', 'mcp') },
+  // Browser code must stay browser-only — no Node-side layer may leak in.
+  { files: ['src/**/*.{ts,tsx}'],  rules: allowOnly('src') },
   {
-    // connectors are L3 like the block above, but the source adapters
-    // legitimately reach L2 (email-source reads creds via server/vault).
-    files: ['connectors/**/*.mjs'],
-    rules: forbidLayers(['agents', 'llm_agent', 'plugins', 'llm-sources', 'mcp', 'src']),
-  },
-  {
-    files: ['agents/**/*.mjs'],
-    rules: forbidLayers(['llm_agent', 'plugins', 'llm-sources', 'mcp', 'src']),
-  },
-  {
-    files: ['llm_agent/**/*.mjs'],
-    rules: forbidLayers(['agents', 'src']),
-  },
-  {
-    // Browser code must stay browser-only — no Node-side layer may leak in.
-    files: ['src/**/*.{ts,tsx}'],
-    rules: forbidLayers(['core', 'kb', 'server', 'agents', 'llm_agent', 'connectors', 'graphkit', 'guardrails', 'plugins', 'llm-sources', 'mcp']),
-  },
-  {
-    // Routes layer (L4): may import anything; nothing imports it (enforced
-    // above via ROUTE_MODULES). routes/ matches no forbid block; the server/
-    // route files need the explicit opt-out from the server-libs block.
+    // Routes layer (L4): may import any Node layer, but never the browser
+    // bundle — and no ROUTE_MODULES pattern here, since router.mjs mounts its
+    // route modules. The server/ route files need this block to override the
+    // server-libs block above.
     files: ['routes/**/*.mjs', 'server/ai-routes.mjs', 'server/auth-routes.mjs', 'server/export-routes.mjs', 'server/control-plane.mjs'],
-    rules: { 'no-restricted-imports': 'off' },
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          regex: `${REL}(.*/)?src/`,
+          message: 'Server-side code must not import browser code (src/).',
+        }],
+      }],
+    },
   },
   // No grandfathered violations — every cross-layer edge found when this
   // ratchet was introduced has been refactored away (provider-layer

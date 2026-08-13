@@ -141,16 +141,17 @@ loads the same kit. Agent-loop tool **definitions** still sync with
 
 ### Module Boundaries (Extension)
 
-Five layers — arrows indicate "may import". **Enforced by ESLint** (`no-restricted-imports` blocks in `extension/eslint.config.mjs`); current cross-layer violations are grandfathered per-file there as a ratchet — never add to that list.
+Arrows indicate "may import". **Enforced by ESLint** (the allow-table in `extension/eslint.config.mjs`); the ratchet is at **zero violations** — never add per-file exemptions; refactor the edge instead.
 
 ```
 L0 core         → nothing internal
 L1 kb           → core                          (data access only)
 L2 server libs  → core, kb                      (auth/vault/jwt/rate-limit/metrics)
    providers    → core, kb, server libs         (model dispatch/CLI/retry/web client)
-L3 agents · llm_agent · connectors · graphkit · guardrails · plugins ·
-   llm-sources · mcp → L0–L2
-L4 routes       → anything                      (server.mjs, routes/*,
+L3 connectors · graphkit · guardrails · plugins · llm-sources · mcp → L0–L2
+   agents       → L0–L2 + connectors/graphkit/guardrails   (pipeline orchestration)
+   llm_agent    → L0–L2 + graphkit/plugins/llm-sources/mcp (skill/plugin surface)
+L4 routes       → any Node layer, never src/    (server.mjs, routes/*,
                                                  server/*-routes.mjs)
                   — nothing may import a route module
 ```

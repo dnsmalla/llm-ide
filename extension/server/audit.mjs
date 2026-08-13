@@ -20,9 +20,6 @@ const AUDIT_LIMITS = {
   queryDefault:  100,   // default results when limit is not specified
 };
 
-// Re-export for existing importers of the audit redactor.
-export { redact };
-
 // Retention sweep: delete audit rows older than `ageDays`. The audit log
 // otherwise grows unbounded (indefinite retention of IPs/user-agents + DB
 // bloat). Called on the auth GC interval alongside the token purges. Returns
