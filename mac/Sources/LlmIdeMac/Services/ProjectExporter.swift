@@ -40,6 +40,11 @@ final class ProjectExporter {
 
     struct ExportResult {
         let meetingsWritten: Int
+        let plansWritten: Int
+        /// True when the plans side-export failed (meetings were still written;
+        /// the failure is already logged). Surfaced so the UI can say so
+        /// instead of silently reporting "0 plan(s)".
+        let plansWriteFailed: Bool
         let exportedAt: Date
         let durationMs: Int
     }
@@ -64,7 +69,8 @@ final class ProjectExporter {
     func export(
         project: Project,
         folderURL: URL,
-        client: LlmIdeAPIClient
+        client: LlmIdeAPIClient,
+        plansFolder: URL
     ) async throws -> ExportResult {
         let t0 = Date()
 
@@ -120,6 +126,21 @@ final class ProjectExporter {
             ] as [String: Any], options: [.prettyPrinted, .sortedKeys])
             .write(to: meetingsRoot.appendingPathComponent("_index.json"), options: .atomic)
 
+        // ── Plans → global plans folder ──────────────────────────────────────
+        // Plans belong to the project in the backend DB, but they are exported
+        // to the user's global Plans folder (one subfolder per project) so all
+        // plan output lives in one browsable place. A failure here must NOT fail
+        // the meeting export — the data is safe in the backend SQLite DB.
+        var plansWritten = 0
+        var plansWriteFailed = false
+        do {
+            plansWritten = try writePlans(bundle.plans, project: project, to: plansFolder)
+        } catch {
+            log.error("plans export failed (meetings already written): \(error.localizedDescription, privacy: .public)")
+            plansWritten = 0
+            plansWriteFailed = true
+        }
+
         // ── README badge ──────────────────────────────────────────────────────
         updateReadme(
             at: folderURL.appendingPathComponent("README.md"),
@@ -135,18 +156,156 @@ final class ProjectExporter {
             .data(withJSONObject: [
                 "exportedAt":        nowISO(),
                 "meetingsExported":  bundle.meetings.count,
+                "plansExported":     plansWritten,
                 "backendExportedAt": bundle.exportedAt,
             ] as [String: Any], options: .prettyPrinted)
             .write(to: layout.syncJSON, options: .atomic)
 
         let ms = Int(Date().timeIntervalSince(t0) * 1000)
-        log.info("export done: \(bundle.meetings.count) meetings in \(ms)ms")
+        log.info("export done: \(bundle.meetings.count) meetings, \(plansWritten) plans in \(ms)ms")
 
         return ExportResult(
             meetingsWritten: bundle.meetings.count,
+            plansWritten:    plansWritten,
+            plansWriteFailed: plansWriteFailed,
             exportedAt:      Date(),
             durationMs:      ms
         )
+    }
+
+    // MARK: - Plans
+
+    /// Fetch the project's plans from the backend and write each one as
+    /// Markdown into the global plans folder. Drives the manual
+    /// "Save Plans to Folder…" command. Returns the number of plans written.
+    ///
+    /// Deliberate trade-off: this fetches the FULL export bundle (all meetings
+    /// + transcripts), not just plans — `GET /kb/plans` has no project filter,
+    /// so a plans-only fetch needs a server-side change. The backend is
+    /// localhost and this is an occasional manual command; if it ever feels
+    /// slow on meeting-heavy projects, add a `projectId` filter to
+    /// `/kb/plans` and switch this to it.
+    @discardableResult
+    func exportPlans(project: Project,
+                     client: LlmIdeAPIClient,
+                     to plansFolder: URL) async throws -> Int {
+        let bundle = try await client.exportProject(projectId: project.id)
+        return try writePlans(bundle.plans, project: project, to: plansFolder)
+    }
+
+    /// Write each plan in `plans` as a Markdown file under
+    /// `<plansFolder>/<projectSlug>/`. Filenames are deterministic
+    /// (`YYYY-MM-DD-<title-slug>-<id8>.md`) so re-exporting overwrites in place
+    /// rather than producing duplicates. Returns the number of files written.
+    /// Empty input is a no-op (creates no project subfolder).
+    func writePlans(_ plans: [ProjectExportBundle.Plan],
+                    project: Project,
+                    to plansFolder: URL) throws -> Int {
+        guard !plans.isEmpty else { return 0 }
+        let fm = FileManager.default
+        let projectDir = plansFolder
+            .appendingPathComponent(projectSlug(for: project), isDirectory: true)
+        try fm.createDirectory(at: projectDir, withIntermediateDirectories: true)
+
+        var written = 0
+        for plan in plans {
+            let prefix   = datePrefix(from: plan.createdAt)
+            let slug     = slugify(plan.title, id: plan.id)
+            let filename = "\(prefix)-\(slug).md"
+            let fileURL  = projectDir.appendingPathComponent(filename)
+
+            // Plan titles are user-editable (inline rename via /kb/plan/save),
+            // so the title-derived slug changes. Identity is anchored by the
+            // id8 filename suffix: before writing, remove any superseded file
+            // carrying the same plan id so a rename replaces instead of
+            // duplicating. (The no-deletion rule covers *user* files; this
+            // only removes the exporter's own out-of-date output.)
+            let idSuffix = "-\(plan.id.suffix(8)).md"
+            if let names = try? fm.contentsOfDirectory(atPath: projectDir.path) {
+                for name in names where name.hasSuffix(idSuffix) && name != filename {
+                    try? fm.removeItem(at: projectDir.appendingPathComponent(name))
+                }
+            }
+
+            try plansMarkdown(plan: plan, projectId: project.id)
+                .write(to: fileURL, atomically: true, encoding: .utf8)
+            written += 1
+        }
+        return written
+    }
+
+    /// Stable per-project subfolder name. Uses the same Unicode-aware slugify
+    /// as meetings (lowercased title + last-8 of the id) so two projects that
+    /// share a display name never collide and re-export lands in the same dir.
+    private func projectSlug(for project: Project) -> String {
+        slugify(project.displayName, id: project.id)
+    }
+
+    /// Render a plan (and its tasks) as a self-contained Markdown document.
+    func plansMarkdown(plan: ProjectExportBundle.Plan, projectId: String) -> String {
+        var lines: [String] = []
+        lines.append("---")
+        lines.append("id: \(yamlScalar(plan.id))")
+        lines.append("projectId: \(yamlScalar(projectId))")
+        lines.append("title: \(yamlScalar(plan.title))")
+        lines.append("language: \(yamlScalar(plan.language))")
+        if let m = plan.meetingId { lines.append("meetingId: \(yamlScalar(m))") }
+        if let c = plan.createdAt  { lines.append("createdAt: \(yamlScalar(c))") }
+        if let u = plan.updatedAt  { lines.append("updatedAt: \(yamlScalar(u))") }
+        lines.append("exportedAt: \(yamlScalar(nowISO()))")
+        lines.append("---")
+        lines.append("")
+        lines.append("# \(escapeMd(plan.title))")
+        lines.append("")
+        lines.append("**Goal**")
+        lines.append("")
+        lines.append(plan.goal)
+        lines.append("")
+
+        let tasks = plan.tasks.sorted { $0.position < $1.position }
+        if tasks.isEmpty {
+            lines.append("_No tasks._")
+        } else {
+            lines.append("## Tasks")
+            lines.append("")
+            for t in tasks {
+                lines.append(taskLine(t))
+            }
+        }
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// One task as a GitHub-style checklist item with indented metadata.
+    private func taskLine(_ t: ProjectExportBundle.Task) -> String {
+        let box: String
+        switch t.status {
+        case "done":      box = "- [x]"
+        case "cancelled": box = "- [-]"
+        default:          box = "- [ ]"
+        }
+
+        var line = "\(box) \(escapeMd(t.title))"
+        switch t.status {
+        case "blocked":     line += " ⚠️"
+        case "in_progress": line += " 🔄"
+        default: break
+        }
+
+        var detail: [String] = ["Status: \(t.status)"]
+        if let m = t.milestone   { detail.append("Milestone: \(escapeMd(m))") }
+        if let owner = t.owner   { detail.append("Owner: \(escapeMd(owner))") }
+        if let due = t.due       { detail.append("Due: \(escapeMd(due))") }
+        if let days = t.estimateDays { detail.append("Estimate: \(days)d") }
+        if !t.dependsOn.isEmpty  { detail.append("Depends on: \(t.dependsOn.joined(separator: ", "))") }
+        if let risk = t.risk {
+            var r = "Risk: \(escapeMd(risk))"
+            if let reason = t.riskReason, !reason.isEmpty { r += " — \(escapeMd(reason))" }
+            detail.append(r)
+        }
+        if let desc = t.description, !desc.isEmpty { detail.append(escapeMd(desc)) }
+
+        for d in detail { line += "\n  - \(d)" }
+        return line
     }
 
     // MARK: - Errors

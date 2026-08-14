@@ -48,13 +48,36 @@ struct ProjectSwitcher: View {
                     Task {
                         do {
                             if let result = try await projectStore.exportCurrentProject() {
-                                let msg =
-                                    "Exported \(result.meetingsWritten) meeting(s)."
+                                var msg =
+                                    "Exported \(result.meetingsWritten) meeting(s), \(result.plansWritten) plan(s)."
+                                if result.plansWriteFailed {
+                                    msg += " (plans export failed — see log)"
+                                }
                                 alert = AlertItem(kind: .exportSuccess(msg, folderPath: active.localPath))
                             }
                             // nil result means isExporting was already true — silently ignored
                         } catch {
                             alert = AlertItem(kind: .error("Export failed: \(error.localizedDescription)"))
+                        }
+                    }
+                }
+                .disabled(busy)
+
+                // Write just this project's KB plans to the global Plans
+                // folder as Markdown — no full export, project stays open.
+                Button("Save Plans to Folder…") {
+                    Task {
+                        do {
+                            if let written = try await projectStore.savePlansToFolder() {
+                                let msg = written == 0
+                                    ? "No plans in this project yet."
+                                    : "Saved \(written) plan(s)."
+                                alert = AlertItem(kind: .exportSuccess(
+                                    msg, folderPath: PlansFolderConfig().currentFolder.path))
+                            }
+                            // nil result means isExporting was already true — silently ignored
+                        } catch {
+                            alert = AlertItem(kind: .error("Save plans failed: \(error.localizedDescription)"))
                         }
                     }
                 }
