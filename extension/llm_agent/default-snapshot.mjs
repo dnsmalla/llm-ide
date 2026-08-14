@@ -40,12 +40,12 @@
 //   than copied wholesale.
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { listSources, listDiscoveryHooks, defaultSourcesDir } from '../llm-sources/registry.mjs';
+import { listSources, listDiscoveryHooks, defaultSourcesDir, defaultSourcesLocation } from '../llm-sources/registry.mjs';
 import { listEnabled } from '../llm-sources/state.mjs';
 import { effectiveMcpServers } from '../mcp/mcp-config.mjs';
 
 const LIBRARY_FAMILIES = ['skills', 'runtime']; // mirrors registry.mjs
-const SNAPSHOT_DIR_NAME = 'llm_default_sources';
+const SNAPSHOT_DIR_NAME = 'llm_default_sources'; // legacy app-support folder name
 // Must match SLUG_RE in llm-sources/registry.mjs — defensive: a hand-edited
 // legacy registry could contain an id that escapes the snapshot folder.
 const SAFE_SOURCE_ID = /^[a-z][a-z0-9-]{1,40}$/;
@@ -56,8 +56,10 @@ const DEFAULT_LIMITS = Object.freeze({
   maxTotalBytes: 200 * 1024 * 1024,  // per refresh, across all skills
 });
 
+// The snapshot is a COMMITTED repo folder (versioned in git), not an
+// app-support artifact — see the header.
 export function defaultSnapshotDir() {
-  return join(defaultSourcesDir(), SNAPSHOT_DIR_NAME);
+  return defaultSourcesLocation();
 }
 
 // Bounded recursive measurement of a skill dir. lstat semantics (symlinks
@@ -112,7 +114,7 @@ function listAgentFiles(loc) {
 export function refreshDefaultSnapshot(userId, limits = {}) {
   const { maxSkillBytes, maxSkillFiles, maxTotalBytes } = { ...DEFAULT_LIMITS, ...limits };
   const dest = defaultSnapshotDir();
-  const staging = join(defaultSourcesDir(), `.tmp-${SNAPSHOT_DIR_NAME}`);
+  const staging = join(dirname(dest), `.tmp-${SNAPSHOT_DIR_NAME}`);
   rmSync(staging, { recursive: true, force: true });
   mkdirSync(staging, { recursive: true });
 
@@ -121,6 +123,10 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
   const skipped = [];
   const hooksBySource = {};
   let totalBytes = 0;
+  // Dedup across ALL enabled sources, not just within one: the first source
+  // in registry order wins (default-sources is seeded first, then builtin,
+  // then user-added). Chat must never see duplicate skills.
+  const seenSkillNames = new Set();
 
   for (const src of listSources()) {
     if (!enabled.has(src.id)) continue;
@@ -128,10 +134,9 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
     if (!src.location || !existsSync(src.location)) continue;
     counts.sources += 1;
 
-    // First family wins on a same-name skill (skills/ before runtime/) —
-    // the chat catalog lists both under distinct ids, but a flat snapshot
-    // folder can hold only one; the dropped copy is recorded, not silent.
-    const seenSkillNames = new Set();
+    // First family wins on a same-name skill within this source (skills/
+    // before runtime/); cross-source duplicates are dropped by the shared
+    // seenSkillNames above. Dropped copies are recorded, never silent.
     for (const { fam, dir: skillDir } of listSkillDirs(src.location)) {
       const name = basename(skillDir);
       if (seenSkillNames.has(name)) {
@@ -194,6 +199,9 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
   // half-written and stale entries from a previous refresh disappear.
   rmSync(dest, { recursive: true, force: true });
   renameSync(staging, dest);
+
+  // Retire the pre-repo app-support location so exactly one copy exists.
+  rmSync(join(defaultSourcesDir(), SNAPSHOT_DIR_NAME), { recursive: true, force: true });
 
   return { ok: true, dir: dest, counts, skipped };
 }

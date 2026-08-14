@@ -16,18 +16,20 @@ process.env.LLMIDE_PLUGIN_DIR = path.join(tmpRoot, 'plugins'); // defaultSources
 const { listEnabled, setEnabled, pruneOrphans } =
   await import('../llm-sources/state.mjs');
 
-test('first-time user has an empty enable set', () => {
-  assert.deepEqual([...listEnabled('user-1')], []);
+test('first-time user implicitly has default-sources enabled', () => {
+  // No persisted entry yet — default-sources is genuinely on by default for
+  // every user, not just the ones present when enableDefaultSourcesOnce ran.
+  assert.deepEqual([...listEnabled('user-1')], ['default-sources']);
 });
 
 test('setEnabled toggles and persists per user', () => {
   setEnabled('user-1', 'builtin', true);
   setEnabled('user-1', 'my-repo', true);
-  assert.deepEqual([...listEnabled('user-1')].sort(), ['builtin', 'my-repo']);
+  assert.deepEqual([...listEnabled('user-1')].sort(), ['builtin', 'default-sources', 'my-repo']);
   setEnabled('user-1', 'my-repo', false);
-  assert.deepEqual([...listEnabled('user-1')], ['builtin']);
-  // Isolated per user.
-  assert.deepEqual([...listEnabled('user-2')], []);
+  assert.deepEqual([...listEnabled('user-1')].sort(), ['builtin', 'default-sources']);
+  // Isolated per user — user-2 is still brand new, so still implicit-only.
+  assert.deepEqual([...listEnabled('user-2')], ['default-sources']);
 });
 
 test('pruneOrphans drops entries for unregistered sources', () => {

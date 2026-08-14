@@ -1086,7 +1086,20 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     if (!body || typeof body.id !== 'string' || !/^[a-z][a-z0-9-]{1,40}$/.test(body.id)) {
       send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid source id' } }); return;
     }
-    const { updateSource } = await import('../llm-sources/registry.mjs');
+    const { updateSource, DEFAULT_SOURCES_ID } = await import('../llm-sources/registry.mjs');
+    // "Update" on the Default Sources entry means: regenerate the committed
+    // llm_default_sources snapshot from the enabled sources (its skills are a
+    // frozen copy, not a git checkout — there is nothing to pull).
+    if (body.id === DEFAULT_SOURCES_ID) {
+      try {
+        const { refreshDefaultSnapshot } = await import('../llm_agent/default-snapshot.mjs');
+        const r = refreshDefaultSnapshot(req.user.id);
+        send(res, 200, { ok: true, dir: r.dir, counts: r.counts });
+      } catch (err) {
+        send(res, 500, { error: { code: 'SNAPSHOT_FAILED', message: err.message || 'snapshot failed' } });
+      }
+      return;
+    }
     const result = await updateSource(body.id);
     if (result.error) {
       send(res, result.status || 400, { error: { code: 'UPDATE_FAILED', message: result.error } }); return;

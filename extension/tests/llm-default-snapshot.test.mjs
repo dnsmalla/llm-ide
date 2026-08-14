@@ -13,6 +13,8 @@ process.env.NODE_ENV = 'test';
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'def-snap-'));
 process.env.LLMIDE_PLUGIN_DIR = path.join(tmpRoot, 'plugins');
+// The snapshot lives in the REPO (committed), not app-support.
+process.env.LLMIDE_REPO_ROOT = path.join(tmpRoot, 'repo');
 
 const USER = 'u1';
 
@@ -164,6 +166,37 @@ test('a source with a missing location is skipped without throwing', () => {
   ]);
   refreshDefaultSnapshot(USER); // must not throw
   assert.ok(!fs.existsSync(path.join(defaultSnapshotDir(), 'skills', 'gone')));
+});
+
+test('cross-source duplicate skill names are deduplicated (first enabled source wins)', () => {
+  const other = path.join(tmpRoot, 'other-src');
+  fs.mkdirSync(path.join(other, 'skills', 'multi'), { recursive: true });
+  fs.writeFileSync(path.join(other, 'skills', 'multi', 'SKILL.md'),
+    '---\nname: multi\ndescription: other copy\n---\n\n# multi (other)\n');
+  writeRegistry([
+    { id: BUILTIN_ID, name: 'Central Skills', origin: 'builtin', location: fakeRepo, builtin: true },
+    { id: 'extra', name: 'Extra', origin: 'local', location: extra, builtin: false },
+    { id: 'other', name: 'Other', origin: 'local', location: other, builtin: false },
+  ]);
+  setEnabled(USER, 'extra', true);
+  setEnabled(USER, 'other', true);
+  refreshDefaultSnapshot(USER);
+  const dir = defaultSnapshotDir();
+  assert.equal(dir, path.join(tmpRoot, 'repo', 'llm_default_sources'), 'repo location');
+  const copy = fs.readFileSync(path.join(dir, 'skills', 'extra', 'multi', 'SKILL.md'), 'utf8');
+  assert.match(copy, /description: m\n/, 'earlier source in registry order wins');
+  assert.ok(!fs.existsSync(path.join(dir, 'skills', 'other', 'multi')), 'duplicate copy dropped');
+  const meta = JSON.parse(fs.readFileSync(path.join(dir, '_meta.json'), 'utf8'));
+  assert.ok(meta.skipped.some((x) => x.source === 'other' && x.skill === 'multi'));
+});
+
+test('legacy app-support snapshot location is retired after a refresh', () => {
+  const legacy = path.join(tmpRoot, 'llm-sources', 'llm_default_sources');
+  fs.mkdirSync(legacy, { recursive: true });
+  fs.writeFileSync(path.join(legacy, 'stale.txt'), 'x');
+  setEnabled(USER, BUILTIN_ID, true);
+  refreshDefaultSnapshot(USER);
+  assert.ok(!fs.existsSync(legacy), 'old app-support copy must be removed');
 });
 
 test('MCP plugin env vars are carried into the snapshot .mcp.json', () => {

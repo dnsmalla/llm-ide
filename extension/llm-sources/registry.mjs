@@ -24,12 +24,13 @@
 
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as yaml from 'js-yaml';
 import { resolveCentralSkillsRepo } from '../core/skills-repo.mjs';
-import { listEnabled, pruneOrphans } from './state.mjs';
+import { listEnabled, pruneOrphans, DEFAULT_SOURCES_ID } from './state.mjs';
 
 // Git operations (clone/fetch/checkout/submodule-update) run async — the
 // server is single-threaded Node, so a *Sync spawn here would freeze every
@@ -39,6 +40,24 @@ import { listEnabled, pruneOrphans } from './state.mjs';
 const execFileAsync = promisify(execFile);
 
 export const BUILTIN_ID = 'builtin';
+// The committed llm_default_sources folder at the repo root — a default,
+// non-removable source holding the frozen copy of everything chat uses
+// (see llm_agent/default-snapshot.mjs). Seeded FIRST: registry order is the
+// skill-library dedup preference, so chat reads this copy before any other.
+// Defined in state.mjs (re-exported here) so state.mjs can default new users
+// into it without importing this module back (would be circular).
+export { DEFAULT_SOURCES_ID };
+
+// This file lives at <repoRoot>/extension/llm-sources/registry.mjs, so two
+// directories up from here is always the repo root regardless of cwd.
+function repoRootFallback() {
+  return fileURLToPath(new URL('../..', import.meta.url));
+}
+
+export function defaultSourcesLocation() {
+  const repoRoot = process.env.LLMIDE_REPO_ROOT || repoRootFallback();
+  return join(repoRoot, 'llm_default_sources');
+}
 const LIBRARY_FAMILIES = ['skills', 'runtime'];
 const AGENTS_FAMILY = 'agents';
 const MAX_DESC = 200;
@@ -245,7 +264,19 @@ export function countDiscoveryMcpServers(dir) {
 // source with location = null so the UI can offer "Install".
 export function seedBuiltinOnce() {
   const list = readRegistry();
-  if (list.some((s) => s.id === BUILTIN_ID)) return;
+  let touched = false;
+  // Default sources first (idempotent, unshift) — see DEFAULT_SOURCES_ID.
+  if (!list.some((s) => s.id === DEFAULT_SOURCES_ID)) {
+    list.unshift({
+      id: DEFAULT_SOURCES_ID,
+      name: 'Default Sources',
+      origin: 'local',
+      location: defaultSourcesLocation(),
+      builtin: true,
+    });
+    touched = true;
+  }
+  if (list.some((s) => s.id === BUILTIN_ID)) { if (touched) writeRegistry(list); return; }
   const repo = resolveCentralSkillsRepo();
   list.push({
     id: BUILTIN_ID,
@@ -401,6 +432,7 @@ export async function updateSource(id) {
 
 export function removeSource(id) {
   if (id === BUILTIN_ID) return { error: 'builtin source cannot be removed', status: 400 };
+  if (id === DEFAULT_SOURCES_ID) return { error: 'default sources cannot be removed', status: 400 };
   const list = readRegistry();
   const idx = list.findIndex((s) => s.id === id);
   if (idx < 0) return { error: 'source not found', status: 404 };
@@ -419,11 +451,10 @@ export function removeSource(id) {
 
 // Builtin update = ensure the .skills submodule is checked out at its pin.
 export async function syncBuiltin() {
-  const repoRoot = join(dirname(defaultSourcesDir()), '..', '..'); // best-effort; server may override
   let installed;
   try {
     await execFileAsync('git', ['submodule', 'update', '--init', '.skills'], {
-      cwd: process.env.LLMIDE_REPO_ROOT || repoRoot,
+      cwd: process.env.LLMIDE_REPO_ROOT || repoRootFallback(),
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
       timeout: 120_000,
     });

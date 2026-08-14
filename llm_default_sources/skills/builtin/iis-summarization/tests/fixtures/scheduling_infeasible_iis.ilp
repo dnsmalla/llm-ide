@@ -1,0 +1,20 @@
+\ IIS for scheduling_infeasible.lp
+\ The three shift minimums (20+18+15=53 worker-shifts) exceed
+\ total capacity (30) even at maximum per-worker hours.
+Minimize
+ obj: 0
+Subject To
+ shift_morning:   w1 + w2 >= 20
+ shift_afternoon: w2 + w3 >= 18
+ shift_night:     w3 + w4 >= 15
+ capacity_total:  w1 + w2 + w3 + w4 <= 30
+ max_w1: w1 <= 8
+ max_w2: w2 <= 8
+ max_w3: w3 <= 8
+ max_w4: w4 <= 6
+Bounds
+ 0 <= w1 <= 8
+ 0 <= w2 <= 8
+ 0 <= w3 <= 8
+ 0 <= w4 <= 6
+End

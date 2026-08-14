@@ -19,7 +19,7 @@ fs.writeFileSync(path.join(fakeRepo, 'skills', 'demo', 'SKILL.md'),
 process.env.SKILLS_REPO = fakeRepo;
 
 const { readRegistry, writeRegistry, isValidLlmSource, seedBuiltinOnce,
-  listSources, getSource, BUILTIN_ID, countDiscoverySkills,
+  listSources, getSource, BUILTIN_ID, DEFAULT_SOURCES_ID, defaultSourcesLocation, countDiscoverySkills,
   countDiscoveryAgents, listDiscoveryAgents, countDiscoveryHooks, listDiscoveryHooks,
   countDiscoveryMcpServers, listDiscoveryMcpServers,
   sourceDiscoveryDetail } =
@@ -49,6 +49,19 @@ test('isValidLlmSource also accepts an agents/-only or hooks-manifest-only direc
   fs.mkdirSync(mcpOnly, { recursive: true });
   fs.writeFileSync(path.join(mcpOnly, '.mcp.json'), '{}');
   assert.ok(isValidLlmSource(mcpOnly));
+});
+
+test('seeding registers default-sources FIRST (dedup preference), pointing at the repo folder, not removable', () => {
+  process.env.LLMIDE_REPO_ROOT = path.join(tmpRoot, 'repo-root');
+  writeRegistry([]); // start clean
+  seedBuiltinOnce();
+  const list = readRegistry();
+  assert.equal(list[0].id, DEFAULT_SOURCES_ID, 'default sources must be first in registry order');
+  assert.equal(list[0].location, path.join(tmpRoot, 'repo-root', 'llm_default_sources'));
+  assert.equal(list[0].builtin, true);
+  const rm = removeSource(DEFAULT_SOURCES_ID);
+  assert.ok(rm.error, 'default-sources must not be removable');
+  delete process.env.LLMIDE_REPO_ROOT;
 });
 
 test('seedBuiltinOnce adds exactly one builtin source pointing at the resolved repo', () => {

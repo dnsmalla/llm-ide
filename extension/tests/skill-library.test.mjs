@@ -223,3 +223,45 @@ test('cleanup', () => {
   fs.rmSync(repo, { recursive: true, force: true });
   fs.rmSync(tmpRegRoot, { recursive: true, force: true });
 });
+
+
+// ── Cross-source dedup: same skill id from two enabled sources → ONE entry ──
+test('listSkillLibrary dedups identical skill ids across enabled sources', async () => {
+  // Self-contained: the 'cleanup' test above already removed tmpRegRoot and
+  // several earlier tests `delete` LLMIDE_PLUGIN_DIR instead of restoring it,
+  // so this must not rely on either — it needs its own temp registry dir.
+  const tmpReg = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-sl-dedup-'));
+  process.env.LLMIDE_PLUGIN_DIR = path.join(tmpReg, 'plugins');
+  writeRegistry([]);
+  _resetSkillLibraryCache();
+  const srcA = path.join(tmpReg, 'a');
+  const srcB = path.join(tmpReg, 'b');
+  for (const [root, tag] of [[srcA, 'A'], [srcB, 'B']]) {
+    fs.mkdirSync(path.join(root, 'agents'), { recursive: true }); // makes the dir a valid LLM source
+    fs.mkdirSync(path.join(root, 'skills', 'shared'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'skills', 'shared', 'SKILL.md'),
+      `---\nname: shared\ndescription: copy ${tag}\n---\n\n# shared\n`);
+    fs.mkdirSync(path.join(root, 'skills', `only-${tag.toLowerCase()}`), { recursive: true });
+    fs.writeFileSync(path.join(root, 'skills', `only-${tag.toLowerCase()}`, 'SKILL.md'),
+      `---\nname: only-${tag.toLowerCase()}\ndescription: ${tag}\n---\n\n# x\n`);
+  }
+  const { addSource } = await import('../llm-sources/registry.mjs');
+  const { setEnabled } = await import('../llm-sources/state.mjs');
+  const addA = await addSource({ path: srcA, name: 'Source A' });
+  const addB = await addSource({ path: srcB, name: 'Source B' });
+  assert.ok(addA.source && addB.source, 'fixtures must register as valid sources');
+  const uid = 'dedup-user';
+  setEnabled(uid, 'source-a', true);
+  setEnabled(uid, 'source-b', true);
+
+  const { skills } = listSkillLibrary(uid);
+  const shared = skills.filter((s) => s.id === 'skills/shared');
+  assert.equal(shared.length, 1, 'duplicate skill id must appear once');
+  assert.equal(shared[0].sourceId, 'source-a', 'first enabled source (registry order) wins');
+  assert.ok(skills.some((s) => s.id === 'skills/only-a'));
+  assert.ok(skills.some((s) => s.id === 'skills/only-b'), 'non-duplicates unaffected');
+
+  fs.rmSync(tmpReg, { recursive: true, force: true });
+  delete process.env.LLMIDE_PLUGIN_DIR;
+  _resetSkillLibraryCache();
+});

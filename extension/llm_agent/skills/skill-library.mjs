@@ -69,6 +69,7 @@ export function listSkillLibrary(userId) {
     : new Set(listSources().map((s) => s.id)); // no user (tests/default) → all enabled
 
   const skills = [];
+  const seenIds = new Set(); // skill ids are source-independent (`<family>/<dir>`) — first enabled source wins
   let builtinRepo = null;
   for (const src of listSources()) {
     if (!enabled.has(src.id)) continue;
@@ -82,10 +83,13 @@ export function listSkillLibrary(userId) {
       for (const e of entries) {
         if (!e.isDirectory()) continue;
         const skillMd = join(src.location, family, e.name, 'SKILL.md');
+        const id = `${family}/${e.name}`;
+        if (seenIds.has(id)) continue; // duplicate across enabled sources (e.g. default-sources + builtin)
         const fm = readNameDesc(skillMd);
         if (!fm) continue;
+        seenIds.add(id);
         skills.push({
-          id: `${family}/${e.name}`,
+          id,
           family,
           name: fm.name,
           description: fm.description,

@@ -48,13 +48,19 @@ const HOST = config.host;
 //     claude-sources, add, consent, toggle, remove) — not tracked in
 //     ENDPOINTS below since /auth/* routes are excluded from that list by
 //     convention.
+// 31: llm_default_sources moved INTO THE REPO (committed at the repo root)
+//     and is seeded as a default, non-removable source ("Default Sources",
+//     first in registry order). GET /auth/me/llm-sources responses gain that
+//     source; skill-library entries are deduped by id (first source wins) so
+//     enabling several overlapping sources no longer duplicates skills in the
+//     chat "/" menu.
 // 30: llm_default_sources snapshot — materializes the effective chat config
 //     (skills+agents copied from enabled sources, hooks discovery catalog,
 //     effective .mcp.json) into <app-support>/llm-sources/llm_default_sources/.
 //     New POST /auth/me/llm-sources/refresh-default rebuilds it on demand;
 //     also refreshed automatically on source toggle, MCP consent/toggle, and
 //     server start. /auth/* path — not tracked in ENDPOINTS by convention.
-const SERVER_API_VERSION = 30;
+const SERVER_API_VERSION = 31;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -881,10 +887,11 @@ server.listen(PORT, HOST, () => {
     // was down. Fire-and-forget: a failure never blocks startup.
     void (async () => {
       try {
-        const { seedBuiltinOnce } = await import('./llm-sources/registry.mjs');
-        const { listStateUserIds } = await import('./llm-sources/state.mjs');
+        const { seedBuiltinOnce, DEFAULT_SOURCES_ID } = await import('./llm-sources/registry.mjs');
+        const { listStateUserIds, enableDefaultSourcesOnce } = await import('./llm-sources/state.mjs');
         const { refreshDefaultSnapshot } = await import('./llm_agent/default-snapshot.mjs');
         seedBuiltinOnce();
+        enableDefaultSourcesOnce(DEFAULT_SOURCES_ID); // one-time: enabled by default
         for (const uid of listStateUserIds()) {
           try { refreshDefaultSnapshot(uid); } catch { /* per-user, best-effort */ }
         }

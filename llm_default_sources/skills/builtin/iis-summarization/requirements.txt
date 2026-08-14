@@ -1,0 +1,16 @@
+# IIS Summarization Skill — runtime dependencies
+#
+# Install with:
+#   pip install -r requirements.txt
+#
+# For development dependencies (pytest, ruff, mypy), use:
+#   pip install -e .[dev]
+#
+# NOTE: gurobipy requires a valid Gurobi license.
+#       The academic / trial license is free at https://www.gurobi.com/downloads/
+
+# ── Core solver ─────────────────────────────────────────────
+gurobipy>=10.0.0
+
+# All other dependencies (pathlib, dataclasses, collections,
+# re, time, argparse, logging) are part of Python 3.10+ stdlib.

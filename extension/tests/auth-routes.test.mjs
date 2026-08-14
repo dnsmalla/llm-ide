@@ -33,6 +33,15 @@ for (const dir of [claudePluginsFixture, llmidePluginFixture]) {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
 }
+// The llm-sources toggle/remove/mcp-consent routes below fire a background
+// scheduleSnapshotRefresh() (server/auth-routes.mjs), which writes to
+// <LLMIDE_REPO_ROOT>/llm_default_sources regardless of LLMIDE_PLUGIN_DIR —
+// without this override it clobbers the real repo's committed snapshot
+// folder with this file's fixture data every time this suite runs.
+const repoRootFixture = path.join(__dirname, '_auth-routes-repo-root-fixture');
+process.env.LLMIDE_REPO_ROOT = repoRootFixture;
+fs.rmSync(repoRootFixture, { recursive: true, force: true });
+fs.mkdirSync(repoRootFixture, { recursive: true });
 
 const kb = await import('../kb/db.mjs');
 const { handleAuth, isAuthRoute } = await import('../server/auth-routes.mjs');
