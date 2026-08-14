@@ -279,19 +279,17 @@ final class ProjectStore: ObservableObject {
 
         // Capture client and folder URL *before* any suspension point so they
         // can't change under us while the export awaits.
-        let client      = _apiClient
-        let folderURL   = URL(fileURLWithPath: ap.localPath)
-        let plansFolder = PlansFolderConfig().currentFolder
+        let client    = _apiClient
+        let folderURL = URL(fileURLWithPath: ap.localPath)
 
         if let client {
             isExporting = true
             do {
                 let exporter = ProjectExporter()
                 let result = try await exporter.export(
-                    project:     ap.bundle,
-                    folderURL:   folderURL,
-                    client:      client,
-                    plansFolder: plansFolder)
+                    project:   ap.bundle,
+                    folderURL: folderURL,
+                    client:    client)
                 log.info("project export ok — \(result.meetingsWritten) meetings, \(result.plansWritten) plans, \(result.durationMs)ms")
             } catch {
                 log.error("project export failed (close will proceed): \(error.localizedDescription, privacy: .public)")
@@ -322,19 +320,18 @@ final class ProjectStore: ObservableObject {
 
         let exporter = ProjectExporter()
         let result = try await exporter.export(
-            project:     ap.bundle,
-            folderURL:   folderURL,
-            client:      client,
-            plansFolder: PlansFolderConfig().currentFolder)
+            project:   ap.bundle,
+            folderURL: folderURL,
+            client:    client)
         log.info("manual export ok — \(result.meetingsWritten) meetings, \(result.plansWritten) plans")
         return result
     }
 
-    /// Write the active project's KB plans to the global Plans folder as
-    /// Markdown, without re-exporting meetings or touching the project tree.
-    /// Drives the manual "Save Plans to Folder…" command. Returns the number
-    /// of plans written, or `nil` when no project is active or the API client
-    /// isn't wired (or another export is already in flight).
+    /// Write the active project's KB plans to `<projectRoot>/llm-doc/plans/`
+    /// as Markdown, without re-exporting meetings. Drives the manual
+    /// "Save Plans to Folder…" command. Returns the number of plans written,
+    /// or `nil` when no project is active or the API client isn't wired (or
+    /// another export is already in flight).
     @discardableResult
     func savePlansToFolder() async throws -> Int? {
         guard !isExporting else { return nil }
@@ -347,7 +344,7 @@ final class ProjectStore: ObservableObject {
         let written = try await exporter.exportPlans(
             project:     ap.bundle,
             client:      client,
-            to:          PlansFolderConfig().currentFolder)
+            projectRoot: URL(fileURLWithPath: ap.localPath))
         log.info("manual plans save ok — \(written) plans")
         return written
     }

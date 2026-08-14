@@ -88,7 +88,9 @@ enum ProjectScaffolder {
         ensureRootGitignore(at: folderURL)
 
         // 3. .gitkeep markers so empty directories survive `git add .`
-        for dir in ["llm-doc", "data", "source/meetings", "source/emails", "source/documents"] {
+        //    (llm-doc/plans is auto-generated — scaffolded empty so the KB
+        //     plans export target exists from day one; see ProjectLayout.plansDir)
+        for dir in ["llm-doc", "llm-doc/plans", "data", "source/meetings", "source/emails", "source/documents"] {
             writeIfAbsent(
                 at: folderURL.appendingPathComponent("\(dir)/.gitkeep"),
                 content: "")

@@ -389,8 +389,9 @@ public final class NoteService: Sendable {
         for file in allFiles {
             let filename = file.lastPathComponent
 
-            // Skip index.json and directories
-            if filename == "index.json" {
+            // Skip index.json, directories, and dotfiles — hidden markers
+            // like the scaffolder's .gitkeep must never surface as notes.
+            if filename == "index.json" || filename.hasPrefix(".") {
                 continue
             }
 

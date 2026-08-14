@@ -2,11 +2,12 @@
 //
 // Display-only. A project's folder layout is fixed when the project is
 // created (New Project) or read from disk (Open Existing). There are no
-// global path settings to manage here.
+// global path settings to manage here. KB plans land in the project tree
+// at llm-doc/plans/ (shown like every other folder; auto-generated).
 //
 //   ┌─ Paths ──────────────────────────────────────────────────┐
 //   │ ℹ These folders belong to the active project.            │
-//   │   source/ code/ data/ llm-doc/ system/  [Reveal]         │
+//   │   source/ code/ data/ llm-doc/ llm-doc/plans/ system/    │
 //   │   [ Rebuild missing folders ]                             │
 //   └──────────────────────────────────────────────────────────┘
 
@@ -92,6 +93,9 @@ struct PathsSettingsSection: View {
                              url: L.dataDir, note: "Documents, data, images", accent: t.textMuted)
             projectFolderRow(label: "llm-doc/", icon: "note.text",
                              url: L.notesDir, note: "Generated LLM docs", accent: t.textMuted)
+            projectFolderRow(label: "llm-doc/plans/", icon: "checklist",
+                             url: L.plansDir, note: "KB plans as Markdown (auto-generated, written on export/close)",
+                             accent: t.textMuted)
             projectFolderRow(label: "templates/", icon: "doc.badge.gearshape",
                              url: L.templatesDir, note: "Doc Gen templates", accent: t.textMuted)
             projectFolderRow(label: "system/", icon: "gearshape",

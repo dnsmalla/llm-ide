@@ -69,8 +69,7 @@ final class ProjectExporter {
     func export(
         project: Project,
         folderURL: URL,
-        client: LlmIdeAPIClient,
-        plansFolder: URL
+        client: LlmIdeAPIClient
     ) async throws -> ExportResult {
         let t0 = Date()
 
@@ -126,15 +125,15 @@ final class ProjectExporter {
             ] as [String: Any], options: [.prettyPrinted, .sortedKeys])
             .write(to: meetingsRoot.appendingPathComponent("_index.json"), options: .atomic)
 
-        // ── Plans → global plans folder ──────────────────────────────────────
-        // Plans belong to the project in the backend DB, but they are exported
-        // to the user's global Plans folder (one subfolder per project) so all
-        // plan output lives in one browsable place. A failure here must NOT fail
-        // the meeting export — the data is safe in the backend SQLite DB.
+        // ── Plans → <projectRoot>/llm-doc/plans/ ────────────────────────────
+        // Plans belong to the project, so they export into the project's
+        // llm-doc/ tree (see ProjectLayout.plansDir) alongside the other generated
+        // notes. A failure here must NOT fail the meeting export — the data is
+        // safe in the backend SQLite DB.
         var plansWritten = 0
         var plansWriteFailed = false
         do {
-            plansWritten = try writePlans(bundle.plans, project: project, to: plansFolder)
+            plansWritten = try writePlans(bundle.plans, projectRoot: folderURL)
         } catch {
             log.error("plans export failed (meetings already written): \(error.localizedDescription, privacy: .public)")
             plansWritten = 0
@@ -176,8 +175,9 @@ final class ProjectExporter {
     // MARK: - Plans
 
     /// Fetch the project's plans from the backend and write each one as
-    /// Markdown into the global plans folder. Drives the manual
-    /// "Save Plans to Folder…" command. Returns the number of plans written.
+    /// Markdown into the project tree at `<projectRoot>/llm-doc/plans/`.
+    /// Drives the manual "Save Plans to Folder…" command. Returns the number
+    /// of plans written.
     ///
     /// Deliberate trade-off: this fetches the FULL export bundle (all meetings
     /// + transcripts), not just plans — `GET /kb/plans` has no project filter,
@@ -188,31 +188,30 @@ final class ProjectExporter {
     @discardableResult
     func exportPlans(project: Project,
                      client: LlmIdeAPIClient,
-                     to plansFolder: URL) async throws -> Int {
+                     projectRoot: URL) async throws -> Int {
         let bundle = try await client.exportProject(projectId: project.id)
-        return try writePlans(bundle.plans, project: project, to: plansFolder)
+        return try writePlans(bundle.plans, projectRoot: projectRoot)
     }
 
     /// Write each plan in `plans` as a Markdown file under
-    /// `<plansFolder>/<projectSlug>/`. Filenames are deterministic
+    /// `<projectRoot>/llm-doc/plans/` (see `ProjectLayout.plansDir`). The
+    /// folder is auto-generated on demand. Filenames are deterministic
     /// (`YYYY-MM-DD-<title-slug>-<id8>.md`) so re-exporting overwrites in place
     /// rather than producing duplicates. Returns the number of files written.
-    /// Empty input is a no-op (creates no project subfolder).
+    /// Empty input is a no-op (creates no plans dir).
     func writePlans(_ plans: [ProjectExportBundle.Plan],
-                    project: Project,
-                    to plansFolder: URL) throws -> Int {
+                    projectRoot: URL) throws -> Int {
         guard !plans.isEmpty else { return 0 }
         let fm = FileManager.default
-        let projectDir = plansFolder
-            .appendingPathComponent(projectSlug(for: project), isDirectory: true)
-        try fm.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        let plansDir = ProjectLayout(root: projectRoot).plansDir
+        try fm.createDirectory(at: plansDir, withIntermediateDirectories: true)
 
         var written = 0
         for plan in plans {
             let prefix   = datePrefix(from: plan.createdAt)
             let slug     = slugify(plan.title, id: plan.id)
             let filename = "\(prefix)-\(slug).md"
-            let fileURL  = projectDir.appendingPathComponent(filename)
+            let fileURL  = plansDir.appendingPathComponent(filename)
 
             // Plan titles are user-editable (inline rename via /kb/plan/save),
             // so the title-derived slug changes. Identity is anchored by the
@@ -221,32 +220,26 @@ final class ProjectExporter {
             // duplicating. (The no-deletion rule covers *user* files; this
             // only removes the exporter's own out-of-date output.)
             let idSuffix = "-\(plan.id.suffix(8)).md"
-            if let names = try? fm.contentsOfDirectory(atPath: projectDir.path) {
+            if let names = try? fm.contentsOfDirectory(atPath: plansDir.path) {
                 for name in names where name.hasSuffix(idSuffix) && name != filename {
-                    try? fm.removeItem(at: projectDir.appendingPathComponent(name))
+                    try? fm.removeItem(at: plansDir.appendingPathComponent(name))
                 }
             }
 
-            try plansMarkdown(plan: plan, projectId: project.id)
+            try plansMarkdown(plan: plan)
                 .write(to: fileURL, atomically: true, encoding: .utf8)
             written += 1
         }
         return written
     }
 
-    /// Stable per-project subfolder name. Uses the same Unicode-aware slugify
-    /// as meetings (lowercased title + last-8 of the id) so two projects that
-    /// share a display name never collide and re-export lands in the same dir.
-    private func projectSlug(for project: Project) -> String {
-        slugify(project.displayName, id: project.id)
-    }
-
     /// Render a plan (and its tasks) as a self-contained Markdown document.
-    func plansMarkdown(plan: ProjectExportBundle.Plan, projectId: String) -> String {
+    /// No projectId in the frontmatter — the file lives inside the project
+    /// tree (`llm-doc/plans/`), so provenance is its location.
+    func plansMarkdown(plan: ProjectExportBundle.Plan) -> String {
         var lines: [String] = []
         lines.append("---")
         lines.append("id: \(yamlScalar(plan.id))")
-        lines.append("projectId: \(yamlScalar(projectId))")
         lines.append("title: \(yamlScalar(plan.title))")
         lines.append("language: \(yamlScalar(plan.language))")
         if let m = plan.meetingId { lines.append("meetingId: \(yamlScalar(m))") }

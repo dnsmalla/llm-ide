@@ -24,7 +24,6 @@ struct SettingsView: View {
                         ServerSettingsSection()
                         BackendSettingsSection()
                         ConnectionsSettingsSection(api: api).id("connections")
-                        PlansFolderSettingsSection()
                         AppearanceSettingsSection()
                         SidebarVisibilitySection()
                         UpdatesSettingsSection()

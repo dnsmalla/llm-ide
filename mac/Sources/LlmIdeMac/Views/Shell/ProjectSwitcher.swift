@@ -63,17 +63,19 @@ struct ProjectSwitcher: View {
                 }
                 .disabled(busy)
 
-                // Write just this project's KB plans to the global Plans
-                // folder as Markdown — no full export, project stays open.
-                Button("Save Plans to Folder…") {
+                // Write just this project's KB plans to the project tree at
+                // llm-doc/plans/ as Markdown — no full export, project stays open.
+                Button("Export Plans…") {
                     Task {
                         do {
                             if let written = try await projectStore.savePlansToFolder() {
                                 let msg = written == 0
                                     ? "No plans in this project yet."
                                     : "Saved \(written) plan(s)."
+                                let plansDir = ProjectLayout(
+                                    root: URL(fileURLWithPath: active.localPath)).plansDir
                                 alert = AlertItem(kind: .exportSuccess(
-                                    msg, folderPath: PlansFolderConfig().currentFolder.path))
+                                    msg, folderPath: plansDir.path))
                             }
                             // nil result means isExporting was already true — silently ignored
                         } catch {

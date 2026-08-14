@@ -31,6 +31,26 @@ final class NoteTypeTests: XCTestCase {
 }
 
 extension NoteTypeTests {
+    func testRebuildIndexSkipsDotfilesInTypeDirs() async throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("notetype-dot-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let svc = NoteService(repoRoot: tmp)
+
+        // A real note plus scaffolder-style hidden markers (.gitkeep) — the
+        // markers must not surface as Library notes.
+        let dir = svc.getDirForType(NoteType("plans"))
+            .appendingPathComponent("2026", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: dir.appendingPathComponent("a.md"))
+        try Data("".utf8).write(to: svc.getDirForType(NoteType("plans")).appendingPathComponent(".gitkeep"))
+
+        let index = try await svc.rebuildIndex()
+        XCTAssertEqual(index.notes.count, 1)
+        XCTAssertFalse(index.notes.contains { $0.title.hasPrefix(".") },
+                       "hidden files like .gitkeep must not be indexed as notes")
+    }
+
     func testRebuildIndexDiscoversAllTypeDirectories() async throws {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("notetype-\(UUID().uuidString)", isDirectory: true)

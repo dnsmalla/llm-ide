@@ -31,6 +31,14 @@ struct ProjectLayout {
         sourceDir.appendingPathComponent(type.directoryName, isDirectory: true)
     }
 
+    /// KB plans exported as Markdown: `<root>/llm-doc/plans/` — plural, like
+    /// its sibling generated-note type dirs (meetings/, emails/, documents/).
+    /// Written by `ProjectExporter.writePlans(...)`; auto-generated on demand
+    /// (withIntermediates) like NoteService type dirs, plus by the scaffolder.
+    var plansDir: URL {
+        notesDir.appendingPathComponent("plans", isDirectory: true)
+    }
+
     /// Doc Gen templates — one subfolder per template (`templates/<slug>/template.md`).
     var templatesDir: URL { root.appendingPathComponent("templates", isDirectory: true) }
 
