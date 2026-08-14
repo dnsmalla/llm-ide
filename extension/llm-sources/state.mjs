@@ -42,6 +42,13 @@ export function listEnabled(userId) {
   return new Set(Array.isArray(arr) ? arr.filter((s) => typeof s === 'string') : []);
 }
 
+// User ids that have any enable state — used by the server-start hook to
+// rebuild the llm_default_sources snapshot for everyone who has one coming
+// (realistically a single local user).
+export function listStateUserIds() {
+  return Object.keys(readAll());
+}
+
 export function setEnabled(userId, sourceId, enabled) {
   if (!userId || typeof sourceId !== 'string') return new Set();
   const all = readAll();

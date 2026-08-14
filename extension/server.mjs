@@ -48,7 +48,13 @@ const HOST = config.host;
 //     claude-sources, add, consent, toggle, remove) — not tracked in
 //     ENDPOINTS below since /auth/* routes are excluded from that list by
 //     convention.
-const SERVER_API_VERSION = 29;
+// 30: llm_default_sources snapshot — materializes the effective chat config
+//     (skills+agents copied from enabled sources, hooks discovery catalog,
+//     effective .mcp.json) into <app-support>/llm-sources/llm_default_sources/.
+//     New POST /auth/me/llm-sources/refresh-default rebuilds it on demand;
+//     also refreshed automatically on source toggle, MCP consent/toggle, and
+//     server start. /auth/* path — not tracked in ENDPOINTS by convention.
+const SERVER_API_VERSION = 30;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -869,6 +875,23 @@ server.listen(PORT, HOST, () => {
     // schedule using vault-stored credentials. No client needs to be
     // connected for status updates to flow in.
     startBackgroundOutcomePoller();
+
+    // Rebuild the llm_default_sources snapshot at boot so it reflects the
+    // current enable/consent state even if sources changed while the server
+    // was down. Fire-and-forget: a failure never blocks startup.
+    void (async () => {
+      try {
+        const { seedBuiltinOnce } = await import('./llm-sources/registry.mjs');
+        const { listStateUserIds } = await import('./llm-sources/state.mjs');
+        const { refreshDefaultSnapshot } = await import('./llm_agent/default-snapshot.mjs');
+        seedBuiltinOnce();
+        for (const uid of listStateUserIds()) {
+          try { refreshDefaultSnapshot(uid); } catch { /* per-user, best-effort */ }
+        }
+      } catch (err) {
+        logger.warn('default_snapshot_boot_failed', { error: err.message });
+      }
+})();
   } catch (err) {
     logger.error('db_open_failed_at_boot', { error: err.message });
     process.exit(1);

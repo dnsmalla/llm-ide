@@ -998,6 +998,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   // Safety note atop llm-sources/registry.mjs).
   // GET  /auth/me/llm-sources          → list sources + per-user enable
   // POST /auth/me/llm-sources/toggle   → { id, enabled }
+  // POST /auth/me/llm-sources/refresh-default → rebuild llm_default_sources now
   // POST /auth/me/llm-sources/add      → { url|path, ref?, name? }  (admin)
   // POST /auth/me/llm-sources/update   → { id }                     (admin)
   // DELETE /auth/me/llm-sources/<id>                                (admin)
@@ -1023,6 +1024,11 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       setEnabled(req.user.id, body.id, body.enabled);
       const { _resetSkillLibraryCache } = await import('../llm_agent/skills/skill-library.mjs');
       _resetSkillLibraryCache();
+      // Rebuild llm_default_sources so the snapshot reflects the new enable set.
+      try {
+        const { scheduleSnapshotRefresh } = await import('../llm_agent/default-snapshot.mjs');
+        scheduleSnapshotRefresh(req.user.id);
+      } catch { /* snapshot is best-effort; toggle already succeeded */ }
       safeAudit(db, {
         userId: req.user.id, requestId, ip, userAgent: ua,
         action: body.enabled ? 'llm-source.enable' : 'llm-source.disable',
@@ -1031,6 +1037,22 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       send(res, 200, { ok: true, enabled: body.enabled });
     } catch (err) {
       send(res, err.status || 400, { error: { code: err.code || 'VALIDATION_FAILED', message: err.message } });
+    }
+    return;
+  }
+
+  // POST /auth/me/llm-sources/refresh-default — rebuild the llm_default_sources
+  // snapshot (skills+agents from enabled sources, hooks catalog, effective
+  // .mcp.json) for the requesting user, right now. Also refreshed
+  // automatically on toggle/MCP-consent/server-start; this is the on-demand
+  // escape hatch.
+  if (method === 'POST' && url === '/auth/me/llm-sources/refresh-default') {
+    try {
+      const { refreshDefaultSnapshot } = await import('../llm_agent/default-snapshot.mjs');
+      const result = refreshDefaultSnapshot(req.user.id);
+      send(res, 200, { ok: true, dir: result.dir, counts: result.counts });
+    } catch (err) {
+      send(res, 500, { error: { code: 'SNAPSHOT_FAILED', message: err.message || 'snapshot failed' } });
     }
     return;
   }
@@ -1090,6 +1112,12 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     }
     const { _resetSkillLibraryCache } = await import('../llm_agent/skills/skill-library.mjs');
     _resetSkillLibraryCache();
+    // The removed source's files must leave the snapshot too (it may have
+    // been enabled). Deferred — see the toggle handler.
+    try {
+      const { scheduleSnapshotRefresh } = await import('../llm_agent/default-snapshot.mjs');
+      scheduleSnapshotRefresh(req.user.id);
+    } catch { /* snapshot is best-effort; removal already succeeded */ }
     safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
       action: 'llm-source.remove', resource: id, outcome: 'success' });
     send(res, 200, result);
@@ -1174,6 +1202,10 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     }
     const { setConsented } = await import('../mcp/state.mjs');
     setConsented(req.user.id, body.id, body.consented);
+    try {
+      const { scheduleSnapshotRefresh } = await import('../llm_agent/default-snapshot.mjs');
+      scheduleSnapshotRefresh(req.user.id);
+    } catch { /* snapshot is best-effort; consent change already succeeded */ }
     safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
       action: body.consented ? 'mcp-plugin.consent' : 'mcp-plugin.revoke-consent', resource: body.id, outcome: 'success' });
     send(res, 200, { ok: true, consented: body.consented });
@@ -1189,6 +1221,10 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     }
     const { setEnabledMcp } = await import('../mcp/state.mjs');
     setEnabledMcp(req.user.id, body.id, body.enabled);
+    try {
+      const { scheduleSnapshotRefresh } = await import('../llm_agent/default-snapshot.mjs');
+      scheduleSnapshotRefresh(req.user.id);
+    } catch { /* snapshot is best-effort; toggle already succeeded */ }
     safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
       action: body.enabled ? 'mcp-plugin.enable' : 'mcp-plugin.disable', resource: body.id, outcome: 'success' });
     send(res, 200, { ok: true, enabled: body.enabled });

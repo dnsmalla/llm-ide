@@ -108,6 +108,7 @@ extension/tests/_llmide-plugins-fixture/
 extension/tests/plugin-state.json
 extension/tests/llm-sources.json
 extension/tests/llm-sources-state.json
+extension/tests/llm-sources/
 extension/tests/_llm-sources-http-fixture-*/
 extension/tests/mcp-plugins.json
 extension/tests/mcp-plugins-state.json
