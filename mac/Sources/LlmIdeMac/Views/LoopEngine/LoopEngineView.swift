@@ -191,13 +191,19 @@ struct LoopEngineView: View {
         // implicit save uses (so it can't lock in an unconfirmed
         // bare-Regression detection) and by the persistedConfig baseline (so
         // merely loading a project never rewrites the committed file).
-        // Residual gap, stated honestly: quitting the app inside the 0.8s
-        // debounce window can still lose that last edit — project switches
-        // and leaving this page flush instead (loadConfig/onDisappear).
+        // Every exit flushes the pending write rather than dropping it:
+        // project switch (loadConfig), leaving this page (onDisappear), and
+        // app quit (willTerminate below — a sleeping Task dies with the
+        // process on Cmd-Q, the same reason LoopEngineRunner installs its
+        // own termination handler).
         .onChange(of: currentConfig) { _, updated in
             scheduleAutosave(updated)
         }
         .onDisappear {
+            flushPendingAutosave()
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.willTerminateNotification)) { _ in
             flushPendingAutosave()
         }
         .sheet(isPresented: $isPresentingNewLoopWizard) {
@@ -869,12 +875,15 @@ struct LoopEngineView: View {
         persistedConfig = nil
     }
 
-    /// Append a non-default copy of `stage` (new id, cleared isDefault, next order).
+    /// Append a non-default copy of `stage` (new id, cleared isDefault +
+    /// defaultKey, next order) — a copy must not claim the default's identity,
+    /// or `ensureDefaultStages`'s key match could pin the copy instead.
     private func duplicateStage(_ stage: LoopStage) {
         let nextOrder = (stages.map(\.order).max() ?? -1) + 1
         var copy = stage
         copy.id = UUID().uuidString
         copy.isDefault = false
+        copy.defaultKey = nil
         copy.order = nextOrder
         stages.append(copy)
     }

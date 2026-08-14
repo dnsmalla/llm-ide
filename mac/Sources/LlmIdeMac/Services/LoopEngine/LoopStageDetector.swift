@@ -17,16 +17,17 @@ enum LoopStageDetector {
     /// `gitRoot == nil` ⇒ Regression only (no tooling to detect).
     private static func defaultStages(gitRoot: URL?) -> [LoopStage] {
         var stages: [LoopStage] = [
-            LoopStage(name: "Regression", kind: .regressionSweep, command: nil, order: 0, isDefault: true)
+            LoopStage(name: "Regression", kind: .regressionSweep, command: nil, order: 0,
+                      isDefault: true, defaultKey: "regression")
         ]
         guard let gitRoot else { return stages }
         if let testCommand = detectTestCommand(gitRoot: gitRoot) {
             stages.append(LoopStage(name: "Test", kind: .shellCommand, command: testCommand,
-                                    order: stages.count, isDefault: true))
+                                    order: stages.count, isDefault: true, defaultKey: "test"))
         }
         for check in systemCheckStages(gitRoot: gitRoot) {
             stages.append(LoopStage(name: check.name, kind: .shellCommand, command: check.command,
-                                    order: stages.count, isDefault: true))
+                                    order: stages.count, isDefault: true, defaultKey: check.key))
         }
         return stages
     }
@@ -38,42 +39,45 @@ enum LoopStageDetector {
     /// of them match and the defaults stay exactly what they were before this
     /// existed (Regression, plus Test if detected) — the same "only add what's
     /// actually there" rule `detectTestCommand` already follows for Test.
-    private static func systemCheckStages(gitRoot: URL) -> [(name: String, command: String)] {
+    private static func systemCheckStages(gitRoot: URL) -> [(key: String, name: String, command: String)] {
         let fm = FileManager.default
         func exists(_ relativePath: String) -> Bool {
             fm.fileExists(atPath: gitRoot.appendingPathComponent(relativePath).path)
         }
-        var checks: [(name: String, command: String)] = []
+        // `key` is the stage's stable identity (`LoopStage.defaultKey`) — it
+        // must never change once shipped, or every saved config's pinned stage
+        // is orphaned and re-appended. `name` is just the initial display name.
+        var checks: [(key: String, name: String, command: String)] = []
         if exists("extension/tests/agent-skills.test.mjs") {
-            checks.append(("Skills", "cd extension && node --test tests/agent-skills.test.mjs "
+            checks.append(("skills", "Skills", "cd extension && node --test tests/agent-skills.test.mjs "
                 + "tests/agent-skill-telemetry.test.mjs tests/skill-library.test.mjs "
                 + "tests/install-project-skills.test.mjs tests/task-skill-routing.test.mjs"))
         }
         if exists("extension/tests/plugins-loader.test.mjs") {
-            checks.append(("Plugins", "cd extension && node --test tests/plugins-loader.test.mjs "
+            checks.append(("plugins", "Plugins", "cd extension && node --test tests/plugins-loader.test.mjs "
                 + "tests/plugins-installer.test.mjs"))
         }
         if exists("extension/tests/box-connector.test.mjs") {
-            checks.append(("Connectors", "cd extension && node --test tests/box-connector.test.mjs "
+            checks.append(("connectors", "Connectors", "cd extension && node --test tests/box-connector.test.mjs "
                 + "tests/box-routes.test.mjs tests/slack-source.test.mjs tests/slack-oauth.test.mjs "
                 + "tests/slack-oauth-routes.test.mjs tests/email-source.test.mjs "
                 + "tests/scip-connector.test.mjs tests/scip-scanner.test.mjs "
                 + "tests/git-connector-chunking.test.mjs"))
         }
         if exists("extension/tests/dispatch-preview.test.mjs") {
-            checks.append(("GitHub dispatch", "cd extension && node --test tests/dispatch-concurrency.test.mjs "
+            checks.append(("github-dispatch", "GitHub dispatch", "cd extension && node --test tests/dispatch-concurrency.test.mjs "
                 + "tests/dispatch-preview.test.mjs tests/github-pr-secrets.test.mjs "
                 + "tests/outcome-dispatch-sentinel.test.mjs"))
         }
         if exists("extension/package.json") {
-            checks.append(("Backend", "cd extension && npm test"))
+            checks.append(("backend", "Backend", "cd extension && npm test"))
         }
         if let makefile = try? String(contentsOf: gitRoot.appendingPathComponent("Makefile"), encoding: .utf8),
            makefile.range(of: #"(?m)^test-shared-protocol:"#, options: .regularExpression) != nil {
-            checks.append(("iOS ↔ Mac shared protocol", "make test-shared-protocol"))
+            checks.append(("shared-protocol", "iOS ↔ Mac shared protocol", "make test-shared-protocol"))
         }
         if exists("mac/Package.swift") {
-            checks.append(("Mac app", "cd mac && swift test"))
+            checks.append(("mac-app", "Mac app", "cd mac && swift test"))
         }
         return checks
     }
@@ -90,18 +94,33 @@ enum LoopStageDetector {
     static func ensureDefaultStages(in config: LoopEngineConfig, gitRoot: URL?) -> LoopEngineConfig {
         var stages = config.stages
         for def in defaultStages(gitRoot: gitRoot) {
-            // "Test" predates every other `.shellCommand` default and has
-            // always been matched by kind alone, so a project that renamed
-            // it (e.g. to "My Tests") keeps its pinned status and its custom
-            // command. Every check added since (Skills, Plugins, Connectors,
-            // …) has no such history to preserve, and kind alone can no
-            // longer disambiguate once there is more than one `.shellCommand`
-            // default — so those match by exact name instead.
-            let matches: (LoopStage) -> Bool = def.name == "Test"
-                ? { $0.kind == def.kind }
-                : { $0.kind == def.kind && $0.name == def.name }
+            // Primary match: the stable `defaultKey`. This is what makes a
+            // pinned default survive a RENAME — matching on the display name
+            // meant renaming a (possibly disabled) default orphaned it, and
+            // a fresh enabled copy was appended on the next load.
+            //
+            // Legacy fallback, for stages saved before `defaultKey` existed
+            // (restricted to key-less stages so it can never steal a stage
+            // that already carries a different default's identity):
+            // "Test" predates every other `.shellCommand` default and was
+            // always matched by kind alone, so a renamed Test keeps its
+            // pinned status; the System Check stages match by exact name.
+            // Whichever way a stage matches, its key is stamped, so every
+            // config migrates to key-matching on first load.
+            let matches: (LoopStage) -> Bool
+            if stages.contains(where: { $0.defaultKey == def.defaultKey }) {
+                matches = { $0.defaultKey == def.defaultKey }
+            } else if def.defaultKey == "test" || def.kind == .regressionSweep {
+                // Kind-alone is unambiguous for these two: there is exactly one
+                // Test default and one Regression default, so even a legacy
+                // stage renamed before keys existed is recovered, not duplicated.
+                matches = { $0.kind == def.kind && $0.defaultKey == nil }
+            } else {
+                matches = { $0.kind == def.kind && $0.name == def.name && $0.defaultKey == nil }
+            }
             if let idx = stages.firstIndex(where: matches) {
                 stages[idx].isDefault = true
+                stages[idx].defaultKey = def.defaultKey
             } else {
                 stages.append(def)
             }

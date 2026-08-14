@@ -203,6 +203,64 @@ final class LoopStageDetectorTests: XCTestCase {
         XCTAssertEqual(plugins?.isDefault, true)
     }
 
+    /// The exact bug `defaultKey` exists to prevent: a pinned default that
+    /// the user disabled AND renamed must stay pinned-and-disabled — before
+    /// key matching, the rename orphaned it and a fresh ENABLED copy was
+    /// appended on the next load, silently defeating the disable.
+    func testRenamedDisabledDefaultStaysPinnedAndIsNotDuplicated() throws {
+        try writeNested("extension/tests/agent-skills.test.mjs")
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil,
+                      order: 0, isDefault: true, defaultKey: "regression"),
+            LoopStage(id: "s1", name: "Skills (off, too slow)", kind: .shellCommand,
+                      command: "custom skills cmd", order: 1, isDefault: true,
+                      enabled: false, defaultKey: "skills"),
+        ])
+        let ensured = LoopStageDetector.ensureDefaultStages(in: config, gitRoot: tempDir)
+        let skillStages = ensured.stages.filter { $0.defaultKey == "skills" }
+        XCTAssertEqual(skillStages.count, 1, "the renamed stage must be re-pinned, not duplicated")
+        XCTAssertEqual(skillStages.first?.name, "Skills (off, too slow)")
+        XCTAssertEqual(skillStages.first?.enabled, false)
+        XCTAssertEqual(skillStages.first?.command, "custom skills cmd")
+    }
+
+    /// Configs saved before `defaultKey` existed migrate on load: the legacy
+    /// name/kind match still finds each stage, and the key is stamped so
+    /// every later load matches by key (making renames safe from then on).
+    func testEnsureDefaultStagesStampsKeysOntoLegacyStages() throws {
+        try writeNested("extension/tests/agent-skills.test.mjs")
+        try writeNested("Package.swift")   // detectable test tooling → a Test default
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil, order: 0),
+            LoopStage(id: "t1", name: "My Tests", kind: .shellCommand, command: "swift test", order: 1),
+            LoopStage(id: "s1", name: "Skills", kind: .shellCommand, command: "custom skills cmd", order: 2),
+        ])
+        let ensured = LoopStageDetector.ensureDefaultStages(in: config, gitRoot: tempDir)
+        XCTAssertEqual(ensured.stages.first { $0.id == "r1" }?.defaultKey, "regression")
+        // Test's legacy rule is kind-alone, so the renamed stage still migrates.
+        XCTAssertEqual(ensured.stages.first { $0.id == "t1" }?.defaultKey, "test")
+        XCTAssertEqual(ensured.stages.first { $0.id == "s1" }?.defaultKey, "skills")
+        XCTAssertEqual(ensured.stages.count, 3, "no defaults were appended — all matched in place")
+    }
+
+    /// A stage carrying one default's key must never be claimed by ANOTHER
+    /// default's legacy fallback — the key-less restriction on the fallback.
+    func testLegacyFallbackCannotStealAKeyedStage() throws {
+        try writeNested("Package.swift")   // Test default detected (kind-alone legacy rule)
+        let config = LoopEngineConfig(stages: [
+            // A shellCommand stage that IS the skills default (keyed), and no
+            // key-less shell stage at all: Test's kind-alone fallback would
+            // have matched it before the key restriction.
+            LoopStage(id: "s1", name: "Skills", kind: .shellCommand,
+                      command: "custom skills cmd", order: 0, defaultKey: "skills"),
+        ])
+        let ensured = LoopStageDetector.ensureDefaultStages(in: config, gitRoot: tempDir)
+        XCTAssertEqual(ensured.stages.first { $0.id == "s1" }?.defaultKey, "skills",
+                       "the keyed stage keeps its own identity")
+        XCTAssertNotNil(ensured.stages.first { $0.defaultKey == "test" && $0.id != "s1" },
+                        "a real Test default is appended instead of stealing the skills stage")
+    }
+
     /// Disabling is the sanctioned escape hatch for pinned default stages —
     /// so re-pinning on load must preserve `enabled = false`, or every load
     /// would silently switch a deliberately-disabled default back on.

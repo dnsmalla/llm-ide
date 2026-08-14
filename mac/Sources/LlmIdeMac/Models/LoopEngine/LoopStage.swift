@@ -69,6 +69,15 @@ struct LoopStage: Identifiable, Codable, Equatable {
     /// `ensureDefaultStages` pins matches in place without touching this flag,
     /// so a disabled default stays disabled across loads.
     var enabled: Bool = true
+    /// Stable identity of the detector default this stage IS, or `nil` for a
+    /// user-added stage. `ensureDefaultStages` matches on this first, so
+    /// renaming a pinned default (including a deliberately-disabled one) can
+    /// no longer make the detector re-append a fresh enabled copy — the bug
+    /// that name-based matching invited. Stamped onto legacy stages the first
+    /// time they are matched by the old name/kind rules, so existing configs
+    /// migrate on load. Cleared on Duplicate: a copy must not claim the
+    /// default's identity.
+    var defaultKey: String? = nil
     /// Whether this stage's failure gates the run. Defaults to `.blocking`, so
     /// every stage that existed before this field was introduced keeps its
     /// original behaviour.
@@ -81,8 +90,8 @@ struct LoopStage: Identifiable, Codable, Equatable {
     // Explicit memberwise initializer (preserved for existing call sites)
     init(id: String = UUID().uuidString, name: String, kind: Kind, command: String? = nil, order: Int,
          skillId: String? = nil, targetPath: String? = nil, outputPath: String? = nil, prompt: String? = nil,
-         isDefault: Bool = false, enabled: Bool = true, severity: LoopStageSeverity = .blocking,
-         timeoutSeconds: Int? = nil) {
+         isDefault: Bool = false, enabled: Bool = true, defaultKey: String? = nil,
+         severity: LoopStageSeverity = .blocking, timeoutSeconds: Int? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
@@ -94,6 +103,7 @@ struct LoopStage: Identifiable, Codable, Equatable {
         self.prompt = prompt
         self.isDefault = isDefault
         self.enabled = enabled
+        self.defaultKey = defaultKey
         self.severity = severity
         self.timeoutSeconds = timeoutSeconds
     }
@@ -102,7 +112,7 @@ struct LoopStage: Identifiable, Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, kind, command, order, skillId, targetPath, outputPath, prompt, isDefault
-        case enabled, severity, timeoutSeconds
+        case enabled, defaultKey, severity, timeoutSeconds
     }
 
     /// Every field added after the first shipped version MUST be decoded with
@@ -124,6 +134,7 @@ struct LoopStage: Identifiable, Codable, Equatable {
         prompt = try container.decodeIfPresent(String.self, forKey: .prompt)
         isDefault = try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        defaultKey = try container.decodeIfPresent(String.self, forKey: .defaultKey)
         severity = try container.decodeIfPresent(LoopStageSeverity.self, forKey: .severity) ?? .blocking
         timeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .timeoutSeconds)
     }

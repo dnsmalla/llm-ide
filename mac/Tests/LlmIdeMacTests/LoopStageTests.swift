@@ -70,6 +70,22 @@ final class LoopStageTests: XCTestCase {
         XCTAssertTrue(decoded.enabled)
     }
 
+    func testOldPayloadWithoutDefaultKeyDecodesNil() throws {
+        let json = """
+        {"id":"t1","name":"Test","kind":"shellCommand","command":"swift test","order":1}
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(LoopStage.self, from: json)
+        XCTAssertNil(decoded.defaultKey)
+    }
+
+    func testDefaultKeyRoundTripsThroughJSON() throws {
+        let stage = LoopStage(id: "s1", name: "Skills", kind: .shellCommand,
+                              command: "cmd", order: 1, defaultKey: "skills")
+        let decoded = try JSONDecoder().decode(LoopStage.self, from: JSONEncoder().encode(stage))
+        XCTAssertEqual(decoded, stage)
+        XCTAssertEqual(decoded.defaultKey, "skills")
+    }
+
     func testEnabledFalseRoundTripsThroughJSON() throws {
         let stage = LoopStage(id: "t1", name: "Test", kind: .shellCommand,
                               command: "swift test", order: 1, enabled: false)
