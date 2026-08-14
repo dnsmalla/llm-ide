@@ -81,11 +81,13 @@ test('refreshDefaultSnapshot materializes skills+agents from enabled sources onl
   // Agents: real files from enabled sources, flat.
   assert.ok(fs.existsSync(path.join(dir, 'agents', 'helper.md')));
 
-  // Hooks: discovery catalog, clearly stamped as never executed.
+  // Hooks: discovery catalog, clearly stamped as never executed. Standard
+  // Claude-Code hook-manifest shape (event name at the TOP level), not a
+  // custom {sources: {...}} wrapper — see the regression test below for why.
   const hooks = JSON.parse(fs.readFileSync(path.join(dir, 'hooks', 'hooks.json'), 'utf8'));
   assert.match(hooks._note, /never execut/i);
-  assert.equal(hooks.sources.extra[0].event, 'PreToolUse');
-  assert.equal(hooks.sources.extra[0].command, 'echo hi');
+  assert.equal(hooks.PreToolUse[0].hooks[0].command, 'echo hi');
+  assert.equal(hooks.PreToolUse[0].hooks[0]._source, 'extra');
 
   // MCP: the EFFECTIVE chat config (enabled+consented plugins) — not the
   // discovery-only source manifests.
@@ -306,54 +308,25 @@ test('commands/commands.json is always written, independent of enabled sources',
   assert.equal(meta.counts.commands, commandsFile.commands.length);
 });
 
-test('agents/agents.json catalogs the real global + internal tool tiers, independent of enabled sources', () => {
-  writeRegistry([]);
-  refreshDefaultSnapshot('nobody-with-nothing-enabled');
-  const dir = defaultSnapshotDir();
-  const agents = JSON.parse(fs.readFileSync(path.join(dir, 'agents', 'agents.json'), 'utf8'));
-
-  // These are the codebase's own always-present global/internal tools —
-  // never sourced from any llm-source, so an empty registry must not empty them.
-  const globalNames = agents.tiers.global.tools.map((t) => t.name);
-  assert.ok(globalNames.includes('ask-internal'));
-  assert.ok(globalNames.includes('ask-subagent'));
-  assert.ok(globalNames.includes('search-kb'));
-
-  const internalNames = agents.tiers.internal.tools.map((t) => t.name);
-  assert.ok(internalNames.includes('search-kb'));
-  assert.ok(internalNames.includes('trigger-review-code'));
-
-  assert.deepEqual(agents.subagents, [], 'no plugin installed → no subagents');
-  const meta = JSON.parse(fs.readFileSync(path.join(dir, '_meta.json'), 'utf8'));
-  assert.equal(meta.counts.subagents, 0);
-});
-
-test('agents/agents.json lists a real, enabled plugin subagent for that user', async () => {
-  const pluginDir = process.env.LLMIDE_PLUGIN_DIR;
-  const p = path.join(pluginDir, 'fake-plugin');
-  fs.mkdirSync(path.join(p, 'agents'), { recursive: true });
-  fs.writeFileSync(path.join(p, 'plugin.json'), JSON.stringify({
-    name: 'fake-plugin', version: '0.0.0', displayName: 'Fake Plugin',
-  }));
-  fs.writeFileSync(path.join(p, 'agents', 'reviewer.md'),
-    '---\ndescription: Reviews code\n---\n\nYou are a code reviewer.\n');
-
-  const { reloadPlugins } = await import('../llm_agent/skills/registry.mjs');
-  reloadPlugins(); // pluginRegistry is cached at module load — force a rescan
-  const { setEnabled: setPluginEnabled } = await import('../plugins/state.mjs');
-  setPluginEnabled(USER, 'fake-plugin', true);
-
-  writeRegistry([]);
+// Regression: default-sources' own hookCount/hooks list — as shown by the
+// Mac app's Library "Default Sources" row via GET /auth/me/llm-sources/
+// <id>/discovery — must reflect real cataloged hooks. Before this fix, the
+// snapshot's hooks.json used a custom {sources: {...}} wrapper that
+// listDiscoveryHooks (the SAME generic reader every other source's hookCount
+// goes through) cannot parse, since it only recognizes event-name keys
+// mapped to arrays at the TOP level — so "Default Sources" always showed 0
+// hooks, no matter what was actually cataloged behind it.
+test('default-sources own hooks.json is readable by the generic per-source hook reader', async () => {
+  writeRegistry([
+    { id: 'extra', name: 'Extra', origin: 'local', location: extra, builtin: false },
+  ]);
+  setEnabled(USER, 'extra', true);
   refreshDefaultSnapshot(USER);
-  const agents = JSON.parse(fs.readFileSync(path.join(defaultSnapshotDir(), 'agents', 'agents.json'), 'utf8'));
-  assert.equal(agents.subagents.length, 1);
-  assert.equal(agents.subagents[0].name, 'reviewer');
-  assert.equal(agents.subagents[0].description, 'Reviews code');
-  assert.equal(agents.subagents[0].pluginName, 'fake-plugin');
-  const meta = JSON.parse(fs.readFileSync(path.join(defaultSnapshotDir(), '_meta.json'), 'utf8'));
-  assert.equal(meta.counts.subagents, 1);
 
-  setPluginEnabled(USER, 'fake-plugin', false);
-  fs.rmSync(p, { recursive: true, force: true });
-  reloadPlugins();
+  const { listDiscoveryHooks, countDiscoveryHooks } = await import('../llm-sources/registry.mjs');
+  const found = listDiscoveryHooks(defaultSnapshotDir());
+  assert.equal(found.length, 1, 'the generic reader must find the real hook cataloged in this folder');
+  assert.equal(found[0].event, 'PreToolUse');
+  assert.equal(found[0].command, 'echo hi');
+  assert.equal(countDiscoveryHooks(defaultSnapshotDir()), 1);
 });

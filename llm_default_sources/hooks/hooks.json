@@ -1,4 +1,3 @@
 {
-  "_note": "Hooks catalogued from enabled sources — DISCOVERY ONLY. LLM-IDE never executes these commands.",
-  "sources": {}
+  "_note": "Hooks catalogued from enabled sources — DISCOVERY ONLY. LLM-IDE never executes these commands. Each hook entry carries its originating source id as `_source`."
 }
