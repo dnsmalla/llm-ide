@@ -71,13 +71,15 @@ test('refreshDefaultSnapshot materializes skills+agents from enabled sources onl
   const summary = refreshDefaultSnapshot(USER);
   const dir = defaultSnapshotDir();
 
-  // Skills: enabled sources copied as real files, per-source subfolder.
-  assert.ok(fs.existsSync(path.join(dir, 'skills', BUILTIN_ID, 'demo', 'SKILL.md')));
-  assert.ok(fs.existsSync(path.join(dir, 'skills', 'extra', 'multi', 'SKILL.md')));
+  // Skills: enabled sources copied as real files, FLAT (no per-source
+  // subfolder — this folder is itself read back as the `default-sources`
+  // llm-source, which expects the same one-level shape every source uses).
+  assert.ok(fs.existsSync(path.join(dir, 'skills', 'demo', 'SKILL.md')));
+  assert.ok(fs.existsSync(path.join(dir, 'skills', 'multi', 'SKILL.md')));
   assert.ok(!fs.existsSync(path.join(dir, 'skills', 'ghost')), 'disabled source must be excluded');
 
-  // Agents: real files from enabled sources.
-  assert.ok(fs.existsSync(path.join(dir, 'agents', 'extra', 'helper.md')));
+  // Agents: real files from enabled sources, flat.
+  assert.ok(fs.existsSync(path.join(dir, 'agents', 'helper.md')));
 
   // Hooks: discovery catalog, clearly stamped as never executed.
   const hooks = JSON.parse(fs.readFileSync(path.join(dir, 'hooks', 'hooks.json'), 'utf8'));
@@ -103,9 +105,9 @@ test('rebuild removes stale entries when a source is disabled', () => {
   setEnabled(USER, 'extra', false);
   refreshDefaultSnapshot(USER);
   const dir = defaultSnapshotDir();
-  assert.ok(!fs.existsSync(path.join(dir, 'skills', 'extra')), 'stale skills must be gone');
-  assert.ok(!fs.existsSync(path.join(dir, 'agents', 'extra')), 'stale agents must be gone');
-  assert.ok(fs.existsSync(path.join(dir, 'skills', BUILTIN_ID, 'demo', 'SKILL.md')),
+  assert.ok(!fs.existsSync(path.join(dir, 'skills', 'multi')), 'stale skills must be gone');
+  assert.ok(!fs.existsSync(path.join(dir, 'agents', 'helper.md')), 'stale agents must be gone');
+  assert.ok(fs.existsSync(path.join(dir, 'skills', 'demo', 'SKILL.md')),
     'still-enabled source survives');
 });
 
@@ -125,7 +127,7 @@ test('runtime-family skills are included alongside skills-family', () => {
     '---\nname: late-skill\ndescription: r\n---\n\n# late\n');
   setEnabled(USER, 'extra', true);
   refreshDefaultSnapshot(USER);
-  assert.ok(fs.existsSync(path.join(defaultSnapshotDir(), 'skills', 'extra', 'late-skill', 'SKILL.md')),
+  assert.ok(fs.existsSync(path.join(defaultSnapshotDir(), 'skills', 'late-skill', 'SKILL.md')),
     'runtime/ family skill must be copied too');
   fs.rmSync(path.join(extra, 'runtime'), { recursive: true, force: true });
 });
@@ -136,7 +138,7 @@ test('same skill name in skills/ and runtime/ keeps skills-family, records the d
     '---\nname: multi\ndescription: runtime copy\n---\n\n# multi (runtime)\n');
   setEnabled(USER, 'extra', true);
   refreshDefaultSnapshot(USER);
-  const copied = fs.readFileSync(path.join(defaultSnapshotDir(), 'skills', 'extra', 'multi', 'SKILL.md'), 'utf8');
+  const copied = fs.readFileSync(path.join(defaultSnapshotDir(), 'skills', 'multi', 'SKILL.md'), 'utf8');
   assert.match(copied, /description: m\n/, 'skills-family copy must win');
   const meta = JSON.parse(fs.readFileSync(path.join(defaultSnapshotDir(), '_meta.json'), 'utf8'));
   assert.ok(meta.skipped.some((s) => s.source === 'extra' && s.skill === 'multi'
@@ -150,7 +152,7 @@ test('over-budget skills are skipped and recorded, not copied', () => {
   fs.writeFileSync(big, Buffer.alloc(1024 * 1024)); // 1 MiB
   setEnabled(USER, 'extra', true);
   const r = refreshDefaultSnapshot(USER, { maxSkillBytes: 1024, maxSkillFiles: 100, maxTotalBytes: 1024 * 1024 });
-  assert.ok(!fs.existsSync(path.join(defaultSnapshotDir(), 'skills', 'extra', 'multi', 'blob.bin')),
+  assert.ok(!fs.existsSync(path.join(defaultSnapshotDir(), 'skills', 'multi', 'blob.bin')),
     'over-budget skill content must not be copied');
   const meta = JSON.parse(fs.readFileSync(path.join(defaultSnapshotDir(), '_meta.json'), 'utf8'));
   assert.ok(meta.skipped.some((s) => s.skill === 'multi' && /size budget/.test(s.reason)));
@@ -183,9 +185,9 @@ test('cross-source duplicate skill names are deduplicated (first enabled source 
   refreshDefaultSnapshot(USER);
   const dir = defaultSnapshotDir();
   assert.equal(dir, path.join(tmpRoot, 'repo', 'llm_default_sources'), 'repo location');
-  const copy = fs.readFileSync(path.join(dir, 'skills', 'extra', 'multi', 'SKILL.md'), 'utf8');
+  const copy = fs.readFileSync(path.join(dir, 'skills', 'multi', 'SKILL.md'), 'utf8');
   assert.match(copy, /description: m\n/, 'earlier source in registry order wins');
-  assert.ok(!fs.existsSync(path.join(dir, 'skills', 'other', 'multi')), 'duplicate copy dropped');
+  assert.ok(!fs.existsSync(path.join(dir, 'skills', 'other')), 'duplicate copy dropped, no other-sourced folder at all');
   const meta = JSON.parse(fs.readFileSync(path.join(dir, '_meta.json'), 'utf8'));
   assert.ok(meta.skipped.some((x) => x.source === 'other' && x.skill === 'multi'));
 });
@@ -208,4 +210,31 @@ test('MCP plugin env vars are carried into the snapshot .mcp.json', () => {
   refreshDefaultSnapshot(USER);
   const mcp = JSON.parse(fs.readFileSync(path.join(defaultSnapshotDir(), '.mcp.json'), 'utf8'));
   assert.equal(mcp.mcpServers['env-server'].env.TOKEN, 'secret');
+});
+
+// Regression: a brand-new user (enabled only in default-sources, per
+// state.mjs listEnabled's fallback) must see the skills that were snapshotted
+// into their own `default-sources` folder. Before the flat-layout fix,
+// default-sources's own location was read back by listSkillLibrary with the
+// SAME one-level expectation every other source uses, but the snapshot wrote
+// a per-source-id subfolder — so this always came back empty regardless of
+// what had been copied in. Exercise the real reader, not just the writer.
+test('the default-sources folder itself is readable by listSkillLibrary (fresh-user path)', async () => {
+  writeRegistry([
+    { id: BUILTIN_ID, name: 'Central Skills', origin: 'builtin', location: fakeRepo, builtin: true },
+  ]);
+  setEnabled(USER, BUILTIN_ID, true);
+  refreshDefaultSnapshot(USER);
+
+  const { listSkillLibrary, _resetSkillLibraryCache } = await import('../llm_agent/skills/skill-library.mjs');
+  const { DEFAULT_SOURCES_ID } = await import('../llm-sources/registry.mjs');
+  writeRegistry([
+    { id: DEFAULT_SOURCES_ID, name: 'Default Sources', origin: 'local', location: defaultSnapshotDir(), builtin: true },
+  ]);
+  _resetSkillLibraryCache();
+  // A never-before-seen userId: listEnabled() falls back to {default-sources}
+  // with no explicit setEnabled call, mirroring a truly fresh install.
+  const { skills } = listSkillLibrary('never-configured-fresh-user');
+  assert.ok(skills.some((s) => s.id === 'skills/demo'),
+    'default-sources must surface the already-snapshotted demo skill to a fresh user');
 });

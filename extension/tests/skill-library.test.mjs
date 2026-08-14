@@ -18,6 +18,14 @@ process.env.NODE_ENV = 'test';
 // seeds the builtin source into the registry on first call.
 const tmpRegRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-sl-reg-'));
 process.env.LLMIDE_PLUGIN_DIR = path.join(tmpRegRoot, 'plugins');
+// Also isolate default-sources' own location (defaultSourcesLocation() falls
+// back to the real repo root otherwise) — seedBuiltinOnce() auto-registers
+// default-sources unconditionally, and since the flat-layout fix its folder
+// is actually readable by listSkillLibrary. Without this, a no-userId call
+// (listSkillLibrary()'s "all sources enabled" test path) would leak the
+// real repo's committed llm_default_sources/skills/* into every assertion
+// here that expects only this file's synthetic fixtures.
+process.env.LLMIDE_REPO_ROOT = tmpRegRoot;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(__dirname, `_skill-library-repo-${process.pid}`);

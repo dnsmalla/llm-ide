@@ -2,15 +2,30 @@
 // use into one browsable folder:
 //
 //   <sourcesDir>/llm_default_sources/
-//   ├── skills/<sourceId>/<skill-name>/…  ← copied (recursively) from each
+//   ├── skills/<skill-name>/…              ← copied (recursively) from each
 //   │                                        ENABLED source (skills/ + runtime/ families)
-//   ├── agents/<sourceId>/<name>.md        ← subagent definition files
+//   ├── agents/<name>.md                    ← subagent definition files
 //   ├── hooks/hooks.json                    ← hooks catalogued from enabled
 //   │                                        sources — DISCOVERY ONLY, never executed
 //   ├── .mcp.json                           ← the EFFECTIVE chat MCP servers
 //   │                                        (enabled+consented MCP plugins), exact
 //   │                                        shape the claude CLI receives
 //   └── _meta.json                          ← generatedAt, userId, counts, skipped[]
+//
+// FLAT layout, not namespaced by source id: this folder is ITSELF registered
+// as the always-on `default-sources` llm-source (see registry.mjs
+// seedBuiltinOnce + state.mjs listEnabled's fallback for a user with no
+// state at all), and every reader of a source's skills/agents (skill-library.mjs,
+// registry.mjs's countDiscoverySkills/listDiscoveryAgents) expects the SAME
+// one-level shape every other source uses (`<location>/skills/<name>/SKILL.md`,
+// `<location>/agents/<name>.md`). A per-source subfolder here would be
+// structurally invisible to those readers — which is exactly what happened
+// before this comment was written: a brand-new user (enabled only in
+// default-sources) saw zero skills. Provenance (which source a copy came
+// from) still lives in _meta.json.skipped and the per-refresh log, just not
+// in the directory shape. Cross-source name collisions are deduped below
+// (first enabled source wins) so flattening never overwrites a different
+// skill/agent silently.
 //
 // Lives in llm_agent/ (not llm-sources/) deliberately: it needs BOTH the
 // llm-sources registry and the MCP plugin state — sibling L3 modules that may
@@ -125,8 +140,11 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
   let totalBytes = 0;
   // Dedup across ALL enabled sources, not just within one: the first source
   // in registry order wins (default-sources is seeded first, then builtin,
-  // then user-added). Chat must never see duplicate skills.
+  // then user-added). Chat must never see duplicate skills. Both sets are
+  // required now that the layout is flat (no per-source subfolder to keep
+  // same-named entries apart) — an agent needs the same guard skills already had.
   const seenSkillNames = new Set();
+  const seenAgentNames = new Set();
 
   for (const src of listSources()) {
     if (!enabled.has(src.id)) continue;
@@ -156,14 +174,21 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
       }
       totalBytes += m.bytes;
 
-      const target = join(staging, 'skills', src.id, name);
+      const target = join(staging, 'skills', name);
       mkdirSync(dirname(target), { recursive: true });
       cpSync(skillDir, target, { recursive: true }); // symlinks preserved — see header
       counts.skills += 1;
     }
 
     for (const agentFile of listAgentFiles(src.location)) {
-      const target = join(staging, 'agents', src.id, basename(agentFile));
+      const agentName = basename(agentFile);
+      if (seenAgentNames.has(agentName)) {
+        skipped.push({ source: src.id, agent: agentName, reason: 'cross-source duplicate — earlier source kept' });
+        continue;
+      }
+      seenAgentNames.add(agentName);
+
+      const target = join(staging, 'agents', agentName);
       mkdirSync(dirname(target), { recursive: true });
       cpSync(agentFile, target);
       counts.agents += 1;

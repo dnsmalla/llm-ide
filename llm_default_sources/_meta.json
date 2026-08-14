@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-14T15:26:24.941Z",
+  "generatedAt": "2026-08-14T22:22:44.391Z",
   "userId": "5de135de64804a0f",
   "description": "Effective chat configuration. skills/ + agents/: copied from ENABLED sources. hooks/: discovery catalog (never executed). .mcp.json: enabled+consented MCP plugins actually passed to the CLI. Single global folder — the last user to trigger a refresh wins (this userId).",
   "counts": {
