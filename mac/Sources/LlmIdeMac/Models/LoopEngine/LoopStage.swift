@@ -61,6 +61,14 @@ struct LoopStage: Identifiable, Codable, Equatable {
     /// always present (re-ensured on load) and cannot be deleted; they remain editable.
     /// User-added stages (the `+` menu, duplicates) are `false`.
     var isDefault: Bool = false
+    /// Whether the runner executes this stage at all. `false` ⇒ skipped entirely:
+    /// not run, not preflighted for approval, never gates the run. This is the
+    /// escape hatch for pinned default stages — they cannot be deleted (the
+    /// detector re-adds them on load), so without this a project whose detector
+    /// finds many defaults could never run a smaller loop.
+    /// `ensureDefaultStages` pins matches in place without touching this flag,
+    /// so a disabled default stays disabled across loads.
+    var enabled: Bool = true
     /// Whether this stage's failure gates the run. Defaults to `.blocking`, so
     /// every stage that existed before this field was introduced keeps its
     /// original behaviour.
@@ -73,7 +81,8 @@ struct LoopStage: Identifiable, Codable, Equatable {
     // Explicit memberwise initializer (preserved for existing call sites)
     init(id: String = UUID().uuidString, name: String, kind: Kind, command: String? = nil, order: Int,
          skillId: String? = nil, targetPath: String? = nil, outputPath: String? = nil, prompt: String? = nil,
-         isDefault: Bool = false, severity: LoopStageSeverity = .blocking, timeoutSeconds: Int? = nil) {
+         isDefault: Bool = false, enabled: Bool = true, severity: LoopStageSeverity = .blocking,
+         timeoutSeconds: Int? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
@@ -84,6 +93,7 @@ struct LoopStage: Identifiable, Codable, Equatable {
         self.outputPath = outputPath
         self.prompt = prompt
         self.isDefault = isDefault
+        self.enabled = enabled
         self.severity = severity
         self.timeoutSeconds = timeoutSeconds
     }
@@ -92,7 +102,7 @@ struct LoopStage: Identifiable, Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, kind, command, order, skillId, targetPath, outputPath, prompt, isDefault
-        case severity, timeoutSeconds
+        case enabled, severity, timeoutSeconds
     }
 
     /// Every field added after the first shipped version MUST be decoded with
@@ -113,7 +123,44 @@ struct LoopStage: Identifiable, Codable, Equatable {
         outputPath = try container.decodeIfPresent(String.self, forKey: .outputPath)
         prompt = try container.decodeIfPresent(String.self, forKey: .prompt)
         isDefault = try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         severity = try container.decodeIfPresent(LoopStageSeverity.self, forKey: .severity) ?? .blocking
         timeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .timeoutSeconds)
+    }
+}
+
+extension LoopStage {
+    /// The runner's canonical execution order: `(order, id)` — `order` values
+    /// can collide (e.g. after a remove + add), and a sort keyed on `order`
+    /// alone isn't stable across call sites. Single source of truth for the
+    /// runner and every view that renders "run order".
+    static func runOrder(_ stages: [LoopStage]) -> [LoopStage] {
+        stages.sorted { ($0.order, $0.id) < ($1.order, $1.id) }
+    }
+
+    /// `stages` with the stage `id` moved by `offset` positions in run order
+    /// (−1 = up, +1 = down), every stage's `order` renumbered to its final
+    /// position. Renumbering all of them — not swapping two `order` values —
+    /// is what makes this correct when orders collide or have gaps.
+    /// Returns `stages` unchanged when `id` is unknown or the move would fall
+    /// off either end.
+    static func moving(_ stages: [LoopStage], id: String, by offset: Int) -> [LoopStage] {
+        var ordered = runOrder(stages)
+        guard let index = ordered.firstIndex(where: { $0.id == id }) else { return stages }
+        let target = index + offset
+        guard ordered.indices.contains(target) else { return stages }
+        ordered.swapAt(index, target)
+        return renumbered(ordered)
+    }
+
+    /// `ordered` with each stage's `order` set to its position. Used after any
+    /// reorder (menu move or list drag) so the persisted `order` values match
+    /// what the user sees.
+    static func renumbered(_ ordered: [LoopStage]) -> [LoopStage] {
+        ordered.enumerated().map { position, stage in
+            var copy = stage
+            copy.order = position
+            return copy
+        }
     }
 }

@@ -136,8 +136,10 @@ Two details that matter more than they look:
 
 Applying regenerates every stage id, because ids key `VerifyApprovalStore`
 approvals: reusing them would let a command approved in one project run unapproved
-in another. Apply does not save, so a user can try a recipe against what they had
-and switch away without having overwritten their config.
+in another. Apply persists like any other edit, via the Loop page's debounced
+autosave — the earlier design deliberately kept Apply unsaved so recipes could be
+compared, but edits silently dying on a project switch proved the worse trap, so
+the TEMPLATE section now warns that applying replaces and saves.
 
 ## Stages
 
@@ -155,8 +157,14 @@ always, plus a **Test** stage when it recognises the project's test tooling
 (`swift test`, `npm test`, `make test`, `pytest`). Both remain editable; neither
 can be deleted.
 
-Two per-stage properties shape how a stage participates:
+Three per-stage properties shape how a stage participates:
 
+- **`enabled`** — `true` (default) or `false`. A disabled stage is skipped
+  entirely: not run, not preflighted for approval, never gating the run. This is
+  the escape hatch for pinned default stages, which cannot be deleted (the
+  detector re-adds them on load) — disabling is how a project runs a smaller
+  loop than its detected defaults. `ensureDefaultStages` preserves the flag, so
+  a disabled default stays disabled across loads.
 - **`severity`** — `blocking` (default) or `advisory`. An advisory stage runs, is
   logged, and is journalled, but never triggers repair, never counts toward a
   stall, and never fails the run. This is what makes it safe to put a linter or a

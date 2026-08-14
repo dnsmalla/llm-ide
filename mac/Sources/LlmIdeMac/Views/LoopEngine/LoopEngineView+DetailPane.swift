@@ -38,9 +38,15 @@ extension LoopEngineView {
                     .foregroundStyle(t.text)
                     .fixedSize(horizontal: false, vertical: true)
 
+                // Numbered by RUN position (disabled stages get "–"), so the
+                // printed numbers line up with the order the log will show —
+                // a disabled stage must not shift every later stage's number.
+                let ordered = sortedStages
+                let runNumbers = Dictionary(uniqueKeysWithValues:
+                    ordered.filter(\.enabled).enumerated().map { ($0.element.id, $0.offset + 1) })
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(sortedStages.enumerated()), id: \.element.id) { index, stage in
-                        overviewRow(index: index + 1, stage: stage)
+                    ForEach(ordered) { stage in
+                        overviewRow(index: runNumbers[stage.id], stage: stage)
                     }
                 }
                 .padding(.top, 2)
@@ -62,12 +68,13 @@ extension LoopEngineView {
         }
     }
 
-    /// One pipeline row: order, name, role, and what it actually executes.
+    /// One pipeline row: run position (`nil` for a disabled stage), name, role,
+    /// and what it actually executes.
     @ViewBuilder
-    private func overviewRow(index: Int, stage: LoopStage) -> some View {
+    private func overviewRow(index: Int?, stage: LoopStage) -> some View {
         let t = theme.current
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("\(index)")
+            Text(index.map(String.init) ?? "–")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(t.textMuted)
                 .frame(width: 14, alignment: .trailing)
@@ -76,6 +83,9 @@ extension LoopEngineView {
                 .foregroundStyle(stage.id == selectedStageId ? t.accent : t.text)
             badge(stage.kind == .skill ? "generate" : "verify",
                   color: stage.kind == .skill ? t.accent2 : t.accent)
+            if !stage.enabled {
+                badge("off", color: t.textMuted)
+            }
             if stage.severity == .advisory {
                 badge("advisory", color: t.textMuted)
             }
@@ -90,6 +100,7 @@ extension LoopEngineView {
 
     /// What the stage will actually run, or the reason it cannot.
     private func stageExecutionDetail(_ stage: LoopStage) -> String {
+        guard stage.enabled else { return "disabled — skipped" }
         switch stage.kind {
         case .regressionSweep:
             return "system/faults/"
@@ -137,16 +148,25 @@ extension LoopEngineView {
     /// One sentence naming the generate/verify shape of the run, so the pipeline
     /// list below has a frame to sit in.
     private var pipelineSummary: String {
-        let verify = sortedStages.filter { $0.kind != .skill && $0.severity == .blocking }.count
-        let generate = sortedStages.filter { $0.kind == .skill }.count
-        let advisory = sortedStages.filter { $0.severity == .advisory }.count
+        // Disabled stages take no part in a run, so they must not count toward
+        // the shape — a summary claiming "3 gating checks" when two are off
+        // would misdescribe the run this pane exists to describe.
+        let active = sortedStages.filter(\.enabled)
+        let verify = active.filter { $0.kind != .skill && $0.severity == .blocking }.count
+        let generate = active.filter { $0.kind == .skill }.count
+        let advisory = active.filter { $0.severity == .advisory }.count
+        let disabled = sortedStages.count - active.count
 
         var parts: [String] = []
         if generate > 0 { parts.append("\(generate) generate step\(generate == 1 ? "" : "s")") }
         parts.append("\(verify) gating check\(verify == 1 ? "" : "s")")
         if advisory > 0 { parts.append("\(advisory) advisory") }
+        if disabled > 0 { parts.append("\(disabled) disabled") }
         let shape = parts.joined(separator: " · ")
 
+        if active.isEmpty {
+            return "\(shape). Every stage is disabled — the run will refuse to start until one is enabled."
+        }
         if verify == 0 {
             // Worth saying plainly: with nothing gating, the loop cannot fail and
             // therefore cannot repair — it will report success after one pass.
@@ -211,16 +231,15 @@ extension LoopEngineView {
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(selected.config.stages
-                        .sorted { ($0.order, $0.id) < ($1.order, $1.id) }
-                        .map(\.name)
+                Text(LoopStage.runOrder(selected.config.stages)
+                        .map { $0.enabled ? $0.name : "\($0.name) (off)" }
                         .joined(separator: " → "))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(t.textMuted)
                 // Applying replaces the stage list wholesale, which also drops the
                 // approvals keyed to the old stage ids — say so before the click,
                 // not after.
-                Text("Applying replaces the current stages and budgets. Shell stages will need approving again.")
+                Text("Applying replaces the current stages and budgets and saves shortly after. Shell stages will need approving again.")
                     .font(Typography.caption)
                     .foregroundStyle(t.accent4)
                     .fixedSize(horizontal: false, vertical: true)
@@ -247,12 +266,10 @@ extension LoopEngineView {
             Text("Budgets — a run stops at whichever it hits first.")
                 .font(Typography.caption)
                 .foregroundStyle(t.textMuted)
-            Stepper("Max iterations: \(maxIterations)", value: $maxIterations, in: 1...20)
-            Stepper("Stop after \(consecutiveFailureStop) non-improving failures",
-                    value: $consecutiveFailureStop, in: 1...10)
-            Stepper(wallClockMinutes == 0 ? "Time budget: none" : "Time budget: \(wallClockMinutes) min",
-                    value: $wallClockMinutes, in: 0...480, step: 15)
-            Stepper("Max repairs per stage: \(maxRepairsPerStage)", value: $maxRepairsPerStage, in: 1...10)
+            LoopBudgetsEditor(maxIterations: $maxIterations,
+                              consecutiveFailureStop: $consecutiveFailureStop,
+                              wallClockMinutes: $wallClockMinutes,
+                              maxRepairsPerStage: $maxRepairsPerStage)
             Text("A non-improving failure is one whose failing-test count did not shrink; for runners we can't parse, one whose output is unchanged.")
                 .font(Typography.caption)
                 .foregroundStyle(t.textMuted)
@@ -275,10 +292,15 @@ extension LoopEngineView {
                 .foregroundStyle(protectedPathPolicy == .off ? t.accent4 : t.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Button("Save") { saveConfig() }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .padding(.top, 2)
+            HStack(spacing: Spacing.sm) {
+                Button("Save") { saveConfig() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                Text("Changes save automatically; Save writes immediately — including states autosave skips, like an emptied stage list.")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+            }
+            .padding(.top, 2)
         }
         .font(Typography.caption)
     }

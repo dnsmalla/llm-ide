@@ -222,7 +222,7 @@ The agentic verify-and-repair loop. Design rationale + the four-level model: [Lo
 
 `LoopEngineRunner` (`Services/LoopEngine/LoopEngineRunner.swift`, `@MainActor`) repeats an ordered `[LoopStage]` until every stage passes or a budget stops it. Each iteration re-runs every stage from the top. A process-wide `activeRoots` set, keyed on the symlink-resolved git root, rejects a concurrent run against the same working tree whichever trigger started it (`run` returns `nil`).
 
-Stage kinds (`Models/LoopEngine/LoopStage.swift`) — `regressionSweep` (via `RegressionSweepRunning` → `RegressionRunner`), `shellCommand` (via `FaultVerifier`, gated by `VerifyApprovalStore` in a preflight pass before any iteration), and `skill` (a generate step via `LoopSkillExecuting`). Per stage: `severity` (`blocking` | `advisory` — an advisory failure is logged and journalled but never repairs, stalls, or fails the run) and `timeoutSeconds` (override of the runner's 600 s default).
+Stage kinds (`Models/LoopEngine/LoopStage.swift`) — `regressionSweep` (via `RegressionSweepRunning` → `RegressionRunner`), `shellCommand` (via `FaultVerifier`, gated by `VerifyApprovalStore` in a preflight pass before any iteration), and `skill` (a generate step via `LoopSkillExecuting`; preflight also rejects a skill stage with no `skillId` chosen). Per stage: `enabled` (default `true`; a disabled stage is skipped entirely — not run, not preflighted, never gating — the escape hatch for pinned default stages, which cannot be deleted), `severity` (`blocking` | `advisory` — an advisory failure is logged and journalled but never repairs, stalls, or fails the run) and `timeoutSeconds` (override of the runner's 600 s default).
 
 Progress + repair:
 

@@ -217,25 +217,57 @@ final class LoopEngineRunner: ObservableObject {
             currentRunContext = nil
         }
 
-        let orderedStages = config.stages.sorted { ($0.order, $0.id) < ($1.order, $1.id) }
-        appendLog(.info, "Loop started · \(orderedStages.count) stage(s), max \(config.maxIterations) iteration(s)")
+        // Disabled stages are skipped entirely — not run, not preflighted.
+        // Preflighting them anyway would let a disabled stage's missing
+        // command or approval block a run it takes no part in.
+        let orderedStages = LoopStage.runOrder(config.stages.filter(\.enabled))
+        let disabledCount = config.stages.count - orderedStages.count
+        guard !orderedStages.isEmpty else {
+            // Two different user errors, two different fixes — "enable one"
+            // is nonsense advice for a config with no stages at all.
+            let reason = config.stages.isEmpty
+                ? "No stages configured"
+                : "Every stage is disabled — enable at least one"
+            appendLog(.warn, "Loop not run · \(reason)")
+            return await finish(.error(reason),
+                                config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                                projectId: projectId, startedAt: startedAt)
+        }
+        let skippedNote = disabledCount > 0 ? " (\(disabledCount) disabled stage(s) skipped)" : ""
+        appendLog(.info, "Loop started · \(orderedStages.count) stage(s), max \(config.maxIterations) iteration(s)\(skippedNote)")
 
-        // Preflight: every shell-command stage's approval is checked BEFORE
-        // any iteration runs — burning iterations/LLM repair calls on an
-        // earlier stage only to discover a LATER stage is unapproved would
-        // waste both, and per spec, needing approval must not itself
-        // consume an iteration.
-        for stage in orderedStages where stage.kind == .shellCommand {
-            guard let command = Self.validCommand(stage) else {
-                return await finish(.error("Stage \"\(stage.name)\" has no command"),
-                                    config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
-                                    projectId: projectId, startedAt: startedAt)
-            }
-            guard approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: command) else {
-                appendLog(.warn, "  [\(stage.name)] needs approval: \(command)")
-                return await finish(.needsApproval(stageName: stage.name),
-                                    config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
-                                    projectId: projectId, startedAt: startedAt)
+        // Preflight: every stage's static config is checked BEFORE any
+        // iteration runs — burning iterations/LLM repair calls on an
+        // earlier stage only to discover a LATER stage is unapproved or
+        // misconfigured would waste both, and per spec, needing approval
+        // must not itself consume an iteration.
+        for stage in orderedStages {
+            switch stage.kind {
+            case .shellCommand:
+                guard let command = Self.validCommand(stage) else {
+                    return await finish(.error("Stage \"\(stage.name)\" has no command"),
+                                        config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                                        projectId: projectId, startedAt: startedAt)
+                }
+                guard approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: command) else {
+                    appendLog(.warn, "  [\(stage.name)] needs approval: \(command)")
+                    return await finish(.needsApproval(stageName: stage.name),
+                                        config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                                        projectId: projectId, startedAt: startedAt)
+                }
+            case .skill:
+                // A generate stage with no skill chosen would fire a bare
+                // agent call with no skill framing at all — uncontrolled
+                // edits, silently, every iteration. That is a config error
+                // on par with a shell stage with no command.
+                guard let skillId = stage.skillId,
+                      !skillId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    return await finish(.error("Stage \"\(stage.name)\" has no skill chosen"),
+                                        config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                                        projectId: projectId, startedAt: startedAt)
+                }
+            case .regressionSweep:
+                break
             }
         }
 

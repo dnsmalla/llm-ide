@@ -313,6 +313,112 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertTrue(verifier.calls.isEmpty)
     }
 
+    func testDisabledStageIsSkippedEntirelyIncludingPreflight() async {
+        // The disabled stage's command always fails AND is unapproved — if the
+        // runner ran or even preflighted it, the run could not succeed. Skipping
+        // must cover both: a disabled stage takes no part in the run at all.
+        let verifier = StubVerifier { command in
+            command == "broken command" ? VerifyOutcome(exitCode: 1, output: "boom")
+                                        : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let repairer = StubRepairer()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "off1", name: "Broken", kind: .shellCommand,
+                      command: "broken command", order: 0, enabled: false),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 1)
+        ], maxIterations: 5, consecutiveFailureStop: 2)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")])   // "off1" NOT approved
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(verifier.calls, ["swift test"])
+        XCTAssertEqual(repairer.repairCount, 0)
+    }
+
+    func testAllStagesDisabledFailsWithClearError() async {
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let repairer = StubRepairer()
+        let journal = InMemoryJournal()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand,
+                      command: "swift test", order: 0, enabled: false)
+        ], maxIterations: 5, consecutiveFailureStop: 2)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            journal: journal
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        // A run with nothing to execute must refuse loudly, not report the
+        // instant hollow "success" an empty stage loop would produce.
+        XCTAssertEqual(result, .error("Every stage is disabled — enable at least one"))
+        XCTAssertTrue(verifier.calls.isEmpty)
+        // Still journalled — a refused run the user asked for is a run outcome.
+        XCTAssertEqual(journal.written.count, 1)
+        XCTAssertEqual(journal.written.first?.statusCode, "error")
+    }
+
+    func testEmptyStageListFailsWithItsOwnMessage() async {
+        // Distinct from all-disabled: "enable at least one" is nonsense advice
+        // for a config with no stages at all.
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals()
+        )
+        let result = await runner.run(config: LoopEngineConfig(stages: []),
+                                      faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .error("No stages configured"))
+    }
+
+    func testSkillStageWithoutSkillChosenFailsPreflight() async {
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let skillExecutor = StubSkillExecutor()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "s1", name: "Generate", kind: .skill, command: nil, order: 0),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 1)
+        ], maxIterations: 5, consecutiveFailureStop: 2)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor,
+            approvals: makeApprovals(approve: [("t1", "swift test")])
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        // A generate stage with no skill would otherwise fire a bare agent
+        // call with no skill framing — uncontrolled edits, every iteration.
+        XCTAssertEqual(result, .error("Stage \"Generate\" has no skill chosen"))
+        XCTAssertEqual(skillExecutor.callCount, 0)
+        XCTAssertEqual(runner.iteration, 0)
+        XCTAssertTrue(verifier.calls.isEmpty)
+    }
+
+    func testDisabledSkillStageWithoutSkillDoesNotFailPreflight() async {
+        // Disabling is the sanctioned way to park a half-configured stage;
+        // preflight must not reject the run for a stage it will never execute.
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "s1", name: "Generate", kind: .skill, command: nil, order: 0, enabled: false),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 1)
+        ], maxIterations: 5, consecutiveFailureStop: 2)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")])
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .success)
+    }
+
     func testFailingRegressionStageRetriesWithoutCallingStageRepairer() async {
         let repairer = StubRepairer()
         let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }

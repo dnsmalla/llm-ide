@@ -96,8 +96,13 @@ final class NoteLoopRunSummaryWriter: LoopRunSummaryWriting {
         for stage in record.config.stages {
             let role = stage.kind == .skill ? "generate" : "verify"
             let severity = stage.severity == .advisory ? ", advisory" : ""
+            // `enabled == false` is the only skip marker; nil (pre-field
+            // records) means the stage ran normally. Without this, a disabled
+            // stage reads as "ran and was fine" — it appears in the pipeline
+            // but has no row in the iterations table below.
+            let skipped = stage.enabled == false ? ", disabled — skipped" : ""
             let detail = stage.command ?? stage.skillId ?? "fault sweep"
-            md += "- **\(stage.name)** (\(role)\(severity)) — `\(detail)`\n"
+            md += "- **\(stage.name)** (\(role)\(severity)\(skipped)) — `\(detail)`\n"
         }
 
         md += """

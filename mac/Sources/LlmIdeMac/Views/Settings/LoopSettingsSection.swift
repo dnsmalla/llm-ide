@@ -18,14 +18,6 @@ struct LoopSettingsSection: View {
     @State private var defaults = LoopEngineConfig(stages: [])
     @State private var templateCount = (builtIn: 0, saved: 0)
 
-    /// 0 means "no wall-clock limit" — a Stepper cannot express `nil`.
-    private var wallClockMinutes: Binding<Int> {
-        Binding(
-            get: { defaults.wallClockBudgetSeconds.map { Int($0 / 60) } ?? 0 },
-            set: { defaults.wallClockBudgetSeconds = $0 == 0 ? nil : Double($0) * 60 }
-        )
-    }
-
     var body: some View {
         SettingsSectionCard(icon: "repeat.circle", title: "Loop") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -55,16 +47,10 @@ struct LoopSettingsSection: View {
 
                 Divider().padding(.vertical, 2)
 
-                Stepper("Max iterations: \(defaults.maxIterations)",
-                        value: $defaults.maxIterations, in: 1...20)
-                Stepper("Stop after \(defaults.consecutiveFailureStop) non-improving failures",
-                        value: $defaults.consecutiveFailureStop, in: 1...10)
-                Stepper(wallClockMinutes.wrappedValue == 0
-                            ? "Time budget: none"
-                            : "Time budget: \(wallClockMinutes.wrappedValue) min",
-                        value: wallClockMinutes, in: 0...480, step: 15)
-                Stepper("Max repairs per stage: \(defaults.maxRepairsPerStage)",
-                        value: $defaults.maxRepairsPerStage, in: 1...10)
+                LoopBudgetsEditor(maxIterations: $defaults.maxIterations,
+                                  consecutiveFailureStop: $defaults.consecutiveFailureStop,
+                                  wallClockMinutes: LoopBudgetsEditor.wallClockMinutes($defaults),
+                                  maxRepairsPerStage: $defaults.maxRepairsPerStage)
 
                 Divider().padding(.vertical, 2)
 

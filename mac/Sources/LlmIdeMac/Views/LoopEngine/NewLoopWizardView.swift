@@ -44,7 +44,14 @@ struct NewLoopWizardView: View {
     /// test tooling found here", not "nothing configured yet". Cleared as
     /// soon as the user takes manual control by adding a stage.
     @State private var noToolingDetectedForTemplate = false
-    @State private var writeSummaryNote = false
+    /// Budgets, policy, and the output toggle for the config being assembled:
+    /// the selected template's when one is chosen, else the same app-wide
+    /// defaults a brand-new project gets. Held as a genuinely stage-less
+    /// `LoopEngineConfig` — stages live ONLY in `stages` above, so there is no
+    /// second stage list to leak template placeholders — and the Output toggle
+    /// binds `budgets.writeSummaryNote` directly, so deselecting a template
+    /// resets it along with everything else.
+    @State private var budgets = LoopEngineDefaults.newConfig(stages: [])
     @State private var isNamingTemplate = false
     @State private var newTemplateName = ""
     @State private var newTemplateSummary = ""
@@ -81,9 +88,12 @@ struct NewLoopWizardView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(stages.isEmpty)
+                // Gated on an ENABLED stage existing, not just any stage — a
+                // template can carry every stage disabled, and creating that
+                // loop could only ever produce the runner's refusal error.
                 Button("Create Loop") { create() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(stages.isEmpty)
+                    .disabled(!stages.contains(where: \.enabled))
             }
             .padding(Spacing.lg)
         }
@@ -126,6 +136,7 @@ struct NewLoopWizardView: View {
             else {
                 stages = []
                 noToolingDetectedForTemplate = false
+                budgets = LoopEngineDefaults.newConfig(stages: [])
                 return
             }
             // One `applied(to:)` call, not two — `wouldApplyEmpty` would run
@@ -133,7 +144,9 @@ struct NewLoopWizardView: View {
             let applied = template.applied(to: gitRoot)
             noToolingDetectedForTemplate = !template.config.stages.isEmpty && applied.stages.isEmpty
             stages = applied.stages
-            writeSummaryNote = template.config.writeSummaryNote
+            var templateBudgets = template.config
+            templateBudgets.stages = []
+            budgets = templateBudgets
         }
     }
 
@@ -183,13 +196,29 @@ struct NewLoopWizardView: View {
                         .font(Typography.body)
                         .foregroundStyle(t.textMuted)
                 } else {
-                    ForEach(stages.indices, id: \.self) { index in
-                        stageConfigCard(index: index)
+                    // Element bindings, NOT `ForEach(stages.indices, id: \.self)`
+                    // — index identity re-binds every row below a removed one to
+                    // the wrong stage mid-render (a focused TextField bound to
+                    // `$stages[index]` can then read past the end and crash on
+                    // the last row's removal). `$stages` gives stable id
+                    // identity and a direct binding, with no per-row lookup.
+                    ForEach($stages) { $stage in
+                        stageConfigCard(stage: $stage)
                     }
                 }
                 Divider().background(t.border)
+                SectionLabel("BUDGETS")
+                Text("A run stops at whichever it hits first.")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+                LoopBudgetsEditor(maxIterations: $budgets.maxIterations,
+                                  consecutiveFailureStop: $budgets.consecutiveFailureStop,
+                                  wallClockMinutes: LoopBudgetsEditor.wallClockMinutes($budgets),
+                                  maxRepairsPerStage: $budgets.maxRepairsPerStage)
+                    .font(Typography.caption)
+                Divider().background(t.border)
                 SectionLabel("OUTPUT")
-                Toggle("Write a run summary note to the Library", isOn: $writeSummaryNote)
+                Toggle("Write a run summary note to the Library", isOn: $budgets.writeSummaryNote)
                     .font(Typography.caption)
                 Text("A readable markdown summary per run under llm-doc/loop/. The run "
                     + "journal (system/loop-runs/) always records every run regardless.")
@@ -215,17 +244,32 @@ struct NewLoopWizardView: View {
     }
 
     @ViewBuilder
-    private func stageConfigCard(index: Int) -> some View {
+    private func stageConfigCard(stage: Binding<LoopStage>) -> some View {
         let t = theme.current
+        let s = stage.wrappedValue
         VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(spacing: 6) {
-                Image(systemName: stages[index].kind == .regressionSweep ? "arrow.uturn.backward.circle"
-                      : stages[index].kind == .shellCommand ? "terminal" : "sparkles")
+                Image(systemName: s.kind == .regressionSweep ? "arrow.uturn.backward.circle"
+                      : s.kind == .shellCommand ? "terminal" : "sparkles")
                     .foregroundStyle(t.textMuted)
-                Text(stages[index].name).font(Typography.bodyStrong)
+                TextField("Stage name", text: stage.name)
+                    .textFieldStyle(.roundedBorder)
+                    .font(Typography.bodyStrong)
+                    .frame(maxWidth: 220)
                 Spacer()
+                // Templates carry `enabled` through (a recipe with a
+                // deliberately-off stage is meaningful), so the wizard must
+                // both SHOW that state and let the user flip it — otherwise a
+                // template saved with a disabled stage is invisible dead
+                // weight in every project it's applied to.
+                Toggle("", isOn: stage.enabled)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .labelsHidden()
+                    .help(s.enabled ? "Enabled — runs every iteration"
+                          : "Disabled — the runner skips this stage")
                 Button {
-                    stages.remove(at: index)
+                    stages.removeAll { $0.id == s.id }
                 } label: {
                     Image(systemName: "trash")
                         .foregroundStyle(t.textMuted)
@@ -234,7 +278,7 @@ struct NewLoopWizardView: View {
                 .help("Remove this stage")
             }
 
-            switch stages[index].kind {
+            switch s.kind {
             case .skill:
                 Text("Skill").font(Typography.caption).foregroundStyle(t.textMuted)
                 if skillCatalog.isEmpty {
@@ -242,8 +286,8 @@ struct NewLoopWizardView: View {
                         .font(Typography.caption).foregroundStyle(t.textMuted)
                 } else {
                     Picker("Skill", selection: Binding(
-                        get: { stages[index].skillId ?? "" },
-                        set: { stages[index].skillId = $0.isEmpty ? nil : $0 }
+                        get: { stage.wrappedValue.skillId ?? "" },
+                        set: { stage.wrappedValue.skillId = $0.isEmpty ? nil : $0 }
                     )) {
                         Text("None").tag("")
                         ForEach(skillCatalog) { s in
@@ -254,15 +298,22 @@ struct NewLoopWizardView: View {
                 }
 
                 Text("Input (optional) — file or folder under the project root").font(Typography.caption).foregroundStyle(t.textMuted)
-                PathPickerField(root: gitRoot, path: $stages[index].targetPath)
+                PathPickerField(root: gitRoot, path: stage.targetPath)
 
                 Text("Output (optional) — where the skill should write its result").font(Typography.caption).foregroundStyle(t.textMuted)
-                PathPickerField(root: gitRoot, path: $stages[index].outputPath)
+                PathPickerField(root: gitRoot, path: stage.outputPath)
+
+                Text("Prompt (optional)").font(Typography.caption).foregroundStyle(t.textMuted)
+                TextField("Defaults to: apply this skill", text: Binding(
+                    get: { stage.wrappedValue.prompt ?? "" },
+                    set: { stage.wrappedValue.prompt = $0.isEmpty ? nil : $0 }
+                ), axis: .vertical)
+                .textFieldStyle(.roundedBorder)
             case .shellCommand:
                 Text("Command").font(Typography.caption).foregroundStyle(t.textMuted)
                 TextField("e.g. swift test", text: Binding(
-                    get: { stages[index].command ?? "" },
-                    set: { stages[index].command = $0 }
+                    get: { stage.wrappedValue.command ?? "" },
+                    set: { stage.wrappedValue.command = $0 }
                 ))
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 11, design: .monospaced))
@@ -271,29 +322,40 @@ struct NewLoopWizardView: View {
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
             }
+
+            // Same meaning as the Loop page's Severity picker; segmented and
+            // inline so the wizard can configure everything the page can.
+            Picker("Severity", selection: stage.severity) {
+                ForEach(LoopStageSeverity.allCases, id: \.self) { severity in
+                    Text(severity.label).tag(severity)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 220)
+            .help("Blocking: a failure triggers repair and can end the run. Advisory: recorded only — use for linters and formatters.")
         }
         .padding(Spacing.sm)
         .background(t.surface)
         .cornerRadius(6)
+        .opacity(s.enabled ? 1 : 0.55)
     }
 
     // MARK: - Create / Save as template
 
     /// The config as currently configured in this wizard — same stages either
     /// path uses, so Create Loop and Save as Template can never disagree about
-    /// what was actually set up. Budgets come from the selected template when
-    /// there is one, else the same app-wide defaults a brand-new project gets
-    /// — a template is a convenient starting point, never a requirement, since
+    /// what was actually set up. Budgets are whatever the BUDGETS section shows
+    /// (seeded from the selected template, else the app-wide defaults) — a
+    /// template is a convenient starting point, never a requirement, since
     /// `stages` can equally have been built from nothing via "+".
     private func configuredConfig() -> LoopEngineConfig {
-        var config = selectedTemplate?.config ?? LoopEngineDefaults.newConfig(stages: [])
+        var config = budgets
         config.stages = stages
-        config.writeSummaryNote = writeSummaryNote
         return config
     }
 
     private func create() {
-        guard !stages.isEmpty else { return }
+        guard stages.contains(where: \.enabled) else { return }
         onCreate(configuredConfig())
         dismiss()
     }

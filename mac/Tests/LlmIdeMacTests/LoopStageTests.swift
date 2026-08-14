@@ -59,6 +59,65 @@ final class LoopStageTests: XCTestCase {
         XCTAssertEqual(decoded.outputPath, "docs/payments.md")
     }
 
+    func testOldPayloadWithoutEnabledDecodesTrue() throws {
+        // A stage saved before `enabled` existed must decode as enabled —
+        // anything else would silently switch off stages in every existing
+        // config the first time it is loaded by a build with this field.
+        let json = """
+        {"id":"t1","name":"Test","kind":"shellCommand","command":"swift test","order":1}
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(LoopStage.self, from: json)
+        XCTAssertTrue(decoded.enabled)
+    }
+
+    func testEnabledFalseRoundTripsThroughJSON() throws {
+        let stage = LoopStage(id: "t1", name: "Test", kind: .shellCommand,
+                              command: "swift test", order: 1, enabled: false)
+        let data = try JSONEncoder().encode(stage)
+        let decoded = try JSONDecoder().decode(LoopStage.self, from: data)
+        XCTAssertEqual(decoded, stage)
+        XCTAssertFalse(decoded.enabled)
+    }
+
+    // MARK: - Reorder helpers
+
+    private func stage(_ id: String, order: Int) -> LoopStage {
+        LoopStage(id: id, name: id, kind: .shellCommand, command: "true", order: order)
+    }
+
+    func testMovingUpSwapsWithPredecessorAndRenumbers() {
+        let stages = [stage("a", order: 0), stage("b", order: 1), stage("c", order: 2)]
+        let moved = LoopStage.moving(stages, id: "c", by: -1)
+        XCTAssertEqual(LoopStage.runOrder(moved).map(\.id), ["a", "c", "b"])
+        // Every order value is renumbered to its final position, not swapped —
+        // so later moves can't be confused by colliding or gapped orders.
+        XCTAssertEqual(LoopStage.runOrder(moved).map(\.order), [0, 1, 2])
+    }
+
+    func testMovingDownSwapsWithSuccessor() {
+        let stages = [stage("a", order: 0), stage("b", order: 1), stage("c", order: 2)]
+        let moved = LoopStage.moving(stages, id: "a", by: 1)
+        XCTAssertEqual(LoopStage.runOrder(moved).map(\.id), ["b", "a", "c"])
+    }
+
+    func testMovingOffEitherEndIsANoOp() {
+        let stages = [stage("a", order: 0), stage("b", order: 1)]
+        XCTAssertEqual(LoopStage.moving(stages, id: "a", by: -1), stages)
+        XCTAssertEqual(LoopStage.moving(stages, id: "b", by: 1), stages)
+        XCTAssertEqual(LoopStage.moving(stages, id: "missing", by: 1), stages)
+    }
+
+    func testMovingResolvesCollidingOrderValues() {
+        // Two stages with the same `order` (possible after remove + add) —
+        // the id tie-break defines their run order, and a move must renumber
+        // both so the result is unambiguous.
+        let stages = [stage("b", order: 0), stage("a", order: 0)]
+        XCTAssertEqual(LoopStage.runOrder(stages).map(\.id), ["a", "b"])
+        let moved = LoopStage.moving(stages, id: "b", by: -1)
+        XCTAssertEqual(LoopStage.runOrder(moved).map(\.id), ["b", "a"])
+        XCTAssertEqual(LoopStage.runOrder(moved).map(\.order), [0, 1])
+    }
+
     func testOldPayloadWithoutOutputPathDecodesNil() throws {
         // A stage saved before outputPath existed must decode with no output set,
         // not fail to decode (same rule as isDefault above).

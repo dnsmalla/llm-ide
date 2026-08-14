@@ -108,6 +108,10 @@ struct LoopRunConfigSnapshot: Codable, Equatable {
         var skillId: String?
         var severity: LoopStageSeverity
         var timeoutSeconds: Int?
+        /// Optional so records written before this field existed still decode.
+        /// `nil` and `true` both mean "ran normally"; only `false` marks a
+        /// stage the run deliberately skipped.
+        var enabled: Bool?
     }
 
     var stages: [Stage]
@@ -118,12 +122,11 @@ struct LoopRunConfigSnapshot: Codable, Equatable {
     var protectedPathPolicy: ProtectedPathPolicy
 
     init(_ config: LoopEngineConfig) {
-        stages = config.stages
-            .sorted { ($0.order, $0.id) < ($1.order, $1.id) }
+        stages = LoopStage.runOrder(config.stages)
             .map {
                 Stage(id: $0.id, name: $0.name, kind: $0.kind, command: $0.command,
                       skillId: $0.skillId, severity: $0.severity,
-                      timeoutSeconds: $0.timeoutSeconds)
+                      timeoutSeconds: $0.timeoutSeconds, enabled: $0.enabled)
             }
         maxIterations = config.maxIterations
         consecutiveFailureStop = config.consecutiveFailureStop

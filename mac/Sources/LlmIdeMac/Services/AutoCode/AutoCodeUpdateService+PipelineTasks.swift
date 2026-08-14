@@ -677,6 +677,18 @@ extension AutoCodeUpdateService {
         }
         let projectConfig = LoopStageDetector.ensureDefaultStages(in: raw, gitRoot: gitRootURL)
 
+        // A project with every stage disabled is PARKED, not broken — the user
+        // switched the stages off deliberately. Skipping quietly here (info
+        // log, no taskError) beats letting the runner refuse on every cron
+        // tick, which would keep the task banner red and fill the journal
+        // with error records for a state the user considers "off".
+        let enabledStageCount = projectConfig.stages.filter(\.enabled).count
+        guard enabledStageCount > 0 else {
+            taskErrors.removeValue(forKey: AutoTask.loopEngineering.rawValue)
+            logStore.append(.loopEngineering, "Loop skipped — every stage is disabled for this project.")
+            return
+        }
+
         let prompter = CodeAssistPrompter(api: api, agent: config.activeCLI)
         let judge = CodeAssistJudge(api: api)
         let repairer = AgentFaultRepairer(api: api)
@@ -704,7 +716,12 @@ extension AutoCodeUpdateService {
         switch result {
         case .success:
             taskErrors.removeValue(forKey: AutoTask.loopEngineering.rawValue)
-            logStore.append(.loopEngineering, "Loop finished — all \(projectConfig.stages.count) stage(s) passed after \(runner.iteration) iteration(s).")
+            // Enabled count only — the runner skips disabled stages, and "all
+            // N passed" quoting the full list would claim coverage from
+            // stages the user switched off.
+            let skippedNote = enabledStageCount < projectConfig.stages.count
+                ? " (\(projectConfig.stages.count - enabledStageCount) disabled stage(s) skipped)" : ""
+            logStore.append(.loopEngineering, "Loop finished — all \(enabledStageCount) enabled stage(s) passed after \(runner.iteration) iteration(s)\(skippedNote).")
         case .givenUp:
             // `.summary` (not raw `GivenUpReason` interpolation, which
             // renders as e.g. "maxIterations") so this message and the

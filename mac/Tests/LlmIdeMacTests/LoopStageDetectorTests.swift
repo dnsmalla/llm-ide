@@ -202,4 +202,24 @@ final class LoopStageDetectorTests: XCTestCase {
         XCTAssertEqual(skills?.isDefault, true)
         XCTAssertEqual(plugins?.isDefault, true)
     }
+
+    /// Disabling is the sanctioned escape hatch for pinned default stages —
+    /// so re-pinning on load must preserve `enabled = false`, or every load
+    /// would silently switch a deliberately-disabled default back on.
+    func testEnsureDefaultStagesPreservesDisabledFlagOnPinnedDefaults() throws {
+        try writeNested("extension/tests/agent-skills.test.mjs")
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil,
+                      order: 0, enabled: false),
+            LoopStage(id: "s1", name: "Skills", kind: .shellCommand, command: "custom skills cmd",
+                      order: 1, enabled: false),
+        ])
+        let ensured = LoopStageDetector.ensureDefaultStages(in: config, gitRoot: tempDir)
+        let regression = ensured.stages.first { $0.name == "Regression" }
+        let skills = ensured.stages.first { $0.name == "Skills" }
+        XCTAssertEqual(regression?.enabled, false)
+        XCTAssertEqual(regression?.isDefault, true)
+        XCTAssertEqual(skills?.enabled, false)
+        XCTAssertEqual(skills?.isDefault, true)
+    }
 }

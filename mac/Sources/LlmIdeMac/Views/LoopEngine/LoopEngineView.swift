@@ -30,9 +30,12 @@
 // enforces this again server-side, so the approve button here is a
 // convenience, not the only gate.
 //
-// No stage-reorder UI exists yet (stage order is fixed at detection/add
-// time) — don't add "reorder" back to the bullet list above without
-// also adding the UI for it.
+// Stages can be reordered (drag in the left list, or Move up/down in a
+// stage's ⋯ menu) and individually disabled — a disabled stage is skipped
+// by the runner entirely, which is the escape hatch for pinned default
+// stages that cannot be deleted. Edits auto-save (debounced) once the
+// project has a real config, so a project switch can no longer silently
+// discard them; Run and Save still persist immediately.
 
 import SwiftUI
 
@@ -54,7 +57,7 @@ struct LoopEngineView: View {
     @StateObject private var runner: LoopEngineRunner
 
     /// Shared verify-command allowlist — consulted by the detail pane's
-    /// "Approve & enable" button and, via the SAME instance handed to
+    /// "Approve command" button and, via the SAME instance handed to
     /// `runner` at construction, at verify time. Must be one shared
     /// instance (not two separate `VerifyApprovalStore()`s) so an
     /// approval made here is visible to the runner's own preflight —
@@ -91,6 +94,24 @@ struct LoopEngineView: View {
     /// distinct from the stages pane's `+` (adds one bare stage) and the
     /// Template section's Apply (overwrites with an un-configured template).
     @State private var isPresentingNewLoopWizard = false
+    /// Debounced autosave of the current config (see `scheduleAutosave`).
+    @State private var autosaveTask: Task<Void, Never>?
+    /// The not-yet-written autosave payload. Held separately from the task so a
+    /// project switch or view teardown can FLUSH it (write now) instead of the
+    /// cancel-and-lose that a bare task would force.
+    @State private var pendingAutosave: PendingAutosave?
+    /// What the active project currently has persisted (`nil` ⇒ no saved config
+    /// yet). The autosave baseline: loading a project must not trigger a write
+    /// of the file it just read, and a no-op edit round-trip must not rewrite a
+    /// committed `system/loop.json`. Also stands in for `LoopEngineConfigStore.
+    /// exists` (`!= nil`), so the guard costs no disk read per keystroke.
+    @State private var persistedConfig: LoopEngineConfig?
+
+    struct PendingAutosave {
+        let config: LoopEngineConfig
+        let projectId: String
+        let projectRoot: URL?
+    }
 
     /// App-wide template library (built-in starters + the user's saved recipes).
     /// A `@StateObject` so the picker updates the moment one is saved or deleted.
@@ -163,6 +184,22 @@ struct LoopEngineView: View {
             loadConfig()
             Task { await loadSkillsIfNeeded() }
         }
+        // Debounced autosave: before this, edits lived only in @State and a
+        // project switch silently discarded them — the Save button sits at
+        // the bottom of SETTINGS and Run is not always the next step. Guarded
+        // inside scheduleAutosave by the same shouldPersist rule runLoop's
+        // implicit save uses (so it can't lock in an unconfirmed
+        // bare-Regression detection) and by the persistedConfig baseline (so
+        // merely loading a project never rewrites the committed file).
+        // Residual gap, stated honestly: quitting the app inside the 0.8s
+        // debounce window can still lose that last edit — project switches
+        // and leaving this page flush instead (loadConfig/onDisappear).
+        .onChange(of: currentConfig) { _, updated in
+            scheduleAutosave(updated)
+        }
+        .onDisappear {
+            flushPendingAutosave()
+        }
         .sheet(isPresented: $isPresentingNewLoopWizard) {
             NewLoopWizardView(
                 templateStore: templateStore,
@@ -203,8 +240,15 @@ struct LoopEngineView: View {
                 .help("Add a stage")
                 .accessibilityLabel("Add stage")
             }
-            List(sortedStages, selection: $selectedStageId) { stage in
-                stageRow(stage)
+            List(selection: $selectedStageId) {
+                ForEach(Array(sortedStages.enumerated()), id: \.element.id) { position, stage in
+                    stageRow(stage, position: position)
+                }
+                .onMove { offsets, destination in
+                    var ordered = sortedStages
+                    ordered.move(fromOffsets: offsets, toOffset: destination)
+                    stages = LoopStage.renumbered(ordered)
+                }
             }
             .listStyle(.sidebar)
             // Budgets, protected-path policy, template and output all live in the
@@ -216,19 +260,15 @@ struct LoopEngineView: View {
         .background(t.surface)
     }
 
-    /// Display order matches `LoopEngineRunner`'s own execution order
-    /// exactly (`(order, id)`, not just `order`) — `order` values can
-    /// collide (e.g. after removing a stage and adding a new one), and a
-    /// sort keyed on `order` alone isn't guaranteed stable across
-    /// re-renders, so the sidebar could show a different order than the
-    /// stages actually run in. The `id` tie-break makes both sorts
-    /// deterministic and identical.
+    /// Display order matches `LoopEngineRunner`'s own execution order exactly —
+    /// both go through `LoopStage.runOrder`, so the sidebar can never show a
+    /// different order than the stages actually run in.
     var sortedStages: [LoopStage] {
-        stages.sorted { ($0.order, $0.id) < ($1.order, $1.id) }
+        LoopStage.runOrder(stages)
     }
 
     @ViewBuilder
-    private func stageRow(_ stage: LoopStage) -> some View {
+    private func stageRow(_ stage: LoopStage, position: Int) -> some View {
         let t = theme.current
         HStack(spacing: 6) {
             Image(systemName: stage.kind == .regressionSweep ? "arrow.uturn.backward.circle"
@@ -238,8 +278,16 @@ struct LoopEngineView: View {
                 .font(Typography.filename)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .strikethrough(!stage.enabled)
             Spacer(minLength: 4)
-            if stage.kind == .shellCommand,
+            if !stage.enabled {
+                Text("off")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(t.textMuted)
+                    .help("Disabled — the runner skips this stage")
+            }
+            if stage.enabled,
+               stage.kind == .shellCommand,
                let command = stage.command,
                let gitRoot = activeGitRootURL,
                !approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: command) {
@@ -252,19 +300,39 @@ struct LoopEngineView: View {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
-                    .help("Default stage — can't be deleted")
+                    .help("Default stage — can't be deleted (disable it instead)")
             }
-            Menu {
-                Button("Duplicate") { duplicateStage(stage) }
-                if !stage.isDefault {
-                    Button("Delete", role: .destructive) { deleteStage(stage) }
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .foregroundStyle(t.textMuted)
-            }
-            .buttonStyle(.borderless)
+            stageMenu(stage, position: position, count: stages.count)
         }
+        .opacity(stage.enabled ? 1 : 0.55)
+    }
+
+    /// One ⋯ menu for a stage, shared by the sidebar row and the PROCESS card
+    /// so the two surfaces can never offer different actions for the same stage.
+    /// `position`/`count` are passed in (both callers already have them) rather
+    /// than re-derived — `sortedStages` is a full sort per access, and Menu
+    /// content is built eagerly per row per render.
+    @ViewBuilder
+    func stageMenu(_ stage: LoopStage, position: Int, count: Int) -> some View {
+        Menu {
+            Button(stage.enabled ? "Disable" : "Enable") { setStageEnabled(stage, !stage.enabled) }
+            Button("Move up") { moveStage(stage, by: -1) }
+                .disabled(position == 0)
+            Button("Move down") { moveStage(stage, by: 1) }
+                .disabled(position == count - 1)
+            Divider()
+            Button("Run this stage only") { startRun(only: stage) }
+                .disabled(runner.running || activeGitRootURL == nil)
+            Divider()
+            Button("Duplicate") { duplicateStage(stage) }
+            if !stage.isDefault {
+                Button("Delete", role: .destructive) { deleteStage(stage) }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .foregroundStyle(theme.current.textMuted)
+        }
+        .buttonStyle(.borderless)
     }
 
     // MARK: - Detail pane
@@ -358,21 +426,25 @@ struct LoopEngineView: View {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 10))
                         .foregroundStyle(t.textMuted)
-                        .help("Default stage — can't be deleted")
+                        .help("Default stage — can't be deleted (disable it instead)")
                 }
                 Spacer()
-                Menu {
-                    Button("Duplicate") { duplicateStage(stage) }
-                    if !stage.isDefault {
-                        Button("Delete", role: .destructive) { deleteStage(stage) }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .foregroundStyle(t.textMuted)
-                }
-                .buttonStyle(.borderless)
+                // Routed through setStageEnabled (not a raw indexed write) so
+                // the switch and the ⋯ menu share one mutation path — an
+                // invariant added to disabling can't be skipped by one of them.
+                Toggle("", isOn: Binding(
+                    get: { stage.enabled },
+                    set: { setStageEnabled(stage, $0) }
+                ))
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .labelsHidden()
+                .help(stage.enabled ? "Enabled — runs every iteration"
+                      : "Disabled — the runner skips this stage")
+                stageMenu(stage, position: position, count: stages.count)
             }
             stageDetail(index: index)
+                .opacity(stage.enabled ? 1 : 0.55)
         }
         .padding(Spacing.sm)
         .background(selectedStageId == stage.id ? t.accent.opacity(0.08) : t.surface)
@@ -398,14 +470,11 @@ struct LoopEngineView: View {
             .help("Create a loop from a template — choose the recipe, then each stage's skill and input")
             Divider().frame(height: 16)
             Button(runner.running ? "Running… (iteration \(runner.iteration))" : "Run") {
-                runTask = Task {
-                    await runLoop()
-                    runTask = nil
-                }
+                startRun()
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-            .disabled(runner.running || stages.isEmpty || activeGitRootURL == nil)
+            .disabled(runner.running || !stages.contains(where: \.enabled) || activeGitRootURL == nil)
             if runner.running {
                 // Cancelling `runTask` makes `Task.isCancelled` true on the
                 // same task `runner.run` is awaiting on, which is how a
@@ -449,8 +518,12 @@ struct LoopEngineView: View {
 
                 if let gitRoot = activeGitRootURL {
                     if let command = stages[index].command, !command.isEmpty {
+                        // "Approve command", not the old "Approve & enable" —
+                        // "enable" now means the per-stage enabled toggle, and a
+                        // button claiming to enable while only approving would
+                        // leave a disabled stage silently skipped.
                         let approved = approvals.isStageApproved(repo: gitRoot, stageId: stages[index].id, command: command)
-                        Button(approved ? "Approved" : "Approve & enable") {
+                        Button(approved ? "Approved" : "Approve command") {
                             approvals.approveStage(repo: gitRoot, stageId: stages[index].id, command: command)
                             selectedStageId = stages[index].id
                         }
@@ -696,7 +769,7 @@ struct LoopEngineView: View {
             stages: stages,
             maxIterations: maxIterations,
             consecutiveFailureStop: consecutiveFailureStop,
-            wallClockBudgetSeconds: wallClockMinutes == 0 ? nil : Double(wallClockMinutes) * 60,
+            wallClockBudgetSeconds: LoopBudgetsEditor.seconds(fromMinutes: wallClockMinutes),
             maxRepairsPerStage: maxRepairsPerStage,
             protectedPathPolicy: protectedPathPolicy,
             extraProtectedGlobs: extraProtectedGlobs,
@@ -704,6 +777,12 @@ struct LoopEngineView: View {
     }
 
     private func loadConfig() {
+        // A pending autosave belongs to the PREVIOUS project — loadConfig runs
+        // on project switch, and the state assignments below will fire
+        // onChange for the NEW project. Write the old project's edits out
+        // first; cancelling here would lose exactly the edit autosave exists
+        // to keep.
+        flushPendingAutosave()
         // Reset up front: this flag is set by applySelectedTemplate() for
         // THIS project's Template section, and a project switch (the sole
         // caller of loadConfig(), via .task(id: activeProjectId)) must not
@@ -720,11 +799,17 @@ struct LoopEngineView: View {
             stages = ensured.stages
             maxIterations = ensured.maxIterations
             consecutiveFailureStop = ensured.consecutiveFailureStop
-            wallClockMinutes = ensured.wallClockBudgetSeconds.map { Int($0 / 60) } ?? 0
+            wallClockMinutes = LoopBudgetsEditor.minutes(fromSeconds: ensured.wallClockBudgetSeconds)
             maxRepairsPerStage = ensured.maxRepairsPerStage
             protectedPathPolicy = ensured.protectedPathPolicy
             extraProtectedGlobs = ensured.extraProtectedGlobs
             writeSummaryNote = ensured.writeSummaryNote
+            // Baseline = the exact value onChange will see for this state, so
+            // the load itself cannot schedule a write. Set from currentConfig
+            // (not `saved`/`ensured`) on purpose: any lossy round-trip (e.g.
+            // seconds → whole minutes) would otherwise register as an "edit"
+            // and rewrite the committed file on open.
+            persistedConfig = currentConfig
         } else if let gitRoot = activeGitRootURL {
             let detected = LoopStageDetector.detectDefaultStages(gitRoot: gitRoot)
             resetStagesToDefaults(stages: detected)
@@ -738,6 +823,7 @@ struct LoopEngineView: View {
                 toSave.stages = detected
                 LoopEngineConfigStore.save(toSave, projectRoot: workspaceContext?.projectRoot,
                                            projectId: projectId)
+                persistedConfig = toSave
             }
         } else {
             // No saved config AND no git root to detect defaults from
@@ -771,13 +857,16 @@ struct LoopEngineView: View {
         stages = seed.stages
         maxIterations = seed.maxIterations
         consecutiveFailureStop = seed.consecutiveFailureStop
-        wallClockMinutes = seed.wallClockBudgetSeconds.map { Int($0 / 60) } ?? 0
+        wallClockMinutes = LoopBudgetsEditor.minutes(fromSeconds: seed.wallClockBudgetSeconds)
         maxRepairsPerStage = seed.maxRepairsPerStage
         protectedPathPolicy = seed.protectedPathPolicy
         extraProtectedGlobs = seed.extraProtectedGlobs
         writeSummaryNote = seed.writeSummaryNote
         pastRuns = []
         lastSummaryNoteName = nil
+        // Nothing is persisted for this project (that is what "reset to
+        // defaults" means here) — autosave's exists-check must say so.
+        persistedConfig = nil
     }
 
     /// Append a non-default copy of `stage` (new id, cleared isDefault, next order).
@@ -790,6 +879,89 @@ struct LoopEngineView: View {
         stages.append(copy)
     }
 
+    /// Move `stage` one position up (`-1`) or down (`+1`) in run order.
+    private func moveStage(_ stage: LoopStage, by offset: Int) {
+        stages = LoopStage.moving(stages, id: stage.id, by: offset)
+    }
+
+    /// Enable or disable `stage` — a disabled stage is skipped by the runner
+    /// but keeps its place, command, and approval.
+    private func setStageEnabled(_ stage: LoopStage, _ enabled: Bool) {
+        guard let index = stages.firstIndex(where: { $0.id == stage.id }) else { return }
+        stages[index].enabled = enabled
+    }
+
+    /// Kick off a run on `runTask` — the Run button and the per-stage
+    /// "Run this stage only" both go through here so Stop always has one
+    /// task to cancel.
+    func startRun(only stage: LoopStage? = nil) {
+        runTask = Task {
+            await runLoop(only: stage)
+            runTask = nil
+        }
+    }
+
+    /// Whether implicit persistence (autosave, Run's implicit save) may write
+    /// `config`. One predicate for both paths — the composed rule lived inline
+    /// at each site once and had already diverged by review time.
+    ///
+    /// - Empty stage lists are never implicitly saved: a template whose stages
+    ///   all resolved to nothing (no test tooling) must not wipe the project's
+    ///   saved stages moments after Apply. Explicit Save still can.
+    /// - Otherwise the same rule as always: a real config (`shouldPersist`) or
+    ///   a project that already has one — implicit saves can't lock in an
+    ///   unconfirmed bare-Regression detection.
+    private func isSafeToPersistImplicitly(_ config: LoopEngineConfig) -> Bool {
+        guard !config.stages.isEmpty else { return false }
+        return LoopEngineConfig.shouldPersist(config.stages) || persistedConfig != nil
+    }
+
+    /// Debounced persistence of `config` for the active project.
+    ///
+    /// The payload (config + project identity) is captured in `pendingAutosave`
+    /// at schedule time, and a switch to a DIFFERENT project **flushes** it —
+    /// `loadConfig` (the project-switch handler) writes the old project's edits
+    /// under the old project's key before touching any state. Cancelling on
+    /// switch, as the first version did, would lose exactly the edit this
+    /// feature exists to keep.
+    private func scheduleAutosave(_ config: LoopEngineConfig) {
+        guard let projectId = activeProjectId else { return }
+        // Baseline: what's already on disk (or the just-loaded equivalent).
+        // Loading a project fires onChange too — without this, opening the
+        // page would rewrite a committed file it only read.
+        guard config != persistedConfig else { return }
+        guard isSafeToPersistImplicitly(config) else { return }
+        // Defensive: a pending save for another project is flushed, never
+        // replaced. loadConfig already flushes on switch, so this is normally
+        // a no-op, but this method must stay safe on its own.
+        if let pending = pendingAutosave, pending.projectId != projectId {
+            flushPendingAutosave()
+        }
+        autosaveTask?.cancel()
+        pendingAutosave = PendingAutosave(config: config, projectId: projectId,
+                                          projectRoot: workspaceContext?.projectRoot)
+        autosaveTask = Task {
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard !Task.isCancelled else { return }
+            flushPendingAutosave()
+        }
+    }
+
+    /// Writes the pending autosave now, if any. Called by the debounce task on
+    /// fire, by `loadConfig` before a project switch overwrites state, and on
+    /// `onDisappear` when the user leaves the Loop page.
+    func flushPendingAutosave() {
+        guard let pending = pendingAutosave else { return }
+        pendingAutosave = nil
+        autosaveTask?.cancel()
+        autosaveTask = nil
+        LoopEngineConfigStore.save(pending.config, projectRoot: pending.projectRoot,
+                                   projectId: pending.projectId)
+        if pending.projectId == activeProjectId {
+            persistedConfig = pending.config
+        }
+    }
+
     /// Remove a stage by id (row ⋯ → Delete). Pinned stages never offer Delete, so this
     /// is only reachable for non-default stages. Clears the selection if it was deleted.
     private func deleteStage(_ stage: LoopStage) {
@@ -800,8 +972,13 @@ struct LoopEngineView: View {
 
     func saveConfig() {
         guard let projectId = activeProjectId else { return }
+        // Explicit save supersedes any pending autosave of older state.
+        pendingAutosave = nil
+        autosaveTask?.cancel()
+        autosaveTask = nil
         LoopEngineConfigStore.save(currentConfig, projectRoot: workspaceContext?.projectRoot,
                                    projectId: projectId)
+        persistedConfig = currentConfig
     }
 
     /// Refreshes the "past runs" list from the journal on disk. Best-effort: an
@@ -851,7 +1028,7 @@ struct LoopEngineView: View {
         stages = applied.stages
         maxIterations = applied.maxIterations
         consecutiveFailureStop = applied.consecutiveFailureStop
-        wallClockMinutes = applied.wallClockBudgetSeconds.map { Int($0 / 60) } ?? 0
+        wallClockMinutes = LoopBudgetsEditor.minutes(fromSeconds: applied.wallClockBudgetSeconds)
         maxRepairsPerStage = applied.maxRepairsPerStage
         protectedPathPolicy = applied.protectedPathPolicy
         extraProtectedGlobs = applied.extraProtectedGlobs
@@ -862,9 +1039,10 @@ struct LoopEngineView: View {
 
     /// Replaces the current stage list and budgets with the selected template's.
     ///
-    /// Does NOT save: applying is an edit like any other, and a user who applies a
-    /// template to compare it against what they had must be able to switch away
-    /// without having overwritten their config. `Run` and `Save` persist, as before.
+    /// Persists like any other edit — via the debounced autosave (the pre-autosave
+    /// design deliberately kept Apply unsaved so templates could be compared, but
+    /// unsaved edits silently dying on a project switch proved the worse trap).
+    /// The warning text in the TEMPLATE section says so before the click.
     func applySelectedTemplate() {
         guard let template = selectedTemplate else { return }
         // One `applied(to:)` call, not two — `wouldApplyEmpty` would run the
@@ -875,12 +1053,10 @@ struct LoopEngineView: View {
     }
 
     /// Applies a config assembled by the New Loop wizard and saves it right
-    /// away. Unlike `applySelectedTemplate` — an edit the user must still
-    /// confirm with Save, so switching templates to compare them can't
-    /// silently overwrite what they had — finishing the wizard already IS the
-    /// confirmation: the user picked a recipe and configured its stages in a
-    /// dedicated flow, so there is nothing left to reconsider before it takes
-    /// effect as this project's active loop.
+    /// away — unlike `applySelectedTemplate`, which persists via the debounced
+    /// autosave, this saves synchronously: finishing the wizard IS the
+    /// confirmation (the user picked a recipe and configured its stages in a
+    /// dedicated flow), so there is no reason to leave a 0.8s window.
     func applyNewLoopConfig(_ applied: LoopEngineConfig) {
         assignConfig(applied)
         selectedTemplateId = nil
@@ -895,8 +1071,13 @@ struct LoopEngineView: View {
         newTemplateSummary = ""
     }
 
+    /// - Parameter single: when set, run just this one stage (forced enabled)
+    ///   under the current budgets — the ⋯ menu's "Run this stage only", for
+    ///   debugging one stage without paying for the whole pipeline. The saved
+    ///   config is still the FULL current one; the single-stage list exists
+    ///   only for this run.
     @MainActor
-    private func runLoop() async {
+    private func runLoop(only single: LoopStage? = nil) async {
         // `gitRoot` is `LoopEngineRunner.run`'s non-optional parameter, so a
         // run must not start until a real git working tree is resolved —
         // guards against running git-dependent stages with no working tree.
@@ -913,11 +1094,24 @@ struct LoopEngineView: View {
         // in-memory `stages` happens to be Regression-only right now — that
         // reflects a real edit (e.g. the user removed the Test stage), not
         // an unconfirmed auto-detection.
-        if LoopEngineConfig.shouldPersist(stages)
-            || LoopEngineConfigStore.exists(projectRoot: context.projectRoot, projectId: projectId) {
+        if isSafeToPersistImplicitly(currentConfig) {
             saveConfig()
         }
-        let result = await runner.run(config: currentConfig, faultsRoot: context.projectRoot,
+        var runConfig = currentConfig
+        if let solo = single {
+            // "Run this stage only" = run with every OTHER stage disabled for
+            // this one run. Keeping the full stage list (rather than
+            // fabricating a one-stage config) means the journal snapshot
+            // records the project's real pipeline with the skipped stages
+            // marked disabled — not a record that reads as "the user deleted
+            // their whole pipeline".
+            runConfig.stages = runConfig.stages.map { stage in
+                var copy = stage
+                copy.enabled = (stage.id == solo.id)
+                return copy
+            }
+        }
+        let result = await runner.run(config: runConfig, faultsRoot: context.projectRoot,
                                       gitRoot: gitRoot, projectId: projectId)
         lastStatus = result
         didRejectLastRun = (result == nil)
