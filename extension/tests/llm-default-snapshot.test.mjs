@@ -20,10 +20,10 @@ const USER = 'u1';
 
 // Fake builtin skills repo (seeds without the real submodule).
 const fakeRepo = path.join(tmpRoot, 'fake-skills');
-fs.mkdirSync(path.join(fakeRepo, 'skills', 'demo'), { recursive: true });
+fs.mkdirSync(path.join(fakeRepo, 'skills', 'code-review'), { recursive: true });
 fs.writeFileSync(path.join(fakeRepo, 'registry.yaml'), 'registryVersion: "3.0.0"\n');
-fs.writeFileSync(path.join(fakeRepo, 'skills', 'demo', 'SKILL.md'),
-  '---\nname: demo\ndescription: d\n---\n\n# demo\n');
+fs.writeFileSync(path.join(fakeRepo, 'skills', 'code-review', 'SKILL.md'),
+  '---\nname: code-review\ndescription: d\n---\n\n# code-review\n');
 process.env.SKILLS_REPO = fakeRepo;
 
 // An extra enabled source: a skill, an agent, a hooks manifest, an MCP manifest.
@@ -48,7 +48,7 @@ fs.mkdirSync(path.join(third, 'skills', 'ghost'), { recursive: true });
 fs.writeFileSync(path.join(third, 'skills', 'ghost', 'SKILL.md'),
   '---\nname: ghost\ndescription: g\n---\n\n# ghost\n');
 
-const { writeRegistry, BUILTIN_ID } = await import('../llm-sources/registry.mjs');
+const { writeRegistry, BUILTIN_ID, DEFAULT_SOURCES_ID } = await import('../llm-sources/registry.mjs');
 const { setEnabled } = await import('../llm-sources/state.mjs');
 const { writeMcpRegistry, setConsented, setEnabledMcp } = await import('../mcp/state.mjs');
 const { refreshDefaultSnapshot, defaultSnapshotDir } =
@@ -74,7 +74,7 @@ test('refreshDefaultSnapshot materializes skills+agents from enabled sources onl
   // Skills: enabled sources copied as real files, FLAT (no per-source
   // subfolder — this folder is itself read back as the `default-sources`
   // llm-source, which expects the same one-level shape every source uses).
-  assert.ok(fs.existsSync(path.join(dir, 'skills', 'demo', 'SKILL.md')));
+  assert.ok(fs.existsSync(path.join(dir, 'skills', 'code-review', 'SKILL.md')));
   assert.ok(fs.existsSync(path.join(dir, 'skills', 'multi', 'SKILL.md')));
   assert.ok(!fs.existsSync(path.join(dir, 'skills', 'ghost')), 'disabled source must be excluded');
 
@@ -107,7 +107,7 @@ test('rebuild removes stale entries when a source is disabled', () => {
   const dir = defaultSnapshotDir();
   assert.ok(!fs.existsSync(path.join(dir, 'skills', 'multi')), 'stale skills must be gone');
   assert.ok(!fs.existsSync(path.join(dir, 'agents', 'helper.md')), 'stale agents must be gone');
-  assert.ok(fs.existsSync(path.join(dir, 'skills', 'demo', 'SKILL.md')),
+  assert.ok(fs.existsSync(path.join(dir, 'skills', 'code-review', 'SKILL.md')),
     'still-enabled source survives');
 });
 
@@ -156,7 +156,7 @@ test('over-budget skills are skipped and recorded, not copied', () => {
     'over-budget skill content must not be copied');
   const meta = JSON.parse(fs.readFileSync(path.join(defaultSnapshotDir(), '_meta.json'), 'utf8'));
   assert.ok(meta.skipped.some((s) => s.skill === 'multi' && /size budget/.test(s.reason)));
-  // Only builtin's tiny demo skill survives the tiny budgets.
+  // Only builtin's tiny code-review skill survives the tiny budgets.
   assert.equal(r.counts.skills, 1);
   fs.rmSync(big, { force: true });
 });
@@ -227,7 +227,6 @@ test('the default-sources folder itself is readable by listSkillLibrary (fresh-u
   refreshDefaultSnapshot(USER);
 
   const { listSkillLibrary, _resetSkillLibraryCache } = await import('../llm_agent/skills/skill-library.mjs');
-  const { DEFAULT_SOURCES_ID } = await import('../llm-sources/registry.mjs');
   writeRegistry([
     { id: DEFAULT_SOURCES_ID, name: 'Default Sources', origin: 'local', location: defaultSnapshotDir(), builtin: true },
   ]);
@@ -235,6 +234,74 @@ test('the default-sources folder itself is readable by listSkillLibrary (fresh-u
   // A never-before-seen userId: listEnabled() falls back to {default-sources}
   // with no explicit setEnabled call, mirroring a truly fresh install.
   const { skills } = listSkillLibrary('never-configured-fresh-user');
-  assert.ok(skills.some((s) => s.id === 'skills/demo'),
-    'default-sources must surface the already-snapshotted demo skill to a fresh user');
+  assert.ok(skills.some((s) => s.id === 'skills/code-review'),
+    'default-sources must surface the already-snapshotted code-review skill to a fresh user');
+});
+
+// ── Curated fundamental-skills set + self-reference guard + commands catalog ──
+
+test('BUILTIN_ID is filtered to the curated core set; other sources ship unfiltered', () => {
+  // fakeRepo (BUILTIN_ID) has one core skill ('code-review') plus a
+  // non-core one ('not-core-at-all') added here. 'extra' (a plain
+  // user-added source) keeps its own skill regardless of the allowlist.
+  fs.mkdirSync(path.join(fakeRepo, 'skills', 'not-core-at-all'), { recursive: true });
+  fs.writeFileSync(path.join(fakeRepo, 'skills', 'not-core-at-all', 'SKILL.md'),
+    '---\nname: not-core-at-all\ndescription: n\n---\n\n# not-core-at-all\n');
+  writeRegistry([
+    { id: BUILTIN_ID, name: 'Central Skills', origin: 'builtin', location: fakeRepo, builtin: true },
+    { id: 'extra', name: 'Extra', origin: 'local', location: extra, builtin: false },
+  ]);
+  setEnabled(USER, BUILTIN_ID, true);
+  setEnabled(USER, 'extra', true);
+  const summary = refreshDefaultSnapshot(USER);
+  const dir = defaultSnapshotDir();
+
+  assert.ok(fs.existsSync(path.join(dir, 'skills', 'code-review')), 'core builtin skill ships');
+  assert.ok(!fs.existsSync(path.join(dir, 'skills', 'not-core-at-all')),
+    'non-core builtin skill must be filtered out');
+  assert.ok(fs.existsSync(path.join(dir, 'skills', 'multi')),
+    'a user-added source is NOT filtered by the builtin curation allowlist');
+  assert.ok(summary.skipped.some((s) => s.source === BUILTIN_ID && s.skill === 'not-core-at-all'
+    && /curated fundamental-skills set/.test(s.reason)));
+
+  fs.rmSync(path.join(fakeRepo, 'skills', 'not-core-at-all'), { recursive: true, force: true });
+});
+
+test('default-sources is never read as an input source (self-reference guard)', () => {
+  // Simulate a PRIOR refresh's output containing a skill that no longer
+  // exists in any currently-enabled source (as if it were removed upstream
+  // or dropped by a curation-list change). If default-sources were read as
+  // an ordinary source, this stale entry would win the "first source wins"
+  // dedup (it's seeded before BUILTIN_ID) and persist forever.
+  const dir = defaultSnapshotDir();
+  fs.mkdirSync(path.join(dir, 'skills', 'long-gone'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'skills', 'long-gone', 'SKILL.md'),
+    '---\nname: long-gone\ndescription: stale\n---\n\n# stale\n');
+
+  writeRegistry([
+    { id: DEFAULT_SOURCES_ID, name: 'Default Sources', origin: 'local', location: dir, builtin: true },
+    { id: BUILTIN_ID, name: 'Central Skills', origin: 'builtin', location: fakeRepo, builtin: true },
+  ]);
+  setEnabled(USER, DEFAULT_SOURCES_ID, true);
+  setEnabled(USER, BUILTIN_ID, true);
+  refreshDefaultSnapshot(USER);
+
+  assert.ok(!fs.existsSync(path.join(dir, 'skills', 'long-gone')),
+    'a stale self-referenced entry must not survive a refresh');
+  assert.ok(fs.existsSync(path.join(dir, 'skills', 'code-review')),
+    'builtin still contributes normally');
+});
+
+test('commands/commands.json is always written, independent of enabled sources', () => {
+  writeRegistry([]);
+  refreshDefaultSnapshot('nobody-with-nothing-enabled');
+  const dir = defaultSnapshotDir();
+  const commandsFile = JSON.parse(fs.readFileSync(path.join(dir, 'commands', 'commands.json'), 'utf8'));
+  assert.match(commandsFile._note, /not sourced from any registered llm-source/i);
+  const names = commandsFile.commands.map((c) => c.name);
+  assert.ok(names.includes('/clear'));
+  assert.ok(names.includes('/compact'));
+  assert.ok(names.includes('/help'));
+  const meta = JSON.parse(fs.readFileSync(path.join(dir, '_meta.json'), 'utf8'));
+  assert.equal(meta.counts.commands, commandsFile.commands.length);
 });

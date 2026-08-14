@@ -1,5 +1,0 @@
-# The log-reading engine needs no third-party runtime dependencies.
-# gurobipy is required ONLY for --lp model-file analysis (and to produce a log).
-# Install it when you want the model-file features:
-#   pip install "gurobipy>=10.0"
-

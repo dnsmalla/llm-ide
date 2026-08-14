@@ -1,13 +1,230 @@
 {
-  "generatedAt": "2026-08-14T22:22:44.391Z",
+  "generatedAt": "2026-08-14T23:09:30.910Z",
   "userId": "5de135de64804a0f",
   "description": "Effective chat configuration. skills/ + agents/: copied from ENABLED sources. hooks/: discovery catalog (never executed). .mcp.json: enabled+consented MCP plugins actually passed to the CLI. Single global folder — the last user to trigger a refresh wins (this userId).",
   "counts": {
-    "sources": 2,
-    "skills": 57,
+    "sources": 1,
+    "skills": 14,
     "agents": 0,
     "hooks": 0,
-    "mcpServers": 0
+    "mcpServers": 0,
+    "commands": 61
   },
-  "skipped": []
+  "skipped": [
+    {
+      "source": "builtin",
+      "skill": "configure-app-settings",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "configure-auth",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "configure-backend",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "configure-database",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "deploy-prod",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "dispatching-parallel-agents",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "docstrings",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "error-handling",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "excel-diff-extractor",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "excel-io",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "grid-pptx",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "gurobi-params",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "iis-summarization",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "lp-compare",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "math-olympiad",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "mirror-web-to-native",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "model-api-contract",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "new-app-bootstrap",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "optimization-advisor",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "performance-budget",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "result-explanation",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "reviewer",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "solve-tuning",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "structure-setup",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "subagent-driven-development",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "type-hints",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "upgrade-system",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "use-memory",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "using-superpowers",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "writing-skills",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "answer-question",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "atomize-text",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "classify-node",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "draft-document",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "draft-section",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "identify-missing-context",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "improve-note",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "infer-edges",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "plan-draft-outline",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "process-unit",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "reconcile-note",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "select-notes-for-question",
+      "reason": "outside the curated fundamental-skills set for this product"
+    },
+    {
+      "source": "builtin",
+      "skill": "summarize-note",
+      "reason": "outside the curated fundamental-skills set for this product"
+    }
+  ]
 }

@@ -3,10 +3,17 @@
 //
 //   <sourcesDir>/llm_default_sources/
 //   ├── skills/<skill-name>/…              ← copied (recursively) from each
-//   │                                        ENABLED source (skills/ + runtime/ families)
+//   │                                        ENABLED source (skills/ + runtime/ families).
+//   │                                        BUILTIN_ID (the central skills repo) is
+//   │                                        filtered to CORE_BUILTIN_SKILLS — a curated
+//   │                                        "fundamental" subset, not the whole repo;
+//   │                                        every other enabled source ships in full.
 //   ├── agents/<name>.md                    ← subagent definition files
 //   ├── hooks/hooks.json                    ← hooks catalogued from enabled
 //   │                                        sources — DISCOVERY ONLY, never executed
+//   ├── commands/commands.json              ← Claude Code's OWN built-in slash commands —
+//   │                                        static reference list, independent of any
+//   │                                        enabled source (see claude-code-commands.mjs)
 //   ├── .mcp.json                           ← the EFFECTIVE chat MCP servers
 //   │                                        (enabled+consented MCP plugins), exact
 //   │                                        shape the claude CLI receives
@@ -55,15 +62,36 @@
 //   than copied wholesale.
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { listSources, listDiscoveryHooks, defaultSourcesDir, defaultSourcesLocation } from '../llm-sources/registry.mjs';
+import { listSources, listDiscoveryHooks, defaultSourcesDir, defaultSourcesLocation, BUILTIN_ID, DEFAULT_SOURCES_ID } from '../llm-sources/registry.mjs';
 import { listEnabled } from '../llm-sources/state.mjs';
 import { effectiveMcpServers } from '../mcp/mcp-config.mjs';
+import { CLAUDE_CODE_COMMANDS } from './claude-code-commands.mjs';
 
 const LIBRARY_FAMILIES = ['skills', 'runtime']; // mirrors registry.mjs
 const SNAPSHOT_DIR_NAME = 'llm_default_sources'; // legacy app-support folder name
 // Must match SLUG_RE in llm-sources/registry.mjs — defensive: a hand-edited
 // legacy registry could contain an id that escapes the snapshot folder.
 const SAFE_SOURCE_ID = /^[a-z][a-z0-9-]{1,40}$/;
+
+// Curated "fundamental" subset of the central skills repo (BUILTIN_ID) — the
+// repo also carries a Gurobi/optimization-consulting vertical (gurobi-params,
+// math-olympiad, excel-io, etc., tagged family: domain in registry.yaml) that
+// has nothing to do with a coding-assistant IDE. Applied ONLY to BUILTIN_ID:
+// a user who explicitly adds their own third-party source gets it in full,
+// unfiltered — this allowlist is about curating what THIS product ships by
+// default, not a general content policy. Update deliberately, not via a
+// broad "everything except X" filter, so drift in the upstream repo can't
+// silently balloon the default set back out.
+const CORE_BUILTIN_SKILLS = new Set([
+  'writing-plans', 'executing-plans',
+  'code-review', 'receiving-code-review', 'requesting-code-review',
+  'documentation',
+  'systematic-debugging', 'test-driven-development',
+  'add-feature', 'add-code',
+  'brainstorming',
+  'verification-before-completion',
+  'using-git-worktrees', 'finishing-a-development-branch',
+]);
 
 const DEFAULT_LIMITS = Object.freeze({
   maxSkillBytes: 10 * 1024 * 1024,   // per skill folder
@@ -134,7 +162,7 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
   mkdirSync(staging, { recursive: true });
 
   const enabled = listEnabled(userId);
-  const counts = { sources: 0, skills: 0, agents: 0, hooks: 0, mcpServers: 0 };
+  const counts = { sources: 0, skills: 0, agents: 0, hooks: 0, mcpServers: 0, commands: CLAUDE_CODE_COMMANDS.length };
   const skipped = [];
   const hooksBySource = {};
   let totalBytes = 0;
@@ -149,6 +177,15 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
   for (const src of listSources()) {
     if (!enabled.has(src.id)) continue;
     if (!SAFE_SOURCE_ID.test(src.id)) continue; // defensive: never escape the folder
+    // default-sources IS this snapshot folder (defaultSourcesLocation() ===
+    // defaultSnapshotDir()) — it must never be read as an INPUT, only ever
+    // produced as output. Since the flat-layout fix made this folder
+    // actually readable as a source, skipping this is required: otherwise
+    // every refresh would copy the PREVIOUS refresh's contents back into the
+    // new one (and, because default-sources is seeded first and dedup keeps
+    // the first source's copy, stale/uncurated entries could win over a
+    // freshly-curated builtin and never go away).
+    if (src.id === DEFAULT_SOURCES_ID) continue;
     if (!src.location || !existsSync(src.location)) continue;
     counts.sources += 1;
 
@@ -157,6 +194,10 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
     // seenSkillNames above. Dropped copies are recorded, never silent.
     for (const { fam, dir: skillDir } of listSkillDirs(src.location)) {
       const name = basename(skillDir);
+      if (src.id === BUILTIN_ID && !CORE_BUILTIN_SKILLS.has(name)) {
+        skipped.push({ source: src.id, skill: name, reason: 'outside the curated fundamental-skills set for this product' });
+        continue;
+      }
       if (seenSkillNames.has(name)) {
         skipped.push({ source: src.id, skill: name, reason: `${fam}-family duplicate — earlier family kept` });
         continue;
@@ -203,6 +244,18 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
   writeFileSync(join(staging, 'hooks', 'hooks.json'), JSON.stringify({
     _note: 'Hooks catalogued from enabled sources — DISCOVERY ONLY. LLM-IDE never executes these commands.',
     sources: hooksBySource,
+  }, null, 2));
+
+  // Claude Code's own built-in slash commands (/clear, /compact, /help, …) —
+  // a REFERENCE catalog, not discovered from any registered llm-source: these
+  // are intrinsic to the `claude` CLI itself, independent of enabled sources
+  // or userId, so this file is identical on every refresh. Static list lives
+  // in claude-code-commands.mjs (source: code.claude.com/docs/en/commands.md)
+  // — update it there when Claude Code's own command set changes.
+  mkdirSync(join(staging, 'commands'), { recursive: true });
+  writeFileSync(join(staging, 'commands', 'commands.json'), JSON.stringify({
+    _note: "Claude Code's own built-in slash commands — a static reference catalog, not sourced from any registered llm-source and never executed by this server.",
+    commands: CLAUDE_CODE_COMMANDS,
   }, null, 2));
 
   // Source .mcp.json manifests are deliberately NOT merged here: they are
