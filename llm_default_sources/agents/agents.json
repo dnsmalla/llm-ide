@@ -1,0 +1,111 @@
+{
+  "_note": "The agent tiers chat actually runs. global/internal are intrinsic to this codebase (their tool lists never depend on enabled sources); subagents are this user’s currently enabled plugin-defined delegates (ask-subagent), independent of any agents/<name>.md files copied alongside this file from a source's discovery catalog, which may not be in the plugin-subagent format at all.",
+  "tiers": {
+    "global": {
+      "description": "Depth 0 — the primary, user-facing loop. Every /code-assist turn runs this.",
+      "tools": [
+        {
+          "name": "ask-internal",
+          "kind": "read",
+          "description": "Delegate to the LLM-IDE internal agent — the only authority on"
+        },
+        {
+          "name": "ask-subagent",
+          "kind": "read",
+          "description": "Delegate to a plugin-defined named subagent. Each subagent has its"
+        },
+        {
+          "name": "bash",
+          "kind": "write",
+          "description": "Run a shell command **in the user's app**, as an action they can see. Emitting"
+        },
+        {
+          "name": "fetch-url",
+          "kind": "read",
+          "description": "Fetch and read the contents of a URL."
+        },
+        {
+          "name": "find-code",
+          "kind": "read",
+          "description": "Search the project's code index and graph for a symbol, file, or feature — returns definition sites with file:line, graph-related code (callers, callees, importers), and full-text hits. Use this before any grep."
+        },
+        {
+          "name": "git-op",
+          "kind": "write",
+          "description": "Act on the user's **active repository** with git. You PROPOSE the operation;"
+        },
+        {
+          "name": "list-files",
+          "kind": "read",
+          "description": "List files in the project the user has open (and their indexed repos), so you"
+        },
+        {
+          "name": "read-file",
+          "kind": "read",
+          "description": "Read the text contents of a file in the project the user has open (or an indexed"
+        },
+        {
+          "name": "run-bash",
+          "kind": "read",
+          "description": "Execute a **read-only** shell command in the user's workspace and get its output"
+        },
+        {
+          "name": "search-kb",
+          "kind": "read",
+          "description": "Search the user's knowledge base — meeting transcripts, decisions, action"
+        },
+        {
+          "name": "task-create",
+          "kind": "read",
+          "description": "Add a new task to your session task list."
+        },
+        {
+          "name": "task-list",
+          "kind": "read",
+          "description": "Return your current task list for this session."
+        },
+        {
+          "name": "task-update",
+          "kind": "read",
+          "description": "Update a task's status or title."
+        },
+        {
+          "name": "update-file",
+          "kind": "write",
+          "description": "Propose an edit to a real file on disk. The Mac client resolves the"
+        },
+        {
+          "name": "web-search",
+          "kind": "read",
+          "description": "Search the web and get a synthesized summary plus the sources behind it."
+        }
+      ]
+    },
+    "internal": {
+      "description": "Depth 1 — invoked by the global agent via ask-internal for app-state/KB-aware reasoning.",
+      "tools": [
+        {
+          "name": "comment-gitlab-issue",
+          "kind": "write",
+          "description": "Propose a comment on an EXISTING GitLab issue in the user's active"
+        },
+        {
+          "name": "create-gitlab-issue",
+          "kind": "write",
+          "description": "Propose a new issue in the user's active project. Works for both"
+        },
+        {
+          "name": "search-kb",
+          "kind": "read",
+          "description": "Search the user's meetings, notes, decisions, and indexed code chunks"
+        },
+        {
+          "name": "trigger-review-code",
+          "kind": "write",
+          "description": "Propose a code-change task to be carried out by the Review Code"
+        }
+      ]
+    }
+  },
+  "subagents": []
+}

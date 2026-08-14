@@ -305,3 +305,55 @@ test('commands/commands.json is always written, independent of enabled sources',
   const meta = JSON.parse(fs.readFileSync(path.join(dir, '_meta.json'), 'utf8'));
   assert.equal(meta.counts.commands, commandsFile.commands.length);
 });
+
+test('agents/agents.json catalogs the real global + internal tool tiers, independent of enabled sources', () => {
+  writeRegistry([]);
+  refreshDefaultSnapshot('nobody-with-nothing-enabled');
+  const dir = defaultSnapshotDir();
+  const agents = JSON.parse(fs.readFileSync(path.join(dir, 'agents', 'agents.json'), 'utf8'));
+
+  // These are the codebase's own always-present global/internal tools —
+  // never sourced from any llm-source, so an empty registry must not empty them.
+  const globalNames = agents.tiers.global.tools.map((t) => t.name);
+  assert.ok(globalNames.includes('ask-internal'));
+  assert.ok(globalNames.includes('ask-subagent'));
+  assert.ok(globalNames.includes('search-kb'));
+
+  const internalNames = agents.tiers.internal.tools.map((t) => t.name);
+  assert.ok(internalNames.includes('search-kb'));
+  assert.ok(internalNames.includes('trigger-review-code'));
+
+  assert.deepEqual(agents.subagents, [], 'no plugin installed → no subagents');
+  const meta = JSON.parse(fs.readFileSync(path.join(dir, '_meta.json'), 'utf8'));
+  assert.equal(meta.counts.subagents, 0);
+});
+
+test('agents/agents.json lists a real, enabled plugin subagent for that user', async () => {
+  const pluginDir = process.env.LLMIDE_PLUGIN_DIR;
+  const p = path.join(pluginDir, 'fake-plugin');
+  fs.mkdirSync(path.join(p, 'agents'), { recursive: true });
+  fs.writeFileSync(path.join(p, 'plugin.json'), JSON.stringify({
+    name: 'fake-plugin', version: '0.0.0', displayName: 'Fake Plugin',
+  }));
+  fs.writeFileSync(path.join(p, 'agents', 'reviewer.md'),
+    '---\ndescription: Reviews code\n---\n\nYou are a code reviewer.\n');
+
+  const { reloadPlugins } = await import('../llm_agent/skills/registry.mjs');
+  reloadPlugins(); // pluginRegistry is cached at module load — force a rescan
+  const { setEnabled: setPluginEnabled } = await import('../plugins/state.mjs');
+  setPluginEnabled(USER, 'fake-plugin', true);
+
+  writeRegistry([]);
+  refreshDefaultSnapshot(USER);
+  const agents = JSON.parse(fs.readFileSync(path.join(defaultSnapshotDir(), 'agents', 'agents.json'), 'utf8'));
+  assert.equal(agents.subagents.length, 1);
+  assert.equal(agents.subagents[0].name, 'reviewer');
+  assert.equal(agents.subagents[0].description, 'Reviews code');
+  assert.equal(agents.subagents[0].pluginName, 'fake-plugin');
+  const meta = JSON.parse(fs.readFileSync(path.join(defaultSnapshotDir(), '_meta.json'), 'utf8'));
+  assert.equal(meta.counts.subagents, 1);
+
+  setPluginEnabled(USER, 'fake-plugin', false);
+  fs.rmSync(p, { recursive: true, force: true });
+  reloadPlugins();
+});

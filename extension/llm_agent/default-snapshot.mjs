@@ -8,7 +8,15 @@
 //   │                                        filtered to CORE_BUILTIN_SKILLS — a curated
 //   │                                        "fundamental" subset, not the whole repo;
 //   │                                        every other enabled source ships in full.
-//   ├── agents/<name>.md                    ← subagent definition files
+//   ├── agents/<name>.md                    ← subagent definition files copied from a
+//   │                                        source's discovery-only agents/ family
+//   │                                        (may not be the plugin-subagent SHAPE — see
+//   │                                        agents.json below for what's actually callable)
+//   ├── agents/agents.json                  ← REFERENCE catalog of the agent tiers chat
+//   │                                        actually runs: global (depth 0) + internal
+//   │                                        (depth 1, ask-internal) tool lists — intrinsic
+//   │                                        to this codebase — plus this user's currently
+//   │                                        enabled plugin subagents (ask-subagent)
 //   ├── hooks/hooks.json                    ← hooks catalogued from enabled
 //   │                                        sources — DISCOVERY ONLY, never executed
 //   ├── commands/commands.json              ← Claude Code's OWN built-in slash commands —
@@ -66,6 +74,7 @@ import { listSources, listDiscoveryHooks, defaultSourcesDir, defaultSourcesLocat
 import { listEnabled } from '../llm-sources/state.mjs';
 import { effectiveMcpServers } from '../mcp/mcp-config.mjs';
 import { CLAUDE_CODE_COMMANDS } from './claude-code-commands.mjs';
+import { globalSkills, internalSkills, buildPerUserSkillSet } from './skills/registry.mjs';
 
 const LIBRARY_FAMILIES = ['skills', 'runtime']; // mirrors registry.mjs
 const SNAPSHOT_DIR_NAME = 'llm_default_sources'; // legacy app-support folder name
@@ -162,7 +171,7 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
   mkdirSync(staging, { recursive: true });
 
   const enabled = listEnabled(userId);
-  const counts = { sources: 0, skills: 0, agents: 0, hooks: 0, mcpServers: 0, commands: CLAUDE_CODE_COMMANDS.length };
+  const counts = { sources: 0, skills: 0, agents: 0, hooks: 0, mcpServers: 0, commands: CLAUDE_CODE_COMMANDS.length, subagents: 0 };
   const skipped = [];
   const hooksBySource = {};
   let totalBytes = 0;
@@ -258,6 +267,45 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
     commands: CLAUDE_CODE_COMMANDS,
   }, null, 2));
 
+  // The three agent TIERS chat actually runs (loop.mjs's nesting-depth
+  // comment: global (0) → internal/subagent (1)) — a REFERENCE catalog
+  // alongside any agents/<name>.md files copied above from a source's
+  // discovery-only `agents/` family. Those copied files are NOT necessarily
+  // functional subagents (a central-repo skill's bundled agents/*.md is
+  // often just a Claude-Code-Task-tool prompt template); the `subagents`
+  // list below is the real, callable set for THIS userId — every plugin
+  // whose own agents/*.md the loader actually parsed and wired into
+  // ask-subagent (plugins/loader.mjs's parseSubagentFile), scoped through
+  // this same user's enabled-plugins state via buildPerUserSkillSet.
+  const { subagents } = buildPerUserSkillSet(userId);
+  counts.subagents = subagents.size;
+  const toolEntry = (name, skill) => ({ name, kind: skill.kind || 'read', description: skill.description || '' });
+  mkdirSync(join(staging, 'agents'), { recursive: true });
+  writeFileSync(join(staging, 'agents', 'agents.json'), JSON.stringify({
+    _note: 'The agent tiers chat actually runs. global/internal are intrinsic to this '
+      + "codebase (their tool lists never depend on enabled sources); subagents are this "
+      + 'user’s currently enabled plugin-defined delegates (ask-subagent), independent '
+      + "of any agents/<name>.md files copied alongside this file from a source's discovery "
+      + 'catalog, which may not be in the plugin-subagent format at all.',
+    tiers: {
+      global: {
+        description: 'Depth 0 — the primary, user-facing loop. Every /code-assist turn runs this.',
+        tools: [...globalSkills.skills].map(([name, skill]) => toolEntry(name, skill)),
+      },
+      internal: {
+        description: 'Depth 1 — invoked by the global agent via ask-internal for app-state/KB-aware reasoning.',
+        tools: [...internalSkills.skills].map(([name, skill]) => toolEntry(name, skill)),
+      },
+    },
+    subagents: [...subagents].map(([name, sub]) => ({
+      name,
+      description: sub.description || '',
+      allowedTools: sub.allowedTools || [],
+      model: sub.model,
+      pluginName: sub.pluginName,
+    })),
+  }, null, 2));
+
   // Source .mcp.json manifests are deliberately NOT merged here: they are
   // catalogued-only and never spawned. The effective servers chat runs with
   // come exclusively from enabled+consented MCP plugins.
@@ -268,7 +316,7 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
   writeFileSync(join(staging, '_meta.json'), JSON.stringify({
     generatedAt: new Date().toISOString(),
     userId,
-    description: 'Effective chat configuration. skills/ + agents/: copied from ENABLED sources. hooks/: discovery catalog (never executed). .mcp.json: enabled+consented MCP plugins actually passed to the CLI. Single global folder — the last user to trigger a refresh wins (this userId).',
+    description: 'Effective chat configuration. skills/: copied from ENABLED sources (BUILTIN_ID curated to a fundamental subset). agents/<name>.md: discovery-only copies from a source\'s agents/ family. agents/agents.json: the REAL agent tiers (global/internal/subagents) chat runs. hooks/: discovery catalog (never executed). commands/commands.json: Claude Code\'s own built-in slash commands, reference only. .mcp.json: enabled+consented MCP plugins actually passed to the CLI. Single global folder — the last user to trigger a refresh wins (this userId).',
     counts,
     skipped,
   }, null, 2));
