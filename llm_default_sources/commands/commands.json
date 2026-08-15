@@ -18,6 +18,10 @@
       "description": "Create a conversation branch"
     },
     {
+      "name": "/rewind",
+      "description": "Restore the code and/or conversation to a previous checkpoint"
+    },
+    {
       "name": "/fork",
       "description": "Copy the conversation to a background session"
     },
@@ -180,6 +184,10 @@
     {
       "name": "/desktop",
       "description": "Open the Desktop app (alias: /app)"
+    },
+    {
+      "name": "/chrome",
+      "description": "Open Claude in Chrome settings"
     },
     {
       "name": "/teleport",
