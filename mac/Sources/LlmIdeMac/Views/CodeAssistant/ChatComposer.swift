@@ -678,6 +678,14 @@ extension CodeAssistantPanel {
         guard !msg.isEmpty else { return }
         draft = ""
 
+        // Built-in slash command — never sent to the model as a prompt.
+        // Deliberately NOT the same mechanism as a plugin's own slash command
+        // (that's server-side prompt-expansion, not a client-side UI action).
+        if ChatSlashCommands.isClearCommand(msg) {
+            clearCurrentChat()
+            return
+        }
+
         // Record the PLAIN text for ↑ recall (not the skill-decorated message).
         if sentPrompts.last != msg {
             sentPrompts.append(msg)

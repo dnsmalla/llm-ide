@@ -70,6 +70,17 @@ extension LlmIdeAPIClient {
     private struct ToggleAck: Decodable { let ok: Bool; let enabled: Bool }
     private struct UpdateAck: Decodable { let ok: Bool; let installed: Bool? }
     private struct RemoveAck: Decodable { let ok: Bool }
+    struct RefreshDefaultSourcesResult: Decodable {
+        let ok: Bool
+        let dir: String
+        let counts: [String: Int]
+    }
+
+    /// The id `default-sources` is registered under — the always-on source
+    /// whose location IS the committed llm_default_sources folder. Not a
+    /// fetchable/git-backed source: "refreshing" it means regenerating that
+    /// folder from whatever's currently enabled (see refreshDefaultSources()).
+    static let defaultSourcesId = "default-sources"
 
     /// All registered LLM sources with this user's per-source enable state.
     /// Callers use `try?` at the call site (matches `listPlugins()`'s callers).
@@ -100,9 +111,13 @@ extension LlmIdeAPIClient {
     }
 
     /// Re-sync a source (git: fetch + checkout tracked ref; local: refresh
-    /// version; builtin: `git submodule update --init .skills`). Returns
-    /// whether the builtin submodule ended up checked out — irrelevant
-    /// for non-builtin sources (nil in the response, defaults false).
+    /// version; builtin: `git submodule update --init .skills`; the
+    /// `default-sources` id specifically: regenerate the llm_default_sources
+    /// snapshot from the currently enabled sources — same rebuild as
+    /// `refreshDefaultSources()` below, just reached via this admin-gated
+    /// route instead). Returns whether the builtin submodule ended up
+    /// checked out — irrelevant for non-builtin sources (nil in the
+    /// response, defaults false). Admin-gated server-side.
     @discardableResult
     func updateLlmSource(id: String) async throws -> Bool {
         struct Req: Encodable { let id: String }
@@ -110,6 +125,19 @@ extension LlmIdeAPIClient {
                                             body: Req(id: id),
                                             authenticated: true)
         return ack.installed ?? false
+    }
+
+    /// On-demand rebuild of the llm_default_sources snapshot for the current
+    /// user — skills/agents from enabled sources, hooks catalog, effective
+    /// .mcp.json. NOT admin-gated (unlike updateLlmSource) — any user can
+    /// refresh their own view of it. Also happens automatically on source
+    /// toggle / MCP consent change / server start; this is the explicit
+    /// "upgrade now" action for the Library's Default Sources row.
+    @discardableResult
+    func refreshDefaultSources() async throws -> RefreshDefaultSourcesResult {
+        try await post("/auth/me/llm-sources/refresh-default",
+                       body: EmptyBody(),
+                       authenticated: true)
     }
 
     /// Remove a registered source (and its clone dir, if any). The server

@@ -10,6 +10,13 @@ import SwiftUI
 /// Remove + re-add). Remove never shows for builtin — the server rejects
 /// it anyway, this just avoids a pointless round trip.
 ///
+/// The `default-sources` row is its own case: it has no upstream to fetch
+/// from (it's a generated folder, not a checkout), so its action is labeled
+/// "Refresh" and hits the non-admin-gated `refresh-default` endpoint instead
+/// of the generic (admin-gated) Update path every other source uses — this
+/// is the "rebuild my curated defaults right now" escape hatch, in addition
+/// to the automatic rebuild that already runs on every source toggle.
+///
 /// Agents, hooks, and MCP servers are DISPLAY ONLY — this view never
 /// invokes a listed agent, executes a listed hook's command, or spawns a
 /// listed MCP server. That's true for every source including builtin; only
@@ -162,18 +169,33 @@ struct LlmSourceDetailView: View {
         }
     }
 
+    private var isDefaultSources: Bool { sourceId == LlmIdeAPIClient.defaultSourcesId }
+
     @ViewBuilder
     private func actionsRow(_ s: LlmIdeAPIClient.LlmSourceInfo) -> some View {
-        HStack(spacing: 10) {
-            Button(s.builtin && !s.installed ? "Install" : "Update") { Task { await update() } }
-                .disabled(busy || (!s.builtin && !s.installed))
-            if s.location != nil, s.installed {
-                Button("Reveal in Finder") { reveal(s) }
-                    .disabled(busy)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Button(isDefaultSources ? "Refresh" : (s.builtin && !s.installed ? "Install" : "Update")) {
+                    Task { await update() }
+                }
+                .disabled(busy || (!isDefaultSources && !s.builtin && !s.installed))
+                if s.location != nil, s.installed {
+                    Button("Reveal in Finder") { reveal(s) }
+                        .disabled(busy)
+                }
+                if !s.builtin {
+                    Button("Remove", role: .destructive) { Task { await remove() } }
+                        .disabled(busy)
+                }
             }
-            if !s.builtin {
-                Button("Remove", role: .destructive) { Task { await remove() } }
-                    .disabled(busy)
+            // "Refresh" here isn't a re-fetch (this source has no upstream to
+            // pull from) — it rebuilds this folder right now from whatever
+            // sources are currently enabled, same as the automatic rebuild
+            // that already runs on every toggle. Any user can do this — not
+            // admin-gated, unlike the generic Update path other sources use.
+            if isDefaultSources {
+                Text("Rebuilds this folder now from your currently enabled sources.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -208,7 +230,11 @@ struct LlmSourceDetailView: View {
         busy = true
         defer { busy = false }
         do {
-            _ = try await api.updateLlmSource(id: sourceId)
+            if isDefaultSources {
+                _ = try await api.refreshDefaultSources()
+            } else {
+                _ = try await api.updateLlmSource(id: sourceId)
+            }
             await load()
         } catch {
             loadError = error.localizedDescription

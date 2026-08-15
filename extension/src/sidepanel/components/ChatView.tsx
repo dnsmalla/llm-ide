@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import type { ChatMessage } from '../hooks/useChat';
+import { isBuiltinClearCommand } from '../chat-commands';
 
 interface Props {
   messages: ChatMessage[];
@@ -53,6 +54,11 @@ export default function ChatView({
   const handleSend = () => {
     const text = input.trim();
     if (!text || isLoading || sendingRef.current) return;
+    if (isBuiltinClearCommand(text)) {
+      setInput('');
+      onClear();
+      return;
+    }
     sendingRef.current = true;
     setInput('');
     onSend(text);
