@@ -9,6 +9,7 @@
 import { buildAllowedRoots, resolveAllowedRepoRoot } from '../../graphkit/index.mjs';
 import { readChatMemoryFacts, appendChatMemory } from '../../graphkit/index.mjs';
 import { extractMemories } from './memory-extract.mjs';
+import { appendSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { logger } from '../../core/logger.mjs';
 
 // Observability: every turn logs ONE `project_memory` line with `outcome` so
@@ -78,15 +79,22 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
       return null;
     }
     const meta = {};
-    // Attribute what we learn to the CHAT session (a stable per-conversation
+    // Session memory is keyed on the CHAT session (a stable per-conversation
     // UUID owned by the client's session store), not `agentContext.sessionId` —
     // that one is re-minted on every session switch, so facts captured after a
     // switch could never be traced back to the chat the user would delete.
-    // Falls back to the agent session id for a client that doesn't send one.
-    const sessionId = typeof agentContext?.chatSessionId === 'string' && agentContext.chatSessionId
-      ? agentContext.chatSessionId
-      : (typeof agentContext?.sessionId === 'string' ? agentContext.sessionId : undefined);
-    const saved = appendChatMemory({ root, facts, remove: superseded, meta, sessionId });
+    // Falls back to the agent session id for a client that doesn't send one —
+    // see resolveChatSessionId, shared with the read path in route.mjs.
+    const sessionId = resolveChatSessionId(agentContext);
+    const saved = appendChatMemory({ root, facts, remove: superseded, meta });
+    // Session-scoped copy of the SAME extracted facts, in a real DB table
+    // (kb/session-memory.mjs) — unlike project memory above, this IS deleted
+    // wholesale when the session is cleared/removed (routes/agent.mjs's
+    // DELETE /kb/agent/session-memory). Best-effort: a failure here must
+    // never take down project-memory capture, which already succeeded.
+    if (sessionId) {
+      try { appendSessionMemory(userId, sessionId, facts); } catch { /* best-effort */ }
+    }
     const added = meta.added ?? Math.max(0, (Array.isArray(saved) ? saved.length : 0) - existing.length);
     logger.audit('project_memory', {
       outcome: 'captured', extracted: facts.length, added,

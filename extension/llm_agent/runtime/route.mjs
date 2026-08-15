@@ -18,6 +18,7 @@ import { globalSkills, internalSkills, buildPerUserSkillSet } from '../skills/in
 import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
 import { renderGraphifyMemory } from '../../graphkit/index.mjs';
 import { persistTurnMemory } from './memory-persist.mjs';
+import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { buildReadableRoots, handleListFiles, handleReadFile } from './handlers/repo-files.mjs';
 import { handleFindCode } from './handlers/find-code.mjs';
 import { searchKb } from './handlers/search-kb.mjs';
@@ -231,6 +232,25 @@ export async function handleCodeAssist({
       files: memStats,
       truncatedAny: memStats.some((s) => s.truncated),
     });
+  } catch { /* memory is best-effort — keep the base without it */ }
+
+  // Session memory: facts extracted from THIS session's own prior turns
+  // (kb/session-memory.mjs) — distinct from renderGraphifyMemory's project-
+  // wide, file-based memory above. Same chatSessionId resolution the write
+  // path (memory-persist.mjs) uses, so a turn recalls exactly what earlier
+  // turns in the SAME chat taught it. Deleted wholesale when the session is
+  // cleared/removed — never edited, so no viewer surface for it like project
+  // memory has. Run through redactFence for the same reason repo memory is:
+  // it's extracted from user/assistant turns, which can carry untrusted text.
+  try {
+    const chatSessionId = resolveChatSessionId(agentContext);
+    if (chatSessionId && userId) {
+      const sessionFacts = listSessionMemory(userId, chatSessionId);
+      if (sessionFacts.length > 0) {
+        const block = `## This session's memory\n${sessionFacts.map((f) => `- ${f}`).join('\n')}`;
+        personaBase += `\n\n${redactFence(block)}`;
+      }
+    }
   } catch { /* memory is best-effort — keep the base without it */ }
 
   // Inject session task list so the agent always sees its own task state.

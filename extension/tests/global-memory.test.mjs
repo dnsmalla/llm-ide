@@ -22,6 +22,7 @@ process.env.LLMIDE_DB_PATH = tmpDb;
 const { handleCodeAssist } = await import('../llm_agent/runtime/route.mjs');
 const db = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
+const sessionMemory = await import('../kb/session-memory.mjs');
 
 function freshUser(tag) {
   db.closeDb();
@@ -86,4 +87,57 @@ test('global agent gets NO memory block when there are no indexed repos', async 
     userId: U,
   });
   assert.doesNotMatch(globalPrompt, /Repository memory \(Graphify\)/);
+});
+
+// Session memory (kb/session-memory.mjs) is a SEPARATE store from project
+// memory (Graphify, above) — facts extracted from THIS session's own prior
+// turns, recalled into a later turn in the same session via chatSessionId.
+test('a session\'s own memory is recalled into a later turn in the same chat', async () => {
+  const U = freshUser('smem');
+  sessionMemory.appendSessionMemory(U, 'RECALL-CHAT', ['UNIQUE_SESSION_MARKER_77: uses a custom build script']);
+
+  let globalPrompt = '';
+  const capturingClaude = async (prompt) => { if (!globalPrompt) globalPrompt = prompt; return 'ok'; };
+  await handleCodeAssist({
+    message: 'what do you know about this project?',
+    history: [],
+    agentContext: { chatSessionId: 'RECALL-CHAT' },
+    runClaude: capturingClaude,
+    kb: kbStub,
+    userId: U,
+  });
+  assert.match(globalPrompt, /This session's memory/);
+  assert.match(globalPrompt, /UNIQUE_SESSION_MARKER_77/);
+});
+
+test('a DIFFERENT session never sees another session\'s memory', async () => {
+  const U = freshUser('smem2');
+  sessionMemory.appendSessionMemory(U, 'CHAT-A', ['UNIQUE_SESSION_MARKER_88: secret to chat A']);
+
+  let globalPrompt = '';
+  const capturingClaude = async (prompt) => { if (!globalPrompt) globalPrompt = prompt; return 'ok'; };
+  await handleCodeAssist({
+    message: 'hi',
+    history: [],
+    agentContext: { chatSessionId: 'CHAT-B' },
+    runClaude: capturingClaude,
+    kb: kbStub,
+    userId: U,
+  });
+  assert.doesNotMatch(globalPrompt, /UNIQUE_SESSION_MARKER_88/);
+});
+
+test('no session memory block when the session has none', async () => {
+  const U = freshUser('smem3');
+  let globalPrompt = '';
+  const capturingClaude = async (prompt) => { if (!globalPrompt) globalPrompt = prompt; return 'ok'; };
+  await handleCodeAssist({
+    message: 'hi',
+    history: [],
+    agentContext: { chatSessionId: 'EMPTY-CHAT' },
+    runClaude: capturingClaude,
+    kb: kbStub,
+    userId: U,
+  });
+  assert.doesNotMatch(globalPrompt, /This session's memory/);
 });

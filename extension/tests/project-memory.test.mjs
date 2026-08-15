@@ -774,92 +774,59 @@ test('DELETE /kb/agent/project-memory removes one fact and clears all', async ()
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-// ── Session-scoped memory (delete the chat → delete what it taught) ───
+// ── Session-scoped memory (kb/session-memory.mjs, a real DB table) ────
+// Project memory (above) is durable and edit-only — it no longer carries any
+// session attribution and is never auto-pruned by a chat's lifecycle. Session
+// memory is the opposite: it's the thing that's SUPPOSED to disappear the
+// moment its session is cleared or deleted, and it lives in `session_memory`,
+// not a file.
 
-test('forgetSessionMemory drops only the deleted session\'s facts', () => {
+const sessionMemory = await import('../kb/session-memory.mjs');
+
+test('appendSessionMemory + listSessionMemory round-trip, oldest first', () => {
   reset();
   const u = provision();
-  const root = tmpRepo(u, 'session-forget');
-  writer.appendChatMemory({ root, facts: ['from chat A', 'shared fact'], sessionId: 'A' });
-  writer.appendChatMemory({ root, facts: ['from chat B'], sessionId: 'B' });
-
-  const { facts, removed } = writer.forgetSessionMemory({ root, sessionId: 'A' });
-  assert.equal(removed, 2);
-  assert.deepEqual(facts, ['from chat B'], 'chat B\'s memory survives');
-  fs.rmSync(root, { recursive: true, force: true });
+  sessionMemory.appendSessionMemory(u, 'S', ['fact one']);
+  sessionMemory.appendSessionMemory(u, 'S', ['fact two', 'fact three']);
+  assert.deepEqual(sessionMemory.listSessionMemory(u, 'S'), ['fact one', 'fact two', 'fact three']);
 });
 
-test('a fact re-confirmed by a later session belongs to that session', () => {
+test('session memory is isolated per session id, not per user globally', () => {
   reset();
   const u = provision();
-  const root = tmpRepo(u, 'session-reattribute');
-  writer.appendChatMemory({ root, facts: ['[tooling|pm] uses npm'], sessionId: 'A' });
-  // Session B revises the same subject → B now owns the row, so deleting A
-  // must not take it away. (Deleting a chat should never remove knowledge a
-  // LATER chat re-established.)
-  writer.appendChatMemory({ root, facts: ['[tooling|pm] uses pnpm'], sessionId: 'B' });
-
-  const afterA = writer.forgetSessionMemory({ root, sessionId: 'A' });
-  assert.equal(afterA.removed, 0);
-  assert.deepEqual(afterA.facts, ['[tooling|pm] uses pnpm']);
-
-  const afterB = writer.forgetSessionMemory({ root, sessionId: 'B' });
-  assert.equal(afterB.removed, 1);
-  assert.deepEqual(afterB.facts, []);
-  fs.rmSync(root, { recursive: true, force: true });
+  sessionMemory.appendSessionMemory(u, 'A', ['from chat A']);
+  sessionMemory.appendSessionMemory(u, 'B', ['from chat B']);
+  assert.deepEqual(sessionMemory.listSessionMemory(u, 'A'), ['from chat A']);
+  assert.deepEqual(sessionMemory.listSessionMemory(u, 'B'), ['from chat B']);
 });
 
-test('facts captured with no session id are never forgotten by a session delete', () => {
+test('deleteSessionMemory drops only the deleted session\'s facts', () => {
   reset();
   const u = provision();
-  const root = tmpRepo(u, 'session-unattributed');
-  writer.appendChatMemory({ root, facts: ['unattributed fact'] });
-  writer.appendChatMemory({ root, facts: ['session fact'], sessionId: 'S' });
-  const { facts, removed } = writer.forgetSessionMemory({ root, sessionId: 'S' });
+  sessionMemory.appendSessionMemory(u, 'A', ['from chat A']);
+  sessionMemory.appendSessionMemory(u, 'B', ['from chat B']);
+  const removed = sessionMemory.deleteSessionMemory(u, 'A');
   assert.equal(removed, 1);
-  assert.deepEqual(facts, ['unattributed fact']);
-  fs.rmSync(root, { recursive: true, force: true });
+  assert.deepEqual(sessionMemory.listSessionMemory(u, 'A'), []);
+  assert.deepEqual(sessionMemory.listSessionMemory(u, 'B'), ['from chat B'], 'chat B\'s memory survives');
 });
 
-test('forgetSessionMemory is a safe no-op for an unknown or empty session', () => {
+test('deleteSessionMemory is a safe no-op for an unknown or empty session', () => {
   reset();
   const u = provision();
-  const root = tmpRepo(u, 'session-noop');
-  writer.appendChatMemory({ root, facts: ['a fact'], sessionId: 'S' });
-  assert.equal(writer.forgetSessionMemory({ root, sessionId: 'other' }).removed, 0);
-  assert.equal(writer.forgetSessionMemory({ root, sessionId: '' }).removed, 0);
-  assert.equal(writer.forgetSessionMemory({ root, sessionId: undefined }).removed, 0);
-  assert.deepEqual(writer.readChatMemoryFacts(root), ['a fact']);
-  fs.rmSync(root, { recursive: true, force: true });
+  sessionMemory.appendSessionMemory(u, 'S', ['a fact']);
+  assert.equal(sessionMemory.deleteSessionMemory(u, 'other'), 0);
+  assert.equal(sessionMemory.deleteSessionMemory(u, ''), 0);
+  assert.deepEqual(sessionMemory.listSessionMemory(u, 'S'), ['a fact']);
 });
 
-test('the origins sidecar self-prunes when facts are deleted by other paths', () => {
-  reset();
-  const u = provision();
-  const root = tmpRepo(u, 'session-prune');
-  writer.appendChatMemory({ root, facts: ['x fact', 'y fact'], sessionId: 'S' });
-  assert.equal(Object.keys(writer.readFactOrigins(root)).length, 2);
-  // The viewer's own delete path knows nothing about origins — the sidecar has
-  // to stay honest on its own, or a later fact could inherit a stale owner.
-  writer.writeChatMemoryFacts(root, ['x fact']);
-  assert.deepEqual(Object.keys(writer.readFactOrigins(root)), [writer.factIndex('x fact')]);
-  fs.rmSync(root, { recursive: true, force: true });
+test('resolveChatSessionId prefers the stable chatSessionId over the ephemeral sessionId', () => {
+  assert.equal(sessionMemory.resolveChatSessionId({ chatSessionId: 'STABLE', sessionId: 'ephemeral' }), 'STABLE');
+  assert.equal(sessionMemory.resolveChatSessionId({ sessionId: 'ephemeral' }), 'ephemeral');
+  assert.equal(sessionMemory.resolveChatSessionId({}), undefined);
 });
 
-test('the origins sidecar is not inlined into the prompt', async () => {
-  reset();
-  const u = provision();
-  const root = tmpRepo(u, 'session-not-in-prompt');
-  writer.appendChatMemory({ root, facts: ['a durable fact'], sessionId: 'SECRET-SESSION-ID' });
-  const block = memory.renderGraphifyMemory(
-    { indexedRepos: [{ path: root, name: 'r' }] }, u, null, 'what do you know?');
-  assert.ok(block.includes('a durable fact'));
-  assert.ok(!block.includes('SECRET-SESSION-ID'), 'session ids never reach the model');
-  assert.ok(!block.includes('chat-memory.origins'), 'the sidecar is not read as a memory file');
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('persistTurnMemory attributes facts to the CHAT session id', async () => {
+test('persistTurnMemory writes the SAME extracted facts into project memory AND session memory', async () => {
   reset();
   const u = provision();
   const root = tmpRepo(u, 'session-persist');
@@ -871,54 +838,59 @@ test('persistTurnMemory attributes facts to the CHAT session id', async () => {
     agentContext: {
       indexedRepos: [{ path: root, name: 'r' }],
       // sessionId is re-minted on every session switch; chatSessionId is the
-      // stable one, and it must be what capture attributes to.
+      // stable one, and it must be what session memory is keyed on.
       sessionId: 'ephemeral-agent-session',
       chatSessionId: 'STABLE-CHAT-UUID',
     },
     userId: u, userMessage: 'how do I build?', reply: 'run build.sh', runClaude,
   });
-  const origins = writer.readFactOrigins(root);
-  assert.deepEqual(Object.values(origins), ['STABLE-CHAT-UUID']);
-  // Deleting that chat forgets the fact.
-  assert.equal(writer.forgetSessionMemory({ root, sessionId: 'STABLE-CHAT-UUID' }).removed, 1);
+  assert.deepEqual(writer.readChatMemoryFacts(root), ['[tooling|build-cmd] the build runs via build.sh']);
+  assert.deepEqual(sessionMemory.listSessionMemory(u, 'STABLE-CHAT-UUID'), ['[tooling|build-cmd] the build runs via build.sh']);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('DELETE /kb/agent/session-memory forgets a session, gated by the allow-list', async () => {
+test('project memory outlives its session being deleted — only session memory goes away', async () => {
   reset();
   const u = provision();
-  const root = tmpRepo(u, 'http-session-del');
-  writer.appendChatMemory({ root, facts: ['chat A fact'], sessionId: 'A' });
-  writer.appendChatMemory({ root, facts: ['chat B fact'], sessionId: 'B' });
+  const root = tmpRepo(u, 'project-memory-outlives-session');
+  const runClaude = async () => JSON.stringify({
+    facts: [{ category: 'tooling', key: 'build-cmd', fact: 'the build runs via build.sh' }],
+    superseded: [],
+  });
+  await persist.persistTurnMemory({
+    agentContext: { indexedRepos: [{ path: root, name: 'r' }], chatSessionId: 'DOOMED-CHAT' },
+    userId: u, userMessage: 'how do I build?', reply: 'run build.sh', runClaude,
+  });
+  sessionMemory.deleteSessionMemory(u, 'DOOMED-CHAT');
+  assert.deepEqual(sessionMemory.listSessionMemory(u, 'DOOMED-CHAT'), [], 'session memory is gone');
+  assert.deepEqual(writer.readChatMemoryFacts(root), ['[tooling|build-cmd] the build runs via build.sh'],
+    'project memory survives — it is only ever edited via its own viewer, never by session lifecycle');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('DELETE /kb/agent/session-memory deletes a session\'s facts, no repo/allow-list needed', async () => {
+  reset();
+  const u = provision();
+  sessionMemory.appendSessionMemory(u, 'A', ['chat A fact']);
+  sessionMemory.appendSessionMemory(u, 'B', ['chat B fact']);
 
   let res = mkRes();
   await handleAgentRoutes(
-    mkReq('DELETE', '/kb/agent/session-memory', { repos: [root], sessionId: 'A' }),
+    mkReq('DELETE', '/kb/agent/session-memory', { sessionId: 'A' }),
     res, { userId: u, url: '/kb/agent/session-memory' },
   );
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.removed, 1);
-  assert.deepEqual(res.body.facts, ['chat B fact']);
+  assert.deepEqual(sessionMemory.listSessionMemory(u, 'A'), []);
+  assert.deepEqual(sessionMemory.listSessionMemory(u, 'B'), ['chat B fact'], 'untouched');
 
   // Missing sessionId → 400 rather than silently wiping something.
   res = mkRes();
   await handleAgentRoutes(
-    mkReq('DELETE', '/kb/agent/session-memory', { repos: [root] }),
+    mkReq('DELETE', '/kb/agent/session-memory', {}),
     res, { userId: u, url: '/kb/agent/session-memory' },
   );
   assert.equal(res.statusCode, 400);
-
-  // An unlisted repo touches no disk and reports nothing removed — a chat with
-  // no project attached is deleted client-side regardless.
-  res = mkRes();
-  await handleAgentRoutes(
-    mkReq('DELETE', '/kb/agent/session-memory', { repos: ['/tmp/nope'], sessionId: 'B' }),
-    res, { userId: u, url: '/kb/agent/session-memory' },
-  );
-  assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body, { facts: [], removed: 0, repo: null });
-  assert.deepEqual(writer.readChatMemoryFacts(root), ['chat B fact'], 'untouched');
-  fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('sanitizeFacts keeps the tag inside MAX_FACT_CHARS so the writer never clips it', async () => {
@@ -939,9 +911,9 @@ test('a long fact re-captured verbatim is a no-op, not a phantom update', () => 
   const u = provision();
   const root = tmpRepo(u, 'no-phantom-update');
   const line = `[tooling|build] ${'b'.repeat(240)}`.slice(0, 280);
-  writer.appendChatMemory({ root, facts: [line], sessionId: 'S' });
+  writer.appendChatMemory({ root, facts: [line] });
   const meta = {};
-  writer.appendChatMemory({ root, facts: [line], sessionId: 'S', meta });
+  writer.appendChatMemory({ root, facts: [line], meta });
   assert.equal(meta.updated, 0, 'identical line must not count as an update');
   assert.equal(meta.added, 0);
   fs.rmSync(root, { recursive: true, force: true });

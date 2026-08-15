@@ -4,6 +4,15 @@
 // chat-memory.md back into the agent prompt every request, so anything persisted
 // here is recalled next turn for free.
 //
+// Project memory is durable and NEVER auto-deleted by a chat session's
+// lifecycle — only the viewer's explicit per-fact edit/delete touches it.
+// Session-scoped memory that IS deleted when its session ends lives in a
+// separate store (kb/session-memory.mjs, a real DB table) — see
+// llm_agent/runtime/memory-persist.mjs, which populates both from the same
+// extraction pass. (Before this, project memory carried a session-attribution
+// sidecar used to prune it on session delete — removed: that contradicted
+// project memory being edit-only, and duplicated what the DB table now does.)
+//
 // Security: callers MUST pass a `root` already resolved through
 // resolveAllowedRepoRoot (memory.mjs) — this module does no path gating itself.
 // All disk I/O is best-effort: a read/write error collapses to a safe value
@@ -12,7 +21,7 @@
 import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync, existsSync } from 'node:fs';
 import { config } from '../core/config.mjs';
 import {
-  chatMemoryFile, legacyChatMemoryFile, memoryDir, chatMemoryOriginsFile,
+  chatMemoryFile, legacyChatMemoryFile, memoryDir,
 } from './paths.mjs';
 
 // How many facts the store may hold. The reader ranks these against the current
@@ -144,91 +153,6 @@ export function renderChatMemoryFile(facts) {
   return list.length ? `${HEADER}${body}\n` : '';
 }
 
-// ── Session origins sidecar ────────────────────────────────────────
-// Which chat session taught the agent each fact, so deleting a chat can delete
-// what that chat contributed without touching facts learned elsewhere.
-//
-// SELF-PRUNING: `readFactOrigins` drops any entry whose fact is no longer in the
-// store. That's what keeps this file honest for free — the existing viewer
-// delete / clear-all paths (and cap eviction) know nothing about origins, and
-// don't have to.
-
-function readFactOriginsRaw(root) {
-  try {
-    const parsed = JSON.parse(readFileSync(chatMemoryOriginsFile(root), 'utf8'));
-    return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-/**
- * `{ factIndex: sessionId }` for facts that still exist. Exported for the
- * viewer/tests; callers that just want to forget a session use
- * `forgetSessionMemory`.
- */
-export function readFactOrigins(root, facts = readChatMemoryFacts(root)) {
-  const live = new Set(facts.map(factIndex));
-  const raw = readFactOriginsRaw(root);
-  const out = {};
-  for (const [idx, session] of Object.entries(raw)) {
-    if (typeof session === 'string' && session && live.has(idx)) out[idx] = session;
-  }
-  return out;
-}
-
-function writeFactOrigins(root, origins) {
-  const target = chatMemoryOriginsFile(root);
-  try {
-    if (Object.keys(origins).length === 0) {
-      try { unlinkSync(target); } catch { /* already absent */ }
-      return;
-    }
-    mkdirSync(memoryDir(root), { recursive: true });
-    // Same atomic write-then-rename as the memory file itself.
-    const tmp = `${target}.tmp-${process.pid}`;
-    try {
-      writeFileSync(tmp, `${JSON.stringify(origins, null, 2)}\n`, 'utf8');
-      renameSync(tmp, target);
-    } catch (err) {
-      try { unlinkSync(tmp); } catch { /* already gone */ }
-      throw err;
-    }
-  } catch { /* best-effort: losing an origin only costs precision on delete */ }
-}
-
-/**
- * Drop every fact this session contributed. Facts learned in OTHER sessions
- * stay — including a fact this session merely re-confirmed, since an update
- * re-attributes the row to whoever wrote it last.
- *
- * Returns `{ facts, removed }`: the remaining facts and how many went away.
- * A missing/unknown session removes nothing.
- */
-export function forgetSessionMemory({ root, sessionId }) {
-  const facts = readChatMemoryFacts(root);
-  if (typeof sessionId !== 'string' || !sessionId || facts.length === 0) {
-    return { facts, removed: 0 };
-  }
-  const origins = readFactOrigins(root, facts);
-  const doomed = new Set(
-    Object.entries(origins).filter(([, s]) => s === sessionId).map(([idx]) => idx),
-  );
-  if (doomed.size === 0) {
-    writeFactOrigins(root, origins);   // still prune stale entries while we're here
-    return { facts, removed: 0 };
-  }
-  const remaining = facts.filter((f) => !doomed.has(factIndex(f)));
-  const saved = writeChatMemoryFacts(root, remaining);
-  const keptOrigins = {};
-  const live = new Set(saved.map(factIndex));
-  for (const [idx, s] of Object.entries(origins)) {
-    if (!doomed.has(idx) && live.has(idx)) keptOrigins[idx] = s;
-  }
-  writeFactOrigins(root, keptOrigins);
-  return { facts: saved, removed: facts.length - saved.length };
-}
-
 // Read the current fact list for a repo. Best-effort → [] on any error.
 //
 // Falls back to the pre-consolidation location when the canonical file doesn't
@@ -303,7 +227,13 @@ export function writeChatMemoryFacts(root, facts) {
 // index uses — so a paraphrase of a stored fact still removes it. Returns the
 // resulting persisted fact list; no-op (returns existing) when nothing was
 // added, updated, or removed.
-export function appendChatMemory({ root, facts, remove, meta, sessionId }) {
+//
+// Project memory has no session attribution and is never auto-pruned by a
+// session's lifecycle — it's durable, edit-only (see the viewer's per-fact
+// delete). Session-scoped, session-deletable memory is a separate store —
+// see kb/session-memory.mjs — populated from the SAME extracted facts by
+// llm_agent/runtime/memory-persist.mjs.
+export function appendChatMemory({ root, facts, remove, meta }) {
   const incoming = (Array.isArray(facts) ? facts : [])
     .map((f) => String(f).trim())
     .filter(Boolean);
@@ -328,10 +258,6 @@ export function appendChatMemory({ root, facts, remove, meta, sessionId }) {
   });
   let added = 0;
   let updated = 0;
-  // Indexes this call is responsible for, so `forgetSessionMemory` can undo
-  // exactly this session's contribution. An UPDATE re-attributes the row: the
-  // session that last supplied its content is the one that owns it.
-  const touched = [];
   for (const fact of incoming) {
     const k = factIndex(fact);
     if (!k) continue;
@@ -340,11 +266,9 @@ export function appendChatMemory({ root, facts, remove, meta, sessionId }) {
       slotByKey.set(k, merged.length);
       merged.push(fact);
       added++;
-      touched.push(k);
     } else if (merged[slot] !== fact) {
       merged[slot] = fact;   // same index, new data → update in place
       updated++;
-      touched.push(k);
     }
   }
 
@@ -355,15 +279,6 @@ export function appendChatMemory({ root, facts, remove, meta, sessionId }) {
     return existing; // nothing new, nothing changed, nothing superseded
   }
   const saved = writeChatMemoryFacts(root, merged);
-  if (typeof sessionId === 'string' && sessionId && touched.length > 0) {
-    // readFactOrigins prunes entries for facts that no longer exist (removed
-    // above, or evicted by the cap during the write), so this stays in step
-    // with the store without a second pass.
-    const origins = readFactOrigins(root, saved);
-    const live = new Set(saved.map(factIndex));
-    for (const k of touched) if (live.has(k)) origins[k] = sessionId;
-    writeFactOrigins(root, origins);
-  }
   if (meta && typeof meta === 'object') {
     meta.evicted = Math.max(0, merged.length - saved.length);
     meta.added = added;

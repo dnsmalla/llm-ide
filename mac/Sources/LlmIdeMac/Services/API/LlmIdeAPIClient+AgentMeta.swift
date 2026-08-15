@@ -109,24 +109,22 @@ extension LlmIdeAPIClient {
 
     private struct ForgetSessionMemoryBody: Encodable {
         let sessionId: String
-        let repos: [String]
-        let workspaceRoot: String?
     }
     private struct ForgetSessionMemoryResponse: Decodable {
-        let facts: [String]; let removed: Int; let repo: String?
+        let removed: Int
     }
 
-    /// Forget everything one chat session taught the agent — called when that
-    /// chat is deleted, so its memory doesn't outlive it. Facts learned in other
-    /// sessions are untouched. Returns how many facts were dropped.
+    /// Delete everything session memory captured for one chat session — a
+    /// real DB delete (kb/session-memory.mjs), called when that chat is
+    /// cleared or deleted so its memory doesn't outlive it. NOT the same
+    /// store as project memory (chat-memory.md, above): project memory is
+    /// durable and never touched by a session's lifecycle, only its own
+    /// explicit per-fact edit/delete. Returns how many facts were dropped.
     @discardableResult
-    func forgetSessionMemory(sessionId: String,
-                             repos: [String],
-                             workspaceRoot: String? = nil) async throws -> Int {
+    func forgetSessionMemory(sessionId: String) async throws -> Int {
         let resp: ForgetSessionMemoryResponse = try await send(
             path: "/kb/agent/session-memory", method: "DELETE",
-            body: ForgetSessionMemoryBody(sessionId: sessionId, repos: repos,
-                                          workspaceRoot: workspaceRoot),
+            body: ForgetSessionMemoryBody(sessionId: sessionId),
             authenticated: true)
         return resp.removed
     }

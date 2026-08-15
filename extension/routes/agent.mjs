@@ -19,8 +19,8 @@ import {
   resolveAllowedRepoRoot,
   readChatMemoryFacts,
   writeChatMemoryFacts,
-  forgetSessionMemory,
 } from '../graphkit/index.mjs';
+import { deleteSessionMemory } from '../kb/session-memory.mjs';
 
 // Normalised key for matching a fact line (mirrors memory-writer.factKey).
 const normFact = (s) => String(s).trim().replace(/\s+/g, ' ').toLowerCase();
@@ -424,14 +424,16 @@ export async function handleAgentRoutes(req, res, ctx) {
     return true;
   }
 
-  // DELETE /kb/agent/session-memory   body: { sessionId, repo?, repos?, workspaceRoot? }
-  //   Forget what ONE chat session taught the agent — called when the user
-  //   deletes that chat, so its memory doesn't outlive it. Facts learned in
-  //   other sessions are untouched, including any this session only
-  //   re-confirmed (an update re-attributes the fact to its last writer).
-  //   Same allow-list gate and same candidate-resolution order as
-  //   project-memory above, so it targets the file capture actually wrote to.
-  //   { facts: string[], removed: number, repo: <root | null> }
+  // DELETE /kb/agent/session-memory   body: { sessionId }
+  //   Delete everything session_memory captured for ONE chat session — called
+  //   when the user deletes or clears that chat, so its memory doesn't
+  //   outlive it. A REAL DB delete (kb/session-memory.mjs), scoped to this
+  //   userId's own rows. Unlike project memory (chat-memory.md, above), which
+  //   is durable and never touched by a session's lifecycle — only its own
+  //   explicit per-fact edit/delete — session memory is meant to disappear
+  //   with its session, so no allow-list/repo resolution is needed here at
+  //   all: it isn't repo-scoped.
+  //   { removed: number }
   if (req.method === 'DELETE' && new URL(url, 'http://127.0.0.1').pathname === '/kb/agent/session-memory') {
     const body = parseJSON(await readBody(req, 8 * 1024)) || {};
     const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
@@ -439,22 +441,8 @@ export async function handleAgentRoutes(req, res, ctx) {
       sendJSON(res, 400, { error: { code: 'SESSION_ID_REQUIRED', message: 'sessionId is required' } });
       return true;
     }
-    const workspaceRoot = typeof body.workspaceRoot === 'string' ? body.workspaceRoot : undefined;
-    const candidates = [
-      ...(Array.isArray(body.repos) ? body.repos.filter((r) => typeof r === 'string') : []),
-      ...(typeof body.repo === 'string' ? [body.repo] : []),
-      ...(workspaceRoot ? [workspaceRoot] : []),
-    ];
-    const allowed = buildAllowedRoots(userId, workspaceRoot);
-    let root = null;
-    if (allowed) {
-      for (const c of candidates) { root = resolveAllowedRepoRoot(c, allowed); if (root) break; }
-    }
-    // No resolvable repo is not an error: a chat with no project attached never
-    // captured anything, and the client deletes the session either way.
-    if (!root) { sendJSON(res, 200, { facts: [], removed: 0, repo: null }); return true; }
-    const { facts, removed } = forgetSessionMemory({ root, sessionId });
-    sendJSON(res, 200, { facts, removed, repo: root });
+    const removed = deleteSessionMemory(userId, sessionId);
+    sendJSON(res, 200, { removed });
     return true;
   }
 

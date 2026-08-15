@@ -23,6 +23,4 @@ export {
   parseChatMemoryFacts,
   factKey,
   factIndex,
-  readFactOrigins,
-  forgetSessionMemory,
 } from './memory-writer.mjs';
