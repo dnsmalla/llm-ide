@@ -2523,13 +2523,13 @@ paths:
 
   /kb/agent/session-memory:
     delete:
-      summary: Forget what one chat session taught the agent
+      summary: Delete everything session memory captured for one chat session
       description: >
-        Called when the user deletes a chat, so its captured memory does not outlive it.
-        Facts learned in other sessions are untouched — including a fact this session only
-        re-confirmed, since an update re-attributes the fact to its last writer. Facts
-        captured without a session id are never removed this way. An unresolvable repo is
-        not an error (a chat with no project attached captured nothing).
+        Called when the user clears or deletes a chat, so its captured memory does not
+        outlive it. A real DB delete (kb/session-memory.mjs, table `session_memory`) —
+        distinct from project memory (`/kb/agent/project-memory`, above), which is durable
+        and never touched by a session's lifecycle, only its own explicit per-fact
+        edit/delete. Not repo-scoped, so no allow-list resolution is involved.
       requestBody:
         required: true
         content:
@@ -2538,21 +2538,16 @@ paths:
               type: object
               required: [sessionId]
               properties:
-                sessionId:     { type: string, description: Chat session UUID (AgentContext.chatSessionId) }
-                repos:         { type: array, items: { type: string }, description: Candidate repo paths, tried in order }
-                repo:          { type: string, description: Single candidate, tried after `repos` }
-                workspaceRoot: { type: string }
+                sessionId: { type: string, description: Chat session UUID (AgentContext.chatSessionId) }
       responses:
         '200':
-          description: Remaining facts and how many were dropped
+          description: How many facts were dropped
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  facts:   { type: array, items: { type: string } }
                   removed: { type: integer }
-                  repo:    { type: string, nullable: true }
         '400': { description: sessionId missing, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/chat/sessions:
