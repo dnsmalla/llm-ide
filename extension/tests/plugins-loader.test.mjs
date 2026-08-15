@@ -190,6 +190,33 @@ test('slash: command parses key=value and folds remainder into _rest', () => {
   assert.equal(out.prompt, 'Greet Alice: the rest goes here');
 });
 
+// Regression: a template with NO {{}} placeholders at all (the norm for
+// commands imported from Claude Code's own marketplace, e.g. the official
+// code-review plugin — it expects a PR number as a bare positional argument,
+// a convention this parser doesn't otherwise understand) must not silently
+// drop whatever the user typed after the trigger. Before this fix,
+// `/review` and `/review 123` expanded to byte-identical prompts — the "123"
+// was parsed into args._rest and then never used anywhere, so the agent had
+// nothing to review no matter what the user supplied.
+test('slash: free-form argument is appended when the template has no placeholders at all', () => {
+  const cmds = new Map([
+    ['review', { description: '', args: {}, template: 'Review the given pull request.' }],
+  ]);
+  const bare = expandSlashCommand('/review', cmds);
+  const withArg = expandSlashCommand('/review 123', cmds);
+  assert.equal(bare.prompt, 'Review the given pull request.');
+  assert.equal(withArg.prompt, 'Review the given pull request.\n\n123');
+  assert.notEqual(bare.prompt, withArg.prompt, 'the PR number must actually reach the model');
+});
+
+test('slash: explicit {{_rest}} placeholder is not double-appended', () => {
+  const cmds = new Map([
+    ['hello', { description: '', args: {}, template: 'Greet: {{_rest}}' }],
+  ]);
+  const out = expandSlashCommand('/hello world', cmds);
+  assert.equal(out.prompt, 'Greet: world', 'must appear exactly once, not "Greet: world\\n\\nworld"');
+});
+
 test('slash: required arg missing yields error envelope (not crash)', () => {
   const cmds = new Map([
     ['need', {

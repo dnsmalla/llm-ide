@@ -115,7 +115,16 @@ final class CompletionController: ObservableObject {
                  label: s.name, detail: detail,
                  insert: nil, fileURL: nil, skillId: s.id)
         }
-        commandItems = (commands ?? []).map { c in
+        // Built-in commands are a real client-side UI action (ChatSlashCommands
+        // in ChatComposer.submit()), not server-side prompt expansion like
+        // plugin commands — shown first so /clear is discoverable the same
+        // way. Aliases (/reset, /new) still work if typed, just not listed
+        // separately here to avoid triplicating one entry.
+        let builtinCommandItems: [Item] = [
+            Item(id: "cmd:clear", kind: .command, label: "/clear",
+                 detail: "Clear this conversation", insert: "/clear", fileURL: nil),
+        ]
+        commandItems = builtinCommandItems + (commands ?? []).map { c in
             Item(id: "cmd:\(c.trigger)", kind: .command,
                  label: "/\(c.trigger)", detail: c.description,
                  insert: Self.commandInsert(c), fileURL: nil)

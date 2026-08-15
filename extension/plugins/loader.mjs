@@ -421,6 +421,18 @@ export function loadPlugins({ pluginDir = defaultPluginDir() } = {}) {
  * values via simple "..." or '...'). Everything after the recognized
  * args is folded into a `_rest` variable so `/summary repo=foo and
  * also mention the deploy` produces `{{repo}}` + `{{_rest}}`.
+ *
+ * A template that never references `{{_rest}}` still gets it appended
+ * to the end of the expanded prompt, if non-empty. Without this, a
+ * template with NO placeholders at all — the norm for commands
+ * imported from Claude Code's own marketplace, which use a positional-
+ * argument convention this parser doesn't share — would silently drop
+ * whatever the user typed after the trigger. `/code-review 123` and
+ * bare `/code-review` produced byte-identical prompts before this: the
+ * PR number was parsed into `_rest` and then never used anywhere,
+ * so the agent had nothing to review. Skipped when the template DOES
+ * reference `{{_rest}}` explicitly, so an llm-ide-native template that
+ * places it deliberately (e.g. mid-sentence) doesn't get it twice.
  */
 export function expandSlashCommand(text, enabledCommands) {
   if (typeof text !== 'string') return null;
@@ -459,8 +471,12 @@ export function expandSlashCommand(text, enabledCommands) {
   // Substitute {{key}} in the template. Unknown placeholders are
   // left as empty strings — predictable + lets templates degrade
   // gracefully when optional args are omitted.
-  const expanded = cmd.template.replace(/\{\{(\w+)\}\}/g, (_, key) => {
+  const usesRestPlaceholder = cmd.template.includes('{{_rest}}');
+  let expanded = cmd.template.replace(/\{\{(\w+)\}\}/g, (_, key) => {
     return (key in kv) ? String(kv[key]) : '';
   });
+  if (kv._rest && !usesRestPlaceholder) {
+    expanded += `\n\n${kv._rest}`;
+  }
   return { trigger, prompt: expanded, args: kv };
 }
