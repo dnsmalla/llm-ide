@@ -66,7 +66,7 @@ export function addMcpPlugin({ name, command, args, env, source }) {
     id, name: name || id, command,
     args: Array.isArray(args) ? args.filter((a) => typeof a === 'string') : [],
     env: env && typeof env === 'object' ? env : undefined,
-    source: source === 'claude' ? 'claude' : 'manual',
+    source: (source === 'claude' || source === 'codex') ? source : 'manual',
     builtin: false,
   };
   list.push(plugin);

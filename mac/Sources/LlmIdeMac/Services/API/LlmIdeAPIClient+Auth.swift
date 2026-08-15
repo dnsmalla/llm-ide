@@ -121,6 +121,23 @@ extension LlmIdeAPIClient {
                               authenticated: true)
     }
 
+    // MARK: - Codex Plugin Bridge
+
+    func listCodexInstalled() async throws -> CodexPluginsListResponse {
+        try await get("/auth/me/codex-plugins/installed", authenticated: true)
+    }
+
+    func listCodexMarketplace() async throws -> CodexMarketplaceListResponse {
+        try await get("/auth/me/codex-plugins/marketplace", authenticated: true)
+    }
+
+    func importCodexPlugin(name: String, source: String) async throws -> CodexImportResponse {
+        struct Req: Encodable { let name: String; let source: String }
+        return try await post("/auth/me/codex-plugins/import",
+                              body: Req(name: name, source: source),
+                              authenticated: true)
+    }
+
 }
 
 struct PluginInstallResponse: Decodable {
@@ -278,6 +295,90 @@ struct ClaudeMarketplaceListResponse: Decodable {
 }
 
 struct ClaudeImportResponse: Decodable {
+    let ok: Bool
+    let plugin: ImportedPluginInfo?
+    let error: String?
+    struct ImportedPluginInfo: Decodable {
+        let name: String
+        let version: String
+        let displayName: String
+        let skillCount: Int
+        let commandCount: Int
+    }
+}
+
+// MARK: - Codex Plugin Bridge DTOs
+// Mirrors the Claude Plugin Bridge DTOs above — same shape, different vendor
+// (OpenAI Codex CLI's plugin system; see plugins/codex-adapter.mjs).
+
+struct CodexPlugin: Decodable, Identifiable {
+    let name: String
+    let version: String
+    let marketplace: String
+    let installPath: String?
+    let skillCount: Int
+    let commandCount: Int
+    var alreadyImported: Bool
+    let importedVersion: String?
+    var id: String { name }
+
+    var hasUpdate: Bool {
+        guard alreadyImported, let iv = importedVersion else { return false }
+        return iv != version
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, version, marketplace, installPath, skillCount, commandCount, alreadyImported, importedVersion
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.version = try c.decodeIfPresent(String.self, forKey: .version) ?? "0.0.0"
+        self.marketplace = try c.decodeIfPresent(String.self, forKey: .marketplace) ?? "unknown"
+        self.installPath = try c.decodeIfPresent(String.self, forKey: .installPath)
+        self.skillCount = try c.decodeIfPresent(Int.self, forKey: .skillCount) ?? 0
+        self.commandCount = try c.decodeIfPresent(Int.self, forKey: .commandCount) ?? 0
+        self.alreadyImported = try c.decodeIfPresent(Bool.self, forKey: .alreadyImported) ?? false
+        self.importedVersion = try c.decodeIfPresent(String.self, forKey: .importedVersion)
+    }
+}
+
+struct CodexMarketplacePlugin: Decodable, Identifiable {
+    let name: String
+    let marketplace: String
+    let description: String
+    let hasSkills: Bool
+    let hasCommands: Bool
+    var installedInCodex: Bool
+    var alreadyImported: Bool
+    let importedVersion: String?
+    var id: String { name }
+
+    enum CodingKeys: String, CodingKey {
+        case name, marketplace, description, hasSkills, hasCommands, installedInCodex, alreadyImported, importedVersion
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.marketplace = try c.decodeIfPresent(String.self, forKey: .marketplace) ?? "unknown"
+        self.description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        self.hasSkills = try c.decodeIfPresent(Bool.self, forKey: .hasSkills) ?? false
+        self.hasCommands = try c.decodeIfPresent(Bool.self, forKey: .hasCommands) ?? false
+        self.installedInCodex = try c.decodeIfPresent(Bool.self, forKey: .installedInCodex) ?? false
+        self.alreadyImported = try c.decodeIfPresent(Bool.self, forKey: .alreadyImported) ?? false
+        self.importedVersion = try c.decodeIfPresent(String.self, forKey: .importedVersion)
+    }
+}
+
+struct CodexPluginsListResponse: Decodable {
+    let plugins: [CodexPlugin]
+}
+
+struct CodexMarketplaceListResponse: Decodable {
+    let plugins: [CodexMarketplacePlugin]
+}
+
+struct CodexImportResponse: Decodable {
     let ok: Bool
     let plugin: ImportedPluginInfo?
     let error: String?

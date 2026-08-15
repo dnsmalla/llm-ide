@@ -43,6 +43,7 @@ struct LibraryView: View {
     @State private var plugins: [PluginInfo] = []
     @State private var showingGitInstallSheet = false
     @State private var showingClaudeImportSheet = false
+    @State private var showingCodexImportSheet = false
     @State private var pluginInstallMessage: String?
     /// Held when an install hits "already installed" (409): re-runs the same
     /// install with replace=true if the user confirms. Replaces the old
@@ -65,6 +66,7 @@ struct LibraryView: View {
     @State private var mcpPluginsError: String?
     @State private var mcpPluginMessage: String?
     @State private var mcpClaudeSources: [LlmIdeAPIClient.ClaudeMcpSource] = []
+    @State private var mcpCodexSources: [LlmIdeAPIClient.CodexMcpSource] = []
     /// Persisted set of COLLAPSED section ids (comma-joined). Absence ⇒
     /// expanded. One uniform mechanism drives every section's chevron.
     /// Every section is seeded collapsed so the library opens in a clean,
@@ -91,6 +93,7 @@ struct LibraryView: View {
         .task { await loadLlmSources() }
         .task { await loadMcpPlugins() }
         .task { await scanClaudeSources() }
+        .task { await scanCodexSources() }
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
             Task { @MainActor in
                 // Refresh the meeting list. syncMeetingNotes is handled
@@ -703,6 +706,9 @@ struct LibraryView: View {
                 Button {
                     showingClaudeImportSheet = true
                 } label: { Label("Import from Claude Code…", systemImage: "arrow.down.circle") }
+                Button {
+                    showingCodexImportSheet = true
+                } label: { Label("Import from Codex…", systemImage: "arrow.down.circle") }
                 Divider()
                 Button {
                     revealPluginsFolder()
@@ -733,6 +739,11 @@ struct LibraryView: View {
         .sheet(isPresented: $showingClaudeImportSheet) {
             ClaudePluginImportSheet(api: api,
                 onDismiss: { showingClaudeImportSheet = false },
+                onImported: { Task { await refreshPlugins() } })
+        }
+        .sheet(isPresented: $showingCodexImportSheet) {
+            CodexPluginImportSheet(api: api,
+                onDismiss: { showingCodexImportSheet = false },
                 onImported: { Task { await refreshPlugins() } })
         }
         .alert("Plugin install", isPresented: Binding(
@@ -1003,6 +1014,19 @@ struct LibraryView: View {
                     Divider()
                     Button("Rescan") { Task { await scanClaudeSources() } }
                 }
+                Menu("Add from Codex…") {
+                    if mcpCodexSources.isEmpty {
+                        Button("No servers found in ~/.codex/config.toml") {}.disabled(true)
+                    } else {
+                        ForEach(mcpCodexSources) { s in
+                            Button(s.name) {
+                                Task { await addPluginFromCodex(s.name) }
+                            }
+                        }
+                    }
+                    Divider()
+                    Button("Rescan") { Task { await scanCodexSources() } }
+                }
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 10, weight: .semibold))
@@ -1046,6 +1070,23 @@ struct LibraryView: View {
     private func addPluginFromClaude(_ claudeName: String) async {
         do {
             let added = try await api.addMcpPlugin(claudeName: claudeName)
+            mcpPluginMessage = "Added \(added.name)."
+            await refreshMcpPlugins()
+        } catch {
+            mcpPluginMessage = error.localizedDescription
+        }
+    }
+
+    /// Admin-only scan; a non-admin caller's 403 is swallowed here — the
+    /// submenu just stays empty, matching the read-only nature of the scan
+    /// (nothing actionable for a non-admin to retry).
+    private func scanCodexSources() async {
+        mcpCodexSources = (try? await api.scanCodexMcpSources()) ?? []
+    }
+
+    private func addPluginFromCodex(_ codexName: String) async {
+        do {
+            let added = try await api.addMcpPlugin(codexName: codexName)
             mcpPluginMessage = "Added \(added.name)."
             await refreshMcpPlugins()
         } catch {

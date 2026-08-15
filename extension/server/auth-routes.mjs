@@ -168,6 +168,11 @@ export function isAuthRoute(url) {
       || path === '/auth/me/claude-plugins/import'
       || path === '/auth/me/claude-plugins/refresh'
       || path === '/auth/me/claude-plugins/updates'
+      || path === '/auth/me/codex-plugins/installed'
+      || path === '/auth/me/codex-plugins/marketplace'
+      || path === '/auth/me/codex-plugins/import'
+      || path === '/auth/me/codex-plugins/refresh'
+      || path === '/auth/me/codex-plugins/updates'
       || path === '/auth/me/llm-sources'
       || path === '/auth/me/llm-sources/toggle'
       || path === '/auth/me/llm-sources/add'
@@ -175,6 +180,7 @@ export function isAuthRoute(url) {
       || path.startsWith('/auth/me/llm-sources/')
       || path === '/auth/me/mcp-plugins'
       || path === '/auth/me/mcp-plugins/claude-sources'
+      || path === '/auth/me/mcp-plugins/codex-sources'
       || path === '/auth/me/mcp-plugins/add'
       || path === '/auth/me/mcp-plugins/consent'
       || path === '/auth/me/mcp-plugins/toggle'
@@ -991,6 +997,88 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     return;
   }
 
+  // ── Codex Plugin Bridge ─────────────────────────────────────────────
+  // Mirrors the Claude Plugin Bridge above — same shape, different vendor
+  // (OpenAI Codex CLI's plugin system: ~/.codex/plugins/cache + config.toml,
+  // see plugins/codex-adapter.mjs).
+  if (method === 'GET' && url.split('?')[0] === '/auth/me/codex-plugins/installed') {
+    const { scanInstalled, listImportedNames, getImportedVersion } = await import('../plugins/codex-adapter.mjs');
+    const plugins = scanInstalled();
+    const imported = listImportedNames();
+    for (const p of plugins) {
+      const mnName = p.name.startsWith('codex-') ? p.name : `codex-${p.name}`;
+      p.alreadyImported = imported.has(mnName);
+      p.importedVersion = p.alreadyImported ? getImportedVersion(mnName) : null;
+    }
+    send(res, 200, { plugins });
+    return;
+  }
+
+  if (method === 'GET' && url.split('?')[0] === '/auth/me/codex-plugins/marketplace') {
+    const { scanMarketplace, scanInstalled, listImportedNames, getImportedVersion } = await import('../plugins/codex-adapter.mjs');
+    const plugins = scanMarketplace();
+    const installed = scanInstalled();
+    const installedNames = new Set(installed.map((p) => p.name));
+    const imported = listImportedNames();
+    for (const p of plugins) {
+      p.installedInCodex = installedNames.has(p.name);
+      const mnName = p.name.startsWith('codex-') ? p.name : `codex-${p.name}`;
+      p.alreadyImported = imported.has(mnName);
+      p.importedVersion = p.alreadyImported ? getImportedVersion(mnName) : null;
+    }
+    send(res, 200, { plugins });
+    return;
+  }
+
+  if (method === 'POST' && url === '/auth/me/codex-plugins/import') {
+    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    let body;
+    try { body = await readJson(req, bodyLimit); }
+    catch { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return; }
+    if (!body || !body.name || !body.source) {
+      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'name and source required' } });
+      return;
+    }
+    if (!['installed', 'marketplace'].includes(body.source)) {
+      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'source must be installed or marketplace' } });
+      return;
+    }
+    if (!/^[a-z][a-z0-9-]{1,40}$/.test(body.name)) {
+      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid plugin name' } });
+      return;
+    }
+    const { importPlugin } = await import('../plugins/codex-adapter.mjs');
+    const result = importPlugin({ source: body.source, name: body.name });
+    if (!result.ok) {
+      send(res, 404, { error: { code: 'NOT_FOUND', message: result.error } });
+      return;
+    }
+    const { reloadPlugins } = await import('../llm_agent/runtime/route.mjs');
+    reloadPlugins();
+    safeAudit(db, {
+      userId: req.user.id, requestId, ip, userAgent: ua,
+      action: 'codex-plugin.import', resource: result.plugin.name, outcome: 'success',
+      detail: { source: body.source, version: result.plugin.version },
+    });
+    send(res, 200, result);
+    return;
+  }
+
+  if (method === 'POST' && url === '/auth/me/codex-plugins/refresh') {
+    const { scanInstalled, scanMarketplace } = await import('../plugins/codex-adapter.mjs');
+    const installed = scanInstalled();
+    const marketplace = scanMarketplace();
+    send(res, 200, { installed: installed.length, marketplace: marketplace.length });
+    return;
+  }
+
+  if (method === 'GET' && url.split('?')[0] === '/auth/me/codex-plugins/updates') {
+    const { checkForUpdates } = await import('../plugins/codex-adapter.mjs');
+    const updates = checkForUpdates();
+    send(res, 200, { updates });
+    return;
+  }
+
   // ── LLM sources management ────────────────────────────────────────
   // A registered LLM source contributes any mix of skills (chat "/" menu
   // discovery), agents (subagent definitions), and hooks — the latter two
@@ -1156,7 +1244,8 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   // 2026-08-12-mcp-plugin-runtime-design.md.
   // GET    /auth/me/mcp-plugins                 → list + per-user consent/enable
   // GET    /auth/me/mcp-plugins/claude-sources   → scan ~/.claude.json      (admin)
-  // POST   /auth/me/mcp-plugins/add              → { command,args,env,name,source } | { claudeName } (admin)
+  // GET    /auth/me/mcp-plugins/codex-sources    → scan ~/.codex/config.toml (admin)
+  // POST   /auth/me/mcp-plugins/add              → { command,args,env,name,source } | { claudeName } | { codexName } (admin)
   // POST   /auth/me/mcp-plugins/consent          → { id, consented }
   // POST   /auth/me/mcp-plugins/toggle           → { id, enabled }
   // DELETE /auth/me/mcp-plugins/<id>                                       (admin)
@@ -1182,6 +1271,13 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     return;
   }
 
+  if (method === 'GET' && url.split('?')[0] === '/auth/me/mcp-plugins/codex-sources') {
+    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    const { scanCodexMcpServers } = await import('../mcp/codex-source.mjs');
+    send(res, 200, { servers: scanCodexMcpServers() });
+    return;
+  }
+
   if (method === 'POST' && url === '/auth/me/mcp-plugins/add') {
     try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     let body;
@@ -1192,6 +1288,11 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       const found = scanClaudeMcpServers().find((s) => s.name === body.claudeName);
       if (!found) { send(res, 400, { error: { code: 'ADD_FAILED', message: `no Claude MCP server named '${body.claudeName}'` } }); return; }
       body = { command: found.command, args: found.args, env: found.env, name: body.name || found.name, source: 'claude' };
+    } else if (body?.codexName) {
+      const { scanCodexMcpServers } = await import('../mcp/codex-source.mjs');
+      const found = scanCodexMcpServers().find((s) => s.name === body.codexName);
+      if (!found) { send(res, 400, { error: { code: 'ADD_FAILED', message: `no Codex MCP server named '${body.codexName}'` } }); return; }
+      body = { command: found.command, args: found.args, env: found.env, name: body.name || found.name, source: 'codex' };
     }
     const { addMcpPlugin } = await import('../mcp/state.mjs');
     const result = addMcpPlugin(body || {});

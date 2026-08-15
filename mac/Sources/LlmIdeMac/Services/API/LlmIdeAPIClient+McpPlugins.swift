@@ -58,6 +58,17 @@ extension LlmIdeAPIClient {
     }
     private struct ClaudeMcpSourcesResponse: Decodable { let servers: [ClaudeMcpSource] }
 
+    /// Same as ClaudeMcpSource, scanned from `~/.codex/config.toml`'s
+    /// `[mcp_servers.*]` tables instead (mcp/codex-source.mjs).
+    struct CodexMcpSource: Decodable, Identifiable, Equatable {
+        let name: String
+        let command: String
+        let args: [String]
+        let env: [String: String]?
+        var id: String { name }
+    }
+    private struct CodexMcpSourcesResponse: Decodable { let servers: [CodexMcpSource] }
+
     private struct ConsentAck: Decodable { let ok: Bool; let consented: Bool }
     private struct ToggleAck: Decodable { let ok: Bool; let enabled: Bool }
     private struct RemoveAck: Decodable { let ok: Bool }
@@ -75,15 +86,23 @@ extension LlmIdeAPIClient {
         return resp.servers
     }
 
-    /// Register a new server. Pass `claudeName` to import a server the scan
-    /// found (server resolves its command/args/env); otherwise supply
-    /// `command`/`args`/`env` directly for a manual entry. Admin-gated
-    /// server-side — a non-admin caller sees `APIError.http(status: 403, …)`.
+    /// Admin-only: read-only scan of the operator's `~/.codex/config.toml`
+    /// for MCP servers not yet registered here.
+    func scanCodexMcpSources() async throws -> [CodexMcpSource] {
+        let resp: CodexMcpSourcesResponse = try await get("/auth/me/mcp-plugins/codex-sources", authenticated: true)
+        return resp.servers
+    }
+
+    /// Register a new server. Pass `claudeName`/`codexName` to import a
+    /// server one of the scans found (server resolves its command/args/env);
+    /// otherwise supply `command`/`args`/`env` directly for a manual entry.
+    /// Admin-gated server-side — a non-admin caller sees `APIError.http(status: 403, …)`.
     @discardableResult
-    func addMcpPlugin(claudeName: String? = nil, command: String? = nil, args: [String]? = nil,
+    func addMcpPlugin(claudeName: String? = nil, codexName: String? = nil, command: String? = nil, args: [String]? = nil,
                        env: [String: String]? = nil, name: String? = nil, source: String? = nil) async throws -> McpPluginSummary {
         struct Req: Encodable {
             let claudeName: String?
+            let codexName: String?
             let command: String?
             let args: [String]?
             let env: [String: String]?
@@ -91,7 +110,7 @@ extension LlmIdeAPIClient {
             let source: String?
         }
         let resp: AddMcpPluginResponse = try await post("/auth/me/mcp-plugins/add",
-                                                          body: Req(claudeName: claudeName, command: command, args: args, env: env, name: name, source: source),
+                                                          body: Req(claudeName: claudeName, codexName: codexName, command: command, args: args, env: env, name: name, source: source),
                                                           authenticated: true)
         return resp.plugin
     }

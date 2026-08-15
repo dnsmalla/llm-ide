@@ -27,12 +27,16 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 // in later would be invisible to it.
 const claudePluginsFixture = path.join(__dirname, '_claude-plugins-fixture');
 process.env.CLAUDE_PLUGINS_DIR = claudePluginsFixture;
+const codexHomeFixture = path.join(__dirname, '_codex-home-fixture');
+process.env.CODEX_HOME_DIR = codexHomeFixture;
 const llmidePluginFixture = path.join(__dirname, '_llmide-plugins-fixture');
 process.env.LLMIDE_PLUGIN_DIR = llmidePluginFixture;
-for (const dir of [claudePluginsFixture, llmidePluginFixture]) {
+for (const dir of [claudePluginsFixture, codexHomeFixture, llmidePluginFixture]) {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
 }
+fs.writeFileSync(path.join(codexHomeFixture, 'config.toml'), '', 'utf8');
+process.env.CODEX_CONFIG_PATH = path.join(codexHomeFixture, 'config.toml');
 // The llm-sources toggle/remove/mcp-consent routes below fire a background
 // scheduleSnapshotRefresh() (server/auth-routes.mjs), which writes to
 // <LLMIDE_REPO_ROOT>/llm_default_sources regardless of LLMIDE_PLUGIN_DIR —
@@ -627,6 +631,131 @@ test('GET /auth/me/claude-plugins/updates detects a newer source version after i
   assert.equal(update.source, 'installed');
 });
 
+// ---- Codex Plugin Bridge --------------------------------------------------
+// Mirrors the Claude Plugin Bridge tests above — same route shapes, Codex's
+// own config.toml + plugins/cache layout instead (codex-adapter.test.mjs
+// covers scanInstalled/scanMarketplace/importPlugin/checkForUpdates directly
+// against arbitrary root overrides; these confirm the real env-var wiring,
+// CODEX_HOME_DIR set at the top of this file).
+//
+// appendCodexConfigToml appends rather than overwrites, matching how
+// writeClaudeInstalledFixture merges into the SAME installed_plugins.json
+// index across multiple calls within one test — core/toml-lite.mjs's
+// section parser merges same-path tables across appended blocks rather than
+// rejecting the duplicate the way strict TOML would, which is what makes
+// this safe for these fixtures specifically (see toml-lite.test.mjs).
+function appendCodexConfigToml(block) {
+  const p = path.join(codexHomeFixture, 'config.toml');
+  fs.writeFileSync(p, fs.readFileSync(p, 'utf8') + block, 'utf8');
+}
+
+function writeCodexInstalledFixture({ name, version = '1.0.0', marketplace = 'fixture-mp', sourceVersion }) {
+  const installPath = path.join(codexHomeFixture, 'plugins', 'cache', marketplace, name, version);
+  fs.mkdirSync(path.join(installPath, 'skills', 'demo'), { recursive: true });
+  fs.writeFileSync(path.join(installPath, 'skills', 'demo', 'SKILL.md'), '# Demo\nA fixture skill.', 'utf8');
+  fs.mkdirSync(path.join(installPath, '.codex-plugin'), { recursive: true });
+  fs.writeFileSync(path.join(installPath, '.codex-plugin', 'plugin.json'),
+    JSON.stringify({ name, version: sourceVersion || version, description: `Fixture description for ${name}.` }), 'utf8');
+  appendCodexConfigToml(`\n[plugins."${name}@${marketplace}"]\nenabled = true\n`);
+  return installPath;
+}
+
+function writeCodexMarketplaceFixture({ name, marketplace = 'fixture-mp' }) {
+  const mpSrc = path.join(codexHomeFixture, 'marketplace-src', marketplace);
+  const pDir = path.join(mpSrc, 'plugins', name);
+  fs.mkdirSync(path.join(pDir, 'skills', name), { recursive: true });
+  fs.writeFileSync(path.join(pDir, 'skills', name, 'SKILL.md'), `# ${name}`, 'utf8');
+  fs.mkdirSync(path.join(pDir, '.codex-plugin'), { recursive: true });
+  fs.writeFileSync(path.join(pDir, '.codex-plugin', 'plugin.json'),
+    JSON.stringify({ name, version: '1.0.0', description: `Fixture description for ${name}.` }), 'utf8');
+  appendCodexConfigToml(`\n[marketplaces.${marketplace}]\nsource_type = "local"\nsource = "${mpSrc}"\n`);
+}
+
+test('GET /auth/me/codex-plugins/installed lists fixture plugins with import-state enrichment', async () => {
+  writeCodexInstalledFixture({ name: 'bridge-installed-demo' });
+  const { user } = await registerAndLogin();
+  const res = await callAuth({ method: 'GET', url: '/auth/me/codex-plugins/installed', user: { id: user.id } });
+  assert.equal(res.statusCode, 200, res._body);
+  const found = res.json().plugins.find((p) => p.name === 'bridge-installed-demo');
+  assert.ok(found, 'fixture plugin is listed');
+  assert.equal(found.skillCount, 1);
+  assert.equal(found.alreadyImported, false);
+  assert.equal(found.importedVersion, null);
+});
+
+test('GET /auth/me/codex-plugins/marketplace flags installedInCodex correctly', async () => {
+  writeCodexInstalledFixture({ name: 'bridge-both-demo', marketplace: 'both-mp' });
+  writeCodexMarketplaceFixture({ name: 'bridge-both-demo', marketplace: 'both-mp' });
+  writeCodexMarketplaceFixture({ name: 'bridge-marketplace-only-demo', marketplace: 'only-mp' });
+  const { user } = await registerAndLogin();
+  const res = await callAuth({ method: 'GET', url: '/auth/me/codex-plugins/marketplace', user: { id: user.id } });
+  assert.equal(res.statusCode, 200, res._body);
+  const plugins = res.json().plugins;
+  assert.equal(plugins.find((p) => p.name === 'bridge-both-demo').installedInCodex, true);
+  assert.equal(plugins.find((p) => p.name === 'bridge-marketplace-only-demo').installedInCodex, false);
+});
+
+test('POST /auth/me/codex-plugins/import validates input and wires an imported plugin into the native list', async () => {
+  writeCodexInstalledFixture({ name: 'bridge-import-demo' });
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+
+  const missingFields = await callAuth({ method: 'POST', url: '/auth/me/codex-plugins/import', user: admin, body: {} });
+  assert.equal(missingFields.statusCode, 400);
+
+  const badSource = await callAuth({ method: 'POST', url: '/auth/me/codex-plugins/import', user: admin, body: { name: 'bridge-import-demo', source: 'nope' } });
+  assert.equal(badSource.statusCode, 400);
+
+  const unknownPlugin = await callAuth({ method: 'POST', url: '/auth/me/codex-plugins/import', user: admin, body: { name: 'does-not-exist', source: 'installed' } });
+  assert.equal(unknownPlugin.statusCode, 404);
+
+  const ok = await callAuth({ method: 'POST', url: '/auth/me/codex-plugins/import', user: admin, body: { name: 'bridge-import-demo', source: 'installed' } });
+  assert.equal(ok.statusCode, 200, ok._body);
+  assert.equal(ok.json().plugin.name, 'codex-bridge-import-demo');
+  assert.equal(ok.json().plugin.origin, 'codex');
+
+  const nativeList = await callAuth({ method: 'GET', url: '/auth/me/plugins', user: { id: user.id } });
+  assert.ok(nativeList.json().plugins.some((p) => p.name === 'codex-bridge-import-demo'), 'imported plugin shows up via the native plugin list');
+
+  const installedAgain = await callAuth({ method: 'GET', url: '/auth/me/codex-plugins/installed', user: { id: user.id } });
+  const found = installedAgain.json().plugins.find((p) => p.name === 'bridge-import-demo');
+  assert.equal(found.alreadyImported, true);
+  assert.equal(found.importedVersion, '1.0.0');
+});
+
+test('POST /auth/me/codex-plugins/refresh returns live installed/marketplace counts', async () => {
+  const { user } = await registerAndLogin();
+  const res = await callAuth({ method: 'POST', url: '/auth/me/codex-plugins/refresh', user: { id: user.id } });
+  assert.equal(res.statusCode, 200, res._body);
+  assert.equal(typeof res.json().installed, 'number');
+  assert.equal(typeof res.json().marketplace, 'number');
+});
+
+test('GET /auth/me/codex-plugins/updates detects a newer source version after import', async () => {
+  writeCodexInstalledFixture({ name: 'bridge-update-demo', marketplace: 'update-mp' });
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+
+  const imported = await callAuth({ method: 'POST', url: '/auth/me/codex-plugins/import', user: admin, body: { name: 'bridge-update-demo', source: 'installed' } });
+  assert.equal(imported.statusCode, 200, imported._body);
+
+  // Simulate a newer release becoming available upstream — same version dir
+  // (Codex's own layout is immutably versioned; the .codex-plugin manifest
+  // is what checkForUpdates actually reads), just a newer manifest version.
+  fs.writeFileSync(
+    path.join(codexHomeFixture, 'plugins', 'cache', 'update-mp', 'bridge-update-demo', '1.0.0', '.codex-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'bridge-update-demo', version: '2.0.0', description: 'Fixture' }), 'utf8',
+  );
+
+  const res = await callAuth({ method: 'GET', url: '/auth/me/codex-plugins/updates', user: { id: user.id } });
+  assert.equal(res.statusCode, 200, res._body);
+  const update = res.json().updates.find((u) => u.name === 'codex-bridge-update-demo');
+  assert.ok(update, 'update is detected');
+  assert.equal(update.importedVersion, '1.0.0');
+  assert.equal(update.sourceVersion, '2.0.0');
+  assert.equal(update.source, 'installed');
+});
+
 // ---- LLM sources -------------------------------------------------------
 // GET/toggle are per-user actions any authenticated user may take; add/
 // update/remove are admin-gated (mirrors the plugin routes' split above).
@@ -762,8 +891,35 @@ test('mcp-plugins admin-gated routes reject a non-admin caller', async () => {
   const u = { id: user.id }; // not admin
   const scan = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins/claude-sources', user: u });
   assert.equal(scan.statusCode, 403);
+  const codexScan = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins/codex-sources', user: u });
+  assert.equal(codexScan.statusCode, 403);
   const add = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: u, body: { command: 'npx', args: [] } });
   assert.equal(add.statusCode, 403);
+});
+
+test('GET /auth/me/mcp-plugins/codex-sources scans config.toml; POST add via codexName resolves it server-side', async () => {
+  appendCodexConfigToml(`
+[mcp_servers.linear]
+command = "npx"
+args = ["-y", "@linear/mcp"]
+env = { TOKEN = "secret" }
+`);
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+
+  const scan = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins/codex-sources', user: admin });
+  assert.equal(scan.statusCode, 200, scan._body);
+  const found = scan.json().servers.find((s) => s.name === 'linear');
+  assert.ok(found, 'linear server scanned from config.toml');
+  assert.equal(found.command, 'npx');
+
+  const unknown = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin, body: { codexName: 'not-real' } });
+  assert.equal(unknown.statusCode, 400);
+
+  const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin, body: { codexName: 'linear' } });
+  assert.equal(added.statusCode, 200, added._body);
+  assert.equal(added.json().plugin.source, 'codex');
+  assert.equal(added.json().plugin.name, 'linear');
 });
 
 test('POST /auth/me/mcp-plugins/add (admin) + consent + toggle + list + delete', async () => {

@@ -1,30 +1,13 @@
 import { join } from 'node:path';
 import os from 'node:os';
-import { existsSync, readdirSync, readFileSync, statSync, mkdirSync, writeFileSync, copyFileSync, lstatSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { defaultPluginDir } from './loader.mjs';
+import {
+  PLUGIN_NAME_RE, semverNewer, copySkills, copyCmds, countSkills, countCommands,
+  listImportedNames, getImportedVersion,
+} from './vendor-import-shared.mjs';
 
-// Plugin names are joined into filesystem paths (findClaudePlugin, targetDir),
-// so they MUST be validated to prevent path traversal (e.g. "../../etc").
-// Mirrors loader.mjs NAME_RE — lowercase, starts with a letter, hyphens ok.
-const PLUGIN_NAME_RE = /^[a-z][a-z0-9-]{1,40}$/;
-
-/**
- * Semver-aware version comparison.
- * Returns true if `a` is strictly newer than `b`.
- * Falls back to string inequality for non-semver strings.
- * Treats '0.0.0' as "unknown" (never considered newer).
- */
-function semverNewer(a, b) {
-  if (!a || a === '0.0.0') return false;
-  if (!b || b === '0.0.0') return true;
-  const parse = (v) => String(v).split('.').map((n) => parseInt(n, 10) || 0);
-  const [aMaj, aMin, aPatch] = parse(a);
-  const [bMaj, bMin, bPatch] = parse(b);
-  if (aMaj !== bMaj) return aMaj > bMaj;
-  if (aMin !== bMin) return aMin > bMin;
-  if (aPatch !== bPatch) return aPatch > bPatch;
-  return false; // equal
-}
+export { listImportedNames, getImportedVersion };
 
 /**
  * Root directory where Claude Code stores plugins.
@@ -33,44 +16,6 @@ function semverNewer(a, b) {
 export function claudePluginsRoot() {
   if (process.env.CLAUDE_PLUGINS_DIR) return process.env.CLAUDE_PLUGINS_DIR;
   return join(os.homedir(), '.claude', 'plugins');
-}
-
-/**
- * Count skills in a Claude Code skills directory.
- * Counts: nested `skills/<name>/SKILL.md` dirs + flat `skills/<name>.md` files.
- * Ignores READMEs and other non-skill .md files in nested dirs.
- */
-function countSkills(dir) {
-  if (!existsSync(dir)) return 0;
-  let count = 0;
-  try {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    for (const e of entries) {
-      if (e.isDirectory()) {
-        // Claude nested format: skills/<name>/SKILL.md
-        if (existsSync(join(dir, e.name, 'SKILL.md'))) count++;
-      } else if (e.name.endsWith('.md')) {
-        // Flat format: skills/<name>.md
-        count++;
-      }
-    }
-  } catch { /* permission error, etc. */ }
-  return count;
-}
-
-/**
- * Count commands: only flat .md files in commands/.
- */
-function countCommands(dir) {
-  if (!existsSync(dir)) return 0;
-  let count = 0;
-  try {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    for (const e of entries) {
-      if (e.isFile() && e.name.endsWith('.md')) count++;
-    }
-  } catch { /* permission error, etc. */ }
-  return count;
 }
 
 /**
@@ -307,146 +252,6 @@ function findMarketplaceName(root, pluginName) {
     }
   } catch { /* ignore */ }
   return null;
-}
-
-/**
- * Copy and adapt Claude Code skills into LLM-IDE format.
- * Claude Code skills may lack the `kind` and `name` fields that
- * LLM-IDE' skill-loader requires. This function injects them
- * during import so the skills actually load at LLM runtime.
- *
- * - `kind` defaults to 'read' (Claude skills are contextual/informational)
- * - `name` is set from the output filename (minus .md extension)
- */
-function copySkills(src, dst) {
-  let count = 0;
-  const skipped = [];
-  const MAX_BYTES = 32_768;
-  try {
-    const sources = [];
-    for (const entry of readdirSync(src, { withFileTypes: true })) {
-      if (entry.isDirectory()) {
-        const skillFile = join(src, entry.name, 'SKILL.md');
-        if (existsSync(skillFile)) {
-          const stat = statSync(skillFile);
-          if (stat.size <= MAX_BYTES) {
-            sources.push({ srcPath: skillFile, dstName: `${entry.name}.md` });
-          } else {
-            skipped.push(`${entry.name} (${Math.round(stat.size / 1024)}KB > 32KB limit)`);
-          }
-        }
-      } else if (entry.name.endsWith('.md')) {
-        const stat = statSync(join(src, entry.name));
-        if (stat.size <= MAX_BYTES) {
-          sources.push({ srcPath: join(src, entry.name), dstName: entry.name });
-        } else {
-          skipped.push(`${entry.name} (${Math.round(stat.size / 1024)}KB > 32KB limit)`);
-        }
-      }
-    }
-
-    for (const { srcPath, dstName } of sources) {
-      const raw = readFileSync(srcPath, 'utf8');
-      const adapted = adaptSkillFrontmatter(raw, dstName.replace(/\.md$/, ''));
-      writeFileSync(join(dst, dstName), adapted, 'utf8');
-      count++;
-    }
-  } catch { /* ignore */ }
-  return { count, skipped };
-}
-
-/**
- * Ensure a Claude Code skill .md file has the frontmatter fields
- * required by LLM-IDE' skill-loader: `name` and `kind`.
- * If frontmatter exists but lacks these, inject them.
- * If no frontmatter at all, wrap the content with a minimal one.
- */
-function adaptSkillFrontmatter(raw, expectedName) {
-  // Use multiline mode so `^---$` matches a line that is ONLY `---`,
-  // preventing a `---` embedded in a YAML string value from closing
-  // the frontmatter block prematurely.
-  const fmMatch = raw.match(/^---\n([\s\S]*?)\n^---\s*\n([\s\S]*)$/m);
-  if (!fmMatch) {
-    // No frontmatter — create one
-    return `---\nname: ${expectedName}\nkind: read\ndescription: "Imported from Claude Code"\n---\n${raw}`;
-  }
-
-  let frontmatter = fmMatch[1];
-  const body = fmMatch[2];
-
-  // Inject `name` if missing or wrong
-  if (!/^name:/m.test(frontmatter)) {
-    frontmatter = `name: ${expectedName}\n${frontmatter}`;
-  } else {
-    // Fix name to match expected filename
-    const nameMatch = frontmatter.match(/^name:\s*(.+)$/m);
-    if (nameMatch && nameMatch[1].trim() !== expectedName) {
-      frontmatter = frontmatter.replace(/^name:\s*.+$/m, `name: ${expectedName}`);
-    }
-  }
-
-  // Inject `kind` if missing — Claude Code skills default to 'read'
-  if (!/^kind:/m.test(frontmatter)) {
-    frontmatter = `${frontmatter}\nkind: read`;
-  }
-
-  return `---\n${frontmatter}\n---\n${body}`;
-}
-
-function copyCmds(src, dst) {
-  let count = 0;
-  const MAX_BYTES = 16_384;
-  try {
-    for (const entry of readdirSync(src, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-      const stat = statSync(join(src, entry.name));
-      if (stat.size <= MAX_BYTES) {
-        copyFileSync(join(src, entry.name), join(dst, entry.name));
-        count++;
-      }
-    }
-  } catch { /* ignore */ }
-  return count;
-}
-
-/**
- * Lightweight check: list LLM-IDE plugin directory names (no full load).
- * Returns a Set of plugin folder names from the LLM-IDE plugin dir.
- * @param {string} [mnDirOverride] - Override for tests
- * @returns {Set<string>}
- */
-export function listImportedNames(mnDirOverride) {
-  const dir = mnDirOverride || defaultPluginDir();
-  if (!existsSync(dir)) return new Set();
-  const names = new Set();
-  try {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      // Skip symlinks (same policy as loader.mjs)
-      try { if (lstatSync(join(dir, entry.name)).isSymbolicLink()) continue; } catch { continue; }
-      // Must have a plugin.json to be a real plugin
-      if (existsSync(join(dir, entry.name, 'plugin.json'))) {
-        names.add(entry.name);
-      }
-    }
-  } catch { /* ignore */ }
-  return names;
-}
-
-/**
- * Read the version from a LLM-IDE-imported plugin's manifest.
- * @param {string} pluginName - LLM-IDE plugin name (e.g., 'claude-code-review')
- * @param {string} [mnDirOverride] - Override for tests
- * @returns {string|null}
- */
-export function getImportedVersion(pluginName, mnDirOverride) {
-  const dir = mnDirOverride || defaultPluginDir();
-  const manifestPath = join(dir, pluginName, 'plugin.json');
-  if (!existsSync(manifestPath)) return null;
-  try {
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    return manifest.version || null;
-  } catch { return null; }
 }
 
 /**
