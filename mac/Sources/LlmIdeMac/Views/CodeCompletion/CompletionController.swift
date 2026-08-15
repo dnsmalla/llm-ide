@@ -117,12 +117,27 @@ final class CompletionController: ObservableObject {
         }
         // Built-in commands are a real client-side UI action (ChatSlashCommands
         // in ChatComposer.submit()), not server-side prompt expansion like
-        // plugin commands — shown first so /clear is discoverable the same
-        // way. Aliases (/reset, /new) still work if typed, just not listed
-        // separately here to avoid triplicating one entry.
+        // plugin commands — shown first so they're discoverable the same
+        // way. Aliases (/reset, /new, /settings, /plugins) still work if
+        // typed, just not listed separately here to avoid triplicating one
+        // entry. Only commands with a REAL llm-ide action are listed — see
+        // ChatSlashCommands.swift's header note on why the rest of Claude
+        // Code's own command set isn't mirrored here.
         let builtinCommandItems: [Item] = [
             Item(id: "cmd:clear", kind: .command, label: "/clear",
                  detail: "Clear this conversation", insert: "/clear", fileURL: nil),
+            Item(id: "cmd:model", kind: .command, label: "/model",
+                 detail: "Switch the model for the current provider", insert: "/model ", fileURL: nil),
+            Item(id: "cmd:config", kind: .command, label: "/config",
+                 detail: "Open Settings", insert: "/config", fileURL: nil),
+            Item(id: "cmd:loop", kind: .command, label: "/loop",
+                 detail: "Open the Loop Engine", insert: "/loop", fileURL: nil),
+            Item(id: "cmd:mcp", kind: .command, label: "/mcp",
+                 detail: "Open Library → MCP Plugins", insert: "/mcp", fileURL: nil),
+            Item(id: "cmd:plugin", kind: .command, label: "/plugin",
+                 detail: "Open Library → Plugins", insert: "/plugin", fileURL: nil),
+            Item(id: "cmd:agents", kind: .command, label: "/agents",
+                 detail: "Open Library → Plugins (subagents)", insert: "/agents", fileURL: nil),
         ]
         commandItems = builtinCommandItems + (commands ?? []).map { c in
             Item(id: "cmd:\(c.trigger)", kind: .command,

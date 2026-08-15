@@ -545,6 +545,35 @@ extension CodeAssistantPanel {
         }
     }
 
+    /// `/model <query>` — real, direct action (not a fake reference entry):
+    /// resolves `query` against the current provider's known models (exact
+    /// id/displayName match first, substring fallback) and sets it the same
+    /// way tapping a model-picker chip menu item does, including the
+    /// `config.defaultModelId` sync for built-in providers (see the model
+    /// picker Menu in this file) so the iPhone chat proxy sees the change
+    /// too. There is no way to programmatically open the picker's native
+    /// SwiftUI Menu itself (see ChatSlashCommands.swift's header note on
+    /// scope), so a bare "/model" with no argument just explains usage.
+    func applyModelCommand(_ query: String) {
+        guard !query.isEmpty else {
+            error = "Usage: /model <name> — e.g. /model sonnet, /model gpt-5"
+            return
+        }
+        let candidates = modelsForCurrentProvider()
+        let q = query.lowercased()
+        guard let match = candidates.first(where: { $0.id.lowercased() == q || $0.displayName.lowercased() == q })
+            ?? candidates.first(where: { $0.id.lowercased().contains(q) || $0.displayName.lowercased().contains(q) })
+        else {
+            let available = candidates.map(\.displayName).joined(separator: ", ")
+            error = "No model matching \"\(query)\" for the current provider.\(available.isEmpty ? "" : " Available: \(available)")"
+            return
+        }
+        modelState.selectedModel = match.id
+        if !modelState.selectedProvider.starts(with: "custom:") {
+            config.defaultModelId = match.id
+        }
+    }
+
     /// Models to offer for a provider: the live list when we've fetched one,
     /// otherwise the built-in static list (keeps the picker populated when no
     /// key is set or the fetch failed), plus any user-added custom ids.
@@ -683,6 +712,14 @@ extension CodeAssistantPanel {
         // (that's server-side prompt-expansion, not a client-side UI action).
         if ChatSlashCommands.isClearCommand(msg) {
             clearCurrentChat()
+            return
+        }
+        if let section = ChatSlashCommands.sectionCommand(msg) {
+            NotificationCenter.default.post(name: .openSection, object: section.rawValue)
+            return
+        }
+        if let modelQuery = ChatSlashCommands.modelArgument(msg) {
+            applyModelCommand(modelQuery)
             return
         }
 
