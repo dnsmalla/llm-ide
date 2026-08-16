@@ -1,9 +1,12 @@
 import Testing
 @testable import LlmIdeMacLib
 
-/// Pins the wire-history packing rules from CodeAssistantPanel+Session.swift
-/// (historyForRequest, lines 468-499): per-turn clip at 24k, total budget
-/// 400k, newest-first packing, first-user-turn anchor always included.
+/// Pins the wire-history packing rules of `ChatEngine.historyForRequest`:
+/// per-turn clip at 24k, total budget 400k, newest-first packing,
+/// first-user-turn anchor always included. (Written against
+/// `CodeAssistantPanel.historyForRequest` in Task 1; retargeted verbatim
+/// when Task 7 moved the method — and its two budget constants — into the
+/// engine along with the rest of the turn lifecycle. Same assertions.)
 ///
 /// Divergences from the task brief, fixed to match current behavior:
 /// - `LlmIdeAPIClient(baseURL:)` takes a `String`, not a `URL`.
@@ -13,11 +16,12 @@ import Testing
 ///   always fits the 400k budget. The oversized-anchor test pins what
 ///   actually happens (clip, keep, tail kept); the anchor-nil branch is
 ///   covered separately by the no-user-turn test.
+@MainActor
 @Suite("historyForRequest packing")
 struct HistoryForRequestTests {
-    let panel = CodeAssistantPanel(
-        api: LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456"),
-        scope: .explorer)
+    let engine = ChatEngine(
+        scope: .explorer,
+        transport: CodeAssistTransport(api: LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")))
 
     func turn(_ role: LlmIdeAPIClient.CodeAssistRole, _ content: String)
         -> LlmIdeAPIClient.CodeAssistTurn { .init(role: role, content: content) }
@@ -25,16 +29,16 @@ struct HistoryForRequestTests {
     @Test("Under budget: everything passes through, order preserved")
     func underBudget() {
         let turns = [turn(.user, "hello"), turn(.assistant, "hi"), turn(.user, "again")]
-        let out = panel.historyForRequest(turns)
+        let out = engine.historyForRequest(turns)
         #expect(out.map(\.content) == ["hello", "hi", "again"])
     }
 
     @Test("Oversized single turn is clipped with marker")
     func perTurnClip() {
-        let big = String(repeating: "a", count: CodeAssistantPanel.maxHistoryTurnChars + 500)
-        let out = panel.historyForRequest([turn(.user, big)])
+        let big = String(repeating: "a", count: ChatEngine.maxHistoryTurnChars + 500)
+        let out = engine.historyForRequest([turn(.user, big)])
         #expect(out.count == 1)
-        #expect(out[0].content.count == CodeAssistantPanel.maxHistoryTurnChars
+        #expect(out[0].content.count == ChatEngine.maxHistoryTurnChars
                 + "\n…(turn clipped)".count)
         #expect(out[0].content.hasSuffix("…(turn clipped)"))
     }
@@ -47,11 +51,11 @@ struct HistoryForRequestTests {
         var turns = [anchor]
         for _ in 0..<20 { turns.append(turn(.assistant, String(repeating: "b", count: 24_000))) }
         turns.append(turn(.user, "final question"))
-        let out = panel.historyForRequest(turns)
+        let out = engine.historyForRequest(turns)
         #expect(out.first?.content.hasPrefix("aaaa") == true)          // anchor survives
         #expect(out.last?.content == "final question")                 // newest survives
         let total = out.reduce(0) { $0 + $1.content.count }
-        #expect(total <= CodeAssistantPanel.maxHistoryChars)
+        #expect(total <= ChatEngine.maxHistoryChars)
     }
 
     @Test("Oversized anchor is per-turn clipped and kept, never dropped")
@@ -62,10 +66,10 @@ struct HistoryForRequestTests {
         // dropped) — that branch is unreachable while per-turn clipping runs
         // first, since a clipped turn (24,016 chars) always fits the 400k
         // reservation budget.
-        let anchor = turn(.user, String(repeating: "a", count: CodeAssistantPanel.maxHistoryChars + 1))
-        let out = panel.historyForRequest([anchor, turn(.user, "small")])
+        let anchor = turn(.user, String(repeating: "a", count: ChatEngine.maxHistoryChars + 1))
+        let out = engine.historyForRequest([anchor, turn(.user, "small")])
         #expect(out.count == 2)
-        #expect(out[0].content.count == CodeAssistantPanel.maxHistoryTurnChars
+        #expect(out[0].content.count == ChatEngine.maxHistoryTurnChars
                 + "\n…(turn clipped)".count)
         #expect(out[0].content.hasSuffix("…(turn clipped)"))
         #expect(out[1].content == "small")
@@ -78,10 +82,10 @@ struct HistoryForRequestTests {
         var turns: [LlmIdeAPIClient.CodeAssistTurn] = []
         for _ in 0..<20 { turns.append(turn(.assistant, String(repeating: "b", count: 24_000))) }
         turns.append(turn(.assistant, "final answer"))
-        let out = panel.historyForRequest(turns)
+        let out = engine.historyForRequest(turns)
         #expect(out.last?.content == "final answer")
         let total = out.reduce(0) { $0 + $1.content.count }
-        #expect(total <= CodeAssistantPanel.maxHistoryChars)
+        #expect(total <= ChatEngine.maxHistoryChars)
         // Newest-first packing: with 20×24k + tail, the oldest turns are the
         // ones dropped (400k admits 16 of the 24k turns plus the tail).
         #expect(out.count == 17)

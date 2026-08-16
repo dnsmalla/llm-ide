@@ -18,13 +18,13 @@ extension CodeAssistantPanel {
                 number: args.iid,
                 body: args.body
             )
-            agent.pendingTool = nil
+            engine.agent.pendingTool = nil
             sheets.showingCommentSheet = false
-            history.append(.init(
+            engine.appendTurn(.init(
                 role: .user,
                 content: "(executed comment-issue → #\(args.iid))"
             ))
-            await sendFollowup()
+            await engine.sendFollowup()
             return .success(args.iid)
         } catch {
             return .failure(error.localizedDescription)
@@ -45,14 +45,14 @@ extension CodeAssistantPanel {
                 number: args.iid,
                 payload: payload
             )
-            agent.pendingTool = nil
+            engine.agent.pendingTool = nil
             sheets.showingUpdateIssueSheet = false
-            history.append(.init(
+            engine.appendTurn(.init(
                 role: .user,
                 content: "(executed update-issue → #\(args.iid))"
             ))
             await refreshRecentIssuesOnce()
-            await sendFollowup()
+            await engine.sendFollowup()
             return .success(args.iid)
         } catch {
             return .failure(error.localizedDescription)

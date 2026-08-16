@@ -52,9 +52,9 @@ extension CodeAssistantPanel {
             guard let active = projectStore.activeProject,
                   let context = WorkspaceRoot.context(config: config, projectStore: projectStore),
                   let gitRoot = context.gitRoot,
-                  !busy, runTask == nil, !agent.agentIsAutonomous
+                  !engine.busy, engine.runTask == nil, !engine.agent.agentIsAutonomous
             else { return }
-            // Set synchronously here, before the Task is even created — if
+            // Claimed synchronously here, before the Task is even created — if
             // this were left to the top of `runLoopEngineeringFromChat`
             // instead, a fast double-click could fire twice in the single
             // hop before that first `await` suspension point flips `busy`.
@@ -62,12 +62,12 @@ extension CodeAssistantPanel {
             // prevents two runs from actually touching the same working
             // tree), but it would leave an orphaned first run plus a
             // confusing duplicate "already in progress" placeholder turn.
-            busy = true
-            runTask = Task {
+            engine.beginPanelRun()
+            engine.setRunTask(Task {
                 await runLoopEngineeringFromChat(
                     projectId: active.bundle.id, faultsRoot: context.projectRoot,
                     gitRoot: gitRoot, language: prefLanguage)
-            }
+            })
         } label: {
             Image(systemName: "repeat.circle")
                 .font(.system(size: 11, weight: .medium))
@@ -84,7 +84,7 @@ extension CodeAssistantPanel {
         // takes a non-optional `gitRoot`, so a run can't start without one.
         .disabled(projectStore.activeProject == nil
                   || WorkspaceRoot.gitWorkingTree(config: config, projectStore: projectStore) == nil
-                  || busy || runTask != nil || agent.agentIsAutonomous)
+                  || engine.busy || engine.runTask != nil || engine.agent.agentIsAutonomous)
     }
 
     /// Starts a Loop Engineering run against the active project and appends
@@ -101,10 +101,10 @@ extension CodeAssistantPanel {
     /// turn to drain it.
     @MainActor
     func runLoopEngineeringFromChat(projectId: String, faultsRoot: URL, gitRoot: URL, language: String) async {
-        // `busy` itself is already set by the button (see its own doc
-        // comment) before this function is even reached; setting it again
+        // The turn slot is already claimed by the button (see its own doc
+        // comment) before this function is even reached; claiming it again
         // here is a harmless no-op that also makes this function correct
-        // to call on its own. The rest of these mirror `runTurn`'s own
+        // to call on its own. `beginPanelRun` mirrors `runTurn`'s own
         // start-of-turn resets:
         // - `agent.pendingTool = nil` — without this, a stale action card
         //   left over from a PREVIOUS turn stays clickable once this
@@ -115,10 +115,7 @@ extension CodeAssistantPanel {
         // - `statusText`/`error` — otherwise a stale SSE progress string or
         //   error bubble from the previous turn lingers under this run as
         //   if it were live.
-        busy = true
-        agent.pendingTool = nil
-        statusText = ""
-        error = nil
+        engine.beginPanelRun()
         let placeholderTurn = LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: "Starting Loop…")
         let placeholderId = placeholderTurn.id
         // Captured BEFORE the first await below — if the user switches to a
@@ -130,8 +127,8 @@ extension CodeAssistantPanel {
         // a swapped-in one); `sessionEpoch` is kept as a belt-and-suspenders
         // check for the common case, and to short-circuit before scanning
         // `history` at all.
-        let startEpoch = sessionEpoch
-        history.append(placeholderTurn)
+        let startEpoch = engine.sessionEpoch
+        engine.appendTurn(placeholderTurn)
 
         // `projectId` here is the stable Project.id (see the contract on
         // LoopEngineConfig.load/save from Task 1) — the same key Task 9's
@@ -178,10 +175,12 @@ extension CodeAssistantPanel {
         let cancellable = runner.$log
             .throttle(for: .milliseconds(500), scheduler: RunLoop.main, latest: true)
             .sink { [weak runner] lines in
-                guard runner != nil, sessionEpoch == startEpoch else { return }
-                guard let idx = history.firstIndex(where: { $0.id == placeholderId }) else { return }
+                guard runner != nil, engine.sessionEpoch == startEpoch else { return }
                 let text = lines.map(\.text).joined(separator: "\n")
-                history[idx].content = text.isEmpty ? "Starting Loop…" : text
+                // No-ops if the placeholder is gone (session switched
+                // mid-run) — the same guard the id lookup used to do inline.
+                engine.setTurnContent(id: placeholderId,
+                                      text.isEmpty ? "Starting Loop…" : text)
             }
 
         // run() returns LoopEngineStatus? — nil means rejected (a run is
@@ -197,21 +196,15 @@ extension CodeAssistantPanel {
                                       gitRoot: gitRoot, projectId: projectId)
         cancellable.cancel()
 
-        if sessionEpoch == startEpoch, let idx = history.firstIndex(where: { $0.id == placeholderId }) {
+        if engine.sessionEpoch == startEpoch {
             let logText = runner.log.map(\.text).joined(separator: "\n")
             let resultLine = result.map { "\n\n**Result:** \($0.summary)" } ?? "\n\n**Result:** a run is already in progress for this repo"
-            history[idx].content = logText + resultLine
+            engine.setTurnContent(id: placeholderId, logText + resultLine)
         }
 
         // Same tail as `runTurn`: drain the next queued message (FIFO) as a
         // fresh turn if the user sent one while this run occupied `busy`/
         // `runTask`; otherwise release both.
-        if !queued.isEmpty {
-            let next = queued.removeFirst()
-            startTurn(next.text, skillIds: next.skillIds)
-        } else {
-            busy = false
-            runTask = nil
-        }
+        engine.drainQueueOrRelease()
     }
 }

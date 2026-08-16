@@ -75,10 +75,16 @@ struct CodeAssistantPanel: View {
         let action: Action
         var iconName: String { if case .library = action { return "books.vertical" } else { return "sparkles" } }
     }
+    /// Chat turn + session lifecycle. Owns `history`, the streaming/queue
+    /// state, the saved-session list, and the agent-turn metadata; the panel
+    /// keeps only view/composer state and wires the engine's injected
+    /// collaborators to it in `wireEngine()`. Constructed in `init` (rather
+    /// than assigned on appear) because it needs `api`/`scope`, which are
+    /// `let` properties available only there.
+    @State var engine: ChatEngine
     /// Attachments/modified-files/invoked-skills — see
     /// CodeAssistantAttachmentState's doc comment.
     @State var attachmentState = CodeAssistantAttachmentState()
-    @State var history: [LlmIdeAPIClient.CodeAssistTurn] = []
     @State var draft: String = ""
     /// Shell / Claude-Code-style prompt history: submitted prompts (oldest →
     /// newest). Up-arrow walks back through them, Down walks forward, Down past
@@ -87,37 +93,7 @@ struct CodeAssistantPanel: View {
     @State var sentPrompts: [String] = []
     @State var historyIndex: Int? = nil
     @State var draftStash: String = ""
-    /// Recent chats for this scope, newest `lastUsedAt` first — backs the
-    /// session-picker popover.
-    @State var sessions: [ChatSession] = []
     @State var showingSessionPicker = false
-    /// UUID string of the chat currently loaded into `history`. Mirrored to
-    /// UserDefaults under `chat.current.<scope>` so it survives relaunch.
-    @State var currentSessionIDString: String = ""
-    @State var busy: Bool = false
-    /// Live agent status streamed from /code-assist (SSE): "Searching the web…",
-    /// "Writing the answer…", etc. Shown in place of a static "Thinking…" so a
-    /// 60–90s agent turn doesn't look hung. Reset at the start/end of each turn.
-    @State var statusText: String = ""
-    /// Handle to the in-flight user turn, so Stop can cancel it.
-    @State var runTask: Task<Void, Never>?
-    /// Messages the user submitted while a turn was running, in FIFO order; they
-    /// auto-send one per turn as the current run finishes (or is stopped).
-    /// FIFO of messages queued while a turn runs. Identifiable so a cancel
-    /// button removes the RIGHT entry even after the queue shifts (drain pops
-    /// the head between render and tap) — index-keyed rows deleted the wrong one.
-    struct QueuedMessage: Identifiable { let id = UUID(); let text: String; let skillIds: [String] }
-    @State var queued: [QueuedMessage] = []
-    @State var error: String?
-    /// Measured render height per assistant turn, keyed by turn id, so each
-    /// markdown web-view bubble can be sized to its content in the scroll list.
-    @State var bubbleHeights: [UUID: CGFloat] = [:]
-    /// Resolved mode for each assistant turn, keyed by turn id — populated
-    /// in finishStreamingTurn, read by ChatMessageList to show ModeBadge.
-    /// Not part of CodeAssistTurn itself (avoids a wire/persistence change
-    /// for a display-only concern, same reasoning as the existing
-    /// isToolNotice content-based convention).
-    @State var turnModes: [UUID: CodeAssistMode] = [:]
     /// One tool step the agent took during a turn — "Reading Foo.swift",
     /// "Running npm test" — so the transcript shows WHAT it did instead of the
     /// raw `<<<TOOL_CALL>>>` JSON that used to stream into the reply.
@@ -143,11 +119,6 @@ struct CodeAssistantPanel: View {
             }
         }
     }
-    /// Tool steps per assistant turn, keyed by turn id. Display-only and
-    /// in-memory, exactly like `turnModes` — deliberately NOT added to
-    /// `CodeAssistTurn`, which is what gets persisted AND replayed to the model;
-    /// the agent does not need its own tool log fed back to it.
-    @State var turnActivity: [UUID: [ToolStep]] = [:]
     @State var prefLanguage: String = "en"
     @State var didAttachInitial = false
     /// Path of the file auto-attached from the tree selection (`initialURL`),
@@ -163,9 +134,6 @@ struct CodeAssistantPanel: View {
     /// the user run a model the built-in/live lists don't include (e.g. a
     /// brand-new release) — it's sent as-is and routed by id prefix.
     @AppStorage("MEETNOTES_CUSTOM_MODELS") var customModelsRaw = "{}"
-    /// Agent-turn / issue-context / Q&A-nudge metadata — see
-    /// CodeAssistantAgentState's doc comment.
-    @State var agent = CodeAssistantAgentState()
     /// Sheet/popover presentation flags — see CodeAssistantSheetState's
     /// doc comment for why these are grouped apart from the fragile
     /// composer/session/streaming state.
@@ -180,12 +148,6 @@ struct CodeAssistantPanel: View {
     /// "latest is always open" rule (see isAssistantExpanded), this collapses
     /// older replies to a lightweight text preview so a long chat stays short.
     @State var expandedTurns: Set<UUID> = []
-    /// The assistant turn currently receiving live text — real token
-    /// streaming from the server's SSE `chunk` events, mutated in place via
-    /// CodeAssistantPanel+Session's beginStreamingTurn/appendStreamedChunk/
-    /// finishStreamingTurn. nil once nothing is streaming.
-    @State var revealingTurnID: UUID?
-    @State var revealedCount: Int = 0
     /// Filter text for the session-picker popover. Reset whenever the
     /// popover closes so it never opens pre-filtered from a prior search.
     @State var sessionSearchQuery: String = ""
@@ -202,19 +164,6 @@ struct CodeAssistantPanel: View {
     @State var voiceService = VoiceInputService()
     /// Voice UI state — recording, interim text, errors
     @State var voiceState = ChatVoiceState()
-    /// Bumped every time the active chat session changes (create/switch/
-    /// delete-fallback). Captured by the auto-continue `asyncAfter` closure
-    /// before its delay; if the epoch has moved on by the time it fires, the
-    /// closure no-ops instead of starting a turn against a different chat's
-    /// history. `agentStopRequested` alone isn't enough here because it's a
-    /// single shared flag, not scoped to the session that scheduled the
-    /// closure.
-    @State var sessionEpoch: UInt = 0
-    /// While `true`, `handleHistoryChange` persists but skips the VoiceOver
-    /// announcement. Set around bulk history loads (switch/delete-fallback/
-    /// on-appear) so restoring an old chat doesn't read its last message
-    /// aloud as if the assistant had just replied.
-    @State var suppressHistoryAnnounce = false
     /// The current `update-file` proposal, resolved against the filesystem.
     /// Cached because resolving reads the target file — see the `onChange` in
     /// `body` that refreshes it, and `pendingUpdateFileDiff` that reads it.
@@ -236,6 +185,25 @@ struct CodeAssistantPanel: View {
     var isCompact: Bool { panelWidth < 240 }
     var isVeryCompact: Bool { panelWidth < 180 }
 
+    /// Hand-written rather than memberwise, purely so the engine can be built
+    /// from `api`/`scope` — `@State`'s initial value has to be supplied here,
+    /// and `api` isn't in scope for a property initializer. The parameter list
+    /// and defaults match the memberwise initializer this replaces, so no call
+    /// site changes.
+    init(api: LlmIdeAPIClient,
+         scope: ChatScope,
+         initialURL: URL? = nil,
+         showFileAttachButtons: Bool = true,
+         showModelPicker: Bool = false) {
+        self.api = api
+        self.scope = scope
+        self.initialURL = initialURL
+        self.showFileAttachButtons = showFileAttachButtons
+        self.showModelPicker = showModelPicker
+        _engine = State(initialValue: ChatEngine(scope: scope,
+                                                 transport: CodeAssistTransport(api: api)))
+    }
+
     var body: some View {
         baseContent
             .frame(minWidth: 120)
@@ -252,7 +220,7 @@ struct CodeAssistantPanel: View {
             // the proposal arrives — not inside `body`, where a card on screen
             // would mean a synchronous disk read on every re-render (i.e. on
             // every keystroke in the composer below it).
-            .onChange(of: agent.pendingTool, initial: true) { _, _ in
+            .onChange(of: engine.agent.pendingTool, initial: true) { _, _ in
                 refreshPendingEditPreview()
             }
             .task(id: activeRepoKey) {
@@ -272,21 +240,20 @@ struct CodeAssistantPanel: View {
             .task { await refreshRecentIssuesLoop() }
             .task { await loadModels(for: AICliTool(rawValue: config.activeCLI) ?? .claudeCode) }
             .onAppear { handleOnAppear() }
-            .onChange(of: history) { oldValue, newValue in
-                handleHistoryChange(oldValue: oldValue, newValue: newValue)
+            .onChange(of: engine.history) { oldValue, newValue in
+                engine.announceAndPersist(oldValue: oldValue, newValue: newValue)
             }
             .onReceive(NotificationCenter.default.publisher(for: .explorerChatTranscriptChanged)) { note in
                 // An iPhone explore_chat persisted a turn to this session —
                 // reload so the Mac panel shows it (and so the panel's own
                 // persistCurrentChat can't clobber it with a stale in-memory
                 // copy). The explorer-panel twin of LlmChatSheet's
-                // .llmChatTranscriptChanged handling.
-                guard let sid = note.object as? String, sid == currentSessionIDString,
-                      let uid = UUID(uuidString: sid),
-                      let session = ChatSessionStore.load(id: uid),
-                      session.scope == scope else { return }
-                history = session.history
-                rebuildSentPrompts(from: session.history)
+                // .llmChatTranscriptChanged handling. The id match stays here
+                // (it reads the notification's payload); the load + scope
+                // check are the engine's.
+                guard let sid = note.object as? String, sid == engine.currentSessionIDString,
+                      let uid = UUID(uuidString: sid) else { return }
+                engine.reloadFromDisk(id: uid)
             }
             .onChange(of: config.activeCLI) { _, _ in
                 modelState.selectedModel = config.defaultModelId
@@ -301,12 +268,12 @@ struct CodeAssistantPanel: View {
                 showingIssueSheetContent
             }
             .sheet(isPresented: $sheets.showingReviewCodeSheet, onDismiss: {
-                if agent.pendingTool?.triggerReviewCodeArgs != nil { agent.pendingTool = nil }
+                if engine.agent.pendingTool?.triggerReviewCodeArgs != nil { engine.agent.pendingTool = nil }
             }) {
                 showingReviewCodeSheetContent
             }
             .sheet(isPresented: $sheets.showingUpdateFileSheet, onDismiss: {
-                if agent.pendingTool?.updateFileArgs != nil { agent.pendingTool = nil }
+                if engine.agent.pendingTool?.updateFileArgs != nil { engine.agent.pendingTool = nil }
             }) {
                 showingUpdateFileSheetContent
             }
@@ -335,7 +302,7 @@ struct CodeAssistantPanel: View {
                 showLibraryPickerContent
             }
             .sheet(isPresented: $sheets.showingGitOpSheet, onDismiss: {
-                if agent.pendingTool?.gitOpArgs != nil { agent.pendingTool = nil }
+                if engine.agent.pendingTool?.gitOpArgs != nil { engine.agent.pendingTool = nil }
             }) {
                 showingGitOpSheetContent
             }
@@ -357,21 +324,13 @@ struct CodeAssistantPanel: View {
             header
             Divider().background(theme.current.border)
             ChatMessageList(
-                history: history,
+                engine: engine,
                 showModelPicker: showModelPicker,
-                pendingTool: agent.pendingTool,
-                tasks: agent.agentPendingTasks,
+                pendingTool: engine.agent.pendingTool,
+                tasks: engine.agent.agentPendingTasks,
                 diffPreview: pendingUpdateFileDiff,
-                turnModes: turnModes,
-                turnActivity: turnActivity,
-                busy: busy,
-                statusText: statusText,
-                error: $error,
                 draft: $draft,
                 expandedTurns: $expandedTurns,
-                revealingTurnID: $revealingTurnID,
-                revealedCount: $revealedCount,
-                bubbleHeights: $bubbleHeights,
                 activeRepoRoot: activeRepoRoot,
                 sheets: sheets,
                 loadBranchContext: { await buildAgentContext() },
@@ -384,7 +343,7 @@ struct CodeAssistantPanel: View {
             if !attachmentState.selectedSkills.isEmpty { skillBar }
             if !attachmentState.attachments.isEmpty { attachmentBar }
             if let attachNotice { attachNoticeBar(attachNotice) }
-            if let prompt = agent.nudgePrompt, activeRepoRoot != nil {
+            if let prompt = engine.agent.nudgePrompt, activeRepoRoot != nil {
                 nudgeBanner(prompt: prompt)
             }
             // Voice indicators
@@ -406,7 +365,75 @@ struct CodeAssistantPanel: View {
 
     // MARK: - Event Handlers
 
+    /// Point the engine's injected collaborators at this panel's own state.
+    ///
+    /// Called from `.onAppear` rather than `init` for two reasons: the
+    /// context-building hooks read `@EnvironmentObject`s that aren't available
+    /// in `init`, and the closures must capture a view value whose property
+    /// wrappers are installed. Re-running it on a later appearance just
+    /// reassigns the same closures, so it is idempotent — and it MUST run
+    /// before `handleOnAppearSessions()` below, which fires `onHistoryReplaced`
+    /// while loading the restored chat.
+    func wireEngine() {
+        // Not read by the engine itself today (`resolveTransportInput` supplies
+        // the context as part of a fully-formed input, exactly as
+        // `codeAssistRoundTrip` built `ctx` inline) — wired for completeness.
+        engine.buildContext = { await buildAgentContext() }
+        engine.sendAnnouncement = { text in
+            NSAccessibility.post(
+                element: NSApp as Any,
+                notification: .announcementRequested,
+                userInfo: [
+                    .announcement: text,
+                    .priority: NSAccessibilityPriorityLevel.high.rawValue,
+                ]
+            )
+        }
+        engine.resolveTransportInput = { message, history, attachments, skills in
+            ChatTransportInput(
+                message: message,
+                history: history,
+                attachments: attachments,
+                skills: skills,
+                // Recomputed per turn so Settings/branch changes are picked up
+                // live — same as the inline `await buildAgentContext()` the
+                // old `codeAssistRoundTrip` did on every call.
+                agentContext: await buildAgentContext(),
+                language: prefLanguage,
+                model: modelState.selectedModel.isEmpty ? nil : modelState.selectedModel,
+                provider: ChatTransportInput.makeProvider(
+                    selectedProvider: modelState.selectedProvider),
+                mode: modelState.selectedMode.rawValue)
+        }
+        // Fresh budget of auto-run git ops for this user turn (commit→push→…).
+        // Panel-owned because `autoChainPendingAction` — which spends it — is.
+        engine.onTurnStart = { autoGitOpsThisTurn = 0 }
+        engine.onRecordPrompt = { _ = session.record(prompt: $0) }
+        engine.onNudge = { prompt in
+            if session.shouldNudge(for: prompt) { engine.agent.nudgePrompt = prompt }
+        }
+        engine.attachmentsForTurn = { attachmentState.attachments }
+        engine.packHistory = { engine.historyForRequest($0) }
+        engine.autoChain = { pendingTool, usage in
+            await autoChainPendingAction(pendingTool, usage: usage)
+        }
+        engine.onHistoryReplaced = { rebuildSentPrompts(from: $0) }
+        engine.onResetActiveTurnExtra = { expandedTurns.removeAll() }
+        engine.onResetTransientStateExtra = {
+            sentPrompts = []; historyIndex = nil; draftStash = ""
+            draft = ""
+            attachmentState.attachments.removeAll()
+            attachmentState.selectedSkills.removeAll()
+            autoAttachedPath = nil
+            attachNotice = nil
+        }
+        engine.forgetSessionMemory = { id in
+            _ = try? await api.forgetSessionMemory(sessionId: id)
+        }
+    }
+
     func handleOnAppear() {
+        wireEngine()
         modelState.customProviders = CustomProvider.loadAll()
         if modelState.selectedModel.isEmpty {
             modelState.selectedModel = config.defaultModelId.isEmpty
@@ -416,27 +443,7 @@ struct CodeAssistantPanel: View {
         if modelState.selectedProvider.isEmpty {
             modelState.selectedProvider = config.activeCLI.isEmpty ? "anthropic" : config.activeCLI
         }
-        _ = ChatSessionStore.migrateScopeFileIfNeeded(for: scope)
-        refreshSessions()
-        let pointerKey = "chat.current.\(scope.rawValue)"
-        if currentSessionIDString.isEmpty {
-            currentSessionIDString = UserDefaults.standard.string(forKey: pointerKey) ?? ""
-        }
-        suppressHistoryAnnounce = true
-        if let cur = UUID(uuidString: currentSessionIDString),
-           let session = ChatSessionStore.load(id: cur),
-           session.scope == scope {
-            history = session.history
-            rebuildSentPrompts(from: session.history)
-        } else if let newest = sessions.first {
-            currentSessionIDString = newest.id.uuidString
-            history = newest.history
-            rebuildSentPrompts(from: newest.history)
-            UserDefaults.standard.set(currentSessionIDString, forKey: pointerKey)
-        } else {
-            mintFreshSession()
-        }
-        DispatchQueue.main.async { suppressHistoryAnnounce = false }
+        engine.handleOnAppearSessions()
         if let url = initialURL, !didAttachInitial {
             didAttachInitial = true
             if addFile(url: url) == .added {
@@ -463,30 +470,10 @@ struct CodeAssistantPanel: View {
         }
     }
 
-    func handleHistoryChange(oldValue: [LlmIdeAPIClient.CodeAssistTurn], newValue: [LlmIdeAPIClient.CodeAssistTurn]) {
-        persistCurrentChat(history: Array(newValue.suffix(50)))
-        guard !suppressHistoryAnnounce else { return }
-        if newValue.count > oldValue.count,
-           let last = newValue.last,
-           last.role == .assistant {
-            let text = String(last.content.prefix(200))
-            if !text.isEmpty {
-                NSAccessibility.post(
-                    element: NSApp as Any,
-                    notification: .announcementRequested,
-                    userInfo: [
-                        .announcement: text,
-                        .priority: NSAccessibilityPriorityLevel.high.rawValue,
-                    ]
-                )
-            }
-        }
-    }
-
     func handleActiveRepoChange() {
         session.reset()
-        agent.nudgePrompt = nil
-        agent.qaSaveError = nil
+        engine.agent.nudgePrompt = nil
+        engine.agent.qaSaveError = nil
         autoAttachedPath = nil
         attachNotice = nil
     }

@@ -2,12 +2,19 @@ import SwiftUI
 
 /// Chat transcript — scrollable history of turns, the typing indicator, the
 /// pending-action confirmation card for the latest assistant turn, and the
-/// error bubble. Extracted from `CodeAssistantPanel` as a child view; all
-/// mutable state it touches is threaded in via bindings/closures so this
-/// stays a pure rendering of `history` + the handful of transient flags
-/// that affect it.
+/// error bubble. Extracted from `CodeAssistantPanel` as a child view: the
+/// chat itself arrives as the `ChatEngine` that owns it, and everything the
+/// PANEL still owns (draft, expanded turns, sheet flags, the pending-action
+/// callbacks) is threaded in via bindings/closures — so this stays a pure
+/// rendering of `engine.history` plus the handful of transient flags that
+/// affect it.
 struct ChatMessageList: View {
-    let history: [LlmIdeAPIClient.CodeAssistTurn]
+    /// The chat itself: `history`, the busy/status line, the live-streaming
+    /// cursor (`revealingTurnID`/`revealedCount`), per-turn modes and tool
+    /// steps, the measured bubble heights this view writes back, and the
+    /// error banner it can dismiss. A reference type (`@Observable`), so
+    /// reading its properties in `body` tracks them without any Binding.
+    let engine: ChatEngine
     let showModelPicker: Bool
     let pendingTool: PendingTool?
     /// Current multi-step task list — `CodeAssistantAgentState.agentPendingTasks`,
@@ -16,22 +23,8 @@ struct ChatMessageList: View {
     /// Precomputed diff stats for the current `update-file` pendingTool, if
     /// any — see CodeAssistantPanel.pendingUpdateFileDiff.
     let diffPreview: DiffStats?
-    /// See CodeAssistantPanel.turnModes / finishStreamingTurn.
-    let turnModes: [UUID: CodeAssistMode]
-    /// Tool steps the agent took, per assistant turn — rendered as compact rows
-    /// above the reply. See CodeAssistantPanel.turnActivity.
-    let turnActivity: [UUID: [CodeAssistantPanel.ToolStep]]
-    let busy: Bool
-    let statusText: String
-    @Binding var error: String?
     @Binding var draft: String
     @Binding var expandedTurns: Set<UUID>
-    /// Live-streaming state — the turn currently receiving chunks, and how
-    /// much of its content to show. See CodeAssistantPanel+Session's
-    /// beginStreamingTurn/appendStreamedChunk/finishStreamingTurn.
-    @Binding var revealingTurnID: UUID?
-    @Binding var revealedCount: Int
-    @Binding var bubbleHeights: [UUID: CGFloat]
     /// Resolved project root — governs whether "Report this" is shown.
     let activeRepoRoot: URL?
 
@@ -60,6 +53,7 @@ struct ChatMessageList: View {
 
     @ViewBuilder
     var body: some View {
+        let history = engine.history
         if history.isEmpty && !showModelPicker {
             emptyState
         } else if history.isEmpty {
@@ -80,7 +74,7 @@ struct ChatMessageList: View {
                                     .padding(.bottom, 4)
                                     .transition(.opacity)
                             }
-                            if turn.role == .assistant, let steps = turnActivity[turn.id], !steps.isEmpty {
+                            if turn.role == .assistant, let steps = engine.turnActivity[turn.id], !steps.isEmpty {
                                 toolActivityView(steps)
                             }
                             turnView(turn, lastAssistantTurnId: lastAssistantTurnId)
@@ -139,10 +133,10 @@ struct ChatMessageList: View {
                                 .transition(.opacity)
                             }
                         }
-                        if busy {
+                        if engine.busy {
                             HStack(spacing: 6) {
                                 ProgressView().controlSize(.small)
-                                Text(statusText.isEmpty ? "Thinking…" : statusText)
+                                Text(engine.statusText.isEmpty ? "Thinking…" : engine.statusText)
                                     .font(Typography.caption)
                                     .foregroundStyle(theme.current.textMuted)
                             }
@@ -150,7 +144,7 @@ struct ChatMessageList: View {
                             .id("typing-indicator")
                             .transition(.opacity)
                         }
-                        if let err = error {
+                        if let err = engine.error {
                             errorBubble(err)
                                 .transition(.opacity)
                         }
@@ -158,13 +152,13 @@ struct ChatMessageList: View {
                     .padding(Spacing.md)
                     .animation(.easeOut(duration: 0.22), value: history.count)
                     .animation(.easeOut(duration: 0.2), value: pendingTool?.name)
-                    .animation(.easeOut(duration: 0.18), value: busy)
-                    .animation(.easeOut(duration: 0.2), value: error)
+                    .animation(.easeOut(duration: 0.18), value: engine.busy)
+                    .animation(.easeOut(duration: 0.2), value: engine.error)
                 }
-                .onChange(of: history.count) { _, _ in
-                    if let last = history.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                .onChange(of: engine.history.count) { _, _ in
+                    if let last = engine.history.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
                 }
-                .onChange(of: busy) { _, b in
+                .onChange(of: engine.busy) { _, b in
                     if b { withAnimation { proxy.scrollTo("typing-indicator", anchor: .bottom) } }
                 }
             }
@@ -237,13 +231,13 @@ struct ChatMessageList: View {
 
     /// The text to actually render for an assistant turn: truncated to
     /// `revealedCount` while this turn is the one actively streaming (see
-    /// CodeAssistantPanel+Session's appendStreamedChunk), full content
+    /// `ChatEngine.appendStreamedChunk`), full content
     /// otherwise — including once streaming finishes, and always for
     /// history loaded from a saved session (which never sets
     /// `revealingTurnID` in the first place).
     private func displayedContent(for turn: LlmIdeAPIClient.CodeAssistTurn) -> String {
-        guard turn.id == revealingTurnID else { return turn.content }
-        return String(turn.content.prefix(revealedCount))
+        guard turn.id == engine.revealingTurnID else { return turn.content }
+        return String(turn.content.prefix(engine.revealedCount))
     }
 
     /// A short plain-text preview of a markdown reply for the collapsed state —
@@ -349,7 +343,7 @@ struct ChatMessageList: View {
                     Text(isUser ? "You" : "Claude")
                         .font(Typography.caption)
                         .foregroundStyle(theme.current.textMuted)
-                    if !isUser, let mode = turnModes[turn.id] {
+                    if !isUser, let mode = engine.turnModes[turn.id] {
                         ModeBadge(mode: mode)
                     }
                     if isUser {
@@ -370,10 +364,10 @@ struct ChatMessageList: View {
                                 markdown: displayedContent(for: turn),
                                 isDark: theme.current.isDark
                             ) { h in
-                                if bubbleHeights[turn.id] != h { bubbleHeights[turn.id] = h }
+                                if engine.bubbleHeights[turn.id] != h { engine.bubbleHeights[turn.id] = h }
                             }
                             .frame(maxWidth: 720, alignment: .leading)
-                            .frame(height: max(bubbleHeights[turn.id] ?? 24, 24))
+                            .frame(height: max(engine.bubbleHeights[turn.id] ?? 24, 24))
                             // Older expanded replies can be collapsed again; the
                             // latest stays open and shows no collapse control.
                             if turn.id != lastAssistantTurnId {
@@ -440,6 +434,7 @@ struct ChatMessageList: View {
     /// most recent user message. Falls back to nil when the assistant
     /// answered without a preceding user turn (rare; agent self-prompts).
     private func prevUserPrompt(before turn: LlmIdeAPIClient.CodeAssistTurn) -> String? {
+        let history = engine.history
         guard let idx = history.firstIndex(where: { $0.id == turn.id }) else { return nil }
         for i in stride(from: idx - 1, through: 0, by: -1) {
             let candidate = history[i]
@@ -462,7 +457,7 @@ struct ChatMessageList: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()
             Button {
-                error = nil
+                engine.error = nil
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(theme.current.textMuted)

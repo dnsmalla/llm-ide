@@ -29,7 +29,7 @@ extension CodeAssistantPanel {
 
     var showingIssueSheetContent: some View {
         Group {
-            if let pt = agent.pendingTool,
+            if let pt = engine.agent.pendingTool,
                let args = pt.createIssueArgs,
                let target = resolveIssueTarget() {
                 CreateIssueSheet(
@@ -52,12 +52,12 @@ extension CodeAssistantPanel {
 
     var showingReviewCodeSheetContent: some View {
         Group {
-            if let pt = agent.pendingTool,
+            if let pt = engine.agent.pendingTool,
                let args = pt.triggerReviewCodeArgs {
                 TriggerReviewCodeSheet(
                     plan: args.plan,
                     iid: args.iid,
-                    issueTitle: agent.recentIssues.first(where: { $0.iid == args.iid })?.title,
+                    issueTitle: engine.agent.recentIssues.first(where: { $0.iid == args.iid })?.title,
                     api: api
                 )
                 .environmentObject(config)
@@ -71,7 +71,7 @@ extension CodeAssistantPanel {
 
     var showingUpdateFileSheetContent: some View {
         Group {
-            if let pt = agent.pendingTool,
+            if let pt = engine.agent.pendingTool,
                let args = pt.updateFileArgs,
                let edit = pendingEdit {
                 UpdateFileSheet(
@@ -91,7 +91,7 @@ extension CodeAssistantPanel {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    if let pt = agent.pendingTool, let args = pt.updateFileArgs {
+                    if let pt = engine.agent.pendingTool, let args = pt.updateFileArgs {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Agent's path").font(.caption).foregroundStyle(.secondary)
                             Text(args.path)
@@ -131,7 +131,7 @@ extension CodeAssistantPanel {
 
     var showingCommentSheetContent: some View {
         Group {
-            if let pt = agent.pendingTool,
+            if let pt = engine.agent.pendingTool,
                let args = pt.commentIssueArgs,
                let target = resolveIssueTarget() {
                 CommentIssueSheet(
@@ -139,7 +139,7 @@ extension CodeAssistantPanel {
                     projectName: target.label,
                     projectURL: target.projectURL,
                     provider: target.kind.displayName,
-                    issueTitle: agent.recentIssues.first(where: { $0.iid == args.iid })?.title,
+                    issueTitle: engine.agent.recentIssues.first(where: { $0.iid == args.iid })?.title,
                     isAllowed: config.isAllowed(.commentIssue, provider: target.kind),
                     onConfirm: { editedArgs in
                         await confirmCommentIssue(editedArgs, target: target)
@@ -155,14 +155,14 @@ extension CodeAssistantPanel {
 
     var showingGetIssueSheetContent: some View {
         Group {
-            if let pt = agent.pendingTool, let args = pt.getIssueArgs, let target = resolveIssueTarget() {
+            if let pt = engine.agent.pendingTool, let args = pt.getIssueArgs, let target = resolveIssueTarget() {
                 GetIssueSheet(
                     iid: args.iid,
                     projectId: target.projectId,
                     providerKind: target.kind,
                     onConfirm: {
                         sheets.showingGetIssueSheet = false
-                        agent.pendingTool = nil
+                        engine.agent.pendingTool = nil
                     }
                 )
             } else {
@@ -175,7 +175,7 @@ extension CodeAssistantPanel {
 
     var showingUpdateIssueSheetContent: some View {
         Group {
-            if let pt = agent.pendingTool, let args = pt.updateIssueArgs, let target = resolveIssueTarget() {
+            if let pt = engine.agent.pendingTool, let args = pt.updateIssueArgs, let target = resolveIssueTarget() {
                 UpdateIssueSheet(
                     initialArgs: UpdateIssueSheet.Args(
                         iid: args.iid,
@@ -184,7 +184,7 @@ extension CodeAssistantPanel {
                         state: args.state,
                         labels: args.labels
                     ),
-                    issueTitle: agent.recentIssues.first(where: { $0.iid == args.iid })?.title,
+                    issueTitle: engine.agent.recentIssues.first(where: { $0.iid == args.iid })?.title,
                     projectId: target.projectId,
                     providerKind: target.kind,
                     isAllowed: config.isAllowed(.editIssue, provider: target.kind),
@@ -202,7 +202,7 @@ extension CodeAssistantPanel {
 
     var showingListIssuesSheetContent: some View {
         Group {
-            if let pt = agent.pendingTool, let args = pt.listIssuesArgs, let target = resolveIssueTarget() {
+            if let pt = engine.agent.pendingTool, let args = pt.listIssuesArgs, let target = resolveIssueTarget() {
                 ListIssuesSheet(
                     initialArgs: ListIssuesSheetArgs(
                         search: args.search,
@@ -213,7 +213,7 @@ extension CodeAssistantPanel {
                     providerKind: target.kind,
                     onConfirm: {
                         sheets.showingListIssuesSheet = false
-                        agent.pendingTool = nil
+                        engine.agent.pendingTool = nil
                     }
                 )
             } else {
@@ -226,7 +226,7 @@ extension CodeAssistantPanel {
 
     var showingCreateBranchSheetContent: some View {
         Group {
-            if let pt = agent.pendingTool, let args = pt.createBranchArgs {
+            if let pt = engine.agent.pendingTool, let args = pt.createBranchArgs {
                 BranchCreationSheet(
                     initialArgs: BranchCreationSheet.CreateBranchArgs(
                         branch: args.branch,
@@ -290,7 +290,7 @@ extension CodeAssistantPanel {
 
     var showingGitOpSheetContent: some View {
         Group {
-            if let pt = agent.pendingTool, let g = pt.gitOpArgs {
+            if let pt = engine.agent.pendingTool, let g = pt.gitOpArgs {
                 GitOpSheet(
                     args: g,
                     onConfirm: {
@@ -299,7 +299,7 @@ extension CodeAssistantPanel {
                     },
                     onCancel: {
                         sheets.showingGitOpSheet = false
-                        agent.pendingTool = nil
+                        engine.agent.pendingTool = nil
                     }
                 )
                 .environmentObject(theme)
@@ -390,7 +390,7 @@ extension CodeAssistantPanel {
 
     var showingCreatePRSheetContent: some View {
         Group {
-            if let pt = agent.pendingTool, let args = pt.createPRArgs, let target = resolveIssueTarget() {
+            if let pt = engine.agent.pendingTool, let args = pt.createPRArgs, let target = resolveIssueTarget() {
                 // Build description with file changes for File → PR automation
                 let enhancedDescription: String = {
                     let base = args.description.isEmpty ? "" : args.description + "\n\n"

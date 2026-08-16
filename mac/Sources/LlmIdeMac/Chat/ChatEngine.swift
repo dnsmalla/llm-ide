@@ -39,7 +39,12 @@ final class ChatEngine {
     /// "Writing the answer…", etc. Shown in place of a static "Thinking…" so a
     /// 60–90s agent turn doesn't look hung. Reset at the start of each turn.
     private(set) var statusText = ""
-    private(set) var error: String?
+    /// Error banner text for the transcript. Publicly settable, unlike the
+    /// rest of the turn state: the panel raises its own failures here
+    /// (`applyPendingEdit`, `autoChainPendingAction`, `/model`) and the
+    /// transcript's error bubble clears it on dismiss — exactly as they did
+    /// when this was the panel's own `@State var error`.
+    var error: String?
     /// Messages the user submitted while a turn was running, in FIFO order; they
     /// auto-send one per turn as the current run finishes (or is stopped).
     private(set) var queued: [QueuedMessage] = []
@@ -149,11 +154,12 @@ final class ChatEngine {
     /// passed `[]`.
     var attachmentsForTurn: () -> [LlmIdeAPIClient.CodeAttachment] = { [] }
 
-    /// Packs `history` for the wire — the panel's `historyForRequest`, which
-    /// stays panel-side in this task (its contract is pinned by
-    /// `HistoryForRequestTests` against the panel). Defaults to identity;
-    /// **Task 7 must wire this to `historyForRequest` when it rewires the call
-    /// sites**, otherwise the 400k-char request budget silently disappears.
+    /// Packs `history` for the wire. The panel wires this to the engine's own
+    /// `historyForRequest` (moved here in Task 7 together with
+    /// `HistoryForRequestTests`); the identity default only exists so a test
+    /// that doesn't care about budgeting can construct the engine with a
+    /// transport alone. Leaving it unwired in production would silently drop
+    /// the 400k-char request budget.
     var packHistory: ([LlmIdeAPIClient.CodeAssistTurn]) -> [LlmIdeAPIClient.CodeAssistTurn] = { $0 }
 
     /// Auto-chain the next pending action (file edit / git op / shell command)
@@ -301,6 +307,14 @@ final class ChatEngine {
             }
         }
         // Drain the next queued message (FIFO) as a fresh, un-cancelled turn.
+        drainQueueOrRelease()
+    }
+
+    /// Every turn's shared tail: hand the slot to the next queued message
+    /// (FIFO, as a fresh un-cancelled task) or release `busy`/`runTask`.
+    /// Also called by the panel at the end of a run it drives itself through
+    /// this same slot — see `beginPanelRun`.
+    func drainQueueOrRelease() {
         if !queued.isEmpty {
             let next = queued.removeFirst()
             startTurn(next.text, skillIds: next.skillIds)
@@ -308,6 +322,13 @@ final class ChatEngine {
             busy = false
             runTask = nil
         }
+    }
+
+    /// Drop a still-queued message the user cancelled from the composer.
+    /// Keyed by id, not index — the queue may have shifted (FIFO drain)
+    /// between the row rendering and the tap.
+    func cancelQueued(id: UUID) {
+        queued.removeAll { $0.id == id }
     }
 
     /// `sendFollowup` guards on `!busy` so a rapid double-confirm or manual
@@ -777,5 +798,152 @@ final class ChatEngine {
             return
         }
         await deleteSession(id)
+    }
+
+    /// Reload the active chat from disk and reseed anything derived from it.
+    /// Driven by `.explorerChatTranscriptChanged`: an iPhone `explore_chat`
+    /// persisted a turn into this session's file, so the in-memory copy is
+    /// stale — and would otherwise be written back over the phone's turn by
+    /// the next `persistCurrentChat`. The scope guard mirrors
+    /// `switchSession`'s: a notification naming a chat from another section
+    /// must not load into this engine.
+    func reloadFromDisk(id: UUID) {
+        guard let session = ChatSessionStore.load(id: id), session.scope == scope else { return }
+        history = session.history
+        onHistoryReplaced(session.history)
+    }
+
+    // MARK: - History change
+
+    /// Persist the chat and announce a newly-arrived assistant turn — the
+    /// panel's `handleHistoryChange`, driven by `.onChange(of: engine.history)`.
+    ///
+    /// Only a GROWING history announces, and only when the new last turn is
+    /// the assistant's: an in-place edit (streamed chunks land as content
+    /// mutations on an existing turn) must not re-read the whole reply on
+    /// every chunk. `suppressHistoryAnnounce` covers the two cases where the
+    /// array does grow but nothing should be read aloud — a bulk session load
+    /// and the empty streaming placeholder (`finishStreamingTurn` announces
+    /// that one itself, once, with the complete text).
+    ///
+    /// The announcement goes through `sendAnnouncement` rather than
+    /// `NSAccessibility.post` directly, so the engine stays AppKit-free and
+    /// silent under test — same as `finishStreamingTurn`.
+    func announceAndPersist(oldValue: [LlmIdeAPIClient.CodeAssistTurn],
+                            newValue: [LlmIdeAPIClient.CodeAssistTurn]) {
+        persistCurrentChat()
+        guard !suppressHistoryAnnounce else { return }
+        if newValue.count > oldValue.count,
+           let last = newValue.last,
+           last.role == .assistant {
+            let text = String(last.content.prefix(200))
+            if !text.isEmpty {
+                sendAnnouncement(text)
+            }
+        }
+    }
+
+    // MARK: - History packing for the wire
+
+    /// Total characters of chat history sent per request. The server applies
+    /// its own (smaller, prompt-aware) budget — see `config.history` and
+    /// `selectHistoryTurns` in `llm_agent/runtime/loop.mjs` — so this only has
+    /// to keep the POST body clear of the server's 8 MB request-body limit.
+    static let maxHistoryChars = 400_000
+    /// Per-turn clip. One runaway turn (a big command output, a whole file)
+    /// must not be able to consume the entire budget by itself.
+    static let maxHistoryTurnChars = 24_000
+
+    /// The history to replay on the wire: as much as fits `maxHistoryChars`,
+    /// newest-first, ALWAYS including the first user turn.
+    ///
+    /// Replaces a flat `history.suffix(8)`. Eight turns sounds generous until
+    /// you count tool calls: every client-executed tool (bash / update-file /
+    /// git-op) appends a synthetic result turn plus the agent's reply, so a
+    /// four-step task pushed the user's original request out of the window and
+    /// the agent carried on with no idea what it had been asked to do.
+    ///
+    /// Takes its input as a parameter rather than reading `self.history`: both
+    /// round-trip sites pack the history they are about to send, and the
+    /// contract is pinned turn-by-turn by `HistoryForRequestTests`.
+    func historyForRequest(_ turns: [LlmIdeAPIClient.CodeAssistTurn])
+        -> [LlmIdeAPIClient.CodeAssistTurn]
+    {
+        let clipped = turns.map { turn -> LlmIdeAPIClient.CodeAssistTurn in
+            guard turn.content.count > Self.maxHistoryTurnChars else { return turn }
+            return .init(role: turn.role,
+                         content: String(turn.content.prefix(Self.maxHistoryTurnChars))
+                             + "\n…(turn clipped)")
+        }
+        let total = clipped.reduce(0) { $0 + $1.content.count }
+        if total <= Self.maxHistoryChars { return clipped }
+
+        // Reserve the anchor (first user turn) before packing the tail.
+        let anchorIdx = clipped.firstIndex { $0.role == .user }
+        var budget = Self.maxHistoryChars
+        var anchor: LlmIdeAPIClient.CodeAssistTurn?
+        if let idx = anchorIdx, clipped[idx].content.count <= budget {
+            anchor = clipped[idx]
+            budget -= clipped[idx].content.count
+        }
+        var tail: [LlmIdeAPIClient.CodeAssistTurn] = []
+        let stopAt = anchor == nil ? -1 : (anchorIdx ?? -1)
+        var i = clipped.count - 1
+        while i > stopAt {
+            let cost = clipped[i].content.count
+            if cost > budget { break }
+            budget -= cost
+            tail.append(clipped[i])
+            i -= 1
+        }
+        return (anchor.map { [$0] } ?? []) + tail.reversed()
+    }
+
+    // MARK: - Panel-driven writes
+    //
+    // `history` is `private(set)` because the engine owns the turn lifecycle.
+    // These are the narrow openings the panel still needs, each matching one
+    // thing it did directly when it owned the array.
+
+    /// Append a synthetic turn the PANEL produced: the "(executed create-issue
+    /// → …)" / "(bash result …)" / "(applied update to …)" acknowledgements
+    /// every client-executed tool writes so the agent sees its own result as
+    /// conversation context (see `ChatMessageList.isToolNotice`), and the
+    /// placeholder a chat-triggered Loop run streams its log into.
+    func appendTurn(_ turn: LlmIdeAPIClient.CodeAssistTurn) {
+        history.append(turn)
+    }
+
+    /// Replace the content of an existing turn, addressed by id. No-op when
+    /// the id is gone (the session was switched out from under a long-running
+    /// producer) — deliberately, so a stale writer can't resurrect a turn into
+    /// a chat it doesn't belong to.
+    func setTurnContent(id: UUID, _ content: String) {
+        guard let idx = history.firstIndex(where: { $0.id == id }) else { return }
+        history[idx].content = content
+    }
+
+    /// Claim the turn slot for a run the PANEL executes itself (today: the
+    /// Loop Engineering run started from the chat header, which streams its
+    /// log into one assistant turn rather than going through `transport`).
+    /// Applies the same start-of-turn resets `runTurn` does, for the same
+    /// reasons: a stale action card left interactive under the new "latest
+    /// assistant turn" can run its own completion handler and clear `busy`
+    /// out from under the run, and a leftover status/error line would render
+    /// as if it belonged to it.
+    ///
+    /// Idempotent, and paired with `drainQueueOrRelease()` at the end of the
+    /// run so a message queued during it is still drained.
+    func beginPanelRun() {
+        busy = true
+        agent.pendingTool = nil
+        statusText = ""
+        error = nil
+    }
+
+    /// Hand the engine the handle for a panel-driven run, so the composer's
+    /// existing Stop button (`stop()`) cancels it like any other turn.
+    func setRunTask(_ task: Task<Void, Never>?) {
+        runTask = task
     }
 }

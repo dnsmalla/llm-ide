@@ -19,15 +19,15 @@ extension CodeAssistantPanel {
         // Drop the card as soon as we commit to running: it's no longer
         // actionable, and leaving it up invites a second tap that would run the
         // same command again.
-        agent.pendingTool = nil
+        engine.agent.pendingTool = nil
 
         // Validate the command first
         guard bashService.validateCommand(args.command) else {
-            history.append(.init(
+            engine.appendTurn(.init(
                 role: .user,
                 content: "(bash blocked - command contains potentially dangerous operations)"
             ))
-            await unblockAndFollowUp()
+            await engine.unblockAndFollowUp()
             return
         }
 
@@ -50,7 +50,7 @@ extension CodeAssistantPanel {
         let displayCommand = args.command.replacingOccurrences(of: "\n", with: " ⏎ ")
         let output = "\(header)\n$ \(displayCommand)\n\(body)"
 
-        history.append(.init(role: .user, content: output))
-        await unblockAndFollowUp()
+        engine.appendTurn(.init(role: .user, content: output))
+        await engine.unblockAndFollowUp()
     }
 }

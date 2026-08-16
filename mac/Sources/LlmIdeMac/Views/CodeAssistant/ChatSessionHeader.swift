@@ -11,10 +11,10 @@ extension CodeAssistantPanel {
                     .lineLimit(1)
             }
             // Session counter only when we have horizontal room to spare.
-            if !isCompact, !history.isEmpty || !attachmentState.attachments.isEmpty {
+            if !isCompact, !engine.history.isEmpty || !attachmentState.attachments.isEmpty {
                 Text("·")
                     .foregroundStyle(theme.current.textMuted.opacity(0.5))
-                Text("\(history.count) turn\(history.count == 1 ? "" : "s")  \(attachmentState.attachments.count) file\(attachmentState.attachments.count == 1 ? "" : "s")")
+                Text("\(engine.history.count) turn\(engine.history.count == 1 ? "" : "s")  \(attachmentState.attachments.count) file\(attachmentState.attachments.count == 1 ? "" : "s")")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(theme.current.textMuted)
                     .lineLimit(1)
@@ -34,7 +34,7 @@ extension CodeAssistantPanel {
         Button {
             // Refresh the list every time the popover opens so the
             // ordering reflects the latest `lastUsedAt`.
-            refreshSessions()
+            engine.refreshSessions()
             sessionSearchQuery = ""
             showingSessionPicker.toggle()
         } label: {
@@ -65,8 +65,8 @@ extension CodeAssistantPanel {
     }
 
     var currentSessionTitle: String {
-        guard let cur = UUID(uuidString: currentSessionIDString),
-              let s = sessions.first(where: { $0.id == cur }) else {
+        guard let cur = UUID(uuidString: engine.currentSessionIDString),
+              let s = engine.sessions.first(where: { $0.id == cur }) else {
             return "New chat"
         }
         return s.title.isEmpty ? "New chat" : s.title
@@ -77,8 +77,8 @@ extension CodeAssistantPanel {
     /// not just that recent window) whose title matches.
     var filteredSessions: [ChatSession] {
         let q = sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return Array(sessions.prefix(20)) }
-        return sessions.filter { ($0.title.isEmpty ? "New chat" : $0.title).lowercased().contains(q) }
+        guard !q.isEmpty else { return Array(engine.sessions.prefix(20)) }
+        return engine.sessions.filter { ($0.title.isEmpty ? "New chat" : $0.title).lowercased().contains(q) }
     }
 
     var sessionPickerPopover: some View {
@@ -98,7 +98,7 @@ extension CodeAssistantPanel {
 
             Button {
                 showingSessionPicker = false
-                createNewSession()
+                engine.createNewSession()
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "plus")
@@ -118,7 +118,7 @@ extension CodeAssistantPanel {
 
             let shown = filteredSessions
             if shown.isEmpty {
-                Text(sessions.isEmpty ? "No saved chats yet." : "No chats match “\(sessionSearchQuery)”.")
+                Text(engine.sessions.isEmpty ? "No saved chats yet." : "No chats match “\(sessionSearchQuery)”.")
                     .font(.system(size: 11))
                     .foregroundStyle(theme.current.textMuted)
                     .padding(.horizontal, 12)
@@ -129,16 +129,16 @@ extension CodeAssistantPanel {
                         ForEach(shown) { session in
                             SessionRow(
                                 session: session,
-                                isActive: session.id.uuidString == currentSessionIDString,
+                                isActive: session.id.uuidString == engine.currentSessionIDString,
                                 onSelect: {
                                     showingSessionPicker = false
-                                    switchSession(to: session.id)
+                                    engine.switchSession(to: session.id)
                                 },
                                 onDelete: {
-                                    deleteSession(session.id)
+                                    Task { await engine.deleteSession(session.id) }
                                 },
                                 onRename: { newTitle in
-                                    renameSession(session.id, to: newTitle)
+                                    engine.renameSession(session.id, to: newTitle)
                                 }
                             )
                             .environmentObject(theme)
@@ -155,7 +155,7 @@ extension CodeAssistantPanel {
     /// it was the last remaining session for this scope).
     var clearChatButton: some View {
         Button {
-            clearCurrentChat()
+            Task { await engine.clearCurrentChat() }
         } label: {
             Image(systemName: "trash")
                 .font(.system(size: 11, weight: .medium))
@@ -167,7 +167,7 @@ extension CodeAssistantPanel {
         .buttonStyle(.plain)
         .help("Delete current chat")
         .accessibilityLabel("Delete current chat")
-        .disabled(history.isEmpty && sessions.count <= 1)
+        .disabled(engine.history.isEmpty && engine.sessions.count <= 1)
     }
 
 
