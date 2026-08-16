@@ -13,7 +13,9 @@ import Foundation
 struct ChatEngineTurnTests {
     func makeEngine() -> (ChatEngine, ScriptedChatTransport) {
         let t = ScriptedChatTransport()
-        let engine = ChatEngine(transport: t)
+        // Scope is irrelevant to the turn lifecycle — these tests never touch
+        // session files; ChatEngineSessionTests covers the scoped paths.
+        let engine = ChatEngine(scope: .explorer, transport: t)
         engine.resolveTransportInput = { msg, history, _, skills in
             ChatTransportInput(message: msg, history: history, attachments: [],
                                skills: skills, agentContext: nil, language: "en",
