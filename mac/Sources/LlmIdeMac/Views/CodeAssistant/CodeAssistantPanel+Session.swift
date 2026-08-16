@@ -509,33 +509,43 @@ extension CodeAssistantPanel {
         _ pendingTool: PendingTool?,
         usage: LlmIdeAPIClient.CodeAssistResponse.Usage?
     ) async {
-        // Fast path: in Auto mode, apply a proposed file edit immediately
-        // instead of surfacing the card + popup. Scoped to `update-file`
-        // (confirmUpdateFile resolves and guards the target, and leaves the
-        // card up if it can't); GitLab actions keep their confirmation.
-        if editMode == .auto, autoGitOpsThisTurn < Self.maxAutoGitOpsPerTurn,
-           let pt = pendingTool, let args = pt.updateFileArgs {
-            // Data-loss guard: if the server CUT this file to fit the prompt,
-            // the agent only saw its head — auto-overwriting with the "full"
-            // rewrite would silently drop the tail. Fall back to the manual
-            // confirmation card (its diff makes the loss visible) instead of
-            // applying. matchingAttachment uses the same exact-path rule
-            // confirmUpdateFile enforces in auto mode.
-            //
-            // ONLY whole-file (`content`) proposals are at risk: an anchored
-            // old_text/new_text edit rewrites just the matched region, so a
-            // truncated view of the file can't cost the tail — and refusing
-            // those would block auto-edit for exactly the files it is most
-            // useful on (the large ones the agent read in slices).
-            let truncated = Set(usage?.truncatedPaths ?? [])
-            let isWholeFileRewrite = args.content != nil
-            if isWholeFileRewrite,
-               let match = matchingAttachment(for: args.path, allowBasenameFallback: false),
-               truncated.contains(match.path) {
-                let basename = (match.path as NSString).lastPathComponent
-                self.error = "“\(basename)” was too large to send in full, so auto-edit is disabled for it — review the proposed change before applying."
-                // Leave pendingTool in place (already stored via finishStreamingTurn) so the card shows.
-            } else {
+        // Data-loss guard input: if the server CUT this file to fit the
+        // prompt, the agent only saw its head — auto-overwriting with the
+        // "full" rewrite would silently drop the tail. matchingAttachment
+        // uses the same exact-path rule confirmUpdateFile enforces in auto
+        // mode. ONLY whole-file (`content`) proposals are at risk: an
+        // anchored old_text/new_text edit rewrites just the matched region,
+        // so a truncated view of the file can't cost the tail — and
+        // refusing those would block auto-edit for exactly the files it is
+        // most useful on (the large ones the agent read in slices).
+        let updateArgs = pendingTool?.updateFileArgs
+        let matchPath = updateArgs.flatMap {
+            matchingAttachment(for: $0.path, allowBasenameFallback: false)?.path
+        }
+
+        // `autoGitOpsThisTurn`/`maxAutoGitOpsPerTurn` are shared as a general
+        // "auto-chained actions this turn" budget across update-file, git-op,
+        // and bash auto-chaining — without a shared cap, a large batch of
+        // attached files (e.g. 30+ dragged in for a bulk edit) could
+        // auto-chain through all of them with no ceiling.
+        let decisions = ChatAutoChainPolicy.decide(
+            pendingTool: pendingTool,
+            editMode: editMode,
+            autoOpsUsed: autoGitOpsThisTurn,
+            maxAutoOpsPerTurn: Self.maxAutoGitOpsPerTurn,
+            truncatedPaths: Set(usage?.truncatedPaths ?? []),
+            isWholeFileRewrite: updateArgs?.content != nil,
+            matchPath: matchPath,
+            shouldAutoRunGitOp: shouldAutoRunGitOp
+        )
+
+        for decision in decisions {
+            switch decision {
+            case .autoApplyEdit:
+                // Scoped to `update-file` (confirmUpdateFile resolves and
+                // guards the target, and leaves the card up if it can't);
+                // GitLab actions keep their confirmation.
+                guard let args = updateArgs else { continue }
                 switch resolveEdit(args) {
                 case .success(let edit):
                     autoGitOpsThisTurn += 1
@@ -546,30 +556,32 @@ extension CodeAssistantPanel {
                     // rather than silently dropping the agent's edit.
                     self.error = err.message
                 }
+            case .requireManualReview:
+                guard let args = updateArgs,
+                      let match = matchingAttachment(for: args.path, allowBasenameFallback: false)
+                else { continue }
+                let basename = (match.path as NSString).lastPathComponent
+                self.error = "“\(basename)” was too large to send in full, so auto-edit is disabled for it — review the proposed change before applying."
+                // Leave pendingTool in place (already stored via finishStreamingTurn) so the card shows.
+            case .autoRunGitOp:
+                // Otherwise it stays as a pending card for the user to confirm.
+                guard let gitOpArgs = pendingTool?.gitOpArgs else { continue }
+                autoGitOpsThisTurn += 1
+                await runGitOpFlow(gitOpArgs)
+            case .autoRunBash:
+                // Auto-run a proposed shell command in Bypass mode. Without this,
+                // EVERY "run the tests / check the version" request stalled on a
+                // card no matter which mode was selected — the agent's prompt
+                // steers it to the client-executed `bash` tool, which ends the
+                // request, so an untapped card meant the turn simply ended with
+                // no answer. runBashCommand still applies
+                // BashService.validateCommand plus its own timeout/output caps.
+                guard let bashArgs = pendingTool?.bashArgs else { continue }
+                autoGitOpsThisTurn += 1
+                await runBashCommand(bashArgs)
+            case .none:
+                break
             }
-        }
-        // Auto-run the proposed git op when allowed (see shouldAutoRunGitOp);
-        // otherwise it stays as a pending card for the user to confirm.
-        // `autoGitOpsThisTurn`/`maxAutoGitOpsPerTurn` are shared as a general
-        // "auto-chained actions this turn" budget across BOTH update-file and
-        // git-op auto-chaining — without a shared cap, a large batch of
-        // attached files (e.g. 30+ dragged in for a bulk edit) could
-        // auto-chain through all of them with no ceiling.
-        if let pt = pendingTool, let g = pt.gitOpArgs, shouldAutoRunGitOp(g) {
-            autoGitOpsThisTurn += 1
-            await runGitOpFlow(g)
-        }
-        // Auto-run a proposed shell command in Bypass mode. Without this, EVERY
-        // "run the tests / check the version" request stalled on a card no
-        // matter which mode was selected — the agent's prompt steers it to the
-        // client-executed `bash` tool, which ends the request, so an untapped
-        // card meant the turn simply ended with no answer. Shares the same
-        // per-turn budget as the two branches above, and runBashCommand still
-        // applies BashService.validateCommand plus its own timeout/output caps.
-        if editMode == .auto, autoGitOpsThisTurn < Self.maxAutoGitOpsPerTurn,
-           let pt = pendingTool, let args = pt.bashArgs {
-            autoGitOpsThisTurn += 1
-            await runBashCommand(args)
         }
     }
 
