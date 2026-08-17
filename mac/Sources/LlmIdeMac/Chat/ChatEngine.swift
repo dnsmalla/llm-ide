@@ -982,6 +982,43 @@ final class ChatEngine {
         return message.id
     }
 
+    /// Append a client-executed tool's result as a typed `.toolResult` message,
+    /// and — when `followUp` is true — re-invoke the agent so it can react to
+    /// it in natural language.
+    ///
+    /// This is what the confirmers in `CodeAssistant+Bash/Git/Issues/PR.swift`
+    /// and `CodeAssistantPanel+Session.swift`/`+Edits.swift` call now (Task
+    /// 10) instead of each building its own synthetic ack STRING and passing
+    /// it through `appendTurn` to be classified back into a payload via
+    /// `ChatMessage.migrate`: they build the typed `ToolResultPayload`
+    /// directly, and `payload.legacyContent()` is what still reconstructs the
+    /// exact string the server has always read on the wire — nothing about
+    /// that contract changes here, only where the classification work used to
+    /// happen (on the way OUT of a string) now happens on the way IN.
+    ///
+    /// Always routes the follow-up through `unblockAndFollowUp()`, never a
+    /// plain `sendFollowup()`: some confirmers run from INSIDE a turn that
+    /// already set `busy = true` (the Bypass-mode auto-chain path through
+    /// `autoChainPendingAction`) and need their ack's follow-up to actually
+    /// fire rather than being silently dropped by `sendFollowup`'s `!busy`
+    /// guard. Forcing `busy = false` first is a harmless no-op when it was
+    /// already false (the plain sheet-confirm path, where the prior turn
+    /// already finished) — see `unblockAndFollowUp`'s own doc comment for why
+    /// that's safe — so one mechanism is correct for every call site.
+    func acknowledge(_ payload: ChatMessage.ToolResultPayload, followUp: Bool) async {
+        let message = ChatMessage(
+            role: .toolResult,
+            content: payload.legacyContent(),
+            status: .done,
+            createdAt: Date(),
+            toolResult: payload
+        )
+        messages.append(message)
+        if followUp {
+            await unblockAndFollowUp()
+        }
+    }
+
     /// Replace the content of an existing message, addressed by id. No-op when
     /// the id is gone (the session was switched out from under a long-running
     /// producer) — deliberately, so a stale writer can't resurrect a turn into
