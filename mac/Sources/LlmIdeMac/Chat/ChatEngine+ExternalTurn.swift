@@ -105,10 +105,19 @@ extension ChatEngine {
         // can cancel a phone-driven turn exactly like a panel-driven one —
         // until this existed, `runTask` was never set for external turns and
         // the Mac's Stop button was inert while a phone turn streamed on the
-        // shared engine. Cancellation flows both ways: phone-side
-        // explore_cancel cancels the task awaiting this method (whose catch
-        // below cancels the inner); Mac-side stop() cancels the inner
-        // directly.
+        // shared engine. Cancellation reaches the inner task from BOTH
+        // surfaces: Mac-side stop()/reset cancel `externalRunTask` directly;
+        // phone-side explore_cancel cancels the task awaiting this method —
+        // which does NOT propagate on its own (awaiting an unstructured
+        // task's value is not cancellation-responsive) — so the
+        // withTaskCancellationHandler below bridges it onto the inner task.
+        //
+        // The wrapper deliberately never clears `externalRunTask` itself:
+        // the body releases `busy` (drainQueueOrRelease) before this await
+        // resumes, and a SECOND external turn may have stored its own handle
+        // in that window — an unconditional clear here would orphan it and
+        // re-break Stop for the newer turn. The clear lives where completion
+        // is actually known: drainQueueOrRelease's idle branch.
         let task = Task { [self] in
             try await performExternalTurn(
                 message: message, skillIds: skillIds, attachments: attachments,
@@ -117,16 +126,21 @@ extension ChatEngine {
         }
         externalRunTask = task
         do {
-            let reply = try await task.value
-            externalRunTask = nil
+            let reply = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                // The phone cancelled its awaiting task; propagate.
+                task.cancel()
+            }
             return reply
         } catch {
             task.cancel()
-            externalRunTask = nil
-            // Let the inner catch run its stopped-finalize + persist before
-            // propagating, so the transcript is never left holding a live
-            // `.streaming` placeholder. URLSession aborts promptly on
-            // cancellation, so this await is short in practice.
+            // When this catch fired, the inner task had already completed —
+            // task.value rethrows a stored error immediately — so this
+            // re-await is instantaneous; it exists only to cover the outer-
+            // cancellation path, where the cancel above is what makes the
+            // inner finish (its catch finalizes the placeholder + persists
+            // + releases the slot before this resolves).
             _ = try? await task.value
             throw error
         }
@@ -145,6 +159,24 @@ extension ChatEngine {
         expectedSessionID: UUID,
         onProgress: @escaping (String) -> Void
     ) async throws -> String {
+        // Body-start re-checks. The entry guards ran in the wrapper one
+        // main-actor hop ago and the spawn in between is a scheduling
+        // boundary: switchSession/createNewSession/deleteSession have no
+        // busy-check and can interleave in that hop, leaving this body to
+        // start against a DIFFERENT session — and resetActiveTurnState's
+        // cancel() is only a flag, it cannot stop the prologue below from
+        // appending the phone's turn into (and persisting it to) the
+        // newly-active chat. Re-assert both before any state mutation;
+        // each early exit releases the slot the wrapper claimed, since the
+        // do/catch tail below is never reached on these paths.
+        if Task.isCancelled {
+            drainQueueOrRelease()
+            throw CancellationError()
+        }
+        guard currentSessionIDString == expectedSessionID.uuidString else {
+            drainQueueOrRelease()
+            throw ExternalTurnError.sessionMoved
+        }
         onTurnStart()
         onRecordPrompt(message)
         onNudge(message)

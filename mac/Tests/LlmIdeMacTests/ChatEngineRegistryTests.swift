@@ -372,6 +372,96 @@ struct ChatEngineRunExternalTurnTests {
         }
     }
 
+    @Test("Phone-side cancellation aborts the TURN, not just the reply — the bridged cancel reaches the engine's task")
+    func phoneSideCancellationAbortsTheTurn() async throws {
+        try await withTempStore {
+            let transport = SuspendableChatTransport()
+            let engine = ChatEngine(scope: Self.scope, transport: transport)
+            let session = ChatSession(scope: Self.scope, title: "A")
+            ChatSessionStore.save(session)
+            engine.switchSession(to: session.id)
+
+            // The manager-side task — what cancelMobileInflightTask cancels
+            // when the phone sends explore_cancel.
+            let turnTask = Task {
+                try await engine.runExternalTurn(
+                    message: "from iPhone", skillIds: [], attachments: [],
+                    agentContext: nil, model: nil, provider: nil,
+                    expectedSessionID: session.id,
+                    onProgress: { _ in })
+            }
+            try await Task.sleep(nanoseconds: 30_000_000)
+            #expect(engine.busy == true)
+
+            turnTask.cancel()
+
+            // Awaiting an unstructured task is not cancellation-responsive,
+            // so WITHOUT the withTaskCancellationHandler bridge the inner
+            // turn would run to completion and this await would return the
+            // reply normally. The test double doesn't abort the way
+            // URLSession does; unblock it so the (now cancelled) body can
+            // observe the flag.
+            transport.resume()
+            var threw = false
+            do {
+                _ = try await turnTask.value
+            } catch {
+                threw = true
+            }
+            #expect(threw)
+
+            // The turn actually aborted: stopped placeholder, slot released,
+            // no banner, handle cleared.
+            #expect(engine.busy == false)
+            #expect(engine.error == nil)
+            #expect(engine.messages.last?.status == .stopped)
+            #expect(engine.externalRunTask == nil)
+        }
+    }
+
+    @Test("A session switch before the turn starts yields sessionMoved — the turn never touches the other session")
+    func sessionSwitchBeforeTurnStartsYieldsSessionMoved() async throws {
+        try await withTempStore {
+            let transport = SuspendableChatTransport()
+            let engine = ChatEngine(scope: Self.scope, transport: transport)
+            let sessionA = ChatSession(scope: Self.scope, title: "A")
+            ChatSessionStore.save(sessionA)
+            let sessionB = ChatSession(scope: Self.scope, title: "B")
+            ChatSessionStore.save(sessionB)
+            engine.switchSession(to: sessionA.id)
+
+            // Queue the phone turn, then switch the session BEFORE the
+            // wrapper can run (the unstructured task cannot jump ahead of
+            // this synchronous main-actor code). This pins the ENTRY guard;
+            // the body-start re-check inside performExternalTurn covers the
+            // narrower spawn-boundary window (switch landing between the
+            // wrapper's guards and the body's first instruction), which is
+            // not deterministically constructible from a test.
+            let turnTask = Task {
+                try await engine.runExternalTurn(
+                    message: "from iPhone", skillIds: [], attachments: [],
+                    agentContext: nil, model: nil, provider: nil,
+                    expectedSessionID: sessionA.id,
+                    onProgress: { _ in })
+            }
+            engine.switchSession(to: sessionB.id)
+
+            var thrown: ExternalTurnError?
+            do {
+                _ = try await turnTask.value
+            } catch let e as ExternalTurnError {
+                thrown = e
+            }
+            #expect(thrown == .sessionMoved)
+
+            // Neither session's transcript gained the phone's turn.
+            #expect(engine.busy == false)
+            #expect(engine.messages.map(\.content).contains("from iPhone") == false)
+            #expect(ChatSessionStore.load(id: sessionB.id)?.messages.isEmpty == true)
+            #expect(ChatSessionStore.load(id: sessionA.id)?.messages.map(\.content).contains("from iPhone") == false)
+        }
+    }
+
     @Test("A mid-flight session switch on the shared engine leaves the newly-active session untouched, and the call returns gracefully")
     func midFlightSessionSwitchDoesNotCorruptTheNewSession() async {
         await withTempStore {

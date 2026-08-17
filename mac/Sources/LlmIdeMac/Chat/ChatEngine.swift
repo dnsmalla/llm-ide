@@ -367,6 +367,15 @@ final class ChatEngine {
         } else {
             busy = false
             runTask = nil
+            // Clear the completed phone turn's handle HERE, not in
+            // runExternalTurn's wrapper: the body reaches this idle branch
+            // before the wrapper's await resumes, and by then a second
+            // external turn may legitimately have stored its own handle —
+            // an unconditional wrapper-side clear would orphan the newer
+            // turn's Stop support. Cancelling an already-completed task is
+            // a no-op, so a stale handle was never dangerous; this keeps
+            // the field tidy for stop()/tests.
+            externalRunTask = nil
         }
     }
 

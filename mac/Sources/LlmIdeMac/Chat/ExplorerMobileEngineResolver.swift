@@ -107,7 +107,10 @@ final class ExplorerMobileEngineResolver {
             return sharedExplorerEngine
         }
         if let cached = offScreen[sessionID] {
-            guard !cached.busy else { return cached }
+            guard !cached.busy else {
+                touch(sessionID)  // mid-turn lookups count as use too
+                return cached
+            }
             guard cached.loadSessionForBackgroundUse(id: sessionID) else {
                 // Deleted (or re-scoped) since it was cached — don't keep
                 // serving orphaned data for an id that no longer resolves.

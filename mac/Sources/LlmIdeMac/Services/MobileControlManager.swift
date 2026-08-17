@@ -763,10 +763,13 @@ final class MobileControlManager {
     /// `forgetSessionMemory` hook (a duplicate server DELETE is idempotent).
     @MainActor
     private func handleExploreDelete(_ uid: UUID) async {
-        guard let api else { return }
-        let shared = ChatEngineRegistry.shared.engine(for: .explorer, api: api)
-        if shared.currentSessionIDString == uid.uuidString {
-            await shared.deleteSession(uid)
+        // `api` is optional only so the network forget at the tail degrades
+        // gracefully — the local file delete and engine routing above it
+        // must not be skipped when it's nil, or the phone silently keeps a
+        // session it deleted.
+        let shared = api.map { ChatEngineRegistry.shared.engine(for: .explorer, api: $0) }
+        if shared?.currentSessionIDString == uid.uuidString {
+            await shared?.deleteSession(uid)
         }
         if let cached = explorerMobileEngineResolver.cachedEngine(for: uid) {
             await cached.deleteSession(uid)
@@ -774,7 +777,9 @@ final class MobileControlManager {
         if ChatSessionStore.load(id: uid) != nil {
             ChatSessionStore.delete(id: uid)
         }
-        _ = try? await api.forgetSessionMemory(sessionId: uid.uuidString)
+        if let api {
+            _ = try? await api.forgetSessionMemory(sessionId: uid.uuidString)
+        }
         // Drop any cached off-screen engine for this id too — a later
         // explore_chat referencing the same (now-deleted) session must not
         // resolve to a stale cached instance.
