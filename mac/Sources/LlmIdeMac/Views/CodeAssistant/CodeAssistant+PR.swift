@@ -20,11 +20,10 @@ extension CodeAssistantPanel {
 
             engine.agent.pendingTool = nil
             sheets.showingCreatePRSheet = false
-            engine.appendTurn(.init(
-                role: .user,
-                content: "(executed create-pr → #\(result.number): \(result.webUrl))"
-            ))
-            await engine.sendFollowup()
+            let ackPayload = ChatMessage.ToolResultPayload(
+                kind: .issue, summary: "(executed create-pr → #\(result.number): \(result.webUrl))",
+                exitCode: nil, command: nil, output: nil, url: result.webUrl, isFailure: false)
+            await engine.acknowledge(ackPayload, followUp: true)
             return .success(iid: result.number, webUrl: result.webUrl)
         } catch {
             return .failure(error.localizedDescription)

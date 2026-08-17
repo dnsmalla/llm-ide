@@ -110,18 +110,17 @@ extension CodeAssistantPanel {
             let issue = try await client.createIssue(projectId: target.projectId, payload: payload)
             // Clear the pending tool so the card disappears.
             engine.agent.pendingTool = nil
-            // Synthetic acknowledgement turn — agent sees the result in history.
+            // Synthetic acknowledgement — agent sees the result in history.
             // RepoIssue.webUrl is backend-correct for both providers.
-            engine.appendTurn(.init(
-                role: .user,
-                content: "(executed create-issue → #\(issue.number) \(issue.webUrl))"
-            ))
+            let ackPayload = ChatMessage.ToolResultPayload(
+                kind: .issue, summary: "(executed create-issue → #\(issue.number) \(issue.webUrl))",
+                exitCode: nil, command: nil, output: nil, url: issue.webUrl, isFailure: false)
             // Refresh recentIssues so the newly created issue's title
             // resolves in follow-up comment/update sheets instead of
             // showing blank until the next unrelated refresh.
             await refreshRecentIssuesOnce()
             // Re-invoke the agent so it can acknowledge in natural language.
-            await engine.sendFollowup()
+            await engine.acknowledge(ackPayload, followUp: true)
             return .success(issue.number)
         } catch {
             return .failure(error.localizedDescription)
@@ -205,11 +204,10 @@ extension CodeAssistantPanel {
         let deltaStr = delta == 0
             ? "no net line change"
             : (delta > 0 ? "+\(delta) lines" : "\(delta) lines")
-        engine.appendTurn(.init(
-            role: .user,
-            content: "(applied update to \(basename): \(deltaStr))"
-        ))
-        await engine.unblockAndFollowUp()
+        let payload = ChatMessage.ToolResultPayload(
+            kind: .edit, summary: "(applied update to \(basename): \(deltaStr))",
+            exitCode: nil, command: nil, output: nil, url: nil, isFailure: false)
+        await engine.acknowledge(payload, followUp: true)
         return .success
     }
 

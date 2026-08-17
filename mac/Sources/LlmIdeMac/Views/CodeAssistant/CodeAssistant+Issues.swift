@@ -20,11 +20,10 @@ extension CodeAssistantPanel {
             )
             engine.agent.pendingTool = nil
             sheets.showingCommentSheet = false
-            engine.appendTurn(.init(
-                role: .user,
-                content: "(executed comment-issue → #\(args.iid))"
-            ))
-            await engine.sendFollowup()
+            let ackPayload = ChatMessage.ToolResultPayload(
+                kind: .issue, summary: "(executed comment-issue → #\(args.iid))",
+                exitCode: nil, command: nil, output: nil, url: nil, isFailure: false)
+            await engine.acknowledge(ackPayload, followUp: true)
             return .success(args.iid)
         } catch {
             return .failure(error.localizedDescription)
@@ -47,12 +46,11 @@ extension CodeAssistantPanel {
             )
             engine.agent.pendingTool = nil
             sheets.showingUpdateIssueSheet = false
-            engine.appendTurn(.init(
-                role: .user,
-                content: "(executed update-issue → #\(args.iid))"
-            ))
+            let ackPayload = ChatMessage.ToolResultPayload(
+                kind: .issue, summary: "(executed update-issue → #\(args.iid))",
+                exitCode: nil, command: nil, output: nil, url: nil, isFailure: false)
             await refreshRecentIssuesOnce()
-            await engine.sendFollowup()
+            await engine.acknowledge(ackPayload, followUp: true)
             return .success(args.iid)
         } catch {
             return .failure(error.localizedDescription)

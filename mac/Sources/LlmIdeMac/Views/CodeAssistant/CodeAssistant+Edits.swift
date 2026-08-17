@@ -83,10 +83,10 @@ extension CodeAssistantPanel {
         engine.agent.pendingTool = nil
         sheets.showingUpdateFileSheet = false
         let name = (args.path as NSString).lastPathComponent
-        engine.appendTurn(.init(
-            role: .user,
-            content: "(skipped the proposed edit to \(name) — do not apply it or propose it again unless I ask; continue with anything else outstanding)"
-        ))
-        await engine.unblockAndFollowUp()
+        let payload = ChatMessage.ToolResultPayload(
+            kind: .skip,
+            summary: "(skipped the proposed edit to \(name) — do not apply it or propose it again unless I ask; continue with anything else outstanding)",
+            exitCode: nil, command: nil, output: nil, url: nil, isFailure: true)
+        await engine.acknowledge(payload, followUp: true)
     }
 }

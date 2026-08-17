@@ -21,11 +21,10 @@ extension CodeAssistantPanel {
             _ = try await repoManager.runGit(gitArgs, at: repoURL)
 
             engine.agent.pendingTool = nil
-            engine.appendTurn(.init(
-                role: .user,
-                content: "(executed create-branch → \(args.branch))"
-            ))
-            await engine.sendFollowup()
+            let payload = ChatMessage.ToolResultPayload(
+                kind: .git, summary: "(executed create-branch → \(args.branch))",
+                exitCode: nil, command: nil, output: nil, url: nil, isFailure: false)
+            await engine.acknowledge(payload, followUp: true)
             return .success(args.branch)
         } catch {
             return .failure(error.localizedDescription)
@@ -61,9 +60,10 @@ extension CodeAssistantPanel {
         sheets.showingGitOpSheet = false
         // Resolve the active repo URL — GitLab first, then GitHub (mirrors config.activeRepoLocalURL).
         guard let repoURL = config.activeRepoLocalURL else {
-            engine.appendTurn(.init(role: .user,
-                content: "(git \(args.op.rawValue) skipped — no active repository)"))
-            await engine.unblockAndFollowUp()
+            let payload = ChatMessage.ToolResultPayload(
+                kind: .git, summary: "(git \(args.op.rawValue) skipped — no active repository)",
+                exitCode: nil, command: nil, output: nil, url: nil, isFailure: true)
+            await engine.acknowledge(payload, followUp: true)
             return
         }
         // Resolve auth token: prefer the active GitLab project's token, fall back to GitHub.
@@ -80,16 +80,20 @@ extension CodeAssistantPanel {
         }
         do {
             let out = try await RepoManager().runGitOp(args, at: repoURL, token: token)
-            engine.appendTurn(.init(role: .user,
-                content: "(git \(args.op.rawValue) result)\n\(out.prefix(4000))"))
+            let payload = ChatMessage.ToolResultPayload(
+                kind: .git, summary: "(git \(args.op.rawValue) result)",
+                exitCode: nil, command: nil, output: String(out.prefix(4000)), url: nil, isFailure: false)
+            // A read-tier op auto-runs from INSIDE runTurn (busy still true) —
+            // `acknowledge`'s follow-up always goes through
+            // `unblockAndFollowUp()` for exactly this reason (see its doc). On
+            // the sheet/card path busy is already false, so that's a benign
+            // no-op there.
+            await engine.acknowledge(payload, followUp: true)
         } catch {
-            engine.appendTurn(.init(role: .user,
-                content: "(git \(args.op.rawValue) failed) \(error.localizedDescription)"))
+            let payload = ChatMessage.ToolResultPayload(
+                kind: .git, summary: "(git \(args.op.rawValue) failed) \(error.localizedDescription)",
+                exitCode: nil, command: nil, output: nil, url: nil, isFailure: true)
+            await engine.acknowledge(payload, followUp: true)
         }
-        // A read-tier op auto-runs from INSIDE runTurn (busy still true) — see
-        // unblockAndFollowUp's doc for why this must not just call sendFollowup
-        // directly. On the sheet/card path busy is already false, so this is a
-        // benign no-op there.
-        await engine.unblockAndFollowUp()
     }
 }
