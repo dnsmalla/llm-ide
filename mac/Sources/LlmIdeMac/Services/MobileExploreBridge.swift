@@ -22,6 +22,13 @@ enum MobileExploreBridge {
     }
 
     /// Same workspace / project / git snapshot the Mac Explorer panel sends.
+    /// `sessionId` is the phone-side explorer chat's stable ChatSession UUID —
+    /// it fills BOTH `AgentContext.sessionId` (task-store correlation for the
+    /// phone's turns) and `chatSessionId` (the field the server prefers for
+    /// session-memory keying). The value is the same either way; sending the
+    /// stable id explicitly keeps memory keying on the preferred field
+    /// instead of the server's sessionId fallback, which only lined up
+    /// because this caller happened to pass the chat UUID.
     static func buildAgentContext(config: AppConfig, projectStore: ProjectStore,
                                   sessionId: String?) async -> AgentContext {
         let activeProject = deriveActiveProject(from: projectStore.activeProject)
@@ -65,6 +72,7 @@ enum MobileExploreBridge {
             recentIssues: nil,
             workspaceRoot: workspaceRoot,
             sessionId: sessionId,
+            chatSessionId: sessionId,
             currentBranch: gitBranch,
             gitStatus: gitStatus
         )
