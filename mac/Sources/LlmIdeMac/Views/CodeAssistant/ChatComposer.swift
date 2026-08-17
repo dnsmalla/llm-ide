@@ -135,9 +135,9 @@ extension CodeAssistantPanel {
         VStack(spacing: 0) {
             // Messages queued while a turn is running — they auto-send in order,
             // one per turn. Each is individually removable.
-            if !queued.isEmpty {
+            if !engine.queued.isEmpty {
                 VStack(spacing: 0) {
-                    ForEach(Array(queued.enumerated()), id: \.element.id) { index, q in
+                    ForEach(Array(engine.queued.enumerated()), id: \.element.id) { index, q in
                         HStack(spacing: 6) {
                             Image(systemName: "clock")
                                 .font(.system(size: 10))
@@ -151,7 +151,7 @@ extension CodeAssistantPanel {
                             Button {
                                 // Remove by stable id, not index — the queue may
                                 // have shifted (FIFO drain) since this row rendered.
-                                queued.removeAll { $0.id == q.id }
+                                engine.cancelQueued(id: q.id)
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 11))
@@ -307,13 +307,13 @@ extension CodeAssistantPanel {
         Button { sheets.showProjectMemory = true } label: {
             HStack(spacing: 3) {
                 Image(systemName: "brain").font(.system(size: 11))
-                if let t = agent.lastMemoryTokens {
+                if let t = engine.agent.lastMemoryTokens {
                     Text(t > 0 ? "~\(formatTokens(t))" : "0")
                         .font(.system(size: 9, weight: .medium, design: .rounded))
                 }
             }
             .frame(height: 22)
-            .padding(.horizontal, agent.lastMemoryTokens == nil ? 0 : 3)
+            .padding(.horizontal, engine.agent.lastMemoryTokens == nil ? 0 : 3)
         }
         .buttonStyle(.plain)
         .foregroundStyle(theme.current.textMuted)
@@ -322,13 +322,13 @@ extension CodeAssistantPanel {
     }
 
     var memoryButtonHelp: String {
-        guard let t = agent.lastMemoryTokens else {
+        guard let t = engine.agent.lastMemoryTokens else {
             return "Project memory — what the assistant has learned about this repo"
         }
         if t == 0 {
             return "Project memory — no memory injected last turn (0 tokens). None generated for this project yet."
         }
-        let chat = agent.lastMemoryHasChat ? " (incl. chat-captured facts)" : " (graph-derived only)"
+        let chat = engine.agent.lastMemoryHasChat ? " (incl. chat-captured facts)" : " (graph-derived only)"
         return "Project memory — added ~\(t) tokens to the last request\(chat). Click to view/prune."
     }
 
@@ -347,8 +347,8 @@ extension CodeAssistantPanel {
     var sendButton: some View {
         HStack(spacing: 6) {
             // While a turn is running, offer a Stop control that cancels it.
-            if busy {
-                Button { stop() } label: {
+            if engine.busy {
+                Button { engine.stop() } label: {
                     Image(systemName: "stop.fill")
                         .font(.system(size: 11, weight: .semibold))
                         .frame(width: 24, height: 24)
@@ -359,10 +359,10 @@ extension CodeAssistantPanel {
                 .help("Stop the running response (Esc)")
                 .accessibilityLabel("Stop")
             }
-            if agent.agentIsAutonomous && !busy {
+            if engine.agent.agentIsAutonomous && !engine.busy {
                 Button(action: {
-                    agent.agentStopRequested = true
-                    agent.agentIsAutonomous = false
+                    engine.agent.agentStopRequested = true
+                    engine.agent.agentIsAutonomous = false
                 }) {
                     Label("Stop", systemImage: "stop.circle.fill")
                         .foregroundColor(theme.current.danger)
@@ -375,7 +375,7 @@ extension CodeAssistantPanel {
             Button {
                 submit()
             } label: {
-                Image(systemName: busy ? "arrow.up.to.line" : "arrow.up")
+                Image(systemName: engine.busy ? "arrow.up.to.line" : "arrow.up")
                     .font(.system(size: 12, weight: .semibold))
                     .frame(width: 24, height: 24)
             }
@@ -383,8 +383,8 @@ extension CodeAssistantPanel {
             .controlSize(.small)
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .keyboardShortcut(.return, modifiers: .command)
-            .help(busy ? "Queue this message — sends when the current response finishes (⌘↵)" : "Send (⌘↵)")
-            .accessibilityLabel(busy ? "Queue message" : "Send message")
+            .help(engine.busy ? "Queue this message — sends when the current response finishes (⌘↵)" : "Send (⌘↵)")
+            .accessibilityLabel(engine.busy ? "Queue message" : "Send message")
         }
     }
 
@@ -556,7 +556,7 @@ extension CodeAssistantPanel {
     /// scope), so a bare "/model" with no argument just explains usage.
     func applyModelCommand(_ query: String) {
         guard !query.isEmpty else {
-            error = "Usage: /model <name> — e.g. /model sonnet, /model gpt-5"
+            engine.error = "Usage: /model <name> — e.g. /model sonnet, /model gpt-5"
             return
         }
         let candidates = modelsForCurrentProvider()
@@ -565,7 +565,7 @@ extension CodeAssistantPanel {
             ?? candidates.first(where: { $0.id.lowercased().contains(q) || $0.displayName.lowercased().contains(q) })
         else {
             let available = candidates.map(\.displayName).joined(separator: ", ")
-            error = "No model matching \"\(query)\" for the current provider.\(available.isEmpty ? "" : " Available: \(available)")"
+            engine.error = "No model matching \"\(query)\" for the current provider.\(available.isEmpty ? "" : " Available: \(available)")"
             return
         }
         modelState.selectedModel = match.id
@@ -711,7 +711,7 @@ extension CodeAssistantPanel {
         // Deliberately NOT the same mechanism as a plugin's own slash command
         // (that's server-side prompt-expansion, not a client-side UI action).
         if ChatSlashCommands.isClearCommand(msg) {
-            clearCurrentChat()
+            Task { await engine.clearCurrentChat() }
             return
         }
         if let section = ChatSlashCommands.sectionCommand(msg) {
@@ -742,26 +742,27 @@ extension CodeAssistantPanel {
         }
         attachmentState.selectedSkills = []
         let outgoing = directives.isEmpty ? msg : directives.joined(separator: "\n") + "\n\n" + msg
-        if busy {
-            queued.append(.init(text: outgoing, skillIds: skillIds))
+        if engine.busy {
+            engine.enqueue(outgoing, skillIds: skillIds)
         } else {
-            startTurn(outgoing, skillIds: skillIds)
+            engine.startTurn(outgoing, skillIds: skillIds)
         }
     }
 
     /// ↑ in the composer: walk back through previously-sent prompts. Returns
     /// `.ignored` (so the cursor moves normally) unless the field is empty or
     /// we're already browsing history.
-    /// Seed ↑/↓ recall from a loaded/switched session's turns. Without this,
-    /// `sentPrompts` only tracks prompts submitted in the CURRENT app run, so
-    /// after a relaunch or session switch the chat shows prior turns but ↑
-    /// recalls nothing. Synthetic turns (tool acks like "(applied update…)",
-    /// "(continue)") are skipped so they don't pollute recall.
-    func rebuildSentPrompts(from turns: [LlmIdeAPIClient.CodeAssistTurn]) {
+    /// Seed ↑/↓ recall from a loaded/switched session's messages. Without
+    /// this, `sentPrompts` only tracks prompts submitted in the CURRENT app
+    /// run, so after a relaunch or session switch the chat shows prior turns
+    /// but ↑ recalls nothing. Synthetic tool acks are skipped so they don't
+    /// pollute recall — by ROLE now (`.toolResult` is not `.user`), where this
+    /// used to have to guess from a leading "(".
+    func rebuildSentPrompts(from turns: [ChatMessage]) {
         var prompts: [String] = []
         for t in turns where t.role == .user {
             let c = t.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !c.isEmpty, !c.hasPrefix("(") else { continue }
+            guard !c.isEmpty else { continue }
             if prompts.last != c { prompts.append(c) }
         }
         if prompts.count > 100 { prompts.removeFirst(prompts.count - 100) }

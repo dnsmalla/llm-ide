@@ -18,13 +18,13 @@ extension CodeAssistantPanel {
             )
             let result = try await client.createMergeRequest(projectId: target.projectId, payload: payload)
 
-            agent.pendingTool = nil
+            engine.agent.pendingTool = nil
             sheets.showingCreatePRSheet = false
-            history.append(.init(
+            engine.appendTurn(.init(
                 role: .user,
                 content: "(executed create-pr → #\(result.number): \(result.webUrl))"
             ))
-            await sendFollowup()
+            await engine.sendFollowup()
             return .success(iid: result.number, webUrl: result.webUrl)
         } catch {
             return .failure(error.localizedDescription)

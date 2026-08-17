@@ -36,7 +36,7 @@ extension CodeAssistantPanel {
     /// This performs I/O — call it from an event, never from `body`. The chat
     /// card reads the cached `pendingEditPreview` instead.
     var pendingEdit: ProposedEdit? {
-        guard let args = agent.pendingTool?.updateFileArgs else { return nil }
+        guard let args = engine.agent.pendingTool?.updateFileArgs else { return nil }
         return try? resolveEdit(args).get()
     }
 
@@ -52,7 +52,7 @@ extension CodeAssistantPanel {
     /// unreadable) is what tells the user whether to retry or rephrase, so it's
     /// shown instead of a generic "path didn't match".
     var pendingEditFailureReason: String? {
-        guard let args = agent.pendingTool?.updateFileArgs else { return nil }
+        guard let args = engine.agent.pendingTool?.updateFileArgs else { return nil }
         if case .failure(let err) = resolveEdit(args) { return err.message }
         return nil
     }
@@ -62,15 +62,15 @@ extension CodeAssistantPanel {
     /// user chose to skip.
     @MainActor
     func applyPendingEdit() async {
-        guard let args = agent.pendingTool?.updateFileArgs else { return }
+        guard let args = engine.agent.pendingTool?.updateFileArgs else { return }
         switch resolveEdit(args) {
         case .failure(let err):
             // Don't clear pendingTool: the card stays up so the user can open
             // the sheet and see the detail, or ask the agent to retry.
-            error = err.message
+            engine.error = err.message
         case .success(let edit):
             let result = await confirmUpdateFile(args, finalContent: edit.proposed)
-            if case .failure(let message) = result { error = message }
+            if case .failure(let message) = result { engine.error = message }
         }
     }
 
@@ -79,14 +79,14 @@ extension CodeAssistantPanel {
     /// write and the next turn re-proposes the same change.
     @MainActor
     func skipPendingEdit() async {
-        guard let args = agent.pendingTool?.updateFileArgs else { return }
-        agent.pendingTool = nil
+        guard let args = engine.agent.pendingTool?.updateFileArgs else { return }
+        engine.agent.pendingTool = nil
         sheets.showingUpdateFileSheet = false
         let name = (args.path as NSString).lastPathComponent
-        history.append(.init(
+        engine.appendTurn(.init(
             role: .user,
             content: "(skipped the proposed edit to \(name) — do not apply it or propose it again unless I ask; continue with anything else outstanding)"
         ))
-        await unblockAndFollowUp()
+        await engine.unblockAndFollowUp()
     }
 }

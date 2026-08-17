@@ -20,12 +20,12 @@ extension CodeAssistantPanel {
 
             _ = try await repoManager.runGit(gitArgs, at: repoURL)
 
-            self.agent.pendingTool = nil
-            history.append(.init(
+            engine.agent.pendingTool = nil
+            engine.appendTurn(.init(
                 role: .user,
                 content: "(executed create-branch → \(args.branch))"
             ))
-            await sendFollowup()
+            await engine.sendFollowup()
             return .success(args.branch)
         } catch {
             return .failure(error.localizedDescription)
@@ -57,13 +57,13 @@ extension CodeAssistantPanel {
     /// Read-tier ops are auto-run from runTurn; write/destructive run after sheet confirm.
     @MainActor
     func runGitOpFlow(_ args: GitOpArgs) async {
-        agent.pendingTool = nil
+        engine.agent.pendingTool = nil
         sheets.showingGitOpSheet = false
         // Resolve the active repo URL — GitLab first, then GitHub (mirrors config.activeRepoLocalURL).
         guard let repoURL = config.activeRepoLocalURL else {
-            history.append(.init(role: .user,
+            engine.appendTurn(.init(role: .user,
                 content: "(git \(args.op.rawValue) skipped — no active repository)"))
-            await unblockAndFollowUp()
+            await engine.unblockAndFollowUp()
             return
         }
         // Resolve auth token: prefer the active GitLab project's token, fall back to GitHub.
@@ -80,16 +80,16 @@ extension CodeAssistantPanel {
         }
         do {
             let out = try await RepoManager().runGitOp(args, at: repoURL, token: token)
-            history.append(.init(role: .user,
+            engine.appendTurn(.init(role: .user,
                 content: "(git \(args.op.rawValue) result)\n\(out.prefix(4000))"))
         } catch {
-            history.append(.init(role: .user,
+            engine.appendTurn(.init(role: .user,
                 content: "(git \(args.op.rawValue) failed) \(error.localizedDescription)"))
         }
         // A read-tier op auto-runs from INSIDE runTurn (busy still true) — see
         // unblockAndFollowUp's doc for why this must not just call sendFollowup
         // directly. On the sheet/card path busy is already false, so this is a
         // benign no-op there.
-        await unblockAndFollowUp()
+        await engine.unblockAndFollowUp()
     }
 }

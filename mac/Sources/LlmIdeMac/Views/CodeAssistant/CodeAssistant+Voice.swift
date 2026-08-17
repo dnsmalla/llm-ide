@@ -23,7 +23,7 @@ extension CodeAssistantPanel {
             .frame(minWidth: 44, minHeight: 44)
             .help("Start voice input (Cmd+M)")
         }
-        .disabled(busy)
+        .disabled(engine.busy)
         .keyboardShortcut("m", modifiers: .command)
     }
 

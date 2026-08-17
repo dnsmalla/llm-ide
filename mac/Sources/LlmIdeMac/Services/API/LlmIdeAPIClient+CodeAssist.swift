@@ -67,7 +67,10 @@ extension LlmIdeAPIClient {
         /// Resolved mode the server actually used — differs from the
         /// requested mode only when the request was "auto".
         let mode: String?
-        struct Usage: Codable {
+        // Equatable + Sendable added for ChatMessage.Metadata (Task 8's v2
+        // chat envelope embeds this struct and needs both conformances);
+        // Codable behavior is unchanged.
+        struct Usage: Codable, Equatable, Sendable {
             let attachmentCount: Int
             let attachmentChars: Int
             let paths: [String]

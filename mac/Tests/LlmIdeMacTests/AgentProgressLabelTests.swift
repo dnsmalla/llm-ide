@@ -44,7 +44,7 @@ final class AgentProgressLabelTests: XCTestCase {
 
     func testStepIconsDistinguishReadsFromWritesAndShellRuns() {
         let icon = { (tool: String?) in
-            CodeAssistantPanel.ToolStep(label: "x", tool: tool).icon
+            ChatMessage.ToolStep(label: "x", tool: tool).icon
         }
         XCTAssertEqual(icon("read-file"), "doc.text")
         XCTAssertEqual(icon("bash"), "terminal")
