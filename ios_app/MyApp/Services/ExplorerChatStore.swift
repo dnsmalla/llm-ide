@@ -112,7 +112,10 @@ final class ExplorerChatStore: ObservableObject {
         }
         let displayText = Self.transcriptText(text: text, refs: refs, files: files, skills: skills)
         var messages = exploreCurrent?.history ?? []
-        let (id, chatHistory) = mintStreamingTurn(
+        // The returned history turns are unused — the Mac's own session file
+        // is the canonical transcript now; only the minted command id goes
+        // on the wire.
+        let (id, _) = mintStreamingTurn(
             messages: &messages,
             commandIds: &exploreCommandIds,
             userText: displayText
@@ -121,7 +124,7 @@ final class ExplorerChatStore: ObservableObject {
         isStreaming = true
         startStreamTimeout(for: id)
         let chat = ExploreChat(sessionId: sessionId, commandId: id, text: text,
-                               history: chatHistory, files: files, refs: refs, skills: skills)
+                               files: files, refs: refs, skills: skills)
         if let data = try? JSONEncoder().encode(chat),
            let str = String(data: data, encoding: .utf8) {
             connection?.sendTextFrame(str)

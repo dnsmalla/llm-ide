@@ -86,11 +86,7 @@ final class ConnectionMessagesTests: XCTestCase {
     // MARK: - Explorer-chat session messages (Phase B, Task 1)
 
     func testExploreChatRoundTrips() throws {
-        let history = [
-            ChatTurn(role: "user", content: "first question"),
-            ChatTurn(role: "assistant", content: "first answer")
-        ]
-        let original = ExploreChat(sessionId: "sess-123", commandId: "cmd-456", text: "new question", history: history,
+        let original = ExploreChat(sessionId: "sess-123", commandId: "cmd-456", text: "new question",
                                    files: [ChatFileText(name: "spec.md", text: "# spec")])
         let decoded = try roundTrip(original)
         XCTAssertEqual(decoded, original)
@@ -98,16 +94,13 @@ final class ConnectionMessagesTests: XCTestCase {
         XCTAssertEqual(decoded.sessionId, "sess-123")
         XCTAssertEqual(decoded.commandId, "cmd-456")
         XCTAssertEqual(decoded.text, "new question")
-        XCTAssertEqual(decoded.history.count, 2)
-        XCTAssertEqual(decoded.history[0].role, "user")
-        XCTAssertEqual(decoded.history[0].content, "first question")
         XCTAssertEqual(decoded.files.count, 1)
         XCTAssertEqual(decoded.files[0].name, "spec.md")
     }
 
     func testExploreChatDecodesWithoutFilesKey() throws {
         let json = """
-        {"type":"explore_chat","sessionId":"s1","commandId":"c1","text":"hi","history":[]}
+        {"type":"explore_chat","sessionId":"s1","commandId":"c1","text":"hi"}
         """.data(using: .utf8)!
         let chat = try JSONDecoder().decode(ExploreChat.self, from: json)
         XCTAssertTrue(chat.files.isEmpty)
@@ -120,7 +113,7 @@ final class ConnectionMessagesTests: XCTestCase {
             ExploreWorkspaceRef(path: "extension/kb", kind: "folder")
         ]
         let original = ExploreChat(sessionId: "s1", commandId: "c1", text: "explain this",
-                                   history: [], refs: refs)
+                                   refs: refs)
         let decoded = try roundTrip(original)
         XCTAssertEqual(decoded.refs, refs)
         XCTAssertEqual(decoded.refs[0].displayLabel, "@file extension/server.mjs")
@@ -167,7 +160,7 @@ final class ConnectionMessagesTests: XCTestCase {
         let skills = [ExploreSkillRef(id: "skills/brainstorming", name: "brainstorming",
                                       kind: "library", directive: nil)]
         let original = ExploreChat(sessionId: "s1", commandId: "c1", text: "help me plan",
-                                   history: [], skills: skills)
+                                   skills: skills)
         let decoded = try roundTrip(original)
         XCTAssertEqual(decoded.skills, skills)
         XCTAssertEqual(decoded.skills.first?.displayLabel, "/brainstorming")

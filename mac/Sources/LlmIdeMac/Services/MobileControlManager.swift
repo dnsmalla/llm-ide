@@ -774,7 +774,7 @@ final class MobileControlManager {
         if ChatSessionStore.load(id: uid) != nil {
             ChatSessionStore.delete(id: uid)
         }
-        try? await api.forgetSessionMemory(sessionId: uid.uuidString)
+        _ = try? await api.forgetSessionMemory(sessionId: uid.uuidString)
         // Drop any cached off-screen engine for this id too — a later
         // explore_chat referencing the same (now-deleted) session must not
         // resolve to a stale cached instance.
@@ -1130,7 +1130,10 @@ final class MobileControlManager {
 /// OWN canonical `messages` via `packHistory` — the same source of truth the
 /// Mac panel's own turns use — so the phone's cached copy is no longer read
 /// for that purpose (`explore_load_session`, the ← direction's other would-be
-/// use, only ever needed →, never ←).
+/// use, only ever needed →, never ←). The `ExploreChat.history` wire field
+/// was removed outright in 2026-08-17; an unknown `history` key from an
+/// older phone is ignored, but an older Mac decoding a newer phone's
+/// message would fail — the two apps update together.
 extension ChatTurn {
     /// Code Assistant view-model → SharedProtocol wire shape: drop the
     /// client-only `id`, surface the role as its raw string ("user"/"assistant").

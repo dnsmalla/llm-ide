@@ -63,7 +63,6 @@ public struct ExploreChat: Codable, Equatable {
     public let sessionId: String
     public let commandId: String
     public let text: String
-    public let history: [ChatTurn]
     /// Text extracted on the iPhone (PDF / plain text). The Mac converts these
     /// to code-assist attachments and runs the prompt with Mac agent settings.
     public let files: [ChatFileText]
@@ -71,19 +70,24 @@ public struct ExploreChat: Codable, Equatable {
     public let refs: [ExploreWorkspaceRef]
     /// Mac agent skills selected on the iPhone (`/skill name`).
     public let skills: [ExploreSkillRef]
-    public init(sessionId: String, commandId: String, text: String, history: [ChatTurn],
+    /// No `history` field: since Task 12 the Mac runs explore turns through
+    /// its own ChatEngine, whose on-disk session IS the canonical transcript
+    /// — the phone's cached copy the field used to carry was never read.
+    /// Old phones still sending the key are fine (unknown keys are ignored);
+    /// an OLD Mac decoding a NEW phone's message would fail (the field used
+    /// to be a required key), so the two apps update together.
+    public init(sessionId: String, commandId: String, text: String,
                 files: [ChatFileText] = [], refs: [ExploreWorkspaceRef] = [],
                 skills: [ExploreSkillRef] = []) {
         self.sessionId = sessionId
         self.commandId = commandId
         self.text = text
-        self.history = history
         self.files = files
         self.refs = refs
         self.skills = skills
     }
     private enum CodingKeys: String, CodingKey {
-        case type, sessionId, commandId, text, history, files, refs, skills
+        case type, sessionId, commandId, text, files, refs, skills
     }
 
     public init(from decoder: Decoder) throws {
@@ -91,7 +95,6 @@ public struct ExploreChat: Codable, Equatable {
         sessionId = try c.decode(String.self, forKey: .sessionId)
         commandId = try c.decode(String.self, forKey: .commandId)
         text = try c.decode(String.self, forKey: .text)
-        history = try c.decode([ChatTurn].self, forKey: .history)
         files = try c.decodeIfPresent([ChatFileText].self, forKey: .files) ?? []
         refs = try c.decodeIfPresent([ExploreWorkspaceRef].self, forKey: .refs) ?? []
         skills = try c.decodeIfPresent([ExploreSkillRef].self, forKey: .skills) ?? []
@@ -103,7 +106,6 @@ public struct ExploreChat: Codable, Equatable {
         try c.encode(sessionId, forKey: .sessionId)
         try c.encode(commandId, forKey: .commandId)
         try c.encode(text, forKey: .text)
-        try c.encode(history, forKey: .history)
         try c.encode(files, forKey: .files)
         try c.encode(refs, forKey: .refs)
         try c.encode(skills, forKey: .skills)
