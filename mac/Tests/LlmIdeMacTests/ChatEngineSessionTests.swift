@@ -42,6 +42,8 @@ struct ChatEngineSessionTests {
     /// intent as `ChatSessionStoreTests`' setUp/tearDown, expressed as a scope
     /// because a `struct` suite has no `deinit` to restore process globals in.
     func withTempStore(_ body: () async -> Void) async {
+        await ChatStoreOverrideGate.shared.acquire()
+        defer { ChatStoreOverrideGate.shared.release() }
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("chat-engine-session-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)

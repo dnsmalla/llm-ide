@@ -75,6 +75,8 @@ struct ChatEngineRunExternalTurnTests {
     /// `try` (runExternalTurn) compiles — a bare `() async -> Void` made the
     /// whole test target fail to build.
     func withTempStore(_ body: () async throws -> Void) async rethrows {
+        await ChatStoreOverrideGate.shared.acquire()
+        defer { ChatStoreOverrideGate.shared.release() }
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("chat-engine-external-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
@@ -404,6 +406,8 @@ final class SuspendableChatTransport: ChatTransport, @unchecked Sendable {
 @Suite("ExplorerMobileEngineResolver", .serialized)
 struct ExplorerMobileEngineResolverTests {
     func withTempStore(_ body: () async -> Void) async {
+        await ChatStoreOverrideGate.shared.acquire()
+        defer { ChatStoreOverrideGate.shared.release() }
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("chat-engine-resolver-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
