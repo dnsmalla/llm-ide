@@ -39,12 +39,6 @@ extension Notification.Name {
     /// send or iPhone `llmide_chat` proxy). LlmChatSheet reloads history.
     static let llmChatTranscriptChanged = Notification.Name("llmChatTranscriptChanged")
 
-    /// Posted after a mobile `explore_chat` turn is persisted to a Mac explorer
-    /// session. `object` is the session UUID string; `CodeAssistantPanel`
-    /// observes it to reload the open chat so iPhone-originated turns appear on
-    /// the Mac (the explorer-panel twin of `llmChatTranscriptChanged`).
-    static let explorerChatTranscriptChanged = Notification.Name("explorerChatTranscriptChanged")
-
     /// Posted when a custom Auto Task's enabled-state changes via a
     /// phone-originated toggle — AutoCodeView observes this to reload its
     /// local `customTasks` snapshot, since CustomAutoTask is a plain struct

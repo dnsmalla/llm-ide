@@ -627,13 +627,16 @@ final class MobileControlManager {
         }
     }
 
-    /// Proxy an explorer chat turn through the backend Code Assistant and
-    /// persist the appended history into the Mac's `ChatSessionStore`, so the
-    /// phone and Mac stay in sync. The reply is sent back as a nested `Output`
-    /// payload (`{stream, done:true}`); failures surface as a `CommandError`
-    /// and are mirrored into the Mac log + `lastError`. Mirrors `handleChat`
-    /// but routes through `codeAssistStream` (live agent progress) and writes
-    /// the user + assistant turns back to the session file.
+    /// Proxy an explorer chat turn through the SAME shared `ChatEngine` the
+    /// Mac Explorer panel uses (`ChatEngineRegistry.shared`, Task 12) — no
+    /// more direct `ChatSessionStore` reads/writes here. Persistence, the
+    /// synthetic-turn append, and the streamed round trip all now go through
+    /// `ChatEngine.runExternalTurn`, which is a 1:1 mirror of the panel's own
+    /// `runTurn`. Before this task, this method wrote straight to
+    /// `ChatSessionStore` and posted `.explorerChatTranscriptChanged` so the
+    /// (separately-owned) panel engine would notice and reload from disk;
+    /// now the panel IS this engine, so a phone-driven turn is visible the
+    /// instant it mutates `engine.messages` — no notification needed.
     private func handleExploreChat(_ chat: ExploreChat) async {
         guard let api else {
             await server?.send(CommandError(commandId: chat.commandId, message: "Backend not configured"))
@@ -644,18 +647,33 @@ final class MobileControlManager {
             return
         }
         // Upfront existence check: a stale sessionId (the session was deleted
-        // on the Mac while the phone still holds an old id) would otherwise
-        // stream a reply that the `if var session` block below silently drops
-        // instead of persisting — Mac↔phone drift with no error. Surface it as
-        // a CommandError so the phone can reload its explorer session list.
-        // The re-check below stays as a race fallback (session deleted
-        // mid-request, between this guard and the post-stream persist).
+        // on the Mac while the phone still holds an old id) must not silently
+        // run a turn against whatever session happens to be active. Surface
+        // it as a CommandError so the phone can reload its explorer session
+        // list.
         guard ChatSessionStore.load(id: sid) != nil else {
             append(.info, "explore_chat: session \(chat.sessionId.prefix(8)) not found")
             await server?.send(CommandError(commandId: chat.commandId, message: "Session not found on Mac — it may have been deleted. Reload your explorer sessions."))
             return
         }
-        let history = chat.history.map { LlmIdeAPIClient.CodeAssistTurn(from: $0) }
+        let engine = ChatEngineRegistry.shared.engine(for: .explorer, api: api)
+        // Put the engine ON the requested session before driving a turn —
+        // `runExternalTurn` (like `runTurn`) always operates on whatever
+        // session is CURRENTLY loaded. `switchSession` no-ops if it's already
+        // current, and persists+finalizes whatever chat was active before
+        // switching away from it. If the id turned out to belong to a
+        // different scope (shouldn't happen — `.explorer` ids are minted only
+        // by this scope — but `switchSession` silently no-ops on a scope
+        // mismatch), the post-switch check below catches it instead of
+        // silently running the turn against the WRONG session.
+        if engine.currentSessionIDString != sid.uuidString {
+            engine.switchSession(to: sid)
+        }
+        guard engine.currentSessionIDString == sid.uuidString else {
+            append(.info, "explore_chat: could not switch to session \(chat.sessionId.prefix(8))")
+            await server?.send(CommandError(commandId: chat.commandId, message: "Could not open that session on your Mac."))
+            return
+        }
         var attachments = MobileExploreBridge.attachments(from: chat.files)
         if let root = mobileWorkspaceURL(), !chat.refs.isEmpty {
             let (refAttachments, refErrors) = MobileWorkspaceSearch.attachments(
@@ -676,32 +694,17 @@ final class MobileControlManager {
                 append(.info, "explore_chat: Mac workspace not wired — attachments/refs may be limited")
             }
         }
-        // Persist the USER turn immediately so it appears on the Mac Explorer
-        // panel before the agent replies (mirrors CodeAssistantPanel.runTurn's
-        // optimistic append), and notify the panel so it reloads — otherwise its
-        // stale in-memory history would later clobber this file back to [].
-        if var session = ChatSessionStore.load(id: sid) {
-            session.messages.append(ChatMessage(
-                wireTurn: LlmIdeAPIClient.CodeAssistTurn(role: .user, content: skillMessage),
-                sessionDate: Date()))
-            if session.title == "New chat" { session.title = String(chat.text.prefix(40)) }
-            ChatSessionStore.save(session)
-            NotificationCenter.default.post(name: .explorerChatTranscriptChanged, object: sid.uuidString)
-        }
         do {
             let commandId = chat.commandId
-            let resp = try await api.codeAssistStream(
+            let reply = try await engine.runExternalTurn(
                 message: skillMessage,
-                language: nil,
+                skillIds: skillIds,
+                attachments: attachments,
+                agentContext: agentContext,
                 model: model,
                 provider: provider,
-                history: history,
-                attachments: attachments,
-                skills: skillIds,
-                agentContext: agentContext,
-                onProgress: { [weak self] progress in
+                onProgress: { [weak self] label in
                     guard let self, !self.isMobileCommandCancelled(commandId) else { return }
-                    let label = progress.label
                     append(.info, "code-assist: \(label)")
                     Task {
                         guard !self.isMobileCommandCancelled(commandId) else { return }
@@ -709,29 +712,11 @@ final class MobileControlManager {
                             commandId: commandId,
                             payload: OutputPayload(stream: label, done: false)))
                     }
-                },
-                // The iPhone companion's chat proxy has no incremental-render
-                // path (its UI only ever showed progress labels, then the
-                // complete reply) — out of scope for the Mac Code Assistant
-                // streaming feature. No-op keeps this surface's behavior
-                // exactly as it was; resp.reply below still carries the full
-                // text via the terminal `done` event either way.
-                onChunk: { _ in }
+                }
             )
             guard !isMobileCommandCancelled(chat.commandId) else { return }
-            // Append the ASSISTANT reply (the user turn was persisted above,
-            // before the stream) and notify the panel so it reloads. The re-load
-            // is a race fallback: if the session was deleted mid-stream the reply
-            // still goes to the phone, but the turn isn't persisted.
-            if var session = ChatSessionStore.load(id: sid) {
-                session.messages.append(ChatMessage(
-                    wireTurn: LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: resp.reply),
-                    sessionDate: Date()))
-                ChatSessionStore.save(session)
-                NotificationCenter.default.post(name: .explorerChatTranscriptChanged, object: sid.uuidString)
-            }
             await server?.send(Output(commandId: chat.commandId,
-                                      payload: OutputPayload(stream: resp.reply, done: true)))
+                                      payload: OutputPayload(stream: reply, done: true)))
         } catch is CancellationError {
             append(.info, "explore_chat cancelled: \(chat.commandId.prefix(8))")
         } catch {
@@ -1080,22 +1065,21 @@ final class MobileControlManager {
 /// The SharedProtocol `ChatTurn` (wire shape) and the Mac-side
 /// `LlmIdeAPIClient.CodeAssistTurn` (Code Assistant view-model) carry the same
 /// `{role, content}` payload but differ in the `id`/role-enum representation.
-/// Both conversion directions live here so the mapping can't drift between the
-/// `explore_load_session` (→) and `handleExploreChat` (←) paths. Defined in
-/// the Mac target (not SharedProtocol) because `CodeAssistTurn` is Mac-local
-/// and a SharedProtocol-side dependency would be circular.
+/// Defined in the Mac target (not SharedProtocol) because `CodeAssistTurn` is
+/// Mac-local and a SharedProtocol-side dependency would be circular.
+///
+/// Only the → direction survives Task 12: `handleExploreChat` used to decode
+/// the phone's own cached `chat.history` (← direction, `CodeAssistTurn.init(
+/// from: ChatTurn)`) into the request it sent. It now drives
+/// `ChatEngine.runExternalTurn`, which packs the request from the engine's
+/// OWN canonical `messages` via `packHistory` — the same source of truth the
+/// Mac panel's own turns use — so the phone's cached copy is no longer read
+/// for that purpose (`explore_load_session`, the ← direction's other would-be
+/// use, only ever needed →, never ←).
 extension ChatTurn {
     /// Code Assistant view-model → SharedProtocol wire shape: drop the
     /// client-only `id`, surface the role as its raw string ("user"/"assistant").
     init(from t: LlmIdeAPIClient.CodeAssistTurn) {
         self.init(role: t.role.rawValue, content: t.content)
-    }
-}
-
-extension LlmIdeAPIClient.CodeAssistTurn {
-    /// SharedProtocol wire shape → Code Assistant view-model. Unknown roles
-    /// fall back to `.user` (matches the prior inline behavior).
-    init(from t: ChatTurn) {
-        self.init(role: .init(rawValue: t.role) ?? .user, content: t.content)
     }
 }

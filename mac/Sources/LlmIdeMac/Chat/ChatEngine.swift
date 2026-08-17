@@ -858,19 +858,6 @@ final class ChatEngine {
         await deleteSession(id)
     }
 
-    /// Reload the active chat from disk and reseed anything derived from it.
-    /// Driven by `.explorerChatTranscriptChanged`: an iPhone `explore_chat`
-    /// persisted a turn into this session's file, so the in-memory copy is
-    /// stale — and would otherwise be written back over the phone's turn by
-    /// the next `persistCurrentChat`. The scope guard mirrors
-    /// `switchSession`'s: a notification naming a chat from another section
-    /// must not load into this engine.
-    func reloadFromDisk(id: UUID) {
-        guard let session = ChatSessionStore.load(id: id), session.scope == scope else { return }
-        messages = session.messages
-        onHistoryReplaced(session.messages)
-    }
-
     // MARK: - History change
 
     /// Persist the chat and announce a newly-arrived assistant turn — the
@@ -1109,5 +1096,129 @@ final class ChatEngine {
     /// existing Stop button (`stop()`) cancels it like any other turn.
     func setRunTask(_ task: Task<Void, Never>?) {
         runTask = task
+    }
+
+    // MARK: - External turn (mobile bridge)
+
+    /// One turn driven by a non-view client (today: the iPhone's
+    /// `explore_chat`, via `MobileControlManager.handleExploreChat` —
+    /// Task 12). This is a 1:1 mirror of `runTurn`'s own body — append the
+    /// user turn, stream, finalize, auto-chain, persist, drain the queue —
+    /// NOT a parallel reimplementation, so the two can never quietly drift.
+    ///
+    /// It takes its transport input as explicit parameters instead of
+    /// through `resolveTransportInput`/`attachmentsForTurn`: those hooks are
+    /// wired to the PANEL's own environment state (model picker,
+    /// `prefLanguage`, active-repo context) in `CodeAssistantPanel.wireEngine()`,
+    /// and are still the no-op default pass-through if the panel has never
+    /// appeared for this scope — a phone-driven turn must resolve its
+    /// model/provider/context from the Mac's OWN settings
+    /// (`MobileExploreBridge`) regardless of whether the Explorer tab is
+    /// even open.
+    ///
+    /// Callers are responsible for making sure the engine is already ON the
+    /// target session (`switchSession(to:)` first, if it isn't the active
+    /// one already) — this operates on whatever session is CURRENTLY loaded,
+    /// exactly like `runTurn`.
+    ///
+    /// Guards on `!busy` and throws `ExternalTurnError.busy` rather than
+    /// silently queuing or racing: `runTurn`/`sendFollowup` mutate
+    /// `messages`/`revealingTurnID`/`runTask` assuming only one turn is ever
+    /// in flight at a time, and this engine is now SHARED (registry-cached)
+    /// with the Mac panel — a concurrent Mac-driven turn on the same
+    /// instance racing this one would corrupt that bookkeeping exactly as
+    /// Task 10's review found for `sendFollowup`'s own `!busy` guard. The
+    /// phone gets a clear, typed "try again" error instead of an unexplained
+    /// hang or a corrupted transcript.
+    func runExternalTurn(
+        message: String,
+        skillIds: [String],
+        attachments: [LlmIdeAPIClient.CodeAttachment],
+        agentContext: AgentContext?,
+        model: String?,
+        provider: String?,
+        onProgress: @escaping (String) -> Void
+    ) async throws -> String {
+        guard !busy else { throw ExternalTurnError.busy }
+        onTurnStart()
+        onRecordPrompt(message)
+        onNudge(message)
+        messages.append(ChatMessage(role: .user, content: message, status: .done, createdAt: Date()))
+        busy = true
+        statusText = ""
+        error = nil
+        agent.pendingTool = nil
+        agent.agentPendingTasks = []
+        // Persist the user turn immediately, mirroring the old
+        // MobileControlManager behavior of writing it before the round
+        // trip starts — disk should not lag a full round-trip behind in
+        // case the app quits mid-turn. A panel showing this SAME instance
+        // already sees it live via `messages` regardless of this write.
+        persistCurrentChat()
+        let streamingID = beginStreamingTurn()
+        do {
+            let recent = packHistory(messages)
+            let input = ChatTransportInput(
+                message: message,
+                history: Array(recent.dropLast()),  // exclude the just-pushed user turn — server appends it
+                attachments: attachments,
+                skills: skillIds,
+                agentContext: agentContext,
+                language: nil,
+                model: model,
+                provider: provider,
+                mode: nil
+            )
+            let resp = try await transport.roundTrip(
+                input,
+                onProgress: { [self] progress in
+                    recordProgress(progress)
+                    onProgress(progress.label)
+                },
+                onChunk: { [self] text in appendStreamedChunk(streamingID, text) }
+            )
+            try Task.checkCancellation()
+            if let idx = messages.firstIndex(where: { $0.id == streamingID }) {
+                messages[idx].content = resp.reply
+            }
+            finishStreamingTurn(
+                streamingID,
+                pendingTool: resp.pendingTool,
+                tasks: resp.tasks,
+                continueNeeded: resp.continueNeeded,
+                usage: resp.usage,
+                mode: resp.mode,
+                stopped: false
+            )
+            await autoChain?(resp.pendingTool, resp.usage)
+            persistCurrentChat()
+            drainQueueOrRelease()
+            return resp.reply
+        } catch {
+            let isCancellation = error is CancellationError || (error as? URLError)?.code == .cancelled
+            if revealingTurnID == streamingID {
+                finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
+            }
+            if !isCancellation {
+                self.error = error.localizedDescription
+                markFailed(streamingID, error)
+            }
+            persistCurrentChat()
+            drainQueueOrRelease()
+            throw error
+        }
+    }
+}
+
+/// Thrown by `ChatEngine.runExternalTurn` when the engine is already mid-turn.
+/// See that method's doc comment for why this is a typed error rather than a
+/// silent queue/no-op.
+enum ExternalTurnError: LocalizedError {
+    case busy
+
+    var errorDescription: String? {
+        switch self {
+        case .busy: return "This chat is busy with another turn — try again in a moment."
+        }
     }
 }

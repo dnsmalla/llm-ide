@@ -170,6 +170,15 @@ struct CodeAssistantPanel: View {
     /// and `api` isn't in scope for a property initializer. The parameter list
     /// and defaults match the memberwise initializer this replaces, so no call
     /// site changes.
+    ///
+    /// As of Task 12, the engine comes from `ChatEngineRegistry.shared`
+    /// rather than being privately constructed here — every panel for a given
+    /// `scope` (and, for `.explorer`, `MobileControlManager`'s mobile bridge
+    /// too) now shares the SAME instance, so a phone-driven turn is visible
+    /// the moment it lands, with no disk-reload notification needed. `@State`
+    /// only actually applies this initial value once per view identity — a
+    /// later re-init of this same panel (e.g. a SwiftUI re-layout) resolves
+    /// back to the same cached engine via the registry, not a fresh one.
     init(api: LlmIdeAPIClient,
          scope: ChatScope,
          initialURL: URL? = nil,
@@ -180,8 +189,7 @@ struct CodeAssistantPanel: View {
         self.initialURL = initialURL
         self.showFileAttachButtons = showFileAttachButtons
         self.showModelPicker = showModelPicker
-        _engine = State(initialValue: ChatEngine(scope: scope,
-                                                 transport: CodeAssistTransport(api: api)))
+        _engine = State(initialValue: ChatEngineRegistry.shared.engine(for: scope, api: api))
     }
 
     var body: some View {
@@ -222,18 +230,6 @@ struct CodeAssistantPanel: View {
             .onAppear { handleOnAppear() }
             .onChange(of: engine.messages) { oldValue, newValue in
                 engine.announceAndPersist(oldValue: oldValue, newValue: newValue)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .explorerChatTranscriptChanged)) { note in
-                // An iPhone explore_chat persisted a turn to this session —
-                // reload so the Mac panel shows it (and so the panel's own
-                // persistCurrentChat can't clobber it with a stale in-memory
-                // copy). The explorer-panel twin of LlmChatSheet's
-                // .llmChatTranscriptChanged handling. The id match stays here
-                // (it reads the notification's payload); the load + scope
-                // check are the engine's.
-                guard let sid = note.object as? String, sid == engine.currentSessionIDString,
-                      let uid = UUID(uuidString: sid) else { return }
-                engine.reloadFromDisk(id: uid)
             }
             .onChange(of: config.activeCLI) { _, _ in
                 modelState.selectedModel = config.defaultModelId
@@ -423,7 +419,22 @@ struct CodeAssistantPanel: View {
         if modelState.selectedProvider.isEmpty {
             modelState.selectedProvider = config.activeCLI.isEmpty ? "anthropic" : config.activeCLI
         }
-        engine.handleOnAppearSessions()
+        // Task 12: the engine is now shared (`ChatEngineRegistry`), so it may
+        // already have a session loaded — from a PRIOR appearance of this
+        // same panel, or from a mobile `explore_chat` that switched it onto a
+        // session before this view ever appeared. `handleOnAppearSessions()`
+        // unconditionally sets `messages` from whatever's on disk for the
+        // remembered pointer, which would clobber a session that's already
+        // live in memory (in particular an in-flight streaming turn a phone
+        // is mid-way through) with a stale, pre-turn snapshot. Only run the
+        // full resolve-or-mint path when the engine has never picked a
+        // session; otherwise just refresh the sidebar list so anything
+        // created/renamed/deleted (by this panel OR the phone) still shows up.
+        if engine.currentSessionIDString.isEmpty {
+            engine.handleOnAppearSessions()
+        } else {
+            engine.refreshSessions()
+        }
         if let url = initialURL, !didAttachInitial {
             didAttachInitial = true
             if addFile(url: url) == .added {
