@@ -1,5 +1,4 @@
 import SwiftUI
-import os.log
 
 /// Global LLM Chat sheet — same `/kb/agent/ask` transcript the iPhone uses via
 /// `llmide_chat`. History is server-persisted so Mac and iPhone stay in sync.
@@ -20,13 +19,24 @@ struct LlmChatSheet: View {
     @State private var confirmingClear = false
     @State private var historyRefreshTask: Task<Void, Never>?
     @FocusState private var inputFocused: Bool
-    private let log = Logger(subsystem: "com.llmide.macapp", category: "LlmChatSheet")
 
     /// Hand-written rather than memberwise: `viewModel` and `engine` must
     /// share the SAME `ChatEngine` instance (the view renders `engine`
     /// directly; the view model drives its turn lifecycle and its
     /// server-history polling), and `@State`'s initial value needs `api` to
     /// build it — `api` isn't in scope for a property initializer.
+    ///
+    /// WARNING: `scope: .explorer` is a borrowed label, not a real scope for
+    /// this chat — this engine never persists a `ChatSession` file (its
+    /// transcript is server-side, via `AgentAskTransport`/`loadHistory`), so
+    /// nothing here actually reads/writes anything keyed by `.explorer`
+    /// today. That's true only as long as no one calls this engine's
+    /// session-file methods (`persistCurrentChat`, `handleOnAppearSessions`,
+    /// `switchSession`, …) — which `LlmChatSheet`/`LlmChatViewModel`
+    /// deliberately never do. A future task wiring persistence onto this
+    /// sheet (Tasks 13/14) must NOT reuse `.explorer` for that — add a
+    /// dedicated `ChatScope` case instead, or it will silently collide with
+    /// the real Explorer panel's saved chats.
     init(api: LlmIdeAPIClient) {
         self.api = api
         let engine = ChatEngine(scope: .explorer, transport: AgentAskTransport(api: api))
@@ -63,6 +73,17 @@ struct LlmChatSheet: View {
         }
         .onChange(of: engine.messages) { oldValue, newValue in
             viewModel.notifyIfTurnFinished(oldValue: oldValue, newValue: newValue)
+            // A connectivity/server failure (never a user-initiated stop —
+            // that's `.stopped`, not `.failed`) leaves the user's prompt
+            // sent-and-gone with no retry affordance yet (Task 16 owns
+            // that); restoring it into the composer at least means the
+            // words aren't lost. `draft = text` unconditionally, matching
+            // the original sheet's synchronous `catch { draft = text }` —
+            // this can overwrite something the user started typing during
+            // the failed round trip, same as the original did.
+            if let recovered = viewModel.recoverableDraftAfterFailure(oldValue: oldValue, newValue: newValue) {
+                draft = recovered
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .llmChatTranscriptChanged)) { _ in
             Task { await viewModel.loadHistory() }
@@ -185,29 +206,38 @@ struct LlmChatSheet: View {
 
     @ViewBuilder
     private func bubble(for msg: ChatMessage) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: msg.role == .user ? "person.fill" : "bubble.left.fill")
-                .foregroundStyle(msg.role == .user ? Color.accentColor : theme.current.accent)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(msg.role == .user ? "You" : "LLM-IDE")
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
-                if msg.role == .user {
-                    // User input is plain text — rendered verbatim, no markdown.
-                    Text(msg.content)
-                        .font(.body)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    AssistantBubbleContent(markdown: msg.content, isDark: theme.current.isDark)
+        // The streaming placeholder starts life with empty content (this
+        // transport never streams chunks into it — it's filled in one shot
+        // when the reply lands) — an empty bubble with a name label and
+        // nothing else would flash on screen for no reason. The "Thinking…"
+        // row below the list already covers this turn's in-progress state.
+        if msg.status == .streaming && msg.content.isEmpty {
+            EmptyView()
+        } else {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: msg.role == .user ? "person.fill" : "bubble.left.fill")
+                    .foregroundStyle(msg.role == .user ? Color.accentColor : theme.current.accent)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(msg.role == .user ? "You" : "LLM-IDE")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                    if msg.role == .user {
+                        // User input is plain text — rendered verbatim, no markdown.
+                        Text(msg.content)
+                            .font(.body)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        AssistantBubbleContent(markdown: msg.content, isDark: theme.current.isDark)
+                    }
                 }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            .padding(10)
+            .background(msg.role == .user ? Color.accentColor.opacity(0.08) : theme.current.accent.opacity(0.08))
+            .cornerRadius(8)
         }
-        .padding(10)
-        .background(msg.role == .user ? Color.accentColor.opacity(0.08) : theme.current.accent.opacity(0.08))
-        .cornerRadius(8)
     }
 
     private var inputRow: some View {
@@ -226,6 +256,12 @@ struct LlmChatSheet: View {
     /// Code Assistant composer's `sendButton` (`ChatComposer.swift`), just
     /// without that view's queueing/autonomous-agent affordances, which
     /// don't apply to this sheet's single-shot `/kb/agent/ask` turns.
+    ///
+    /// WARNING: unlike `/code-assist`, `/kb/agent/ask` has no server-side
+    /// cancel — see `LlmChatViewModel.stop()`'s doc comment. The bubble
+    /// really does show `.stopped` immediately, it just isn't guaranteed to
+    /// stay that way once the next history poll fetches what the server
+    /// finished anyway.
     private var sendButton: some View {
         Button {
             if engine.busy {

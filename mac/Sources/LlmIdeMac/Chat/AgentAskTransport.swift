@@ -12,20 +12,14 @@ protocol AgentAskSending: Sendable {
                   model: String?, provider: String?) async throws -> String
 }
 
-/// Seam over the two `/kb/agent/ask/history` endpoints `LlmChatViewModel`
-/// needs (`AgentAskSending` above only covers the send side) — so
-/// `loadHistory()`/`clearHistory()` can be driven by a canned double instead
-/// of a live server.
-protocol AgentAskHistoryFetching: Sendable {
-    func listAgentAskHistory(limit: Int) async throws -> [LlmIdeAPIClient.AgentAskHistoryItem]
-    @discardableResult
-    func clearAgentAskHistory() async throws -> Int
-}
-
-// `LlmIdeAPIClient`'s existing methods already match both signatures above
-// (default parameter values aren't part of a method's type, so they don't
-// block conformance) — no forwarding shims needed.
-extension LlmIdeAPIClient: AgentAskSending, AgentAskHistoryFetching {}
+// `LlmIdeAPIClient.askAgent`'s existing signature already matches
+// `AgentAskSending` above (default parameter values aren't part of a
+// method's type, so they don't block conformance) — no forwarding shim
+// needed. `AgentAskHistoryFetching`, the OTHER seam `LlmChatViewModel`
+// needs (`listAgentAskHistory`/`clearAgentAskHistory`), lives in
+// `LlmChatViewModel.swift` next to its one consumer, with its own
+// `extension LlmIdeAPIClient: AgentAskHistoryFetching {}`.
+extension LlmIdeAPIClient: AgentAskSending {}
 
 /// `ChatTransport` for the LLM Chat sheet's `/kb/agent/ask` endpoint — the
 /// same shared transcript the iPhone's `llmide_chat` uses via

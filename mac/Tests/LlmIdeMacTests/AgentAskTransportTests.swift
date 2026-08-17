@@ -76,6 +76,36 @@ final class HangingTransport: ChatTransport, @unchecked Sendable {
     }
 }
 
+/// A `AgentAskHistoryFetching` double whose `listAgentAskHistory` can be made
+/// to suspend indefinitely until `resume()` is called — for reproducing the
+/// specific race `loadHistory`'s post-await busy re-check guards against: a
+/// turn starting WHILE a poll is suspended on the network call, after the
+/// poll's pre-await guard already passed.
+@MainActor
+final class SuspendableHistoryFetcher: AgentAskHistoryFetching, @unchecked Sendable {
+    var items: [LlmIdeAPIClient.AgentAskHistoryItem] = []
+    private var shouldSuspend = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func suspendNextCall() { shouldSuspend = true }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
+    }
+
+    func listAgentAskHistory(limit: Int) async throws -> [LlmIdeAPIClient.AgentAskHistoryItem] {
+        if shouldSuspend {
+            shouldSuspend = false
+            await withCheckedContinuation { self.continuation = $0 }
+        }
+        return items
+    }
+
+    @discardableResult
+    func clearAgentAskHistory() async throws -> Int { 0 }
+}
+
 /// Local, non-`Sendable`-capturing counter for asserting how many times a
 /// `NotificationCenter` observer fired — avoids the "mutable var captured by
 /// an escaping closure" shape entirely.
@@ -256,6 +286,69 @@ struct LlmChatViewModelTests {
         #expect(vm.engine.messages.isEmpty)
     }
 
+    @Test("a transient loadHistory failure clears on the next successful poll")
+    func lastErrorClearsOnSuccessfulLoad() async {
+        struct Boom: Error {}
+        let (vm, _, history) = makeViewModel()
+        history.listError = Boom()
+        await vm.loadHistory()
+        #expect(vm.lastError != nil)
+
+        history.listError = nil
+        history.items = [.init(seq: 1, role: "user", content: "hi", createdAt: 0)]
+        await vm.loadHistory()
+        #expect(vm.lastError == nil)
+    }
+
+    @Test("send() clears a stale lastError left over from a previous history-fetch failure")
+    func sendClearsStaleLastError() async {
+        struct Boom: Error {}
+        let (vm, transport, history) = makeViewModel()
+        history.listError = Boom()
+        await vm.loadHistory()
+        #expect(vm.lastError != nil)
+
+        transport.result = .init(reply: "ok", pendingTool: nil, tasks: nil,
+                                 continueNeeded: nil, usage: nil, mode: nil)
+        vm.send("hello")
+        // lastError is cleared synchronously at the top of send(), before
+        // the spawned turn Task even runs — no need to pump the run loop.
+        #expect(vm.lastError == nil)
+    }
+
+    @Test("loadHistory re-checks busy AFTER the await — a turn starting mid-poll isn't clobbered")
+    func loadHistoryRaceAfterAwait() async {
+        let engine = ChatEngine(scope: .explorer, transport: HangingTransport())
+        let history = SuspendableHistoryFetcher()
+        history.items = [.init(seq: 1, role: "user", content: "stale server snapshot", createdAt: 0)]
+        history.suspendNextCall()
+        let vm = LlmChatViewModel(engine: engine, historyAPI: history)
+
+        // The poll starts — it passes the PRE-await busy guard (nothing is
+        // running yet) and then suspends inside `listAgentAskHistory`,
+        // simulating a slow network call.
+        let pollTask = Task { await vm.loadHistory() }
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        #expect(engine.busy == false)
+
+        // A turn starts WHILE the poll is still suspended on its network call.
+        vm.send("hello")
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        #expect(engine.busy == true)
+
+        // Let the poll's await resume. The POST-await guard must now see
+        // `engine.busy == true` and bail BEFORE calling `replaceMessages` —
+        // otherwise it would wipe out "hello" and its in-flight streaming
+        // placeholder with the stale pre-turn snapshot it fetched.
+        history.resume()
+        await pollTask.value
+
+        #expect(engine.messages.contains { $0.content == "hello" })
+        #expect(!engine.messages.contains { $0.content == "stale server snapshot" })
+
+        vm.stop()
+    }
+
     @Test("clearHistory empties the transcript, calls through to clear, and posts llmChatTranscriptChanged")
     func clearHistoryPostsNotification() async {
         let (vm, transport, history) = makeViewModel()
@@ -301,9 +394,9 @@ struct LlmChatViewModelTests {
         #expect(counter.value == 0)
     }
 
-    @Test("notifyIfTurnFinished posts only when a new DONE assistant turn was appended")
+    @Test("notifyIfTurnFinished posts only for a turn THIS view model started, and only once")
     func notifyIfTurnFinishedGates() {
-        let (vm, _, _) = makeViewModel()
+        let (vm, transport, _) = makeViewModel()
         let counter = Counter()
         let observer = NotificationCenter.default.addObserver(
             forName: .llmChatTranscriptChanged, object: nil, queue: nil
@@ -314,16 +407,54 @@ struct LlmChatViewModelTests {
         let doneAssistant = ChatMessage(role: .assistant, content: "ok", status: .done, createdAt: Date())
         let streamingAssistant = ChatMessage(role: .assistant, content: "", status: .streaming, createdAt: Date())
 
-        // Growing history ending in a DONE assistant turn → posts.
+        // Before send() ever ran, this isn't "our own turn" — must not post
+        // even though the shape otherwise qualifies. This is exactly what a
+        // poll observing an iPhone-originated turn's growth looks like.
         vm.notifyIfTurnFinished(oldValue: [userMsg], newValue: [userMsg, doneAssistant])
-        #expect(counter.value == 1)
+        #expect(counter.value == 0)
+
+        // send() is what flips the gate — the transport doesn't even need to
+        // resolve for this test, since we drive notifyIfTurnFinished with
+        // hand-built arrays rather than the engine's own messages.
+        transport.result = .init(reply: "irrelevant", pendingTool: nil, tasks: nil,
+                                 continueNeeded: nil, usage: nil, mode: nil)
+        vm.send("go")
 
         // Growing history ending in a STREAMING placeholder → must not post yet.
         vm.notifyIfTurnFinished(oldValue: [userMsg], newValue: [userMsg, streamingAssistant])
+        #expect(counter.value == 0)
+
+        // Growing history ending in a DONE assistant turn → posts, and
+        // consumes the gate.
+        vm.notifyIfTurnFinished(oldValue: [userMsg], newValue: [userMsg, doneAssistant])
         #expect(counter.value == 1)
 
-        // Same-size history (e.g. an in-place content mutation) → no post.
-        vm.notifyIfTurnFinished(oldValue: [userMsg, doneAssistant], newValue: [userMsg, doneAssistant])
+        // The gate was consumed — a later, unrelated "done" transition must
+        // not re-post on its own.
+        vm.notifyIfTurnFinished(oldValue: [userMsg], newValue: [userMsg, doneAssistant])
         #expect(counter.value == 1)
+    }
+
+    @Test("recoverableDraftAfterFailure returns the user's prompt on the transition into .failed, once")
+    func recoverableDraftAfterFailureFiresOnce() {
+        let (vm, _, _) = makeViewModel()
+        let userMsg = ChatMessage(role: .user, content: "please help", status: .done, createdAt: Date())
+        let failedAssistant = ChatMessage(role: .assistant, content: "", status: .failed, createdAt: Date())
+
+        #expect(vm.recoverableDraftAfterFailure(oldValue: [userMsg], newValue: [userMsg, failedAssistant])
+                == "please help")
+        // Already failed BEFORE this change (same id, same status) — a later,
+        // unrelated onChange delivery for the same value must return nil so
+        // the view doesn't stomp on whatever the user has since typed.
+        #expect(vm.recoverableDraftAfterFailure(oldValue: [userMsg, failedAssistant],
+                                                 newValue: [userMsg, failedAssistant]) == nil)
+    }
+
+    @Test("recoverableDraftAfterFailure returns nil for a user-initiated stop")
+    func recoverableDraftAfterFailureIgnoresStopped() {
+        let (vm, _, _) = makeViewModel()
+        let userMsg = ChatMessage(role: .user, content: "please help", status: .done, createdAt: Date())
+        let stoppedAssistant = ChatMessage(role: .assistant, content: "partial", status: .stopped, createdAt: Date())
+        #expect(vm.recoverableDraftAfterFailure(oldValue: [userMsg], newValue: [userMsg, stoppedAssistant]) == nil)
     }
 }
