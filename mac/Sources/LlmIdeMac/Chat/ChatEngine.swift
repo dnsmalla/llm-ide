@@ -19,6 +19,18 @@ import Foundation
 ///     injected closure that defaults to a no-op. The panel wires them in
 ///     Task 7; until then the engine is exercised only by its own tests and
 ///     the panel keeps running its own copies of these methods.
+///
+/// Task 17 split the grown file along its MARK sections — all pure moves,
+/// no behavior change. This file keeps the type declaration (stored state,
+/// hooks, init), the turn lifecycle, and streaming. Session management
+/// lives in ChatEngine+Session.swift, wire-history packing in
+/// ChatEngine+History.swift, panel-driven writes in
+/// ChatEngine+PanelWrites.swift, the phone-driven turn surface in
+/// ChatEngine+ExternalTurn.swift, and the auto-chain policy types in
+/// ChatEngine+AutoChain.swift. Because extensions can't hold stored
+/// properties (and Swift's `private` is file-scoped), the state those files
+/// mutate is internal rather than `private(set)` — still engine-owned by
+/// convention: nothing outside ChatEngine's own files writes it.
 @MainActor
 @Observable
 final class ChatEngine {
@@ -40,12 +52,12 @@ final class ChatEngine {
     /// encoding all of that in magic content strings the view had to sniff.
     /// The wire shape is produced on the way OUT only, by `wireTurn()` /
     /// `historyForRequest`; the server contract is unchanged.
-    private(set) var messages: [ChatMessage] = []
-    private(set) var busy = false
+    var messages: [ChatMessage] = []
+    var busy = false
     /// Live agent status streamed from /code-assist (SSE): "Searching the web…",
     /// "Writing the answer…", etc. Shown in place of a static "Thinking…" so a
     /// 60–90s agent turn doesn't look hung. Reset at the start of each turn.
-    private(set) var statusText = ""
+    var statusText = ""
     /// Error banner text for the transcript. Publicly settable, unlike the
     /// rest of the turn state: the panel raises its own failures here
     /// (`applyPendingEdit`, `autoChainPendingAction`, `/model`) and the
@@ -54,15 +66,15 @@ final class ChatEngine {
     var error: String?
     /// Messages the user submitted while a turn was running, in FIFO order; they
     /// auto-send one per turn as the current run finishes (or is stopped).
-    private(set) var queued: [QueuedMessage] = []
+    var queued: [QueuedMessage] = []
     /// The assistant turn currently receiving live text — real token streaming
     /// from the server's SSE `chunk` events, mutated in place via
     /// `beginStreamingTurn`/`appendStreamedChunk`/`finishStreamingTurn`.
     /// nil once nothing is streaming.
-    private(set) var revealingTurnID: UUID?
-    private(set) var revealedCount = 0
+    var revealingTurnID: UUID?
+    var revealedCount = 0
     /// Handle to the in-flight user turn, so `stop()` can cancel it.
-    private(set) var runTask: Task<Void, Never>?
+    var runTask: Task<Void, Never>?
     /// Handle to the in-flight EXTERNAL (phone-driven) turn, for the same
     /// reason `runTask` exists: `stop()` — the Mac panel's Stop button — and
     /// `resetActiveTurnState()` must be able to cancel a phone turn that is
@@ -70,13 +82,13 @@ final class ChatEngine {
     /// because the result types differ (`String`/`Error`, not `Void`).
     /// Owned by `runExternalTurn`; see its doc comment for how cancellation
     /// reaches it from both surfaces.
-    private(set) var externalRunTask: Task<String, Error>?
+    var externalRunTask: Task<String, Error>?
     /// Bumped every time the active chat session changes (create/switch/
     /// delete-fallback). Captured by the auto-continue `asyncAfter` closure
     /// before its delay; if the epoch has moved on by the time it fires, the
     /// closure no-ops instead of starting a turn against a different chat's
     /// history.
-    private(set) var sessionEpoch: UInt = 0
+    var sessionEpoch: UInt = 0
     /// Measured render height per assistant turn, keyed by MESSAGE id, so each
     /// markdown web-view bubble can be sized to its content in the scroll list.
     /// Written by the VIEW (`ChatMessageList`), so it stays publicly settable
@@ -96,10 +108,10 @@ final class ChatEngine {
     /// Saved chats for `scope`, newest `lastUsedAt` first. Reloaded from disk
     /// by `refreshSessions()` — deliberately NOT on every history change; see
     /// `persistCurrentChat`'s doc comment.
-    private(set) var sessions: [ChatSession] = []
+    var sessions: [ChatSession] = []
     /// UUID string of the chat currently loaded into `messages`. Empty until
     /// `handleOnAppearSessions()` resolves (or mints) one.
-    private(set) var currentSessionIDString = ""
+    var currentSessionIDString = ""
 
     /// Agent-turn metadata. The engine owns it; the panel reads the same
     /// object (it is a reference type, so both see one state).
@@ -468,7 +480,9 @@ final class ChatEngine {
     /// leaving a silent empty bubble behind an error banner. Separate from
     /// `finishStreamingTurn(stopped:)`, which runs first and handles the
     /// stream/chain teardown that a stop and a failure share.
-    private func markFailed(_ id: UUID, _ error: Error) {
+    /// Internal (not private) since Task 17's file split: the external-turn
+    /// extension file calls it from its catch paths.
+    func markFailed(_ id: UUID, _ error: Error) {
         guard let idx = messages.firstIndex(where: { $0.id == id }) else { return }
         messages[idx].status = .failed
         var metadata = messages[idx].metadata ?? ChatMessage.Metadata()
@@ -482,7 +496,9 @@ final class ChatEngine {
     /// the `onProgress` closure `codeAssistRoundTrip` passed to
     /// `api.codeAssistStream`; shared by both round-trip sites, which each
     /// passed an identical body.
-    private func recordProgress(_ progress: LlmIdeAPIClient.AgentProgress) {
+    /// Internal (not private) since Task 17's file split: the external-turn
+    /// extension file forwards progress through it.
+    func recordProgress(_ progress: LlmIdeAPIClient.AgentProgress) {
         statusText = progress.label
         // Keep a durable row for each TOOL step (not for thinking/writing,
         // which are momentary): this is the record that replaces the raw fence
@@ -614,801 +630,4 @@ final class ChatEngine {
         }
     }
 
-    // MARK: - Session management
-    //
-    // Moved 1:1 from `CodeAssistantPanel+Session.swift` (the panel keeps its
-    // own copies until Task 7 rewires it). Three mechanical changes, all
-    // forced by the move out of the view:
-    //
-    //  1. `persistCurrentChat(history:)` loses its parameter — the engine owns
-    //     `messages`, so it applies the same 50-turn cap its callers used to
-    //     pass in.
-    //  2. `rebuildSentPrompts(from:)` (composer state, still panel-owned)
-    //     becomes the `onHistoryReplaced` hook; `expandedTurns.removeAll()`
-    //     (view expand state) and the composer/attachment resets become the
-    //     `onResetActiveTurnExtra` / `onResetTransientStateExtra` hooks.
-    //  3. `deleteSession`'s `Task.detached { api.forgetSessionMemory(…) }`
-    //     becomes the injected `forgetSessionMemory` closure (see below for
-    //     why it moved to the tail of the method).
-
-    /// UserDefaults key holding the last-active chat id for this scope.
-    private var pointerKey: String { "chat.current.\(scope.rawValue)" }
-
-    /// Persist `messages` into the current UUID session file, deriving a
-    /// title from the first user turn if it's still "New chat".
-    ///
-    /// Does NOT call `refreshSessions()` — this runs on every history change
-    /// (i.e. every turn), and the sidebar/dropdown session list only needs
-    /// to reflect the latest title/timestamp when it's actually shown or
-    /// when sessions are created/switched/deleted. Reloading the list from
-    /// disk on every message was wasted work on the hot path.
-    ///
-    /// Only the last 50 turns are written — the same cap every caller of the
-    /// panel's `persistCurrentChat(history:)` applied at the call site.
-    func persistCurrentChat() {
-        guard let id = UUID(uuidString: currentSessionIDString) else { return }
-        let capped = Array(messages.suffix(50))
-        var session = ChatSessionStore.load(id: id) ?? ChatSession(id: id, scope: scope)
-        session.scope = scope
-        // A straight assignment as of Task 9 — `messages` IS the persisted
-        // shape now, so ids/`createdAt`/status/tool steps carry through
-        // untouched. (Task 8 needed a position-by-position reconciliation
-        // against the file on disk here, because the engine's own array was
-        // still `[CodeAssistTurn]` and every persist had to re-synthesize
-        // `ChatMessage`s — handing all 50 retained messages a brand-new id
-        // and a `createdAt` of "now" on every single turn unless carefully
-        // matched up. Owning `[ChatMessage]` end-to-end removes the problem
-        // rather than compensating for it; the identity guarantee is the
-        // same, and `ChatEngineSessionTests.persistPreservesIdentity` still
-        // pins it.)
-        session.messages = capped
-        if session.title == "New chat" || session.title.isEmpty {
-            if let firstUser = capped.first(where: { $0.role == .user }) {
-                let raw = firstUser.content
-                    .replacingOccurrences(of: "\n", with: " ")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if !raw.isEmpty {
-                    session.title = String(raw.prefix(40))
-                }
-            }
-        }
-        ChatSessionStore.save(session)
-    }
-
-    /// Reload `sessions` for this scope from disk, newest first.
-    func refreshSessions() {
-        sessions = ChatSessionStore.list(for: scope)
-    }
-
-    /// Renames a saved chat. Safe from being clobbered later:
-    /// persistCurrentChat's auto-title-from-first-message logic only fires
-    /// when the title is still "New chat"/empty, so any other title —
-    /// including a manual rename — is left alone on every later save.
-    func renameSession(_ id: UUID, to newTitle: String) {
-        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, var session = ChatSessionStore.load(id: id) else { return }
-        session.title = String(trimmed.prefix(60))
-        ChatSessionStore.save(session)
-        refreshSessions()
-    }
-
-    /// Mirror `currentSessionIDString` to UserDefaults so the current chat
-    /// survives relaunch.
-    func rememberCurrentPointer() {
-        UserDefaults.standard.set(currentSessionIDString, forKey: pointerKey)
-    }
-
-    /// Resolve which chat this scope should show on appear: migrate any legacy
-    /// per-scope file, load the session list, then restore the remembered
-    /// pointer → fall back to the newest session → mint a fresh one. Sets
-    /// `messages` itself (like every other session-swap method here) and
-    /// returns it for the caller's convenience.
-    ///
-    /// Extracted from `CodeAssistantPanel.handleOnAppear`, which also does
-    /// model-picker and initial-attachment setup — that half stays in the view.
-    @discardableResult
-    func handleOnAppearSessions() -> [ChatMessage] {
-        _ = ChatSessionStore.migrateScopeFileIfNeeded(for: scope)
-        refreshSessions()
-        if currentSessionIDString.isEmpty {
-            currentSessionIDString = UserDefaults.standard.string(forKey: pointerKey) ?? ""
-        }
-        suppressHistoryAnnounce = true
-        if let cur = UUID(uuidString: currentSessionIDString),
-           let session = ChatSessionStore.load(id: cur),
-           session.scope == scope {
-            messages = session.messages
-            onHistoryReplaced(session.messages)
-        } else if let newest = sessions.first {
-            currentSessionIDString = newest.id.uuidString
-            messages = newest.messages
-            onHistoryReplaced(newest.messages)
-            rememberCurrentPointer()
-        } else {
-            // No usable pointer and no saved chats for this scope — start one.
-            // (mintFreshSession clears `messages` itself.)
-            mintFreshSession()
-        }
-        DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
-        return messages
-    }
-
-    /// Cancel any in-flight turn and clear per-conversation transient
-    /// state (`busy`, `queued`, plus whatever `onResetActiveTurnExtra` owns —
-    /// the panel's `expandedTurns`). Called whenever the active chat is
-    /// swapped out (create/switch/delete) so a running reply can't land its
-    /// result in — or leave `busy` stuck locking — the newly active chat, and
-    /// queued messages / expanded-message ids don't survive the swap.
-    func resetActiveTurnState() {
-        runTask?.cancel()
-        runTask = nil
-        externalRunTask?.cancel()
-        externalRunTask = nil
-        busy = false
-        queued.removeAll()
-        onResetActiveTurnExtra()
-        // runTask?.cancel() above is fire-and-forget — the actual
-        // CancellationError cleanup inside runTurn's/sendFollowup's catch
-        // block runs asynchronously and is NOT guaranteed to complete before
-        // callers of this function persist or swap `messages` right after it
-        // returns (session switch/create/delete). Finalize any in-flight
-        // streaming turn synchronously here instead, so the outgoing
-        // session's placeholder is never left unfinished when persisted.
-        if let streamingID = revealingTurnID {
-            finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
-        } else {
-            revealedCount = 0
-        }
-    }
-
-    /// Reset all agent + transient state for a freshly created, switched-to,
-    /// or fallback chat. Does NOT touch `messages` — callers are responsible
-    /// for that. If the caller also fires `onHistoryReplaced` (i.e. it's
-    /// loading a non-empty history rather than starting a blank chat), fire it
-    /// AFTER this so its seeded composer recall state isn't clobbered by
-    /// `onResetTransientStateExtra`'s blanket reset.
-    ///
-    /// Bumps `sessionEpoch` and mints a fresh `agentSessionId`, so anything
-    /// tied to the outgoing session — in particular the auto-continue
-    /// `asyncAfter` closure scheduled from `finishStreamingTurn` — can detect
-    /// the switch and no-op instead of acting on the new session's history.
-    func resetTransientSessionState() {
-        agent.pendingTool = nil
-        error = nil
-        agent.nudgePrompt = nil
-        agent.agentSessionId = UUID().uuidString
-        agent.agentPendingTasks = []
-        agent.agentIsAutonomous = false
-        agent.agentStopRequested = false
-        sessionEpoch += 1
-        // Composer/attachment state the panel still owns (Task 14 moves it).
-        // Order against the engine-owned resets above is immaterial — the two
-        // sets of fields are disjoint.
-        onResetTransientStateExtra()
-    }
-
-    /// Save a fresh session as the new current one, point all the bookkeeping
-    /// (pointer, defaults, sessions list) at it, and reset transient state
-    /// for a blank chat. Shared tail of `createNewSession` and the
-    /// no-sessions-left branch of `deleteSession`.
-    func mintFreshSession() {
-        let fresh = ChatSession(scope: scope)
-        ChatSessionStore.save(fresh)
-        currentSessionIDString = fresh.id.uuidString
-        rememberCurrentPointer()
-        refreshSessions()
-        messages = []
-        resetTransientSessionState()
-    }
-
-    /// Start a new empty chat for this scope. No-op if the current chat is
-    /// already an untouched "New chat" (avoids duplicate empty rows from
-    /// repeated taps on "+ New chat").
-    func createNewSession() {
-        if messages.isEmpty {
-            let title = sessions.first(where: { $0.id.uuidString == currentSessionIDString })?.title ?? "New chat"
-            if title == "New chat" || title.isEmpty { return }
-        }
-        // Finalize any in-flight stream BEFORE persisting — otherwise an
-        // unfinished placeholder turn could be written to disk (see
-        // resetActiveTurnState's doc comment).
-        resetActiveTurnState()
-        persistCurrentChat()
-        mintFreshSession()
-    }
-
-    /// Switch the active chat to `id`, persisting the outgoing chat first.
-    func switchSession(to id: UUID) {
-        guard id.uuidString != currentSessionIDString else { return }
-        guard let session = ChatSessionStore.load(id: id), session.scope == scope else { return }
-        // Finalize any in-flight stream BEFORE persisting — otherwise an
-        // unfinished placeholder turn could be written to disk (see
-        // resetActiveTurnState's doc comment).
-        resetActiveTurnState()
-        persistCurrentChat()
-        currentSessionIDString = id.uuidString
-        rememberCurrentPointer()
-        resetTransientSessionState()
-        suppressHistoryAnnounce = true
-        messages = session.messages
-        onHistoryReplaced(session.messages)
-        DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
-        ChatSessionStore.save(session)
-        refreshSessions()
-    }
-
-    /// Load `id` into a BRAND-NEW, otherwise-untouched engine — for a caller
-    /// that needs to drive a turn against a session without going through
-    /// `switchSession`'s side effects, which assume the engine already has
-    /// something loaded that is visibly rendered somewhere: `resetActiveTurnState()`
-    /// (finalizes/cancels a prior in-flight turn), `rememberCurrentPointer()`
-    /// (overwrites the SCOPE's shared "last active chat" UserDefaults pointer
-    /// — wrong for an engine nothing is displaying), and `resetTransientSessionState()`
-    /// (bumps `sessionEpoch`, resets agent state).
-    ///
-    /// Added for Task 12's mobile-bridge fix (`ExplorerMobileEngineResolver`):
-    /// a phone-driven turn for an `.explorer` session the Mac ISN'T currently
-    /// showing must not alias — or mutate any bookkeeping belonging to — the
-    /// shared, visibly-rendered engine. Instead the caller constructs a fresh
-    /// `ChatEngine` and loads it via this method, which does only the two
-    /// things a never-before-used engine actually needs: point it at the
-    /// right session, and populate `messages` from disk.
-    ///
-    /// Returns `false` (no-op) if `id` doesn't exist or belongs to a
-    /// different scope — same existence/scope contract as `switchSession`.
-    @discardableResult
-    func loadSessionForBackgroundUse(id: UUID) -> Bool {
-        guard let session = ChatSessionStore.load(id: id), session.scope == scope else { return false }
-        currentSessionIDString = id.uuidString
-        messages = session.messages
-        return true
-    }
-
-    /// Delete chat `id`. If it was the active chat, switch to the next most
-    /// recent session, or mint a fresh empty one if none remain.
-    ///
-    /// `async` only because of the session-memory forget at the tail. Every
-    /// state change below still happens before the first suspension point, so
-    /// a caller's `Task { await engine.deleteSession(id) }` updates the UI in
-    /// the same turn the panel's old synchronous call did.
-    func deleteSession(_ id: UUID) async {
-        // Captured once: the panel's version read `currentSessionIDString`
-        // twice inside one synchronous body, so both reads saw the same value.
-        let wasActive = id.uuidString == currentSessionIDString
-        if wasActive { resetActiveTurnState() }
-        ChatSessionStore.delete(id: id)
-        refreshSessions()
-        if wasActive {
-            if let next = sessions.first {
-                currentSessionIDString = next.id.uuidString
-                rememberCurrentPointer()
-                resetTransientSessionState()
-                suppressHistoryAnnounce = true
-                messages = next.messages
-                onHistoryReplaced(next.messages)
-                DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
-            } else {
-                // No sessions left for this scope — mint a blank one and
-                // point everything (pointer, defaults, sessions list) at it.
-                mintFreshSession()
-            }
-        }
-        // Delete this chat's session memory (kb/session-memory.mjs — a real DB
-        // table, distinct from project memory, which is durable and untouched
-        // by this), so facts captured from a chat the user has thrown away
-        // don't keep coming back in every later prompt. Last, and awaited
-        // rather than detached: the chat file and the UI are already updated,
-        // so a slow/failed forget delays nothing the user can see (and a
-        // failure is recoverable by a later delete).
-        await forgetSessionMemory(id.uuidString)
-    }
-
-    /// Header trash: delete the current chat (mints a fresh empty one if it
-    /// was the last remaining session for this scope).
-    func clearCurrentChat() async {
-        guard let id = UUID(uuidString: currentSessionIDString) else {
-            createNewSession()
-            return
-        }
-        await deleteSession(id)
-    }
-
-    // MARK: - History change
-
-    /// Persist the chat and announce a newly-arrived assistant turn — the
-    /// panel's `handleHistoryChange`, driven by `.onChange(of: engine.messages)`.
-    ///
-    /// Only a GROWING history announces, and only when the new last turn is
-    /// the assistant's: an in-place edit (streamed chunks land as content
-    /// mutations on an existing turn) must not re-read the whole reply on
-    /// every chunk. `suppressHistoryAnnounce` covers the two cases where the
-    /// array does grow but nothing should be read aloud — a bulk session load
-    /// and the empty streaming placeholder (`finishStreamingTurn` announces
-    /// that one itself, once, with the complete text).
-    ///
-    /// The announcement goes through `sendAnnouncement` rather than
-    /// `NSAccessibility.post` directly, so the engine stays AppKit-free and
-    /// silent under test — same as `finishStreamingTurn`.
-    func announceAndPersist(oldValue: [ChatMessage],
-                            newValue: [ChatMessage]) {
-        persistCurrentChat()
-        guard !suppressHistoryAnnounce else { return }
-        if newValue.count > oldValue.count,
-           let last = newValue.last,
-           last.role == .assistant {
-            let text = String(last.content.prefix(200))
-            if !text.isEmpty {
-                sendAnnouncement(text)
-            }
-        }
-    }
-
-    // MARK: - History packing for the wire
-
-    /// Total characters of chat history sent per request. The server applies
-    /// its own (smaller, prompt-aware) budget — see `config.history` and
-    /// `selectHistoryTurns` in `llm_agent/runtime/loop.mjs` — so this only has
-    /// to keep the POST body clear of the server's 8 MB request-body limit.
-    static let maxHistoryChars = 400_000
-    /// Per-turn clip. One runaway turn (a big command output, a whole file)
-    /// must not be able to consume the entire budget by itself.
-    static let maxHistoryTurnChars = 24_000
-
-    /// The history to replay on the wire: as much as fits `maxHistoryChars`,
-    /// newest-first, ALWAYS including the first user turn.
-    ///
-    /// Replaces a flat `history.suffix(8)`. Eight turns sounds generous until
-    /// you count tool calls: every client-executed tool (bash / update-file /
-    /// git-op) appends a synthetic result turn plus the agent's reply, so a
-    /// four-step task pushed the user's original request out of the window and
-    /// the agent carried on with no idea what it had been asked to do.
-    ///
-    /// Takes its input as a parameter rather than reading `self.messages`:
-    /// both round-trip sites pack the history they are about to send, and the
-    /// contract is pinned turn-by-turn by `HistoryForRequestTests`.
-    ///
-    /// Wire-encodes FIRST (`wireTurn()`, which re-renders a `.toolResult`
-    /// message through `ToolResultPayload.legacyContent()` and re-attaches the
-    /// stopped marker), then budgets. Both budgets have to measure what is
-    /// actually SENT — a tool-result message's `content` and its reconstructed
-    /// wire text can differ, and it's the latter that lands in the POST body.
-    func historyForRequest(_ msgs: [ChatMessage])
-        -> [LlmIdeAPIClient.CodeAssistTurn]
-    {
-        let clipped = msgs.map { $0.wireTurn() }.map { turn -> LlmIdeAPIClient.CodeAssistTurn in
-            guard turn.content.count > Self.maxHistoryTurnChars else { return turn }
-            return .init(role: turn.role,
-                         content: String(turn.content.prefix(Self.maxHistoryTurnChars))
-                             + "\n…(turn clipped)")
-        }
-        let total = clipped.reduce(0) { $0 + $1.content.count }
-        if total <= Self.maxHistoryChars { return clipped }
-
-        // Reserve the anchor (first user turn) before packing the tail.
-        let anchorIdx = clipped.firstIndex { $0.role == .user }
-        var budget = Self.maxHistoryChars
-        var anchor: LlmIdeAPIClient.CodeAssistTurn?
-        if let idx = anchorIdx, clipped[idx].content.count <= budget {
-            anchor = clipped[idx]
-            budget -= clipped[idx].content.count
-        }
-        var tail: [LlmIdeAPIClient.CodeAssistTurn] = []
-        let stopAt = anchor == nil ? -1 : (anchorIdx ?? -1)
-        var i = clipped.count - 1
-        while i > stopAt {
-            let cost = clipped[i].content.count
-            if cost > budget { break }
-            budget -= cost
-            tail.append(clipped[i])
-            i -= 1
-        }
-        return (anchor.map { [$0] } ?? []) + tail.reversed()
-    }
-
-    // MARK: - Panel-driven writes
-    //
-    // `messages` is `private(set)` because the engine owns the turn lifecycle.
-    // These are the narrow openings the panel still needs, each matching one
-    // thing it did directly when it owned the array.
-
-    /// Append a synthetic turn the PANEL produced: the "(executed create-issue
-    /// → …)" / "(bash result …)" / "(applied update to …)" acknowledgements
-    /// every client-executed tool writes so the agent sees its own result as
-    /// conversation context, and the placeholder a chat-triggered Loop run
-    /// streams its log into.
-    ///
-    /// Still takes a WIRE turn — the confirmers in `CodeAssistant+Bash/Git/
-    /// Edits/Issues/PR.swift` legitimately produce those strings (that text is
-    /// what the agent has to read back on the next round-trip), and they are
-    /// unchanged by Task 9. What changed is that the string is classified
-    /// ONCE, here, the moment it enters the transcript: `ChatMessage.migrate`
-    /// turns it into a typed `.toolResult` message, so nothing downstream —
-    /// least of all the view — ever sniffs it again.
-    ///
-    /// Returns the new message's id: the message gets its own (the caller's
-    /// `CodeAssistTurn.id` is a throwaway client-side value), and the
-    /// chat-triggered Loop run needs that handle to stream into via
-    /// `setTurnContent`.
-    @discardableResult
-    func appendTurn(_ turn: LlmIdeAPIClient.CodeAssistTurn) -> UUID {
-        let message = ChatMessage(wireTurn: turn, sessionDate: Date())
-        messages.append(message)
-        return message.id
-    }
-
-    /// How (if at all) `acknowledge` should re-invoke the agent after
-    /// appending a client-executed tool's result.
-    ///
-    /// The two "yes" cases are NOT interchangeable — picking the wrong one
-    /// reintroduces exactly the bug Task 10's code review caught: forcing a
-    /// follow-up through while an autonomous turn is already mid-stream
-    /// starts a second concurrent `/code-assist` round-trip (two streaming
-    /// placeholders racing `revealingTurnID`, and `runTask` tracking only one
-    /// of them, so Stop can't cancel both).
-    enum FollowUp {
-        /// Don't start a follow-up turn.
-        case none
-        /// Start one only if the engine is idle — routes through plain
-        /// `sendFollowup()`, which no-ops under its own `!busy` guard. This is
-        /// the right choice for every confirmer that runs from a USER-DRIVEN
-        /// sheet tap (create/comment/update issue, create PR, create branch):
-        /// the tap can race the 0.8s auto-continue window
-        /// `finishStreamingTurn` schedules after a `pendingTool` turn, and if
-        /// an autonomous turn is already mid-stream when the sheet confirms,
-        /// the follow-up should be silently skipped exactly as the old
-        /// `sendFollowup()` call at those sites always did — not forced
-        /// through.
-        case ifIdle
-        /// Force the engine out of `busy` and start a follow-up
-        /// unconditionally — routes through `unblockAndFollowUp()`. Reserved
-        /// for a confirmer whose action can legitimately run from INSIDE a
-        /// turn that already set `busy = true` (the Bypass-mode auto-chain
-        /// path through `autoChainPendingAction`: bash / update-file / git-op
-        /// executed without a card) — there, `busy` would otherwise stay
-        /// stuck `true` forever, because nothing else clears it until this
-        /// ack's own follow-up runs.
-        case forceUnblock
-    }
-
-    /// Append a client-executed tool's result as a typed `.toolResult`
-    /// message, then apply `followUp` to decide whether (and how) to
-    /// re-invoke the agent so it can react to it in natural language.
-    ///
-    /// This is what the confirmers in `CodeAssistant+Bash/Git/Issues/PR.swift`
-    /// and `CodeAssistantPanel+Session.swift`/`+Edits.swift` call now (Task
-    /// 10) instead of each building its own synthetic ack STRING and passing
-    /// it through `appendTurn` to be classified back into a payload via
-    /// `ChatMessage.migrate`: they build the typed `ToolResultPayload`
-    /// directly, and `payload.legacyContent()` is what still reconstructs the
-    /// exact string the server has always read on the wire — nothing about
-    /// that contract changes here, only where the classification work used to
-    /// happen (on the way OUT of a string) now happens on the way IN.
-    ///
-    /// See `FollowUp`'s own cases for which one a given call site needs —
-    /// they are not interchangeable.
-    func acknowledge(_ payload: ChatMessage.ToolResultPayload, followUp: FollowUp) async {
-        let message = ChatMessage(
-            role: .toolResult,
-            content: payload.legacyContent(),
-            status: .done,
-            createdAt: Date(),
-            toolResult: payload
-        )
-        messages.append(message)
-        switch followUp {
-        case .none:
-            break
-        case .ifIdle:
-            await sendFollowup()
-        case .forceUnblock:
-            await unblockAndFollowUp()
-        }
-    }
-
-    /// Replace the content of an existing message, addressed by id. No-op when
-    /// the id is gone (the session was switched out from under a long-running
-    /// producer) — deliberately, so a stale writer can't resurrect a turn into
-    /// a chat it doesn't belong to.
-    func setTurnContent(id: UUID, _ content: String) {
-        guard let idx = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[idx].content = content
-    }
-
-    /// Replace `messages` wholesale from an externally-sourced transcript —
-    /// e.g. `LlmChatViewModel.loadHistory()`'s periodic poll of the
-    /// server-persisted `/kb/agent/ask` history. Unlike `switchSession`/
-    /// `handleOnAppearSessions`, this does NOT touch `ChatSessionStore`, the
-    /// current-chat pointer, or transient/agent state — a caller that isn't
-    /// backed by this engine's disk session store (the LLM Chat sheet's
-    /// history lives server-side, not in a `ChatSession` file) just wants the
-    /// in-memory transcript kept in sync with the source of truth. Callers
-    /// are responsible for not calling this mid-turn (would clobber the
-    /// in-flight streaming placeholder) — `busy` is intentionally not
-    /// asserted here so a test can drive it directly.
-    func replaceMessages(_ msgs: [ChatMessage]) {
-        messages = msgs
-    }
-
-    /// Claim the turn slot for a run the PANEL executes itself (today: the
-    /// Loop Engineering run started from the chat header, which streams its
-    /// log into one assistant turn rather than going through `transport`).
-    /// Applies the same start-of-turn resets `runTurn` does, for the same
-    /// reasons: a stale action card left interactive under the new "latest
-    /// assistant turn" can run its own completion handler and clear `busy`
-    /// out from under the run, and a leftover status/error line would render
-    /// as if it belonged to it.
-    ///
-    /// Idempotent, and paired with `drainQueueOrRelease()` at the end of the
-    /// run so a message queued during it is still drained.
-    func beginPanelRun() {
-        busy = true
-        agent.pendingTool = nil
-        statusText = ""
-        error = nil
-    }
-
-    /// Hand the engine the handle for a panel-driven run, so the composer's
-    /// existing Stop button (`stop()`) cancels it like any other turn.
-    func setRunTask(_ task: Task<Void, Never>?) {
-        runTask = task
-    }
-
-    // MARK: - External turn (mobile bridge)
-
-    /// One turn driven by a non-view client (today: the iPhone's
-    /// `explore_chat`, via `MobileControlManager.handleExploreChat` —
-    /// Task 12). This is a 1:1 mirror of `runTurn`'s own body — append the
-    /// user turn, stream, finalize, auto-chain, persist, drain the queue —
-    /// NOT a parallel reimplementation, so the two can never quietly drift.
-    ///
-    /// It takes its transport input as explicit parameters instead of
-    /// through `resolveTransportInput`/`attachmentsForTurn`: those hooks are
-    /// wired to the PANEL's own environment state (model picker,
-    /// `prefLanguage`, active-repo context) in `CodeAssistantPanel.wireEngine()`,
-    /// and are still the no-op default pass-through if the panel has never
-    /// appeared for this scope — a phone-driven turn must resolve its
-    /// model/provider/context from the Mac's OWN settings
-    /// (`MobileExploreBridge`) regardless of whether the Explorer tab is
-    /// even open.
-    ///
-    /// Callers are responsible for making sure the engine is already ON the
-    /// target session (`switchSession(to:)` first, if it isn't the active
-    /// one already) — this operates on whatever session is CURRENTLY loaded,
-    /// exactly like `runTurn`.
-    ///
-    /// `expectedSessionID` is the session the CALLER resolved this engine
-    /// for — code review (post `45d36c6`/`85cc5a1`) found that resolving the
-    /// engine, then `await`ing context-building work that can take hundreds
-    /// of ms to seconds (`MobileExploreBridge.buildAgentContext`'s `git`
-    /// subprocesses) BEFORE calling this method, reopens the exact hijack
-    /// the resolver fix closed: the shared engine can be switched to a
-    /// different session by the Mac user during that window, after the
-    /// caller resolved it but before this method actually runs. Moving the
-    /// resolve call later (right before this call, in
-    /// `MobileControlManager.handleExploreChat`) narrows that window but
-    /// cannot close it — this method itself has its own suspension points
-    /// (`transport.roundTrip`). The guard right below is what actually
-    /// closes it: checked synchronously, on the SAME actor, immediately
-    /// before this method does anything observable, so no in-between
-    /// `await` can invalidate it.
-    ///
-    /// Guards on `!busy` and throws `ExternalTurnError.busy` rather than
-    /// silently queuing or racing: `runTurn`/`sendFollowup` mutate
-    /// `messages`/`revealingTurnID`/`runTask` assuming only one turn is ever
-    /// in flight at a time, and this engine is now SHARED (registry-cached)
-    /// with the Mac panel — a concurrent Mac-driven turn on the same
-    /// instance racing this one would corrupt that bookkeeping exactly as
-    /// Task 10's review found for `sendFollowup`'s own `!busy` guard. The
-    /// phone gets a clear, typed "try again" error instead of an unexplained
-    /// hang or a corrupted transcript.
-    ///
-    /// Deliberately suppresses the `continueNeeded` auto-continue path (a
-    /// phone-driven turn's `finishStreamingTurn` call always passes
-    /// `continueNeeded: nil`, never `resp.continueNeeded`): the scheduled
-    /// "Continue working on your pending tasks." follow-up re-enters through
-    /// `startTurn`/`runTurn`, which uses the ENGINE's `resolveTransportInput`/
-    /// `attachmentsForTurn` hooks (the panel's wiring if a panel has wired
-    /// them, or the silent no-op default otherwise) — never the explicit
-    /// model/provider/context this call was given. On the shared engine with
-    /// a panel open, that means a phone turn could silently auto-execute a
-    /// follow-up (file edits/bash/git ops, if `autoChain` proposes one) with
-    /// no phone confirmation and no card; on an off-screen engine, the
-    /// follow-up's `persistCurrentChat()` never runs through the resolver's
-    /// cache-refresh path, so the work is silently discarded the next time
-    /// that session is resolved. Neither surface is safe for autonomous
-    /// follow-up work today — suppressing it is the tradeoff; making it
-    /// safe (proper off-screen wiring, a phone-side confirmation channel) is
-    /// future work, not this fix.
-    ///
-    /// The SAME suppression applies to `autoChain`: a phone-driven turn
-    /// never auto-executes a proposed tool (bash/update-file/git-op), even
-    /// on the shared engine where the panel's Bypass/Auto wiring would
-    /// otherwise run it hands-free with no phone confirmation. The proposal
-    /// still lands on `agent.pendingTool` (finishStreamingTurn below), so a
-    /// Mac panel renders the confirmation card — today the one surface that
-    /// can act on it. A phone-side confirmation channel is the future work
-    /// that would lift this.
-    func runExternalTurn(
-        message: String,
-        skillIds: [String],
-        attachments: [LlmIdeAPIClient.CodeAttachment],
-        agentContext: AgentContext?,
-        model: String?,
-        provider: String?,
-        expectedSessionID: UUID,
-        onProgress: @escaping (String) -> Void
-    ) async throws -> String {
-        guard !busy else { throw ExternalTurnError.busy }
-        guard currentSessionIDString == expectedSessionID.uuidString else {
-            throw ExternalTurnError.sessionMoved
-        }
-        // Claim the slot synchronously — the spawn below is a scheduling
-        // boundary, and without this a Mac-driven turn could start between
-        // the guard and the body's own `busy = true`.
-        busy = true
-        // The turn body runs as an unstructured task the ENGINE owns and
-        // tracks in `externalRunTask`, so `stop()` (the Mac panel's Stop
-        // button) and `resetActiveTurnState()` (session switch/create/delete)
-        // can cancel a phone-driven turn exactly like a panel-driven one —
-        // until this existed, `runTask` was never set for external turns and
-        // the Mac's Stop button was inert while a phone turn streamed on the
-        // shared engine. Cancellation flows both ways: phone-side
-        // explore_cancel cancels the task awaiting this method (whose catch
-        // below cancels the inner); Mac-side stop() cancels the inner
-        // directly.
-        let task = Task { [self] in
-            try await performExternalTurn(
-                message: message, skillIds: skillIds, attachments: attachments,
-                agentContext: agentContext, model: model, provider: provider,
-                expectedSessionID: expectedSessionID, onProgress: onProgress)
-        }
-        externalRunTask = task
-        do {
-            let reply = try await task.value
-            externalRunTask = nil
-            return reply
-        } catch {
-            task.cancel()
-            externalRunTask = nil
-            // Let the inner catch run its stopped-finalize + persist before
-            // propagating, so the transcript is never left holding a live
-            // `.streaming` placeholder. URLSession aborts promptly on
-            // cancellation, so this await is short in practice.
-            _ = try? await task.value
-            throw error
-        }
-    }
-
-    /// The body of one external turn — everything after `runExternalTurn`'s
-    /// busy/session guards. Only that wrapper calls it; the split exists so
-    /// the engine can hold a cancellable handle to the turn.
-    private func performExternalTurn(
-        message: String,
-        skillIds: [String],
-        attachments: [LlmIdeAPIClient.CodeAttachment],
-        agentContext: AgentContext?,
-        model: String?,
-        provider: String?,
-        expectedSessionID: UUID,
-        onProgress: @escaping (String) -> Void
-    ) async throws -> String {
-        onTurnStart()
-        onRecordPrompt(message)
-        onNudge(message)
-        messages.append(ChatMessage(role: .user, content: message, status: .done, createdAt: Date()))
-        busy = true
-        statusText = ""
-        error = nil
-        agent.pendingTool = nil
-        agent.agentPendingTasks = []
-        // Persist the user turn immediately, mirroring the old
-        // MobileControlManager behavior of writing it before the round
-        // trip starts — disk should not lag a full round-trip behind in
-        // case the app quits mid-turn. A panel showing this SAME instance
-        // already sees it live via `messages` regardless of this write.
-        persistCurrentChat()
-        let streamingID = beginStreamingTurn()
-        do {
-            let recent = packHistory(messages)
-            let input = ChatTransportInput(
-                message: message,
-                history: Array(recent.dropLast()),  // exclude the just-pushed user turn — server appends it
-                attachments: attachments,
-                skills: skillIds,
-                agentContext: agentContext,
-                language: nil,
-                model: model,
-                provider: provider,
-                mode: nil
-            )
-            let resp = try await transport.roundTrip(
-                input,
-                onProgress: { [self] progress in
-                    recordProgress(progress)
-                    onProgress(progress.label)
-                },
-                onChunk: { [self] text in appendStreamedChunk(streamingID, text) }
-            )
-            try Task.checkCancellation()
-            // Second race, found by code review after the entry guard above:
-            // `transport.roundTrip` can take seconds, and NOTHING stops the
-            // Mac user from clicking a different chat while it's in flight —
-            // `ChatSessionHeader`'s switch action calls `switchSession(to:)`
-            // directly, with no busy check, which finalizes/persists THIS
-            // session and overwrites `messages`/`currentSessionIDString` with
-            // the other one's. Without this re-check, everything below would
-            // run against whatever is CURRENTLY loaded — appending the reply,
-            // firing `autoChain` (auto-executing a file edit/bash/git op),
-            // and persisting, all into a conversation this turn was never
-            // about. Bail out instead: hand the phone its answer, but don't
-            // touch `messages`/`agent` or persist into the wrong session.
-            // Session A is left with whatever `resetActiveTurnState` already
-            // finalized it to (the `.stopped` partial, no full reply) — a
-            // best-effort tradeoff matching `sessionMoved`'s entry-race one,
-            // not something this call can safely repair from here.
-            guard currentSessionIDString == expectedSessionID.uuidString else {
-                return resp.reply
-            }
-            if let idx = messages.firstIndex(where: { $0.id == streamingID }) {
-                messages[idx].content = resp.reply
-            }
-            finishStreamingTurn(
-                streamingID,
-                pendingTool: resp.pendingTool,
-                tasks: resp.tasks,
-                continueNeeded: nil,  // see doc comment: external turns never auto-continue
-                usage: resp.usage,
-                mode: resp.mode,
-                stopped: false
-            )
-            // No autoChain here either — see doc comment: a phone-driven
-            // turn never auto-executes a proposed tool. The card lands on
-            // `agent.pendingTool` via finishStreamingTurn above; a Mac panel
-            // (when the shared engine has one) renders the confirmation.
-            persistCurrentChat()
-            drainQueueOrRelease()
-            return resp.reply
-        } catch {
-            // Same mid-flight session-switch race as the success path above,
-            // applied to the failure path: none of this catch's side effects
-            // (error banner, `.failed` status, persist) may land on whatever
-            // session is now loaded if it isn't the one this call started on.
-            guard currentSessionIDString == expectedSessionID.uuidString else {
-                throw error
-            }
-            let isCancellation = error is CancellationError || (error as? URLError)?.code == .cancelled
-            if revealingTurnID == streamingID {
-                finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
-            }
-            if !isCancellation {
-                self.error = error.localizedDescription
-                markFailed(streamingID, error)
-            }
-            persistCurrentChat()
-            drainQueueOrRelease()
-            throw error
-        }
-    }
-}
-
-/// Thrown by `ChatEngine.runExternalTurn` when it can't safely proceed. See
-/// that method's doc comment for why these are typed errors rather than a
-/// silent queue/no-op or a turn landing in the wrong place.
-enum ExternalTurnError: LocalizedError {
-    /// The engine is already running another turn.
-    case busy
-    /// The engine's active session changed between when the CALLER resolved
-    /// it and when this call actually started — e.g. the Mac user switched
-    /// the shared engine to a different chat during the `await`s
-    /// (context-building, etc.) between resolve and this call. Thrown
-    /// instead of silently appending the turn into whatever session happens
-    /// to be current now.
-    case sessionMoved
-
-    var errorDescription: String? {
-        switch self {
-        case .busy: return "This chat is busy with another turn — try again in a moment."
-        case .sessionMoved: return "That chat is no longer open on your Mac — try again."
-        }
-    }
 }
