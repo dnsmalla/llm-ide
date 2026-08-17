@@ -100,6 +100,7 @@ struct ChatEngineRunExternalTurnTests {
             let reply = try await engine.runExternalTurn(
                 message: "hello from iPhone", skillIds: [], attachments: [],
                 agentContext: nil, model: nil, provider: nil,
+                expectedSessionID: session.id,
                 onProgress: { progressLabels.append($0) })
 
             #expect(reply == "the answer")
@@ -142,6 +143,7 @@ struct ChatEngineRunExternalTurnTests {
                 _ = try await engine.runExternalTurn(
                     message: "hi", skillIds: [], attachments: [],
                     agentContext: nil, model: nil, provider: nil,
+                    expectedSessionID: session.id,
                     onProgress: { _ in })
                 Issue.record("Expected runExternalTurn to rethrow the transport failure")
             } catch is APIError {
@@ -177,6 +179,7 @@ struct ChatEngineRunExternalTurnTests {
                 _ = try await engine.runExternalTurn(
                     message: "hi", skillIds: [], attachments: [],
                     agentContext: nil, model: nil, provider: nil,
+                    expectedSessionID: session.id,
                     onProgress: { _ in })
                 Issue.record("Expected ExternalTurnError.busy to be thrown")
             } catch is ExternalTurnError {
@@ -187,6 +190,99 @@ struct ChatEngineRunExternalTurnTests {
 
             // The guard fires before any state mutation — nothing appended.
             #expect(engine.messages.isEmpty)
+        }
+    }
+
+    @Test("Throws .sessionMoved instead of silently writing into a DIFFERENT session if the engine's active session changed after resolve")
+    func sessionMovedGuardPreventsWrongSessionWrite() async {
+        await withTempStore {
+            let (engine, _) = makeEngine()
+            let sessionA = ChatSession(scope: Self.scope, title: "A")
+            ChatSessionStore.save(sessionA)
+            let sessionB = ChatSession(scope: Self.scope, title: "B")
+            ChatSessionStore.save(sessionB)
+
+            engine.switchSession(to: sessionA.id)
+            #expect(engine.currentSessionIDString == sessionA.id.uuidString)
+
+            // Simulate the caller (`MobileControlManager.handleExploreChat`)
+            // resolving the engine for session A, then — during the `await`s
+            // between resolve and this call (`buildAgentContext`'s `git`
+            // subprocesses in production) — the Mac user switching this SAME
+            // engine to session B, exactly the race code review caught.
+            let expectedSessionID = sessionA.id
+            engine.switchSession(to: sessionB.id)
+            #expect(engine.currentSessionIDString == sessionB.id.uuidString)
+
+            do {
+                _ = try await engine.runExternalTurn(
+                    message: "should never land anywhere", skillIds: [], attachments: [],
+                    agentContext: nil, model: nil, provider: nil,
+                    expectedSessionID: expectedSessionID,
+                    onProgress: { _ in })
+                Issue.record("Expected ExternalTurnError.sessionMoved to be thrown")
+            } catch is ExternalTurnError {
+                // expected
+            } catch {
+                Issue.record("Expected ExternalTurnError, got \(error)")
+            }
+
+            // The guard fires before any state mutation — the stray message
+            // landed in NEITHER session, on disk or in memory.
+            #expect(engine.messages.isEmpty)
+            #expect(ChatSessionStore.load(id: sessionA.id)?.messages.isEmpty == true)
+            #expect(ChatSessionStore.load(id: sessionB.id)?.messages.isEmpty == true)
+        }
+    }
+
+    @Test("A freshly-constructed engine's packHistory defaults to the budget-aware historyForRequest, not the bare wire encoder")
+    func packHistoryDefaultsToBudgetAwareHistoryForRequest() {
+        // No `wireEngine()`-style wiring at all — pins that ChatEngine.init
+        // itself (not a caller) is what makes this budget-aware now (code
+        // review, Task 12): any engine nobody has wired — an off-screen
+        // mobile-bridge engine, or the registry's cached engine before its
+        // panel has ever appeared — must still clip an oversized turn.
+        let (engine, _) = makeEngine()
+        let big = String(repeating: "a", count: ChatEngine.maxHistoryTurnChars + 500)
+        let oversized = ChatMessage(wireTurn: .init(role: .user, content: big), sessionDate: Date())
+
+        let packed = engine.packHistory([oversized])
+        #expect(packed.first?.content.hasSuffix("…(turn clipped)") == true)
+        #expect(packed.first?.content.count == ChatEngine.maxHistoryTurnChars + "\n…(turn clipped)".count)
+        // Exactly matches calling the budgeted packer directly — proving the
+        // default isn't a coincidentally-similar bare encoder.
+        #expect(packed.map(\.content) == engine.historyForRequest([oversized]).map(\.content))
+    }
+
+    @Test("runExternalTurn suppresses continueNeeded — no autonomous follow-up is scheduled, even when the transport asks for one")
+    func continueNeededIsSuppressedForExternalTurns() async {
+        await withTempStore {
+            let (engine, t) = makeEngine()
+            let session = ChatSession(scope: Self.scope, title: "New chat")
+            ChatSessionStore.save(session)
+            engine.handleOnAppearSessions()
+            // 0-delay so a scheduled continue (if one were wrongly fired)
+            // would land on the next main-queue drain, not 0.8 real seconds
+            // from now — same trick `ChatEngineSessionTests.epochBump` uses.
+            engine.continueDelayNanos = 0
+
+            t.result = .init(reply: "working on it", pendingTool: nil, tasks: nil,
+                             continueNeeded: true, usage: nil, mode: nil)
+            _ = try? await engine.runExternalTurn(
+                message: "kick off", skillIds: [], attachments: [],
+                agentContext: nil, model: nil, provider: nil,
+                expectedSessionID: session.id,
+                onProgress: { _ in })
+
+            #expect(engine.agent.agentIsAutonomous == false)
+
+            // Give the (would-be) 0-delay asyncAfter closure a chance to run,
+            // then confirm no "Continue working…" turn was ever appended —
+            // a phone-driven turn must never silently re-enter runTurn with
+            // the engine's default (unwired, off-screen-unsafe) hooks.
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            #expect(engine.messages.map(\.content).contains("Continue working on your pending tasks.") == false)
+            #expect(engine.busy == false)
         }
     }
 }

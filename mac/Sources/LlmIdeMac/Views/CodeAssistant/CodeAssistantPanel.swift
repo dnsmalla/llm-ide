@@ -389,7 +389,9 @@ struct CodeAssistantPanel: View {
             if session.shouldNudge(for: prompt) { engine.agent.nudgePrompt = prompt }
         }
         engine.attachmentsForTurn = { attachmentState.attachments }
-        engine.packHistory = { engine.historyForRequest($0) }
+        // `packHistory` defaults to `engine.historyForRequest` in
+        // `ChatEngine.init` itself now (code review, Task 12) — no explicit
+        // wiring needed here.
         engine.autoChain = { pendingTool, usage in
             await autoChainPendingAction(pendingTool, usage: usage)
         }

@@ -157,11 +157,16 @@ final class ChatEngine {
     var attachmentsForTurn: () -> [LlmIdeAPIClient.CodeAttachment] = { [] }
 
     /// Packs `messages` for the wire — `[ChatMessage]` in, wire turns out.
-    /// The panel wires this to the engine's own `historyForRequest` (moved
-    /// here in Task 7 together with `HistoryForRequestTests`); the default
-    /// only does the wire encoding, so a test that doesn't care about
-    /// budgeting can construct the engine with a transport alone. Leaving it
-    /// unwired in production would silently drop the 400k-char request budget.
+    /// Defaults to the engine's own `historyForRequest` (set in `init`, since
+    /// a property initializer can't reference `self`) rather than a bare
+    /// wire-encoding no-op: code review on Task 12 found that the bare
+    /// no-op default was still reachable in production — any engine the
+    /// registry hands out whose panel hasn't (yet, or ever, for an
+    /// off-screen mobile-bridge engine) called `wireEngine()` fell back to
+    /// it, silently dropping the 400k-char total / 24k-per-turn budget for
+    /// exactly the phone-driven turns Task 12 added. A caller that
+    /// deliberately wants the bare encoder (rather than the budgeted one)
+    /// can still reassign this after construction.
     var packHistory: ([ChatMessage]) -> [LlmIdeAPIClient.CodeAssistTurn] = { $0.map { $0.wireTurn() } }
 
     /// Auto-chain the next pending action (file edit / git op / shell command)
@@ -198,6 +203,17 @@ final class ChatEngine {
     init(scope: ChatScope, transport: ChatTransport) {
         self.scope = scope
         self.transport = transport
+        // See `packHistory`'s doc comment: this can't be the property's own
+        // default (a property initializer has no `self`), so it's assigned
+        // here instead — `[weak self]` because a strongly-captured `self` in
+        // a property `self` itself holds would be a retain cycle. The
+        // fallback (reached only if `self` has already been deallocated,
+        // which can't happen for a synchronous call from a live instance) is
+        // the same bare wire-encoding the property used to default to.
+        self.packHistory = { [weak self] messages in
+            guard let self else { return messages.map { $0.wireTurn() } }
+            return self.historyForRequest(messages)
+        }
     }
 
     // MARK: - Turn lifecycle
@@ -1148,6 +1164,22 @@ final class ChatEngine {
     /// one already) — this operates on whatever session is CURRENTLY loaded,
     /// exactly like `runTurn`.
     ///
+    /// `expectedSessionID` is the session the CALLER resolved this engine
+    /// for — code review (post `45d36c6`/`85cc5a1`) found that resolving the
+    /// engine, then `await`ing context-building work that can take hundreds
+    /// of ms to seconds (`MobileExploreBridge.buildAgentContext`'s `git`
+    /// subprocesses) BEFORE calling this method, reopens the exact hijack
+    /// the resolver fix closed: the shared engine can be switched to a
+    /// different session by the Mac user during that window, after the
+    /// caller resolved it but before this method actually runs. Moving the
+    /// resolve call later (right before this call, in
+    /// `MobileControlManager.handleExploreChat`) narrows that window but
+    /// cannot close it — this method itself has its own suspension points
+    /// (`transport.roundTrip`). The guard right below is what actually
+    /// closes it: checked synchronously, on the SAME actor, immediately
+    /// before this method does anything observable, so no in-between
+    /// `await` can invalidate it.
+    ///
     /// Guards on `!busy` and throws `ExternalTurnError.busy` rather than
     /// silently queuing or racing: `runTurn`/`sendFollowup` mutate
     /// `messages`/`revealingTurnID`/`runTask` assuming only one turn is ever
@@ -1157,6 +1189,24 @@ final class ChatEngine {
     /// Task 10's review found for `sendFollowup`'s own `!busy` guard. The
     /// phone gets a clear, typed "try again" error instead of an unexplained
     /// hang or a corrupted transcript.
+    ///
+    /// Deliberately suppresses the `continueNeeded` auto-continue path (a
+    /// phone-driven turn's `finishStreamingTurn` call always passes
+    /// `continueNeeded: nil`, never `resp.continueNeeded`): the scheduled
+    /// "Continue working on your pending tasks." follow-up re-enters through
+    /// `startTurn`/`runTurn`, which uses the ENGINE's `resolveTransportInput`/
+    /// `attachmentsForTurn` hooks (the panel's wiring if a panel has wired
+    /// them, or the silent no-op default otherwise) — never the explicit
+    /// model/provider/context this call was given. On the shared engine with
+    /// a panel open, that means a phone turn could silently auto-execute a
+    /// follow-up (file edits/bash/git ops, if `autoChain` proposes one) with
+    /// no phone confirmation and no card; on an off-screen engine, the
+    /// follow-up's `persistCurrentChat()` never runs through the resolver's
+    /// cache-refresh path, so the work is silently discarded the next time
+    /// that session is resolved. Neither surface is safe for autonomous
+    /// follow-up work today — suppressing it is the tradeoff; making it
+    /// safe (proper off-screen wiring, a phone-side confirmation channel) is
+    /// future work, not this fix.
     func runExternalTurn(
         message: String,
         skillIds: [String],
@@ -1164,9 +1214,13 @@ final class ChatEngine {
         agentContext: AgentContext?,
         model: String?,
         provider: String?,
+        expectedSessionID: UUID,
         onProgress: @escaping (String) -> Void
     ) async throws -> String {
         guard !busy else { throw ExternalTurnError.busy }
+        guard currentSessionIDString == expectedSessionID.uuidString else {
+            throw ExternalTurnError.sessionMoved
+        }
         onTurnStart()
         onRecordPrompt(message)
         onNudge(message)
@@ -1212,7 +1266,7 @@ final class ChatEngine {
                 streamingID,
                 pendingTool: resp.pendingTool,
                 tasks: resp.tasks,
-                continueNeeded: resp.continueNeeded,
+                continueNeeded: nil,  // see doc comment: external turns never auto-continue
                 usage: resp.usage,
                 mode: resp.mode,
                 stopped: false
@@ -1237,15 +1291,24 @@ final class ChatEngine {
     }
 }
 
-/// Thrown by `ChatEngine.runExternalTurn` when the engine is already mid-turn.
-/// See that method's doc comment for why this is a typed error rather than a
-/// silent queue/no-op.
+/// Thrown by `ChatEngine.runExternalTurn` when it can't safely proceed. See
+/// that method's doc comment for why these are typed errors rather than a
+/// silent queue/no-op or a turn landing in the wrong place.
 enum ExternalTurnError: LocalizedError {
+    /// The engine is already running another turn.
     case busy
+    /// The engine's active session changed between when the CALLER resolved
+    /// it and when this call actually started — e.g. the Mac user switched
+    /// the shared engine to a different chat during the `await`s
+    /// (context-building, etc.) between resolve and this call. Thrown
+    /// instead of silently appending the turn into whatever session happens
+    /// to be current now.
+    case sessionMoved
 
     var errorDescription: String? {
         switch self {
         case .busy: return "This chat is busy with another turn — try again in a moment."
+        case .sessionMoved: return "That chat is no longer open on your Mac — try again."
         }
     }
 }

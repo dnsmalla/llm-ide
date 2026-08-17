@@ -647,6 +647,19 @@ final class MobileControlManager {
     /// chat). Persistence, the synthetic-turn append, and the streamed round
     /// trip all go through `ChatEngine.runExternalTurn`, a 1:1 mirror of the
     /// panel's own `runTurn` — no direct `ChatSessionStore` reads/writes here.
+    ///
+    /// The engine is resolved as LATE as possible — right before
+    /// `runExternalTurn`, after every `await` this method does on the way
+    /// there (`MobileExploreBridge.buildAgentContext`'s `git` subprocesses in
+    /// particular, which can take hundreds of ms to seconds on a large
+    /// repo). Code review caught that resolving it any earlier reopens a
+    /// version of the exact hijack `explorerMobileEngineResolver` exists to
+    /// prevent: the shared engine could be switched to a different session
+    /// by the Mac user during that window, between resolve and use. This
+    /// narrows the window but — since resolving still can't be the LAST
+    /// thing before the turn actually starts touching state — doesn't fully
+    /// close it; `runExternalTurn`'s own `expectedSessionID` guard is what
+    /// actually closes it.
     private func handleExploreChat(_ chat: ExploreChat) async {
         guard let api else {
             await server?.send(CommandError(commandId: chat.commandId, message: "Backend not configured"))
@@ -666,12 +679,6 @@ final class MobileControlManager {
             await server?.send(CommandError(commandId: chat.commandId, message: "Session not found on Mac — it may have been deleted. Reload your explorer sessions."))
             return
         }
-        let shared = ChatEngineRegistry.shared.engine(for: .explorer, api: api)
-        guard let engine = explorerMobileEngineResolver.engine(for: sid, sharedExplorerEngine: shared, api: api) else {
-            append(.info, "explore_chat: could not resolve session \(chat.sessionId.prefix(8))")
-            await server?.send(CommandError(commandId: chat.commandId, message: "Could not open that session on your Mac."))
-            return
-        }
         var attachments = MobileExploreBridge.attachments(from: chat.files)
         if let root = mobileWorkspaceURL(), !chat.refs.isEmpty {
             let (refAttachments, refErrors) = MobileWorkspaceSearch.attachments(
@@ -684,6 +691,9 @@ final class MobileControlManager {
         let (model, provider) = MobileExploreBridge.modelAndProvider(config: config)
         let agentContext: AgentContext?
         if let config, let projectStore {
+            // The slowest step here — up to 4 `repoManager.runGit`
+            // subprocesses — is exactly why engine resolution happens AFTER
+            // this, not before (see this method's doc comment).
             agentContext = await MobileExploreBridge.buildAgentContext(
                 config: config, projectStore: projectStore, sessionId: chat.sessionId)
         } else {
@@ -691,6 +701,12 @@ final class MobileControlManager {
             if !chat.files.isEmpty || !chat.refs.isEmpty {
                 append(.info, "explore_chat: Mac workspace not wired — attachments/refs may be limited")
             }
+        }
+        let shared = ChatEngineRegistry.shared.engine(for: .explorer, api: api)
+        guard let engine = explorerMobileEngineResolver.engine(for: sid, sharedExplorerEngine: shared, api: api) else {
+            append(.info, "explore_chat: could not resolve session \(chat.sessionId.prefix(8))")
+            await server?.send(CommandError(commandId: chat.commandId, message: "Could not open that session on your Mac."))
+            return
         }
         do {
             let commandId = chat.commandId
@@ -701,6 +717,7 @@ final class MobileControlManager {
                 agentContext: agentContext,
                 model: model,
                 provider: provider,
+                expectedSessionID: sid,
                 onProgress: { [weak self] label in
                     guard let self, !self.isMobileCommandCancelled(commandId) else { return }
                     append(.info, "code-assist: \(label)")
