@@ -574,7 +574,48 @@ final class ChatEngine {
         let capped = Array(history.suffix(50))
         var session = ChatSessionStore.load(id: id) ?? ChatSession(id: id, scope: scope)
         session.scope = scope
-        session.messages = capped.map { ChatMessage(wireTurn: $0, sessionDate: Date()) }
+        // Reuse each prior `ChatMessage` (its real `id`/`createdAt`/`status`/
+        // `toolResult`/`metadata`/`legacyContent`) wherever it still matches
+        // the wire turn at the same position, instead of unconditionally
+        // rebuilding the whole array via `ChatMessage(wireTurn:sessionDate:)`
+        // — that would hand every one of the up-to-50 retained messages a
+        // brand-new id and a `createdAt` of "now" on EVERY persist (this
+        // runs on every turn), discarding whatever `id`/`createdAt` an
+        // append site (e.g. `MobileControlManager`) had already stamped.
+        //
+        // `previous` (the just-loaded `session.messages`) and `capped` are
+        // both prefixes of the same ever-growing, append-only `history` up
+        // to their respective persist points, so they are prefix-aligned:
+        // position `i` in both refers to the same turn as long as neither
+        // array has had its head trimmed by the 50-turn cap since the
+        // other was written. `previousIndex == offset` handles every normal
+        // case (no growth since last persist, or growth that hasn't yet
+        // pushed the conversation past the cap). The content check below is
+        // what keeps this safe once the cap DOES start trimming the head —
+        // positions stop lining up, the check fails, and that position
+        // falls back to a fresh `ChatMessage` exactly as it did before this
+        // fix, rather than misattributing an id to the wrong turn.
+        let previous = session.messages
+        session.messages = capped.enumerated().map { offset, turn in
+            // Compare role+content only, NOT `CodeAssistTurn.==` directly —
+            // `CodeAssistTurn.id` is a fresh, client-only `UUID()` minted on
+            // every construction (stripped from the wire encoding; see its
+            // `CodingKeys`), so two turns built from identical role+content
+            // in two separate calls never compare equal on `id` even though
+            // they represent the same message.
+            if offset < previous.count {
+                let previousTurn = previous[offset].wireTurn()
+                if previousTurn.role == turn.role, previousTurn.content == turn.content {
+                    return previous[offset]
+                }
+            }
+            // No corresponding prior message (new turn since last persist,
+            // or the cap has trimmed the head so positions no longer line
+            // up), or its role/content no longer matches (shouldn't
+            // normally happen — e.g. an edited/removed upstream turn) —
+            // synthesize fresh, exactly as before.
+            return ChatMessage(wireTurn: turn, sessionDate: Date())
+        }
         if session.title == "New chat" || session.title.isEmpty {
             if let firstUser = capped.first(where: { $0.role == .user }) {
                 let raw = firstUser.content

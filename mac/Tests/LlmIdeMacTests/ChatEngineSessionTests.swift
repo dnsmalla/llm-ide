@@ -195,6 +195,78 @@ struct ChatEngineSessionTests {
         #expect(extraResets == 2)
     }
 
+    @Test("persistCurrentChat preserves id/createdAt across re-saves — only genuinely new turns get fresh ones")
+    func persistPreservesIdentity() async {
+        await withTempStore {
+            let (engine, t) = makeEngine()
+
+            // Seed a session with one message stamped with a REAL, distinct
+            // id/createdAt — standing in for a message an append site (e.g.
+            // `MobileControlManager`) already wrote correctly, the same way
+            // the bug's finding described. If `persistCurrentChat` rebuilds
+            // the whole array via `ChatMessage(wireTurn:sessionDate:)` on
+            // every call, this identity is exactly what gets clobbered.
+            let seededID = UUID()
+            let seededCreatedAt = Date(timeIntervalSince1970: 1_000_000)
+            let seeded = ChatMessage(id: seededID, role: .user, content: "seeded turn",
+                                     status: .done, createdAt: seededCreatedAt)
+            let session = ChatSession(scope: Self.scope, title: "New chat", messages: [seeded])
+            ChatSessionStore.save(session)
+            engine.handleOnAppearSessions()
+            #expect(engine.currentSessionIDString == session.id.uuidString)
+            #expect(engine.history.map(\.content) == ["seeded turn"])
+
+            // Run one real turn — appends "second question" (user) and
+            // "first answer" (assistant) to history.
+            t.result = .init(reply: "first answer", pendingTool: nil, tasks: nil,
+                             continueNeeded: nil, usage: nil, mode: nil)
+            await engine.runTurn("second question")
+            engine.persistCurrentChat()
+
+            let firstSave = ChatSessionStore.load(id: session.id)
+            #expect(firstSave?.messages.map(\.content) == ["seeded turn", "second question", "first answer"])
+            // The seeded message's identity survived the FIRST persist — it
+            // was already loaded from disk one line above `session.messages
+            // = capped.map { ... }` in the old code, and got overwritten
+            // anyway; this pins that it no longer does.
+            #expect(firstSave?.messages[0].id == seededID)
+            #expect(firstSave?.messages[0].createdAt == seededCreatedAt)
+            let newIDs = Set((firstSave?.messages ?? []).dropFirst().map(\.id))
+            #expect(newIDs.count == 2)
+
+            // Persisting AGAIN with no history change at all is the exact
+            // shape of the bug: every call to `persistCurrentChat` fires on
+            // every turn, so a re-save with nothing new must be a no-op on
+            // identity — not just the seeded turn, but the two turns from
+            // the round-trip above too.
+            engine.persistCurrentChat()
+            let secondSave = ChatSessionStore.load(id: session.id)
+            #expect(secondSave?.messages.map(\.id) == firstSave?.messages.map(\.id))
+            #expect(secondSave?.messages.map(\.createdAt) == firstSave?.messages.map(\.createdAt))
+
+            // A genuinely new turn since the last persist gets a fresh id —
+            // the fix must not freeze the array, only stabilize the part
+            // that didn't change.
+            t.result = .init(reply: "second answer", pendingTool: nil, tasks: nil,
+                             continueNeeded: nil, usage: nil, mode: nil)
+            await engine.runTurn("third question")
+            engine.persistCurrentChat()
+            let thirdSave = ChatSessionStore.load(id: session.id)
+            #expect(thirdSave?.messages.map(\.content) ==
+                    ["seeded turn", "second question", "first answer", "third question", "second answer"])
+            // First three messages: same ids/createdAt as before, unchanged.
+            #expect(Array((thirdSave?.messages ?? []).prefix(3)).map(\.id) ==
+                    Array((secondSave?.messages ?? []).prefix(3)).map(\.id))
+            #expect(Array((thirdSave?.messages ?? []).prefix(3)).map(\.createdAt) ==
+                    Array((secondSave?.messages ?? []).prefix(3)).map(\.createdAt))
+            // Last two: brand new ids, disjoint from everything seen so far.
+            let priorIDs = Set((secondSave?.messages ?? []).map(\.id))
+            let latestIDs = Set((thirdSave?.messages ?? []).suffix(2).map(\.id))
+            #expect(latestIDs.isDisjoint(with: priorIDs))
+            #expect(latestIDs.count == 2)
+        }
+    }
+
     @Test("deleteSession fires session-memory forget (injected closure)")
     func forgetMemory() async {
         await withTempStore {
