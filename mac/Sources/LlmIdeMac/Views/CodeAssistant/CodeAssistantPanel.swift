@@ -149,15 +149,6 @@ struct CodeAssistantPanel: View {
     /// `body` that refreshes it, and `pendingUpdateFileDiff` that reads it.
     @State var pendingEditPreview: ProposedEdit?
 
-    /// Context passed to ReportFaultSheet — captured at the moment the
-    /// user clicks "Report this" so the sheet sees the prompt + answer
-    /// that were on screen, not a later edit.
-    struct FaultReportContext: Identifiable {
-        let id = UUID()
-        let prompt: String
-        let response: String
-    }
-
     /// Live-tracked rendered width of the panel. Drives the compact-mode
     /// switch so controls collapse gracefully when the user drags the
     /// divider in.
@@ -271,9 +262,6 @@ struct CodeAssistantPanel: View {
             .sheet(isPresented: $sheets.showingCreatePRSheet) {
                 showingCreatePRSheetContent
             }
-            .sheet(item: $sheets.reportingFault) { ctx in
-                reportingFaultSheetContent(ctx)
-            }
             .sheet(isPresented: $sheets.showLibraryPicker) {
                 showLibraryPickerContent
             }
@@ -307,7 +295,6 @@ struct CodeAssistantPanel: View {
                 diffPreview: pendingUpdateFileDiff,
                 draft: $draft,
                 expandedTurns: $expandedTurns,
-                activeRepoRoot: activeRepoRoot,
                 sheets: sheets,
                 loadBranchContext: { await buildAgentContext() },
                 onGitOp: { g in await runGitOpFlow(g) },
@@ -494,14 +481,11 @@ struct CodeAssistantPanel: View {
 
     // MARK: - Shared derived state
 
-    /// Project root for fault-report / Q&A writes. The "Report this"
-    /// button is hidden when nil. Resolved via WorkspaceRoot (active
-    /// project first, cloned repo as fallback) so faults land at
-    /// `<root>/system/faults` — the SAME place RegressionView reads
-    /// them. Using `config.activeRepoLocalURL` here was a bug: it
-    /// points at the clone (`code/<repo>`), so faults written by this
-    /// panel landed under `code/<repo>/system/faults` and were
-    /// invisible to RegressionView (which reads the project root).
+    /// Project root for Q&A writes (`saveLatestAnswer`). Resolved via
+    /// WorkspaceRoot (active project first, cloned repo as fallback).
+    /// Using `config.activeRepoLocalURL` here was a bug: it points at
+    /// the clone (`code/<repo>`), so writes from this panel landed in
+    /// the clone's tree instead of the project root.
     var activeRepoRoot: URL? {
         WorkspaceRoot.resolve(config: config, projectStore: projectStore)
     }

@@ -31,8 +31,6 @@ struct ChatMessageList: View {
     let diffPreview: DiffStats?
     @Binding var draft: String
     @Binding var expandedTurns: Set<UUID>
-    /// Resolved project root — governs whether "Report this" is shown.
-    let activeRepoRoot: URL?
 
     /// Sheet presentation flags + branch/fault context, shared by reference
     /// with CodeAssistantPanel (an @Observable class, so mutations here are
@@ -425,40 +423,10 @@ struct ChatMessageList: View {
                             .font(Typography.caption)
                             .foregroundStyle(theme.current.textMuted)
                     }
-                    if !isUser, activeRepoRoot != nil {
-                        Button {
-                            sheets.reportingFault = CodeAssistantPanel.FaultReportContext(
-                                prompt: prevUserPrompt(before: turn) ?? "",
-                                response: turn.content
-                            )
-                        } label: {
-                            Label("Report this", systemImage: "ant")
-                                .font(Typography.caption)
-                                .foregroundStyle(theme.current.textMuted)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Save this answer as a fault report")
-                    }
                 }
                 if !isUser { Spacer(minLength: 40) }
             }
         }
-    }
-
-    /// Walk backwards from `turn`'s position in `history` and return the
-    /// most recent user message. Falls back to nil when the assistant
-    /// answered without a preceding user turn (rare; agent self-prompts).
-    private func prevUserPrompt(before turn: ChatMessage) -> String? {
-        let history = engine.messages
-        guard let idx = history.firstIndex(where: { $0.id == turn.id }) else { return nil }
-        for i in stride(from: idx - 1, through: 0, by: -1) {
-            let candidate = history[i]
-            // `.toolResult` is its own role now, so a synthetic ack simply
-            // isn't a `.user` message — a fault report quotes what the human
-            // actually typed without needing to filter acks out by hand.
-            if candidate.role == .user { return candidate.content }
-        }
-        return nil
     }
 
     private func errorBubble(_ msg: String) -> some View {

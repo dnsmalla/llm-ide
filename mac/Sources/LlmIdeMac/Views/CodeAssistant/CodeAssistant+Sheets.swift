@@ -245,30 +245,6 @@ extension CodeAssistantPanel {
         }
     }
 
-    func reportingFaultSheetContent(_ ctx: FaultReportContext) -> some View {
-        Group {
-            if let repoRoot = activeRepoRoot {
-                let target = resolveIssueTarget()
-                ReportFaultSheet(
-                    prompt: ctx.prompt,
-                    response: ctx.response,
-                    repoRoot: repoRoot,
-                    agent: config.activeCLI,
-                    onSubmitted: { _ in sheets.reportingFault = nil },
-                    onDismiss: { sheets.reportingFault = nil },
-                    onFileIssue: target.map { tgt in
-                        { fault in try await fileFaultAsIssue(fault, target: tgt) }
-                    },
-                    fileIssueTargetLabel: target?.label ?? ""
-                )
-                .environmentObject(theme)
-                .environmentObject(config)
-            } else {
-                EmptyView()
-            }
-        }
-    }
-
     var showLibraryPickerContent: some View {
         LibraryPicker(
             allowed: [.code, .notes, .data],
@@ -314,10 +290,10 @@ extension CodeAssistantPanel {
 
 
 
-    // MARK: - Fault → Issue routing
+    // MARK: - Issue routing
 
     /// Resolves the currently-active issue tracker target — used by the
-    /// "Also file as issue" toggle in ReportFaultSheet. Precedence matches
+    /// issue/PR confirm sheets' routing. Precedence matches
     /// `config.activeRepoLocalURL`: GitLab project first, then GitHub.
     /// Returns nil when nothing is configured or the active project is
     /// missing the bits we need (token, resolved ID).
@@ -338,45 +314,6 @@ extension CodeAssistantPanel {
             return .init(kind: .github, projectId: pid, label: "\(pid) (GitHub)", projectURL: r.url)
         }
         return nil
-    }
-
-    /// Build a RepoIssuePayload from the local FaultReport and POST it via
-    /// the matching RepoBackend. Returns the new issue's web URL on
-    /// success.
-    func fileFaultAsIssue(_ fault: FaultReport, target: IssueTarget) async throws -> URL? {
-        let title = fault.notes
-            .split(whereSeparator: { $0.isNewline })
-            .first.map(String.init)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            ?? "Fault report"
-        let body = """
-        **Severity:** \(fault.severity.displayName)
-        **Agent:** \(fault.agent)
-        **App version:** \(fault.appVersion)
-        \(fault.gitHead.map { "**Git HEAD:** `\($0)`" } ?? "")
-
-        ### Notes
-        \(fault.notes)
-
-        ### Prompt
-        ```
-        \(fault.prompt.prefix(4000))
-        ```
-
-        ### Response
-        \(fault.response.prefix(8000))
-        """
-        // "bug" stays as the conventional issue-tracker label so existing
-        // tracker filters/automation keep matching.
-        let labels = fault.tags + ["bug", "meet-notes"]
-        let payload = RepoIssuePayload(
-            title: String(title.prefix(140)),
-            body: body,
-            labels: labels
-        )
-        let client = RepoBackendFactory.backend(for: target.kind, config: config)
-        let issue = try await client.createIssue(projectId: target.projectId, payload: payload)
-        return URL(string: issue.webUrl)
     }
 
     /// Target descriptor returned by `resolveIssueTarget`.

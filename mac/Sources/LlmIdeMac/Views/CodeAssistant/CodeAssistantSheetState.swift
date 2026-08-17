@@ -21,5 +21,4 @@ final class CodeAssistantSheetState {
     var showingGitOpSheet = false
     var showLibraryPicker = false
     var showProjectMemory = false
-    var reportingFault: CodeAssistantPanel.FaultReportContext?
 }
