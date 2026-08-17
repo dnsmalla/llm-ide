@@ -81,9 +81,16 @@ struct ChatEngineRunExternalTurnTests {
             .appendingPathComponent("chat-engine-external-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         ChatSessionStore.baseDirectoryOverride = tmp
+        // Restore + cleanup in a defer, not trailing lines: `body` can throw
+        // (rethrows), and a throwing body must not leave the process-global
+        // override pointing at this now-abandoned directory for the rest of
+        // the process. Registered AFTER the gate's defer so LIFO restores the
+        // override while this suite still holds the gate, then hands it on.
+        defer {
+            ChatSessionStore.baseDirectoryOverride = nil
+            try? FileManager.default.removeItem(at: tmp)
+        }
         try await body()
-        ChatSessionStore.baseDirectoryOverride = nil
-        try? FileManager.default.removeItem(at: tmp)
     }
 
     @Test("Appends user+assistant turns, forwards scripted progress, persists to disk, and is visible with no reload")
