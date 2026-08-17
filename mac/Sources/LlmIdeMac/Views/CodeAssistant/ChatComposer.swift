@@ -752,16 +752,17 @@ extension CodeAssistantPanel {
     /// ↑ in the composer: walk back through previously-sent prompts. Returns
     /// `.ignored` (so the cursor moves normally) unless the field is empty or
     /// we're already browsing history.
-    /// Seed ↑/↓ recall from a loaded/switched session's turns. Without this,
-    /// `sentPrompts` only tracks prompts submitted in the CURRENT app run, so
-    /// after a relaunch or session switch the chat shows prior turns but ↑
-    /// recalls nothing. Synthetic turns (tool acks like "(applied update…)",
-    /// "(continue)") are skipped so they don't pollute recall.
-    func rebuildSentPrompts(from turns: [LlmIdeAPIClient.CodeAssistTurn]) {
+    /// Seed ↑/↓ recall from a loaded/switched session's messages. Without
+    /// this, `sentPrompts` only tracks prompts submitted in the CURRENT app
+    /// run, so after a relaunch or session switch the chat shows prior turns
+    /// but ↑ recalls nothing. Synthetic tool acks are skipped so they don't
+    /// pollute recall — by ROLE now (`.toolResult` is not `.user`), where this
+    /// used to have to guess from a leading "(".
+    func rebuildSentPrompts(from turns: [ChatMessage]) {
         var prompts: [String] = []
         for t in turns where t.role == .user {
             let c = t.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !c.isEmpty, !c.hasPrefix("(") else { continue }
+            guard !c.isEmpty else { continue }
             if prompts.last != c { prompts.append(c) }
         }
         if prompts.count > 100 { prompts.removeFirst(prompts.count - 100) }

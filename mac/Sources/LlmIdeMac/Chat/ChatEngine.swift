@@ -33,7 +33,14 @@ final class ChatEngine {
 
     // MARK: - Observable state (moved 1:1 from the panel)
 
-    private(set) var history: [LlmIdeAPIClient.CodeAssistTurn] = []
+    /// The conversation. `[ChatMessage]` (not the wire `[CodeAssistTurn]`) is
+    /// the engine's own representation as of Task 9: a turn carries its
+    /// status, its tool steps, its mode/usage metadata and — for a
+    /// client-executed tool result — a typed `ToolResultPayload`, instead of
+    /// encoding all of that in magic content strings the view had to sniff.
+    /// The wire shape is produced on the way OUT only, by `wireTurn()` /
+    /// `historyForRequest`; the server contract is unchanged.
+    private(set) var messages: [ChatMessage] = []
     private(set) var busy = false
     /// Live agent status streamed from /code-assist (SSE): "Searching the web…",
     /// "Writing the answer…", etc. Shown in place of a static "Thinking…" so a
@@ -62,20 +69,15 @@ final class ChatEngine {
     /// closure no-ops instead of starting a turn against a different chat's
     /// history.
     private(set) var sessionEpoch: UInt = 0
-    /// Tool steps per assistant turn, keyed by turn id. Display-only and
-    /// in-memory — deliberately NOT part of `CodeAssistTurn`, which is what
-    /// gets persisted AND replayed to the model; the agent does not need its
-    /// own tool log fed back to it. Written only here (from the transport's
-    /// progress callback), so `private(set)` is the whole contract.
-    private(set) var turnActivity: [UUID: [CodeAssistantPanel.ToolStep]] = [:]
-    /// Resolved mode for each assistant turn, keyed by turn id — populated in
-    /// `finishStreamingTurn`, read by `ChatMessageList` to show `ModeBadge`.
-    private(set) var turnModes: [UUID: CodeAssistMode] = [:]
-    /// Measured render height per assistant turn, keyed by turn id, so each
+    /// Measured render height per assistant turn, keyed by MESSAGE id, so each
     /// markdown web-view bubble can be sized to its content in the scroll list.
-    /// Unlike the two dictionaries above this one is written by the VIEW
-    /// (`ChatMessageList` takes it as a `Binding`), so it stays publicly
-    /// settable rather than `private(set)`.
+    /// Written by the VIEW (`ChatMessageList`), so it stays publicly settable
+    /// rather than `private(set)`. Stays a dictionary — unlike the tool
+    /// steps/mode that moved onto `ChatMessage` in Task 9, a measured render
+    /// height is view geometry, not chat data, and must never be persisted.
+    /// (It is also more correct now than it was: `ChatMessage.id` is stable
+    /// across a save/reload, where `CodeAssistTurn.id` was minted fresh on
+    /// every decode.)
     var bubbleHeights: [UUID: CGFloat] = [:]
     /// While `true`, the panel's `handleHistoryChange` persists but skips the
     /// VoiceOver announcement. Set around bulk history loads and around the
@@ -87,7 +89,7 @@ final class ChatEngine {
     /// by `refreshSessions()` — deliberately NOT on every history change; see
     /// `persistCurrentChat`'s doc comment.
     private(set) var sessions: [ChatSession] = []
-    /// UUID string of the chat currently loaded into `history`. Empty until
+    /// UUID string of the chat currently loaded into `messages`. Empty until
     /// `handleOnAppearSessions()` resolves (or mints) one.
     private(set) var currentSessionIDString = ""
 
@@ -154,13 +156,13 @@ final class ChatEngine {
     /// passed `[]`.
     var attachmentsForTurn: () -> [LlmIdeAPIClient.CodeAttachment] = { [] }
 
-    /// Packs `history` for the wire. The panel wires this to the engine's own
-    /// `historyForRequest` (moved here in Task 7 together with
-    /// `HistoryForRequestTests`); the identity default only exists so a test
-    /// that doesn't care about budgeting can construct the engine with a
-    /// transport alone. Leaving it unwired in production would silently drop
-    /// the 400k-char request budget.
-    var packHistory: ([LlmIdeAPIClient.CodeAssistTurn]) -> [LlmIdeAPIClient.CodeAssistTurn] = { $0 }
+    /// Packs `messages` for the wire — `[ChatMessage]` in, wire turns out.
+    /// The panel wires this to the engine's own `historyForRequest` (moved
+    /// here in Task 7 together with `HistoryForRequestTests`); the default
+    /// only does the wire encoding, so a test that doesn't care about
+    /// budgeting can construct the engine with a transport alone. Leaving it
+    /// unwired in production would silently drop the 400k-char request budget.
+    var packHistory: ([ChatMessage]) -> [LlmIdeAPIClient.CodeAssistTurn] = { $0.map { $0.wireTurn() } }
 
     /// Auto-chain the next pending action (file edit / git op / shell command)
     /// when the budget allows — the panel's `autoChainPendingAction`, which is
@@ -168,11 +170,11 @@ final class ChatEngine {
     /// the same truncated-path data-loss guard.
     var autoChain: ((PendingTool?, LlmIdeAPIClient.CodeAssistResponse.Usage?) async -> Void)?
 
-    /// Called with the history that just replaced `history` wholesale
+    /// Called with the messages that just replaced `messages` wholesale
     /// (session switch / delete-fallback / on-appear load). The panel wires
     /// this to `rebuildSentPrompts(from:)`, which reseeds the composer's
     /// ↑-recall list — panel-owned composer state until Task 14.
-    var onHistoryReplaced: ([LlmIdeAPIClient.CodeAssistTurn]) -> Void = { _ in }
+    var onHistoryReplaced: ([ChatMessage]) -> Void = { _ in }
 
     /// Extra per-conversation reset the panel still owns, called from
     /// `resetActiveTurnState()` in place of the `expandedTurns.removeAll()`
@@ -226,8 +228,12 @@ final class ChatEngine {
         onRecordPrompt(message)
         onNudge(message)
         // Append the user turn FIRST so the message appears immediately
-        // even if the network call is slow.
-        history.append(.init(role: .user, content: message))
+        // even if the network call is slow. Constructed directly rather than
+        // through `ChatMessage.migrate` (which `appendTurn` uses for the
+        // confirmers' synthetic acks): this one is known statically to be a
+        // real human turn, so a prompt that happens to start with "(" must
+        // not be classified as a tool result.
+        messages.append(ChatMessage(role: .user, content: message, status: .done, createdAt: Date()))
         busy = true
         statusText = ""
         error = nil
@@ -251,7 +257,7 @@ final class ChatEngine {
             // Replay as much of the conversation as fits (see
             // historyForRequest); the server applies its own prompt-aware
             // budget on top.
-            let recent = packHistory(history)
+            let recent = packHistory(messages)
             let input = await resolveTransportInput(
                 message,
                 Array(recent.dropLast()),  // exclude the just-pushed user turn — server appends it
@@ -271,11 +277,11 @@ final class ChatEngine {
             try Task.checkCancellation()
             // If the buffered fallback path fired (no chunk events ever
             // arrived), the placeholder turn is still empty — fill it from
-            // the complete reply now. If chunks DID arrive, history[idx]
+            // the complete reply now. If chunks DID arrive, messages[idx]
             // already holds the complete text and this is a no-op overwrite
             // with the same value.
-            if let idx = history.firstIndex(where: { $0.id == streamingID }) {
-                history[idx].content = resp.reply
+            if let idx = messages.firstIndex(where: { $0.id == streamingID }) {
+                messages[idx].content = resp.reply
             }
             finishStreamingTurn(
                 streamingID,
@@ -294,16 +300,18 @@ final class ChatEngine {
             // Stopped-by-user (CancellationError, or URLError.cancelled from
             // URLSession) leaves the partial streamed text (if any) in place,
             // tagged as stopped, with no error banner. A real failure (network
-            // drop, decode error, etc.) gets the same "(stopped)" cleanup —
-            // an orphaned empty/partial placeholder turn must not linger in
-            // `history` forever either way — plus the `self.error` banner
-            // explaining what went wrong.
+            // drop, decode error, etc.) gets the same finalization — an
+            // orphaned `.streaming` placeholder must not linger in `messages`
+            // forever either way — plus the `self.error` banner explaining
+            // what went wrong, and a per-message `.failed` status carrying the
+            // reason (Task 16 hangs the retry affordance off exactly that).
             let isCancellation = error is CancellationError || (error as? URLError)?.code == .cancelled
             if revealingTurnID == streamingID {
                 finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
             }
             if !isCancellation {
                 self.error = error.localizedDescription
+                markFailed(streamingID, error)
             }
         }
         // Drain the next queued message (FIFO) as a fresh, un-cancelled turn.
@@ -362,10 +370,10 @@ final class ChatEngine {
         // of re-reading the (possibly now-different) global `revealingTurnID`.
         let streamingID = beginStreamingTurn()
         do {
-            let recent = packHistory(history)
+            let recent = packHistory(messages)
             // The synthetic "(executed create-gitlab-issue …)" turn we
             // pushed before this call IS the signal the agent needs to
-            // see. Keep it in `history`; pass "(continue)" as the user
+            // see. Keep it in `messages`; pass "(continue)" as the user
             // message purely to pass the server's empty-message guard.
             let input = await resolveTransportInput("(continue)", recent, [], [])
             let resp = try await transport.roundTrip(
@@ -373,8 +381,8 @@ final class ChatEngine {
                 onProgress: { [self] progress in recordProgress(progress) },
                 onChunk: { [self] text in appendStreamedChunk(streamingID, text) }
             )
-            if let idx = history.firstIndex(where: { $0.id == streamingID }) {
-                history[idx].content = resp.reply
+            if let idx = messages.firstIndex(where: { $0.id == streamingID }) {
+                messages[idx].content = resp.reply
             }
             finishStreamingTurn(
                 streamingID,
@@ -399,12 +407,35 @@ final class ChatEngine {
             // Same cleanup as runTurn's generic catch — beginStreamingTurn()
             // already inserted an empty placeholder turn before this
             // round-trip started, and a non-cancellation failure must not
-            // leave it orphaned in `history` forever.
+            // leave it orphaned in `messages` forever.
             if revealingTurnID == streamingID {
                 finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
             }
+            // The banner stays unconditional here (unlike runTurn, which
+            // suppresses it for a user-initiated stop) — a follow-up is not
+            // something the user can press Stop on, so any error reaching
+            // this point is worth showing. The `.failed` STATUS, though, is
+            // reserved for real failures, so a cancellation propagated from
+            // an outer task doesn't mark a message retryable.
             self.error = error.localizedDescription
+            let isCancellation = error is CancellationError || (error as? URLError)?.code == .cancelled
+            if !isCancellation {
+                markFailed(streamingID, error)
+            }
         }
+    }
+
+    /// Tag the placeholder message for a failed round-trip: `.failed` status
+    /// plus the reason, so the transcript can offer a retry instead of
+    /// leaving a silent empty bubble behind an error banner. Separate from
+    /// `finishStreamingTurn(stopped:)`, which runs first and handles the
+    /// stream/chain teardown that a stop and a failure share.
+    private func markFailed(_ id: UUID, _ error: Error) {
+        guard let idx = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[idx].status = .failed
+        var metadata = messages[idx].metadata ?? ChatMessage.Metadata()
+        metadata.failedError = error.localizedDescription
+        messages[idx].metadata = metadata
     }
 
     // MARK: - Streaming
@@ -418,29 +449,33 @@ final class ChatEngine {
         // Keep a durable row for each TOOL step (not for thinking/writing,
         // which are momentary): this is the record that replaces the raw fence
         // JSON the user used to watch stream into the reply.
-        guard progress.isTool, let turnID = revealingTurnID else { return }
-        var steps = turnActivity[turnID] ?? []
+        // Written straight onto the streaming MESSAGE (Task 9) rather than
+        // into a `turnActivity[turnID]` side table: the steps belong to the
+        // turn, so they now survive a save/reload like the rest of it, and
+        // the transcript reads them from one place whether the turn is live
+        // or loaded from disk.
+        guard progress.isTool, let turnID = revealingTurnID,
+              let idx = messages.firstIndex(where: { $0.id == turnID }) else { return }
         // The loop re-emits on every iteration; a repeat of the same
         // action back-to-back is noise, not a second step.
-        if steps.last?.label == progress.label { return }
-        steps.append(.init(label: progress.label, tool: progress.tool))
-        turnActivity[turnID] = steps
+        if messages[idx].toolSteps.last?.label == progress.label { return }
+        messages[idx].toolSteps.append(.init(label: progress.label, tool: progress.tool))
     }
 
-    /// Begin a new streaming assistant turn: appends a placeholder turn to
-    /// `history` and marks it as the one `appendStreamedChunk` will mutate.
-    /// The append happens with `suppressHistoryAnnounce` set so the
+    /// Begin a new streaming assistant turn: appends a `.streaming`
+    /// placeholder message and marks it as the one `appendStreamedChunk` will
+    /// mutate. The append happens with `suppressHistoryAnnounce` set so the
     /// length-triggered VoiceOver announcement in `handleHistoryChange`
     /// doesn't fire on an empty placeholder — `finishStreamingTurn` fires the
     /// real announcement itself, once, with the complete text.
     func beginStreamingTurn() -> UUID {
-        let turn = LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: "")
+        let message = ChatMessage(role: .assistant, content: "", status: .streaming, createdAt: Date())
         suppressHistoryAnnounce = true
-        history.append(turn)
+        messages.append(message)
         DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
-        revealingTurnID = turn.id
+        revealingTurnID = message.id
         revealedCount = 0
-        return turn.id
+        return message.id
     }
 
     /// Append `text` to the streaming turn identified by `id`. `revealedCount`
@@ -450,9 +485,9 @@ final class ChatEngine {
     /// the same read path the old fixed-schedule reveal used, now driven by
     /// real chunk arrival instead of an artificial timer.
     func appendStreamedChunk(_ id: UUID, _ text: String) {
-        guard let idx = history.firstIndex(where: { $0.id == id }) else { return }
-        history[idx].content += text
-        revealedCount = history[idx].content.count
+        guard let idx = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[idx].content += text
+        revealedCount = messages[idx].content.count
     }
 
     /// Finalize a streaming turn: fires the VoiceOver announcement exactly
@@ -471,20 +506,23 @@ final class ChatEngine {
     ) {
         revealingTurnID = nil
         revealedCount = 0
-        // Only store non-default modes — ModeBadge never renders for
-        // .execute/.auto, and most turns use one of those, so skipping them
-        // here keeps this dictionary from growing with entries nothing ever
-        // reads back.
-        if let mode, let resolved = CodeAssistMode(rawValue: mode), resolved != .execute, resolved != .auto {
-            turnModes[id] = resolved
-        }
-        if let idx = history.firstIndex(where: { $0.id == id }) {
-            if stopped {
-                if !history[idx].content.isEmpty {
-                    history[idx].content += "\n\n_(stopped)_"
-                }
+        if let idx = messages.firstIndex(where: { $0.id == id }) {
+            // A stop is a STATUS now, not a `"\n\n_(stopped)_"` suffix glued
+            // onto the content: the partial text stays exactly as it
+            // streamed, and the marker is re-synthesized only on the way out
+            // to the server (`ChatMessage.wireTurn()`).
+            messages[idx].status = stopped ? .stopped : .done
+            var metadata = messages[idx].metadata ?? ChatMessage.Metadata()
+            // Only store non-default modes — ModeBadge never renders for
+            // .execute/.auto, and most turns use one of those, so recording
+            // them would only add noise the transcript then has to filter.
+            if let mode, let resolved = CodeAssistMode(rawValue: mode),
+               resolved != .execute, resolved != .auto {
+                metadata.mode = resolved.rawValue
             }
-            let text = String(history[idx].content.prefix(200))
+            metadata.usage = usage
+            messages[idx].metadata = metadata
+            let text = String(messages[idx].content.prefix(200))
             if !text.isEmpty {
                 sendAnnouncement(text)
             }
@@ -545,7 +583,7 @@ final class ChatEngine {
     // forced by the move out of the view:
     //
     //  1. `persistCurrentChat(history:)` loses its parameter — the engine owns
-    //     `history`, so it applies the same 50-turn cap its callers used to
+    //     `messages`, so it applies the same 50-turn cap its callers used to
     //     pass in.
     //  2. `rebuildSentPrompts(from:)` (composer state, still panel-owned)
     //     becomes the `onHistoryReplaced` hook; `expandedTurns.removeAll()`
@@ -558,7 +596,7 @@ final class ChatEngine {
     /// UserDefaults key holding the last-active chat id for this scope.
     private var pointerKey: String { "chat.current.\(scope.rawValue)" }
 
-    /// Persist `history` into the current UUID session file, deriving a
+    /// Persist `messages` into the current UUID session file, deriving a
     /// title from the first user turn if it's still "New chat".
     ///
     /// Does NOT call `refreshSessions()` — this runs on every history change
@@ -571,51 +609,21 @@ final class ChatEngine {
     /// panel's `persistCurrentChat(history:)` applied at the call site.
     func persistCurrentChat() {
         guard let id = UUID(uuidString: currentSessionIDString) else { return }
-        let capped = Array(history.suffix(50))
+        let capped = Array(messages.suffix(50))
         var session = ChatSessionStore.load(id: id) ?? ChatSession(id: id, scope: scope)
         session.scope = scope
-        // Reuse each prior `ChatMessage` (its real `id`/`createdAt`/`status`/
-        // `toolResult`/`metadata`/`legacyContent`) wherever it still matches
-        // the wire turn at the same position, instead of unconditionally
-        // rebuilding the whole array via `ChatMessage(wireTurn:sessionDate:)`
-        // — that would hand every one of the up-to-50 retained messages a
-        // brand-new id and a `createdAt` of "now" on EVERY persist (this
-        // runs on every turn), discarding whatever `id`/`createdAt` an
-        // append site (e.g. `MobileControlManager`) had already stamped.
-        //
-        // `previous` (the just-loaded `session.messages`) and `capped` are
-        // both prefixes of the same ever-growing, append-only `history` up
-        // to their respective persist points, so they are prefix-aligned:
-        // position `i` in both refers to the same turn as long as neither
-        // array has had its head trimmed by the 50-turn cap since the
-        // other was written. `previousIndex == offset` handles every normal
-        // case (no growth since last persist, or growth that hasn't yet
-        // pushed the conversation past the cap). The content check below is
-        // what keeps this safe once the cap DOES start trimming the head —
-        // positions stop lining up, the check fails, and that position
-        // falls back to a fresh `ChatMessage` exactly as it did before this
-        // fix, rather than misattributing an id to the wrong turn.
-        let previous = session.messages
-        session.messages = capped.enumerated().map { offset, turn in
-            // Compare role+content only, NOT `CodeAssistTurn.==` directly —
-            // `CodeAssistTurn.id` is a fresh, client-only `UUID()` minted on
-            // every construction (stripped from the wire encoding; see its
-            // `CodingKeys`), so two turns built from identical role+content
-            // in two separate calls never compare equal on `id` even though
-            // they represent the same message.
-            if offset < previous.count {
-                let previousTurn = previous[offset].wireTurn()
-                if previousTurn.role == turn.role, previousTurn.content == turn.content {
-                    return previous[offset]
-                }
-            }
-            // No corresponding prior message (new turn since last persist,
-            // or the cap has trimmed the head so positions no longer line
-            // up), or its role/content no longer matches (shouldn't
-            // normally happen — e.g. an edited/removed upstream turn) —
-            // synthesize fresh, exactly as before.
-            return ChatMessage(wireTurn: turn, sessionDate: Date())
-        }
+        // A straight assignment as of Task 9 — `messages` IS the persisted
+        // shape now, so ids/`createdAt`/status/tool steps carry through
+        // untouched. (Task 8 needed a position-by-position reconciliation
+        // against the file on disk here, because the engine's own array was
+        // still `[CodeAssistTurn]` and every persist had to re-synthesize
+        // `ChatMessage`s — handing all 50 retained messages a brand-new id
+        // and a `createdAt` of "now" on every single turn unless carefully
+        // matched up. Owning `[ChatMessage]` end-to-end removes the problem
+        // rather than compensating for it; the identity guarantee is the
+        // same, and `ChatEngineSessionTests.persistPreservesIdentity` still
+        // pins it.)
+        session.messages = capped
         if session.title == "New chat" || session.title.isEmpty {
             if let firstUser = capped.first(where: { $0.role == .user }) {
                 let raw = firstUser.content
@@ -655,13 +663,13 @@ final class ChatEngine {
     /// Resolve which chat this scope should show on appear: migrate any legacy
     /// per-scope file, load the session list, then restore the remembered
     /// pointer → fall back to the newest session → mint a fresh one. Sets
-    /// `history` itself (like every other session-swap method here) and
+    /// `messages` itself (like every other session-swap method here) and
     /// returns it for the caller's convenience.
     ///
     /// Extracted from `CodeAssistantPanel.handleOnAppear`, which also does
     /// model-picker and initial-attachment setup — that half stays in the view.
     @discardableResult
-    func handleOnAppearSessions() -> [LlmIdeAPIClient.CodeAssistTurn] {
+    func handleOnAppearSessions() -> [ChatMessage] {
         _ = ChatSessionStore.migrateScopeFileIfNeeded(for: scope)
         refreshSessions()
         if currentSessionIDString.isEmpty {
@@ -671,20 +679,20 @@ final class ChatEngine {
         if let cur = UUID(uuidString: currentSessionIDString),
            let session = ChatSessionStore.load(id: cur),
            session.scope == scope {
-            history = session.messages.map { $0.wireTurn() }
-            onHistoryReplaced(session.messages.map { $0.wireTurn() })
+            messages = session.messages
+            onHistoryReplaced(session.messages)
         } else if let newest = sessions.first {
             currentSessionIDString = newest.id.uuidString
-            history = newest.messages.map { $0.wireTurn() }
-            onHistoryReplaced(newest.messages.map { $0.wireTurn() })
+            messages = newest.messages
+            onHistoryReplaced(newest.messages)
             rememberCurrentPointer()
         } else {
             // No usable pointer and no saved chats for this scope — start one.
-            // (mintFreshSession clears `history` itself.)
+            // (mintFreshSession clears `messages` itself.)
             mintFreshSession()
         }
         DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
-        return history
+        return messages
     }
 
     /// Cancel any in-flight turn and clear per-conversation transient
@@ -692,7 +700,7 @@ final class ChatEngine {
     /// the panel's `expandedTurns`). Called whenever the active chat is
     /// swapped out (create/switch/delete) so a running reply can't land its
     /// result in — or leave `busy` stuck locking — the newly active chat, and
-    /// queued messages / expanded-turn ids don't survive the swap.
+    /// queued messages / expanded-message ids don't survive the swap.
     func resetActiveTurnState() {
         runTask?.cancel()
         runTask = nil
@@ -702,7 +710,7 @@ final class ChatEngine {
         // runTask?.cancel() above is fire-and-forget — the actual
         // CancellationError cleanup inside runTurn's/sendFollowup's catch
         // block runs asynchronously and is NOT guaranteed to complete before
-        // callers of this function persist or swap `history` right after it
+        // callers of this function persist or swap `messages` right after it
         // returns (session switch/create/delete). Finalize any in-flight
         // streaming turn synchronously here instead, so the outgoing
         // session's placeholder is never left unfinished when persisted.
@@ -714,7 +722,7 @@ final class ChatEngine {
     }
 
     /// Reset all agent + transient state for a freshly created, switched-to,
-    /// or fallback chat. Does NOT touch `history` — callers are responsible
+    /// or fallback chat. Does NOT touch `messages` — callers are responsible
     /// for that. If the caller also fires `onHistoryReplaced` (i.e. it's
     /// loading a non-empty history rather than starting a blank chat), fire it
     /// AFTER this so its seeded composer recall state isn't clobbered by
@@ -726,9 +734,6 @@ final class ChatEngine {
     /// the switch and no-op instead of acting on the new session's history.
     func resetTransientSessionState() {
         agent.pendingTool = nil
-        // Tool-step rows belong to the outgoing chat's turns; a reloaded
-        // session mints fresh turn ids, so keeping them would only leak.
-        turnActivity.removeAll()
         error = nil
         agent.nudgePrompt = nil
         agent.agentSessionId = UUID().uuidString
@@ -752,7 +757,7 @@ final class ChatEngine {
         currentSessionIDString = fresh.id.uuidString
         rememberCurrentPointer()
         refreshSessions()
-        history = []
+        messages = []
         resetTransientSessionState()
     }
 
@@ -760,7 +765,7 @@ final class ChatEngine {
     /// already an untouched "New chat" (avoids duplicate empty rows from
     /// repeated taps on "+ New chat").
     func createNewSession() {
-        if history.isEmpty {
+        if messages.isEmpty {
             let title = sessions.first(where: { $0.id.uuidString == currentSessionIDString })?.title ?? "New chat"
             if title == "New chat" || title.isEmpty { return }
         }
@@ -785,8 +790,8 @@ final class ChatEngine {
         rememberCurrentPointer()
         resetTransientSessionState()
         suppressHistoryAnnounce = true
-        history = session.messages.map { $0.wireTurn() }
-        onHistoryReplaced(session.messages.map { $0.wireTurn() })
+        messages = session.messages
+        onHistoryReplaced(session.messages)
         DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
         ChatSessionStore.save(session)
         refreshSessions()
@@ -812,8 +817,8 @@ final class ChatEngine {
                 rememberCurrentPointer()
                 resetTransientSessionState()
                 suppressHistoryAnnounce = true
-                history = next.messages.map { $0.wireTurn() }
-                onHistoryReplaced(next.messages.map { $0.wireTurn() })
+                messages = next.messages
+                onHistoryReplaced(next.messages)
                 DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
             } else {
                 // No sessions left for this scope — mint a blank one and
@@ -850,14 +855,14 @@ final class ChatEngine {
     /// must not load into this engine.
     func reloadFromDisk(id: UUID) {
         guard let session = ChatSessionStore.load(id: id), session.scope == scope else { return }
-        history = session.messages.map { $0.wireTurn() }
-        onHistoryReplaced(session.messages.map { $0.wireTurn() })
+        messages = session.messages
+        onHistoryReplaced(session.messages)
     }
 
     // MARK: - History change
 
     /// Persist the chat and announce a newly-arrived assistant turn — the
-    /// panel's `handleHistoryChange`, driven by `.onChange(of: engine.history)`.
+    /// panel's `handleHistoryChange`, driven by `.onChange(of: engine.messages)`.
     ///
     /// Only a GROWING history announces, and only when the new last turn is
     /// the assistant's: an in-place edit (streamed chunks land as content
@@ -870,8 +875,8 @@ final class ChatEngine {
     /// The announcement goes through `sendAnnouncement` rather than
     /// `NSAccessibility.post` directly, so the engine stays AppKit-free and
     /// silent under test — same as `finishStreamingTurn`.
-    func announceAndPersist(oldValue: [LlmIdeAPIClient.CodeAssistTurn],
-                            newValue: [LlmIdeAPIClient.CodeAssistTurn]) {
+    func announceAndPersist(oldValue: [ChatMessage],
+                            newValue: [ChatMessage]) {
         persistCurrentChat()
         guard !suppressHistoryAnnounce else { return }
         if newValue.count > oldValue.count,
@@ -904,13 +909,19 @@ final class ChatEngine {
     /// four-step task pushed the user's original request out of the window and
     /// the agent carried on with no idea what it had been asked to do.
     ///
-    /// Takes its input as a parameter rather than reading `self.history`: both
-    /// round-trip sites pack the history they are about to send, and the
+    /// Takes its input as a parameter rather than reading `self.messages`:
+    /// both round-trip sites pack the history they are about to send, and the
     /// contract is pinned turn-by-turn by `HistoryForRequestTests`.
-    func historyForRequest(_ turns: [LlmIdeAPIClient.CodeAssistTurn])
+    ///
+    /// Wire-encodes FIRST (`wireTurn()`, which re-renders a `.toolResult`
+    /// message through `ToolResultPayload.legacyContent()` and re-attaches the
+    /// stopped marker), then budgets. Both budgets have to measure what is
+    /// actually SENT — a tool-result message's `content` and its reconstructed
+    /// wire text can differ, and it's the latter that lands in the POST body.
+    func historyForRequest(_ msgs: [ChatMessage])
         -> [LlmIdeAPIClient.CodeAssistTurn]
     {
-        let clipped = turns.map { turn -> LlmIdeAPIClient.CodeAssistTurn in
+        let clipped = msgs.map { $0.wireTurn() }.map { turn -> LlmIdeAPIClient.CodeAssistTurn in
             guard turn.content.count > Self.maxHistoryTurnChars else { return turn }
             return .init(role: turn.role,
                          content: String(turn.content.prefix(Self.maxHistoryTurnChars))
@@ -942,26 +953,42 @@ final class ChatEngine {
 
     // MARK: - Panel-driven writes
     //
-    // `history` is `private(set)` because the engine owns the turn lifecycle.
+    // `messages` is `private(set)` because the engine owns the turn lifecycle.
     // These are the narrow openings the panel still needs, each matching one
     // thing it did directly when it owned the array.
 
     /// Append a synthetic turn the PANEL produced: the "(executed create-issue
     /// → …)" / "(bash result …)" / "(applied update to …)" acknowledgements
     /// every client-executed tool writes so the agent sees its own result as
-    /// conversation context (see `ChatMessageList.isToolNotice`), and the
-    /// placeholder a chat-triggered Loop run streams its log into.
-    func appendTurn(_ turn: LlmIdeAPIClient.CodeAssistTurn) {
-        history.append(turn)
+    /// conversation context, and the placeholder a chat-triggered Loop run
+    /// streams its log into.
+    ///
+    /// Still takes a WIRE turn — the confirmers in `CodeAssistant+Bash/Git/
+    /// Edits/Issues/PR.swift` legitimately produce those strings (that text is
+    /// what the agent has to read back on the next round-trip), and they are
+    /// unchanged by Task 9. What changed is that the string is classified
+    /// ONCE, here, the moment it enters the transcript: `ChatMessage.migrate`
+    /// turns it into a typed `.toolResult` message, so nothing downstream —
+    /// least of all the view — ever sniffs it again.
+    ///
+    /// Returns the new message's id: the message gets its own (the caller's
+    /// `CodeAssistTurn.id` is a throwaway client-side value), and the
+    /// chat-triggered Loop run needs that handle to stream into via
+    /// `setTurnContent`.
+    @discardableResult
+    func appendTurn(_ turn: LlmIdeAPIClient.CodeAssistTurn) -> UUID {
+        let message = ChatMessage(wireTurn: turn, sessionDate: Date())
+        messages.append(message)
+        return message.id
     }
 
-    /// Replace the content of an existing turn, addressed by id. No-op when
+    /// Replace the content of an existing message, addressed by id. No-op when
     /// the id is gone (the session was switched out from under a long-running
     /// producer) — deliberately, so a stale writer can't resurrect a turn into
     /// a chat it doesn't belong to.
     func setTurnContent(id: UUID, _ content: String) {
-        guard let idx = history.firstIndex(where: { $0.id == id }) else { return }
-        history[idx].content = content
+        guard let idx = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[idx].content = content
     }
 
     /// Claim the turn slot for a run the PANEL executes itself (today: the

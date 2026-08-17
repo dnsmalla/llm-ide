@@ -98,7 +98,7 @@ struct ChatEngineSessionTests {
             #expect(engine.currentSessionIDString == other.id.uuidString)
             // The decisive assertion: the follow-up turn did NOT land in the
             // newly active chat.
-            #expect(engine.history.isEmpty)
+            #expect(engine.messages.isEmpty)
             #expect(engine.busy == false)
             // ...and the outgoing chat was persisted with exactly its own two
             // turns — no "Continue working" turn appended after the switch.
@@ -116,7 +116,7 @@ struct ChatEngineSessionTests {
             ct.result = .init(reply: "done", pendingTool: nil, tasks: nil,
                               continueNeeded: nil, usage: nil, mode: nil)
             await settle(100)
-            #expect(control.history.map(\.content).contains("Continue working on your pending tasks."))
+            #expect(control.messages.map(\.content).contains("Continue working on your pending tasks."))
         }
     }
 
@@ -137,14 +137,14 @@ struct ChatEngineSessionTests {
 
             engine.handleOnAppearSessions()
             #expect(engine.currentSessionIDString == active.id.uuidString)
-            #expect(engine.history.map(\.content) == ["doomed"])
+            #expect(engine.messages.map(\.content) == ["doomed"])
             #expect(replaced == [["doomed"]])
 
             // Delete the ACTIVE chat → newest survivor becomes current, with
             // its own history loaded and the relaunch pointer moved with it.
             await engine.deleteSession(active.id)
             #expect(engine.currentSessionIDString == keep.id.uuidString)
-            #expect(engine.history.map(\.content) == ["kept"])
+            #expect(engine.messages.map(\.content) == ["kept"])
             #expect(ChatSessionStore.load(id: active.id)?.id == nil)
             #expect(UserDefaults.standard.string(forKey: Self.pointerKey) == keep.id.uuidString)
             // The panel's ↑-recall seed is re-fired for the loaded history.
@@ -156,7 +156,7 @@ struct ChatEngineSessionTests {
             await engine.deleteSession(keep.id)
             #expect(engine.currentSessionIDString != keep.id.uuidString)
             #expect(UUID(uuidString: engine.currentSessionIDString) != nil)
-            #expect(engine.history.isEmpty)
+            #expect(engine.messages.isEmpty)
             #expect(engine.sessions.map(\.id.uuidString) == [engine.currentSessionIDString])
             #expect(UserDefaults.standard.string(forKey: Self.pointerKey) == engine.currentSessionIDString)
             // A blank chat replaces no history, so no extra hook call.
@@ -183,7 +183,10 @@ struct ChatEngineSessionTests {
 
         #expect(engine.revealingTurnID == nil)
         #expect(engine.revealedCount == 0)
-        #expect(engine.history.last?.content == "half an answer\n\n_(stopped)_")
+        // Task 9: the partial text is left exactly as it streamed; the stop
+        // is carried by `status`, not by a marker glued onto the content.
+        #expect(engine.messages.last?.content == "half an answer")
+        #expect(engine.messages.last?.status == .stopped)
         #expect(engine.busy == false)
         #expect(engine.queued.isEmpty)
         // The panel's view-only expand state is reset through the hook.
@@ -191,7 +194,7 @@ struct ChatEngineSessionTests {
 
         // With nothing streaming it is a no-op beyond the counters.
         engine.resetActiveTurnState()
-        #expect(engine.history.map(\.content) == ["half an answer\n\n_(stopped)_"])
+        #expect(engine.messages.map(\.content) == ["half an answer"])
         #expect(extraResets == 2)
     }
 
@@ -214,7 +217,7 @@ struct ChatEngineSessionTests {
             ChatSessionStore.save(session)
             engine.handleOnAppearSessions()
             #expect(engine.currentSessionIDString == session.id.uuidString)
-            #expect(engine.history.map(\.content) == ["seeded turn"])
+            #expect(engine.messages.map(\.content) == ["seeded turn"])
 
             // Run one real turn — appends "second question" (user) and
             // "first answer" (assistant) to history.
@@ -294,7 +297,7 @@ struct ChatEngineSessionTests {
             await engine.clearCurrentChat()
             #expect(forgotten == [active.id.uuidString, bystander.id.uuidString])
             #expect(engine.currentSessionIDString != bystander.id.uuidString)
-            #expect(engine.history.isEmpty)
+            #expect(engine.messages.isEmpty)
         }
     }
 }

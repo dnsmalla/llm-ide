@@ -117,7 +117,6 @@ extension CodeAssistantPanel {
         //   if it were live.
         engine.beginPanelRun()
         let placeholderTurn = LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: "Starting Loop…")
-        let placeholderId = placeholderTurn.id
         // Captured BEFORE the first await below — if the user switches to a
         // different chat session while this run is in flight, `history`
         // gets swapped out from under us (see `sessionEpoch`'s doc comment
@@ -128,7 +127,11 @@ extension CodeAssistantPanel {
         // check for the common case, and to short-circuit before scanning
         // `history` at all.
         let startEpoch = engine.sessionEpoch
-        engine.appendTurn(placeholderTurn)
+        // The id comes back FROM the append: `appendTurn` classifies the turn
+        // into a `ChatMessage` with its own stable id (Task 9), so the
+        // throwaway `CodeAssistTurn.id` above is not the handle to stream
+        // into — this one is.
+        let placeholderId = engine.appendTurn(placeholderTurn)
 
         // `projectId` here is the stable Project.id (see the contract on
         // LoopEngineConfig.load/save from Task 1) — the same key Task 9's

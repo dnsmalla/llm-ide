@@ -1,11 +1,10 @@
 import Foundation
 
-/// v2 chat message envelope — the persisted shape for one turn inside a
-/// `ChatSession`. This is the on-disk/model format only: `ChatEngine.history`
-/// stays `[LlmIdeAPIClient.CodeAssistTurn]` until Task 9 rewires the
-/// turn-lifecycle logic onto this type. Until then, the boundary between the
-/// two is exactly `wireTurn()` (`ChatMessage` → wire turn) and
-/// `init(wireTurn:sessionDate:)` (wire turn → `ChatMessage`).
+/// v2 chat message envelope — the shape of one turn both on disk (inside a
+/// `ChatSession`) and in memory (`ChatEngine.messages`). The wire boundary
+/// with the server is exactly `wireTurn()` (`ChatMessage` → `{role, content}`)
+/// and `migrate(role:content:sessionDate:)` / `init(wireTurn:sessionDate:)`
+/// (`{role, content}` → `ChatMessage`).
 ///
 /// The point of the richer shape: legacy history stored client-executed tool
 /// acknowledgements as magic `"("`-prefixed user strings (e.g. "(applied
@@ -21,18 +20,28 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
     enum Status: String, Codable { case streaming, done, stopped, failed }
 
     /// One tool step the agent took during a turn — "Reading Foo.swift",
-    /// "Running npm test". Mirrors `CodeAssistantPanel.ToolStep` (still the
-    /// type `ChatEngine.turnActivity` uses today; Task 9 is what actually
-    /// moves the transcript's live rendering onto `ChatMessage`).
+    /// "Running npm test" — so the transcript shows WHAT it did instead of the
+    /// raw `<<<TOOL_CALL>>>` JSON that used to stream into the reply. Replaces
+    /// the old view-nested `CodeAssistantPanel.ToolStep` (deleted in Task 9,
+    /// together with the `ChatEngine.turnActivity` dictionary that keyed them
+    /// by turn id): steps now live on the message they belong to, so they
+    /// survive a session reload instead of being in-memory only.
     struct ToolStep: Codable, Equatable, Identifiable, Sendable {
         let id: UUID
         let label: String
         let tool: String?
         let at: Date
 
-        /// SF Symbol matching the action — copied verbatim from
-        /// `CodeAssistantPanel.ToolStep.icon` (CodeAssistantPanel.swift:106-120)
-        /// so the two render identically.
+        init(id: UUID = UUID(), label: String, tool: String?, at: Date = Date()) {
+            self.id = id
+            self.label = label
+            self.tool = tool
+            self.at = at
+        }
+
+        /// SF Symbol matching the action — carried over verbatim from the
+        /// deleted `CodeAssistantPanel.ToolStep.icon` so the transcript
+        /// renders identically to before.
         var icon: String {
             switch tool {
             case "read-file", "get-issue":            return "doc.text"
@@ -57,11 +66,16 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         enum Kind: String, Codable { case edit, bash, git, issue, skip, other }
         let kind: Kind
         /// Human line shown in the capsule ("applied update to parser.swift:
-        /// +3 lines") — the first line of the legacy ack text.
+        /// +3 lines") — the first line of the legacy ack text, verbatim.
         var summary: String
         var exitCode: Int?         // bash
         var command: String?       // bash
-        var output: String?        // bash (full, beyond the first line)
+        /// Everything after the first line (and, for bash, after the
+        /// `"$ <command>"` line): the command's output, a git op's stdout, an
+        /// edit ack's continuation. `nil` — NOT `""` — when the ack was a
+        /// single line, because `legacyContent()` distinguishes the two
+        /// ("(git push result)" vs "(git push result)\n").
+        var output: String?
         var url: String?           // issue/PR
         /// NOT in the brief's originally printed struct — added because the
         /// code this parser replaces (`BashResultDisplay` in
@@ -98,7 +112,9 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
                 command = String(first.dropFirst(2))
                 lines.removeFirst()
             }
-            var output = lines.joined(separator: "\n")
+            // nil, not "", when nothing followed the header/command line —
+            // see `output`'s doc comment and `legacyContent()`.
+            var output: String? = lines.isEmpty ? nil : lines.joined(separator: "\n")
             // The "blocked" variant (CodeAssistant+Bash.swift's
             // validateCommand guard) is a single-line message with no exit
             // code, no command, and no separate body — the header IS the
@@ -116,6 +132,45 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
             return ToolResultPayload(kind: .bash, summary: summary, exitCode: exitCode,
                                       command: command, output: output, url: nil,
                                       isFailure: isFailure)
+        }
+
+        /// THE inverse of the classification above: rebuilds the exact legacy
+        /// synthetic-ack string this payload was parsed from, purely from the
+        /// typed fields. This is the ONLY thing the server ever sees of a
+        /// `.toolResult` message (`ChatMessage.wireTurn()` and
+        /// `ChatEngine.historyForRequest` both go through it), so it has to be
+        /// byte-identical to what the confirmers in `CodeAssistant+Bash/Git/
+        /// Edits/Issues/PR.swift` wrote — otherwise the agent's view of its own
+        /// tool results would silently drift mid-session across the upgrade.
+        /// `ChatEngineMessageTests` pins that round trip against every v1
+        /// fixture.
+        ///
+        /// The header is `summary` verbatim rather than re-rendered from
+        /// `kind`/`exitCode`/`isFailure`: those three don't carry enough to
+        /// reproduce the exact wording ("(bash result - exit code: 0)" vs
+        /// "(bash failed - exit code: 1)" vs "(git push result)"), and the
+        /// first line is stored losslessly anyway.
+        func legacyContent() -> String {
+            // The "blocked" bash variant is a single-line message whose header
+            // IS the whole content; `parse` unwrapped it by dropping the
+            // leading "(bash " (6 chars) and the trailing ")", so re-wrapping
+            // `output` — NOT `summary`, which is still the fully-wrapped
+            // header and would nest a second "(bash …)" around it — restores
+            // the original exactly.
+            if kind == .bash, summary.contains("blocked") {
+                return output.map { "(bash \($0))" } ?? summary
+            }
+            var text = summary
+            // bash only: the "$ <command>" line sits between the header and
+            // the output. Non-bash acks have no such line, and `command` is
+            // always nil for them.
+            if let command { text += "\n$ \(command)" }
+            // A SINGLE newline before the body — the production format is
+            // `"\(header)\n$ \(displayCommand)\n\(body)"` (CodeAssistant+Bash
+            // .swift), and any blank line the real output started with is
+            // already part of `output`.
+            if let output { text += "\n" + output }
+            return text
         }
     }
 
@@ -141,21 +196,9 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
     var toolResult: ToolResultPayload?   // role == .toolResult
     var metadata: Metadata?
 
-    /// Verbatim legacy wire text, set only when this message was produced by
-    /// `migrate(role:content:sessionDate:)` (v1→v2 migration, OR the
-    /// `ChatEngine` ↔ `ChatSession` boundary conversion, which runs every
-    /// live turn through the same function). `wireTurn()` returns this
-    /// untouched when present, guaranteeing a byte-exact round trip for
-    /// every migrated/converted `.toolResult` message — including the
-    /// non-bash kinds (e.g. "(applied update to X: Y)") whose `summary`
-    /// alone is not always enough to reconstruct the original string.
-    /// Private: it exists purely to make `wireTurn()` exact, not as
-    /// something other code should read or compare on.
-    private var legacyContent: String?
-
     init(id: UUID = UUID(), role: Role, content: String, status: Status, createdAt: Date,
          toolSteps: [ToolStep] = [], toolResult: ToolResultPayload? = nil,
-         metadata: Metadata? = nil, legacyContent: String? = nil) {
+         metadata: Metadata? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -164,15 +207,15 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         self.toolSteps = toolSteps
         self.toolResult = toolResult
         self.metadata = metadata
-        self.legacyContent = legacyContent
     }
 
     // MARK: - v1 → v2 migration
 
-    /// THE single transform behind both v1 JSON migration
+    /// THE single transform behind v1 JSON migration
     /// (`ChatSession.init(from:)`, one call per legacy `{role, content}`
-    /// turn) and the `ChatEngine` ↔ `ChatSession` boundary conversion
-    /// (`init(wireTurn:sessionDate:)` below) — the brief's Interfaces section
+    /// turn) AND live classification of the synthetic tool-result acks the
+    /// confirmers still produce as strings (`ChatEngine.appendTurn` →
+    /// `init(wireTurn:sessionDate:)` below) — the brief's Interfaces section
     /// names the migration entry point `migrate(role:content:sessionDate:)`
     /// and its Step 3 prose separately mentions a `fromWireTurn` for the
     /// engine-boundary conversion, but a `(role, content)` pair IS a
@@ -181,8 +224,12 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
     ///
     /// `sessionDate` becomes `createdAt`: v1 turns had no per-turn timestamp,
     /// so migration uses the session's `lastUsedAt` as a best-effort stand-in
-    /// (per the brief); the engine-boundary conversion passes the actual
-    /// current time for freshly-written turns.
+    /// (per the brief); a live append passes the actual current time.
+    ///
+    /// NOTE: this classifies ANY `"("`-prefixed user string as a tool result,
+    /// which is why `ChatEngine.runTurn` does NOT route the human's own
+    /// prompt through it — a person who opens a message with a parenthesis is
+    /// still typing a message.
     static func migrate(role: LlmIdeAPIClient.CodeAssistRole, content: String, sessionDate: Date) -> ChatMessage {
         // Bash-result ack — checked first because "(bash " is a MORE
         // SPECIFIC prefix than the generic "(" branch below; letting the
@@ -190,18 +237,28 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         // `.other` before this ever got a chance to match.
         if role == .user, let payload = ToolResultPayload.parse(content: content) {
             return ChatMessage(role: .toolResult, content: content, status: .done,
-                                createdAt: sessionDate, toolResult: payload, legacyContent: content)
+                                createdAt: sessionDate, toolResult: payload)
         }
         // Every other legacy synthetic-ack convention: role user, content
         // starting with "(". See `classifyAckKind`'s doc comment for the
         // full list of conventions this covers and why it's best-effort.
+        //
+        // Split into first line + remainder exactly the way the bash branch
+        // above does, so `legacyContent()` can reconstruct the WHOLE ack
+        // rather than just its first line: a git-op result ("(git push
+        // result)\n<stdout>") carries real content on the lines after the
+        // summary, and truncating it would quietly change what the agent
+        // sees of its own tool output.
         if role == .user, content.hasPrefix("(") {
-            let summary = content.components(separatedBy: "\n").first ?? content
+            let lines = content.components(separatedBy: "\n")
+            let summary = lines.first ?? content
+            let body = lines.count > 1 ? lines.dropFirst().joined(separator: "\n") : nil
             let kind = classifyAckKind(content)
             let payload = ToolResultPayload(kind: kind, summary: summary, exitCode: nil,
-                                             command: nil, output: nil, url: nil, isFailure: false)
+                                             command: nil, output: body, url: nil,
+                                             isFailure: ackIsFailure(summary: summary, kind: kind))
             return ChatMessage(role: .toolResult, content: content, status: .done,
-                                createdAt: sessionDate, toolResult: payload, legacyContent: content)
+                                createdAt: sessionDate, toolResult: payload)
         }
         // Assistant turn ending in the legacy stopped marker
         // (`ChatEngine.finishStreamingTurn`'s `"\n\n_(stopped)_"` suffix,
@@ -217,12 +274,11 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
     }
 
     /// Convenience wrapper for the `CodeAssistTurn` case of `migrate` — used
-    /// by v1 JSON migration (one call per legacy turn) and by the
-    /// engine-boundary conversions in `ChatEngine.swift`
-    /// (`persistCurrentChat`, `handleOnAppearSessions`, `switchSession`,
-    /// `deleteSession`, `reloadFromDisk`) and `MobileControlManager.swift`'s
-    /// explorer-chat proxy, all of which need a `CodeAssistTurn` (which is
-    /// just `{role, content}`) turned into the right `ChatMessage` shape.
+    /// by v1 JSON migration (one call per legacy turn), by
+    /// `ChatEngine.appendTurn` (the confirmers' synthetic acks, classified on
+    /// the way in) and by `MobileControlManager.swift`'s explorer-chat proxy,
+    /// all of which hold a `CodeAssistTurn` (which is just `{role, content}`)
+    /// and need the right `ChatMessage` shape for it.
     init(wireTurn: LlmIdeAPIClient.CodeAssistTurn, sessionDate: Date) {
         self = ChatMessage.migrate(role: wireTurn.role, content: wireTurn.content, sessionDate: sessionDate)
     }
@@ -268,40 +324,45 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         return .other
     }
 
+    /// Whether a non-bash ack should render as a warning rather than a
+    /// success. This is where the old `ChatMessageList.toolNoticeIcon`
+    /// content-sniffing moved to: the VIEW now just reads
+    /// `payload.isFailure`, and the one place that has to look at the legacy
+    /// wording is the classifier that owns every other legacy-string decision.
+    ///
+    /// Deliberately narrowed from the old check, which scanned the WHOLE ack
+    /// text: a successful "(git push result)" whose stdout happened to contain
+    /// the word "failed" used to flip the capsule to a warning. Only the
+    /// summary line — the one the capsule actually shows — decides now.
+    private static func ackIsFailure(summary: String, kind: ToolResultPayload.Kind) -> Bool {
+        kind == .skip || summary.contains("failed") || summary.contains("skipped")
+    }
+
     // MARK: - Wire encoding — THE server contract (spec: unchanged)
 
     /// Reconstructs the legacy `{role: "user"|"assistant", content}` shape
-    /// the server still (and only ever) understands. Byte-exact for any
-    /// message produced by `migrate`/`init(wireTurn:sessionDate:)` (which is
-    /// every message this task can produce) because those always populate
-    /// `legacyContent` for anything that isn't a plain `.done` turn, and a
-    /// plain turn's own `content` IS the original string untouched.
+    /// the server still (and only ever) understands.
+    ///
+    /// A `.toolResult` message rebuilds its text from the typed payload via
+    /// `ToolResultPayload.legacyContent()` — there is no stored copy of the
+    /// original string to short-circuit with (Task 8 kept one; Task 9 dropped
+    /// it once `legacyContent()` became lossless for EVERY kind, so a
+    /// tool-result turn no longer costs two copies of its text on disk and
+    /// there is exactly one reconstruction path to test). The `?? content`
+    /// fallback covers a `.toolResult` message with no payload at all, which
+    /// nothing constructs.
     func wireTurn() -> LlmIdeAPIClient.CodeAssistTurn {
-        if let legacyContent {
-            return .init(role: .user, content: legacyContent)
-        }
         switch role {
         case .toolResult:
-            // Defensive fallback for a `.toolResult` message constructed
-            // some OTHER way than `migrate` (none exist yet — Task 9 is what
-            // adds direct construction sites). Best-effort reconstruction
-            // from the typed payload; not exercised by this task's tests.
-            return .init(role: .user, content: wireTextForToolResultFallback())
+            return .init(role: .user, content: toolResult?.legacyContent() ?? content)
         case .assistant:
+            // `Status.stopped` is the v2 representation; the marker suffix is
+            // re-attached ONLY here, on the way out to the server, so the
+            // agent still reads a stopped reply the way it always has.
             let text = (status == .stopped && !content.isEmpty) ? content + "\n\n_(stopped)_" : content
             return .init(role: .assistant, content: text)
         case .user:
             return .init(role: .user, content: content)
         }
-    }
-
-    private func wireTextForToolResultFallback() -> String {
-        guard let payload = toolResult else { return content }
-        guard payload.kind == .bash else { return payload.summary }
-        guard let command = payload.command else {
-            return "(bash blocked - \(payload.summary))"
-        }
-        let header = "(bash \(payload.isFailure ? "failed" : "result") - exit code: \(payload.exitCode.map(String.init) ?? "0"))"
-        return "\(header)\n$ \(command)\n\n\(payload.output ?? "")"
     }
 }

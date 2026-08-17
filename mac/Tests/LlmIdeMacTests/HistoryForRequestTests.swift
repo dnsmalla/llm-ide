@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import LlmIdeMacLib
 
@@ -16,6 +17,12 @@ import Testing
 ///   always fits the 400k budget. The oversized-anchor test pins what
 ///   actually happens (clip, keep, tail kept); the anchor-nil branch is
 ///   covered separately by the no-user-turn test.
+///
+/// Task 9 retargeted the INPUT type only: the packer takes `[ChatMessage]`
+/// and wire-encodes before budgeting. Same rules, same constants, same
+/// assertions — plus one new case pinning that a `.toolResult` message is
+/// measured and emitted by its RECONSTRUCTED wire text, which is what
+/// actually goes in the POST body.
 @MainActor
 @Suite("historyForRequest packing")
 struct HistoryForRequestTests {
@@ -23,8 +30,12 @@ struct HistoryForRequestTests {
         scope: .explorer,
         transport: CodeAssistTransport(api: LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")))
 
-    func turn(_ role: LlmIdeAPIClient.CodeAssistRole, _ content: String)
-        -> LlmIdeAPIClient.CodeAssistTurn { .init(role: role, content: content) }
+    /// Builds the `ChatMessage` a wire turn of this shape migrates into —
+    /// the same transform every real append site uses, so these fixtures
+    /// can't drift from production message construction.
+    func turn(_ role: LlmIdeAPIClient.CodeAssistRole, _ content: String) -> ChatMessage {
+        ChatMessage(wireTurn: .init(role: role, content: content), sessionDate: Date())
+    }
 
     @Test("Under budget: everything passes through, order preserved")
     func underBudget() {
@@ -79,7 +90,7 @@ struct HistoryForRequestTests {
     func noUserTurn() {
         // The only reachable anchor==nil path: there is no user turn to
         // reserve, so the whole 400k budget packs the tail newest-first.
-        var turns: [LlmIdeAPIClient.CodeAssistTurn] = []
+        var turns: [ChatMessage] = []
         for _ in 0..<20 { turns.append(turn(.assistant, String(repeating: "b", count: 24_000))) }
         turns.append(turn(.assistant, "final answer"))
         let out = engine.historyForRequest(turns)
@@ -90,5 +101,16 @@ struct HistoryForRequestTests {
         // ones dropped (400k admits 16 of the 24k turns plus the tail).
         #expect(out.count == 17)
         #expect(out.first?.content == String(repeating: "b", count: 24_000))
+    }
+
+    @Test("A tool-result message is packed by its reconstructed wire text")
+    func toolResultUsesWireText() {
+        // `migrate` splits this ack into summary + output; the packer must
+        // measure and emit `legacyContent()`, not the summary line alone —
+        // the whole point of the budget is to bound what is SENT.
+        let ack = "(git push result)\nEverything up-to-date"
+        let out = engine.historyForRequest([turn(.user, "push it"), turn(.user, ack)])
+        #expect(out.map(\.role) == [.user, .user])   // server sees user/assistant only
+        #expect(out[1].content == ack)
     }
 }

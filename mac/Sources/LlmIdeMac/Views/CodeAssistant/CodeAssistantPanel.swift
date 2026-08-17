@@ -94,31 +94,11 @@ struct CodeAssistantPanel: View {
     @State var historyIndex: Int? = nil
     @State var draftStash: String = ""
     @State var showingSessionPicker = false
-    /// One tool step the agent took during a turn — "Reading Foo.swift",
-    /// "Running npm test" — so the transcript shows WHAT it did instead of the
-    /// raw `<<<TOOL_CALL>>>` JSON that used to stream into the reply.
-    struct ToolStep: Identifiable, Equatable {
-        let id = UUID()
-        let label: String
-        let tool: String?
-        /// SF Symbol matching the action, so a glance distinguishes a read from
-        /// a shell run without parsing the text.
-        var icon: String {
-            switch tool {
-            case "read-file", "get-issue":            return "doc.text"
-            case "list-files", "list-issues":         return "list.bullet"
-            case "search-kb":                         return "books.vertical"
-            case "web-search":                        return "globe"
-            case "fetch-url":                         return "link"
-            case "bash", "run-bash":                  return "terminal"
-            case "git-op":                            return "arrow.triangle.branch"
-            case "update-file":                       return "pencil"
-            case "ask-internal", "ask-subagent":      return "sparkles"
-            case "task-create", "task-update", "task-list": return "checklist"
-            default:                                  return "wrench.and.screwdriver"
-            }
-        }
-    }
+    // NOTE: the per-turn `ToolStep` struct that used to live here moved to
+    // `ChatMessage.ToolStep` in Task 9 — a tool step belongs to the message
+    // that produced it, not to the view that draws it, so it is now stored
+    // (and reloaded) with the turn instead of held in an in-memory dictionary
+    // keyed by turn id.
     @State var prefLanguage: String = "en"
     @State var didAttachInitial = false
     /// Path of the file auto-attached from the tree selection (`initialURL`),
@@ -240,7 +220,7 @@ struct CodeAssistantPanel: View {
             .task { await refreshRecentIssuesLoop() }
             .task { await loadModels(for: AICliTool(rawValue: config.activeCLI) ?? .claudeCode) }
             .onAppear { handleOnAppear() }
-            .onChange(of: engine.history) { oldValue, newValue in
+            .onChange(of: engine.messages) { oldValue, newValue in
                 engine.announceAndPersist(oldValue: oldValue, newValue: newValue)
             }
             .onReceive(NotificationCenter.default.publisher(for: .explorerChatTranscriptChanged)) { note in

@@ -31,22 +31,28 @@ struct ChatEngineTurnTests {
         t.result = .init(reply: "Hello", pendingTool: nil, tasks: nil,
                          continueNeeded: nil, usage: nil, mode: nil)
         await engine.runTurn("hi")
-        #expect(engine.history.map(\.role) == [.user, .assistant])
-        #expect(engine.history[1].content == "Hello")
+        #expect(engine.messages.map(\.role) == [.user, .assistant])
+        #expect(engine.messages[1].content == "Hello")
+        #expect(engine.messages[1].status == .done)
         #expect(engine.busy == false)
         #expect(engine.revealingTurnID == nil)
         #expect(engine.error == nil)
     }
 
-    @Test("Stop mid-stream keeps partial text, marks stopped, no error")
+    @Test("Stop mid-stream keeps partial text verbatim, marks .stopped, no error")
     func stopMidStream() async {
         let (engine, t) = makeEngine()
         t.scripted = [.chunk("partial answer")]
         t.thrownError = CancellationError()
         await engine.runTurn("hi")
-        #expect(engine.history[1].content.contains("partial answer"))
-        #expect(engine.history[1].content.contains("_(stopped)_"))
+        // Task 9: the stop is a STATUS, and the streamed text is untouched.
+        // The "\n\n_(stopped)_" marker only reappears on the wire.
+        #expect(engine.messages[1].content == "partial answer")
+        #expect(engine.messages[1].status == .stopped)
+        #expect(engine.messages[1].wireTurn().content == "partial answer\n\n_(stopped)_")
         #expect(engine.error == nil)
+        // A user-initiated stop is not a failure — no retry affordance.
+        #expect(engine.messages[1].metadata?.failedError == nil)
     }
 
     @Test("Real failure surfaces error and finalizes placeholder")
@@ -58,7 +64,7 @@ struct ChatEngineTurnTests {
         t.thrownError = APIError.agent(message: "down")
         await engine.runTurn("hi")
         #expect(engine.error != nil)
-        #expect(engine.history.last?.role == .assistant)
+        #expect(engine.messages.last?.role == .assistant)
         #expect(engine.revealingTurnID == nil)
         // The placeholder is finalized, not orphaned mid-stream.
         #expect(engine.busy == false)
@@ -76,7 +82,7 @@ struct ChatEngineTurnTests {
         await Task.yield()
         try? await Task.sleep(nanoseconds: 50_000_000)
         #expect(engine.queued.isEmpty || engine.queued.map(\.text) == ["second"])
-        let userTexts = engine.history.filter { $0.role == .user }.map(\.content)
+        let userTexts = engine.messages.filter { $0.role == .user }.map(\.content)
         #expect(userTexts.contains("zero"))
         #expect(userTexts.contains("first"))
     }
@@ -90,8 +96,9 @@ struct ChatEngineTurnTests {
         t.result = .init(reply: "done", pendingTool: nil, tasks: nil,
                          continueNeeded: nil, usage: nil, mode: nil)
         await engine.runTurn("go")
-        // Task 4 keeps the dict shape; Task 9 moves it into the message.
-        let steps = engine.turnActivity[engine.history[1].id] ?? []
+        // Task 9: steps live on the message that produced them, not in an
+        // engine-side dictionary keyed by turn id.
+        let steps = engine.messages[1].toolSteps
         #expect(steps.map(\.label) == ["Reading Foo.swift", "Running npm test"])
         #expect(engine.statusText == "Running npm test")
     }
@@ -102,13 +109,13 @@ struct ChatEngineTurnTests {
         t.result = .init(reply: "planned", pendingTool: nil, tasks: nil,
                          continueNeeded: nil, usage: nil, mode: CodeAssistMode.plan.rawValue)
         await engine.runTurn("plan it")
-        #expect(engine.turnModes[engine.history[1].id] == .plan)
+        #expect(engine.messages[1].metadata?.mode == CodeAssistMode.plan.rawValue)
 
         let (engine2, t2) = makeEngine()
         t2.result = .init(reply: "ran", pendingTool: nil, tasks: nil,
                           continueNeeded: nil, usage: nil, mode: CodeAssistMode.execute.rawValue)
         await engine2.runTurn("run it")
-        #expect(engine2.turnModes.isEmpty)
+        #expect(engine2.messages[1].metadata?.mode == nil)
     }
 
     @Test("Follow-up sends (continue), appends one assistant turn, never drains the queue")
@@ -121,8 +128,8 @@ struct ChatEngineTurnTests {
         await engine.sendFollowup()
         // A follow-up appends only the assistant placeholder — the synthetic
         // "(continue)" user message is a wire-only detail, never in `history`.
-        #expect(engine.history.count == 3)
-        #expect(engine.history.last?.content == "ack")
+        #expect(engine.messages.count == 3)
+        #expect(engine.messages.last?.content == "ack")
         #expect(t.receivedInputs.last?.message == "(continue)")
         #expect(engine.queued.map(\.text) == ["ignored"])
     }

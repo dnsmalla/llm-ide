@@ -82,7 +82,7 @@ extension CodeAssistantPanel {
     /// turn that follows a user turn whose content matches `prompt`.
     /// Falls back to the latest assistant turn if no exact match.
     func mostRecentAnswer(forPrompt prompt: String) -> String? {
-        let history = engine.history
+        let history = engine.messages
         for i in stride(from: history.count - 1, through: 0, by: -1) {
             let t = history[i]
             if t.role == .assistant {

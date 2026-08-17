@@ -11,10 +11,10 @@ extension CodeAssistantPanel {
                     .lineLimit(1)
             }
             // Session counter only when we have horizontal room to spare.
-            if !isCompact, !engine.history.isEmpty || !attachmentState.attachments.isEmpty {
+            if !isCompact, !engine.messages.isEmpty || !attachmentState.attachments.isEmpty {
                 Text("·")
                     .foregroundStyle(theme.current.textMuted.opacity(0.5))
-                Text("\(engine.history.count) turn\(engine.history.count == 1 ? "" : "s")  \(attachmentState.attachments.count) file\(attachmentState.attachments.count == 1 ? "" : "s")")
+                Text("\(engine.messages.count) turn\(engine.messages.count == 1 ? "" : "s")  \(attachmentState.attachments.count) file\(attachmentState.attachments.count == 1 ? "" : "s")")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(theme.current.textMuted)
                     .lineLimit(1)
@@ -167,7 +167,7 @@ extension CodeAssistantPanel {
         .buttonStyle(.plain)
         .help("Delete current chat")
         .accessibilityLabel("Delete current chat")
-        .disabled(engine.history.isEmpty && engine.sessions.count <= 1)
+        .disabled(engine.messages.isEmpty && engine.sessions.count <= 1)
     }
 
 

@@ -6,14 +6,20 @@ import SwiftUI
 /// chat itself arrives as the `ChatEngine` that owns it, and everything the
 /// PANEL still owns (draft, expanded turns, sheet flags, the pending-action
 /// callbacks) is threaded in via bindings/closures — so this stays a pure
-/// rendering of `engine.history` plus the handful of transient flags that
+/// rendering of `engine.messages` plus the handful of transient flags that
 /// affect it.
+///
+/// As of Task 9 it renders `[ChatMessage]`, not `[CodeAssistTurn]`: a tool
+/// result is `role == .toolResult` with a typed `ToolResultPayload` (no more
+/// `content.hasPrefix("(")` sniffing), a stopped reply is `status == .stopped`
+/// (no more `"_(stopped)_"` suffix in the text), and tool steps / the reply
+/// mode are read off the message instead of out of engine-side dictionaries.
 struct ChatMessageList: View {
-    /// The chat itself: `history`, the busy/status line, the live-streaming
-    /// cursor (`revealingTurnID`/`revealedCount`), per-turn modes and tool
-    /// steps, the measured bubble heights this view writes back, and the
-    /// error banner it can dismiss. A reference type (`@Observable`), so
-    /// reading its properties in `body` tracks them without any Binding.
+    /// The chat itself: `messages`, the busy/status line, the live-streaming
+    /// cursor (`revealingTurnID`/`revealedCount`), the measured bubble heights
+    /// this view writes back, and the error banner it can dismiss. A reference
+    /// type (`@Observable`), so reading its properties in `body` tracks them
+    /// without any Binding.
     let engine: ChatEngine
     let showModelPicker: Bool
     let pendingTool: PendingTool?
@@ -53,7 +59,7 @@ struct ChatMessageList: View {
 
     @ViewBuilder
     var body: some View {
-        let history = engine.history
+        let history = engine.messages
         if history.isEmpty && !showModelPicker {
             emptyState
         } else if history.isEmpty {
@@ -74,8 +80,8 @@ struct ChatMessageList: View {
                                     .padding(.bottom, 4)
                                     .transition(.opacity)
                             }
-                            if turn.role == .assistant, let steps = engine.turnActivity[turn.id], !steps.isEmpty {
-                                toolActivityView(steps)
+                            if turn.role == .assistant, !turn.toolSteps.isEmpty {
+                                toolActivityView(turn.toolSteps)
                             }
                             turnView(turn, lastAssistantTurnId: lastAssistantTurnId)
                                 .id(turn.id)
@@ -155,8 +161,8 @@ struct ChatMessageList: View {
                     .animation(.easeOut(duration: 0.18), value: engine.busy)
                     .animation(.easeOut(duration: 0.2), value: engine.error)
                 }
-                .onChange(of: engine.history.count) { _, _ in
-                    if let last = engine.history.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                .onChange(of: engine.messages.count) { _, _ in
+                    if let last = engine.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
                 }
                 .onChange(of: engine.busy) { _, b in
                     if b { withAnimation { proxy.scrollTo("typing-indicator", anchor: .bottom) } }
@@ -225,7 +231,7 @@ struct ChatMessageList: View {
 
     /// An assistant turn renders in full iff it's the latest one or the user
     /// expanded it; otherwise it collapses to a preview.
-    private func isAssistantExpanded(_ turn: LlmIdeAPIClient.CodeAssistTurn, lastAssistantTurnId: UUID?) -> Bool {
+    private func isAssistantExpanded(_ turn: ChatMessage, lastAssistantTurnId: UUID?) -> Bool {
         turn.id == lastAssistantTurnId || expandedTurns.contains(turn.id)
     }
 
@@ -235,7 +241,7 @@ struct ChatMessageList: View {
     /// otherwise — including once streaming finishes, and always for
     /// history loaded from a saved session (which never sets
     /// `revealingTurnID` in the first place).
-    private func displayedContent(for turn: LlmIdeAPIClient.CodeAssistTurn) -> String {
+    private func displayedContent(for turn: ChatMessage) -> String {
         guard turn.id == engine.revealingTurnID else { return turn.content }
         return String(turn.content.prefix(engine.revealedCount))
     }
@@ -253,24 +259,17 @@ struct ChatMessageList: View {
         return s.count > 160 ? String(s.prefix(160)) + "…" : s
     }
 
-    /// Tool-call acknowledgments (issue created, file updated, git op
-    /// result, bash output, …) are appended as role: .user turns — the
-    /// agent needs to see them as real conversation context, and the wire
-    /// format the server round-trips only distinguishes user/assistant, so
-    /// changing that isn't worth the risk for a display-only concern. Every
-    /// one of them already starts with "(" — a convention that predates
-    /// this check (see CodeAssistant+Issues/PR/Git/Bash.swift and
-    /// CodeAssistantPanel+Session.swift) — so detecting it by content works
-    /// correctly whether the turn just arrived live or was reloaded from a
-    /// saved session, unlike an id-keyed flag (CodeAssistTurn's decoder
-    /// mints a fresh id on every decode, so an id-based tag can't survive
-    /// a session switch or relaunch).
-    private func isToolNotice(_ turn: LlmIdeAPIClient.CodeAssistTurn) -> Bool {
-        turn.role == .user && turn.content.hasPrefix("(")
-    }
-
-    private func toolNoticeIcon(_ content: String) -> (name: String, color: Color) {
-        if content.contains("failed") || content.contains("skipped") {
+    /// Tool-call acknowledgments (issue created, file updated, git op result,
+    /// bash output, …) are their own role now — `.toolResult` — instead of
+    /// `.user` turns the view had to recognise by their leading "(". The
+    /// classification happens once, where the ack enters the transcript
+    /// (`ChatEngine.appendTurn` → `ChatMessage.migrate`), so this view just
+    /// reads the role, and an ack reloaded from a saved session is exactly as
+    /// recognisable as one that just arrived live.
+    private func toolNoticeIcon(_ payload: ChatMessage.ToolResultPayload)
+        -> (name: String, color: Color)
+    {
+        if payload.isFailure {
             return ("exclamationmark.triangle.fill", theme.current.warning)
         }
         return ("checkmark.circle.fill", theme.current.success)
@@ -281,7 +280,7 @@ struct ChatMessageList: View {
     /// JSON streaming into the bubble. Read-only and non-interactive: it is a
     /// record of what happened, not a control.
     @ViewBuilder
-    private func toolActivityView(_ steps: [CodeAssistantPanel.ToolStep]) -> some View {
+    private func toolActivityView(_ steps: [ChatMessage.ToolStep]) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             ForEach(steps) { step in
                 HStack(spacing: 6) {
@@ -308,13 +307,15 @@ struct ChatMessageList: View {
     }
 
     @ViewBuilder
-    private func toolNoticeView(_ turn: LlmIdeAPIClient.CodeAssistTurn) -> some View {
-        let (icon, color) = toolNoticeIcon(turn.content)
+    private func toolNoticeView(_ payload: ChatMessage.ToolResultPayload) -> some View {
+        let (icon, color) = toolNoticeIcon(payload)
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 10))
                 .foregroundStyle(color)
-            Text(turn.content.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? turn.content)
+            // `summary` IS the ack's first line, split off at classification
+            // time — no runtime line-splitting needed here anymore.
+            Text(payload.summary)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(theme.current.textMuted)
                 .lineLimit(1)
@@ -328,12 +329,18 @@ struct ChatMessageList: View {
     }
 
     @ViewBuilder
-    private func turnView(_ turn: LlmIdeAPIClient.CodeAssistTurn, lastAssistantTurnId: UUID?) -> some View {
-        if isToolNotice(turn) {
-            if let bash = BashResultDisplay.parse(turn.content) {
-                CommandOutputView(display: bash)
+    private func turnView(_ turn: ChatMessage, lastAssistantTurnId: UUID?) -> some View {
+        if turn.role == .toolResult, let payload = turn.toolResult {
+            // Already parsed — `BashResultDisplay.parse(content)` used to run
+            // on every render pass; the payload carries the same four fields.
+            if payload.kind == .bash {
+                CommandOutputView(display: BashResultDisplay(
+                    exitCode: payload.exitCode,
+                    isFailure: payload.isFailure,
+                    command: payload.command,
+                    output: payload.output ?? ""))
             } else {
-                toolNoticeView(turn)
+                toolNoticeView(payload)
             }
         } else {
             let isUser = turn.role == .user
@@ -343,7 +350,8 @@ struct ChatMessageList: View {
                     Text(isUser ? "You" : "Claude")
                         .font(Typography.caption)
                         .foregroundStyle(theme.current.textMuted)
-                    if !isUser, let mode = engine.turnModes[turn.id] {
+                    if !isUser, let raw = turn.metadata?.mode,
+                       let mode = CodeAssistMode(rawValue: raw) {
                         ModeBadge(mode: mode)
                     }
                     if isUser {
@@ -410,6 +418,15 @@ struct ChatMessageList: View {
                         .buttonStyle(.plain)
                         .help("Show full reply")
                     }
+                    // A stopped reply used to be marked by a literal
+                    // "\n\n_(stopped)_" glued onto its text by the engine.
+                    // The text is now left exactly as it streamed and the
+                    // stop is a status, so the transcript says so itself.
+                    if !isUser, turn.status == .stopped {
+                        Text("Stopped")
+                            .font(Typography.caption)
+                            .foregroundStyle(theme.current.textMuted)
+                    }
                     if !isUser, activeRepoRoot != nil {
                         Button {
                             sheets.reportingFault = CodeAssistantPanel.FaultReportContext(
@@ -433,16 +450,15 @@ struct ChatMessageList: View {
     /// Walk backwards from `turn`'s position in `history` and return the
     /// most recent user message. Falls back to nil when the assistant
     /// answered without a preceding user turn (rare; agent self-prompts).
-    private func prevUserPrompt(before turn: LlmIdeAPIClient.CodeAssistTurn) -> String? {
-        let history = engine.history
+    private func prevUserPrompt(before turn: ChatMessage) -> String? {
+        let history = engine.messages
         guard let idx = history.firstIndex(where: { $0.id == turn.id }) else { return nil }
         for i in stride(from: idx - 1, through: 0, by: -1) {
             let candidate = history[i]
-            // Skip tool-notices (role: .user but synthetic, see isToolNotice) —
-            // a fault report should quote what the human actually typed, not
-            // a "(executed create-issue → ...)" acknowledgment that happened
-            // to be the nearest .user-role turn.
-            if candidate.role == .user && !isToolNotice(candidate) { return candidate.content }
+            // `.toolResult` is its own role now, so a synthetic ack simply
+            // isn't a `.user` message — a fault report quotes what the human
+            // actually typed without needing to filter acks out by hand.
+            if candidate.role == .user { return candidate.content }
         }
         return nil
     }
