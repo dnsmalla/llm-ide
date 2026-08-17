@@ -23,6 +23,10 @@ private func gitOpTool(_ op: GitOp) -> PendingTool {
     pendingTool(name: "git-op", args: GitOpArgs(op: op, message: nil, branch: nil, ref: nil, mode: nil, slug: nil))
 }
 
+private func savePlanTool() -> PendingTool {
+    pendingTool(name: "save-plan", args: PendingTool.SavePlanArgs(title: "A plan", content: "# A plan\n"))
+}
+
 @Suite("Auto-chain policy")
 struct ChatAutoChainPolicyTests {
     @Test("Review mode never auto-applies an edit")
@@ -126,5 +130,27 @@ struct ChatAutoChainPolicyTests {
             shouldAutoRunGitOp: { _ in false }
         )
         #expect(dDestructive.isEmpty)
+    }
+
+    @Test("save-plan always auto-saves — ungated by editMode, unlike update-file/bash")
+    func savePlanIgnoresEditMode() {
+        for mode: EditAcceptanceMode in [.auto, .review] {
+            let d = ChatAutoChainPolicy.decide(
+                pendingTool: savePlanTool(), editMode: mode, autoOpsUsed: 0, maxAutoOpsPerTurn: 10,
+                truncatedPaths: [], isWholeFileRewrite: false, matchPath: nil,
+                shouldAutoRunGitOp: { _ in false }
+            )
+            #expect(d == [.autoSavePlan], "editMode \(mode) should not change save-plan's decision")
+        }
+    }
+
+    @Test("save-plan always auto-saves — ungated by the per-turn auto-ops budget, unlike update-file/bash")
+    func savePlanIgnoresBudget() {
+        let d = ChatAutoChainPolicy.decide(
+            pendingTool: savePlanTool(), editMode: .review, autoOpsUsed: 10, maxAutoOpsPerTurn: 10,
+            truncatedPaths: [], isWholeFileRewrite: false, matchPath: nil,
+            shouldAutoRunGitOp: { _ in false }
+        )
+        #expect(d == [.autoSavePlan], "a spent budget should not block save-plan — it isn't counted against it")
     }
 }

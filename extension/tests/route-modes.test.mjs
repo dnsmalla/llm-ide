@@ -95,6 +95,23 @@ test('enforceModeToolRestriction is a no-op when there is no pendingTool', () =>
   assert.equal(result, out); // same reference — no unnecessary object copy
 });
 
+test('enforceModeToolRestriction lets a save-plan pendingTool survive in plan mode', () => {
+  const out = { reply: 'hi', pendingTool: { name: 'save-plan', arguments: { title: 't', content: 'c' } } };
+  const result = enforceModeToolRestriction(out, 'plan');
+  assert.deepEqual(result.pendingTool, { name: 'save-plan', arguments: { title: 't', content: 'c' } });
+});
+
+test('enforceModeToolRestriction still clears save-plan for review/document — the carve-out is plan-only', () => {
+  const out = { reply: 'hi', pendingTool: { name: 'save-plan', arguments: { title: 't', content: 'c' } } };
+  assert.equal(enforceModeToolRestriction(out, 'review').pendingTool, null);
+  assert.equal(enforceModeToolRestriction(out, 'document').pendingTool, null);
+});
+
+test('enforceModeToolRestriction still clears every other write tool in plan mode — the carve-out is save-plan only', () => {
+  const out = { reply: 'hi', pendingTool: { name: 'update-file', arguments: {} } };
+  assert.equal(enforceModeToolRestriction(out, 'plan').pendingTool, null);
+});
+
 test('mode: "review" never injects the task-list block into the prompt, even with real session tasks', async () => {
   // Seed a real task in this session BEFORE the reviewed turn, exactly like
   // a prior Execute-mode turn would have.

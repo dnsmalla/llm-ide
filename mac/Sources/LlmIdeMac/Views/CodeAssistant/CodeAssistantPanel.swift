@@ -300,7 +300,8 @@ struct CodeAssistantPanel: View {
                 onGitOp: { g in await runGitOpFlow(g) },
                 onBash: { args in await runBashCommand(args) },
                 onApplyEdit: { await applyPendingEdit() },
-                onSkipEdit: { await skipPendingEdit() }
+                onSkipEdit: { await skipPendingEdit() },
+                onSavePlan: { await autoSavePendingPlan() }
             )
             Divider().background(theme.current.border)
             if !attachmentState.selectedSkills.isEmpty { skillBar }

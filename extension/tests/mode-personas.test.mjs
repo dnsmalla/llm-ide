@@ -52,3 +52,17 @@ test('allowedToolNames excludes task tracking tools — Plan/Review/Document mod
   assert.equal(names.has('task-update'), false);
   assert.equal(names.has('task-list'), false);
 });
+
+test('allowedToolNames excludes save-plan when called with no mode (or a non-plan mode)', () => {
+  assert.equal(allowedToolNames().has('save-plan'), false);
+  assert.equal(allowedToolNames('review').has('save-plan'), false);
+  assert.equal(allowedToolNames('document').has('save-plan'), false);
+});
+
+test('allowedToolNames("plan") includes save-plan on top of the base read-only set', () => {
+  const names = allowedToolNames('plan');
+  assert.equal(names.has('save-plan'), true);
+  // Base set is still fully present — this is additive, not a replacement.
+  assert.equal(names.has('read-file'), true);
+  assert.equal(names.has('update-file'), false);
+});

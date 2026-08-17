@@ -50,6 +50,10 @@ struct ChatMessageList: View {
     /// Wraps `CodeAssistantPanel.skipPendingEdit()` — declines it and tells the
     /// agent so, so the loop isn't left holding an unanswered write.
     let onSkipEdit: () async -> Void
+    /// Wraps `CodeAssistantPanel.autoSavePendingPlan()` — defensive fallback
+    /// only; the normal path already resolves this in `autoChainPendingAction`
+    /// before the card can render.
+    let onSavePlan: () async -> Void
 
     @EnvironmentObject var theme: ThemeStore
 
@@ -129,6 +133,8 @@ struct ChatMessageList: View {
                                         }
                                     case .bash:
                                         Task { await onBash(pt.bashArgs) }
+                                    case .savePlan:
+                                        Task { await onSavePlan() }
                                     case nil:
                                         break
                                     }

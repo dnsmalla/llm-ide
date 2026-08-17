@@ -39,6 +39,14 @@
 //     outbound network reads (SSRF-guarded); no mutation of any local or
 //     remote state.
 //   - search-kb (handlers/search-kb.mjs): read-only KB query.
+//   - save-plan is NOT in this base set — see PLAN_MODE_EXTRA_TOOL_NAMES
+//     below: it's the one deliberate write-kind carve-out, but added ONLY
+//     for `plan` mode, not review/document. It takes no `path` argument —
+//     the Mac client always resolves it to <workspaceRoot>/llm-doc/plans/,
+//     so even though it is `kind: write`, it cannot be redirected into
+//     editing an arbitrary file the way update-file/bash could.
+//     enforceModeToolRestriction (route.mjs) also special-cases this name
+//     so its pendingTool survives for `plan` specifically.
 // Excluded despite `kind: read`:
 //   - run-bash (handlers/run-bash.mjs): executes arbitrary shell commands
 //     on the server via /bin/sh with no user confirmation. Must never be
@@ -65,14 +73,25 @@ const READ_ONLY_TOOL_NAMES = new Set([
   'search-kb',
 ]);
 
+// save-plan is added on top of READ_ONLY_TOOL_NAMES for `plan` mode ONLY
+// (see allowedToolNames below) — review/document must not even see it in
+// their tool list, since enforceModeToolRestriction (route.mjs) nulls its
+// pendingTool for those modes and a model that called it anyway would get a
+// silently-truncated reply for no visible reason.
+const PLAN_MODE_EXTRA_TOOL_NAMES = new Set(['save-plan']);
+
 const MODE_CONFIG = {
   plan: {
     persona: 'You are in PLAN mode. Propose a clear, step-by-step plan for the '
            + "user's request in prose — do NOT call any write tool (file edits, "
-           + 'bash, git operations, issue/PR actions). Read-only tools (find-code, '
-           + 'search, list-files, read-file) are fine if they help you scope the plan. '
-           + "End with a short summary of what you'd do and in what order; the "
-           + 'user decides whether to execute it.',
+           + 'bash, git operations, issue/PR actions) EXCEPT save-plan, which is '
+           + 'the one write action available in this mode. Read-only tools '
+           + '(find-code, search, list-files, read-file) are fine if they help you '
+           + "scope the plan. End with a short summary of what you'd do and in what "
+           + 'order, then call save-plan with a short title and the full plan as '
+           + 'content — it saves immediately with no confirmation step, so only '
+           + "call it once the plan is actually ready, and say in your reply that "
+           + "you've saved it and where.",
   },
   review: {
     persona: 'You are in REVIEW mode. Read the attached files/context and give '
@@ -103,7 +122,15 @@ export function restrictsTools(mode) {
  * to. Returns a fresh copy each call — this is a security-relevant
  * process-wide singleton; a caller mutating the returned Set (e.g. a
  * future per-request tweak) must never corrupt it for other requests.
+ *
+ * `mode` is optional so existing no-arg callers keep the base read-only
+ * set unchanged; pass the resolved mode to also get `plan`'s one write-tool
+ * carve-out (save-plan) merged in.
  */
-export function allowedToolNames() {
-  return new Set(READ_ONLY_TOOL_NAMES);
+export function allowedToolNames(mode) {
+  const names = new Set(READ_ONLY_TOOL_NAMES);
+  if (mode === 'plan') {
+    for (const n of PLAN_MODE_EXTRA_TOOL_NAMES) names.add(n);
+  }
+  return names;
 }

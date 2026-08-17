@@ -221,6 +221,40 @@ extension CodeAssistantPanel {
         return .success
     }
 
+    /// Writes a `save-plan` proposal to `<projectRoot>/llm-doc/plans/`, then
+    /// acknowledges so the agent can react. Mirrors `confirmUpdateFile`, with
+    /// two differences: there's no sheet-edited content to prefer over the
+    /// agent's own (this always saves automatically, so `finalContent` is
+    /// just `args.content`), and `llm-doc/plans/` may not exist yet (unlike
+    /// an edit target, which is always an existing file) — so the directory
+    /// is created first.
+    @MainActor
+    func confirmSavePlan(_ args: PendingTool.SavePlanArgs,
+                                 finalContent: String)
+        async -> SavePlanResult
+    {
+        let plan: ProposedPlan
+        switch resolvePlan(args) {
+        case .failure(let err): return .failure(err.message)
+        case .success(let p): plan = p
+        }
+        let url = URL(fileURLWithPath: plan.absolutePath)
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try finalContent.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            return .failure("Couldn't write \(plan.displayPath): \(error.localizedDescription)")
+        }
+        engine.agent.pendingTool = nil
+
+        let payload = ChatMessage.ToolResultPayload(
+            kind: .edit, summary: "(saved plan to \(plan.displayPath))",
+            exitCode: nil, command: nil, output: nil, url: nil, isFailure: false)
+        await engine.acknowledge(payload, followUp: .forceUnblock)
+        return .success
+    }
+
     /// Auto-chain the next pending action (file edit or git op) when the
     /// budget allows. Shared by `runTurn` and `sendFollowup` — both reach it
     /// through the engine's `autoChain` hook — so both see the same
@@ -301,6 +335,12 @@ extension CodeAssistantPanel {
                 guard let bashArgs = pendingTool?.bashArgs else { continue }
                 autoGitOpsThisTurn += 1
                 await runBashCommand(bashArgs)
+            case .autoSavePlan:
+                // Not counted against autoGitOpsThisTurn: that budget exists to
+                // cap actions which could each touch a different file; save-plan
+                // always writes the same one, so it isn't the risk that budget
+                // guards against.
+                await autoSavePendingPlan()
             case .none:
                 break
             }

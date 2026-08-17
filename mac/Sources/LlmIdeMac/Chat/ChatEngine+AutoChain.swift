@@ -16,6 +16,7 @@ enum ChatAutoChainDecision: Equatable {
     case requireManualReview(reason: String?)
     case autoRunGitOp
     case autoRunBash
+    case autoSavePlan
     case none
 }
 
@@ -72,6 +73,16 @@ enum ChatAutoChainPolicy {
         if editMode == .auto, autoOpsUsed < maxAutoOpsPerTurn,
            pendingTool?.bashArgs != nil {
             decisions.append(.autoRunBash)
+        }
+
+        // Branch 4: save-plan. Unlike the branches above, this is NOT gated
+        // by editMode or the per-turn budget — it can never touch an
+        // arbitrary file (fixed destination under llm-doc/plans/, always
+        // creates/overwrites only its own plan file), so it always saves
+        // automatically the instant it's proposed. See save-plan.md and
+        // mode-personas.mjs for why it's the one write tool Plan mode gets.
+        if pendingTool?.savePlanArgs != nil {
+            decisions.append(.autoSavePlan)
         }
 
         return decisions

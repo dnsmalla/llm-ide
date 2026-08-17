@@ -460,43 +460,11 @@ final class ProjectExporter {
 
     // MARK: - Slug / date helpers
 
-    /// Unicode-aware slug.  Non-ASCII letters (CJK, Arabic, Devanagari, …)
-    /// are preserved as-is rather than stripped so they remain recognisable
-    /// in the filename.  Unsafe filesystem characters are replaced with `-`.
     /// A short ID suffix prevents collisions between items with the same
-    /// title + date.
+    /// title + date. See `FilesystemSlug` for the shared slugging rules
+    /// (also used by `ProposedPlanResolver` for chat's save-plan).
     private func slugify(_ title: String, id: String) -> String {
-        // Step 1: lowercase
-        var s = title.lowercased()
-
-        // Step 2: replace whitespace runs with a single hyphen
-        s = s.components(separatedBy: .whitespacesAndNewlines)
-             .filter { !$0.isEmpty }
-             .joined(separator: "-")
-
-        // Step 3: keep Unicode letters/digits, hyphens; drop filesystem-unsafe chars
-        //         (/ \ : * ? " < > |) and control characters.
-        let unsafe = CharacterSet(charactersIn: "/\\:*?\"<>|")
-            .union(.controlCharacters)
-            .union(.illegalCharacters)
-        s = s.unicodeScalars
-            .filter { !unsafe.contains($0) }
-            .map { String($0) }
-            .joined()
-
-        // Step 4: collapse consecutive hyphens; trim leading/trailing
-        while s.contains("--") { s = s.replacingOccurrences(of: "--", with: "-") }
-        s = s.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-
-        // Step 5: truncate to 40 chars (leaves room for date prefix + ID suffix)
-        if s.count > 40 {
-            s = String(s.prefix(40))
-                .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        }
-        if s.isEmpty { s = "untitled" }
-
-        // Step 6: append last-8 chars of the item ID — guarantees uniqueness
-        return "\(s)-\(id.suffix(8))"
+        FilesystemSlug.make(from: title, maxLength: 40, fallback: "untitled", suffix: "-\(id.suffix(8))")
     }
 
     /// Parse an ISO-8601 date string and return ("YYYY", "MM").

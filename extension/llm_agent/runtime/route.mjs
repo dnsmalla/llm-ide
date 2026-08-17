@@ -80,9 +80,16 @@ const NATIVE_SYSTEM_PROMPT = [
  * NOT filtered to this feature's tool allowlist). This is the actual
  * enforcement point for that guarantee; kept as a small pure function so
  * it's directly unit-testable without driving a real agent-loop call.
+ *
+ * One deliberate exception: `save-plan` in `plan` mode specifically — its
+ * whole purpose is to survive here so the Mac client can write the plan
+ * (save-plan saves automatically, with no confirmation step). review/document
+ * get no exception; a leaked save-plan call there is nulled just like any
+ * other write tool.
  */
 export function enforceModeToolRestriction(out, resolvedMode) {
-  if (restrictsTools(resolvedMode) && out?.pendingTool) {
+  if (restrictsTools(resolvedMode) && out?.pendingTool
+      && !(resolvedMode === 'plan' && out.pendingTool.name === 'save-plan')) {
     return { ...out, pendingTool: null };
   }
   return out;
@@ -452,7 +459,7 @@ export async function handleCodeAssist({
   // its own dispatch would then reject as "Unknown tool" in restricted
   // modes. Both `skills:` and `tools:` now derive from this single map.
   const activeSkills = restrictsTools(resolvedMode)
-    ? new Map([...globalSkills.skills].filter(([name]) => allowedToolNames().has(name)))
+    ? new Map([...globalSkills.skills].filter(([name]) => allowedToolNames(resolvedMode).has(name)))
     : globalSkills.skills;
 
   let out;
@@ -474,11 +481,18 @@ export async function handleCodeAssist({
       skills: activeSkills,
       // { readOnly: true } still needs to drop kind: write skills from
       // activeSkills for the unrestricted/execute case (activeSkills ===
-      // globalSkills.skills there). For restricted modes activeSkills is
-      // already allowlist-filtered, so this is a no-op — none of the
-      // allowlisted names are kind: write anyway — but keeping the flag
-      // is harmless and correct either way.
-      tools: skillsToOpenAITools(activeSkills, { readOnly: true }),
+      // globalSkills.skills there) — update-file/git-op/bash-as-write stay
+      // fence-only, never offered as native tools, in every mode.
+      //
+      // `plan` mode is the one exception: activeSkills is already
+      // allowlist-filtered down to the read-only set plus save-plan (its
+      // one write-kind carve-out — see PLAN_MODE_EXTRA_TOOL_NAMES), so
+      // dropping `kind: write` here would silently strip save-plan from the
+      // tools a native/OpenAI-compatible model is even told exist, making
+      // the persona's "call save-plan" instruction unfollowable for those
+      // providers. `readOnly: false` is safe here specifically because
+      // activeSkills can't contain any OTHER write-kind tool in this mode.
+      tools: skillsToOpenAITools(activeSkills, { readOnly: resolvedMode !== 'plan' }),
       complete: (opts) => callOpenAI({ apiKey: nativeKey, model, baseUrl: nativeBaseUrl, ...opts }),
       userId,
       handlers,

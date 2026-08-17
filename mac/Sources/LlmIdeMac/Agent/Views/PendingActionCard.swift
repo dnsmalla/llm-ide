@@ -259,6 +259,14 @@ struct PendingActionCard: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
+                } else if let args = pendingTool.savePlanArgs {
+                    Text(args.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(2)
+                    Text(descriptionPreview(args.content))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
                 } else {
                     Text(pendingTool.name)
                         .font(.system(size: 13, weight: .regular))
@@ -286,6 +294,7 @@ struct PendingActionCard: View {
         case .updateFile: return "WILL UPDATE FILE"
         case .gitOp: return "WILL RUN GIT OPERATION"
         case .bash: return "WILL RUN COMMAND"
+        case .savePlan: return "WILL SAVE PLAN"
         case nil: return "PENDING ACTION: \(pendingTool.name.uppercased())"
         }
     }
@@ -299,6 +308,10 @@ struct PendingActionCard: View {
         switch pendingTool.kind {
         case .bash: return "Tap to run it"
         case .gitOp where pendingTool.gitOpArgs?.op.tier == .read: return "Tap to run it"
+        // Saves automatically the instant it's proposed (see
+        // ChatAutoChainPolicy) — this card should barely ever be visible
+        // long enough to read this, but say what's actually happening.
+        case .savePlan: return "Saving…"
         default: return "Tap to review and confirm"
         }
     }

@@ -68,6 +68,20 @@ test('skillsToOpenAITools: readOnly excludes write skills', () => {
     ['run-bash', 'read-file']);
 });
 
+test('skillsToOpenAITools: readOnly:false retains write skills — the flag plan mode passes for save-plan', () => {
+  // route.mjs passes { readOnly: resolvedMode !== 'plan' } so plan mode's
+  // one write-kind carve-out (save-plan) still reaches a native/OpenAI-
+  // compatible model's tools list — activeSkills is already allowlist-
+  // filtered to exclude every OTHER write tool by the time this runs, so
+  // readOnly:false here can't leak update-file/bash/git-op back in.
+  const skills = new Map([
+    ['read-file', { name: 'read-file', kind: 'read', description: 'read a file', schema: {} }],
+    ['save-plan', { name: 'save-plan', kind: 'write', description: 'save a plan', schema: {} }],
+  ]);
+  assert.deepEqual(skillsToOpenAITools(skills, { readOnly: false }).map((t) => t.function.name),
+    ['read-file', 'save-plan']);
+});
+
 test('skillToOpenAITool: falls back to the name when description is empty', () => {
   const skill = {
     name: 'no-desc',

@@ -35,6 +35,21 @@ test('assembled global prompt renders skills exactly once (dedup guard)', () => 
   assert.equal((full.match(/# Available skills/g) || []).length, 1);
 });
 
+test('save-plan.md loads cleanly as a write-kind skill with an editable-sheet confirmation', () => {
+  const skills = loadSkills(GLOBAL_SKILLS_DIR);
+  assert.ok(!skills.warnings.some((w) => w.includes('save-plan')),
+    `save-plan.md should load without warnings, got: ${skills.warnings.join('; ')}`);
+  const skill = skills.skills.get('save-plan');
+  assert.ok(skill, 'save-plan should be registered in the global skill map');
+  assert.equal(skill.kind, 'write');
+  assert.equal(skill.confirmation, 'editable-sheet');
+  assert.equal(skill.schema.title?.required, true);
+  assert.equal(skill.schema.content?.required, true);
+  // No `path` argument by design — the destination is always
+  // <workspaceRoot>/llm-doc/plans/, never agent-supplied.
+  assert.equal('path' in skill.schema, false);
+});
+
 test('askInternal — plain reply from internal propagates as answer', async () => {
   const internalSkills = loadSkills(INTERNAL_SKILLS_DIR);
   // Mock claude: internal responds with plain prose (no fence).

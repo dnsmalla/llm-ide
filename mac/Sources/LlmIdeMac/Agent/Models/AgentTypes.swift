@@ -108,6 +108,7 @@ struct AgentTask: Codable, Identifiable {
 enum PendingToolKind: CaseIterable {
     case createIssue, commentIssue, getIssue, updateIssue, listIssues
     case createBranch, createPR, triggerReviewCode, updateFile, gitOp, bash
+    case savePlan
 
     fileprivate var names: [String] {
         switch self {
@@ -122,6 +123,7 @@ enum PendingToolKind: CaseIterable {
         case .updateFile: return ["update-file"]
         case .gitOp: return ["git-op"]
         case .bash: return ["bash"]
+        case .savePlan: return ["save-plan"]
         }
     }
 
@@ -321,6 +323,21 @@ struct PendingTool: Codable, Equatable {
     var bashArgs: BashArgs? {
         guard kind == .bash else { return nil }
         return try? AppJSON.decoder.decode(BashArgs.self, from: arguments.raw)
+    }
+
+    /// Typed view for the save-plan variant. Returns nil if `name`
+    /// is different or the payload doesn't fit the schema.
+    var savePlanArgs: SavePlanArgs? {
+        guard kind == .savePlan else { return nil }
+        return try? AppJSON.decoder.decode(SavePlanArgs.self, from: arguments.raw)
+    }
+
+    /// Deliberately no `path` field — unlike `update-file`, this tool always
+    /// resolves to `<projectRoot>/llm-doc/plans/`, never an agent-supplied
+    /// location. See `ProposedPlanResolver`.
+    struct SavePlanArgs: Codable, Equatable {
+        var title: String
+        var content: String
     }
 }
 
