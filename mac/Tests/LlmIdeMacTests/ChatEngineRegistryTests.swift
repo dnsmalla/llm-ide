@@ -329,4 +329,84 @@ struct ExplorerMobileEngineResolverTests {
             #expect(afterForget == nil)
         }
     }
+
+    @Test("A stale off-screen cache entry is refreshed from disk before reuse — no data loss when the Mac later owns the session")
+    func staleOffScreenEntryRefreshesFromDiskAndDoesNotLoseData() async {
+        await withTempStore {
+            let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
+            let shared = ChatEngine(scope: .explorer, transport: ScriptedChatTransport())
+            let sessionA = ChatSession(scope: .explorer, title: "A")
+            ChatSessionStore.save(sessionA)
+            let sessionB = ChatSession(scope: .explorer, title: "B")
+            ChatSessionStore.save(sessionB)
+            let sessionC = ChatSession(scope: .explorer, title: "C")
+            ChatSessionStore.save(sessionC)
+
+            shared.switchSession(to: sessionA.id)
+            let resolver = ExplorerMobileEngineResolver()
+
+            // 1. Phone opens session B while the Mac is on A — caches an
+            // off-screen engine for B (empty, matching disk at this point).
+            let firstResolve = resolver.engine(for: sessionB.id, sharedExplorerEngine: shared, api: api)
+            #expect(firstResolve != nil)
+            #expect(firstResolve?.messages.isEmpty == true)
+
+            // 2. The Mac user switches the SHARED engine to B directly and
+            // appends a turn — persisted through the shared engine, entirely
+            // independent of the cached off-screen instance from step 1.
+            shared.switchSession(to: sessionB.id)
+            shared.replaceMessages([ChatMessage(wireTurn: .init(role: .user, content: "from Mac"),
+                                                sessionDate: Date())])
+            shared.persistCurrentChat()
+
+            // 3. The Mac user switches away to C.
+            shared.switchSession(to: sessionC.id)
+            #expect(shared.currentSessionIDString == sessionC.id.uuidString)
+
+            // 4. The phone hits session B again. The stale cached engine from
+            // step 1 must NOT be served as-is — it must be refreshed from
+            // disk first, so the phone (and any turn it appends) sees the
+            // Mac's newer content instead of silently overwriting it.
+            let secondResolve = resolver.engine(for: sessionB.id, sharedExplorerEngine: shared, api: api)
+            #expect(secondResolve != nil)
+            #expect(secondResolve?.messages.map(\.content) == ["from Mac"])
+            // It's still the SAME cached instance (refreshed in place), not a
+            // brand-new one — the whole point of the off-screen cache.
+            #expect(secondResolve === firstResolve)
+
+            // And the shared engine (now showing C) is untouched by this.
+            #expect(shared.currentSessionIDString == sessionC.id.uuidString)
+        }
+    }
+
+    @Test("A BUSY off-screen cache entry is returned as-is, not refreshed mid-turn")
+    func busyOffScreenEntryIsNotRefreshed() async {
+        await withTempStore {
+            let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
+            let shared = ChatEngine(scope: .explorer, transport: ScriptedChatTransport())
+            let sessionA = ChatSession(scope: .explorer, title: "A")
+            ChatSessionStore.save(sessionA)
+            let sessionB = ChatSession(scope: .explorer, title: "B")
+            ChatSessionStore.save(sessionB)
+            shared.switchSession(to: sessionA.id)
+
+            let resolver = ExplorerMobileEngineResolver()
+            guard let cached = resolver.engine(for: sessionB.id, sharedExplorerEngine: shared, api: api) else {
+                Issue.record("expected an off-screen engine for session B")
+                return
+            }
+            // Simulate a phone turn mid-flight on the cached engine, with
+            // in-memory content that hasn't been persisted yet.
+            cached.beginPanelRun()
+            cached.replaceMessages([ChatMessage(wireTurn: .init(role: .user, content: "mid-turn draft"),
+                                                sessionDate: Date())])
+            #expect(cached.busy == true)
+
+            let resolvedWhileBusy = resolver.engine(for: sessionB.id, sharedExplorerEngine: shared, api: api)
+            // Same instance, untouched — NOT reloaded from (stale-relative-
+            // to-memory) disk while a turn is in flight.
+            #expect(resolvedWhileBusy === cached)
+            #expect(resolvedWhileBusy?.messages.map(\.content) == ["mid-turn draft"])
+        }
+    }
 }

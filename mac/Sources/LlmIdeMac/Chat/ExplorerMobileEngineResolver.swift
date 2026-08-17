@@ -25,6 +25,21 @@ import Foundation
 /// turns against the same background session share one instance rather than
 /// racing two independent writers to the same session file, but never
 /// aliasing what is rendered on the Mac.
+///
+/// Second bug, found by spec re-review: a cached off-screen engine that is
+/// never touched again would go STALE the moment the Mac later takes
+/// ownership of that same session — e.g. the phone opens session B while the
+/// Mac is on A (caching an off-screen engine for B), the Mac user then
+/// switches the SHARED engine to B and appends turns there (persisted
+/// through the shared engine, invisible to the cached off-screen instance),
+/// the Mac switches away to C, and the phone messages B again. Serving the
+/// stale cached engine at that point would mean `runExternalTurn` appends
+/// onto — and then `persistCurrentChat()` overwrites the session file with —
+/// an out-of-date copy that is MISSING the Mac's newer turns: silent data
+/// loss. `engine(for:sharedExplorerEngine:api:)` below closes this by
+/// refreshing a cached (non-busy) off-screen engine from disk on every
+/// lookup before handing it back, rather than trusting the cache
+/// unconditionally.
 @MainActor
 final class ExplorerMobileEngineResolver {
     private var offScreen: [UUID: ChatEngine] = [:]
@@ -41,10 +56,19 @@ final class ExplorerMobileEngineResolver {
     ///   is the common case: phone and Mac collaborating on the same chat.
     /// - Otherwise the shared engine is already showing a DIFFERENT
     ///   session — touching it would hijack the Mac's screen — so a private,
-    ///   off-screen engine (cached per `sessionID`) is used instead.
+    ///   off-screen engine (cached per `sessionID`) is used instead. A
+    ///   cached entry that isn't currently mid-turn is ALWAYS refreshed from
+    ///   disk first (a cheap load+decode) so a newer write from the shared
+    ///   engine — the Mac having since owned and chatted in this same
+    ///   session — is never silently discarded. A cached entry that IS
+    ///   mid-turn (`busy`) is returned as-is, untouched: refreshing its
+    ///   `messages` out from under an in-flight round trip would corrupt it,
+    ///   and `runExternalTurn`'s own busy-guard is what the caller relies on
+    ///   for that case anyway.
     ///
     /// Returns `nil` if `sessionID` doesn't resolve to a real `.explorer`
-    /// session on disk.
+    /// session on disk — including when a previously-cached session was
+    /// since deleted, in which case the stale cache entry is also evicted.
     func engine(for sessionID: UUID, sharedExplorerEngine: ChatEngine, api: LlmIdeAPIClient) -> ChatEngine? {
         if sharedExplorerEngine.currentSessionIDString.isEmpty {
             sharedExplorerEngine.switchSession(to: sessionID)
@@ -55,6 +79,13 @@ final class ExplorerMobileEngineResolver {
             return sharedExplorerEngine
         }
         if let cached = offScreen[sessionID] {
+            guard !cached.busy else { return cached }
+            guard cached.loadSessionForBackgroundUse(id: sessionID) else {
+                // Deleted (or re-scoped) since it was cached — don't keep
+                // serving orphaned data for an id that no longer resolves.
+                offScreen.removeValue(forKey: sessionID)
+                return nil
+            }
             return cached
         }
         let engine = ChatEngine(scope: .explorer, transport: CodeAssistTransport(api: api))
