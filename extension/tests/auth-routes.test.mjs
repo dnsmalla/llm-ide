@@ -801,6 +801,12 @@ test('llm-sources admin-gated routes reject a non-admin caller', async () => {
 
   const remove = await callAuth({ method: 'DELETE', url: '/auth/me/llm-sources/whatever', user: u });
   assert.equal(remove.statusCode, 403);
+
+  // Discovery surfaces absolute agent paths + hook/MCP command strings from
+  // admin-registered sources — admin-gated like add/update/remove. Uses
+  // `builtin` (always registered); requireAdmin runs before id validation.
+  const discovery = await callAuth({ method: 'GET', url: '/auth/me/llm-sources/builtin/discovery', user: u });
+  assert.equal(discovery.statusCode, 403);
 });
 
 test('DELETE /auth/me/llm-sources/<id> rejects an invalid id and rejects removing builtin', async () => {

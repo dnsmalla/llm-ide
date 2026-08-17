@@ -26,6 +26,33 @@ extension LlmIdeAPIClient {
         let hookCount: Int
         let mcpCount: Int
         let enabled: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case id, name, origin, location, builtin, version, ref, installed
+            case skillCount, agentCount, hookCount, mcpCount, enabled
+        }
+        /// `agentCount`/`hookCount`/`mcpCount` arrived with the v28 MCP bump
+        /// (v27 renamed the endpoints but didn't carry them). Decode all four
+        /// counts with fallbacks so an app paired with a not-yet-restarted v27
+        /// server still decodes the list instead of throwing `keyNotFound` and
+        /// silently rendering the section empty. Mirrors the back-compat pattern
+        /// in `SkillLibraryEntry.init(from:)`.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.id         = try c.decode(String.self, forKey: .id)
+            self.name       = try c.decode(String.self, forKey: .name)
+            self.origin     = try c.decode(String.self, forKey: .origin)
+            self.location   = try c.decodeIfPresent(String.self, forKey: .location)
+            self.builtin    = try c.decode(Bool.self, forKey: .builtin)
+            self.version    = try c.decodeIfPresent(String.self, forKey: .version)
+            self.ref        = try c.decodeIfPresent(String.self, forKey: .ref)
+            self.installed  = try c.decode(Bool.self, forKey: .installed)
+            self.skillCount = try c.decodeIfPresent(Int.self, forKey: .skillCount) ?? 0
+            self.agentCount = try c.decodeIfPresent(Int.self, forKey: .agentCount) ?? 0
+            self.hookCount  = try c.decodeIfPresent(Int.self, forKey: .hookCount) ?? 0
+            self.mcpCount   = try c.decodeIfPresent(Int.self, forKey: .mcpCount) ?? 0
+            self.enabled    = try c.decode(Bool.self, forKey: .enabled)
+        }
     }
     private struct LlmSourcesListResponse: Decodable { let sources: [LlmSourceInfo] }
 

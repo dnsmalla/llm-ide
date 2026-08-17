@@ -1090,6 +1090,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   // POST /auth/me/llm-sources/add      → { url|path, ref?, name? }  (admin)
   // POST /auth/me/llm-sources/update   → { id }                     (admin)
   // DELETE /auth/me/llm-sources/<id>                                (admin)
+  // GET  /auth/me/llm-sources/<id>/discovery → agents/hooks/mcp listing (admin)
   if (method === 'GET' && url.split('?')[0] === '/auth/me/llm-sources') {
     const { listSourcesWithState, seedBuiltinOnce } = await import('../llm-sources/registry.mjs');
     seedBuiltinOnce();
@@ -1226,6 +1227,10 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   }
 
   if (method === 'GET' && url.split('?')[0].startsWith('/auth/me/llm-sources/') && url.split('?')[0].endsWith('/discovery')) {
+    // Admin-gated: this surfaces absolute agent file paths and hook/MCP
+    // command strings from admin-registered sources, which are not for every
+    // authenticated user to enumerate (the list endpoint returns only counts).
+    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     const id = decodeURIComponent(url.split('?')[0].slice('/auth/me/llm-sources/'.length, -'/discovery'.length));
     if (!/^[a-z][a-z0-9-]{1,40}$/.test(id)) {
       send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid source id' } }); return;
