@@ -80,7 +80,8 @@ enum ChatAutoChainPolicy {
         // arbitrary file (fixed destination under llm-doc/plans/, always
         // creates/overwrites only its own plan file), so it always saves
         // automatically the instant it's proposed. See save-plan.md and
-        // mode-personas.mjs for why it's the one write tool Plan mode gets.
+        // mode-personas.mjs (PLAN_LIKE_MODES) for why it's the one write
+        // tool the plan-like modes (plan, assist_plan) get.
         if pendingTool?.savePlanArgs != nil {
             decisions.append(.autoSavePlan)
         }

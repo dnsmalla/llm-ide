@@ -1,7 +1,7 @@
 // extension/tests/mode-classify.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyCodeAssistMode } from '../llm_agent/runtime/mode-classify.mjs';
+import { classifyCodeAssistMode, buildPrompt } from '../llm_agent/runtime/mode-classify.mjs';
 
 test('classifyCodeAssistMode returns the model-chosen mode when valid JSON comes back', async () => {
   const result = await classifyCodeAssistMode('how would you approach fixing this?', {
@@ -40,4 +40,26 @@ test('classifyCodeAssistMode accepts review and document modes too', async () =>
     _runClaude: async () => '{"mode": "document"}',
   });
   assert.deepEqual(doc, { mode: 'document' });
+});
+
+test('classifyCodeAssistMode accepts assist_plan', async () => {
+  const result = await classifyCodeAssistMode("let's work through a plan together, ask me whatever you need", {
+    _runClaude: async () => '{"mode": "assist_plan"}',
+  });
+  assert.deepEqual(result, { mode: 'assist_plan' });
+});
+
+// A mocked _runClaude can only prove the JSON round-trips (above) — it can't
+// prove the model would actually pick the right one between plan/assist_plan
+// for a given message. This asserts on the prompt text itself, so a future
+// edit that weakens or drops the disambiguating language fails loudly here
+// instead of silently degrading real classification.
+test('buildPrompt draws an explicit line between plan (one-shot) and assist_plan (collaborative)', () => {
+  const prompt = buildPrompt('anything');
+  assert.match(prompt, /"plan\|assist_plan\|review\|document\|execute"/);
+  assert.match(prompt, /"plan":.*ONE-SHOT/);
+  assert.match(prompt, /"assist_plan":.*TOGETHER/);
+  // The assist_plan bullet must tell the model not to infer it from topic
+  // complexity alone — that's the actual collision risk with "plan".
+  assert.match(prompt, /don't infer it just because the topic sounds complex/);
 });

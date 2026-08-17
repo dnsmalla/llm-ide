@@ -4,13 +4,21 @@ import Foundation
 /// extension/llm_agent/runtime/mode-personas.mjs / route.mjs's
 /// `resolvedMode`) — raw values are wire contracts, not renameable.
 enum CodeAssistMode: String, Codable, CaseIterable, Identifiable, ChipMenuOption {
-    case auto, plan, review, document, execute
+    case auto, plan
+    /// Slower, collaborative counterpart to `.plan` — rounds of clarifying
+    /// questions and section-by-section review instead of a one-shot
+    /// proposal. See `superpowers:assist-plan` and the server's
+    /// `mode-personas.mjs` (`PLAN_LIKE_MODES`) for the shared 5-phase
+    /// process both this mode and `.plan` follow.
+    case assistPlan = "assist_plan"
+    case review, document, execute
     var id: String { rawValue }
 
     var label: String {
         switch self {
         case .auto: return "Auto"
         case .plan: return "Plan"
+        case .assistPlan: return "Assist Plan"
         // "Code Review", not "Review" — the adjacent editModeChip already
         // has its own unrelated "Review" option (file-edit confirmation
         // policy); a bare "Review" here would read as the same control.
@@ -24,6 +32,7 @@ enum CodeAssistMode: String, Codable, CaseIterable, Identifiable, ChipMenuOption
         switch self {
         case .auto: return "sparkles"
         case .plan: return "list.bullet.clipboard"
+        case .assistPlan: return "questionmark.bubble.fill"
         case .review: return "checkmark.seal"
         case .document: return "doc.text"
         case .execute: return "bolt.fill"
@@ -34,6 +43,7 @@ enum CodeAssistMode: String, Codable, CaseIterable, Identifiable, ChipMenuOption
         switch self {
         case .auto: return "Auto — Claude classifies your request and picks a mode itself"
         case .plan: return "Plan — propose a step-by-step plan in prose; no file edits or commands"
+        case .assistPlan: return "Assist Plan — build a plan together over several turns, with rounds of clarifying questions and section-by-section review; no file edits or commands except saving the finished plan"
         case .review: return "Review — give code-review feedback; no file edits or commands"
         case .document: return "Document — write documentation in the reply; no file edits or commands"
         case .execute: return "Execute — today's full agentic behavior (file edits, commands, tools)"

@@ -76,6 +76,35 @@ test('mode: undefined behaves exactly like "execute" (back-compat — no mode fi
   assert.equal(out.mode, 'execute');
 });
 
+test('mode: "assist_plan" appends the assist_plan persona and never returns a write pendingTool other than save-plan', async () => {
+  const runClaude = async () => 'What would you like to build? Give me a short summary.';
+  const out = await handleCodeAssist({
+    message: "let's work through a plan together",
+    history: [],
+    agentContext: { sessionId: 'test-assist-plan-1' },
+    runClaude,
+    kb: fakeKb(),
+    userId: 'u1',
+    mode: 'assist_plan',
+  });
+  assert.equal(out.mode, 'assist_plan');
+  assert.ok(!out.pendingTool, `expected no pendingTool, got ${JSON.stringify(out.pendingTool)}`);
+});
+
+test('mode: an unrecognized client-supplied string (e.g. a typo) falls back to "execute" rather than silently resolving unrestricted', async () => {
+  const runClaude = async () => 'Sure, done.';
+  const out = await handleCodeAssist({
+    message: 'do something',
+    history: [],
+    agentContext: { sessionId: 'test-badmode-1' },
+    runClaude,
+    kb: fakeKb(),
+    userId: 'u1',
+    mode: 'assist-plan', // hyphen typo for "assist_plan"
+  });
+  assert.equal(out.mode, 'execute');
+});
+
 test('enforceModeToolRestriction clears a pendingTool for a restricted mode', () => {
   const out = { reply: 'hi', pendingTool: { name: 'create-issue', arguments: {} } };
   const result = enforceModeToolRestriction(out, 'plan');
@@ -95,21 +124,26 @@ test('enforceModeToolRestriction is a no-op when there is no pendingTool', () =>
   assert.equal(result, out); // same reference — no unnecessary object copy
 });
 
-test('enforceModeToolRestriction lets a save-plan pendingTool survive in plan mode', () => {
-  const out = { reply: 'hi', pendingTool: { name: 'save-plan', arguments: { title: 't', content: 'c' } } };
-  const result = enforceModeToolRestriction(out, 'plan');
-  assert.deepEqual(result.pendingTool, { name: 'save-plan', arguments: { title: 't', content: 'c' } });
+test('enforceModeToolRestriction lets a save-plan pendingTool survive in every plan-like mode', () => {
+  for (const mode of ['plan', 'assist_plan']) {
+    const out = { reply: 'hi', pendingTool: { name: 'save-plan', arguments: { title: 't', content: 'c' } } };
+    const result = enforceModeToolRestriction(out, mode);
+    assert.deepEqual(result.pendingTool, { name: 'save-plan', arguments: { title: 't', content: 'c' } },
+      `expected save-plan to survive for mode "${mode}"`);
+  }
 });
 
-test('enforceModeToolRestriction still clears save-plan for review/document — the carve-out is plan-only', () => {
+test('enforceModeToolRestriction still clears save-plan for review/document — the carve-out is plan-like modes only', () => {
   const out = { reply: 'hi', pendingTool: { name: 'save-plan', arguments: { title: 't', content: 'c' } } };
   assert.equal(enforceModeToolRestriction(out, 'review').pendingTool, null);
   assert.equal(enforceModeToolRestriction(out, 'document').pendingTool, null);
 });
 
-test('enforceModeToolRestriction still clears every other write tool in plan mode — the carve-out is save-plan only', () => {
-  const out = { reply: 'hi', pendingTool: { name: 'update-file', arguments: {} } };
-  assert.equal(enforceModeToolRestriction(out, 'plan').pendingTool, null);
+test('enforceModeToolRestriction still clears every other write tool in plan-like modes — the carve-out is save-plan only', () => {
+  for (const mode of ['plan', 'assist_plan']) {
+    const out = { reply: 'hi', pendingTool: { name: 'update-file', arguments: {} } };
+    assert.equal(enforceModeToolRestriction(out, mode).pendingTool, null, `expected update-file cleared for mode "${mode}"`);
+  }
 });
 
 test('mode: "review" never injects the task-list block into the prompt, even with real session tasks', async () => {

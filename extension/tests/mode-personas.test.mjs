@@ -1,12 +1,21 @@
 // extension/tests/mode-personas.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { personaForMode, restrictsTools, allowedToolNames } from '../llm_agent/runtime/mode-personas.mjs';
+import { personaForMode, restrictsTools, allowedToolNames, PLAN_LIKE_MODES } from '../llm_agent/runtime/mode-personas.mjs';
 
-test('personaForMode returns mode-specific text for plan/review/document', () => {
+test('personaForMode returns mode-specific text for plan/assist_plan/review/document', () => {
   assert.match(personaForMode('plan'), /PLAN mode/);
+  assert.match(personaForMode('assist_plan'), /ASSIST_PLAN mode/);
   assert.match(personaForMode('review'), /REVIEW mode/);
   assert.match(personaForMode('document'), /DOCUMENT mode/);
+});
+
+test('assist_plan persona describes all 5 phases and the round/recommended-answer question format', () => {
+  const persona = personaForMode('assist_plan');
+  assert.match(persona, /assist-plan skill/);
+  assert.match(persona, /ONE numbered round per turn/);
+  assert.match(persona, /recommended default/);
+  assert.match(persona, /save-plan/);
 });
 
 test('personaForMode returns empty string for execute (no persona change)', () => {
@@ -17,8 +26,9 @@ test('personaForMode returns empty string for an unrecognised mode', () => {
   assert.equal(personaForMode('something-else'), '');
 });
 
-test('restrictsTools is true for plan/review/document, false for execute', () => {
+test('restrictsTools is true for plan/assist_plan/review/document, false for execute', () => {
   assert.equal(restrictsTools('plan'), true);
+  assert.equal(restrictsTools('assist_plan'), true);
   assert.equal(restrictsTools('review'), true);
   assert.equal(restrictsTools('document'), true);
   assert.equal(restrictsTools('execute'), false);
@@ -53,16 +63,22 @@ test('allowedToolNames excludes task tracking tools — Plan/Review/Document mod
   assert.equal(names.has('task-list'), false);
 });
 
-test('allowedToolNames excludes save-plan when called with no mode (or a non-plan mode)', () => {
+test('allowedToolNames excludes save-plan when called with no mode (or a non-plan-like mode)', () => {
   assert.equal(allowedToolNames().has('save-plan'), false);
   assert.equal(allowedToolNames('review').has('save-plan'), false);
   assert.equal(allowedToolNames('document').has('save-plan'), false);
 });
 
-test('allowedToolNames("plan") includes save-plan on top of the base read-only set', () => {
-  const names = allowedToolNames('plan');
-  assert.equal(names.has('save-plan'), true);
-  // Base set is still fully present — this is additive, not a replacement.
-  assert.equal(names.has('read-file'), true);
-  assert.equal(names.has('update-file'), false);
+test('allowedToolNames includes save-plan on top of the base read-only set for every plan-like mode', () => {
+  for (const mode of PLAN_LIKE_MODES) {
+    const names = allowedToolNames(mode);
+    assert.equal(names.has('save-plan'), true, `expected save-plan for mode "${mode}"`);
+    // Base set is still fully present — this is additive, not a replacement.
+    assert.equal(names.has('read-file'), true);
+    assert.equal(names.has('update-file'), false);
+  }
+});
+
+test('PLAN_LIKE_MODES is exactly {plan, assist_plan}', () => {
+  assert.deepEqual([...PLAN_LIKE_MODES].sort(), ['assist_plan', 'plan']);
 });

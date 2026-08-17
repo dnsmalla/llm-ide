@@ -517,7 +517,7 @@ extension CodeAssistantPanel {
         ))
     }
 
-    /// Code-assist mode selector (Auto / Plan / Code Review / Document / Execute).
+    /// Code-assist mode selector (Auto / Plan / Assist Plan / Code Review / Document / Execute).
     var modePicker: some View {
         chipMenu($modelState.selectedMode)
     }

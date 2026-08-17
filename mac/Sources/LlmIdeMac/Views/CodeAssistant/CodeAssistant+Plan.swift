@@ -1,6 +1,7 @@
 import Foundation
 
-/// The chat's save-plan flow — Plan mode's one write action. Unlike
+/// The chat's save-plan flow — the one write action the plan-like modes
+/// (Plan, Assist Plan) get. Unlike
 /// `update-file`/`bash`, this is never gated behind a confirmation sheet or
 /// the auto-edit toggle: it can only ever write its own fixed-location plan
 /// file under `llm-doc/plans/`, never an arbitrary one, so it always saves

@@ -29,8 +29,8 @@ import { logger } from '../../core/logger.mjs';
 import { GLOBAL_HANDLER_NAMES } from './global-handlers.mjs';
 import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider, resolveCustomProviderDispatch, assertSafeBaseUrlResolved } from '../../providers/providers.mjs';
 import { skillsToOpenAITools } from './openai-tools.mjs';
-import { classifyCodeAssistMode } from './mode-classify.mjs';
-import { personaForMode, restrictsTools, allowedToolNames } from './mode-personas.mjs';
+import { classifyCodeAssistMode, MODES } from './mode-classify.mjs';
+import { personaForMode, restrictsTools, allowedToolNames, PLAN_LIKE_MODES } from './mode-personas.mjs';
 import { classifyTaskType } from './task-skill-routing.mjs';
 import { readSkillInstructions } from '../skills/skill-library.mjs';
 import { buildMcpConfigForUser } from '../../mcp/mcp-config.mjs';
@@ -74,22 +74,22 @@ const NATIVE_SYSTEM_PROMPT = [
 ].join(' ');
 
 /**
- * Restricted modes (plan/review/document) must never surface a write-tool
+ * Restricted modes (plan/assist_plan/review/document) must never surface a write-tool
  * pendingTool, even one that leaked through ask-internal's unfiltered
  * nested delegation (see the comment in mode-personas.mjs — that path is
  * NOT filtered to this feature's tool allowlist). This is the actual
  * enforcement point for that guarantee; kept as a small pure function so
  * it's directly unit-testable without driving a real agent-loop call.
  *
- * One deliberate exception: `save-plan` in `plan` mode specifically — its
- * whole purpose is to survive here so the Mac client can write the plan
- * (save-plan saves automatically, with no confirmation step). review/document
- * get no exception; a leaked save-plan call there is nulled just like any
- * other write tool.
+ * One deliberate exception: `save-plan` in a plan-like mode (`plan`,
+ * `assist_plan`) specifically — its whole purpose is to survive here so the
+ * Mac client can write the plan (save-plan saves automatically, with no
+ * confirmation step). review/document get no exception; a leaked save-plan
+ * call there is nulled just like any other write tool.
  */
 export function enforceModeToolRestriction(out, resolvedMode) {
   if (restrictsTools(resolvedMode) && out?.pendingTool
-      && !(resolvedMode === 'plan' && out.pendingTool.name === 'save-plan')) {
+      && !(PLAN_LIKE_MODES.has(resolvedMode) && out.pendingTool.name === 'save-plan')) {
     return { ...out, pendingTool: null };
   }
   return out;
@@ -110,7 +110,7 @@ export async function handleCodeAssist({
   maxIterations: maxIterationsOverride,  // optional: override for tests
   model,                    // resolved model id (from the client) — routes native vs fence loop
   provider,                 // explicit provider id from the client, if any
-  mode: requestedMode,      // NEW — "auto" | "plan" | "review" | "document" | "execute" | undefined
+  mode: requestedMode,      // NEW — "auto" | "plan" | "assist_plan" | "review" | "document" | "execute" | undefined
   // Test seam only — defaults to the real classifier. ESM named exports
   // can't be redefined by node:test's mock.method (module namespace
   // properties are non-configurable), and mock.module() needs
@@ -127,10 +127,14 @@ export async function handleCodeAssist({
   // Resolve the request's mode. Missing/undefined behaves exactly like
   // "execute" (back-compat with clients that don't send the field yet).
   // "auto" classifies the message; classification failure already falls
-  // back to "execute" inside classifyCodeAssistMode itself.
+  // back to "execute" inside classifyCodeAssistMode itself. A client-
+  // supplied mode outside MODES (typo, stale client, hand-crafted request)
+  // also falls back to "execute" rather than silently resolving to a
+  // string restrictsTools() doesn't recognize — that would run the request
+  // with full unrestricted access instead of the mode the client asked for.
   const resolvedMode = requestedMode === 'auto'
     ? (await _classifyMode(message, { userId })).mode
-    : (requestedMode || 'execute');
+    : (requestedMode && MODES.has(requestedMode) ? requestedMode : 'execute');
 
   // MCP plugins (Claude CLI path only). Restricted modes get none; execute
   // modes get the user's enabled+consented servers as --mcp-config. Subagents
@@ -449,7 +453,7 @@ export async function handleCodeAssist({
 
   // Computed once and shared by both loop branches below: the actual
   // dispatchable skill set for this turn's mode. A restricted mode
-  // (plan/review/document) collapses to the explicit read-only allowlist;
+  // (plan/assist_plan/review/document) collapses to the explicit read-only allowlist;
   // execute/unrecognised modes get the full per-request skill map
   // unchanged. Previously this filter expression was duplicated between
   // the native loop's `skills:` and the fence loop's `skills:` — and the
@@ -484,15 +488,15 @@ export async function handleCodeAssist({
       // globalSkills.skills there) — update-file/git-op/bash-as-write stay
       // fence-only, never offered as native tools, in every mode.
       //
-      // `plan` mode is the one exception: activeSkills is already
-      // allowlist-filtered down to the read-only set plus save-plan (its
-      // one write-kind carve-out — see PLAN_MODE_EXTRA_TOOL_NAMES), so
-      // dropping `kind: write` here would silently strip save-plan from the
-      // tools a native/OpenAI-compatible model is even told exist, making
-      // the persona's "call save-plan" instruction unfollowable for those
-      // providers. `readOnly: false` is safe here specifically because
-      // activeSkills can't contain any OTHER write-kind tool in this mode.
-      tools: skillsToOpenAITools(activeSkills, { readOnly: resolvedMode !== 'plan' }),
+      // The plan-like modes (`plan`, `assist_plan`) are the one exception:
+      // activeSkills is already allowlist-filtered down to the read-only set
+      // plus save-plan (its one write-kind carve-out — see PLAN_LIKE_MODES),
+      // so dropping `kind: write` here would silently strip save-plan from
+      // the tools a native/OpenAI-compatible model is even told exist,
+      // making the persona's "call save-plan" instruction unfollowable for
+      // those providers. `readOnly: false` is safe here specifically because
+      // activeSkills can't contain any OTHER write-kind tool in these modes.
+      tools: skillsToOpenAITools(activeSkills, { readOnly: !PLAN_LIKE_MODES.has(resolvedMode) }),
       complete: (opts) => callOpenAI({ apiKey: nativeKey, model, baseUrl: nativeBaseUrl, ...opts }),
       userId,
       handlers,
@@ -555,7 +559,7 @@ export async function handleCodeAssist({
   // Surface the per-request memory overhead so the client can show it (and the
   // user can judge whether the always-on memory block is worth its tokens).
   const memoryUsage = { chars: memoryChars, approxTokens: Math.round(memoryChars / 4), hasChatMemory: memoryHasChat };
-  // A restricted mode (plan/review/document) can never resolve a pending
+  // A restricted mode (plan/assist_plan/review/document) can never resolve a pending
   // task — task-create/task-update are excluded from its tool allowlist,
   // and its persona forbids acting on one. Without this gate, a stale task
   // left behind by an EARLIER Execute-mode turn in the same session (tasks

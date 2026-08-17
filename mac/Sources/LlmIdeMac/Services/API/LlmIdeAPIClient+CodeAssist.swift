@@ -53,7 +53,7 @@ extension LlmIdeAPIClient {
         /// content, so this channel can't be used to smuggle followable text.
         let skills: [String]
         let agentContext: AgentContext?     // NEW — optional for back-compat
-        /// "auto" | "plan" | "review" | "document" | "execute". Optional so
+        /// "auto" | "plan" | "assist_plan" | "review" | "document" | "execute". Optional so
         /// an older client (or a request that doesn't care) omits it —
         /// server treats missing/nil exactly like "execute".
         let mode: String?

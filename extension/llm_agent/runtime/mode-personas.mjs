@@ -39,14 +39,15 @@
 //     outbound network reads (SSRF-guarded); no mutation of any local or
 //     remote state.
 //   - search-kb (handlers/search-kb.mjs): read-only KB query.
-//   - save-plan is NOT in this base set — see PLAN_MODE_EXTRA_TOOL_NAMES
-//     below: it's the one deliberate write-kind carve-out, but added ONLY
-//     for `plan` mode, not review/document. It takes no `path` argument —
-//     the Mac client always resolves it to <workspaceRoot>/llm-doc/plans/,
-//     so even though it is `kind: write`, it cannot be redirected into
-//     editing an arbitrary file the way update-file/bash could.
-//     enforceModeToolRestriction (route.mjs) also special-cases this name
-//     so its pendingTool survives for `plan` specifically.
+//   - save-plan is NOT in this base set — see PLAN_LIKE_MODES below: it's
+//     the one deliberate write-kind carve-out, but added ONLY for the
+//     plan-like modes (`plan`, `assist_plan`), not review/document. It
+//     takes no `path` argument — the Mac client always resolves it to
+//     <workspaceRoot>/llm-doc/plans/, so even though it is `kind: write`,
+//     it cannot be redirected into editing an arbitrary file the way
+//     update-file/bash could. enforceModeToolRestriction (route.mjs) also
+//     special-cases this name so its pendingTool survives for those modes
+//     specifically.
 // Excluded despite `kind: read`:
 //   - run-bash (handlers/run-bash.mjs): executes arbitrary shell commands
 //     on the server via /bin/sh with no user confirmation. Must never be
@@ -73,12 +74,14 @@ const READ_ONLY_TOOL_NAMES = new Set([
   'search-kb',
 ]);
 
-// save-plan is added on top of READ_ONLY_TOOL_NAMES for `plan` mode ONLY
+// The plan-like modes: both get save-plan added on top of READ_ONLY_TOOL_NAMES
 // (see allowedToolNames below) — review/document must not even see it in
 // their tool list, since enforceModeToolRestriction (route.mjs) nulls its
 // pendingTool for those modes and a model that called it anyway would get a
-// silently-truncated reply for no visible reason.
-const PLAN_MODE_EXTRA_TOOL_NAMES = new Set(['save-plan']);
+// silently-truncated reply for no visible reason. Exported so route.mjs can
+// check membership instead of duplicating the mode-name comparison.
+export const PLAN_LIKE_MODES = new Set(['plan', 'assist_plan']);
+const PLAN_LIKE_EXTRA_TOOL_NAMES = new Set(['save-plan']);
 
 const MODE_CONFIG = {
   plan: {
@@ -92,6 +95,34 @@ const MODE_CONFIG = {
            + 'content — it saves immediately with no confirmation step, so only '
            + "call it once the plan is actually ready, and say in your reply that "
            + "you've saved it and where.",
+  },
+  assist_plan: {
+    persona: 'You are in ASSIST_PLAN mode — a slower, collaborative planning '
+           + "process for when the user wants to build a plan WITH you over "
+           + 'several turns, not get a one-shot proposal like PLAN mode. Follow '
+           + 'the assist-plan skill\'s 5 phases, picking up from '
+           + "wherever the conversation already is — re-read the history to work "
+           + "out which phase you're on; there is no separate state, only the "
+           + 'conversation. (1) If the user hasn\'t given a summary of what they '
+           + 'want yet, ask for one — don\'t proceed without it. (2) Extract the '
+           + "claims in that summary, check them yourself against the real "
+           + 'project (find-code, read-file, list-files — never ask the user for '
+           + 'a fact you can look up), then for what\'s genuinely a decision ask '
+           + 'selection-based questions, batched as ONE numbered round per turn, '
+           + 'each with a recommended default: "❓ **Q1** — <question w/ '
+           + 'options>" / "➡️ <recommended answer>" — then use the answers to '
+           + 'rewrite the summary accurately. (3) Turn the grounded summary into '
+           + 'a few scoped paragraphs and ask if it looks right before '
+           + 'continuing. (4) Find a gap (edge cases, testing, rollout, ...), '
+           + 'add it as a new section, run another round of questions if it '
+           + 'raises new decisions — repeat until nothing important is left '
+           + 'unclear. (5) Self-review for placeholders/contradictions/ '
+           + 'ambiguity and fix them, then ask for a final review; only once '
+           + 'the user approves, call save-plan with a short title and the '
+           + 'finalized document — it saves immediately with no further '
+           + 'confirmation, so call it only after real approval, and say in '
+           + "your reply that you've saved it and where. Do NOT call any other "
+           + 'write tool (file edits, bash, git operations, issue/PR actions).',
   },
   review: {
     persona: 'You are in REVIEW mode. Read the attached files/context and give '
@@ -124,13 +155,13 @@ export function restrictsTools(mode) {
  * future per-request tweak) must never corrupt it for other requests.
  *
  * `mode` is optional so existing no-arg callers keep the base read-only
- * set unchanged; pass the resolved mode to also get `plan`'s one write-tool
- * carve-out (save-plan) merged in.
+ * set unchanged; pass the resolved mode to also get the plan-like modes'
+ * one write-tool carve-out (save-plan) merged in.
  */
 export function allowedToolNames(mode) {
   const names = new Set(READ_ONLY_TOOL_NAMES);
-  if (mode === 'plan') {
-    for (const n of PLAN_MODE_EXTRA_TOOL_NAMES) names.add(n);
+  if (PLAN_LIKE_MODES.has(mode)) {
+    for (const n of PLAN_LIKE_EXTRA_TOOL_NAMES) names.add(n);
   }
   return names;
 }
