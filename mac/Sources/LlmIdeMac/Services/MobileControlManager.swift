@@ -381,14 +381,13 @@ final class MobileControlManager {
             append(.info, "Explore new: \(s.id.uuidString.prefix(8))")
             reply(ExploreSessionCreated(sessionId: s.id.uuidString))
         case MobileProtocol.Tag.exploreDeleteSession:
-            if let m = try? decoder.decode(ExploreDeleteSession.self, from: data) {
-                if let uid = UUID(uuidString: m.sessionId) {
-                    ChatSessionStore.delete(id: uid)
-                    // Drop any cached off-screen engine for this id too — a
-                    // later explore_chat referencing the same (now-deleted)
-                    // session must not resolve to a stale cached instance.
-                    explorerMobileEngineResolver.forget(sessionID: uid)
-                    append(.info, "Explore delete: \(uid.uuidString.prefix(8))")
+            if let m = try? decoder.decode(ExploreDeleteSession.self, from: data),
+               let uid = UUID(uuidString: m.sessionId) {
+                // Async (the session-memory forget is a network call); this
+                // message carries no commandId, so there is no inflight
+                // registration or cancel tracking — see handleExploreDelete.
+                Task { @MainActor [weak self] in
+                    await self?.handleExploreDelete(uid)
                 }
             }
         case MobileProtocol.Tag.exploreChat:
@@ -740,6 +739,47 @@ final class MobileControlManager {
             lastError = error.localizedDescription
             await server?.send(CommandError(commandId: chat.commandId, message: error.localizedDescription))
         }
+    }
+
+    /// Delete an explorer session on behalf of the phone, routed through
+    /// whichever engine currently holds it. The old direct
+    /// `ChatSessionStore.delete` resurrected the chat whenever an engine
+    /// still had it loaded: `persistCurrentChat` recreates the file when
+    /// `load(id:)` comes back nil (`?? ChatSession(id:scope:)` keeps the id),
+    /// so the Mac panel's next history change — or an in-flight phone turn's
+    /// cancellation-path persist — brought the deleted chat right back, and
+    /// the server's session-memory rows for it were never forgotten.
+    ///
+    /// `ChatEngine.deleteSession` already does every piece correctly for a
+    /// session its engine is showing (cancel + finalize the in-flight turn,
+    /// delete, fall back to the next session or mint a fresh one — which is
+    /// also what moves the engine OFF the deleted id so nothing can
+    /// re-persist it), so both holders go through it. The shared engine and
+    /// a cached off-screen engine can BOTH hold the same id (Mac switched to
+    /// a session the phone had opened off-screen), so check each. A session
+    /// nobody holds takes the raw delete — plus the memory forget the raw
+    /// path used to skip, which is also re-issued unconditionally because
+    /// off-screen engines never get a panel to wire their
+    /// `forgetSessionMemory` hook (a duplicate server DELETE is idempotent).
+    @MainActor
+    private func handleExploreDelete(_ uid: UUID) async {
+        guard let api else { return }
+        let shared = ChatEngineRegistry.shared.engine(for: .explorer, api: api)
+        if shared.currentSessionIDString == uid.uuidString {
+            await shared.deleteSession(uid)
+        }
+        if let cached = explorerMobileEngineResolver.cachedEngine(for: uid) {
+            await cached.deleteSession(uid)
+        }
+        if ChatSessionStore.load(id: uid) != nil {
+            ChatSessionStore.delete(id: uid)
+        }
+        try? await api.forgetSessionMemory(sessionId: uid.uuidString)
+        // Drop any cached off-screen engine for this id too — a later
+        // explore_chat referencing the same (now-deleted) session must not
+        // resolve to a stale cached instance.
+        explorerMobileEngineResolver.forget(sessionID: uid)
+        append(.info, "Explore delete: \(uid.uuidString.prefix(8))")
     }
 
     /// Prepend each extracted file's text as a fenced block before the user's

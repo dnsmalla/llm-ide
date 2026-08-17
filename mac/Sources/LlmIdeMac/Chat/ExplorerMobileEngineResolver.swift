@@ -94,6 +94,17 @@ final class ExplorerMobileEngineResolver {
         return engine
     }
 
+    /// The cached off-screen engine for `sessionID`, if one exists — WITHOUT
+    /// creating or refreshing anything. Exists so `explore_delete_session`
+    /// can route the delete through the engine that actually holds the
+    /// session (cancelling any in-flight phone turn and re-pointing the
+    /// engine, so its next `persistCurrentChat` can't resurrect the file)
+    /// while leaving the lookup itself side-effect free. Returns nil when no
+    /// engine has this session loaded off-screen.
+    func cachedEngine(for sessionID: UUID) -> ChatEngine? {
+        offScreen[sessionID]
+    }
+
     /// Drop a cached off-screen engine — called when the session it was
     /// backing is deleted (`explore_delete_session`), so a later phone
     /// request for the same (now-gone) id can't resolve to a stale instance.

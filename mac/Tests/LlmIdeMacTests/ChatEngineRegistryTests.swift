@@ -368,6 +368,58 @@ struct ChatEngineRunExternalTurnTests {
             #expect(aOnDisk?.messages.contains { $0.content == "B's own turn" } == false)
         }
     }
+
+    @Test("Deleting the session MID external turn never resurrects it — the orphaned round trip must not re-persist")
+    func deleteDuringExternalTurnDoesNotResurrect() async {
+        await withTempStore {
+            let transport = SuspendableChatTransport()
+            let engine = ChatEngine(scope: Self.scope, transport: transport)
+            let sessionA = ChatSession(scope: Self.scope, title: "A")
+            ChatSessionStore.save(sessionA)
+
+            engine.switchSession(to: sessionA.id)
+            #expect(engine.currentSessionIDString == sessionA.id.uuidString)
+
+            // 1. The phone's turn starts on A — passes the entry guard,
+            // appends+persists the user turn, busy = true — then suspends
+            // inside the transport call.
+            let turnTask = Task {
+                try? await engine.runExternalTurn(
+                    message: "from iPhone", skillIds: [], attachments: [],
+                    agentContext: nil, model: nil, provider: nil,
+                    expectedSessionID: sessionA.id,
+                    onProgress: { _ in })
+            }
+            try? await Task.sleep(nanoseconds: 30_000_000)
+            #expect(engine.busy == true)
+
+            // 2. The phone deletes the very chat its turn is running in,
+            // routed the way `handleExploreDelete` routes it: through the
+            // engine, NOT a raw store delete. resetActiveTurnState finalizes
+            // the in-flight placeholder, the file is deleted, and
+            // mintFreshSession moves the engine OFF the deleted id — which is
+            // what makes the orphaned round trip's guards bail instead of
+            // re-persisting. Also pins the session-memory forget firing.
+            var forgotten: [String] = []
+            engine.forgetSessionMemory = { forgotten.append($0) }
+            await engine.deleteSession(sessionA.id)
+            #expect(engine.currentSessionIDString != sessionA.id.uuidString)
+            #expect(forgotten == [sessionA.id.uuidString])
+
+            // 3. The round trip resolves after the delete. Both the success
+            // and catch paths re-check expectedSessionID; with the engine
+            // moved off A, neither may persist into it.
+            transport.resume()
+            let _: String? = await turnTask.value
+
+            // The file stays deleted. persistCurrentChat's load-nil fallback
+            // (`?? ChatSession(id:scope:)`, id preserved) is exactly the
+            // resurrection vector a raw store delete used to trigger — the
+            // old explore_delete_session behavior.
+            #expect(ChatSessionStore.load(id: sessionA.id) == nil)
+            #expect(engine.busy == false)
+        }
+    }
 }
 
 /// A `ChatTransport` whose `roundTrip` suspends until `resume()` is called —
@@ -479,6 +531,43 @@ struct ExplorerMobileEngineResolverTests {
             #expect(first === second)
             // Still hasn't touched the shared engine.
             #expect(shared.currentSessionIDString == sessionA.id.uuidString)
+        }
+    }
+
+    @Test("cachedEngine(for:) is side-effect free — no creation, no disk refresh, and forget drops it")
+    func cachedEngineAccessorDoesNotCreateOrRefresh() async {
+        await withTempStore {
+            let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
+            let shared = ChatEngine(scope: .explorer, transport: ScriptedChatTransport())
+            let sessionA = ChatSession(scope: .explorer, title: "A")
+            ChatSessionStore.save(sessionA)
+            let sessionB = ChatSession(scope: .explorer, title: "B")
+            ChatSessionStore.save(sessionB)
+            shared.switchSession(to: sessionA.id)
+
+            let resolver = ExplorerMobileEngineResolver()
+            // Nothing cached for a random id — and crucially no engine is
+            // CREATED for it (the full engine(for:) lookup would return one).
+            #expect(resolver.cachedEngine(for: UUID()) == nil)
+
+            #expect(resolver.engine(for: sessionB.id, sharedExplorerEngine: shared, api: api) != nil)
+
+            // A disk write the full lookup would refresh on next resolve is
+            // NOT visible through cachedEngine — it returns the cached
+            // instance exactly as it is.
+            var updated = sessionB
+            updated.messages = [ChatMessage(wireTurn: .init(role: .user, content: "Mac-side turn"), sessionDate: Date())]
+            ChatSessionStore.save(updated)
+            let cached = resolver.cachedEngine(for: sessionB.id)
+            #expect(cached?.messages.isEmpty == true)
+            // The full lookup DOES refresh from disk.
+            #expect(resolver.engine(for: sessionB.id, sharedExplorerEngine: shared, api: api)?
+                .messages.map(\.content) == ["Mac-side turn"])
+            // Same instance either way — the accessor never rebuilds.
+            #expect(cached === resolver.cachedEngine(for: sessionB.id))
+
+            resolver.forget(sessionID: sessionB.id)
+            #expect(resolver.cachedEngine(for: sessionB.id) == nil)
         }
     }
 
