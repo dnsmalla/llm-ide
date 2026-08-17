@@ -329,6 +329,49 @@ struct ChatEngineRunExternalTurnTests {
         }
     }
 
+    @Test("stop() cancels a phone-driven turn — the Mac Stop button is no longer inert")
+    func stopCancelsExternalTurn() async throws {
+        try await withTempStore {
+            let transport = SuspendableChatTransport()
+            let engine = ChatEngine(scope: Self.scope, transport: transport)
+            let session = ChatSession(scope: Self.scope, title: "A")
+            ChatSessionStore.save(session)
+            engine.switchSession(to: session.id)
+
+            let turnTask = Task {
+                try await engine.runExternalTurn(
+                    message: "from iPhone", skillIds: [], attachments: [],
+                    agentContext: nil, model: nil, provider: nil,
+                    expectedSessionID: session.id,
+                    onProgress: { _ in })
+            }
+            try await Task.sleep(nanoseconds: 30_000_000)
+            #expect(engine.busy == true)
+
+            engine.stop()
+
+            // The scripted transport doesn't abort on cancellation the way
+            // URLSession does; unblock it so the turn observes the flag.
+            transport.resume()
+            var threw = false
+            do {
+                _ = try await turnTask.value
+            } catch {
+                threw = true
+                #expect(error is CancellationError
+                        || (error as? URLError)?.code == .cancelled)
+            }
+            #expect(threw)
+
+            // A user-initiated stop leaves the partial text in place as
+            // `.stopped`, with no error banner, and releases the slot.
+            #expect(engine.busy == false)
+            #expect(engine.error == nil)
+            #expect(engine.messages.last?.status == .stopped)
+            #expect(engine.externalRunTask == nil)
+        }
+    }
+
     @Test("A mid-flight session switch on the shared engine leaves the newly-active session untouched, and the call returns gracefully")
     func midFlightSessionSwitchDoesNotCorruptTheNewSession() async {
         await withTempStore {
@@ -368,9 +411,9 @@ struct ChatEngineRunExternalTurnTests {
             // action does: `switchSession(to:)`, no busy check.
             engine.switchSession(to: sessionB.id)
             #expect(engine.currentSessionIDString == sessionB.id.uuidString)
-            // resetActiveTurnState() clears busy — the phone's turn is never
-            // cancelled (runExternalTurn never registers a runTask), it's
-            // just no longer reflected in `busy`.
+            // resetActiveTurnState() clears busy AND cancels the phone turn
+            // via externalRunTask — the orphaned round trip's post-await
+            // guard then bails instead of persisting into either session.
             #expect(engine.busy == false)
             let bMessagesBeforeResolve = engine.messages
 

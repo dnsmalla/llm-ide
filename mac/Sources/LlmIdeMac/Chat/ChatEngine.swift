@@ -63,6 +63,14 @@ final class ChatEngine {
     private(set) var revealedCount = 0
     /// Handle to the in-flight user turn, so `stop()` can cancel it.
     private(set) var runTask: Task<Void, Never>?
+    /// Handle to the in-flight EXTERNAL (phone-driven) turn, for the same
+    /// reason `runTask` exists: `stop()` — the Mac panel's Stop button — and
+    /// `resetActiveTurnState()` must be able to cancel a phone turn that is
+    /// visibly streaming on the shared engine. Separate from `runTask`
+    /// because the result types differ (`String`/`Error`, not `Void`).
+    /// Owned by `runExternalTurn`; see its doc comment for how cancellation
+    /// reaches it from both surfaces.
+    private(set) var externalRunTask: Task<String, Error>?
     /// Bumped every time the active chat session changes (create/switch/
     /// delete-fallback). Captured by the auto-continue `asyncAfter` closure
     /// before its delay; if the epoch has moved on by the time it fires, the
@@ -223,11 +231,13 @@ final class ChatEngine {
         runTask = Task { await runTurn(message, skillIds: skillIds) }
     }
 
-    /// Cancel the in-flight turn. URLSession.data(for:) throws on cancellation,
-    /// so the network request is actually aborted; runTurn treats that as a
-    /// clean stop (no error bubble) and then drains any queued message.
+    /// Cancel the in-flight turn — panel-driven (`runTask`) or phone-driven
+    /// (`externalRunTask`) alike. URLSession.data(for:) throws on
+    /// cancellation, so the network request is actually aborted; both turn
+    /// kinds treat that as a clean stop (no error bubble).
     func stop() {
         runTask?.cancel()
+        externalRunTask?.cancel()
     }
 
     /// Queue a message the user sent while a turn was running. Drained FIFO,
@@ -732,6 +742,8 @@ final class ChatEngine {
     func resetActiveTurnState() {
         runTask?.cancel()
         runTask = nil
+        externalRunTask?.cancel()
+        externalRunTask = nil
         busy = false
         queued.removeAll()
         onResetActiveTurnExtra()
@@ -1230,6 +1242,56 @@ final class ChatEngine {
         guard currentSessionIDString == expectedSessionID.uuidString else {
             throw ExternalTurnError.sessionMoved
         }
+        // Claim the slot synchronously — the spawn below is a scheduling
+        // boundary, and without this a Mac-driven turn could start between
+        // the guard and the body's own `busy = true`.
+        busy = true
+        // The turn body runs as an unstructured task the ENGINE owns and
+        // tracks in `externalRunTask`, so `stop()` (the Mac panel's Stop
+        // button) and `resetActiveTurnState()` (session switch/create/delete)
+        // can cancel a phone-driven turn exactly like a panel-driven one —
+        // until this existed, `runTask` was never set for external turns and
+        // the Mac's Stop button was inert while a phone turn streamed on the
+        // shared engine. Cancellation flows both ways: phone-side
+        // explore_cancel cancels the task awaiting this method (whose catch
+        // below cancels the inner); Mac-side stop() cancels the inner
+        // directly.
+        let task = Task { [self] in
+            try await performExternalTurn(
+                message: message, skillIds: skillIds, attachments: attachments,
+                agentContext: agentContext, model: model, provider: provider,
+                expectedSessionID: expectedSessionID, onProgress: onProgress)
+        }
+        externalRunTask = task
+        do {
+            let reply = try await task.value
+            externalRunTask = nil
+            return reply
+        } catch {
+            task.cancel()
+            externalRunTask = nil
+            // Let the inner catch run its stopped-finalize + persist before
+            // propagating, so the transcript is never left holding a live
+            // `.streaming` placeholder. URLSession aborts promptly on
+            // cancellation, so this await is short in practice.
+            _ = try? await task.value
+            throw error
+        }
+    }
+
+    /// The body of one external turn — everything after `runExternalTurn`'s
+    /// busy/session guards. Only that wrapper calls it; the split exists so
+    /// the engine can hold a cancellable handle to the turn.
+    private func performExternalTurn(
+        message: String,
+        skillIds: [String],
+        attachments: [LlmIdeAPIClient.CodeAttachment],
+        agentContext: AgentContext?,
+        model: String?,
+        provider: String?,
+        expectedSessionID: UUID,
+        onProgress: @escaping (String) -> Void
+    ) async throws -> String {
         onTurnStart()
         onRecordPrompt(message)
         onNudge(message)
