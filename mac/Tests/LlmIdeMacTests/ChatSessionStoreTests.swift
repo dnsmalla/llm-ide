@@ -2,8 +2,9 @@ import XCTest
 @testable import LlmIdeMacLib
 
 /// ChatSessionStore persistence: list/filter, save/load/delete, legacy migration, scoped clear.
-/// Blocked from CI until `Package.swift` splits app sources into a library target — see
-/// `README-truncated-tests.md`.
+/// (An older header here claimed this suite was blocked from CI until
+/// `Package.swift` split app sources into a library target — that split
+/// happened; the suite runs with the rest of `swift test`.)
 final class ChatSessionStoreTests: XCTestCase {
     var tmp: URL!
 
