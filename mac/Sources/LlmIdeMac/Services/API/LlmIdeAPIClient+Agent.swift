@@ -140,6 +140,17 @@ extension LlmIdeAPIClient {
             case seq, role, content
             case createdAt = "created_at"
         }
+
+        // Explicit memberwise init: like `AgentAskMessage` above, Decodable's
+        // compiler-synthesized `init(from:)` suppresses the automatic
+        // memberwise one, and `LlmChatViewModelTests` needs to construct
+        // fixtures directly rather than round-tripping through JSON.
+        init(seq: Int, role: String, content: String, createdAt: Double) {
+            self.seq = seq
+            self.role = role
+            self.content = content
+            self.createdAt = createdAt
+        }
     }
 
     /// Fetch the most recent N persisted Ask-the-Agent turns,

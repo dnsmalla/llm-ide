@@ -1072,6 +1072,21 @@ final class ChatEngine {
         messages[idx].content = content
     }
 
+    /// Replace `messages` wholesale from an externally-sourced transcript —
+    /// e.g. `LlmChatViewModel.loadHistory()`'s periodic poll of the
+    /// server-persisted `/kb/agent/ask` history. Unlike `switchSession`/
+    /// `handleOnAppearSessions`, this does NOT touch `ChatSessionStore`, the
+    /// current-chat pointer, or transient/agent state — a caller that isn't
+    /// backed by this engine's disk session store (the LLM Chat sheet's
+    /// history lives server-side, not in a `ChatSession` file) just wants the
+    /// in-memory transcript kept in sync with the source of truth. Callers
+    /// are responsible for not calling this mid-turn (would clobber the
+    /// in-flight streaming placeholder) — `busy` is intentionally not
+    /// asserted here so a test can drive it directly.
+    func replaceMessages(_ msgs: [ChatMessage]) {
+        messages = msgs
+    }
+
     /// Claim the turn slot for a run the PANEL executes itself (today: the
     /// Loop Engineering run started from the chat header, which streams its
     /// log into one assistant turn rather than going through `transport`).
