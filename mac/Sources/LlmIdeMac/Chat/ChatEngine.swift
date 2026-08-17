@@ -574,7 +574,7 @@ final class ChatEngine {
         let capped = Array(history.suffix(50))
         var session = ChatSessionStore.load(id: id) ?? ChatSession(id: id, scope: scope)
         session.scope = scope
-        session.history = capped
+        session.messages = capped.map { ChatMessage(wireTurn: $0, sessionDate: Date()) }
         if session.title == "New chat" || session.title.isEmpty {
             if let firstUser = capped.first(where: { $0.role == .user }) {
                 let raw = firstUser.content
@@ -630,12 +630,12 @@ final class ChatEngine {
         if let cur = UUID(uuidString: currentSessionIDString),
            let session = ChatSessionStore.load(id: cur),
            session.scope == scope {
-            history = session.history
-            onHistoryReplaced(session.history)
+            history = session.messages.map { $0.wireTurn() }
+            onHistoryReplaced(session.messages.map { $0.wireTurn() })
         } else if let newest = sessions.first {
             currentSessionIDString = newest.id.uuidString
-            history = newest.history
-            onHistoryReplaced(newest.history)
+            history = newest.messages.map { $0.wireTurn() }
+            onHistoryReplaced(newest.messages.map { $0.wireTurn() })
             rememberCurrentPointer()
         } else {
             // No usable pointer and no saved chats for this scope — start one.
@@ -744,8 +744,8 @@ final class ChatEngine {
         rememberCurrentPointer()
         resetTransientSessionState()
         suppressHistoryAnnounce = true
-        history = session.history
-        onHistoryReplaced(session.history)
+        history = session.messages.map { $0.wireTurn() }
+        onHistoryReplaced(session.messages.map { $0.wireTurn() })
         DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
         ChatSessionStore.save(session)
         refreshSessions()
@@ -771,8 +771,8 @@ final class ChatEngine {
                 rememberCurrentPointer()
                 resetTransientSessionState()
                 suppressHistoryAnnounce = true
-                history = next.history
-                onHistoryReplaced(next.history)
+                history = next.messages.map { $0.wireTurn() }
+                onHistoryReplaced(next.messages.map { $0.wireTurn() })
                 DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
             } else {
                 // No sessions left for this scope — mint a blank one and
@@ -809,8 +809,8 @@ final class ChatEngine {
     /// must not load into this engine.
     func reloadFromDisk(id: UUID) {
         guard let session = ChatSessionStore.load(id: id), session.scope == scope else { return }
-        history = session.history
-        onHistoryReplaced(session.history)
+        history = session.messages.map { $0.wireTurn() }
+        onHistoryReplaced(session.messages.map { $0.wireTurn() })
     }
 
     // MARK: - History change

@@ -55,12 +55,20 @@ enum ChatSessionV1Fixtures {
 
 @Suite("v1 fixture sanity")
 struct ChatSessionV1FixtureTests {
+    // NOTE: as of Task 8, `ChatSession.init(from:)` migrates v1 JSON
+    // transparently on decode — there is no way to observe the RAW v1 shape
+    // through `ChatSession` anymore (that's the point: a v1 file becomes a
+    // fully-formed v2 `ChatSession` the instant it's read). These
+    // assertions were written against pre-migration behavior (Task 2); they
+    // now assert the POST-migration shape instead — same fixtures, updated
+    // expectations, not new behavior under test (that's
+    // `ChatMessageMigrationTests`'s job).
     @Test func plainFixtureDecodesAsV1() throws {
         let data = Data(ChatSessionV1Fixtures.plainTurns.utf8)
         let session = try AppJSON.decoder.decode(ChatSession.self, from: data)
-        #expect(session.storeVersion == 1)
-        #expect(session.history.count == 2)
-        #expect(session.history[1].role == .assistant)
+        #expect(session.storeVersion == 2)
+        #expect(session.messages.count == 2)
+        #expect(session.messages[1].role == .assistant)
     }
 
     @Test func allFixturesDecodeWithStoreDecoder() throws {
@@ -72,9 +80,9 @@ struct ChatSessionV1FixtureTests {
                     ChatSessionV1Fixtures.bashTurns,
                     ChatSessionV1Fixtures.stoppedTurn] {
             let session = try AppJSON.decoder.decode(ChatSession.self, from: Data(raw.utf8))
-            #expect(session.storeVersion == 1)
+            #expect(session.storeVersion == 2)
             #expect(session.scope == .explorer)
-            #expect(!session.history.isEmpty)
+            #expect(!session.messages.isEmpty)
         }
     }
 }

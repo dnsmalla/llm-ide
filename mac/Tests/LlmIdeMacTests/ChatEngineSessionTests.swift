@@ -102,7 +102,7 @@ struct ChatEngineSessionTests {
             #expect(engine.busy == false)
             // ...and the outgoing chat was persisted with exactly its own two
             // turns — no "Continue working" turn appended after the switch.
-            #expect(ChatSessionStore.load(id: old.id)?.history.map(\.content) == ["kick off", "working"])
+            #expect(ChatSessionStore.load(id: old.id)?.messages.map(\.content) == ["kick off", "working"])
 
             // Control: with no session swap, the identical setup DOES fire the
             // follow-up. Without this, the assertion above would still pass if
@@ -128,11 +128,11 @@ struct ChatEngineSessionTests {
             engine.onHistoryReplaced = { replaced.append($0.map(\.content)) }
 
             let keep = ChatSession(scope: Self.scope, title: "Keep",
-                                   history: [.init(role: .user, content: "kept")])
+                                   messages: [ChatMessage(wireTurn: .init(role: .user, content: "kept"), sessionDate: Date())])
             ChatSessionStore.save(keep)
             await settle()
             let active = ChatSession(scope: Self.scope, title: "Active",
-                                     history: [.init(role: .user, content: "doomed")])
+                                     messages: [ChatMessage(wireTurn: .init(role: .user, content: "doomed"), sessionDate: Date())])
             ChatSessionStore.save(active)
 
             engine.handleOnAppearSessions()

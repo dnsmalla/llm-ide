@@ -364,7 +364,7 @@ final class MobileControlManager {
                                    message: "Session not found on Mac — it may have been deleted."))
                 return
             }
-            let turns = s.history.map { ChatTurn(from: $0) }
+            let turns = s.messages.map { ChatTurn(from: $0.wireTurn()) }
             append(.info, "Explore load: \(s.id.uuidString.prefix(8))")
             reply(ExploreSessionHistory(sessionId: s.id.uuidString,
                                         title: s.title,
@@ -681,7 +681,9 @@ final class MobileControlManager {
         // optimistic append), and notify the panel so it reloads — otherwise its
         // stale in-memory history would later clobber this file back to [].
         if var session = ChatSessionStore.load(id: sid) {
-            session.history.append(LlmIdeAPIClient.CodeAssistTurn(role: .user, content: skillMessage))
+            session.messages.append(ChatMessage(
+                wireTurn: LlmIdeAPIClient.CodeAssistTurn(role: .user, content: skillMessage),
+                sessionDate: Date()))
             if session.title == "New chat" { session.title = String(chat.text.prefix(40)) }
             ChatSessionStore.save(session)
             NotificationCenter.default.post(name: .explorerChatTranscriptChanged, object: sid.uuidString)
@@ -722,7 +724,9 @@ final class MobileControlManager {
             // is a race fallback: if the session was deleted mid-stream the reply
             // still goes to the phone, but the turn isn't persisted.
             if var session = ChatSessionStore.load(id: sid) {
-                session.history.append(LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: resp.reply))
+                session.messages.append(ChatMessage(
+                    wireTurn: LlmIdeAPIClient.CodeAssistTurn(role: .assistant, content: resp.reply),
+                    sessionDate: Date()))
                 ChatSessionStore.save(session)
                 NotificationCenter.default.post(name: .explorerChatTranscriptChanged, object: sid.uuidString)
             }

@@ -43,7 +43,7 @@ final class ChatSessionStoreTests: XCTestCase {
     func testMigrateScopeFileOnce() throws {
         let legacyDir = tmp.appendingPathComponent("sessions", isDirectory: true)
         try FileManager.default.createDirectory(at: legacyDir, withIntermediateDirectories: true)
-        let legacy = ChatSession(scope: .explorer, title: "Old", history: [])
+        let legacy = ChatSession(scope: .explorer, title: "Old", messages: [])
         let url = legacyDir.appendingPathComponent("explorer.json")
         let data = try AppJSON.encoder.encode(legacy)
         try data.write(to: url)

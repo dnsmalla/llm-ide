@@ -11,8 +11,15 @@ enum ChatScope: String, Codable, CaseIterable {
 /// `sessions/<uuid>.json` file under Application Support, tagged with the
 /// sidebar section (`scope`) it belongs to, so a section can have multiple
 /// chats and a turn only rewrites one small file.
+///
+/// v2 envelope (`storeVersion == 2`): `messages: [ChatMessage]` replaces the
+/// flat v1 `history: [LlmIdeAPIClient.CodeAssistTurn]`. `init(from:)`
+/// transparently migrates any v1 file it reads (decodes the legacy `history`
+/// key, runs each turn through `ChatMessage.migrate`, and bumps
+/// `storeVersion` to 2 in memory) so a v1 file rewrites itself as v2 the
+/// next time it's saved — `encode(to:)` always writes the v2 shape.
 struct ChatSession: Identifiable, Codable, Equatable {
-    var storeVersion: Int = 1
+    var storeVersion: Int = 2
     let id: UUID
     /// Section this chat belongs to. Nil only when decoding legacy UUID
     /// files written before scope existed — those are orphans and must not
@@ -21,35 +28,50 @@ struct ChatSession: Identifiable, Codable, Equatable {
     var title: String
     let createdAt: Date
     var lastUsedAt: Date
-    var history: [LlmIdeAPIClient.CodeAssistTurn]
+    var messages: [ChatMessage]
 
     init(id: UUID = UUID(),
          scope: ChatScope,
          title: String = "New chat",
          createdAt: Date = Date(),
          lastUsedAt: Date = Date(),
-         history: [LlmIdeAPIClient.CodeAssistTurn] = []) {
+         messages: [ChatMessage] = []) {
         self.id = id
         self.scope = scope
         self.title = title
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
-        self.history = history
+        self.messages = messages
     }
 
     enum CodingKeys: String, CodingKey {
-        case storeVersion, id, scope, title, createdAt, lastUsedAt, history
+        case storeVersion, id, scope, title, createdAt, lastUsedAt, messages, history
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.storeVersion = (try? c.decode(Int.self, forKey: .storeVersion)) ?? 1
         self.id = try c.decode(UUID.self, forKey: .id)
         self.scope = try? c.decode(ChatScope.self, forKey: .scope)
         self.title = try c.decode(String.self, forKey: .title)
         self.createdAt = try c.decode(Date.self, forKey: .createdAt)
         self.lastUsedAt = try c.decode(Date.self, forKey: .lastUsedAt)
-        self.history = try c.decode([LlmIdeAPIClient.CodeAssistTurn].self, forKey: .history)
+        if let v2Messages = try? c.decode([ChatMessage].self, forKey: .messages) {
+            // Already v2 — decode directly, no migration.
+            self.storeVersion = (try? c.decode(Int.self, forKey: .storeVersion)) ?? 2
+            self.messages = v2Messages
+        } else {
+            // v1 file: legacy `history` key of `{role, content}` turns. Run
+            // each through the shared migration transform, stamping every
+            // migrated message with the SESSION's `lastUsedAt` as its
+            // `createdAt` — v1 turns carried no per-turn timestamp.
+            let legacyTurns = try c.decode([LlmIdeAPIClient.CodeAssistTurn].self, forKey: .history)
+            let migratedCreatedAt = self.lastUsedAt
+            self.messages = legacyTurns.map { ChatMessage.migrate(role: $0.role, content: $0.content, sessionDate: migratedCreatedAt) }
+            // In-memory, this file is now v2 shaped — the next save() writes
+            // it back out as v2, so storeVersion reflects that immediately
+            // rather than only after a round trip through disk.
+            self.storeVersion = 2
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -60,6 +82,6 @@ struct ChatSession: Identifiable, Codable, Equatable {
         try c.encode(title, forKey: .title)
         try c.encode(createdAt, forKey: .createdAt)
         try c.encode(lastUsedAt, forKey: .lastUsedAt)
-        try c.encode(history, forKey: .history)
+        try c.encode(messages, forKey: .messages)
     }
 }
