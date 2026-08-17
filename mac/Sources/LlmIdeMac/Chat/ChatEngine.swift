@@ -1207,6 +1207,15 @@ final class ChatEngine {
     /// follow-up work today — suppressing it is the tradeoff; making it
     /// safe (proper off-screen wiring, a phone-side confirmation channel) is
     /// future work, not this fix.
+    ///
+    /// The SAME suppression applies to `autoChain`: a phone-driven turn
+    /// never auto-executes a proposed tool (bash/update-file/git-op), even
+    /// on the shared engine where the panel's Bypass/Auto wiring would
+    /// otherwise run it hands-free with no phone confirmation. The proposal
+    /// still lands on `agent.pendingTool` (finishStreamingTurn below), so a
+    /// Mac panel renders the confirmation card — today the one surface that
+    /// can act on it. A phone-side confirmation channel is the future work
+    /// that would lift this.
     func runExternalTurn(
         message: String,
         skillIds: [String],
@@ -1290,7 +1299,10 @@ final class ChatEngine {
                 mode: resp.mode,
                 stopped: false
             )
-            await autoChain?(resp.pendingTool, resp.usage)
+            // No autoChain here either — see doc comment: a phone-driven
+            // turn never auto-executes a proposed tool. The card lands on
+            // `agent.pendingTool` via finishStreamingTurn above; a Mac panel
+            // (when the shared engine has one) renders the confirmation.
             persistCurrentChat()
             drainQueueOrRelease()
             return resp.reply

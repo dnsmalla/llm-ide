@@ -297,6 +297,38 @@ struct ChatEngineRunExternalTurnTests {
         }
     }
 
+    @Test("runExternalTurn never auto-chains a proposed tool — the card is left for a Mac panel to confirm")
+    func autoChainIsSuppressedForExternalTurns() async throws {
+        try await withTempStore {
+            let (engine, t) = makeEngine()
+            let session = ChatSession(scope: Self.scope, title: "New chat")
+            ChatSessionStore.save(session)
+            engine.handleOnAppearSessions()
+
+            // The agent proposes a bash command with this turn.
+            t.result = .init(reply: "proposing a command",
+                             pendingTool: PendingTool(name: "bash", arguments: .init(raw: Data(#"{"command":"ls"}"#.utf8))),
+                             tasks: nil, continueNeeded: nil, usage: nil, mode: nil)
+
+            // Wired so the test can prove the panel's Bypass/Auto chaining
+            // would NOT fire for this phone-driven turn.
+            var autoChainCalls = 0
+            engine.autoChain = { _, _ in autoChainCalls += 1 }
+
+            _ = try await engine.runExternalTurn(
+                message: "run ls", skillIds: [], attachments: [],
+                agentContext: nil, model: nil, provider: nil,
+                expectedSessionID: session.id,
+                onProgress: { _ in })
+
+            #expect(autoChainCalls == 0)
+            // The proposal survives on the engine instead — the pendingTool
+            // a Mac panel renders as a confirmation card, never a silent
+            // execution from a surface that can't confirm it.
+            #expect(engine.agent.pendingTool?.name == "bash")
+        }
+    }
+
     @Test("A mid-flight session switch on the shared engine leaves the newly-active session untouched, and the call returns gracefully")
     func midFlightSessionSwitchDoesNotCorruptTheNewSession() async {
         await withTempStore {
