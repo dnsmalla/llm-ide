@@ -1259,6 +1259,25 @@ final class ChatEngine {
                 onChunk: { [self] text in appendStreamedChunk(streamingID, text) }
             )
             try Task.checkCancellation()
+            // Second race, found by code review after the entry guard above:
+            // `transport.roundTrip` can take seconds, and NOTHING stops the
+            // Mac user from clicking a different chat while it's in flight —
+            // `ChatSessionHeader`'s switch action calls `switchSession(to:)`
+            // directly, with no busy check, which finalizes/persists THIS
+            // session and overwrites `messages`/`currentSessionIDString` with
+            // the other one's. Without this re-check, everything below would
+            // run against whatever is CURRENTLY loaded — appending the reply,
+            // firing `autoChain` (auto-executing a file edit/bash/git op),
+            // and persisting, all into a conversation this turn was never
+            // about. Bail out instead: hand the phone its answer, but don't
+            // touch `messages`/`agent` or persist into the wrong session.
+            // Session A is left with whatever `resetActiveTurnState` already
+            // finalized it to (the `.stopped` partial, no full reply) — a
+            // best-effort tradeoff matching `sessionMoved`'s entry-race one,
+            // not something this call can safely repair from here.
+            guard currentSessionIDString == expectedSessionID.uuidString else {
+                return resp.reply
+            }
             if let idx = messages.firstIndex(where: { $0.id == streamingID }) {
                 messages[idx].content = resp.reply
             }
@@ -1276,6 +1295,13 @@ final class ChatEngine {
             drainQueueOrRelease()
             return resp.reply
         } catch {
+            // Same mid-flight session-switch race as the success path above,
+            // applied to the failure path: none of this catch's side effects
+            // (error banner, `.failed` status, persist) may land on whatever
+            // session is now loaded if it isn't the one this call started on.
+            guard currentSessionIDString == expectedSessionID.uuidString else {
+                throw error
+            }
             let isCancellation = error is CancellationError || (error as? URLError)?.code == .cancelled
             if revealingTurnID == streamingID {
                 finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)

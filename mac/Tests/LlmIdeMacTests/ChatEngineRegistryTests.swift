@@ -285,6 +285,107 @@ struct ChatEngineRunExternalTurnTests {
             #expect(engine.busy == false)
         }
     }
+
+    @Test("A mid-flight session switch on the shared engine leaves the newly-active session untouched, and the call returns gracefully")
+    func midFlightSessionSwitchDoesNotCorruptTheNewSession() async {
+        await withTempStore {
+            let transport = SuspendableChatTransport()
+            let engine = ChatEngine(scope: Self.scope, transport: transport)
+            let sessionA = ChatSession(scope: Self.scope, title: "A")
+            ChatSessionStore.save(sessionA)
+            let sessionB = ChatSession(
+                scope: Self.scope, title: "B",
+                messages: [ChatMessage(wireTurn: .init(role: .user, content: "B's own turn"), sessionDate: Date())])
+            ChatSessionStore.save(sessionB)
+
+            engine.switchSession(to: sessionA.id)
+            #expect(engine.currentSessionIDString == sessionA.id.uuidString)
+
+            // Wired so the test can prove it does NOT fire against B.
+            var autoChainCalls = 0
+            engine.autoChain = { _, _ in autoChainCalls += 1 }
+
+            // 1. The phone's turn starts on A — passes the entry guard,
+            // appends+persists the user turn, busy = true — then suspends
+            // inside the transport call, simulating the multi-second
+            // /code-assist round trip code review flagged.
+            let turnTask = Task {
+                try? await engine.runExternalTurn(
+                    message: "from iPhone", skillIds: [], attachments: [],
+                    agentContext: nil, model: nil, provider: nil,
+                    expectedSessionID: sessionA.id,
+                    onProgress: { _ in })
+            }
+            try? await Task.sleep(nanoseconds: 30_000_000)
+            #expect(engine.busy == true)
+            #expect(engine.currentSessionIDString == sessionA.id.uuidString)
+
+            // 2. WHILE the round trip is in flight, the Mac user clicks a
+            // different chat — exactly what `ChatSessionHeader`'s switch
+            // action does: `switchSession(to:)`, no busy check.
+            engine.switchSession(to: sessionB.id)
+            #expect(engine.currentSessionIDString == sessionB.id.uuidString)
+            // resetActiveTurnState() clears busy — the phone's turn is never
+            // cancelled (runExternalTurn never registers a runTask), it's
+            // just no longer reflected in `busy`.
+            #expect(engine.busy == false)
+            let bMessagesBeforeResolve = engine.messages
+
+            // 3. The round trip finally resolves.
+            transport.resume()
+            await turnTask.value
+
+            // The call returned gracefully (no crash, no error escaping the
+            // Task). Session B — now active — is COMPLETELY untouched: no
+            // stray append, no auto-chain execution, identical messages in
+            // memory and on disk.
+            #expect(engine.currentSessionIDString == sessionB.id.uuidString)
+            #expect(engine.messages.map(\.id) == bMessagesBeforeResolve.map(\.id))
+            #expect(engine.messages.map(\.content) == ["B's own turn"])
+            #expect(autoChainCalls == 0)
+            let bOnDisk = ChatSessionStore.load(id: sessionB.id)
+            #expect(bOnDisk?.messages.map(\.content) == ["B's own turn"])
+
+            // Session A keeps whatever `resetActiveTurnState` already
+            // finalized it to when the Mac switched away (the user turn,
+            // plus an empty `.stopped` placeholder) — a best-effort
+            // tradeoff, not the full reply. The point pinned here is that it
+            // is NOT silently overwritten with B's content, or anything else
+            // from the orphaned round trip.
+            let aOnDisk = ChatSessionStore.load(id: sessionA.id)
+            #expect(aOnDisk?.messages.map(\.content).first == "from iPhone")
+            #expect(aOnDisk?.messages.contains { $0.content == "B's own turn" } == false)
+        }
+    }
+}
+
+/// A `ChatTransport` whose `roundTrip` suspends until `resume()` is called —
+/// for reproducing the mid-round-trip session-switch race
+/// `runExternalTurn`'s post-await `expectedSessionID` re-check guards
+/// against: the engine's active session changes while the transport call is
+/// still suspended. Same shape as `AgentAskTransportTests.swift`'s
+/// `SuspendableHistoryFetcher`, adapted to `ChatTransport`'s signature.
+@MainActor
+final class SuspendableChatTransport: ChatTransport, @unchecked Sendable {
+    var result = ChatTransportResult(reply: "the answer", pendingTool: nil, tasks: nil,
+                                     continueNeeded: nil, usage: nil, mode: nil)
+    var thrownError: Error?
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
+    }
+
+    func roundTrip(
+        _ input: ChatTransportInput,
+        onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
+        onChunk: @escaping @MainActor (String) -> Void
+    ) async throws -> ChatTransportResult {
+        await withCheckedContinuation { self.continuation = $0 }
+        if let thrownError { throw thrownError }
+        return result
+    }
 }
 
 /// `ExplorerMobileEngineResolver` — the fix for the bug spec review caught
