@@ -331,14 +331,12 @@ struct ChatMessageList: View {
     @ViewBuilder
     private func turnView(_ turn: ChatMessage, lastAssistantTurnId: UUID?) -> some View {
         if turn.role == .toolResult, let payload = turn.toolResult {
-            // Already parsed — `BashResultDisplay.parse(content)` used to run
-            // on every render pass; the payload carries the same four fields.
+            // Already typed — `CommandOutputView.init(message:)` reads
+            // `turn.toolResult` directly; no string parsing happens at
+            // render time (that lived in the now-deleted `BashResultDisplay
+            // .parse`).
             if payload.kind == .bash {
-                CommandOutputView(display: BashResultDisplay(
-                    exitCode: payload.exitCode,
-                    isFailure: payload.isFailure,
-                    command: payload.command,
-                    output: payload.output ?? ""))
+                CommandOutputView(message: turn)
             } else {
                 toolNoticeView(payload)
             }

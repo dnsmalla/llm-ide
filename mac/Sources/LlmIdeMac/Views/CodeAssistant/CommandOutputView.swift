@@ -1,51 +1,19 @@
 import SwiftUI
 
-/// Parsed view of a bash-result chat turn, produced by
-/// `CodeAssistant+Bash.swift`'s `"(bash result - exit code: N)\n$ <command>\n<output>"`
-/// convention (also matches the `"(bash failed - ...)"` / `"(bash blocked - ...)"`
-/// variants). Returns nil for anything that isn't a bash-result turn, so
-/// `ChatMessageList` can fall back to the generic tool-notice capsule.
+/// Display-only value for a bash-result chat turn's four rendered fields.
+/// Until Task 10 this was built by re-parsing the
+/// `"(bash result - exit code: N)\n$ <command>\n<output>"` convention (and its
+/// `"(bash failed - ...)"` / `"(bash blocked - ...)"` variants) out of the
+/// message's raw string on every render pass (`BashResultDisplay.parse`,
+/// deleted here). That parsing now lives in exactly one place —
+/// `ChatMessage.ToolResultPayload.parse` — and runs once, when the ack enters
+/// the transcript; this struct just carries the already-typed fields off the
+/// message's `toolResult` payload (see `CommandOutputView.init(message:)`).
 struct BashResultDisplay {
     let exitCode: Int?
     let isFailure: Bool
     let command: String?
     let output: String
-
-    static func parse(_ content: String) -> BashResultDisplay? {
-        guard content.hasPrefix("(bash ") else { return nil }
-        var lines = content.components(separatedBy: "\n")
-        guard !lines.isEmpty else { return nil }
-        let header = lines.removeFirst()
-        let isFailure = header.contains("failed") || header.contains("blocked")
-        var exitCode: Int?
-        if let range = header.range(of: "exit code: ") {
-            let digits = header[range.upperBound...].prefix { $0.isNumber || $0 == "-" }
-            exitCode = Int(digits)
-        }
-        var command: String?
-        if let first = lines.first, first.hasPrefix("$ ") {
-            command = String(first.dropFirst(2))
-            lines.removeFirst()
-        }
-        var output = lines.joined(separator: "\n")
-        // The "blocked" variant (CodeAssistant+Bash.swift's validateCommand
-        // guard) is a single-line message with no exit code, no command, and
-        // no separate body — the header IS the whole message (e.g. "(bash
-        // blocked - command contains potentially dangerous operations)").
-        // Keyed directly on the "blocked" keyword (the same signal isFailure
-        // already checks above) rather than inferring it from the absence of
-        // exitCode/command/output — that would have been fragile: a future
-        // change to the blocked message's shape could silently defeat an
-        // absence-based guard and reintroduce dropped explanatory text with
-        // nothing to catch it.
-        if header.contains("blocked") {
-            var message = header
-            if message.hasPrefix("(bash ") { message.removeFirst(6) }
-            if message.hasSuffix(")") { message.removeLast() }
-            output = message
-        }
-        return BashResultDisplay(exitCode: exitCode, isFailure: isFailure, command: command, output: output)
-    }
 }
 
 /// Collapsible command-output block: always shows the command line and a
@@ -57,6 +25,22 @@ struct CommandOutputView: View {
     @State private var expanded = false
 
     private let collapsedLineCount = 6
+
+    /// Builds directly from a `.toolResult` message's typed payload — no
+    /// string parsing involved. `message.toolResult` is expected to be a
+    /// `.bash` payload (the only caller, `ChatMessageList`, already checks
+    /// `payload.kind == .bash` before constructing this view); a nil/missing
+    /// payload degrades to an empty, non-failing, command-less block rather
+    /// than crashing, since a view initializer must not throw.
+    init(message: ChatMessage) {
+        let payload = message.toolResult
+        self.display = BashResultDisplay(
+            exitCode: payload?.exitCode,
+            isFailure: payload?.isFailure ?? false,
+            command: payload?.command,
+            output: payload?.output ?? ""
+        )
+    }
 
     private var outputLines: [String] {
         display.output.components(separatedBy: "\n")
