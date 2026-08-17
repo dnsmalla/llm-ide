@@ -65,6 +65,12 @@ final class MobileControlManager {
     /// Persisted `@file` / `/skill` browse indexes under Application Support settings/.
     let exploreIndex = MobileExploreIndexStore()
 
+    /// Resolves which `.explorer` `ChatEngine` `handleExploreChat` drives a
+    /// turn on — the shared, Mac-panel-visible one when safe, or a private
+    /// off-screen engine when the Mac is already showing a different session
+    /// (see that type's doc comment for why this exists).
+    private let explorerMobileEngineResolver = ExplorerMobileEngineResolver()
+
     private var server: MobileWebSocketServer?
     private var advertiser: MobileBonjourAdvertiser?
     private var workspaceWatcher: RepoFileWatcher?
@@ -378,6 +384,10 @@ final class MobileControlManager {
             if let m = try? decoder.decode(ExploreDeleteSession.self, from: data) {
                 if let uid = UUID(uuidString: m.sessionId) {
                     ChatSessionStore.delete(id: uid)
+                    // Drop any cached off-screen engine for this id too — a
+                    // later explore_chat referencing the same (now-deleted)
+                    // session must not resolve to a stale cached instance.
+                    explorerMobileEngineResolver.forget(sessionID: uid)
                     append(.info, "Explore delete: \(uid.uuidString.prefix(8))")
                 }
             }
@@ -627,16 +637,16 @@ final class MobileControlManager {
         }
     }
 
-    /// Proxy an explorer chat turn through the SAME shared `ChatEngine` the
-    /// Mac Explorer panel uses (`ChatEngineRegistry.shared`, Task 12) — no
-    /// more direct `ChatSessionStore` reads/writes here. Persistence, the
-    /// synthetic-turn append, and the streamed round trip all now go through
-    /// `ChatEngine.runExternalTurn`, which is a 1:1 mirror of the panel's own
-    /// `runTurn`. Before this task, this method wrote straight to
-    /// `ChatSessionStore` and posted `.explorerChatTranscriptChanged` so the
-    /// (separately-owned) panel engine would notice and reload from disk;
-    /// now the panel IS this engine, so a phone-driven turn is visible the
-    /// instant it mutates `engine.messages` — no notification needed.
+    /// Proxy an explorer chat turn through a `ChatEngine` — the SAME shared
+    /// instance the Mac Explorer panel renders (`ChatEngineRegistry.shared`,
+    /// Task 12) when that's safe, or a private off-screen engine when it
+    /// isn't (`ExplorerMobileEngineResolver` — see its doc comment: the
+    /// shared engine must never be force-switched away from a DIFFERENT
+    /// session the Mac is already showing, since that would silently cancel
+    /// the Mac user's in-flight turn and yank their screen to an unrelated
+    /// chat). Persistence, the synthetic-turn append, and the streamed round
+    /// trip all go through `ChatEngine.runExternalTurn`, a 1:1 mirror of the
+    /// panel's own `runTurn` — no direct `ChatSessionStore` reads/writes here.
     private func handleExploreChat(_ chat: ExploreChat) async {
         guard let api else {
             await server?.send(CommandError(commandId: chat.commandId, message: "Backend not configured"))
@@ -656,21 +666,9 @@ final class MobileControlManager {
             await server?.send(CommandError(commandId: chat.commandId, message: "Session not found on Mac — it may have been deleted. Reload your explorer sessions."))
             return
         }
-        let engine = ChatEngineRegistry.shared.engine(for: .explorer, api: api)
-        // Put the engine ON the requested session before driving a turn —
-        // `runExternalTurn` (like `runTurn`) always operates on whatever
-        // session is CURRENTLY loaded. `switchSession` no-ops if it's already
-        // current, and persists+finalizes whatever chat was active before
-        // switching away from it. If the id turned out to belong to a
-        // different scope (shouldn't happen — `.explorer` ids are minted only
-        // by this scope — but `switchSession` silently no-ops on a scope
-        // mismatch), the post-switch check below catches it instead of
-        // silently running the turn against the WRONG session.
-        if engine.currentSessionIDString != sid.uuidString {
-            engine.switchSession(to: sid)
-        }
-        guard engine.currentSessionIDString == sid.uuidString else {
-            append(.info, "explore_chat: could not switch to session \(chat.sessionId.prefix(8))")
+        let shared = ChatEngineRegistry.shared.engine(for: .explorer, api: api)
+        guard let engine = explorerMobileEngineResolver.engine(for: sid, sharedExplorerEngine: shared, api: api) else {
+            append(.info, "explore_chat: could not resolve session \(chat.sessionId.prefix(8))")
             await server?.send(CommandError(commandId: chat.commandId, message: "Could not open that session on your Mac."))
             return
         }

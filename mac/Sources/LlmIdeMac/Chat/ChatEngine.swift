@@ -809,6 +809,33 @@ final class ChatEngine {
         refreshSessions()
     }
 
+    /// Load `id` into a BRAND-NEW, otherwise-untouched engine — for a caller
+    /// that needs to drive a turn against a session without going through
+    /// `switchSession`'s side effects, which assume the engine already has
+    /// something loaded that is visibly rendered somewhere: `resetActiveTurnState()`
+    /// (finalizes/cancels a prior in-flight turn), `rememberCurrentPointer()`
+    /// (overwrites the SCOPE's shared "last active chat" UserDefaults pointer
+    /// — wrong for an engine nothing is displaying), and `resetTransientSessionState()`
+    /// (bumps `sessionEpoch`, resets agent state).
+    ///
+    /// Added for Task 12's mobile-bridge fix (`ExplorerMobileEngineResolver`):
+    /// a phone-driven turn for an `.explorer` session the Mac ISN'T currently
+    /// showing must not alias — or mutate any bookkeeping belonging to — the
+    /// shared, visibly-rendered engine. Instead the caller constructs a fresh
+    /// `ChatEngine` and loads it via this method, which does only the two
+    /// things a never-before-used engine actually needs: point it at the
+    /// right session, and populate `messages` from disk.
+    ///
+    /// Returns `false` (no-op) if `id` doesn't exist or belongs to a
+    /// different scope — same existence/scope contract as `switchSession`.
+    @discardableResult
+    func loadSessionForBackgroundUse(id: UUID) -> Bool {
+        guard let session = ChatSessionStore.load(id: id), session.scope == scope else { return false }
+        currentSessionIDString = id.uuidString
+        messages = session.messages
+        return true
+    }
+
     /// Delete chat `id`. If it was the active chat, switch to the next most
     /// recent session, or mint a fresh empty one if none remain.
     ///

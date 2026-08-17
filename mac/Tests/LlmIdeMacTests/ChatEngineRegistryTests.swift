@@ -190,3 +190,143 @@ struct ChatEngineRunExternalTurnTests {
         }
     }
 }
+
+/// `ExplorerMobileEngineResolver` — the fix for the bug spec review caught
+/// in Task 12's first pass: `handleExploreChat` used to call
+/// `switchSession(to:)` unconditionally on the SHARED `.explorer` engine, so
+/// a phone request for a session the Mac panel wasn't currently showing
+/// would silently cancel the Mac user's in-flight turn and swap their
+/// visible screen to an unrelated chat. These pin that the shared engine's
+/// visible state (`messages`/`currentSessionIDString`/`busy`) is untouched
+/// whenever it's already showing something else, and that off-screen
+/// sessions still resolve to a working (cached, reusable) engine instead of
+/// being rejected outright.
+@MainActor
+@Suite("ExplorerMobileEngineResolver", .serialized)
+struct ExplorerMobileEngineResolverTests {
+    func withTempStore(_ body: () async -> Void) async {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("chat-engine-resolver-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        ChatSessionStore.baseDirectoryOverride = tmp
+        await body()
+        ChatSessionStore.baseDirectoryOverride = nil
+        try? FileManager.default.removeItem(at: tmp)
+    }
+
+    @Test("A request for a DIFFERENT session never touches the shared engine's visible state, even mid-turn")
+    func doesNotHijackActiveSession() async {
+        await withTempStore {
+            let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
+            let shared = ChatEngine(scope: .explorer, transport: ScriptedChatTransport())
+            let sessionA = ChatSession(
+                scope: .explorer, title: "A",
+                messages: [ChatMessage(wireTurn: .init(role: .user, content: "on Mac"), sessionDate: Date())])
+            ChatSessionStore.save(sessionA)
+            let sessionB = ChatSession(scope: .explorer, title: "B")
+            ChatSessionStore.save(sessionB)
+
+            shared.switchSession(to: sessionA.id)
+            #expect(shared.currentSessionIDString == sessionA.id.uuidString)
+            // Simulate the Mac user's own turn actively in flight — the
+            // exact state a naive `switchSession` would have force-cancelled.
+            shared.beginPanelRun()
+            #expect(shared.busy == true)
+            let messagesBefore = shared.messages
+
+            let resolver = ExplorerMobileEngineResolver()
+            let resolved = resolver.engine(for: sessionB.id, sharedExplorerEngine: shared, api: api)
+
+            // A DIFFERENT engine is handed back — never the live one — since
+            // the shared engine is already showing (and busy on) session A.
+            #expect(resolved !== shared)
+            #expect(resolved?.currentSessionIDString == sessionB.id.uuidString)
+
+            // The Mac's visible state is completely untouched: still on A,
+            // still busy, identical messages.
+            #expect(shared.currentSessionIDString == sessionA.id.uuidString)
+            #expect(shared.busy == true)
+            #expect(shared.messages.map(\.id) == messagesBefore.map(\.id))
+            #expect(shared.messages.map(\.content) == ["on Mac"])
+        }
+    }
+
+    @Test("The same off-screen session id resolves to the SAME cached engine across calls")
+    func offScreenEngineIsCachedPerSession() async {
+        await withTempStore {
+            let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
+            let shared = ChatEngine(scope: .explorer, transport: ScriptedChatTransport())
+            let sessionA = ChatSession(scope: .explorer, title: "A")
+            ChatSessionStore.save(sessionA)
+            let sessionB = ChatSession(scope: .explorer, title: "B")
+            ChatSessionStore.save(sessionB)
+            shared.switchSession(to: sessionA.id)
+
+            let resolver = ExplorerMobileEngineResolver()
+            let first = resolver.engine(for: sessionB.id, sharedExplorerEngine: shared, api: api)
+            let second = resolver.engine(for: sessionB.id, sharedExplorerEngine: shared, api: api)
+            #expect(first != nil)
+            #expect(first === second)
+            // Still hasn't touched the shared engine.
+            #expect(shared.currentSessionIDString == sessionA.id.uuidString)
+        }
+    }
+
+    @Test("An idle, unclaimed shared engine is safely claimed directly — nothing is visibly displayed yet")
+    func claimsIdleUnclaimedSharedEngine() async {
+        await withTempStore {
+            let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
+            let shared = ChatEngine(scope: .explorer, transport: ScriptedChatTransport())
+            #expect(shared.currentSessionIDString.isEmpty)
+            let session = ChatSession(scope: .explorer, title: "Fresh")
+            ChatSessionStore.save(session)
+
+            let resolver = ExplorerMobileEngineResolver()
+            let resolved = resolver.engine(for: session.id, sharedExplorerEngine: shared, api: api)
+
+            // Safe to claim directly: no Mac panel has shown anything on
+            // this engine yet, so there is nothing to hijack.
+            #expect(resolved === shared)
+            #expect(shared.currentSessionIDString == session.id.uuidString)
+        }
+    }
+
+    @Test("Once the shared engine is already showing the requested session, it's used directly")
+    func usesSharedEngineWhenAlreadyOnRequestedSession() async {
+        await withTempStore {
+            let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
+            let shared = ChatEngine(scope: .explorer, transport: ScriptedChatTransport())
+            let session = ChatSession(scope: .explorer, title: "Same")
+            ChatSessionStore.save(session)
+            shared.switchSession(to: session.id)
+
+            let resolver = ExplorerMobileEngineResolver()
+            let resolved = resolver.engine(for: session.id, sharedExplorerEngine: shared, api: api)
+            #expect(resolved === shared)
+        }
+    }
+
+    @Test("forget(sessionID:) drops the off-screen cache entry")
+    func forgetDropsCachedEngine() async {
+        await withTempStore {
+            let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
+            let shared = ChatEngine(scope: .explorer, transport: ScriptedChatTransport())
+            let sessionA = ChatSession(scope: .explorer, title: "A")
+            ChatSessionStore.save(sessionA)
+            let sessionB = ChatSession(scope: .explorer, title: "B")
+            ChatSessionStore.save(sessionB)
+            shared.switchSession(to: sessionA.id)
+
+            let resolver = ExplorerMobileEngineResolver()
+            let first = resolver.engine(for: sessionB.id, sharedExplorerEngine: shared, api: api)
+            #expect(first != nil)
+
+            resolver.forget(sessionID: sessionB.id)
+            ChatSessionStore.delete(id: sessionB.id)
+            // No cache hit now, and the session is genuinely gone — resolving
+            // again correctly fails instead of returning a stale engine.
+            let afterForget = resolver.engine(for: sessionB.id, sharedExplorerEngine: shared, api: api)
+            #expect(afterForget == nil)
+        }
+    }
+}
