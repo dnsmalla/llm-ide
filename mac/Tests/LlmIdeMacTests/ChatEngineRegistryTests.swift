@@ -71,20 +71,22 @@ struct ChatEngineRunExternalTurnTests {
 
     /// Same pattern as `ChatEngineSessionTests.withTempStore`: point
     /// `ChatSessionStore` at a throwaway directory for the duration of
-    /// `body`, then restore it.
-    func withTempStore(_ body: () async -> Void) async {
+    /// `body`, then restore it. `rethrows` so a test whose closure contains
+    /// `try` (runExternalTurn) compiles — a bare `() async -> Void` made the
+    /// whole test target fail to build.
+    func withTempStore(_ body: () async throws -> Void) async rethrows {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("chat-engine-external-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         ChatSessionStore.baseDirectoryOverride = tmp
-        await body()
+        try await body()
         ChatSessionStore.baseDirectoryOverride = nil
         try? FileManager.default.removeItem(at: tmp)
     }
 
     @Test("Appends user+assistant turns, forwards scripted progress, persists to disk, and is visible with no reload")
     func appendsAndPersistsAndStreams() async throws {
-        await withTempStore {
+        try await withTempStore {
             let (engine, t) = makeEngine()
             let session = ChatSession(scope: Self.scope, title: "New chat")
             ChatSessionStore.save(session)
