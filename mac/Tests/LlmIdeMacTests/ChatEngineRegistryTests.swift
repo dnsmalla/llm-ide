@@ -646,6 +646,44 @@ struct ExplorerMobileEngineResolverTests {
         }
     }
 
+    @Test("The off-screen cache is capped — oldest entries evicted past the limit")
+    func offScreenCacheIsCapped() async {
+        await withTempStore {
+            let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
+            let shared = ChatEngine(scope: .explorer, transport: ScriptedChatTransport())
+            let home = ChatSession(scope: .explorer, title: "home")
+            ChatSessionStore.save(home)
+            shared.switchSession(to: home.id)
+
+            let resolver = ExplorerMobileEngineResolver()
+            // One more than the cap, opened oldest-first.
+            let ids = (0...(ExplorerMobileEngineResolver.offScreenCacheLimit + 1)).map { _ in
+                let s = ChatSession(scope: .explorer, title: "B")
+                ChatSessionStore.save(s)
+                return s.id
+            }
+            for id in ids {
+                #expect(resolver.engine(for: id, sharedExplorerEngine: shared, api: api) != nil)
+            }
+
+            // The two oldest were evicted; the newest cap-worth remain.
+            #expect(resolver.cachedEngine(for: ids[0]) == nil)
+            #expect(resolver.cachedEngine(for: ids[1]) == nil)
+            for id in ids.suffix(ExplorerMobileEngineResolver.offScreenCacheLimit) {
+                #expect(resolver.cachedEngine(for: id) != nil)
+            }
+
+            // Re-touching an evicted-id's NEIGHBOUR keeps it alive while
+            // opening one more session evicts the next-oldest instead.
+            let fresh = ChatSession(scope: .explorer, title: "fresh")
+            ChatSessionStore.save(fresh)
+            _ = resolver.engine(for: ids[2], sharedExplorerEngine: shared, api: api)  // touch: ids[2] is now MRU
+            _ = resolver.engine(for: fresh.id, sharedExplorerEngine: shared, api: api)
+            #expect(resolver.cachedEngine(for: ids[2]) != nil)  // touched → survived
+            #expect(resolver.cachedEngine(for: ids[3]) == nil)  // next-oldest went instead
+        }
+    }
+
     @Test("An idle, unclaimed shared engine is safely claimed directly — nothing is visibly displayed yet")
     func claimsIdleUnclaimedSharedEngine() async {
         await withTempStore {

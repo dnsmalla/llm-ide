@@ -42,7 +42,35 @@ import Foundation
 /// unconditionally.
 @MainActor
 final class ExplorerMobileEngineResolver {
+    /// Upper bound on cached off-screen engines. Phone usage flips between
+    /// a handful of sessions, and each cached engine pins that session's
+    /// transcript in memory for the process lifetime — unbounded growth
+    /// would accumulate one per session the phone ever touched. Oldest
+    /// non-busy entries are evicted on insert; a mid-turn engine is never
+    /// evicted (dropping it would orphan the running turn's writes), so an
+    /// all-busy overflow past the cap is allowed rather than racing a turn.
+    static let offScreenCacheLimit = 6
+
     private var offScreen: [UUID: ChatEngine] = [:]
+    /// Use order for eviction, oldest first — same membership as `offScreen`.
+    private var offScreenOrder: [UUID] = []
+
+    /// Mark `id` as most-recently used.
+    private func touch(_ id: UUID) {
+        offScreenOrder.removeAll { $0 == id }
+        offScreenOrder.append(id)
+    }
+
+    /// Evict oldest non-busy entries while the cache exceeds its limit.
+    private func evictOverflow() {
+        while offScreen.count > Self.offScreenCacheLimit {
+            guard let victim = offScreenOrder.first(where: { offScreen[$0]?.busy != true }) else {
+                return // everything is mid-turn; overflow stands
+            }
+            offScreenOrder.removeAll { $0 == victim }
+            offScreen.removeValue(forKey: victim)
+        }
+    }
 
     /// Resolve the engine to drive a turn for `sessionID` on.
     ///
@@ -84,13 +112,17 @@ final class ExplorerMobileEngineResolver {
                 // Deleted (or re-scoped) since it was cached — don't keep
                 // serving orphaned data for an id that no longer resolves.
                 offScreen.removeValue(forKey: sessionID)
+                offScreenOrder.removeAll { $0 == sessionID }
                 return nil
             }
+            touch(sessionID)
             return cached
         }
         let engine = ChatEngine(scope: .explorer, transport: CodeAssistTransport(api: api))
         guard engine.loadSessionForBackgroundUse(id: sessionID) else { return nil }
         offScreen[sessionID] = engine
+        touch(sessionID)
+        evictOverflow()
         return engine
     }
 
@@ -110,5 +142,6 @@ final class ExplorerMobileEngineResolver {
     /// request for the same (now-gone) id can't resolve to a stale instance.
     func forget(sessionID: UUID) {
         offScreen.removeValue(forKey: sessionID)
+        offScreenOrder.removeAll { $0 == sessionID }
     }
 }
