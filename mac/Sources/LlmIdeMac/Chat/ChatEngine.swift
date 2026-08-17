@@ -339,18 +339,30 @@ final class ChatEngine {
         queued.removeAll { $0.id == id }
     }
 
-    /// `sendFollowup` guards on `!busy` so a rapid double-confirm or manual
-    /// ⌘↵ mid-stream can't stack overlapping round-trips. But 3 call sites
-    /// (`confirmUpdateFile`'s auto-edit path, and `runGitOpFlow`'s two early
-    /// returns) run their action from INSIDE a turn that already set
-    /// `busy = true` and need their own synthetic-ack `sendFollowup` to
-    /// actually fire, not be silently skipped by that guard. This is the
-    /// one place that unblocks it — `busy = false` here is always safe to
-    /// call from those three sites specifically: `runTurn`/`sendFollowup`
-    /// re-set `busy = false` at their own tail regardless (a benign no-op
-    /// once already false), and each of the three callers is on the
-    /// success path of an action that just appended the synthetic-ack turn
-    /// the follow-up needs to see.
+    /// `sendFollowup` guards on `!busy` so a rapid double-confirm, a manual
+    /// ⌘↵ mid-stream, or a sheet confirm racing the 0.8s auto-continue window
+    /// `finishStreamingTurn` schedules after a `pendingTool` turn can't stack
+    /// overlapping round-trips. But `acknowledge(_:followUp: .forceUnblock)`
+    /// runs its action from INSIDE a turn that already set `busy = true` —
+    /// the Bypass-mode auto-chain path through `autoChainPendingAction`
+    /// (bash / update-file / git-op executed without a card) — and needs its
+    /// own ack's follow-up to actually fire, not be silently skipped by that
+    /// guard. This is the one place that unblocks it.
+    ///
+    /// As of Task 10's Issue-1 fix, `acknowledge`'s `.forceUnblock` case is
+    /// this method's ONLY caller — every confirmer that runs from a
+    /// user-driven SHEET tap instead (create/comment/update issue, create PR,
+    /// create branch) uses `.ifIdle`, which goes through plain
+    /// `sendFollowup()` so it correctly no-ops if an autonomous turn is still
+    /// streaming when the sheet confirms, rather than starting a second
+    /// concurrent round-trip. `busy = false` here is safe ONLY because
+    /// `.forceUnblock` is reserved for call sites that are themselves the
+    /// tail of an action whose own work already finished (the auto-chained
+    /// tool's execution, not a network call, has already completed by the
+    /// time its ack is appended) — `runTurn`/`sendFollowup` re-set
+    /// `busy = false` at their own tail regardless (a benign no-op once
+    /// already false). A future direct call site here (or a new
+    /// `.forceUnblock` use) must re-derive that same argument, not assume it.
     func unblockAndFollowUp() async {
         busy = false
         await sendFollowup()
@@ -982,9 +994,43 @@ final class ChatEngine {
         return message.id
     }
 
-    /// Append a client-executed tool's result as a typed `.toolResult` message,
-    /// and — when `followUp` is true — re-invoke the agent so it can react to
-    /// it in natural language.
+    /// How (if at all) `acknowledge` should re-invoke the agent after
+    /// appending a client-executed tool's result.
+    ///
+    /// The two "yes" cases are NOT interchangeable — picking the wrong one
+    /// reintroduces exactly the bug Task 10's code review caught: forcing a
+    /// follow-up through while an autonomous turn is already mid-stream
+    /// starts a second concurrent `/code-assist` round-trip (two streaming
+    /// placeholders racing `revealingTurnID`, and `runTask` tracking only one
+    /// of them, so Stop can't cancel both).
+    enum FollowUp {
+        /// Don't start a follow-up turn.
+        case none
+        /// Start one only if the engine is idle — routes through plain
+        /// `sendFollowup()`, which no-ops under its own `!busy` guard. This is
+        /// the right choice for every confirmer that runs from a USER-DRIVEN
+        /// sheet tap (create/comment/update issue, create PR, create branch):
+        /// the tap can race the 0.8s auto-continue window
+        /// `finishStreamingTurn` schedules after a `pendingTool` turn, and if
+        /// an autonomous turn is already mid-stream when the sheet confirms,
+        /// the follow-up should be silently skipped exactly as the old
+        /// `sendFollowup()` call at those sites always did — not forced
+        /// through.
+        case ifIdle
+        /// Force the engine out of `busy` and start a follow-up
+        /// unconditionally — routes through `unblockAndFollowUp()`. Reserved
+        /// for a confirmer whose action can legitimately run from INSIDE a
+        /// turn that already set `busy = true` (the Bypass-mode auto-chain
+        /// path through `autoChainPendingAction`: bash / update-file / git-op
+        /// executed without a card) — there, `busy` would otherwise stay
+        /// stuck `true` forever, because nothing else clears it until this
+        /// ack's own follow-up runs.
+        case forceUnblock
+    }
+
+    /// Append a client-executed tool's result as a typed `.toolResult`
+    /// message, then apply `followUp` to decide whether (and how) to
+    /// re-invoke the agent so it can react to it in natural language.
     ///
     /// This is what the confirmers in `CodeAssistant+Bash/Git/Issues/PR.swift`
     /// and `CodeAssistantPanel+Session.swift`/`+Edits.swift` call now (Task
@@ -996,16 +1042,9 @@ final class ChatEngine {
     /// that contract changes here, only where the classification work used to
     /// happen (on the way OUT of a string) now happens on the way IN.
     ///
-    /// Always routes the follow-up through `unblockAndFollowUp()`, never a
-    /// plain `sendFollowup()`: some confirmers run from INSIDE a turn that
-    /// already set `busy = true` (the Bypass-mode auto-chain path through
-    /// `autoChainPendingAction`) and need their ack's follow-up to actually
-    /// fire rather than being silently dropped by `sendFollowup`'s `!busy`
-    /// guard. Forcing `busy = false` first is a harmless no-op when it was
-    /// already false (the plain sheet-confirm path, where the prior turn
-    /// already finished) — see `unblockAndFollowUp`'s own doc comment for why
-    /// that's safe — so one mechanism is correct for every call site.
-    func acknowledge(_ payload: ChatMessage.ToolResultPayload, followUp: Bool) async {
+    /// See `FollowUp`'s own cases for which one a given call site needs —
+    /// they are not interchangeable.
+    func acknowledge(_ payload: ChatMessage.ToolResultPayload, followUp: FollowUp) async {
         let message = ChatMessage(
             role: .toolResult,
             content: payload.legacyContent(),
@@ -1014,7 +1053,12 @@ final class ChatEngine {
             toolResult: payload
         )
         messages.append(message)
-        if followUp {
+        switch followUp {
+        case .none:
+            break
+        case .ifIdle:
+            await sendFollowup()
+        case .forceUnblock:
             await unblockAndFollowUp()
         }
     }

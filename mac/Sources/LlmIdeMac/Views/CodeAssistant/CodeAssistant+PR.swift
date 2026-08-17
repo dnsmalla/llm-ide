@@ -23,7 +23,9 @@ extension CodeAssistantPanel {
             let ackPayload = ChatMessage.ToolResultPayload(
                 kind: .issue, summary: "(executed create-pr → #\(result.number): \(result.webUrl))",
                 exitCode: nil, command: nil, output: nil, url: result.webUrl, isFailure: false)
-            await engine.acknowledge(ackPayload, followUp: true)
+            // Sheet-driven, not the auto-chain path — .ifIdle matches the old
+            // plain sendFollowup() (no-op if an autonomous turn is streaming).
+            await engine.acknowledge(ackPayload, followUp: .ifIdle)
             return .success(iid: result.number, webUrl: result.webUrl)
         } catch {
             return .failure(error.localizedDescription)

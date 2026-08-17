@@ -115,12 +115,19 @@ extension CodeAssistantPanel {
             let ackPayload = ChatMessage.ToolResultPayload(
                 kind: .issue, summary: "(executed create-issue → #\(issue.number) \(issue.webUrl))",
                 exitCode: nil, command: nil, output: nil, url: issue.webUrl, isFailure: false)
+            // Append the ack BEFORE the refresh below, matching the original
+            // ordering (appendTurn was synchronous): the transcript shows the
+            // acknowledgement immediately rather than only after
+            // recentIssues finishes reloading.
+            await engine.acknowledge(ackPayload, followUp: .none)
             // Refresh recentIssues so the newly created issue's title
             // resolves in follow-up comment/update sheets instead of
             // showing blank until the next unrelated refresh.
             await refreshRecentIssuesOnce()
-            // Re-invoke the agent so it can acknowledge in natural language.
-            await engine.acknowledge(ackPayload, followUp: true)
+            // Sheet-driven, not the auto-chain path — sendFollowup no-ops if
+            // an autonomous turn is still streaming, same as every other
+            // sheet confirmer's .ifIdle.
+            await engine.sendFollowup()
             return .success(issue.number)
         } catch {
             return .failure(error.localizedDescription)
@@ -207,7 +214,10 @@ extension CodeAssistantPanel {
         let payload = ChatMessage.ToolResultPayload(
             kind: .edit, summary: "(applied update to \(basename): \(deltaStr))",
             exitCode: nil, command: nil, output: nil, url: nil, isFailure: false)
-        await engine.acknowledge(payload, followUp: true)
+        // Can run from INSIDE the auto-chain path (busy still true) — force
+        // the follow-up through, as the old unblockAndFollowUp() call here
+        // always did.
+        await engine.acknowledge(payload, followUp: .forceUnblock)
         return .success
     }
 

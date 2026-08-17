@@ -23,7 +23,9 @@ extension CodeAssistantPanel {
             let ackPayload = ChatMessage.ToolResultPayload(
                 kind: .issue, summary: "(executed comment-issue → #\(args.iid))",
                 exitCode: nil, command: nil, output: nil, url: nil, isFailure: false)
-            await engine.acknowledge(ackPayload, followUp: true)
+            // Sheet-driven, not the auto-chain path — .ifIdle matches the old
+            // plain sendFollowup() (no-op if an autonomous turn is streaming).
+            await engine.acknowledge(ackPayload, followUp: .ifIdle)
             return .success(args.iid)
         } catch {
             return .failure(error.localizedDescription)
@@ -49,8 +51,14 @@ extension CodeAssistantPanel {
             let ackPayload = ChatMessage.ToolResultPayload(
                 kind: .issue, summary: "(executed update-issue → #\(args.iid))",
                 exitCode: nil, command: nil, output: nil, url: nil, isFailure: false)
+            // Append the ack BEFORE the await below, matching the original
+            // ordering (appendTurn was synchronous): the transcript shows the
+            // acknowledgement immediately rather than only after the issue
+            // list refresh completes. The follow-up itself still waits for
+            // the refresh, same as before.
+            await engine.acknowledge(ackPayload, followUp: .none)
             await refreshRecentIssuesOnce()
-            await engine.acknowledge(ackPayload, followUp: true)
+            await engine.sendFollowup()
             return .success(args.iid)
         } catch {
             return .failure(error.localizedDescription)

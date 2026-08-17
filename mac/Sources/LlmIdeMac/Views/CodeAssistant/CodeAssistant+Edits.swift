@@ -87,6 +87,9 @@ extension CodeAssistantPanel {
             kind: .skip,
             summary: "(skipped the proposed edit to \(name) — do not apply it or propose it again unless I ask; continue with anything else outstanding)",
             exitCode: nil, command: nil, output: nil, url: nil, isFailure: true)
-        await engine.acknowledge(payload, followUp: true)
+        // Can run from INSIDE the auto-chain path (busy still true) — force
+        // the follow-up through, as the old unblockAndFollowUp() call here
+        // always did.
+        await engine.acknowledge(payload, followUp: .forceUnblock)
     }
 }

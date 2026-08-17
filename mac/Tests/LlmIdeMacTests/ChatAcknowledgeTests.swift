@@ -8,7 +8,15 @@ import Foundation
 /// into a `ToolResultPayload` (`ChatMessage.migrate`); they build the typed
 /// payload directly and call `ChatEngine.acknowledge(_:followUp:)`. This
 /// suite pins that one new entry point: it appends exactly one `.toolResult`
-/// message, and `followUp` controls whether a round-trip fires at all.
+/// message, and `followUp` (a `ChatEngine.FollowUp`, not a plain `Bool` — see
+/// its cases' doc comments) controls whether and how a round-trip fires.
+///
+/// `.ifIdle` vs `.forceUnblock` is the exact distinction a code-review pass
+/// caught missing from the first version of this method: routing every
+/// confirmer through `unblockAndFollowUp()` unconditionally let a sheet
+/// confirm force a SECOND concurrent round-trip while an autonomous turn was
+/// still streaming. `acknowledgeIfIdleNoOpsWhenBusy` below pins the guard
+/// that regression would have broken.
 @MainActor
 @Suite("ChatEngine.acknowledge")
 struct ChatAcknowledgeTests {
@@ -24,8 +32,8 @@ struct ChatAcknowledgeTests {
         return (engine, t)
     }
 
-    @Test("followUp: true appends exactly one .toolResult message and starts a follow-up turn")
-    func acknowledgeWithFollowUpStartsATurn() async {
+    @Test(".ifIdle appends exactly one .toolResult message and starts a follow-up turn when idle")
+    func acknowledgeIfIdleStartsATurnWhenIdle() async {
         let (engine, t) = makeEngine()
         t.result = .init(reply: "Got it.", pendingTool: nil, tasks: nil,
                          continueNeeded: nil, usage: nil, mode: nil)
@@ -34,7 +42,7 @@ struct ChatAcknowledgeTests {
             exitCode: nil, command: nil, output: nil, url: nil, isFailure: false
         )
 
-        await engine.acknowledge(payload, followUp: true)
+        await engine.acknowledge(payload, followUp: .ifIdle)
 
         // Exactly one .toolResult message, carrying the payload verbatim.
         let toolResultMessages = engine.messages.filter { $0.role == .toolResult }
@@ -50,15 +58,15 @@ struct ChatAcknowledgeTests {
         #expect(engine.messages.last?.content == "Got it.")
     }
 
-    @Test("followUp: false appends the message and never invokes the transport")
-    func acknowledgeWithoutFollowUpNeverCallsTransport() async {
+    @Test(".none appends the message and never invokes the transport")
+    func acknowledgeNoneNeverCallsTransport() async {
         let (engine, t) = makeEngine()
         let payload = ChatMessage.ToolResultPayload(
             kind: .bash, summary: "(bash result - exit code: 0)",
             exitCode: 0, command: "npm test", output: "3 passing", url: nil, isFailure: false
         )
 
-        await engine.acknowledge(payload, followUp: false)
+        await engine.acknowledge(payload, followUp: .none)
 
         #expect(engine.messages.count == 1)
         #expect(engine.messages[0].role == .toolResult)
@@ -69,14 +77,15 @@ struct ChatAcknowledgeTests {
         #expect(engine.busy == false)
     }
 
-    @Test("followUp: true still fires even mid-turn (busy already true)")
-    func acknowledgeFollowUpFiresEvenWhenBusy() async {
+    @Test(".forceUnblock still fires even mid-turn (busy already true)")
+    func acknowledgeForceUnblockFiresEvenWhenBusy() async {
         // Mirrors the Bypass-mode auto-chain path: `runBashCommand` /
-        // `runGitOpFlow` can call `acknowledge(..., followUp: true)` from
-        // INSIDE a turn that already set `busy = true`. A plain
-        // `sendFollowup()` would no-op under its `!busy` guard; `acknowledge`
-        // must route through `unblockAndFollowUp()` instead so the ack's
-        // follow-up isn't silently dropped.
+        // `runGitOpFlow` / `confirmUpdateFile` / `skipPendingEdit` call
+        // `acknowledge(..., followUp: .forceUnblock)` from INSIDE a turn that
+        // already set `busy = true`. `.ifIdle` (plain `sendFollowup()`) would
+        // no-op under its `!busy` guard; `.forceUnblock` routes through
+        // `unblockAndFollowUp()` instead so the ack's follow-up isn't
+        // silently dropped and `busy` isn't left stuck `true` forever.
         let (engine, t) = makeEngine()
         t.result = .init(reply: "done", pendingTool: nil, tasks: nil,
                          continueNeeded: nil, usage: nil, mode: nil)
@@ -87,10 +96,42 @@ struct ChatAcknowledgeTests {
             kind: .git, summary: "(git push result)",
             exitCode: nil, command: nil, output: "Everything up-to-date", url: nil, isFailure: false
         )
-        await engine.acknowledge(payload, followUp: true)
+        await engine.acknowledge(payload, followUp: .forceUnblock)
 
         #expect(t.receivedInputs.last?.message == "(continue)")
         #expect(engine.messages.filter { $0.role == .toolResult }.count == 1)
         #expect(engine.messages.last?.content == "done")
+    }
+
+    @Test(".ifIdle appends the message but does NOT start a follow-up while busy — no second round-trip")
+    func acknowledgeIfIdleNoOpsWhenBusy() async {
+        // This is the sheet-confirmer policy: confirmCreateIssue /
+        // confirmCommentIssue / confirmUpdateIssue / confirmPRCreation /
+        // confirmBranchCreation all use `.ifIdle`, which must behave exactly
+        // like the old plain `sendFollowup()` call they replaced — a no-op if
+        // an autonomous turn is already mid-stream when the sheet confirms.
+        // Getting this wrong (routing through `unblockAndFollowUp()`
+        // unconditionally) would start a SECOND concurrent `/code-assist`
+        // round-trip: two streaming placeholders racing `revealingTurnID`,
+        // with `runTask` tracking only one so Stop can't cancel both.
+        let (engine, t) = makeEngine()
+        t.result = .init(reply: "should not appear", pendingTool: nil, tasks: nil,
+                         continueNeeded: nil, usage: nil, mode: nil)
+        engine.beginPanelRun()   // sets busy = true, as a mid-stream turn would
+        #expect(engine.busy == true)
+
+        let payload = ChatMessage.ToolResultPayload(
+            kind: .issue, summary: "(executed create-issue → #1 https://example.com/issues/1)",
+            exitCode: nil, command: nil, output: nil, url: "https://example.com/issues/1", isFailure: false
+        )
+        await engine.acknowledge(payload, followUp: .ifIdle)
+
+        // The ack itself still lands...
+        #expect(engine.messages.count == 1)
+        #expect(engine.messages[0].role == .toolResult)
+        // ...but no round-trip was started, and busy is left exactly as this
+        // caller set it — `.ifIdle` must not clear a busy flag it didn't set.
+        #expect(t.receivedInputs.isEmpty)
+        #expect(engine.busy == true)
     }
 }

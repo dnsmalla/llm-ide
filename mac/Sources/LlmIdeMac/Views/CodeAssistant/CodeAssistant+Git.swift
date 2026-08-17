@@ -24,7 +24,9 @@ extension CodeAssistantPanel {
             let payload = ChatMessage.ToolResultPayload(
                 kind: .git, summary: "(executed create-branch → \(args.branch))",
                 exitCode: nil, command: nil, output: nil, url: nil, isFailure: false)
-            await engine.acknowledge(payload, followUp: true)
+            // Sheet-driven, not the auto-chain path — .ifIdle matches the old
+            // plain sendFollowup() (no-op if an autonomous turn is streaming).
+            await engine.acknowledge(payload, followUp: .ifIdle)
             return .success(args.branch)
         } catch {
             return .failure(error.localizedDescription)
@@ -63,7 +65,10 @@ extension CodeAssistantPanel {
             let payload = ChatMessage.ToolResultPayload(
                 kind: .git, summary: "(git \(args.op.rawValue) skipped — no active repository)",
                 exitCode: nil, command: nil, output: nil, url: nil, isFailure: true)
-            await engine.acknowledge(payload, followUp: true)
+            // Read-tier ops can reach here from INSIDE runTurn's auto-run path
+            // (busy still true) — force the follow-up through, as the old
+            // unblockAndFollowUp() call here always did.
+            await engine.acknowledge(payload, followUp: .forceUnblock)
             return
         }
         // Resolve auth token: prefer the active GitLab project's token, fall back to GitHub.
@@ -84,16 +89,15 @@ extension CodeAssistantPanel {
                 kind: .git, summary: "(git \(args.op.rawValue) result)",
                 exitCode: nil, command: nil, output: String(out.prefix(4000)), url: nil, isFailure: false)
             // A read-tier op auto-runs from INSIDE runTurn (busy still true) —
-            // `acknowledge`'s follow-up always goes through
-            // `unblockAndFollowUp()` for exactly this reason (see its doc). On
-            // the sheet/card path busy is already false, so that's a benign
-            // no-op there.
-            await engine.acknowledge(payload, followUp: true)
+            // .forceUnblock (`unblockAndFollowUp()`) is required for exactly
+            // this reason (see its doc). On the sheet/card path busy is
+            // already false, so that's a benign no-op there.
+            await engine.acknowledge(payload, followUp: .forceUnblock)
         } catch {
             let payload = ChatMessage.ToolResultPayload(
                 kind: .git, summary: "(git \(args.op.rawValue) failed) \(error.localizedDescription)",
                 exitCode: nil, command: nil, output: nil, url: nil, isFailure: true)
-            await engine.acknowledge(payload, followUp: true)
+            await engine.acknowledge(payload, followUp: .forceUnblock)
         }
     }
 }
