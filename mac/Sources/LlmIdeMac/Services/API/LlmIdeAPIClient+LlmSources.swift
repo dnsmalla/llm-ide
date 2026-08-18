@@ -40,9 +40,15 @@ extension LlmIdeAPIClient {
     }
     private struct AddLlmSourceResponse: Decodable { let source: LlmSourceSummary }
 
-    /// One catalogued agent (subagent definition), hook, or MCP server found
-    /// in a source. Display-only — never invoked/executed/spawned from the
-    /// Mac client either.
+    /// One catalogued skill, agent (subagent definition), hook, or MCP server
+    /// found in a source. Display-only — never invoked/executed/spawned from
+    /// the Mac client either.
+    struct LlmSourceSkill: Decodable, Identifiable, Equatable {
+        let name: String
+        let description: String
+        let path: String
+        var id: String { path }
+    }
     struct LlmSourceAgent: Decodable, Identifiable, Equatable {
         let name: String
         let description: String
@@ -62,6 +68,9 @@ extension LlmIdeAPIClient {
         var id: String { name }
     }
     struct LlmSourceDiscoveryDetail: Decodable {
+        /// Optional so a Mac build ahead of its server still decodes the
+        /// pre-skills response shape (the field shipped later than the rest).
+        let skills: [LlmSourceSkill]?
         let agents: [LlmSourceAgent]
         let hooks: [LlmSourceHook]
         let mcpServers: [LlmSourceMcpServer]
@@ -74,6 +83,11 @@ extension LlmIdeAPIClient {
         let ok: Bool
         let dir: String
         let counts: [String: Int]
+        /// true when the refresh found ZERO enabled input sources and kept
+        /// the existing folder untouched instead of wiping it (the server
+        /// guard added after a one-click Refresh deleted every committed
+        /// skill). nil from servers that predate the guard.
+        let noSources: Bool?
     }
 
     /// The id `default-sources` is registered under — the always-on source

@@ -37,6 +37,10 @@ struct LlmSourceDetailView: View {
     @State private var loaded = false
     @State private var loadError: String?
     @State private var busy = false
+    /// Non-error outcome worth surfacing under the actions row (e.g. the
+    /// server's noSources guard declined to rebuild) — unlike `loadError`,
+    /// this must not replace the whole detail pane.
+    @State private var actionNotice: String?
 
     var body: some View {
         ScrollView {
@@ -51,6 +55,7 @@ struct LlmSourceDetailView: View {
                     infoBlock(source)
                     actionsRow(source)
                     if let discovery {
+                        skillsBlock(discovery.skills ?? [])
                         agentsBlock(discovery.agents)
                         hooksBlock(discovery.hooks)
                         mcpServersBlock(discovery.mcpServers)
@@ -107,6 +112,26 @@ struct LlmSourceDetailView: View {
                      ? "The bundled .skills submodule isn't checked out. Install to fetch it."
                      : "This source's directory is missing on disk. Remove and re-add it.")
                     .font(.callout).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// The skills a source contributes, by name — the one discoverable kind
+    /// this pane used to show only as a COUNT, which read as "the update did
+    /// nothing" whenever someone came looking for the skills themselves.
+    @ViewBuilder
+    private func skillsBlock(_ skills: [LlmIdeAPIClient.LlmSourceSkill]) -> some View {
+        if !skills.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Skills (\(skills.count))").font(.headline)
+                ForEach(skills) { s in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(s.name).font(.body.bold())
+                        if !s.description.isEmpty {
+                            Text(s.description).font(.callout).foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
         }
     }
@@ -197,6 +222,11 @@ struct LlmSourceDetailView: View {
                 Text("Rebuilds this folder now from your currently enabled sources.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            if let actionNotice {
+                Text(actionNotice)
+                    .font(.callout)
+                    .foregroundStyle(theme.current.warning)
+            }
         }
     }
 
@@ -205,6 +235,13 @@ struct LlmSourceDetailView: View {
     private func load() async {
         loaded = false
         loadError = nil
+        // Cleared here — not in update() — because SwiftUI reuses this view's
+        // identity (and thus all @State) when the user selects a DIFFERENT
+        // source: `.task(id: sourceId)` re-runs load(), and a notice earned
+        // on Default Sources must not survive onto Central Skills' pane.
+        // update() re-sets its notice AFTER its own load() call for the same
+        // reason.
+        actionNotice = nil
         do {
             let sources = try await api.listLlmSources()
             self.source = sources.first { $0.id == sourceId }
@@ -230,12 +267,22 @@ struct LlmSourceDetailView: View {
         busy = true
         defer { busy = false }
         do {
+            var refreshResult: LlmIdeAPIClient.RefreshDefaultSourcesResult?
             if isDefaultSources {
-                _ = try await api.refreshDefaultSources()
+                refreshResult = try await api.refreshDefaultSources()
             } else {
                 _ = try await api.updateLlmSource(id: sourceId)
             }
             await load()
+            // AFTER load() — which clears actionNotice (see its comment).
+            // The server's data-loss guard: zero enabled INPUT sources (this
+            // folder is output, never input) means it kept the existing
+            // folder instead of swapping in an empty one. Say why nothing
+            // changed, or the click reads as a silent no-op.
+            if refreshResult?.noSources == true {
+                actionNotice = "Nothing to rebuild from — no other source is enabled. "
+                    + "Enable Central Skills (or another source) above, then Refresh again."
+            }
         } catch {
             loadError = error.localizedDescription
         }

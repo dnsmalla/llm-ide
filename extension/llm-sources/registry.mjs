@@ -162,6 +162,32 @@ export function countDiscoverySkills(dir) {
   return n;
 }
 
+// skills/<name>/SKILL.md (and runtime/ — same families the count above
+// walks): name + description from frontmatter, falling back to the directory
+// name when the frontmatter is missing/invalid so a malformed skill is still
+// VISIBLE in the detail list rather than silently absent (the count already
+// includes it — a list that omitted it would contradict its own count).
+export function listDiscoverySkills(dir) {
+  const skills = [];
+  for (const fam of LIBRARY_FAMILIES) {
+    const d = join(dir, fam);
+    if (!existsSync(d)) continue;
+    let entries;
+    try { entries = readdirSync(d, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      const file = join(d, e.name, 'SKILL.md');
+      if (!e.isDirectory() || !existsSync(file)) continue;
+      const fm = readFrontmatterNameDesc(file);
+      skills.push({
+        name: fm?.name || e.name,
+        description: fm?.description || '',
+        path: file,
+      });
+    }
+  }
+  return skills;
+}
+
 // agents/*.md — one file per subagent, same frontmatter shape as SKILL.md
 // (Claude Code's convention for standalone subagent definitions).
 export function listDiscoveryAgents(dir) {
@@ -491,6 +517,7 @@ export function sourceDiscoveryDetail(id) {
   const src = getSource(id);
   if (!src || !src.location || !existsSync(src.location)) return null;
   return {
+    skills: listDiscoverySkills(src.location),
     agents: listDiscoveryAgents(src.location),
     hooks: listDiscoveryHooks(src.location),
     mcpServers: listDiscoveryMcpServers(src.location),

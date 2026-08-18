@@ -131,10 +131,21 @@ test('countDiscoveryMcpServers + listDiscoveryMcpServers read .mcp.json — disc
   assert.deepEqual(servers[0].args, ['-y', '@modelcontextprotocol/server-filesystem', '/tmp']);
 });
 
-test('sourceDiscoveryDetail returns the agents+hooks+mcpServers for a registered, installed source', () => {
+test('sourceDiscoveryDetail returns the skills+agents+hooks+mcpServers for a registered, installed source', () => {
   writeRegistry([]); seedBuiltinOnce(); // re-seed after writeRegistry([]) above cleared it
   const detail = sourceDiscoveryDetail(BUILTIN_ID);
   assert.ok(detail);
+  // Skills were the one discoverable kind the detail endpoint never listed —
+  // the Mac detail pane could show a skill COUNT but no skills, which read as
+  // "update did nothing" whenever the user went looking for them.
+  assert.ok(Array.isArray(detail.skills));
+  // fakeRepo holds skills/demo (setup) + runtime/rt (added by the count test
+  // above) — both families must be listed, and frontmatter feeds name/desc.
+  assert.equal(detail.skills.length, countDiscoverySkills(fakeRepo),
+    'the list must never contradict its own count');
+  const demo = detail.skills.find((s) => s.name === 'demo');
+  assert.ok(demo, 'skills/demo must be listed');
+  assert.equal(demo.description, 'd');
   assert.ok(Array.isArray(detail.agents));
   assert.ok(Array.isArray(detail.hooks));
   assert.ok(Array.isArray(detail.mcpServers));

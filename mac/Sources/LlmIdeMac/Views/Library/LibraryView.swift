@@ -54,6 +54,7 @@ struct LibraryView: View {
     /// appear and refreshed after any add/toggle/update/remove — same
     /// pattern as `plugins`.
     @State private var llmSources: [LlmIdeAPIClient.LlmSourceInfo] = []
+    @State private var refreshingAll = false
     @State private var showingLlmSourceAddSheet = false
     @State private var llmSourceMessage: String?
     /// Registered MCP plugins for the current user. Loaded once on appear
@@ -175,6 +176,23 @@ struct LibraryView: View {
                 .accessibilityLabel("Clear filter")
                 .help("Clear filter")
             }
+            // Manual refresh for the whole page. Every section otherwise
+            // loads once per appearance (`.task`), so files changed on disk
+            // and source/plugin mutations made from a detail pane stayed
+            // invisible until the view was remounted.
+            Button {
+                Task { await refreshAll() }
+            } label: {
+                if refreshingAll {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: "arrow.clockwise").foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(refreshingAll)
+            .accessibilityLabel("Refresh library")
+            .help("Reload files, plugins, LLM sources, and MCP plugins")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
@@ -650,6 +668,18 @@ struct LibraryView: View {
     }
 
     // MARK: - Actions
+
+    /// The search bar's refresh button: re-run every section's loader, same
+    /// set the `.task` modifiers fire on first appearance. Sequential on
+    /// purpose — they share the API client and each is fast local I/O.
+    private func refreshAll() async {
+        refreshingAll = true
+        defer { refreshingAll = false }
+        await load()
+        await loadPlugins()
+        await loadLlmSources()
+        await loadMcpPlugins()
+    }
 
     private func load() async {
         do {
