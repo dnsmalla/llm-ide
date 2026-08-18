@@ -11,36 +11,25 @@
 // Only modules in this directory (llm_agent/sdk/) may import
 // '@anthropic-ai/claude-agent-sdk' (the isolation rule from the
 // staying-current design: upstream churn is confined to this surface).
-// The SDK is exact-pinned in package.json — a bump is a deliberate,
-// reviewed change (canary CI is the plan for P1.5).
+// The spike is no longer the sole SDK importer: engine.mjs (the v2 chat
+// engine's option composition + shared auth ladder) lives here too, and its
+// runner layer joins this file in importing the SDK. The SDK is exact-pinned
+// in package.json — a bump is a deliberate, reviewed change (canary CI is
+// the plan for P1.5).
 //
 // Event model: the pure mapper lives in events.mjs (the single definition
 // of the v2 event vocabulary) and is re-exported here so existing spike
 // consumers keep importing it from this module. The llmide in-process MCP
-// server lives in tools.mjs.
+// server lives in tools.mjs. Auth (resolveAnthropicKey) lives in engine.mjs
+// and is re-exported below for existing importers.
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { getDb } from '../../kb/db.mjs';
-import { getSecret } from '../../server/vault.mjs';
 import { mapSdkMessage } from './events.mjs';
 import { buildLlmIdeServer } from './tools.mjs';
+import { resolveAnthropicKey } from './engine.mjs';
 
 export { mapSdkMessage };
-
-// --- Auth: per-user vault key first, operator env as fallback -------------
-
-export function resolveAnthropicKey(userId) {
-  if (userId) {
-    try {
-      const key = getSecret(getDb(), userId, 'claude.apiKey');
-      if (key) return { key, source: 'vault' };
-    } catch {
-      // Vault miss/unavailable — fall through to the environment.
-    }
-  }
-  if (process.env.ANTHROPIC_API_KEY) return { key: process.env.ANTHROPIC_API_KEY, source: 'env' };
-  return { key: null, source: 'none' };
-}
+export { resolveAnthropicKey };
 
 // --- The spike query -------------------------------------------------------
 
