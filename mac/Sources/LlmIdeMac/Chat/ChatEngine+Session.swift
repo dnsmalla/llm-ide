@@ -181,7 +181,7 @@ extension ChatEngine {
         // post against the old chat's SDK session either (its own `init`
         // event re-records the new id on the next turn).
         pendingApproval = nil
-        (transport as? AgentV2Transport)?.resetSdkSessionId()
+        agentV2Transport?.resetSdkSessionId()
         error = nil
         agent.nudgePrompt = nil
         agent.agentSessionId = UUID().uuidString
@@ -309,6 +309,13 @@ extension ChatEngine {
         // so a slow/failed forget delays nothing the user can see (and a
         // failure is recoverable by a later delete).
         await forgetSessionMemory(id.uuidString)
+        // Also drop the chat's SERVER-SIDE v2 session mapping. Same
+        // best-effort reasoning as the forget above — and same ordering: the
+        // local delete already succeeded, so a slow or failed server call
+        // can't block or roll it back (the wired client swallows failures
+        // itself; a failure just leaves a stale mapping the server's
+        // SESSION_UNRESUMABLE recovery cleans up on the next v2 turn).
+        await deleteAgentV2Session(id.uuidString)
     }
 
     /// Header trash: delete the current chat (mints a fresh empty one if it

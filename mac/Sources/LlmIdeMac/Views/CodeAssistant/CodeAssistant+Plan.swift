@@ -83,4 +83,40 @@ extension CodeAssistantPanel {
             await engine.acknowledge(payload, followUp: .forceUnblock)
         }
     }
+
+    /// The v2 counterpart to `autoSavePendingPlan`: the "Save Plan" action
+    /// on a plan-like v2 RESULT message. On the v2 engine no `save-plan`
+    /// pendingTool ever arrives — the plan IS the reply — so the message's
+    /// own text is the plan content, a title is derived from its first
+    /// heading line, and the SAME resolver→write→PlanSavedCard path runs.
+    /// No follow-up turn is fired afterwards: the v2 engine's history lives
+    /// server-side and never sees the local ack, so a "(continue)" round
+    /// trip would only earn a confused reply (the legacy loop's
+    /// `.forceUnblock` exists for an agent that is actively waiting on the
+    /// ack, which v2's isn't).
+    @MainActor
+    func savePlanFromMessage(_ message: ChatMessage) async {
+        guard engine.agent.pendingTool == nil else { return }
+        let args = PendingTool.SavePlanArgs(
+            title: Self.planTitle(from: message.content),
+            content: message.content)
+        switch await confirmSavePlan(args, finalContent: message.content, followUp: .none) {
+        case .success:
+            break
+        case .failure(let failure):
+            engine.error = failure
+        }
+    }
+
+    /// Best-effort plan title from a plan-like reply: the first non-empty
+    /// line, leading markdown heading marks stripped, capped to the 60-char
+    /// slug budget `FilesystemSlug` applies. An empty result is fine — the
+    /// resolver's slugify falls back to "untitled-plan".
+    static func planTitle(from content: String) -> String {
+        let firstLine = content
+            .components(separatedBy: .newlines)
+            .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
+        let stripped = firstLine.drop(while: { $0 == "#" || $0 == " " })
+        return String(stripped).trimmingCharacters(in: .whitespaces).prefix(60).description
+    }
 }

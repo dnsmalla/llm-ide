@@ -80,6 +80,28 @@ extension CodeAssistantPanel {
         .background(theme.current.surface.opacity(0.6))
     }
 
+    /// Non-dismissable inline hint shown while the agent-engine toggle is on
+    /// but the selected provider can't take the v2 engine — sits directly
+    /// above the input bar's mode/model chips so the condition and its
+    /// remedy (switch provider) are on screen together. Clears itself the
+    /// moment the conflict does (unlike `attachNoticeBar`, there is no
+    /// "later" to keep it for — the state is live).
+    var agentV2ProviderHintBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.current.warning)
+            Text("v2 needs the Anthropic provider — turns will use the classic engine until you switch.")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.current.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, 6)
+        .background(theme.current.warning.opacity(0.08))
+    }
+
     var attachmentBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {

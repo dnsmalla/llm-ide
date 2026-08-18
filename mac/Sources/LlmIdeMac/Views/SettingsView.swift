@@ -37,6 +37,7 @@ struct SettingsView: View {
                         }
                         PreferencesSettingsSection(api: api)
                         ProvidersSettingsSection(api: api)
+                        CodeAssistantSettingsSection()
                         CustomProvidersSection(api: api)
                         // App-scoped, not Project: these are the values a NEW
                         // project's Loop config inherits. A project already opened

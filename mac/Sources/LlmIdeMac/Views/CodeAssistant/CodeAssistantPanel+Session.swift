@@ -228,9 +228,17 @@ extension CodeAssistantPanel {
     /// just `args.content`), and `llm-doc/plans/` may not exist yet (unlike
     /// an edit target, which is always an existing file) — so the directory
     /// is created first.
+    ///
+    /// `followUp` defaults to `.forceUnblock` — the legacy loop's caller
+    /// (`autoSavePendingPlan`) runs from inside a turn that is actively
+    /// waiting on the ack. The v2 message-action path
+    /// (`savePlanFromMessage`) passes `.none`: nothing is waiting (the v2
+    /// engine's history is server-side and never sees the ack), so a
+    /// follow-up round-trip would only produce a confused reply.
     @MainActor
     func confirmSavePlan(_ args: PendingTool.SavePlanArgs,
-                                 finalContent: String)
+                                 finalContent: String,
+                                 followUp: ChatEngine.FollowUp = .forceUnblock)
         async -> SavePlanResult
     {
         let plan: ProposedPlan
@@ -256,7 +264,7 @@ extension CodeAssistantPanel {
             kind: .plan, summary: "(saved plan to \(plan.displayPath))",
             exitCode: nil, command: nil, output: nil, url: plan.absolutePath,
             isFailure: false, planTitle: plan.title, planContent: finalContent)
-        await engine.acknowledge(payload, followUp: .forceUnblock)
+        await engine.acknowledge(payload, followUp: followUp)
         return .success
     }
 

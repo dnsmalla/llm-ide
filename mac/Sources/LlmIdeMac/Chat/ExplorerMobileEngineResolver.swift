@@ -121,6 +121,12 @@ final class ExplorerMobileEngineResolver {
             touch(sessionID)
             return cached
         }
+        // Deliberately the LEGACY transport, not the v2 factory: a v2 turn
+        // can park on an AskUserQuestion approval, and an OFF-SCREEN engine
+        // has no panel to render the card or post the decision — the turn
+        // would hang until the server's park timeout denies it. Off-screen
+        // phone turns stay on /code-assist; the shared (visible) engine is
+        // where the Agent engine beta applies.
         let engine = ChatEngine(scope: .explorer, transport: CodeAssistTransport(api: api))
         guard engine.loadSessionForBackgroundUse(id: sessionID) else { return nil }
         offScreen[sessionID] = engine

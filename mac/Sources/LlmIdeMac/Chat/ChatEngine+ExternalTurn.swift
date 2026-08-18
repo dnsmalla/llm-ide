@@ -184,6 +184,7 @@ extension ChatEngine {
         busy = true
         statusText = ""
         error = nil
+        agentV2Notice = nil
         agent.pendingTool = nil
         agent.agentPendingTasks = []
         // Stale v2 approval card — same turn-start rule as runTurn.

@@ -54,6 +54,11 @@ struct ChatMessageList: View {
     /// only; the normal path already resolves this in `autoChainPendingAction`
     /// before the card can render.
     let onSavePlan: () async -> Void
+    /// Wraps `CodeAssistantPanel.savePlanFromMessage(_:)` — the "Save Plan"
+    /// action on a v2 plan-like RESULT turn (no pendingTool: on the v2
+    /// engine the plan IS the reply, so saving is a client-side action on
+    /// that reply rather than a tool proposal the loop confirms).
+    let onSavePlanFromMessage: (ChatMessage) -> Void
     /// Wraps `CodeAssistantPanel.executeSavedPlan(_:)` — the PlanSavedCard's
     /// "Execute plan" action (switch to Execute mode, attach the plan file).
     let onExecutePlan: (ChatMessage.ToolResultPayload) -> Void
@@ -175,6 +180,30 @@ struct ChatMessageList: View {
                                 .padding(.top, 4)
                                 .transition(.opacity)
                             }
+                            // v2 plan-like RESULT turns: no save-plan
+                            // pendingTool ever arrives (the plan IS the
+                            // reply), so the one write action plan modes get
+                            // is this message-level affordance on the LAST
+                            // assistant message. Legacy engines never show
+                            // it — their plan saves ride the pendingTool
+                            // flow above.
+                            if turn.role == .assistant,
+                               turn.id == lastAssistantTurnId,
+                               AgentV2Selection.showsSavePlanAction(
+                                   mode: turn.metadata?.mode,
+                                   v2Selected: engine.usesAgentV2Engine,
+                                   hasPendingTool: pendingTool != nil) {
+                                Button {
+                                    onSavePlanFromMessage(turn)
+                                } label: {
+                                    Label("Save Plan", systemImage: "square.and.arrow.down")
+                                        .font(Typography.caption)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .padding(.top, 4)
+                                .help("Save this plan to llm-doc/plans/ in the open project")
+                            }
                         }
                         if engine.busy {
                             HStack(spacing: 6) {
@@ -189,6 +218,14 @@ struct ChatMessageList: View {
                         }
                         if let err = engine.error {
                             errorBubble(err)
+                                .transition(.opacity)
+                        }
+                        // Stale-server notice (v2 turn 404'd and the legacy
+                        // engine completed it) — a condition, not a failure:
+                        // warning-styled, dismissible, and cleared by the
+                        // next turn's start.
+                        if let notice = engine.agentV2Notice {
+                            agentV2NoticeBubble(notice)
                                 .transition(.opacity)
                         }
                     }
@@ -498,6 +535,33 @@ struct ChatMessageList: View {
         }
         .padding(10)
         .background(theme.current.danger.opacity(0.1))
+        .cornerRadius(6)
+    }
+
+    /// `errorBubble`'s shape, warning-flavoured: the v2 stale-server notice
+    /// says "this turn still completed (on the classic engine)", so the red
+    /// failure treatment would misrepresent it.
+    private func agentV2NoticeBubble(_ msg: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .foregroundStyle(theme.current.warning)
+            Text(msg)
+                .font(Typography.caption)
+                .foregroundStyle(theme.current.warning)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button {
+                engine.agentV2Notice = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(theme.current.textMuted)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss notice")
+            .help("Dismiss notice")
+        }
+        .padding(10)
+        .background(theme.current.warning.opacity(0.1))
         .cornerRadius(6)
     }
 }

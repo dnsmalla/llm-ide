@@ -137,6 +137,21 @@ struct CodeAssistantPanel: View {
     /// the GitLab actions always confirm regardless).
     @AppStorage("codeAssist.editMode") var editModeRaw = EditAcceptanceMode.review.rawValue
     var editMode: EditAcceptanceMode { EditAcceptanceMode(rawValue: editModeRaw) ?? .review }
+    /// Agent engine (beta) — off by default. When on (AND the turn's
+    /// provider is Anthropic), the engine's transport answers turns on the
+    /// v2 agent engine; see `AgentV2Selection`. Written by
+    /// `CodeAssistantSettingsSection` in Settings; the panel only READS it
+    /// (plus swapping the transport when it flips).
+    @AppStorage(AgentV2Selection.toggleKey) var useAgentV2 = false
+    /// True when the toggle is on but the currently selected provider can't
+    /// take the v2 engine — drives the "v2 needs the Anthropic provider"
+    /// hint near the mode/model chips. Uses the same provider resolution
+    /// the wire uses (`makeProvider`), so the hint appears exactly when a
+    /// turn would silently fall back to legacy.
+    var agentV2ProviderBlocked: Bool {
+        useAgentV2 && !AgentV2Selection.providerIsAnthropic(
+            ChatTransportInput.makeProvider(selectedProvider: modelState.selectedProvider))
+    }
     @StateObject var session = CodeAssistantSession()
     /// Cursor-style "/" (command/skill) + "@" (file) autocomplete for the input.
     @StateObject var completion = CompletionController()
@@ -225,6 +240,14 @@ struct CodeAssistantPanel: View {
             .onChange(of: config.activeCLI) { _, _ in
                 modelState.selectedModel = config.defaultModelId
             }
+            .onChange(of: useAgentV2) { _, enabled in
+                // Swap the shared engine's transport to match the toggle.
+                // `setTransport` refuses mid-turn (the in-flight round-trip
+                // holds the old transport); a flip during a turn applies on
+                // the next flip — the composite re-checks the toggle every
+                // turn anyway, so at worst one turn lags.
+                engine.setTransport(ChatTransportFactory.makeTransport(api: api, useV2: enabled))
+            }
             .onChange(of: activeRepoKey) { _, _ in
                 handleActiveRepoChange()
             }
@@ -302,6 +325,9 @@ struct CodeAssistantPanel: View {
                 onApplyEdit: { await applyPendingEdit() },
                 onSkipEdit: { await skipPendingEdit() },
                 onSavePlan: { await autoSavePendingPlan() },
+                onSavePlanFromMessage: { message in
+                    Task { await savePlanFromMessage(message) }
+                },
                 onExecutePlan: { payload in executeSavedPlan(payload) },
                 onEditPlan: { payload in editSavedPlanInChat(payload) }
             )
@@ -309,6 +335,7 @@ struct CodeAssistantPanel: View {
             if !attachmentState.selectedSkills.isEmpty { skillBar }
             if !attachmentState.attachments.isEmpty { attachmentBar }
             if let attachNotice { attachNoticeBar(attachNotice) }
+            if agentV2ProviderBlocked { agentV2ProviderHintBar }
             if let prompt = engine.agent.nudgePrompt, activeRepoRoot != nil {
                 nudgeBanner(prompt: prompt)
             }
@@ -397,6 +424,20 @@ struct CodeAssistantPanel: View {
         }
         engine.forgetSessionMemory = { id in
             _ = try? await api.forgetSessionMemory(sessionId: id)
+        }
+        // Task 12: the real v2 decision client. The engine's default reports
+        // failure on the approval card; this wiring makes Submit actually
+        // post `POST /agent/v2/decision` through the shared api client.
+        engine.postApprovalDecision = { requestId, sdkSessionId, answers in
+            try await api.agentV2Decision(requestId: requestId,
+                                          sdkSessionId: sdkSessionId,
+                                          answers: answers)
+        }
+        // Task 12: delete-session's server-side v2 cleanup. The client
+        // swallows its own failures to the log (best-effort by contract);
+        // `try?` is belt-and-braces so nothing here can reject the call.
+        engine.deleteAgentV2Session = { chatSessionId in
+            try? await api.agentV2DeleteSession(chatSessionId: chatSessionId)
         }
     }
 

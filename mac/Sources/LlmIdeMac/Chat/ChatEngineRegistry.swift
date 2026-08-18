@@ -37,20 +37,28 @@ final class ChatEngineRegistry {
     /// the engine's default, no-op hooks) on first call.
     ///
     /// `api` is consulted ONLY on first creation, to build the engine's
-    /// `CodeAssistTransport`. A later call for the same scope with a
-    /// DIFFERENT `api` instance still returns the SAME cached engine — the
-    /// transport is fixed for the engine's lifetime, exactly like `scope`.
-    /// In practice this never matters: `api` is a long-lived singleton handed
-    /// out once at app launch (see `LlmIdeMacApp`), not something that
-    /// changes per call site. A caller whose environment-dependent behavior
-    /// (context building, model/provider resolution, composer hooks) DOES
-    /// need to track its own current state re-wires those hooks itself on
-    /// appear — see `CodeAssistantPanel.wireEngine()`, which does exactly
-    /// this and is safe to call repeatedly (each call just reassigns fresh
-    /// closures over the same cached engine).
+    /// transport through `ChatTransportFactory` — v2 (beta toggle on at
+    /// creation) or the legacy `CodeAssistTransport`. A later call for the
+    /// same scope with a DIFFERENT `api` instance still returns the SAME
+    /// cached engine. The transport is no longer strictly fixed for the
+    /// engine's lifetime (Task 12's agent-engine toggle): the PANEL swaps it
+    /// via `ChatEngine.setTransport` when the setting flips, engine identity
+    /// unchanged — which is what keeps this registry's sharing (panel +
+    /// mobile bridge on one `.explorer` engine) intact across the swap. In
+    /// practice `api` never changes anyway: it is a long-lived singleton
+    /// handed out once at app launch (see `LlmIdeMacApp`). A caller whose
+    /// environment-dependent behavior (context building, model/provider
+    /// resolution, composer hooks) DOES need to track its own current state
+    /// re-wires those hooks itself on appear — see
+    /// `CodeAssistantPanel.wireEngine()`, which does exactly this and is
+    /// safe to call repeatedly (each call just reassigns fresh closures over
+    /// the same cached engine).
     func engine(for scope: ChatScope, api: LlmIdeAPIClient) -> ChatEngine {
         if let existing = engines[scope] { return existing }
-        let created = ChatEngine(scope: scope, transport: CodeAssistTransport(api: api))
+        let created = ChatEngine(
+            scope: scope,
+            transport: ChatTransportFactory.makeTransport(
+                api: api, useV2: AgentV2Selection.toggleEnabled()))
         engines[scope] = created
         return created
     }

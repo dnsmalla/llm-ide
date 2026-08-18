@@ -123,7 +123,17 @@ final class ChatEngine {
     /// Agent-turn metadata. The engine owns it; the panel reads the same
     /// object (it is a reference type, so both see one state).
     let agent = CodeAssistantAgentState()
-    let transport: ChatTransport
+    /// The turn transport. A `var` (not `let`) since Task 12's agent-engine
+    /// toggle: the panel swaps it via `setTransport(_:)` when the user flips
+    /// the beta setting, engine identity unchanged. Still engine-owned by
+    /// convention — nothing outside `setTransport` assigns it.
+    var transport: ChatTransport
+    /// Transient banner for v2-engine conditions that are NOT turn failures
+    /// — today only the stale-server notice ("Server update needed for the
+    /// Agent engine", raised when a v2 turn 404s and the legacy engine
+    /// completed it instead). Cleared at the start of the next turn; the
+    /// transcript renders it dismissibly next to the error bubble.
+    var agentV2Notice: String?
     /// Sidebar section this engine's chats belong to. Fixed for the engine's
     /// lifetime: it scopes the session files (`ChatSession.scope`), the
     /// `"chat.current.<scope>"` relaunch pointer, and `switchSession`'s
@@ -227,6 +237,15 @@ final class ChatEngine {
     /// panel wires it to `api.forgetSessionMemory(sessionId:)` in Task 7.
     var forgetSessionMemory: (String) async -> Void = { _ in }
 
+    /// Drops the deleted chat's SERVER-SIDE v2 chat→SDK-session mapping
+    /// (`DELETE /agent/v2/session`) so the Agent engine's next turn for a
+    /// re-created chat with the same id can't resume a stale SDK session.
+    /// Best-effort by contract: the panel wires it to
+    /// `api.agentV2DeleteSession` (which swallows its own failures to the
+    /// log), the local delete has already completed by the time it runs, and
+    /// tests script a recording double.
+    var deleteAgentV2Session: (String) async -> Void = { _ in }
+
     /// Posts an AskUserQuestion decision (`POST /agent/v2/decision`) —
     /// (requestId, sdkSessionId, answers) → the server's `ok` flag. Injected
     /// like every other network collaborator: the engine reaches the backend
@@ -250,6 +269,28 @@ final class ChatEngine {
         self.packHistory = { [weak self] messages in
             guard let self else { return messages.map { $0.wireTurn() } }
             return self.historyForRequest(messages)
+        }
+        connectTransportObservers()
+    }
+
+    /// Swap the turn transport (the agent-engine beta toggle's onChange).
+    /// Refused mid-turn: the in-flight round-trip holds the old transport,
+    /// and swapping under it would split one visible turn across two engines
+    /// (and strand any v2 approvals parked against the old one). A flip
+    /// during a turn simply applies on the next flip or the next engine.
+    func setTransport(_ newTransport: ChatTransport) {
+        guard !busy else { return }
+        transport = newTransport
+        connectTransportObservers()
+    }
+
+    /// Point the engine-selection transport's callbacks at engine state.
+    /// Called from `init` and `setTransport` so a swapped transport is wired
+    /// the same way the original was. No-op for legacy transports.
+    private func connectTransportObservers() {
+        guard let engineTransport = transport as? AgentV2EngineTransport else { return }
+        engineTransport.onStaleServer = { [weak self] in
+            self?.agentV2Notice = AgentV2EngineTransport.staleServerBannerText
         }
     }
 
@@ -292,6 +333,10 @@ final class ChatEngine {
         busy = true
         statusText = ""
         error = nil
+        // Transient v2 banner (stale-server notice): it described the
+        // PREVIOUS turn's fallback — a new turn starting means it has served
+        // its purpose.
+        agentV2Notice = nil
         // Clear any stale pending-tool card from a prior turn the user ignored —
         // otherwise it stays interactive against the old args while a new turn runs.
         agent.pendingTool = nil
@@ -451,6 +496,7 @@ final class ChatEngine {
         guard !busy else { return }
         busy = true
         statusText = ""
+        agentV2Notice = nil
         defer { busy = false }
         // Captured once, fixed for this whole invocation, and declared
         // OUTSIDE the do block below — see runTurn's matching comment for

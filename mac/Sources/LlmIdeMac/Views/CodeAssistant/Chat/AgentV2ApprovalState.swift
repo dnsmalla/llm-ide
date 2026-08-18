@@ -57,13 +57,31 @@ extension ChatEngine {
     /// the Mac-pending note is needed.
     var isExternalTurn: Bool { externalRunTask != nil }
 
+    /// The engine's v2 transport, unwrapped through EITHER shape it takes —
+    /// bare (`AgentV2Transport`) or behind the engine-selection composite
+    /// (`AgentV2EngineTransport.v2`), which is what the factory installs
+    /// when the beta toggle is on. Nil for plain legacy engines.
+    var agentV2Transport: AgentV2Transport? {
+        if let direct = transport as? AgentV2Transport { return direct }
+        return (transport as? AgentV2EngineTransport)?.v2
+    }
+
     /// The v2 transport's most recent SDK session id (off its `init` event).
     /// The decision POST tenancy-checks requestId + sdkSessionId + user, so
     /// `submitApproval` reads this at submit time. Nil for legacy transports,
     /// which never park approvals — and nil then is harmless, because no
     /// card exists to submit from.
     var agentV2SessionId: String? {
-        (transport as? AgentV2Transport)?.sdkSessionId
+        agentV2Transport?.sdkSessionId
+    }
+
+    /// True when this engine carries the v2 machinery AND the beta toggle
+    /// currently selects it — the per-turn rule minus the per-turn provider,
+    /// which is exactly what view-level affordances keyed to "this is a v2
+    /// chat" (the save-plan message action) need. Mirrors the selection the
+    /// transport itself applies each turn, so the two can't drift.
+    var usesAgentV2Engine: Bool {
+        agentV2Transport != nil && AgentV2Selection.toggleEnabled()
     }
 
     /// Sink for the transport's 4-callback `onApproval`. Called by every
