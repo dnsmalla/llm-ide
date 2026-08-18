@@ -1,12 +1,15 @@
-// Tests for the v2 chat engine's pure option composition
-// (llm_agent/sdk/engine.mjs — buildEngineOptions + capAttachments).
+// Tests for the v2 chat engine (llm_agent/sdk/engine.mjs):
+// buildEngineOptions + capAttachments (pure composition) and, since Task 6,
+// runAgentV2Turn — the turn runner with the AskUserQuestion approval
+// round-trip.
 //
 // Hermetic: readSkillInstructions and buildReadableRoots are injected as
-// fakes (no DB reads, no filesystem, no SDK subprocess), so these tests pin
-// the composition contract itself — the mapping Task 6's runner consumes
-// verbatim. resolveAnthropicKey lives here too (moved from spike-engine);
-// its behavior stays covered by agent-sdk-spike.test.mjs through the
-// spike-engine re-export — this file only pins the move.
+// fakes, and runAgentV2Turn's queryFactory is a fabricated async stream, so
+// no SDK subprocess ever spawns — the fake captures the composed
+// (prompt, options) and tests invoke options.canUseTool exactly the way the
+// real SDK does when the model reaches for a tool. resolveAnthropicKey lives
+// here too (moved from spike-engine); its behavior stays covered by
+// agent-sdk-spike.test.mjs through the spike-engine re-export.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -22,7 +25,8 @@ const tmpDb = path.join(__dirname, '_agent-v2-engine-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
 
-const { buildEngineOptions, resolveAnthropicKey } = await import('../llm_agent/sdk/engine.mjs');
+const { buildEngineOptions, resolveAnthropicKey, runAgentV2Turn } = await import('../llm_agent/sdk/engine.mjs');
+const { answerDecision, abortDecisionsForSession } = await import('../llm_agent/sdk/decisions.mjs');
 
 // --- The brief's binding contract -------------------------------------------
 
@@ -157,3 +161,150 @@ test('resolveAnthropicKey: moved to engine.mjs, spike re-export is the same func
     else process.env.ANTHROPIC_API_KEY = prev;
   }
 });
+
+// --- runAgentV2Turn: the turn runner + approval round-trip --------------------
+
+// The fake SDK query: captures the (prompt, options) the runner composed so
+// a test can drive options.canUseTool directly — exactly what the real SDK
+// does when the model reaches for a tool. No subprocess, no timers.
+function makeFakeQuery(script) {
+  return (prompt, options) => {
+    script.prompt = prompt;
+    script.options = options;
+    return (async function* () {
+      for (const m of script.messages) yield m;
+    })();
+  };
+}
+
+// The runner's auth ladder reads process.env.ANTHROPIC_API_KEY, so every
+// turn test pins it explicitly (fresh test DB → no vault key): a fake key
+// when the turn should run, deleted for the no-key error path.
+function withAnthropicKey(value, fn) {
+  return async () => {
+    const prev = process.env.ANTHROPIC_API_KEY;
+    if (value === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = value;
+    try {
+      await fn();
+    } finally {
+      if (prev === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = prev;
+    }
+  };
+}
+
+const turnInjectable = { readSkill: () => null, roots: () => [] };
+
+test('AskUserQuestion round-trip: request event → answer → allow with updatedInput',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const script = { messages: [
+      { type: 'system', subtype: 'init', session_id: 'sdk-9', tools: [], capabilities: [] },
+      { type: 'assistant', message: { usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 2 } } },
+      { type: 'result', subtype: 'success', session_id: 'sdk-9', total_cost_usd: 0.25, num_turns: 2, duration_ms: 1200 },
+    ] };
+    const events = [];
+    const { result, usageTotals } = await runAgentV2Turn({
+      message: 'hi', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      resumeSdkSessionId: 'sdk-9', onEvent: (e) => events.push(e),
+      queryFactory: makeFakeQuery(script),
+    }, turnInjectable);
+    assert.equal(script.prompt, 'hi');
+    assert.equal(script.options.env.ANTHROPIC_API_KEY, 'sk-ant-v2-test', 'resolved key flows into the subprocess env');
+    assert.equal(typeof script.options.canUseTool, 'function');
+    assert.equal(script.options.maxTurns, 40);
+    assert.equal(result.subtype, 'success');
+    assert.deepEqual(usageTotals,
+      { inputTokens: 10, outputTokens: 5, cacheReadTokens: 2, costUsd: 0.25, numTurns: 2, durationMs: 1200 });
+    // Simulate the SDK asking mid-turn: canUseTool parks a decision under a
+    // requestId and only resolves once the registry hears from the client.
+    const questions = [{ question: 'Pick one?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }];
+    const decision = script.options.canUseTool('AskUserQuestion', { questions });
+    const req = events.find((e) => e.type === 'approval_request');
+    assert.ok(req, 'approval_request emitted');
+    assert.equal(req.kind, 'AskUserQuestion');
+    assert.deepEqual(req.questions, questions);
+    const res = answerDecision({ requestId: req.requestId, sdkSessionId: 'sdk-9', userId: 'u1', answers: { 'Pick one?': 'A' } });
+    assert.equal(res.ok, true);
+    const d = await decision;
+    assert.equal(d.behavior, 'allow');
+    assert.deepEqual(d.updatedInput.questions, questions);
+    assert.deepEqual(d.updatedInput.answers, { 'Pick one?': 'A' });
+    assert.ok(events.some((e) => e.type === 'approval_resolved' && e.outcome === 'answer'));
+  }));
+
+test('non-question tools are denied with an explanatory message',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
+    await runAgentV2Turn({
+      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      onEvent: () => {}, queryFactory: makeFakeQuery(script),
+    }, turnInjectable);
+    const d = await script.options.canUseTool('Bash', { command: 'rm -rf /' });
+    assert.equal(d.behavior, 'deny');
+    assert.match(d.message, /next engine release/);
+  }));
+
+test('resume failure maps to SESSION_UNRESUMABLE',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const boom = () => (async function* () { throw new Error('No conversation found with session id: x'); })();
+    await assert.rejects(
+      runAgentV2Turn({
+        message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+        resumeSdkSessionId: 'x', onEvent: () => {}, queryFactory: boom,
+      }, turnInjectable),
+      (e) => e.code === 'SESSION_UNRESUMABLE',
+    );
+  }));
+
+test('aborted approval denies with the no-answer message; session id captured from init',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    // No resumeSdkSessionId: currentSdkSessionId must be captured from the
+    // streamed init message for abortDecisionsForSession to find the entry.
+    const script = { messages: [{ type: 'system', subtype: 'init', session_id: 'sdk-cap', tools: [], capabilities: [] }] };
+    const events = [];
+    await runAgentV2Turn({
+      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
+    }, turnInjectable);
+    const decision = script.options.canUseTool('AskUserQuestion', { questions: [{ question: 'Q?' }] });
+    const req = events.find((e) => e.type === 'approval_request');
+    assert.ok(req, 'approval_request emitted');
+    assert.equal(abortDecisionsForSession('sdk-cap'), 1);
+    const d = await decision;
+    assert.equal(d.behavior, 'deny');
+    assert.match(d.message, /did not answer/);
+    assert.ok(events.some((e) => e.type === 'approval_resolved' && e.outcome === 'aborted'));
+  }));
+
+test('missing workspaceRoot is rejected before any query starts', async () => {
+  let queryStarted = false;
+  await assert.rejects(
+    runAgentV2Turn({
+      message: 'm', userId: 'u1', mode: 'execute', agentContext: {},
+      onEvent: () => {}, queryFactory: () => { queryStarted = true; return (async function* () {})(); },
+    }, turnInjectable),
+    (e) => /workspaceRoot is required/.test(e.message),
+  );
+  assert.equal(queryStarted, false);
+});
+
+test('auth: no key throws the spike error unless allowAmbientAuth',
+  withAnthropicKey(undefined, async () => {
+    // Fresh test DB has no vault key for u1 and the env key is deleted →
+    // the runner must refuse rather than silently use operator ambient auth.
+    await assert.rejects(
+      runAgentV2Turn({
+        message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+        onEvent: () => {}, queryFactory: makeFakeQuery({ messages: [] }),
+      }, turnInjectable),
+      (e) => /No Anthropic API key available/.test(e.message),
+    );
+    // Ambient opt-in: the turn runs and the composed options carry no `env`.
+    const ambient = { messages: [] };
+    await runAgentV2Turn({
+      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      allowAmbientAuth: true, onEvent: () => {}, queryFactory: makeFakeQuery(ambient),
+    }, turnInjectable);
+    assert.ok(!('env' in ambient.options), 'ambient auth must not fabricate an env key');
+  }));

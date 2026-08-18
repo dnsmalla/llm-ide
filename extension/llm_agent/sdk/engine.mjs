@@ -1,19 +1,18 @@
-// Pure option composition for the v2 chat engine (the Agent-SDK-powered
-// successor of the CLI loop behind the Mac chat).
+// Pure option composition + the turn runner for the v2 chat engine (the
+// Agent-SDK-powered successor of the CLI loop behind the Mac chat).
 //
 // `buildEngineOptions()` maps a Mac chat request onto Claude Agent SDK
 // `query()` options — mode → permissionMode/persona, the read-only tool
 // allowlist, skills text, cwd + additional directories, and the
-// preset+append system prompt — WITHOUT starting a query. Everything here
-// is pure composition; the runner (runAgentV2Turn, added on top of this
-// module) owns the query lifecycle, the llmide in-process MCP server, key
-// auth, resume, and event mapping. That split keeps this file testable with
-// injected readSkill/roots fakes (no DB, no filesystem, no SDK subprocess).
+// preset+append system prompt — WITHOUT starting a query. That composition
+// is pure and testable with injected readSkill/roots fakes.
 //
-// No SDK import (yet): composing options is plain data, so this module stays
-// loadable everywhere the SDK isn't. The runner layer adds the SDK import —
-// still inside llm_agent/sdk/ per the isolation rule (only this directory
-// may import '@anthropic-ai/claude-agent-sdk').
+// `runAgentV2Turn()` (below) is the runner: it owns the query lifecycle,
+// the llmide in-process MCP server, key auth, resume, event mapping, and
+// the AskUserQuestion approval round-trip (canUseTool bridged to HTTP via
+// the decisions registry). It imports the SDK — the only place that may,
+// per the isolation rule (modules inside llm_agent/sdk/ only), and the
+// exact-pinned SDK version makes that import a reviewed surface.
 //
 // Framing notes (deliberate copies, not shared imports):
 //   - Skill blocks mirror server/ai-routes.mjs's /code-assist framing
@@ -23,12 +22,16 @@
 //     semantics locally (30 files / 80k per file / 200k total) — same
 //     reason. Keep the two in sync when either changes.
 
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import { personaForMode, PLAN_LIKE_MODES } from '../runtime/mode-personas.mjs';
 import { readSkillInstructions } from '../skills/index.mjs';
 import { buildReadableRoots } from '../runtime/handlers/repo-files.mjs';
 import { sanitizeForPrompt, sanitizeLine } from '../../core/utils.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { getSecret } from '../../server/vault.mjs';
+import { mapSdkMessage } from './events.mjs';
+import { buildLlmIdeServer } from './tools.mjs';
+import { registerDecision } from './decisions.mjs';
 
 // --- Auth: per-user vault key first, operator env as fallback -------------
 // (Moved here from spike-engine.mjs, which re-exports it for compatibility —
@@ -211,4 +214,130 @@ export function buildEngineOptions(
       truncatedPaths,
     },
   };
+}
+
+// --- The turn runner ----------------------------------------------------------
+
+// The injectable factory contract is positional (prompt, options); this
+// default adapts the real SDK query() (one params object) to that shape so
+// the live path (no queryFactory passed) and the test fakes are interchangeable.
+const sdkQueryFactory = (prompt, options) => query({ prompt, options });
+
+const MAX_TURNS = 40;
+
+// v2 is read-and-answer: write/shell tools are not wired yet, so a deny with
+// an instruction to re-plan reads better to the model than a silent hang.
+const DENY_NEXT_RELEASE = 'Writes and shell commands arrive in the next engine release; re-plan using read-only tools.';
+const DENY_NO_ANSWER = 'The user did not answer the question.';
+
+/**
+ * Run one v2 chat turn against the Agent SDK and stream its wire events.
+ *
+ * Composes options via buildEngineOptions, mounts the llmide in-process MCP
+ * server, resolves auth (vault key → env → operator ambient when
+ * allowAmbientAuth), and iterates the query: every SDK message is mapped
+ * (mapSdkMessage) onto `onEvent`, `msg.session_id` is captured as the live
+ * SDK session, and usage/cost totals accumulate across the stream.
+ *
+ * The approval bridge: `canUseTool` parks an AskUserQuestion in the
+ * decisions registry (requestId), emits `approval_request`, and blocks until
+ * the HTTP decision route answers (allow with the client's answers verbatim)
+ * or the registry expires/aborts (deny with a no-answer message). Any other
+ * tool is denied read-only-style.
+ *
+ * Throws `Error{code:'SESSION_UNRESUMABLE'}` when `resumeSdkSessionId` was
+ * set and the iteration fails with a /session|conversation|resume/i error —
+ * the route layer's cue to restart from a fresh session.
+ *
+ * Returns `{ result, usageTotals }`: the mapped result event (or null) and
+ * summed { inputTokens, outputTokens, cacheReadTokens, costUsd, numTurns,
+ * durationMs }.
+ */
+export async function runAgentV2Turn(
+  {
+    message, userId, mode, model, language, skills, agentContext, attachments,
+    resumeSdkSessionId, onEvent, signal, allowAmbientAuth = false,
+    queryFactory = sdkQueryFactory,
+  } = {},
+  { readSkill = readSkillInstructions, roots = buildReadableRoots } = {},
+) {
+  // Without a workspace the SDK would inherit the server process's cwd —
+  // a v2 turn is always rooted in the request's workspace or not run at all.
+  const workspaceRoot = typeof agentContext?.workspaceRoot === 'string' ? agentContext.workspaceRoot : '';
+  if (!workspaceRoot) throw new Error('workspaceRoot is required');
+
+  // Same auth ladder as the spike: per-user vault key → operator ambient
+  // auth. Ambient is opt-in so hermetic tests can assert the no-key error.
+  const { key } = resolveAnthropicKey(userId);
+  if (!key && !allowAmbientAuth) {
+    throw new Error('No Anthropic API key available (set vault claude.apiKey or ANTHROPIC_API_KEY)');
+  }
+
+  const resume = typeof resumeSdkSessionId === 'string' && resumeSdkSessionId ? resumeSdkSessionId : null;
+  // The SDK session this turn belongs to: the resumed id up front, then
+  // whatever the stream reports (the init message carries it first).
+  let currentSdkSessionId = resume;
+
+  const canUseTool = async (toolName, input) => {
+    if (toolName !== 'AskUserQuestion') {
+      return { behavior: 'deny', message: DENY_NEXT_RELEASE };
+    }
+    // Park the decision; the SDK await below may legitimately block for
+    // minutes while a human decides on the other side of the SSE stream.
+    const { requestId, promise } = registerDecision({ sdkSessionId: currentSdkSessionId, userId, questions: input.questions });
+    onEvent?.({ type: 'approval_request', requestId, kind: 'AskUserQuestion', questions: input.questions });
+    const outcome = await promise;
+    onEvent?.({ type: 'approval_resolved', requestId, outcome: outcome.action });
+    if (outcome.action === 'answer') {
+      // SDK ≥2.1.207 rejects allow without updatedInput; answers pass
+      // through verbatim (multi-select arrives comma-joined from the client).
+      return { behavior: 'allow', updatedInput: { questions: input.questions, answers: outcome.answers } };
+    }
+    return { behavior: 'deny', message: DENY_NO_ANSWER };
+  };
+
+  const { queryOptions, prompt } = buildEngineOptions(
+    { userId, mode, model, language, message, skills, agentContext, attachments },
+    { readSkill, roots },
+  );
+
+  const q = queryFactory(prompt, {
+    ...queryOptions,
+    mcpServers: { llmide: buildLlmIdeServer(userId) },
+    canUseTool,
+    maxTurns: MAX_TURNS,
+    // `env` REPLACES the subprocess environment — always spread process.env.
+    ...(key ? { env: { ...process.env, ANTHROPIC_API_KEY: key } } : {}),
+    ...(resume ? { resume } : {}),
+    ...(signal ? { signal } : {}),
+  });
+
+  const usageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0, numTurns: 0, durationMs: 0 };
+  let result = null;
+  try {
+    for await (const msg of q) {
+      if (msg?.session_id) currentSdkSessionId = msg.session_id;
+      for (const ev of mapSdkMessage(msg)) {
+        if (ev.type === 'usage') {
+          usageTotals.inputTokens += ev.inputTokens;
+          usageTotals.outputTokens += ev.outputTokens;
+          usageTotals.cacheReadTokens += ev.cacheReadTokens;
+        } else if (ev.type === 'result') {
+          result = ev;
+          usageTotals.costUsd += ev.costUsd ?? 0;
+          usageTotals.numTurns += ev.numTurns ?? 0;
+          usageTotals.durationMs += ev.durationMs ?? 0;
+        }
+        onEvent?.(ev);
+      }
+    }
+  } catch (err) {
+    // A resume the SDK cannot honor (session pruned / cleared) is
+    // recoverable at the route layer: drop the mapping and start fresh.
+    if (resume && /session|conversation|resume/i.test(String(err?.message ?? ''))) {
+      throw Object.assign(new Error(err?.message ?? String(err)), { code: 'SESSION_UNRESUMABLE' });
+    }
+    throw err;
+  }
+  return { result, usageTotals };
 }
