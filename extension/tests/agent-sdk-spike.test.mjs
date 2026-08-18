@@ -59,7 +59,7 @@ test('mapSdkMessage: stream deltas map to delta / tool_use_start / tool_args_del
   );
   assert.deepEqual(
     mapSdkMessage({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'input_json_delta', partial_json: '{"query":"a' } } }),
-    [{ type: 'tool_args_delta', partialJson: '{"query":"a' }],
+    [{ type: 'tool_args_delta', index: 0, partialJson: '{"query":"a' }],
   );
   // Non-content stream events (message_start, message_delta, …) stay quiet —
   // the Mac shouldn't render them.

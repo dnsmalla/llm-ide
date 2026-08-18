@@ -13,11 +13,9 @@
 // confined to one module). The SDK is exact-pinned in package.json — a bump
 // is a deliberate, reviewed change (canary CI is the plan for P1.5).
 //
-// Event model: `mapSdkMessage()` emits a small, engine-agnostic set
-// (init/delta/tool_use_start/tool_args_delta/tool_result/result) plus a
-// generic `sdk` passthrough carrying the raw message for anything unmapped —
-// the forward-compatibility rule ("open set, ignore unknown values") so new
-// upstream capabilities are observable on the wire from day one.
+// Event model: the pure mapper lives in events.mjs (the single definition
+// of the v2 event vocabulary) and is re-exported here so existing spike
+// consumers keep importing it from this module.
 
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
@@ -25,95 +23,9 @@ import * as kb from '../../kb/db.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { getSecret } from '../../server/vault.mjs';
 import { redactFence } from '../runtime/redaction.mjs';
+import { mapSdkMessage } from './events.mjs';
 
-const MAX_TOOL_RESULT_CHARS = 20_000;
-
-// --- Pure event mapping (unit-tested; no SDK objects required) ------------
-
-function textOfToolResultContent(content) {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  const parts = content
-    .filter((b) => b && b.type === 'text' && typeof b.text === 'string')
-    .map((b) => b.text);
-  return parts.join('\n');
-}
-
-// Map one SDK message → array of wire events (usually 0..2). Exported pure
-// so tests can drive it with fabricated messages and the P1 protocol design
-// can be reviewed against real transcripts without a live engine.
-export function mapSdkMessage(msg) {
-  if (!msg || typeof msg !== 'object') return [];
-
-  if (msg.type === 'system' && msg.subtype === 'init') {
-    return [{
-      type: 'init',
-      sessionId: msg.session_id ?? null,
-      claudeCodeVersion: msg.claude_code_version ?? null,
-      model: msg.model ?? null,
-      tools: Array.isArray(msg.tools) ? msg.tools : [],
-      capabilities: Array.isArray(msg.capabilities) ? msg.capabilities : [],
-      mcpServers: Array.isArray(msg.mcp_servers)
-        ? msg.mcp_servers.map((s) => ({ name: s?.name, status: s?.status }))
-        : [],
-    }];
-  }
-
-  if (msg.type === 'stream_event') {
-    const ev = msg.event;
-    if (!ev || typeof ev !== 'object') return [];
-    if (ev.type === 'content_block_start') {
-      const block = ev.content_block;
-      if (block?.type === 'tool_use') {
-        return [{ type: 'tool_use_start', id: block.id ?? null, name: block.name ?? null }];
-      }
-      return [];
-    }
-    if (ev.type === 'content_block_delta') {
-      const d = ev.delta;
-      if (d?.type === 'text_delta' && typeof d.text === 'string') {
-        return [{ type: 'delta', text: d.text }];
-      }
-      if (d?.type === 'input_json_delta' && typeof d.partial_json === 'string') {
-        return [{ type: 'tool_args_delta', partialJson: d.partial_json }];
-      }
-      return [];
-    }
-    return [];
-  }
-
-  if (msg.type === 'user') {
-    const blocks = msg?.message?.content;
-    if (!Array.isArray(blocks)) return [];
-    return blocks
-      .filter((b) => b?.type === 'tool_result')
-      .map((b) => ({
-        type: 'tool_result',
-        toolUseId: b.tool_use_id ?? null,
-        isError: b.is_error === true,
-        // Tool outputs can be huge; the Mac renders a summary, the raw stays
-        // server-side. Truncation is marked so the UI can say "truncated".
-        text: textOfToolResultContent(b.content).slice(0, MAX_TOOL_RESULT_CHARS),
-        truncated: textOfToolResultContent(b.content).length > MAX_TOOL_RESULT_CHARS,
-      }));
-  }
-
-  if (msg.type === 'result') {
-    return [{
-      type: 'result',
-      subtype: msg.subtype ?? null,
-      costUsd: msg.total_cost_usd ?? null,
-      numTurns: msg.num_turns ?? null,
-      durationMs: msg.duration_ms ?? null,
-      sessionId: msg.session_id ?? null,
-      stopReason: msg.stop_reason ?? null,
-    }];
-  }
-
-  // Everything else (compact_boundary, informational, api_retry, complete
-  // assistant messages, …) rides the observation channel unchanged.
-  return [{ type: 'sdk', sdkType: msg.type, subtype: msg.subtype ?? null, raw: msg }];
-}
+export { mapSdkMessage };
 
 // --- Domain tool: KB search as an in-process SDK MCP tool -----------------
 
