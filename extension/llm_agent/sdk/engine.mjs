@@ -31,7 +31,7 @@ import { getDb } from '../../kb/db.mjs';
 import { getSecret } from '../../server/vault.mjs';
 import { mapSdkMessage } from './events.mjs';
 import { buildLlmIdeServer } from './tools.mjs';
-import { registerDecision } from './decisions.mjs';
+import { registerDecision, abortDecisionsForSession } from './decisions.mjs';
 
 // --- Auth: per-user vault key first, operator env as fallback -------------
 // (Moved here from spike-engine.mjs, which re-exports it for compatibility —
@@ -242,8 +242,11 @@ const DENY_NO_ANSWER = 'The user did not answer the question.';
  * The approval bridge: `canUseTool` parks an AskUserQuestion in the
  * decisions registry (requestId), emits `approval_request`, and blocks until
  * the HTTP decision route answers (allow with the client's answers verbatim)
- * or the registry expires/aborts (deny with a no-answer message). Any other
- * tool is denied read-only-style.
+ * or the registry expires/aborts (deny with a no-answer message). The SDK's
+ * per-call abort signal AND the turn-level `signal` both abort the session's
+ * parked decisions, so an aborted turn denies a pending approval immediately
+ * instead of lingering to the registry's 300 s timeout. Any other tool is
+ * denied read-only-style.
  *
  * Throws `Error{code:'SESSION_UNRESUMABLE'}` when `resumeSdkSessionId` was
  * set and the iteration fails with a /session|conversation|resume/i error —
@@ -278,22 +281,52 @@ export async function runAgentV2Turn(
   // whatever the stream reports (the init message carries it first).
   let currentSdkSessionId = resume;
 
-  const canUseTool = async (toolName, input) => {
+  const canUseTool = async (toolName, input, callOpts) => {
     if (toolName !== 'AskUserQuestion') {
       return { behavior: 'deny', message: DENY_NEXT_RELEASE };
     }
     // Park the decision; the SDK await below may legitimately block for
     // minutes while a human decides on the other side of the SSE stream.
-    const { requestId, promise } = registerDecision({ sdkSessionId: currentSdkSessionId, userId, questions: input.questions });
-    onEvent?.({ type: 'approval_request', requestId, kind: 'AskUserQuestion', questions: input.questions });
-    const outcome = await promise;
-    onEvent?.({ type: 'approval_resolved', requestId, outcome: outcome.action });
-    if (outcome.action === 'answer') {
-      // SDK ≥2.1.207 rejects allow without updatedInput; answers pass
-      // through verbatim (multi-select arrives comma-joined from the client).
-      return { behavior: 'allow', updatedInput: { questions: input.questions, answers: outcome.answers } };
+    // Snapshot the session id the entry is parked under — the abort paths
+    // below must target that same session even if the stream reports a new
+    // one before the human answers.
+    const sessionId = currentSdkSessionId;
+    const { requestId, promise } = registerDecision({ sdkSessionId: sessionId, userId, questions: input.questions });
+    // An aborted turn denies the parked approval NOW, not at the registry's
+    // 300 s timeout: the SDK hands canUseTool a per-call abort signal
+    // (CanUseTool in sdk.d.ts), and the turn-level signal covers callers
+    // that pass none. Session granularity is deliberate — one question at a
+    // time per turn. Listeners come off the moment the decision settles
+    // either way: the turn signal outlives any single question, so leaving
+    // them armed would accumulate one listener per asked question.
+    const onAbort = () => { abortDecisionsForSession(sessionId); };
+    const signals = [callOpts?.signal, signal].filter(Boolean);
+    for (const s of signals) {
+      if (s.aborted) onAbort(); // already dead — a listener would never fire
+      else s.addEventListener('abort', onAbort, { once: true });
     }
-    return { behavior: 'deny', message: DENY_NO_ANSWER };
+    const detach = () => { for (const s of signals) s.removeEventListener('abort', onAbort); };
+    try {
+      // A throwing onEvent must not strand the parked entry — its timer (and
+      // the eventual settle's approval_resolved) would outlive the turn — so
+      // un-park it before the throw escapes to the SDK.
+      try {
+        onEvent?.({ type: 'approval_request', requestId, kind: 'AskUserQuestion', questions: input.questions });
+      } catch (err) {
+        onAbort();
+        throw err;
+      }
+      const outcome = await promise;
+      onEvent?.({ type: 'approval_resolved', requestId, outcome: outcome.action });
+      if (outcome.action === 'answer') {
+        // SDK ≥2.1.207 rejects allow without updatedInput; answers pass
+        // through verbatim (multi-select arrives comma-joined from the client).
+        return { behavior: 'allow', updatedInput: { questions: input.questions, answers: outcome.answers } };
+      }
+      return { behavior: 'deny', message: DENY_NO_ANSWER };
+    } finally {
+      detach();
+    }
   };
 
   const { queryOptions, prompt } = buildEngineOptions(

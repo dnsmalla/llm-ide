@@ -14,6 +14,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
+import { getEventListeners } from 'node:events';
 import { fileURLToPath } from 'node:url';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
@@ -275,6 +276,61 @@ test('aborted approval denies with the no-answer message; session id captured fr
     assert.equal(d.behavior, 'deny');
     assert.match(d.message, /did not answer/);
     assert.ok(events.some((e) => e.type === 'approval_resolved' && e.outcome === 'aborted'));
+  }));
+
+test('abort wiring: turn/per-call signals deny a parked approval promptly and listeners detach',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    // Turn A carries the turn-level signal; turn B passes none, so B's
+    // canUseTool sees only the SDK's per-call signal — each wiring in isolation.
+    const scriptA = { messages: [{ type: 'system', subtype: 'init', session_id: 'sdk-abort-a', tools: [], capabilities: [] }] };
+    const scriptB = { messages: [{ type: 'system', subtype: 'init', session_id: 'sdk-abort-b', tools: [], capabilities: [] }] };
+    const events = [];
+    const turnAc = new AbortController();
+    const base = {
+      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      onEvent: (e) => events.push(e),
+    };
+    await runAgentV2Turn({ ...base, signal: turnAc.signal, queryFactory: makeFakeQuery(scriptA) }, turnInjectable);
+    await runAgentV2Turn({ ...base, queryFactory: makeFakeQuery(scriptB) }, turnInjectable);
+    const questions = [{ question: 'Q?' }];
+    const lastReq = () => events.filter((e) => e.type === 'approval_request').at(-1);
+    // Race guard: fail in 5 s instead of hanging on the registry's 300 s timeout.
+    const failAfter = (msg) => new Promise((_, rej) => { setTimeout(() => rej(new Error(msg)), 5_000).unref(); });
+    try {
+      // Settling by answer detaches both listeners — the turn signal outlives
+      // any single question, so leaving listeners armed would leak per asked
+      // question.
+      const pc = new AbortController();
+      const answered = scriptA.options.canUseTool('AskUserQuestion', { questions }, { signal: pc.signal });
+      assert.equal(getEventListeners(turnAc.signal, 'abort').length, 1, 'turn signal armed while parked');
+      assert.equal(getEventListeners(pc.signal, 'abort').length, 1, 'per-call signal armed while parked');
+      answerDecision({ requestId: lastReq().requestId, sdkSessionId: 'sdk-abort-a', userId: 'u1', answers: { 'Q?': 'A' } });
+      assert.equal((await answered).behavior, 'allow');
+      assert.equal(getEventListeners(turnAc.signal, 'abort').length, 0, 'turn-signal listener detached on settle');
+      assert.equal(getEventListeners(pc.signal, 'abort').length, 0, 'per-call listener detached on settle');
+
+      // Turn-level abort while parked → prompt deny + approval_resolved 'aborted'.
+      const parked = scriptA.options.canUseTool('AskUserQuestion', { questions }, { signal: new AbortController().signal });
+      const t0 = Date.now();
+      turnAc.abort();
+      const d = await Promise.race([parked, failAfter('turn abort did not deny the parked approval')]);
+      assert.ok(Date.now() - t0 < 2_000, `deny must be prompt, not the 300 s registry timeout (took ${Date.now() - t0} ms)`);
+      assert.deepEqual(d, { behavior: 'deny', message: 'The user did not answer the question.' });
+      assert.ok(events.some((e) => e.type === 'approval_resolved' && e.outcome === 'aborted'),
+        'approval_resolved outcome aborted emitted');
+
+      // The SDK's per-call signal alone (no turn signal on B) also denies.
+      const pcB = new AbortController();
+      const perCall = scriptB.options.canUseTool('AskUserQuestion', { questions }, { signal: pcB.signal });
+      pcB.abort();
+      const d2 = await Promise.race([perCall, failAfter('per-call abort did not deny the parked approval')]);
+      assert.equal(d2.behavior, 'deny');
+      assert.match(d2.message, /did not answer/);
+    } finally {
+      // Clear any straggler so no 300 s registry timer outlives the test.
+      abortDecisionsForSession('sdk-abort-a');
+      abortDecisionsForSession('sdk-abort-b');
+    }
   }));
 
 test('missing workspaceRoot is rejected before any query starts', async () => {
