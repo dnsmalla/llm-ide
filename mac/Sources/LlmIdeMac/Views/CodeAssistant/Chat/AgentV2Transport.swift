@@ -29,6 +29,24 @@ enum AgentV2Error: Error, Equatable, Sendable {
     case streamEndedWithoutResult
 }
 
+/// Deferred failure capture for one turn. Stream-event callbacks are
+/// non-throwing, so failures detected inside them — an `error` event, or
+/// (on the 3-callback path) an approval nobody can answer — are recorded
+/// here and thrown once the stream ends. It's a class rather than a local
+/// `var` because the recording sites live in different stack frames: the
+/// event loop in `runTurn` and the `onApproval` sink the 3-callback entry
+/// point passes down to it.
+@MainActor
+private final class TurnFailureCapture {
+    private(set) var value: AgentV2Error?
+
+    /// First failure wins — anything after the root cause is post-mortem
+    /// noise (e.g. a park-timeout `error` following an unhandled approval).
+    func record(_ error: AgentV2Error) {
+        if value == nil { value = error }
+    }
+}
+
 /// `ChatTransport` over the v2 agent engine (`POST /agent/v2/stream`).
 ///
 /// Mapping contract (mirrors what `CodeAssistTransport` gets from the legacy
@@ -54,7 +72,8 @@ enum AgentV2Error: Error, Equatable, Sendable {
 ///   the panel's usage footnote keeps working; token counts are dropped.
 /// - **Errors** — `error` events can't throw through the non-throwing
 ///   `onEvent` callback, so the failure is captured and thrown once the
-///   stream ends.
+///   stream ends. The 3-callback entry point reuses that same deferral
+///   for approvals it cannot answer (see below).
 @MainActor
 final class AgentV2Transport: ChatTransport, @unchecked Sendable {
     let streamer: AgentV2Streaming
@@ -69,16 +88,31 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         self.streamer = streamer
     }
 
-    /// 3-callback requirement: same turn, approvals silently dropped — the
-    /// engine would park forever with nobody answering. Every v2 caller
-    /// (Tasks 11–12) uses the 4-callback form; this exists because the
-    /// protocol requires both signatures of every conformer.
+    /// 3-callback requirement — the form no v2 caller should take. An
+    /// `approvalRequest` arriving here has nobody to answer it: the engine
+    /// parks the turn server-side awaiting a decision that can never be
+    /// posted, and this call would await the stream indefinitely. So the
+    /// sink passed down records a typed `APPROVAL_UNHANDLED` failure
+    /// through the same deferred-throw path stream errors use (recorded in
+    /// the callback, thrown once the stream ends) — the turn fails in a
+    /// diagnosable way instead of hanging. Exists because the protocol
+    /// requires both signatures of every conformer; v2 callers (Tasks
+    /// 11–12) use the 4-callback form.
     func roundTrip(
         _ input: ChatTransportInput,
         onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
         onChunk: @escaping @MainActor (String) -> Void
     ) async throws -> ChatTransportResult {
-        try await roundTrip(input, onProgress: onProgress, onChunk: onChunk, onApproval: { _ in })
+        let failure = TurnFailureCapture()
+        return try await runTurn(input, fresh: false, failure: failure,
+                                 onProgress: onProgress, onChunk: onChunk) { approval in
+            failure.record(.engine(
+                code: "APPROVAL_UNHANDLED",
+                message: "approvalRequest \(approval.requestId) arrived on the "
+                    + "3-callback roundTrip path, which has no onApproval "
+                    + "handler to answer it"
+            ))
+        }
     }
 
     func roundTrip(
@@ -87,8 +121,8 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         onChunk: @escaping @MainActor (String) -> Void,
         onApproval: @escaping @MainActor (AgentV2Approval) -> Void
     ) async throws -> ChatTransportResult {
-        try await roundTrip(input, fresh: false, onProgress: onProgress,
-                            onChunk: onChunk, onApproval: onApproval)
+        try await runTurn(input, fresh: false, failure: TurnFailureCapture(),
+                          onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
     }
 
     /// v2-only variant with an explicit `fresh` flag: `true` tells the
@@ -99,6 +133,22 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
     func roundTrip(
         _ input: ChatTransportInput,
         fresh: Bool,
+        onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
+        onChunk: @escaping @MainActor (String) -> Void,
+        onApproval: @escaping @MainActor (AgentV2Approval) -> Void
+    ) async throws -> ChatTransportResult {
+        try await runTurn(input, fresh: fresh, failure: TurnFailureCapture(),
+                          onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
+    }
+
+    /// Core turn shared by every entry point above. `failure` is supplied
+    /// by the caller so the 3-callback path's approval sink can record into
+    /// the same deferred-failure storage the `error`-event mapping uses —
+    /// one throw point at stream end, first cause wins.
+    private func runTurn(
+        _ input: ChatTransportInput,
+        fresh: Bool,
+        failure: TurnFailureCapture,
         onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
         onChunk: @escaping @MainActor (String) -> Void,
         onApproval: @escaping @MainActor (AgentV2Approval) -> Void
@@ -126,7 +176,6 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         var reply = ""
         var resolvedMode: String?
         var sawTerminal = false
-        var failure: AgentV2Error?
         // toolUseId → wire name, so a nameless tool_result can still report
         // which tool finished.
         var toolNames: [String: String] = [:]
@@ -168,15 +217,15 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                 sawTerminal = true
             case .error(let code, let message):
                 sawTerminal = true
-                failure = code == "SESSION_UNRESUMABLE"
+                failure.record(code == "SESSION_UNRESUMABLE"
                     ? .sessionUnresumable
-                    : .engine(code: code, message: message)
+                    : .engine(code: code, message: message))
             case .sdk:
                 break  // unknown/passthrough types: observable on the wire, not actionable here
             }
         }
 
-        if let failure {
+        if let failure = failure.value {
             throw failure
         }
         guard sawTerminal else {

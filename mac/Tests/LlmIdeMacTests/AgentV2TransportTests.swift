@@ -415,6 +415,34 @@ struct AgentV2TransportTests {
         #expect(body["fresh"] as? Bool == true)
     }
 
+    // MARK: - 3-callback path (approvals unanswerable)
+
+    @Test("3-callback roundTrip throws APPROVAL_UNHANDLED on approvalRequest, not a hang")
+    func threeCallbackPathFailsFastOnApproval() async {
+        let stream = ScriptedAgentV2Stream()
+        stream.events = [
+            .init_(AgentV2Init(sessionId: "sdk-1", claudeCodeVersion: nil, model: nil,
+                               tools: [], capabilities: [], mcpServers: [])),
+            .approvalRequest(makeApproval(id: "req-1")),
+        ]
+        let transport = AgentV2Transport(streamer: stream)
+        // Bounded await: the scripted stream ends right after the parked
+        // approval, so the call settling at all (with the typed failure, not
+        // streamEndedWithoutResult) proves the 3-callback path fails fast
+        // instead of awaiting an answer nobody can post.
+        await #expect(throws: AgentV2Error.engine(
+            code: "APPROVAL_UNHANDLED",
+            message: "approvalRequest req-1 arrived on the 3-callback roundTrip path, "
+                + "which has no onApproval handler to answer it"
+        )) {
+            try await transport.roundTrip(
+                makeInput(),
+                onProgress: { _ in },
+                onChunk: { _ in }
+            )
+        }
+    }
+
     // MARK: - Protocol-extension default (legacy conformers)
 
     @Test("Legacy-shaped conformer: 4-callback roundTrip compiles, forwards, never fires onApproval")
