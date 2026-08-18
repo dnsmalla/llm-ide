@@ -2766,3 +2766,151 @@ paths:
                   channels: { type: array, items: { type: object } }
                   complete: { type: boolean }
         '400': { description: SLACK_NO_TOKEN — connect Slack first, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Agent v2 engine ─────────────────────────────────────────────────────
+  # The Claude Agent SDK chat engine behind the Mac Code Assistant
+  # (design: docs/superpowers/specs/2026-08-18-agent-v2-engine-design.md).
+
+  /agent/v2/stream:
+    post:
+      summary: Run one Agent-SDK chat turn and stream its events over SSE
+      description: >
+        The server owns the chat→SDK-session mapping: consecutive turns with the same
+        `agentContext.chatSessionId` resume the same SDK conversation. `fresh: true`
+        deliberately skips the recorded id (client asked to start over, e.g. after a
+        SESSION_UNRESUMABLE error). Validation errors answer as plain JSON before the
+        SSE headers are written; once streaming, failures arrive as a terminal
+        `data: {"type":"error",...}` event instead of an HTTP status.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message, agentContext]
+              properties:
+                message:  { type: string, description: 'User message (max 20 000 chars after sanitization)' }
+                language: { type: string }
+                model:    { type: string, description: 'Anthropic model id from the picker; omitted = config default' }
+                mode:     { type: string, description: 'Chat mode; plan/assist_plan map to SDK plan permission mode' }
+                skills:
+                  type: array
+                  description: 'Invoked skill ids (max 5); bodies are prompt-injected'
+                  items: { type: string }
+                agentContext:
+                  type: object
+                  required: [chatSessionId, workspaceRoot]
+                  properties:
+                    chatSessionId: { type: string, description: 'Mac chat session id — the mapping key' }
+                    workspaceRoot:  { type: string, description: 'Workspace the engine roots its reads in' }
+                attachments:
+                  type: array
+                  description: 'File attachments (max 30 files, 80 000 chars each, 200 000 total)'
+                  items:
+                    type: object
+                    required: [path, content]
+                    properties:
+                      path:    { type: string }
+                      content: { type: string }
+                fresh:    { type: boolean, description: 'Skip the recorded SDK session id and start a new one' }
+      responses:
+        '200':
+          description: >
+            SSE stream of engine events — init first, mode_set right after init,
+            result or error last. Event types: init, delta, tool_use_start,
+            tool_args_delta, tool_result, usage, approval_request,
+            approval_resolved, mode_set, result, error, sdk. Unknown event types
+            and fields must be ignored by clients.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: 'SSE stream: data: {"type":"init","sessionId":...} … data: {"type":"result","costUsd":...} / data: {"type":"error","code":"SESSION_UNRESUMABLE|ENGINE_ERROR",...}'
+        '400': { description: Missing message / chatSessionId / workspaceRoot, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: Rate limited }
+
+  /agent/v2/decision:
+    post:
+      summary: Answer a parked AskUserQuestion approval from a v2 stream
+      description: >
+        Tenancy-checked: the deciding user must own the session the approval was
+        parked under; foreign decisions are 403 and logged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, sdkSessionId, answers]
+              properties:
+                requestId:    { type: string, description: 'Id from the approval_request event' }
+                sdkSessionId: { type: string }
+                answers:
+                  type: object
+                  description: 'Question text → chosen label; multi-select answers arrive comma-joined'
+                  additionalProperties: { type: string }
+      responses:
+        '200':
+          description: Decision delivered; the stream emits approval_resolved and the turn continues
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        '403': { description: DECISION_FORBIDDEN — belongs to another user or session, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: DECISION_EXPIRED / DECISION_UNKNOWN — nothing pending, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /agent/v2/session:
+    delete:
+      summary: Drop a chat's SDK-session mapping (chat deletion)
+      description: >
+        Removes the chat→SDK-session mapping row and best-effort deletes the
+        SDK transcript files recorded for the session id (per-user engine home).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chatSessionId]
+              properties:
+                chatSessionId: { type: string }
+      responses:
+        '200':
+          description: Mapping dropped (sdkSessionId is null when none was recorded)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:           { type: boolean }
+                  sdkSessionId: { type: string, nullable: true }
+        '400': { description: chatSessionId missing, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /agent-sdk/spike:
+    post:
+      summary: P0 spike — direct Claude Agent SDK query over SSE (temporary)
+      description: >
+        Proof-of-concept surface from the P0 spike (SDK streaming, kb_search MCP
+        tool, vault-key auth). Temporary by design; its successor is the
+        /agent/v2/* protocol above.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt: { type: string, description: 'Raw prompt (max 4 000 chars)' }
+                resume: { type: string, description: 'SDK session id to resume' }
+      responses:
+        '200':
+          description: SSE stream of spike events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: 'SSE stream: data: {"type":"spike_start",...} … data: {"type":"spike_done",...} / data: {"type":"error",...}'
+        '400': { description: Missing prompt, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
