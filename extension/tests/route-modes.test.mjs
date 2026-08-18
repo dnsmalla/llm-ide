@@ -183,3 +183,39 @@ test('mode: "plan" reports continueNeeded: false and an empty tasks array, even 
   assert.equal(out.continueNeeded, false);
   assert.deepEqual(out.tasks, []);
 });
+
+test('restricted modes: the prompt carries an accurate tool roster overriding the base prompt\'s run-bash/bash guidance', async () => {
+  const prompts = [];
+  const runClaude = async (prompt) => { prompts.push(prompt); return 'A plan.'; };
+  await handleCodeAssist({
+    message: 'plan how to remove unnecessary files',
+    history: [],
+    agentContext: { sessionId: 'test-roster-1' },
+    runClaude,
+    kb: fakeKb(),
+    userId: 'u1',
+    mode: 'plan',
+  });
+  assert.equal(prompts.length, 1);
+  // The roster must name what IS available (incl. save-plan for plan mode)…
+  assert.match(prompts[0], /Tools available in this mode:.*save-plan/s);
+  // …and explicitly disown the base prompt's shell/write-tool guidance, which
+  // a live Plan-mode run followed into "Unknown tool" dead ends.
+  assert.match(prompts[0], /run-bash.*NOT available/s);
+});
+
+test('execute mode: no restricted-mode tool roster is injected', async () => {
+  const prompts = [];
+  const runClaude = async (prompt) => { prompts.push(prompt); return 'Done.'; };
+  await handleCodeAssist({
+    message: 'add a hello world function',
+    history: [],
+    agentContext: { sessionId: 'test-roster-2' },
+    runClaude,
+    kb: fakeKb(),
+    userId: 'u1',
+    mode: 'execute',
+  });
+  assert.ok(!prompts[0].includes('Tools available in this mode:'),
+    'execute mode must not carry the restricted-mode roster');
+});

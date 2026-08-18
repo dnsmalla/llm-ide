@@ -302,6 +302,23 @@ export async function handleCodeAssist({
   const modePersona = personaForMode(resolvedMode);
   if (modePersona) personaBase += `\n\n${modePersona}`;
 
+  // Restricted modes: append the accurate tool roster. The composed base
+  // (global/prompt.md) unconditionally teaches the run-bash / bash /
+  // update-file / task-tool workflows, but none of those names are
+  // dispatchable in a restricted mode — a live Plan-mode run followed that
+  // guidance into consecutive "Unknown tool" dead ends before ever writing
+  // its plan. Derived from allowedToolNames() so it can never drift from
+  // what dispatch actually accepts. Shared with the native branch below.
+  let modeToolNote = '';
+  if (restrictsTools(resolvedMode)) {
+    const roster = [...allowedToolNames(resolvedMode)].sort().join(', ');
+    modeToolNote = `\n\nTools available in this mode: ${roster}. No other tool `
+      + 'exists in this mode — in particular run-bash, bash, update-file, '
+      + 'git-op, and the task tools are NOT available here, and any earlier '
+      + 'instructions about using them do not apply in this mode.';
+    personaBase += modeToolNote;
+  }
+
   // Global handler set: ask-internal (for app-state-aware questions)
   // plus ask-subagent (for plugin-defined named delegates). The
   // ask-subagent handler is registered unconditionally — when no
@@ -479,7 +496,7 @@ export async function handleCodeAssist({
     // (not the DNS-resolution check).
     if (nativeBaseUrl) await assertSafeBaseUrlResolved(nativeBaseUrl);
     out = await runNativeAgentLoop({
-      systemPrompt: NATIVE_SYSTEM_PROMPT + (modePersona ? `\n\n${modePersona}` : ''),
+      systemPrompt: NATIVE_SYSTEM_PROMPT + (modePersona ? `\n\n${modePersona}` : '') + modeToolNote,
       userMessage: composedUserMessage,
       history: Array.isArray(history) ? history : [],
       skills: activeSkills,

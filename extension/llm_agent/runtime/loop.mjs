@@ -89,6 +89,15 @@ function resolveDeadline(deadlineMs) {
 // context window. 128 KB ≈ 4 max-size skills; core sets use ~8 KB.
 const MAX_TOTAL_SKILL_BYTES = 131_072;
 
+// Echo-stall guard thresholds (see the fence loop). The minimum keeps trivial
+// results like {"ok":true} from ever matching inside a legitimate answer; the
+// slack tolerates the wrapper the model tends to echo around the JSON (the
+// <<<TOOL_RESULT>>> markers and a line of lead-in) while still requiring the
+// echo to DOMINATE the output — a real answer that merely quotes the data is
+// longer than result + slack and must finish the turn normally.
+const MIN_ECHO_JSON_CHARS = 40;
+const ECHO_SLACK_CHARS = 400;
+
 // The single most useful argument to show alongside a tool name, so live
 // progress reads like an action ("Reading Foo.swift") instead of a bare tool
 // id. Kept to ONE short value on purpose: this crosses the SSE channel on every
@@ -373,6 +382,11 @@ export async function runAgentLoop({
   let toolResult;
   let toolError;
   let preToolText = '';
+  // Echo-stall guard state (see the `!fence` branch below). Holds the exact
+  // string buildIterationPrompt embedded in the last <<<TOOL_RESULT>>> block,
+  // so a verbatim echo can be detected byte-for-byte.
+  let lastToolResultJson = null;
+  let echoNudged = false;
 
   // Return the standard graceful "ran out of time" reply. Shared by the
   // between-iteration check and the in-flight abort path so both look
@@ -430,6 +444,38 @@ export async function runAgentLoop({
     }
     prevOutput = out;
     const { text, fence, parseError } = parseFence(out);
+
+    // Echo-stall guard: a known fence-protocol failure is the model answering
+    // a <<<TOOL_RESULT>>> block by repeating it verbatim, with no fence and no
+    // real continuation. Without this check that output is indistinguishable
+    // from a final answer, so the loop ended the turn mid-task and the raw
+    // JSON leaked into the user-visible reply (seen live in Plan mode, where
+    // it also meant save-plan was never reached). Detect the dominant-echo
+    // case only — the full serialized result appearing near-alone in the
+    // output — nudge once, and drop the echo from the reply text.
+    const strippedText = text.trim();
+    const isEchoStall = !fence && !parseError
+        && lastToolResultJson && lastToolResultJson.length >= MIN_ECHO_JSON_CHARS
+        && strippedText.includes(lastToolResultJson)
+        && strippedText.length <= lastToolResultJson.length + ECHO_SLACK_CHARS;
+    if (isEchoStall) {
+      if (!echoNudged) {
+        echoNudged = true;
+        toolError = 'Your last output only repeated the tool result instead of continuing. '
+          + 'Never repeat raw tool results. Continue the turn: call the next tool you need, '
+          + 'or write your final answer for the user.';
+        continue;
+      }
+      // Second echo: give up — one nudge is the retry budget (no echo loop) —
+      // but still end the turn WITHOUT the raw JSON in the reply. Falling
+      // through to the normal finish here would reproduce the exact
+      // user-facing symptom this guard exists to remove, one iteration later.
+      if (sniff) sniff.flush();
+      return {
+        reply: `${stripFenceRemnants(preToolText.trim())}\n\n_(the model stalled repeating a tool result — try again)_`,
+        pendingTool: null, iterations: i + 1, cacheHits,
+      };
+    }
     preToolText += text;
 
     if (!fence) {
@@ -510,6 +556,9 @@ export async function runAgentLoop({
       };
     }
     toolResult = result;
+    // Mirror of buildIterationPrompt's serialization, kept for the echo-stall
+    // guard above — the two must stringify identically for verbatim detection.
+    lastToolResultJson = JSON.stringify(redactDeep(result));
   }
 
   const capMsg = `\n\n_(reached the ${cap}-call tool iteration limit — try again)_`;

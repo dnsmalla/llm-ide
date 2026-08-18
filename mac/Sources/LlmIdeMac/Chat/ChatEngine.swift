@@ -315,9 +315,12 @@ final class ChatEngine {
             try Task.checkCancellation()
             // If the buffered fallback path fired (no chunk events ever
             // arrived), the placeholder turn is still empty — fill it from
-            // the complete reply now. If chunks DID arrive, messages[idx]
-            // already holds the complete text and this is a no-op overwrite
-            // with the same value.
+            // the complete reply now. If chunks DID arrive this is usually a
+            // same-value overwrite, but it is LOAD-BEARING, not a no-op: the
+            // server's fence loop can drop streamed text from the final reply
+            // (e.g. its echo-stall guard discards a raw tool-result dump the
+            // sniffer already streamed), and this overwrite is what removes
+            // that text from the visible chat.
             if let idx = messages.firstIndex(where: { $0.id == streamingID }) {
                 messages[idx].content = resp.reply
             }
