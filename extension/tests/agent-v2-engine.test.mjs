@@ -25,8 +25,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tmpDb = path.join(__dirname, '_agent-v2-engine-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
+// Per-user engine homes are derived from the DB's directory; clear the tree
+// so a previous run's homes can't leak (in)to this one.
+const agentSdkRoot = path.join(path.dirname(tmpDb), 'agent-sdk');
+try { fs.rmSync(agentSdkRoot, { recursive: true, force: true }); } catch { /* ok */ }
 
-const { buildEngineOptions, resolveAnthropicKey, runAgentV2Turn } = await import('../llm_agent/sdk/engine.mjs');
+const { buildEngineOptions, resolveAnthropicKey, runAgentV2Turn, agentSdkHomeFor } = await import('../llm_agent/sdk/engine.mjs');
 const { answerDecision, abortDecisionsForSession } = await import('../llm_agent/sdk/decisions.mjs');
 
 // --- The brief's binding contract -------------------------------------------
@@ -164,6 +168,47 @@ test('resolveAnthropicKey: moved to engine.mjs, spike re-export is the same func
 });
 
 // --- runAgentV2Turn: the turn runner + approval round-trip --------------------
+
+// Per-user engine homes (spec §6): every v2 turn composes CLAUDE_CONFIG_DIR
+// from agentSdkHomeFor — the DB directory + /agent-sdk/<userId>/ — so one
+// tenant's SDK transcripts/credentials can never cross to another, keyed or
+// ambient. (The same derivation backs the route's transcript cleanup.)
+test('agentSdkHomeFor: per-user dir under the server data dir; rejects unsafe ids', () => {
+  assert.equal(agentSdkHomeFor('user-a'), path.join(path.dirname(tmpDb), 'agent-sdk', 'user-a'));
+  for (const bad of [null, undefined, '', 42, '../escape', 'a/b', 'a..b']) {
+    assert.equal(agentSdkHomeFor(bad), null, `${JSON.stringify(bad)} must not resolve a home`);
+  }
+});
+
+test('per-user CLAUDE_CONFIG_DIR: composed for every turn, keyed or ambient',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    // A capturing factory (makeFakeQuery's shape, without the script) so the
+    // composed options survive the turn for inspection.
+    const capture = {};
+    const capturingQuery = (prompt, options) => {
+      capture.prompt = prompt;
+      capture.options = options;
+      return (async function* () {})();
+    };
+    const turn = (userId) => runAgentV2Turn({
+      message: 'm', userId, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      onEvent: () => {}, queryFactory: capturingQuery,
+    }, turnInjectable);
+
+    await turn('user-a');
+    const homeA = capture.options.env.CLAUDE_CONFIG_DIR;
+    const keyA = capture.options.env.ANTHROPIC_API_KEY;
+    await turn('user-b');
+    const homeB = capture.options.env.CLAUDE_CONFIG_DIR;
+
+    assert.equal(homeA, agentSdkHomeFor('user-a'));
+    assert.equal(homeB, agentSdkHomeFor('user-b'));
+    assert.notEqual(homeA, homeB, 'each tenant gets its own engine home');
+    assert.equal(keyA, 'sk-ant-v2-test', 'resolved key still rides along in the same env');
+    // The home dir itself was created (isolation must not depend on the SDK
+    // quietly making it later).
+    assert.ok(fs.existsSync(agentSdkHomeFor('user-a')));
+  }));
 
 // The fake SDK query: captures the (prompt, options) the runner composed so
 // a test can drive options.canUseTool directly — exactly what the real SDK
@@ -356,11 +401,15 @@ test('auth: no key throws the spike error unless allowAmbientAuth',
       }, turnInjectable),
       (e) => /No Anthropic API key available/.test(e.message),
     );
-    // Ambient opt-in: the turn runs and the composed options carry no `env`.
+    // Ambient opt-in: the turn runs and the composed env carries the
+    // per-user engine home but NO fabricated key — ambient auth means the
+    // subprocess finds the operator's login on its own.
     const ambient = { messages: [] };
     await runAgentV2Turn({
       message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
       allowAmbientAuth: true, onEvent: () => {}, queryFactory: makeFakeQuery(ambient),
     }, turnInjectable);
-    assert.ok(!('env' in ambient.options), 'ambient auth must not fabricate an env key');
+    assert.ok(!('ANTHROPIC_API_KEY' in ambient.options.env), 'ambient auth must not fabricate an env key');
+    assert.equal(ambient.options.env.CLAUDE_CONFIG_DIR, agentSdkHomeFor('u1'),
+      'ambient turns still get their per-user engine home');
   }));

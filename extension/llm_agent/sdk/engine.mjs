@@ -22,10 +22,13 @@
 //     semantics locally (30 files / 80k per file / 200k total) — same
 //     reason. Keep the two in sync when either changes.
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { personaForMode, PLAN_LIKE_MODES } from '../runtime/mode-personas.mjs';
 import { readSkillInstructions } from '../skills/index.mjs';
 import { buildReadableRoots } from '../runtime/handlers/repo-files.mjs';
+import { config } from '../../core/config.mjs';
 import { sanitizeForPrompt, sanitizeLine } from '../../core/utils.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { getSecret } from '../../server/vault.mjs';
@@ -48,6 +51,25 @@ export function resolveAnthropicKey(userId) {
   }
   if (process.env.ANTHROPIC_API_KEY) return { key: process.env.ANTHROPIC_API_KEY, source: 'env' };
   return { key: null, source: 'none' };
+}
+
+// --- Per-user engine homes (spec §6/§11) --------------------------------------
+//
+// CLAUDE_CONFIG_DIR = <dataDir>/agent-sdk/<userId>/ isolates each tenant's
+// SDK transcripts and credentials (settingSources: [] isolates the operator's
+// SETTINGS; the config dir isolates everything else the SDK writes). The base
+// follows the server's canonical data dir — the DB's directory (core/config:
+// <repo>/kb by default, wherever LLMIDE_DB_PATH points) — so engine homes sit
+// next to the other per-install runtime data. User ids are server-minted hex
+// (users.mjs); the charset guard keeps even a hand-edited id from escaping
+// the base via path traversal. Shared by the runner (composes the env every
+// turn) and the route's transcript cleanup — one derivation, never two.
+
+const USER_ID_RE = /^[A-Za-z0-9_-]+$/;
+
+export function agentSdkHomeFor(userId) {
+  if (typeof userId !== 'string' || !USER_ID_RE.test(userId)) return null;
+  return path.join(path.dirname(config.dbPath), 'agent-sdk', userId);
 }
 
 // --- Attachment caps ---------------------------------------------------------
@@ -276,6 +298,16 @@ export async function runAgentV2Turn(
     throw new Error('No Anthropic API key available (set vault claude.apiKey or ANTHROPIC_API_KEY)');
   }
 
+  // Per-user engine home (spec §6): EVERY v2 turn — keyed or ambient — runs
+  // with its own CLAUDE_CONFIG_DIR so transcripts and credentials never cross
+  // tenants. Created up front (best-effort): the CLI would create it too, but
+  // if it ever fell back to ~/.claude on a missing dir, isolation would be
+  // silently gone — an empty dir is cheap insurance.
+  const sdkHome = agentSdkHomeFor(userId);
+  if (sdkHome) {
+    try { fs.mkdirSync(sdkHome, { recursive: true }); } catch { /* SDK may still create it; best-effort */ }
+  }
+
   const resume = typeof resumeSdkSessionId === 'string' && resumeSdkSessionId ? resumeSdkSessionId : null;
   // The SDK session this turn belongs to: the resumed id up front, then
   // whatever the stream reports (the init message carries it first).
@@ -340,7 +372,18 @@ export async function runAgentV2Turn(
     canUseTool,
     maxTurns: MAX_TURNS,
     // `env` REPLACES the subprocess environment — always spread process.env.
-    ...(key ? { env: { ...process.env, ANTHROPIC_API_KEY: key } } : {}),
+    // The key (when one resolved) and the per-user engine home ride along in
+    // the SAME composed env; an ambient-auth turn sets no key but still gets
+    // its tenant-isolated CLAUDE_CONFIG_DIR.
+    ...(key || sdkHome
+      ? {
+          env: {
+            ...process.env,
+            ...(key ? { ANTHROPIC_API_KEY: key } : {}),
+            ...(sdkHome ? { CLAUDE_CONFIG_DIR: sdkHome } : {}),
+          },
+        }
+      : {}),
     ...(resume ? { resume } : {}),
     ...(signal ? { signal } : {}),
   });

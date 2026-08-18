@@ -19,7 +19,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { runAgentV2Turn } from '../llm_agent/sdk/engine.mjs';
+import { runAgentV2Turn, agentSdkHomeFor } from '../llm_agent/sdk/engine.mjs';
 import { answerDecision, abortDecisionsForSession } from '../llm_agent/sdk/decisions.mjs';
 import { getDb } from '../kb/db.mjs';
 import {
@@ -249,20 +249,22 @@ async function handleV2SessionDelete(req, res, userId) {
   }
   const dropped = deleteAgentSession(getDb(), userId, chatSessionId);
   const sdkSessionId = dropped?.sdkSessionId ?? null;
-  deleteSdkTranscripts(sdkSessionId);
+  deleteSdkTranscripts(userId, sdkSessionId);
   sendJSON(res, 200, { ok: true, sdkSessionId });
   return true;
 }
 
 // Best-effort SDK transcript cleanup. The SDK stores per-session JSONL
-// transcripts under <CLAUDE_CONFIG_DIR>/projects/<encoded-workspace>/; a
-// deleted chat's transcripts are dead weight (and a privacy remnant), so
-// remove every entry whose name contains the sdk session id. Pure fs —
-// never a shell call — and silent on any failure (CLAUDE_CONFIG_DIR unset,
-// projects dir missing, unreadable entries): transcript cleanup must never
-// fail the mapping delete it follows.
-function deleteSdkTranscripts(sdkSessionId) {
-  const root = process.env.CLAUDE_CONFIG_DIR;
+// transcripts under <engine home>/projects/<encoded-workspace>/ — the SAME
+// per-user CLAUDE_CONFIG_DIR the engine composes for every turn
+// (agentSdkHomeFor in llm_agent/sdk/engine.mjs; production never sets the
+// env var by hand) — so a deleted chat's transcripts are dead weight (and a
+// privacy remnant): remove every entry whose name contains the sdk session
+// id. Pure fs — never a shell call — and silent on any failure (no engine
+// home for the user, projects dir missing, unreadable entries): transcript
+// cleanup must never fail the mapping delete it follows.
+function deleteSdkTranscripts(userId, sdkSessionId) {
+  const root = agentSdkHomeFor(userId);
   if (!root || !sdkSessionId) return;
   const projectsDir = path.join(root, 'projects');
   let workspaces;

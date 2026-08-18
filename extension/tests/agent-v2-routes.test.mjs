@@ -13,7 +13,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
@@ -33,6 +32,7 @@ const {
   deleteAgentSession,
 } = await import('../kb/agent-sessions.mjs');
 const { registerDecision, abortDecisionsForSession } = await import('../llm_agent/sdk/decisions.mjs');
+const { agentSdkHomeFor } = await import('../llm_agent/sdk/engine.mjs');
 const { handleAgentV2Routes } = await import('../routes/agent-v2.mjs');
 
 // --- req/res doubles (from agent-sdk-spike.test.mjs; makeReq additionally
@@ -330,12 +330,15 @@ test('session delete: drops the mapping, best-effort deletes SDK transcripts', a
   const user = newUser('v2route-del@example.com');
   markAgentSessionUsed(db, user.id, 'chat-del', { sdkSessionId: 'sdk-del-1234', model: 'claude-sonnet-5', mode: 'execute' });
 
-  const cfgRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'v2routes-cfg-'));
-  const prevCfg = process.env.CLAUDE_CONFIG_DIR;
-  process.env.CLAUDE_CONFIG_DIR = cfgRoot;
+  // The cleanup root is the SAME per-user engine home the engine composes
+  // (agentSdkHomeFor — derived from the data dir, NOT an env var production
+  // never sets), so this test scripts transcripts exactly where a live turn
+  // would have written them.
+  const home = agentSdkHomeFor(user.id);
+  assert.ok(home, 'registered user id resolves an engine home');
+  const ws = path.join(home, 'projects', '-tmp-w');
+  fs.mkdirSync(ws, { recursive: true });
   try {
-    const ws = path.join(cfgRoot, 'projects', '-tmp-w');
-    fs.mkdirSync(ws, { recursive: true });
     fs.writeFileSync(path.join(ws, 'sdk-del-1234.jsonl'), '{}\n');
     fs.writeFileSync(path.join(ws, 'unrelated.jsonl'), '{}\n');
 
@@ -354,9 +357,7 @@ test('session delete: drops the mapping, best-effort deletes SDK transcripts', a
     assert.equal(fs.existsSync(path.join(ws, 'unrelated.jsonl')), true);
     assert.equal(deleteAgentSession(db, user.id, 'chat-del'), null); // mapping row gone
   } finally {
-    if (prevCfg === undefined) delete process.env.CLAUDE_CONFIG_DIR;
-    else process.env.CLAUDE_CONFIG_DIR = prevCfg;
-    fs.rmSync(cfgRoot, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
   }
 
   // A chat with no sdk session bound (or never mapped) deletes cleanly too.
