@@ -104,6 +104,13 @@ final class ChatEngine {
     /// streaming placeholder append so an empty turn isn't read aloud.
     /// Publicly settable: the panel's session load/switch paths set it too.
     var suppressHistoryAnnounce = false
+    /// The parked AskUserQuestion the v2 engine is blocking on, if any. Set
+    /// by the transport's `onApproval` callback (`handleApprovalArrival`),
+    /// dropped by submit/dismiss and at turn start. Nil on legacy engines,
+    /// which never park a question. The STATE object rather than the raw
+    /// `AgentV2Approval` so submit/lastError can evolve on the card without
+    /// the engine re-publishing a new value. See AgentV2ApprovalState.swift.
+    var pendingApproval: AgentV2ApprovalState?
 
     /// Saved chats for `scope`, newest `lastUsedAt` first. Reloaded from disk
     /// by `refreshSessions()` — deliberately NOT on every history change; see
@@ -220,6 +227,16 @@ final class ChatEngine {
     /// panel wires it to `api.forgetSessionMemory(sessionId:)` in Task 7.
     var forgetSessionMemory: (String) async -> Void = { _ in }
 
+    /// Posts an AskUserQuestion decision (`POST /agent/v2/decision`) —
+    /// (requestId, sdkSessionId, answers) → the server's `ok` flag. Injected
+    /// like every other network collaborator: the engine reaches the backend
+    /// only through `ChatTransport`, which has no decision surface (the
+    /// decision is a separate request posted while the turn's stream stays
+    /// open). The default reports failure so an unwired engine surfaces that
+    /// on the card instead of silently succeeding; Task 12's panel wiring
+    /// connects the real `LlmIdeAPIClient.agentV2Decision`.
+    var postApprovalDecision: (String, String, [String: String]) async throws -> Bool = { _, _, _ in false }
+
     init(scope: ChatScope, transport: ChatTransport) {
         self.scope = scope
         self.transport = transport
@@ -278,6 +295,11 @@ final class ChatEngine {
         // Clear any stale pending-tool card from a prior turn the user ignored —
         // otherwise it stays interactive against the old args while a new turn runs.
         agent.pendingTool = nil
+        // Same reasoning for a parked v2 approval: a NEW turn starting means
+        // the old question was never answered (or already expired/aborted
+        // server-side), so its card must not stay interactive against the
+        // previous turn's requestId.
+        pendingApproval = nil
         // Same reasoning for a finished plan's checklist: without this, a prior
         // turn's completed/failed task list stays in agentPendingTasks and
         // (since PlanTimelineCard pins to the latest assistant turn) would
@@ -305,11 +327,15 @@ final class ChatEngine {
             // Stream so the user sees live progress ("Searching the web…",
             // "Writing the answer…") instead of a frozen spinner for the
             // 60–90s an agent turn can take. Falls back to buffered on a
-            // stream failure (see CodeAssistTransport).
+            // stream failure (see CodeAssistTransport). The 4-callback form
+            // surfaces v2 approvals; legacy transports take the protocol's
+            // default, which forwards to the 3-callback method above and
+            // never fires onApproval — byte-identical to the old call.
             let resp = try await transport.roundTrip(
                 input,
                 onProgress: { [self] progress in recordProgress(progress) },
-                onChunk: { [self] text in appendStreamedChunk(streamingID, text) }
+                onChunk: { [self] text in appendStreamedChunk(streamingID, text) },
+                onApproval: { [self] approval in handleApprovalArrival(approval) }
             )
             // If Stop fired during the await, don't append the (now-unwanted) reply.
             try Task.checkCancellation()
@@ -441,7 +467,8 @@ final class ChatEngine {
             let resp = try await transport.roundTrip(
                 input,
                 onProgress: { [self] progress in recordProgress(progress) },
-                onChunk: { [self] text in appendStreamedChunk(streamingID, text) }
+                onChunk: { [self] text in appendStreamedChunk(streamingID, text) },
+                onApproval: { [self] approval in handleApprovalArrival(approval) }
             )
             if let idx = messages.firstIndex(where: { $0.id == streamingID }) {
                 messages[idx].content = resp.reply

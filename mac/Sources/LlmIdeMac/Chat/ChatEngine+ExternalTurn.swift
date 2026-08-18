@@ -186,6 +186,8 @@ extension ChatEngine {
         error = nil
         agent.pendingTool = nil
         agent.agentPendingTasks = []
+        // Stale v2 approval card — same turn-start rule as runTurn.
+        pendingApproval = nil
         // Persist the user turn immediately, mirroring the old
         // MobileControlManager behavior of writing it before the round
         // trip starts — disk should not lag a full round-trip behind in
@@ -212,7 +214,16 @@ extension ChatEngine {
                     recordProgress(progress)
                     onProgress(progress.label)
                 },
-                onChunk: { [self] text in appendStreamedChunk(streamingID, text) }
+                onChunk: { [self] text in appendStreamedChunk(streamingID, text) },
+                onApproval: { [self] approval in
+                    handleApprovalArrival(approval)
+                    // handleApprovalArrival recorded the Mac-pending note
+                    // into the turn's tool steps for the mirrored transcript;
+                    // the phone's LIVE label channel doesn't observe
+                    // engine-side recordProgress calls, so forward the note
+                    // the same way every other progress label reaches it.
+                    onProgress(Self.externalApprovalNote)
+                }
             )
             try Task.checkCancellation()
             // Second race, found by code review after the entry guard above:

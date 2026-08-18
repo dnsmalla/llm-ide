@@ -149,6 +149,32 @@ struct ChatMessageList: View {
                                 .padding(.top, 4)
                                 .transition(.opacity)
                             }
+                            // v2 AskUserQuestion — placed like the
+                            // pending-action card above (under the last
+                            // assistant message), but driven purely off the
+                            // engine's approval state: it appears MID-turn
+                            // while the v2 engine parks on the answer, and
+                            // survives a failed submit so Submit can retry.
+                            // NOT gated on the turn's origin — the Mac panel
+                            // owns the shared engine, so a phone-driven
+                            // turn's question renders here too.
+                            if let approvalState = engine.pendingApproval,
+                               turn.id == history.last?.id,
+                               turn.role == .assistant {
+                                ApprovalQuestionCard(
+                                    state: approvalState,
+                                    onSubmit: { answers in
+                                        await engine.submitApproval(answers: answers)
+                                    },
+                                    onDismiss: { engine.dismissApproval() }
+                                )
+                                // Keyed by requestId: a second approval must
+                                // not inherit the previous card's @State
+                                // selection.
+                                .id(approvalState.approval.requestId)
+                                .padding(.top, 4)
+                                .transition(.opacity)
+                            }
                         }
                         if engine.busy {
                             HStack(spacing: 6) {
@@ -169,6 +195,7 @@ struct ChatMessageList: View {
                     .padding(Spacing.md)
                     .animation(.easeOut(duration: 0.22), value: history.count)
                     .animation(.easeOut(duration: 0.2), value: pendingTool?.name)
+                    .animation(.easeOut(duration: 0.2), value: engine.pendingApproval?.approval.requestId)
                     .animation(.easeOut(duration: 0.18), value: engine.busy)
                     .animation(.easeOut(duration: 0.2), value: engine.error)
                 }
