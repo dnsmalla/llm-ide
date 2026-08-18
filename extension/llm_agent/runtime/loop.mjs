@@ -218,7 +218,70 @@ function renderHistoryBlock(history, budget) {
   return ['# Previous conversation', ...body].join('\n\n');
 }
 
-function buildIterationPrompt({ systemPrompt, history, userMessage, prevOutput, toolResult, toolError }) {
+// Intra-turn memory budgets for renderTurnLog below. The single-slot design
+// this replaced (only the LAST output + LAST tool result survived into the
+// next iteration) made multi-read investigations thrash: a live Plan-mode
+// turn ping-ponged list-files ↔ read-file five times (9 of its 13 tool calls
+// were verbatim repeats) because each fetch evicted the other result from the
+// model's view. The read cache absorbed the re-execution but every repeat
+// still cost a full model round-trip. A replayed (non-latest) result is
+// clipped to the per-entry cap; when even the clipped log exceeds the total
+// budget, whole oldest entries are dropped behind an explicit "steps omitted"
+// note — never silently.
+const TURN_LOG_RESULT_CAP_CHARS = 16_000;
+const TURN_LOG_BUDGET_CHARS = 80_000;
+
+// Renders this turn's accumulated log — the model's own outputs and the tool
+// results/errors they produced, oldest first — as prompt blocks. The LAST
+// entry is the fresh result the model is being asked to act on, so it is
+// never clipped or dropped here (handlers already cap their own outputs);
+// earlier entries are replay context and get the per-entry cap. `budget` is
+// the caller's real headroom (never above TURN_LOG_BUDGET_CHARS): a large
+// user message must shrink the log, not stack on top of it, or the composed
+// prompt could cross runClaude's hard 500k throw mid-turn.
+function renderTurnLog(turnLog, budget = TURN_LOG_BUDGET_CHARS) {
+  if (turnLog.length === 0) return '';
+  const rendered = turnLog.map((entry, i) => {
+    if (entry.kind === 'assistant') {
+      return `# Assistant (your own output, earlier this turn)\n${entry.text}`;
+    }
+    // 'result' entries arrive pre-serialized (and pre-redacted) as
+    // `entry.json`; 'error' entries wrap the message the way the single-slot
+    // design always did.
+    const body = entry.kind === 'error'
+      ? JSON.stringify({ error: redactFence(String(entry.text)) })
+      : entry.json;
+    const isLatest = i === turnLog.length - 1;
+    const clipped = (!isLatest && body.length > TURN_LOG_RESULT_CAP_CHARS)
+      ? `${body.slice(0, TURN_LOG_RESULT_CAP_CHARS)}\n…(result clipped — you already saw it in full; re-call the tool ONLY if you truly need the clipped part)`
+      : body;
+    return `<<<TOOL_RESULT>>>\n${clipped}\n<<<END_TOOL_RESULT>>>`;
+  });
+  let total = rendered.reduce((sum, block) => sum + block.length, 0);
+  let drop = 0;
+  // Never drop the latest entry — it's what this iteration must respond to.
+  while (drop < rendered.length - 1 && total > budget) {
+    total -= rendered[drop].length;
+    drop += 1;
+  }
+  const kept = rendered.slice(drop);
+  if (drop > 0) {
+    kept.unshift(`_(${drop} earlier step(s) of this turn omitted to fit the prompt — their data is gone; re-fetch only what you actually still need)_`);
+  }
+  return kept.join('\n\n');
+}
+
+function buildIterationPrompt({ systemPrompt, history, userMessage, turnLog = [] }) {
+  // The log's budget is the smaller of its own cap and what the prompt-wide
+  // ceiling leaves after the two blocks that can never yield (system prompt,
+  // user message incl. attachments) — the same "must not cross runClaude's
+  // 500k throw" reasoning the history budget below applies. The latest entry
+  // still always survives (see renderTurnLog).
+  const turnLogBudget = Math.min(TURN_LOG_BUDGET_CHARS, Math.max(
+    0,
+    config.history.promptBudgetChars - (systemPrompt?.length || 0) - (userMessage?.length || 0),
+  ));
+  const turnLogBlock = renderTurnLog(turnLog, turnLogBudget);
   // History gets whatever the rest of the prompt leaves under the global
   // budget, capped by config.history.maxChars. Sized here (not inside
   // renderHistoryBlock) because this is the only place that knows how big the
@@ -226,7 +289,7 @@ function buildIterationPrompt({ systemPrompt, history, userMessage, prevOutput, 
   // as much as fits" safe: runClaude THROWS above 500 000 chars, so history
   // must yield to the parts of the prompt that can't be dropped.
   const fixedChars = (systemPrompt?.length || 0) + (userMessage?.length || 0)
-    + (prevOutput?.length || 0);
+    + turnLogBlock.length;
   const historyBudget = Math.max(
     0,
     Math.min(config.history.maxChars, config.history.promptBudgetChars - fixedChars),
@@ -234,21 +297,12 @@ function buildIterationPrompt({ systemPrompt, history, userMessage, prevOutput, 
   const historyBlock = renderHistoryBlock(history, historyBudget);
   const blocks = [systemPrompt];
   if (historyBlock) blocks.push(historyBlock);
-  // Redact fence sentinels from the user message — it is repeated in
-  // prevOutput on subsequent iterations and must not be parseable as a
-  // tool call if it happens to contain the <<<TOOL_CALL>>> sentinel.
+  // Redact fence sentinels from the user message — it is repeated in the
+  // turn log's assistant entries on subsequent iterations and must not be
+  // parseable as a tool call if it happens to contain the <<<TOOL_CALL>>>
+  // sentinel.
   blocks.push(`# User\n${redactFence(userMessage || '')}`);
-  if (prevOutput) {
-    blocks.push(`# Assistant (previous turn — your own output)\n${prevOutput}`);
-  }
-  if (toolResult !== undefined) {
-    // Redact fence sentinels before embedding — a KB snippet or nested
-    // agent answer containing <<<TOOL_CALL>>> would otherwise survive
-    // JSON.stringify as a parseable sentinel and forge a tool invocation.
-    blocks.push(`<<<TOOL_RESULT>>>\n${JSON.stringify(redactDeep(toolResult))}\n<<<END_TOOL_RESULT>>>`);
-  } else if (toolError !== undefined) {
-    blocks.push(`<<<TOOL_RESULT>>>\n${JSON.stringify({ error: redactFence(String(toolError)) })}\n<<<END_TOOL_RESULT>>>`);
-  }
+  if (turnLogBlock) blocks.push(turnLogBlock);
   blocks.push('Assistant:');
   return blocks.join('\n\n');
 }
@@ -378,13 +432,17 @@ export async function runAgentLoop({
   const readCache = new Map();
   let cacheHits = 0;
 
-  let prevOutput;
-  let toolResult;
-  let toolError;
+  // This turn's accumulated log — every model output and every tool
+  // result/error, oldest first (rendered by renderTurnLog). Replaces the
+  // single-slot prevOutput/toolResult/toolError trio, whose two-iteration
+  // horizon made the model re-fetch data it had already seen (the
+  // list-files ↔ read-file ping-pong described at renderTurnLog).
+  const turnLog = [];
+  const noteError = (message) => turnLog.push({ kind: 'error', text: message });
   let preToolText = '';
   // Echo-stall guard state (see the `!fence` branch below). Holds the exact
-  // string buildIterationPrompt embedded in the last <<<TOOL_RESULT>>> block,
-  // so a verbatim echo can be detected byte-for-byte.
+  // string renderTurnLog embeds in the latest <<<TOOL_RESULT>>> block, so a
+  // verbatim echo can be detected byte-for-byte.
   let lastToolResultJson = null;
   let echoNudged = false;
 
@@ -409,11 +467,7 @@ export async function runAgentLoop({
     // First pass = "thinking"; later passes mean we're folding a tool result
     // back in = "writing the answer".
     emit({ phase: i === 0 ? 'thinking' : 'writing', iteration: i + 1 });
-    const prompt = buildIterationPrompt({
-      systemPrompt, history, userMessage, prevOutput, toolResult, toolError,
-    });
-    toolResult = undefined;
-    toolError = undefined;
+    const prompt = buildIterationPrompt({ systemPrompt, history, userMessage, turnLog });
 
     // Pass userId so the HTTP path uses the user's own Anthropic key
     // when available, rather than silently falling back to the operator
@@ -442,7 +496,7 @@ export async function runAgentLoop({
       if (callSignal?.aborted) return deadlineReply(i);
       throw err;
     }
-    prevOutput = out;
+    turnLog.push({ kind: 'assistant', text: out });
     const { text, fence, parseError } = parseFence(out);
 
     // Echo-stall guard: a known fence-protocol failure is the model answering
@@ -461,9 +515,9 @@ export async function runAgentLoop({
     if (isEchoStall) {
       if (!echoNudged) {
         echoNudged = true;
-        toolError = 'Your last output only repeated the tool result instead of continuing. '
+        noteError('Your last output only repeated the tool result instead of continuing. '
           + 'Never repeat raw tool results. Continue the turn: call the next tool you need, '
-          + 'or write your final answer for the user.';
+          + 'or write your final answer for the user.');
         continue;
       }
       // Second echo: give up — one nudge is the retry budget (no echo loop) —
@@ -480,7 +534,7 @@ export async function runAgentLoop({
 
     if (!fence) {
       if (parseError) {
-        toolError = parseError;
+        noteError(parseError);
         continue;
       }
       if (sniff) sniff.flush();
@@ -492,13 +546,13 @@ export async function runAgentLoop({
 
     const skill = skills.get(fence.name);
     if (!skill) {
-      toolError = `Unknown tool: ${fence.name}`;
+      noteError(`Unknown tool: ${fence.name}`);
       continue;
     }
 
     const validation = validateArgs(skill.schema, fence.arguments, skill.name);
     if (validation.error) {
-      toolError = validation.error;
+      noteError(validation.error);
       continue;
     }
 
@@ -540,7 +594,7 @@ export async function runAgentLoop({
       }
     }
     if (result.error) {
-      toolError = result.error;
+      noteError(result.error);
       continue;
     }
     // If a read handler surfaces a pendingTool (e.g. ask-internal
@@ -555,10 +609,11 @@ export async function runAgentLoop({
         cacheHits,
       };
     }
-    toolResult = result;
-    // Mirror of buildIterationPrompt's serialization, kept for the echo-stall
-    // guard above — the two must stringify identically for verbatim detection.
+    // Serialized once — renderTurnLog embeds this exact string in the latest
+    // <<<TOOL_RESULT>>> block and the echo-stall guard above compares against
+    // it, so verbatim detection can't drift from what the model was shown.
     lastToolResultJson = JSON.stringify(redactDeep(result));
+    turnLog.push({ kind: 'result', json: lastToolResultJson });
   }
 
   const capMsg = `\n\n_(reached the ${cap}-call tool iteration limit — try again)_`;
