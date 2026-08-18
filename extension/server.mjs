@@ -63,7 +63,11 @@ const HOST = config.host;
 // 31→32: P0 spike — POST /agent-sdk/spike (SSE stream from the Claude Agent
 //     SDK engine with the kb_search in-process tool). Temporary endpoint;
 //     its successor is the P1 /agent/v2/* chat protocol.
-const SERVER_API_VERSION = 32;
+// 32→33: P1 v2 engine — POST /agent/v2/stream (SSE chat turns with
+//     init/mode_set/delta/tool_*/approval_*/result/error events),
+//     POST /agent/v2/decision (AskUserQuestion approval answers), and
+//     DELETE /agent/v2/session (chat→SDK-session mapping + transcripts).
+const SERVER_API_VERSION = 33;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -71,6 +75,9 @@ const ENDPOINTS = [
   '/chat',
   '/code-assist',
   '/agent-sdk/spike',
+  '/agent/v2/stream',
+  '/agent/v2/decision',
+  '/agent/v2/session',
   '/generate-questions',
   '/extract-entities',
   '/kb/ingest',
@@ -191,6 +198,9 @@ function rateLimitProfile(url, method) {
   if (url === '/generate-docx')          return 'llmFast';
   if (url === '/generate-doc')           return 'llmFast';          // LLM export twin of /generate-docx
   if (url === '/code-assist')            return 'llm';            // expensive, cap tighter
+  // The v2 engine's chat turn stream — the Agent-SDK successor of
+  // /code-assist, same cost class (a multi-minute agent turn).
+  if (url === '/agent/v2/stream')        return 'llm';
   if (url === '/kb/generate-plan')       return 'llm';
   if (url === '/kb/analyze-risks')       return 'llm';
   if (url === '/kb/generate-code')       return 'llm';
@@ -349,8 +359,11 @@ const server = http.createServer(async (req, res) => {
 
   // Mount the Phase-2 KB router before the rest so /kb/* never falls
   // through to the legacy "no route" branch.  handleKB returns true once
-  // it has written a response; false means the URL isn't a /kb/* path.
-  if ((req.url || '').startsWith('/kb')) {
+  // it has written a response; false means the URL isn't a handled path.
+  // /agent/v2/* (the Agent-SDK chat engine) rides the same dispatcher —
+  // its route module is mounted inside handleKB next to the other
+  // handle*Routes calls and shares that tenancy gate.
+  if ((req.url || '').startsWith('/kb') || (req.url || '').startsWith('/agent/v2')) {
     const budgetMs = routeTimeoutMs(req.url || '', req.method || 'GET');
     const handled = budgetMs != null
       ? await withRouteTimeout(req, res, budgetMs, () => handleKB(req, res))

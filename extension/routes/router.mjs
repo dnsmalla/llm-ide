@@ -19,6 +19,7 @@ import { listActiveSessions } from '../agents/live-sessions.mjs';
 import { listRuns } from '../agents/meeting-agent.mjs';
 // live-sessions imports moved into routes/live.mjs.
 import { handleAgentRoutes } from './agent.mjs';
+import { handleAgentV2Routes } from './agent-v2.mjs';
 import { handlePlanningRoutes } from './planning.mjs';
 import { handleIssueScheduleRoutes } from './issue-schedule.mjs';
 import { handleLiveRoutes } from './live.mjs';
@@ -68,10 +69,14 @@ function resolveSlackToken(userId) {
 }
 
 // Returns true if the request was handled (response written), false if
-// the URL is not a /kb/* route — caller falls through to its own routing.
+// the URL is not a /kb/* or /agent/v2/* path — caller falls through to its
+// own routing.
 export async function handleKB(req, res) {
   const url = req.url || '';
-  if (!url.startsWith('/kb')) return false;
+  // /agent/v2/* (the Agent-SDK chat engine) rides this dispatcher — it is
+  // mounted below alongside the other route modules and shares the tenancy
+  // gate — but it is not part of the /kb tree.
+  if (!url.startsWith('/kb') && !url.startsWith('/agent/v2')) return false;
 
   // Tenancy gate.  By the time the request reaches this router, the
   // global auth middleware has already verified the JWT and attached
@@ -1002,6 +1007,11 @@ export async function handleKB(req, res) {
     // when the handler matched; we fall through on false so a route
     // typo here still hits the 404 at the bottom of the function.
     if (await handleAgentRoutes(req, res, { userId, url })) return true;
+
+    // ── Agent v2 engine (/agent/v2/*) ─────────────────────────────
+    // The Agent-SDK chat surface: SSE turn stream, approval decisions,
+    // session delete. See routes/agent-v2.mjs.
+    if (await handleAgentV2Routes(req, res)) return true;
 
     // (Old inline agent block removed — extracted to routes/agent.mjs)
 
