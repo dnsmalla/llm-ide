@@ -11,6 +11,33 @@ protocol ChatTransport: Sendable {
         onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
         onChunk: @escaping @MainActor (String) -> Void
     ) async throws -> ChatTransportResult
+
+    /// v2 engines surface mid-turn approval questions (a parked
+    /// `AskUserQuestion` the turn blocks on until the user answers via
+    /// `POST /agent/v2/decision`). The default below ignores them — legacy
+    /// engines (`CodeAssistTransport`, `AgentAskTransport`, test doubles)
+    /// never produce any, so they compile unchanged and their callers can
+    /// adopt the 4-callback form without caring which engine answered.
+    func roundTrip(
+        _ input: ChatTransportInput,
+        onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
+        onChunk: @escaping @MainActor (String) -> Void,
+        onApproval: @escaping @MainActor (AgentV2Approval) -> Void
+    ) async throws -> ChatTransportResult
+}
+
+extension ChatTransport {
+    /// Default 4-callback round trip: forward to the 3-callback variant and
+    /// drop `onApproval` — the legacy engines this default serves cannot
+    /// park on a question.
+    func roundTrip(
+        _ input: ChatTransportInput,
+        onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
+        onChunk: @escaping @MainActor (String) -> Void,
+        onApproval: @escaping @MainActor (AgentV2Approval) -> Void
+    ) async throws -> ChatTransportResult {
+        try await roundTrip(input, onProgress: onProgress, onChunk: onChunk)
+    }
 }
 
 /// Everything one code-assist turn needs, independent of the SwiftUI view
