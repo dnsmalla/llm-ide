@@ -113,12 +113,19 @@ test('rebuild removes stale entries when a source is disabled', () => {
     'still-enabled source survives');
 });
 
-test('user with nothing enabled gets a valid empty snapshot', () => {
-  refreshDefaultSnapshot('nobody');
+// CONTRACT CHANGE (2026-08-18): this used to assert "nothing enabled → a
+// valid EMPTY snapshot" — i.e. the refresh replaced the folder with nothing.
+// That exact behavior deleted every committed skill in production the first
+// time a user with only default-sources enabled clicked Refresh. A no-input
+// refresh now leaves the existing folder alone and reports noSources.
+test('user with nothing enabled keeps the previous snapshot untouched (noSources)', () => {
   const dir = defaultSnapshotDir();
-  const mcp = JSON.parse(fs.readFileSync(path.join(dir, '.mcp.json'), 'utf8'));
-  assert.deepEqual(mcp.mcpServers, {});
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, '_meta.json'), 'utf8')).counts.skills, 0);
+  const before = JSON.parse(fs.readFileSync(path.join(dir, '_meta.json'), 'utf8'));
+  const result = refreshDefaultSnapshot('nobody');
+  assert.equal(result.noSources, true);
+  assert.equal(result.counts.skills, 0, 'reported counts describe the aborted rebuild, not the kept folder');
+  const after = JSON.parse(fs.readFileSync(path.join(dir, '_meta.json'), 'utf8'));
+  assert.deepEqual(after, before, 'the folder on disk must be byte-identical to before the no-input refresh');
 });
 
 // ── Review-fix behaviors ────────────────────────────────────────────────────
@@ -329,4 +336,32 @@ test('default-sources own hooks.json is readable by the generic per-source hook 
   assert.equal(found[0].event, 'PreToolUse');
   assert.equal(found[0].command, 'echo hi');
   assert.equal(countDiscoveryHooks(defaultSnapshotDir()), 1);
+});
+
+// Regression: a user whose only enabled source is default-sources itself has
+// ZERO input sources (the folder is output, never input). A refresh used to
+// rebuild anyway and swap in an EMPTY snapshot — silently deleting every
+// committed skill from llm_default_sources/ (observed live 2026-08-18:
+// _meta.json "sources": 0 and all SKILL.md files gone after one Refresh
+// click). With no inputs the refresh must keep the existing folder untouched
+// and say so, instead of wiping it.
+test('refresh with zero enabled input sources keeps the existing snapshot and reports noSources', () => {
+  writeRegistry([
+    { id: DEFAULT_SOURCES_ID, name: 'Default Sources', origin: 'local',
+      location: defaultSnapshotDir(), builtin: true },
+    { id: 'extra', name: 'Extra', origin: 'local', location: extra, builtin: false },
+  ]);
+  const emptyUser = 'u-empty';
+  setEnabled(emptyUser, DEFAULT_SOURCES_ID, true); // enabled set = [default-sources] only
+
+  const dir = defaultSnapshotDir();
+  fs.mkdirSync(path.join(dir, 'skills', 'committed-marker'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'skills', 'committed-marker', 'SKILL.md'),
+    '---\nname: committed-marker\ndescription: c\n---\n');
+
+  const result = refreshDefaultSnapshot(emptyUser);
+  assert.equal(result.ok, true);
+  assert.equal(result.noSources, true);
+  assert.ok(fs.existsSync(path.join(dir, 'skills', 'committed-marker', 'SKILL.md')),
+    'a no-input refresh must never wipe the existing snapshot');
 });

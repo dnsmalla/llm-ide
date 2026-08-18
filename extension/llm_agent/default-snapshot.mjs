@@ -52,7 +52,11 @@
 // consent/enable change, server start, and POST /auth/me/llm-sources/
 // refresh-default. Rebuild = staging dir + rename, so the folder is never
 // half-written and entries from sources that were disabled since the last
-// refresh disappear.
+// refresh disappear — EXCEPT when the rebuild would have zero input sources
+// at all: then the refresh is a guarded no-op (noSources) that keeps the
+// existing folder, so entries from a just-disabled LAST source linger until
+// some source is enabled again. Deliberate — the alternative wiped the
+// committed snapshot (see the guard in refreshDefaultSnapshot).
 //
 // DESIGN DECISIONS (from review):
 // - Single global folder, NOT per-user. The snapshot is a browsability
@@ -260,6 +264,17 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
       hookManifest[event].push({ matcher, hooks: [{ type: 'command', command, _source: src.id }] });
       counts.hooks += 1;
     }
+  }
+
+  // Zero input sources (default-sources itself is output, never input — see
+  // the skip above): swapping in the staging folder here would replace the
+  // existing snapshot with an EMPTY one, silently deleting every committed
+  // skill. Observed live 2026-08-18: a user whose only enabled source was
+  // default-sources clicked Refresh and lost all 15 skills in one click.
+  // Keep the existing folder untouched and tell the caller why.
+  if (counts.sources === 0) {
+    rmSync(staging, { recursive: true, force: true });
+    return { ok: true, dir: dest, counts, skipped, noSources: true };
   }
 
   mkdirSync(join(staging, 'hooks'), { recursive: true });

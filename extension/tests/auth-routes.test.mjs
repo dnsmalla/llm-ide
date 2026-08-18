@@ -789,6 +789,30 @@ test('POST /auth/me/llm-sources/toggle is per-user, not admin-gated, and validat
   assert.equal(list.json().sources.find((s) => s.id === 'builtin').enabled, true);
 });
 
+// Regression: the refresh-default route used to rebuild the response by hand
+// and DROP the snapshot's `noSources` flag, so the Mac client could never
+// tell a real rebuild from the zero-input guard keeping the old folder — the
+// guard's outcome arrived as a silent no-op. The flag must survive the wire
+// in both states.
+test('POST /auth/me/llm-sources/refresh-default forwards noSources through the wire', async () => {
+  const { user } = await registerAndLogin();
+  const u = { id: user.id };
+
+  // A fresh user's enabled set is implicitly [default-sources] only — zero
+  // INPUT sources, so the guard keeps the existing folder and says so.
+  const kept = await callAuth({ method: 'POST', url: '/auth/me/llm-sources/refresh-default', user: u });
+  assert.equal(kept.statusCode, 200, kept._body);
+  assert.equal(kept.json().noSources, true);
+
+  // With a real input source enabled, the rebuild runs and the flag is false.
+  const on = await callAuth({ method: 'POST', url: '/auth/me/llm-sources/toggle', user: u, body: { id: 'builtin', enabled: true } });
+  assert.equal(on.statusCode, 200, on._body);
+  const rebuilt = await callAuth({ method: 'POST', url: '/auth/me/llm-sources/refresh-default', user: u });
+  assert.equal(rebuilt.statusCode, 200, rebuilt._body);
+  assert.equal(rebuilt.json().noSources, false);
+  assert.ok(rebuilt.json().counts.sources >= 1);
+});
+
 test('llm-sources admin-gated routes reject a non-admin caller', async () => {
   const { user } = await registerAndLogin();
   const u = { id: user.id }; // no role -> not 'admin'

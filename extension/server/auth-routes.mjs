@@ -1138,7 +1138,10 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     try {
       const { refreshDefaultSnapshot } = await import('../llm_agent/default-snapshot.mjs');
       const result = refreshDefaultSnapshot(req.user.id);
-      send(res, 200, { ok: true, dir: result.dir, counts: result.counts });
+      // noSources must survive the wire: it's what tells the client the
+      // guard kept the existing folder (zero enabled input sources) instead
+      // of rebuilding — dropping it turns that outcome into a silent no-op.
+      send(res, 200, { ok: true, dir: result.dir, counts: result.counts, noSources: result.noSources === true });
     } catch (err) {
       send(res, 500, { error: { code: 'SNAPSHOT_FAILED', message: err.message || 'snapshot failed' } });
     }
@@ -1182,7 +1185,8 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       try {
         const { refreshDefaultSnapshot } = await import('../llm_agent/default-snapshot.mjs');
         const r = refreshDefaultSnapshot(req.user.id);
-        send(res, 200, { ok: true, dir: r.dir, counts: r.counts });
+        // Same noSources passthrough as the refresh-default route above.
+        send(res, 200, { ok: true, dir: r.dir, counts: r.counts, noSources: r.noSources === true });
       } catch (err) {
         send(res, 500, { error: { code: 'SNAPSHOT_FAILED', message: err.message || 'snapshot failed' } });
       }
