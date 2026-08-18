@@ -31,6 +31,7 @@ import { buildReadableRoots } from '../runtime/handlers/repo-files.mjs';
 import { config } from '../../core/config.mjs';
 import { sanitizeForPrompt, sanitizeLine } from '../../core/utils.mjs';
 import { getDb } from '../../kb/db.mjs';
+import { usdCapForModel } from '../../kb/usage.mjs';
 import { getSecret } from '../../server/vault.mjs';
 import { mapSdkMessage } from './events.mjs';
 import { buildLlmIdeServer } from './tools.mjs';
@@ -247,6 +248,27 @@ const sdkQueryFactory = (prompt, options) => query({ prompt, options });
 
 const MAX_TURNS = 40;
 
+// --- Turn budget (spec §7: "maxBudgetUsd from the user's model-limits
+// config when set") ------------------------------------------------------------
+//
+// What the model-limits system ACTUALLY stores (kb/usage.mjs + migration
+// 0019): per-(user, provider, model) rows in `model_limits` with
+// limit_value (an integer COUNT), unit ∈ {'runs','tokens'}, window_kind ∈
+// {'daily','monthly'}, threshold_pct. Those are windowed usage caps — never
+// USD — and no pricing table exists anywhere in the install, so converting a
+// runs/tokens cap into dollars would mean inventing an exchange rate that
+// silently rots as prices change. This resolver deliberately does NOT do
+// that; it resolves a budget only from a usd-unit row (usdCapForModel —
+// setLimits currently rejects that unit, so no such row can exist via the
+// API yet; the read path is wired so the moment the limits system grows a
+// USD unit, v2 turns pick it up with no engine change). Until then every v2
+// turn runs uncapped, with the per-model caps still enforced AFTER the fact
+// by the usage ledger: every result is metered via recordUsage in the route,
+// so resolveModel's window caps and auto-fallback keep working unchanged.
+export function resolveMaxBudgetUsd(userId, model, { usdCap = usdCapForModel } = {}) {
+  return usdCap(getDb(), userId, 'anthropic', typeof model === 'string' && model ? model : null);
+}
+
 // v2 is read-and-answer: write/shell tools are not wired yet, so a deny with
 // an instruction to re-plan reads better to the model than a silent hang.
 const DENY_NEXT_RELEASE = 'Writes and shell commands arrive in the next engine release; re-plan using read-only tools.';
@@ -284,7 +306,7 @@ export async function runAgentV2Turn(
     resumeSdkSessionId, onEvent, signal, allowAmbientAuth = false,
     queryFactory = sdkQueryFactory,
   } = {},
-  { readSkill = readSkillInstructions, roots = buildReadableRoots } = {},
+  { readSkill = readSkillInstructions, roots = buildReadableRoots, resolveBudget = resolveMaxBudgetUsd } = {},
 ) {
   // Without a workspace the SDK would inherit the server process's cwd —
   // a v2 turn is always rooted in the request's workspace or not run at all.
@@ -366,11 +388,20 @@ export async function runAgentV2Turn(
     { readSkill, roots },
   );
 
+  // Spec §7 — when the user's limits config yields a usable USD cap for the
+  // model, cap this query's spend (the SDK stops with an error_max_budget_usd
+  // result). Only the REQUESTED model is consulted: an unspecified model is
+  // resolved by the SDK itself at init, after composition — capping against a
+  // guess would cap the wrong budget. See resolveMaxBudgetUsd for exactly
+  // what the limits system stores and why runs/tokens caps don't map here.
+  const maxBudgetUsd = resolveBudget(userId, model);
+
   const q = queryFactory(prompt, {
     ...queryOptions,
     mcpServers: { llmide: buildLlmIdeServer(userId) },
     canUseTool,
     maxTurns: MAX_TURNS,
+    ...(maxBudgetUsd ? { maxBudgetUsd } : {}),
     // `env` REPLACES the subprocess environment — always spread process.env.
     // The key (when one resolved) and the per-user engine home ride along in
     // the SAME composed env; an ambient-auth turn sets no key but still gets

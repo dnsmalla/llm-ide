@@ -30,8 +30,10 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 const agentSdkRoot = path.join(path.dirname(tmpDb), 'agent-sdk');
 try { fs.rmSync(agentSdkRoot, { recursive: true, force: true }); } catch { /* ok */ }
 
-const { buildEngineOptions, resolveAnthropicKey, runAgentV2Turn, agentSdkHomeFor } = await import('../llm_agent/sdk/engine.mjs');
+const { buildEngineOptions, resolveAnthropicKey, runAgentV2Turn, agentSdkHomeFor, resolveMaxBudgetUsd } = await import('../llm_agent/sdk/engine.mjs');
 const { answerDecision, abortDecisionsForSession } = await import('../llm_agent/sdk/decisions.mjs');
+const { registerUser } = await import('../server/users.mjs');
+const { getDb } = await import('../kb/db.mjs');
 
 // --- The brief's binding contract -------------------------------------------
 
@@ -388,6 +390,56 @@ test('missing workspaceRoot is rejected before any query starts', async () => {
     (e) => /workspaceRoot is required/.test(e.message),
   );
   assert.equal(queryStarted, false);
+});
+
+// --- maxBudgetUsd (spec §7) ----------------------------------------------------
+
+test('maxBudgetUsd: a usable cap flows into query options; no cap → option absent',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const seen = [];
+    const capped = { messages: [] };
+    await runAgentV2Turn({
+      message: 'm', userId: 'u1', mode: 'execute', model: 'claude-sonnet-5',
+      agentContext: { workspaceRoot: '/tmp/w' },
+      onEvent: () => {}, queryFactory: makeFakeQuery(capped),
+    }, { ...turnInjectable, resolveBudget: (...args) => { seen.push(args); return 1.25; } });
+    assert.deepEqual(seen, [['u1', 'claude-sonnet-5']], 'resolver sees (userId, requested model)');
+    assert.equal(capped.options.maxBudgetUsd, 1.25);
+
+    const uncapped = { messages: [] };
+    await runAgentV2Turn({
+      message: 'm', userId: 'u1', mode: 'execute', model: 'claude-sonnet-5',
+      agentContext: { workspaceRoot: '/tmp/w' },
+      onEvent: () => {}, queryFactory: makeFakeQuery(uncapped),
+    }, { ...turnInjectable, resolveBudget: () => null });
+    assert.ok(!('maxBudgetUsd' in uncapped.options), 'no usable cap → option absent');
+  }));
+
+test('resolveMaxBudgetUsd: runs/tokens caps (all model-limits stores today) yield no USD cap; a usd-unit row resolves', () => {
+  const db = getDb();
+  const user = registerUser(db, {
+    email: 'v2budget@example.com', password: 'CorrectHorseBattery', displayName: 't',
+  });
+  // No limits configured → no budget.
+  assert.equal(resolveMaxBudgetUsd(user.id, 'claude-sonnet-5'), null);
+  // A runs cap — the shape the "Model & Limits" UI actually writes — is a
+  // windowed usage count, not dollars: must NOT be laundered into maxBudgetUsd.
+  db.prepare(
+    `INSERT INTO model_limits (user_id, provider, model, priority, enabled, limit_value, unit, window_kind, threshold_pct)
+     VALUES (?, 'anthropic', 'claude-sonnet-5', 0, 1, 500, 'runs', 'daily', 90)`,
+  ).run(user.id);
+  assert.equal(resolveMaxBudgetUsd(user.id, 'claude-sonnet-5'), null, 'a runs cap is not a USD budget');
+  // A usd-unit row — not producible via setLimits today (VALID_UNITS rejects
+  // it; inserted raw here) — resolves as the per-turn ceiling. That is the
+  // read path the limits system grows into without an engine change.
+  db.prepare(
+    `UPDATE model_limits SET unit='usd', limit_value=5 WHERE user_id=? AND model='claude-sonnet-5'`,
+  ).run(user.id);
+  assert.equal(resolveMaxBudgetUsd(user.id, 'claude-sonnet-5'), 5);
+  // Guards: other model, no model, no user → null.
+  assert.equal(resolveMaxBudgetUsd(user.id, 'claude-opus-4-8'), null);
+  assert.equal(resolveMaxBudgetUsd(user.id, null), null);
+  assert.equal(resolveMaxBudgetUsd(null, 'claude-sonnet-5'), null);
 });
 
 test('auth: no key throws the spike error unless allowAmbientAuth',

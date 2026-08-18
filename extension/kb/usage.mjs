@@ -286,6 +286,27 @@ export function flagQuota(db, userId, provider, model, now = new Date()) {
   } catch { /* best effort */ }
 }
 
+// Per-query USD budget for the agent v2 engine (spec 2026-08-18 §7:
+// "maxBudgetUsd from the user's model-limits config when set"). The limits
+// UI writes runs/tokens caps only (VALID_UNITS), so today this returns null
+// for every user — but the read is deliberately RAW: `getLimits` coerces
+// unknown units to 'runs' (defensive coercion for HTTP-shaped data), which
+// would launder a future usd-unit row into a run count. When the limits
+// system grows a USD unit, this is the one query that already serves it.
+export function usdCapForModel(db, userId, provider, model) {
+  if (!userId || !provider || !model) return null;
+  try {
+    const row = db.prepare(
+      `SELECT limit_value FROM model_limits
+        WHERE user_id=? AND provider=? AND model=? AND unit='usd' AND enabled=1`
+    ).get(userId, provider, model);
+    const cap = Number(row?.limit_value);
+    return Number.isFinite(cap) && cap > 0 ? cap : null;
+  } catch {
+    return null; // best-effort — a limits read must never fail the turn
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Resolution — the auto-switch brain.
 // ---------------------------------------------------------------------------
