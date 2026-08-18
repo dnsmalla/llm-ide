@@ -1,4 +1,5 @@
 import Foundation
+import os.log
 
 extension LlmIdeAPIClient {
 
@@ -300,5 +301,112 @@ extension LlmIdeAPIClient {
                                 message: "The response stream ended unexpectedly.", details: nil)
         }
         return CodeAssistResponse(reply: reply, usage: usage, pendingTool: pendingTool, continueNeeded: continueNeeded, tasks: tasks, mode: mode)
+    }
+
+    // MARK: - Agent v2 (Agent-SDK chat engine)
+
+    private static let agentV2Log = Logger(subsystem: "com.llmide.macapp", category: "API")
+
+    /// Streams one v2 chat turn from `POST /agent/v2/stream`.
+    ///
+    /// `body` is the request dictionary the caller assembled (message,
+    /// language, model, mode, skills, agentContext, attachments, fresh) —
+    /// deliberately untyped `[String: Any]` so the shared-engine layer owns
+    /// the shape and the server can grow it without a client release; the
+    /// values must be JSON-serializable.
+    ///
+    /// SSE handling copies `codeAssistStream` exactly: `data:`-prefixed
+    /// lines, one JSON event each, unknown/unparseable lines skipped
+    /// silently (the decode layer already maps unknown TYPES onto `.sdk`).
+    /// Unlike the legacy endpoint there is nothing to return — terminal
+    /// state arrives as `.result` / `.error` events through `onEvent`, and
+    /// a stream-level `error` is dispatched, not thrown: the v2 session
+    /// layer (Tasks 10–12) owns turning it into chat state, including the
+    /// SESSION_UNRESUMABLE retry-with-`fresh` dance. Only transport-level
+    /// failures (non-200 before the stream starts, connection errors) throw.
+    func agentV2Stream(
+        _ body: [String: Any],
+        onEvent: @escaping @MainActor (AgentV2Event) -> Void,
+    ) async throws {
+        guard let url = URL(string: baseURL + "/agent/v2/stream") else { throw APIError.invalidURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        if let token = await MainActor.run(body: { _sessionStore?.accessToken }) {
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (bytes, response) = try await session(for: "/agent/v2/stream").bytes(for: req)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.http(status: 0, code: "NO_RESPONSE", message: "No HTTP response", details: nil)
+        }
+        guard http.statusCode == 200 else {
+            // Validation failures answer as plain JSON before the SSE
+            // headers go out — same shape as the legacy stream's guard.
+            throw APIError.http(status: http.statusCode, code: "HTTP_ERROR",
+                                message: "Agent v2 stream request failed (\(http.statusCode))", details: nil)
+        }
+        for try await line in bytes.lines {
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            guard !payload.isEmpty, let data = payload.data(using: .utf8),
+                  let evt = AgentV2Event.decode(fromJSON: data)
+            else { continue }
+            await onEvent(evt)
+        }
+    }
+
+    struct AgentV2DecisionRequest: Encodable {
+        let requestId: String
+        let sdkSessionId: String
+        let answers: [String: String]
+    }
+
+    private struct AgentV2DecisionResponse: Decodable { let ok: Bool }
+
+    /// Answers a parked AskUserQuestion approval via
+    /// `POST /agent/v2/decision`. Returns the server's `ok` flag.
+    ///
+    /// House-error-convention note: this client has no status-tolerant
+    /// pattern — its core `send` turns every non-2xx into `APIError.http`.
+    /// So a 403 (decision belongs to another user/session) or 404
+    /// (unknown/expired requestId) THROWS here; callers that want
+    /// best-effort semantics catch `APIError.http` themselves. A `false`
+    /// return only happens if a 200 body ever reports `ok:false`.
+    func agentV2Decision(requestId: String, sdkSessionId: String, answers: [String: String]) async throws -> Bool {
+        let resp: AgentV2DecisionResponse = try await post(
+            "/agent/v2/decision",
+            body: AgentV2DecisionRequest(requestId: requestId, sdkSessionId: sdkSessionId, answers: answers),
+            authenticated: true,
+        )
+        return resp.ok
+    }
+
+    private struct AgentV2DeleteSessionRequest: Encodable { let chatSessionId: String }
+    private struct AgentV2DeletedSession: Decodable { let ok: Bool?; let sdkSessionId: String? }
+
+    /// Drops the server-side chat→SDK-session mapping (plus its SDK
+    /// transcripts) via `DELETE /agent/v2/session`.
+    ///
+    /// Best-effort BY CONTRACT: the Mac's local chat delete must proceed
+    /// whether or not the server cooperates, so failures are swallowed to
+    /// the log and this method returns normally. (The `throws` stays in
+    /// the signature to match the pinned Task 10–12 interface; there is
+    /// no throw path in practice.)
+    func agentV2DeleteSession(chatSessionId: String) async throws {
+        do {
+            // Core `delete` helper sends no body, and this route reads
+            // {chatSessionId} from one — so go through `send` directly.
+            let _: AgentV2DeletedSession = try await send(
+                path: "/agent/v2/session",
+                method: "DELETE",
+                body: AgentV2DeleteSessionRequest(chatSessionId: chatSessionId),
+                authenticated: true,
+            )
+        } catch {
+            Self.agentV2Log.error("agentV2DeleteSession failed for \(chatSessionId, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
     }
 }
