@@ -171,6 +171,17 @@ extension ChatEngine {
     /// the switch and no-op instead of acting on the new session's history.
     func resetTransientSessionState() {
         agent.pendingTool = nil
+        // A parked v2 approval belongs to the OUTGOING chat: left in place,
+        // its card renders under the new chat's last assistant message and
+        // Submit posts the old requestId with a still-valid sdkSessionId —
+        // same user, so the server's tenancy check passes and the decision
+        // genuinely lands in the wrong chat. Same staleness class as
+        // `agent.pendingTool` above: drop the card, and the transport's
+        // recorded SDK session id with it, so the next chat's submits can't
+        // post against the old chat's SDK session either (its own `init`
+        // event re-records the new id on the next turn).
+        pendingApproval = nil
+        (transport as? AgentV2Transport)?.resetSdkSessionId()
         error = nil
         agent.nudgePrompt = nil
         agent.agentSessionId = UUID().uuidString

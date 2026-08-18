@@ -84,6 +84,16 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
     /// value alongside the parked `AgentV2Approval`.
     private(set) var sdkSessionId: String?
 
+    /// Clears the recorded SDK session id — the session-swap staleness half
+    /// of `ChatEngine.resetTransientSessionState`. The id belongs to the
+    /// outgoing chat's SDK session, and a decision POSTed against it after
+    /// the swap would pass the server's requestId + sdkSessionId tenancy
+    /// check (same user) while answering the wrong chat's question. The next
+    /// turn's `init` event records the new chat's id.
+    func resetSdkSessionId() {
+        sdkSessionId = nil
+    }
+
     init(streamer: AgentV2Streaming) {
         self.streamer = streamer
     }

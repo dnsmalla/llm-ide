@@ -198,6 +198,43 @@ struct AgentV2ApprovalTests {
         #expect(engine.pendingApproval == nil)
     }
 
+    @Test("Session swap drops a parked approval and its SDK session id — a later submit posts nothing")
+    func sessionSwapDropsParkedApproval() async throws {
+        try await withTempStore {
+            let stream = ScriptedAgentV2Stream()
+            let engine = ChatEngine(scope: .explorer, transport: AgentV2Transport(streamer: stream))
+            let poster = ScriptedDecisionPoster()
+            engine.postApprovalDecision = { requestId, sdkSessionId, answers in
+                try await poster.post(requestId: requestId, sdkSessionId: sdkSessionId, answers: answers)
+            }
+            // Chat A loads, runs a turn, parks an approval — its init event
+            // carrying the SDK session id a submit would post with.
+            let a = ChatSession(scope: .explorer, title: "Chat A")
+            ChatSessionStore.save(a)
+            engine.handleOnAppearSessions()
+            stream.events = approvalTurnEvents(requestId: "req-A", sdkSessionId: "sdk-A")
+            await engine.runTurn("hello")
+            #expect(engine.pendingApproval?.approval.requestId == "req-A")
+            #expect(engine.agentV2SessionId == "sdk-A")
+
+            // Swap to chat B — the same driving as ChatEngineSessionTests'
+            // epochBump: save the target, call switchSession directly.
+            let b = ChatSession(scope: .explorer, title: "Chat B")
+            ChatSessionStore.save(b)
+            engine.switchSession(to: b.id)
+
+            // The parked card AND the id it would post with are gone — the
+            // same staleness class as agent.pendingTool on the same reset.
+            #expect(engine.pendingApproval == nil)
+            #expect(engine.agentV2SessionId == nil)
+
+            // Decisive: submitting on the cleared state is a no-op, so chat
+            // A's requestId can never be answered from chat B.
+            await engine.submitApproval(answers: ["Which file?": "A.md"])
+            #expect(poster.calls.isEmpty)
+        }
+    }
+
     // MARK: - Dismiss
 
     @Test("dismissApproval clears without posting anything")
