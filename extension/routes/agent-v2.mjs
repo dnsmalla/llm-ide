@@ -157,6 +157,13 @@ async function handleV2Stream(req, res, userId, deps) {
       resumeSdkSessionId: resumeSdkSessionId ?? undefined,
       onEvent,
       signal: ac.signal,
+      // Auth ladder's last rung (spec §7, the same ladder runClaude uses):
+      // after the per-user vault key and ANTHROPIC_API_KEY miss, the SDK
+      // subprocess falls back to the operator's ambient claude login. The
+      // engine keeps the rung opt-in (hermetic tests pin the no-key error);
+      // the route is what enables it — without this, a user with no stored
+      // key gets ENGINE_ERROR on every v2 turn.
+      allowAmbientAuth: true,
     });
     // Success bookkeeping: bind/refresh the mapping with the session the
     // stream reported, then meter the turn. The engine-resolved model wins

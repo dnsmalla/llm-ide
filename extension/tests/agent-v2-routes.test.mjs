@@ -162,6 +162,30 @@ test('stream: model-less turn meters under the engine-resolved model from init',
   assert.equal(mapping.model, 'claude-sonnet-5');
 });
 
+// The auth ladder's last rung must be reachable through the route (spec §7,
+// same ladder as runClaude): a user with no vault key and no
+// ANTHROPIC_API_KEY still gets a turn via the operator's ambient claude
+// login. The engine keeps the rung opt-in so hermetic tests can pin the
+// no-key error; the ROUTE is what turns it on. agent-v2-live.test.mjs
+// proves the rung end-to-end against the real SDK (opt-in env).
+test('stream: route enables the operator-ambient auth rung for the engine', async () => {
+  const user = newUser('v2route-ambient@example.com');
+  let sawAmbient;
+  const fakeTurn = async ({ allowAmbientAuth }) => {
+    sawAmbient = allowAmbientAuth;
+    return { result: null, usageTotals: {} };
+  };
+  const res = makeRes();
+  const handled = await handleAgentV2Routes(makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: { message: 'hi', agentContext: { chatSessionId: 'chat-amb', workspaceRoot: '/tmp/w' } },
+    user,
+  }), res, { runTurn: fakeTurn });
+  assert.equal(handled, true);
+  assert.equal(sawAmbient, true);
+});
+
 test('stream: second turn resumes the recorded sdk session; fresh:true starts over', async () => {
   const user = newUser('v2route-resume@example.com');
   const seen = [];
