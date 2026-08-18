@@ -60,6 +60,10 @@ test('agent_sessions: create, mark used, replace, delete', () => {
 
   // Delete returns the row's sdkSessionId so the caller can clean transcripts.
   assert.equal(deleteAgentSession(db, u.id, 'chat-1').sdkSessionId, null); // already nulled by replace
+  // The load-bearing return path: a row holding a LIVE sdk id hands that id
+  // back on delete — Task 7 uses it to clean up SDK transcripts.
+  markAgentSessionUsed(db, u.id, 'chat-1', { sdkSessionId: 'sdk-2', model: 'claude-sonnet-5', mode: 'execute' });
+  assert.equal(deleteAgentSession(db, u.id, 'chat-1').sdkSessionId, 'sdk-2');
   // Row is gone — a subsequent getOrCreate mints a new one.
   const row3 = getOrCreateAgentSession(db, u.id, 'chat-1', 'explorer');
   assert.notEqual(row3.id, row2.id);
