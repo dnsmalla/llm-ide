@@ -60,13 +60,17 @@ const HOST = config.host;
 //     New POST /auth/me/llm-sources/refresh-default rebuilds it on demand;
 //     also refreshed automatically on source toggle, MCP consent/toggle, and
 //     server start. /auth/* path — not tracked in ENDPOINTS by convention.
-const SERVER_API_VERSION = 31;
+// 31→32: P0 spike — POST /agent-sdk/spike (SSE stream from the Claude Agent
+//     SDK engine with the kb_search in-process tool). Temporary endpoint;
+//     its successor is the P1 /agent/v2/* chat protocol.
+const SERVER_API_VERSION = 32;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
   '/generate-doc',
   '/chat',
   '/code-assist',
+  '/agent-sdk/spike',
   '/generate-questions',
   '/extract-entities',
   '/kb/ingest',

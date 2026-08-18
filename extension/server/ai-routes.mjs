@@ -1,6 +1,7 @@
 import { runClaude, runClaudeStream, streamModelReply, resolveLanguage } from '../providers/runtime.mjs';
 import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON } from '../core/utils.mjs';
 import { handleCodeAssist } from '../llm_agent/runtime/route.mjs';
+import { runSpikeQuery } from '../llm_agent/sdk/spike-engine.mjs';
 import { selectHistoryTurns } from '../llm_agent/runtime/loop.mjs';
 import { config } from '../core/config.mjs';
 import { readSkillInstructions } from '../llm_agent/skills/index.mjs';
@@ -286,6 +287,51 @@ export async function handleAIRoutes(req, res) {
 
     const result = await runClaude(prompt, { userId: req.user?.id, maxTokens: 2048, cacheTranscript: true });
     sendJSON(res, 200, { reply: result.trim() });
+    return true;
+  }
+
+  // P0 SPIKE — Claude Agent SDK engine behind the future Mac-chat swap.
+  //
+  // POST /agent-sdk/spike { prompt, resume? } → SSE stream of mapped engine
+  // events (init / delta / tool_use_start / tool_args_delta / tool_result /
+  // result / sdk-passthrough). Proves: SDK streaming over SSE, the kb_search
+  // in-process domain tool, and vault-key auth. Temporary by design — its
+  // successor is the P1 `/agent/v2/*` protocol; observations from this
+  // endpoint feed that design.
+  if (req.method === 'POST' && req.url === '/agent-sdk/spike') {
+    const body = parseJSON(await readBody(req, 1024 * 1024));
+    const prompt = typeof body?.prompt === 'string' ? body.prompt.trim().slice(0, 4000) : '';
+    if (!prompt) {
+      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Missing prompt' } });
+      return true;
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    const ac = new AbortController();
+    req.on('close', () => ac.abort());
+    const writeEvent = (obj) => {
+      if (!res.writableEnded && !ac.signal.aborted) {
+        res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      }
+    };
+    writeEvent({ type: 'spike_start', keyHint: 'resolving…' });
+    try {
+      const out = await runSpikeQuery({
+        prompt,
+        userId: req.user?.id,
+        onEvent: writeEvent,
+        signal: ac.signal,
+        resume: typeof body.resume === 'string' && body.resume ? body.resume : undefined,
+      });
+      writeEvent({ type: 'spike_done', sessionId: out.sessionId, result: out.result, keySource: out.keySource });
+    } catch (err) {
+      if (!ac.signal.aborted) writeEvent({ type: 'error', error: err?.message || 'agent-sdk spike failed' });
+    }
+    if (!res.writableEnded) res.end();
     return true;
   }
 
