@@ -8,56 +8,24 @@
 //   3. Vault per-user ANTHROPIC_API_KEY auth works through the SDK `env`
 //      option.
 //
-// This module is the ONLY file that imports '@anthropic-ai/claude-agent-sdk'
-// (the isolation rule from the staying-current design: upstream churn is
-// confined to one module). The SDK is exact-pinned in package.json — a bump
-// is a deliberate, reviewed change (canary CI is the plan for P1.5).
+// Only modules in this directory (llm_agent/sdk/) may import
+// '@anthropic-ai/claude-agent-sdk' (the isolation rule from the
+// staying-current design: upstream churn is confined to this surface).
+// The SDK is exact-pinned in package.json — a bump is a deliberate,
+// reviewed change (canary CI is the plan for P1.5).
 //
 // Event model: the pure mapper lives in events.mjs (the single definition
 // of the v2 event vocabulary) and is re-exported here so existing spike
-// consumers keep importing it from this module.
+// consumers keep importing it from this module. The llmide in-process MCP
+// server lives in tools.mjs.
 
-import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
-import { z } from 'zod';
-import * as kb from '../../kb/db.mjs';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import { getDb } from '../../kb/db.mjs';
 import { getSecret } from '../../server/vault.mjs';
-import { redactFence } from '../runtime/redaction.mjs';
 import { mapSdkMessage } from './events.mjs';
+import { buildLlmIdeServer } from './tools.mjs';
 
 export { mapSdkMessage };
-
-// --- Domain tool: KB search as an in-process SDK MCP tool -----------------
-
-function buildLlmIdeServer(userId) {
-  const kbSearch = tool(
-    'kb_search',
-    'Full-text search across the user\'s LLM-IDE knowledge base (meetings, decisions, action items, ingested sources). Use this whenever a question might be answered by past meetings or project notes.',
-    {
-      query: z.string().describe('Free-text search query'),
-      limit: z.number().int().max(50).default(10).describe('Max hits to return'),
-    },
-    async (args) => {
-      const raw = await Promise.resolve(kb.search(userId, { q: args.query, kind: null, limit: args.limit }));
-      const list = Array.isArray(raw) ? raw : [];
-      const hits = list.map((h) => ({
-        kind: redactFence(h.kind),
-        id: h.id != null ? redactFence(String(h.id)) : '',
-        title: redactFence(h.title || ''),
-        snippet: redactFence(h.snippet || ''),
-      }));
-      return { content: [{ type: 'text', text: JSON.stringify({ hits, total: list.length }) }] };
-    },
-    { annotations: { readOnlyHint: true }, alwaysLoad: true },
-  );
-
-  return createSdkMcpServer({
-    name: 'llmide',
-    version: '0.1.0',
-    instructions: 'LLM-IDE domain tools. kb_search queries the local knowledge base.',
-    tools: [kbSearch],
-  });
-}
 
 // --- Auth: per-user vault key first, operator env as fallback -------------
 
