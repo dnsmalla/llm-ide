@@ -339,9 +339,26 @@ struct MobileHomeView: View {
             Text(connection.connectionStatus == .connecting ? "Connecting…" : "Not connected")
                 .font(.system(size: DesignSystem.Typography.title2, weight: .semibold))
                 .foregroundColor(DesignSystem.Colors.textPrimary)
-            Text("Pair again from the login screen if this persists.")
-                .font(.system(size: DesignSystem.Typography.subheadline))
-                .foregroundColor(DesignSystem.Colors.textTertiary)
+            if connection.connectionStatus == .disconnected {
+                Text("Your Mac is still saved. Reconnect now, or reopen the app once it's back online.")
+                    .font(.system(size: DesignSystem.Typography.subheadline))
+                    .foregroundColor(DesignSystem.Colors.textTertiary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, DesignSystem.Spacing.lg)
+                Button {
+                    connection.connectDirect(
+                        ip: connectionStore.deviceIP,
+                        port: connectionStore.devicePort,
+                        pin: connectionStore.devicePIN
+                    )
+                } label: {
+                    Text("Reconnect")
+                        .font(.system(size: DesignSystem.Typography.body, weight: .semibold))
+                        .frame(maxWidth: 200)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(DesignSystem.Colors.primary)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -396,9 +413,16 @@ struct MobileHomeView: View {
                         Label("Settings", systemImage: "gear")
                     }
                     Divider()
-                    Button("Disconnect", role: .destructive) {
+                    Button {
+                        connection.closeConnection()
+                    } label: {
+                        Label("Close Connection", systemImage: "wifi.slash")
+                    }
+                    Button(role: .destructive) {
                         connection.disconnect()
                         connectionStore.clear()
+                    } label: {
+                        Label("Forget this Mac", systemImage: "xmark.circle")
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle.fill")
