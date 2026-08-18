@@ -248,9 +248,14 @@ extension CodeAssistantPanel {
         }
         engine.agent.pendingTool = nil
 
+        // kind .plan (not .edit) so the chat renders the PlanSavedCard —
+        // title + markdown preview + Execute/Edit actions. The plan body and
+        // title ride on the payload for display only; `legacyContent()` still
+        // sends the server just the one-line summary (see ToolResultPayload).
         let payload = ChatMessage.ToolResultPayload(
-            kind: .edit, summary: "(saved plan to \(plan.displayPath))",
-            exitCode: nil, command: nil, output: nil, url: nil, isFailure: false)
+            kind: .plan, summary: "(saved plan to \(plan.displayPath))",
+            exitCode: nil, command: nil, output: nil, url: plan.absolutePath,
+            isFailure: false, planTitle: plan.title, planContent: finalContent)
         await engine.acknowledge(payload, followUp: .forceUnblock)
         return .success
     }

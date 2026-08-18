@@ -63,7 +63,7 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
     /// client-executed tool produced it, plus whichever of the bash-specific
     /// fields apply.
     struct ToolResultPayload: Codable, Equatable, Sendable {
-        enum Kind: String, Codable { case edit, bash, git, issue, skip, other }
+        enum Kind: String, Codable { case edit, bash, git, issue, skip, other, plan }
         let kind: Kind
         /// Human line shown in the capsule ("applied update to parser.swift:
         /// +3 lines") — the first line of the legacy ack text, verbatim.
@@ -87,6 +87,15 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         /// every case, so it needs its own field — the same reasoning
         /// `BashResultDisplay.isFailure` already encoded.
         var isFailure: Bool = false
+        /// save-plan only (kind == .plan): the plan's title and full markdown
+        /// body, carried for DISPLAY (the chat's PlanSavedCard preview) — the
+        /// file path rides in `url`. Deliberately absent from
+        /// `legacyContent()`: the server must keep seeing exactly the
+        /// one-line "(saved plan to …)" ack, otherwise every later turn's
+        /// history would replay the full plan text. Defaulted so payloads
+        /// persisted before these fields existed decode with them nil.
+        var planTitle: String? = nil
+        var planContent: String? = nil
 
         /// Parses the `"(bash result - exit code: N)\n$ <command>\n<output>"`
         /// convention (and its "(bash failed - …)" / "(bash blocked - …)"

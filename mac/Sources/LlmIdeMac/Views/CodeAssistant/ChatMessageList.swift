@@ -54,6 +54,13 @@ struct ChatMessageList: View {
     /// only; the normal path already resolves this in `autoChainPendingAction`
     /// before the card can render.
     let onSavePlan: () async -> Void
+    /// Wraps `CodeAssistantPanel.executeSavedPlan(_:)` — the PlanSavedCard's
+    /// "Execute plan" action (switch to Execute mode, attach the plan file).
+    let onExecutePlan: (ChatMessage.ToolResultPayload) -> Void
+    /// Wraps `CodeAssistantPanel.editSavedPlanInChat(_:)` — the card's "Edit
+    /// in chat" action (stay in a plan-like mode, seed the composer with the
+    /// card's own plan title).
+    let onEditPlan: (ChatMessage.ToolResultPayload) -> Void
 
     @EnvironmentObject var theme: ThemeStore
 
@@ -341,6 +348,14 @@ struct ChatMessageList: View {
             // .parse`).
             if payload.kind == .bash {
                 CommandOutputView(message: turn)
+            } else if payload.kind == .plan {
+                // A saved plan gets a full card (preview + Execute/Edit), not
+                // a one-line capsule — the whole point of saving it is acting
+                // on it. Centered like the other tool notices.
+                PlanSavedCard(payload: payload,
+                              onExecute: { onExecutePlan(payload) },
+                              onEdit: { onEditPlan(payload) })
+                    .frame(maxWidth: .infinity, alignment: .center)
             } else {
                 toolNoticeView(payload)
             }

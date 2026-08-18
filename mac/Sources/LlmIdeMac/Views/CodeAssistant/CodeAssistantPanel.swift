@@ -301,7 +301,9 @@ struct CodeAssistantPanel: View {
                 onBash: { args in await runBashCommand(args) },
                 onApplyEdit: { await applyPendingEdit() },
                 onSkipEdit: { await skipPendingEdit() },
-                onSavePlan: { await autoSavePendingPlan() }
+                onSavePlan: { await autoSavePendingPlan() },
+                onExecutePlan: { payload in executeSavedPlan(payload) },
+                onEditPlan: { payload in editSavedPlanInChat(payload) }
             )
             Divider().background(theme.current.border)
             if !attachmentState.selectedSkills.isEmpty { skillBar }
