@@ -200,13 +200,28 @@ extension ChatEngine {
     /// for a blank chat. Shared tail of `createNewSession` and the
     /// no-sessions-left branch of `deleteSession`.
     func mintFreshSession() {
-        let fresh = ChatSession(scope: scope)
+        // D3 clean cut: the chat's engine is chosen HERE, once, at creation —
+        // v2 iff the beta toggle is on at this moment — and never changes
+        // after. Per-turn selection (`AgentV2EngineTransport.selectsV2`)
+        // then requires the marker, so later toggle flips never migrate an
+        // existing chat between engines.
+        let fresh = ChatSession(scope: scope, engine: AgentV2Selection.engineForNewChat())
         ChatSessionStore.save(fresh)
         currentSessionIDString = fresh.id.uuidString
         rememberCurrentPointer()
         refreshSessions()
         messages = []
         resetTransientSessionState()
+    }
+
+    /// The loaded chat's engine marker (`ChatSession.engine`; nil = legacy,
+    /// or no session loaded). Read at TURN time by the engine-selection
+    /// transport and by view-level v2 affordances (`usesAgentV2Engine`) —
+    /// a small JSON load on a file `persistCurrentChat` already rewrites
+    /// every turn.
+    func currentSessionEngineMarker() -> String? {
+        guard let id = UUID(uuidString: currentSessionIDString) else { return nil }
+        return ChatSessionStore.load(id: id)?.engine
     }
 
     /// Start a new empty chat for this scope. No-op if the current chat is

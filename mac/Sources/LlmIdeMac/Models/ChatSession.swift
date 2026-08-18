@@ -29,23 +29,33 @@ struct ChatSession: Identifiable, Codable, Equatable {
     let createdAt: Date
     var lastUsedAt: Date
     var messages: [ChatMessage]
+    /// Engine this chat runs on, stamped once at creation (the D3 clean cut):
+    /// nil — or the field absent in an older file — = the legacy engine
+    /// forever; `"agentV2"` (`AgentV2Selection.sessionEngineV2`) = the Agent
+    /// v2 engine. Never rewritten after creation: flipping the beta toggle
+    /// does not migrate an existing chat (a mid-chat swap would hand a
+    /// context-blind fresh SDK session the next turn); the toggle only
+    /// governs NEW chats, plus acts as a global kill switch when off.
+    var engine: String?
 
     init(id: UUID = UUID(),
          scope: ChatScope,
          title: String = "New chat",
          createdAt: Date = Date(),
          lastUsedAt: Date = Date(),
-         messages: [ChatMessage] = []) {
+         messages: [ChatMessage] = [],
+         engine: String? = nil) {
         self.id = id
         self.scope = scope
         self.title = title
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
         self.messages = messages
+        self.engine = engine
     }
 
     enum CodingKeys: String, CodingKey {
-        case storeVersion, id, scope, title, createdAt, lastUsedAt, messages, history
+        case storeVersion, id, scope, title, createdAt, lastUsedAt, messages, history, engine
     }
 
     init(from decoder: Decoder) throws {
@@ -55,6 +65,9 @@ struct ChatSession: Identifiable, Codable, Equatable {
         self.title = try c.decode(String.self, forKey: .title)
         self.createdAt = try c.decode(Date.self, forKey: .createdAt)
         self.lastUsedAt = try c.decode(Date.self, forKey: .lastUsedAt)
+        // Optional decode so files persisted before the engine marker
+        // existed (every chat today) decode as legacy — nil, never a throw.
+        self.engine = try? c.decode(String.self, forKey: .engine)
         if let v2Messages = try? c.decode([ChatMessage].self, forKey: .messages) {
             // Already v2 — decode directly, no migration.
             self.storeVersion = (try? c.decode(Int.self, forKey: .storeVersion)) ?? 2
@@ -83,5 +96,6 @@ struct ChatSession: Identifiable, Codable, Equatable {
         try c.encode(createdAt, forKey: .createdAt)
         try c.encode(lastUsedAt, forKey: .lastUsedAt)
         try c.encode(messages, forKey: .messages)
+        try c.encodeIfPresent(engine, forKey: .engine)
     }
 }

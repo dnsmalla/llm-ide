@@ -75,13 +75,16 @@ extension ChatEngine {
         agentV2Transport?.sdkSessionId
     }
 
-    /// True when this engine carries the v2 machinery AND the beta toggle
-    /// currently selects it — the per-turn rule minus the per-turn provider,
-    /// which is exactly what view-level affordances keyed to "this is a v2
-    /// chat" (the save-plan message action) need. Mirrors the selection the
+    /// True when this engine carries the v2 machinery, the beta toggle
+    /// currently selects it, AND the loaded chat is a v2 chat (its engine
+    /// marker) — the per-turn rule minus the per-turn provider, which is
+    /// exactly what view-level affordances keyed to "this is a v2 chat"
+    /// (the save-plan message action) need. Mirrors the selection the
     /// transport itself applies each turn, so the two can't drift.
     var usesAgentV2Engine: Bool {
-        agentV2Transport != nil && AgentV2Selection.toggleEnabled()
+        agentV2Transport != nil
+            && AgentV2Selection.toggleEnabled()
+            && currentSessionEngineMarker() == AgentV2Selection.sessionEngineV2
     }
 
     /// Sink for the transport's 4-callback `onApproval`. Called by every

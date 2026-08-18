@@ -48,10 +48,11 @@ final class ScriptedLegacyTransport: ChatTransport, @unchecked Sendable {
 }
 
 /// Task 12 — engine selection and the v2 turn guards: the selection rule
-/// (toggle × provider), the transport factory seam, the sessionUnresumable
-/// fresh retry (with its in-chat note), the stale-server 404 fallback to the
-/// legacy transport, the v2 save-plan action's visibility rule, the
-/// transport swap behind the settings toggle, and deleteSession's v2
+/// (toggle × provider × per-chat engine marker), the transport factory seam,
+/// the sessionUnresumable fresh retry (with its in-chat note), the
+/// stale-server 404 fallback to the legacy transport, the v2 save-plan
+/// action's visibility rule, the transport swap behind the settings toggle,
+/// the D3 per-chat marker (ChatSession.engine), and deleteSession's v2
 /// server-side cleanup.
 @MainActor
 @Suite("AgentV2 selection + guards")
@@ -85,10 +86,12 @@ struct AgentV2SelectionTests {
 
     func makeComposite(stream: QueuedAgentV2Stream,
                        legacy: ScriptedLegacyTransport,
-                       toggle: @escaping () -> Bool)
+                       toggle: @escaping () -> Bool,
+                       sessionEngine: @escaping () -> String? = { AgentV2Selection.sessionEngineV2 })
         -> (AgentV2EngineTransport, ScriptedLegacyTransport) {
         (AgentV2EngineTransport(v2: AgentV2Transport(streamer: stream),
-                                legacy: legacy, isV2Enabled: toggle), legacy)
+                                legacy: legacy, isV2Enabled: toggle,
+                                sessionEngineMarker: sessionEngine), legacy)
     }
 
     /// Mirrors `AgentV2ApprovalTests.withTempStore`: deleteSession touches
@@ -110,12 +113,22 @@ struct AgentV2SelectionTests {
 
     // MARK: - Selection rule (truth table)
 
-    @Test("Selection truth table: v2 only when toggle ON and provider anthropic")
+    @Test("Selection truth table: toggle × provider × per-chat engine marker (D3 clean cut)")
     func selectionRuleTruthTable() {
-        #expect(AgentV2Selection.useV2(toggleOn: true, resolvedProvider: "anthropic") == true)
-        #expect(AgentV2Selection.useV2(toggleOn: true, resolvedProvider: "openai") == false)
-        #expect(AgentV2Selection.useV2(toggleOn: false, resolvedProvider: "anthropic") == false)
-        #expect(AgentV2Selection.useV2(toggleOn: false, resolvedProvider: "glm") == false)
+        let v2 = AgentV2Selection.sessionEngineV2
+        // (toggle on, anthropic, marker v2) → v2 — the only v2 combination.
+        #expect(AgentV2Selection.useV2(toggleOn: true, resolvedProvider: "anthropic", sessionEngine: v2))
+        // (toggle on, anthropic, marker nil/legacy) → legacy — a legacy chat
+        // stays on the legacy engine forever; flipping the toggle mid-chat
+        // must not hand it a context-blind fresh SDK session.
+        #expect(!AgentV2Selection.useV2(toggleOn: true, resolvedProvider: "anthropic", sessionEngine: nil))
+        #expect(!AgentV2Selection.useV2(toggleOn: true, resolvedProvider: "anthropic", sessionEngine: "legacy"))
+        // (toggle off, marker v2) → legacy — the toggle is the global kill
+        // switch: off disables v2 entirely, v2 chats included.
+        #expect(!AgentV2Selection.useV2(toggleOn: false, resolvedProvider: "anthropic", sessionEngine: v2))
+        // The provider dimension still applies to v2 chats.
+        #expect(!AgentV2Selection.useV2(toggleOn: true, resolvedProvider: "openai", sessionEngine: v2))
+        #expect(!AgentV2Selection.useV2(toggleOn: false, resolvedProvider: "glm", sessionEngine: v2))
     }
 
     @Test("Anthropic-ness follows the app's provider resolution, not the raw picker id")
@@ -232,9 +245,10 @@ struct AgentV2SelectionTests {
 
     // MARK: - Per-turn routing
 
-    @Test("Toggle off at turn time, or a non-anthropic provider, routes the turn to legacy")
+    @Test("Toggle off at turn time, a non-anthropic provider, or a legacy-marked chat → legacy")
     func perTurnRouting() async throws {
-        // Toggle off → legacy even though the composite carries v2 machinery.
+        // Toggle off → legacy even though the composite carries v2 machinery
+        // (kill switch; the chat is v2-marked).
         do {
             let stream = QueuedAgentV2Stream()
             let (composite, legacy) = makeComposite(stream: stream, legacy: ScriptedLegacyTransport(), toggle: { false })
@@ -256,13 +270,32 @@ struct AgentV2SelectionTests {
             #expect(result.reply == "legacy reply")
             #expect(stream.bodies.isEmpty)
         }
+        // D3: toggle on + anthropic, but the CHAT was created as a legacy
+        // chat (nil marker) → legacy; the marker, not the toggle, decides
+        // which engine owns an existing chat.
+        do {
+            let stream = QueuedAgentV2Stream()
+            stream.turns = [okTurn(sessionId: "sdk-never", deltas: ["v2 reply"])]
+            let (composite, _) = makeComposite(stream: stream, legacy: ScriptedLegacyTransport(),
+                                               toggle: { true }, sessionEngine: { nil })
+            let result = try await composite.roundTrip(
+                makeInput(provider: "anthropic"),
+                onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
+            #expect(result.reply == "legacy reply")
+            #expect(stream.bodies.isEmpty, "the v2 streamer is never contacted for a legacy-marked chat")
+        }
     }
 
     // MARK: - Engine-level behavior
 
     /// Engine whose transport input carries the Anthropic provider, as the
     /// panel's `wireEngine` resolves it — the default pass-through hook
-    /// leaves `provider` nil, which (correctly) routes legacy.
+    /// leaves `provider` nil, which (correctly) routes legacy — AND whose
+    /// current session is stamped as a v2 chat: the D3 marker the composite
+    /// reads at turn time (via the engine's `currentSessionEngineMarker`).
+    /// Without a loaded session the marker is nil and turns (correctly)
+    /// route legacy. Must run inside `withTempStore` — it saves and re-reads
+    /// a session file.
     func makeV2Engine(stream: QueuedAgentV2Stream, legacy: ScriptedLegacyTransport) -> ChatEngine {
         let engine = ChatEngine(
             scope: .explorer,
@@ -273,42 +306,130 @@ struct AgentV2SelectionTests {
                                skills: skills, agentContext: nil, language: nil,
                                model: nil, provider: "anthropic", mode: "plan")
         }
+        let session = ChatSession(scope: .explorer, engine: AgentV2Selection.sessionEngineV2)
+        ChatSessionStore.save(session)
+        engine.currentSessionIDString = session.id.uuidString
         return engine
     }
 
     @Test("Engine turn over v2: fresh-retry note lands in the chat, turn succeeds")
     func engineFreshRetryNoteLandsInChat() async throws {
-        let stream = QueuedAgentV2Stream()
-        stream.turns = [unresumableTurn(sessionId: "sdk-old"),
-                        okTurn(sessionId: "sdk-new", deltas: ["fresh ", "answer"])]
-        let engine = makeV2Engine(stream: stream, legacy: ScriptedLegacyTransport())
+        try await withTempStore {
+            let stream = QueuedAgentV2Stream()
+            stream.turns = [unresumableTurn(sessionId: "sdk-old"),
+                            okTurn(sessionId: "sdk-new", deltas: ["fresh ", "answer"])]
+            let engine = makeV2Engine(stream: stream, legacy: ScriptedLegacyTransport())
 
-        await engine.runTurn("hello")
+            await engine.runTurn("hello")
 
-        let last = engine.messages.last(where: { $0.role == .assistant })
-        #expect(last?.content == "fresh answer")
-        #expect(last?.toolSteps.map(\.label).contains(AgentV2EngineTransport.freshSessionNote) == true)
-        #expect(engine.error == nil)
+            let last = engine.messages.last(where: { $0.role == .assistant })
+            #expect(last?.content == "fresh answer")
+            #expect(last?.toolSteps.map(\.label).contains(AgentV2EngineTransport.freshSessionNote) == true)
+            #expect(engine.error == nil)
+        }
     }
 
     @Test("Engine turn over v2 404: notice banner set, legacy completes the turn, next turn clears it")
     func engineStaleServerNotice() async throws {
-        let stream = QueuedAgentV2Stream()
-        stream.thrownErrors = [APIError.http(status: 404, code: "HTTP_ERROR",
-                                             message: "Agent v2 stream request failed (404)",
-                                             details: nil)]
-        stream.turns = [[], okTurn(sessionId: "sdk-2", deltas: ["v2 ok"])]
-        let engine = makeV2Engine(stream: stream, legacy: ScriptedLegacyTransport())
+        try await withTempStore {
+            let stream = QueuedAgentV2Stream()
+            stream.thrownErrors = [APIError.http(status: 404, code: "HTTP_ERROR",
+                                                 message: "Agent v2 stream request failed (404)",
+                                                 details: nil)]
+            stream.turns = [[], okTurn(sessionId: "sdk-2", deltas: ["v2 ok"])]
+            let engine = makeV2Engine(stream: stream, legacy: ScriptedLegacyTransport())
 
-        await engine.runTurn("one")
-        // Turn one: banner raised, but the turn itself COMPLETED via legacy.
-        #expect(engine.agentV2Notice == AgentV2EngineTransport.staleServerBannerText)
-        #expect(engine.messages.last(where: { $0.role == .assistant })?.content == "legacy reply")
-        #expect(engine.error == nil)
+            await engine.runTurn("one")
+            // Turn one: banner raised, but the turn itself COMPLETED via legacy.
+            #expect(engine.agentV2Notice == AgentV2EngineTransport.staleServerBannerText)
+            #expect(engine.messages.last(where: { $0.role == .assistant })?.content == "legacy reply")
+            #expect(engine.error == nil)
 
-        // Turn two (a healthy v2 turn): the transient notice is gone.
-        await engine.runTurn("two")
-        #expect(engine.agentV2Notice == nil)
+            // Turn two (a healthy v2 turn): the transient notice is gone.
+            await engine.runTurn("two")
+            #expect(engine.agentV2Notice == nil)
+        }
+    }
+
+    @Test("Engine with NO session loaded routes legacy even with the toggle on (fail-closed marker)")
+    func engineWithoutSessionRoutesLegacy() async throws {
+        try await withTempStore {
+            let stream = QueuedAgentV2Stream()
+            stream.turns = [okTurn(sessionId: "sdk-x", deltas: ["v2 reply"])]
+            let legacy = ScriptedLegacyTransport()
+            let engine = ChatEngine(
+                scope: .explorer,
+                transport: AgentV2EngineTransport(v2: AgentV2Transport(streamer: stream),
+                                                   legacy: legacy, isV2Enabled: { true }))
+            engine.resolveTransportInput = { message, history, attachments, skills in
+                ChatTransportInput(message: message, history: history, attachments: attachments,
+                                   skills: skills, agentContext: nil, language: nil,
+                                   model: nil, provider: "anthropic", mode: "plan")
+            }
+
+            await engine.runTurn("hello")
+
+            #expect(engine.messages.last(where: { $0.role == .assistant })?.content == "legacy reply")
+            #expect(stream.bodies.isEmpty)
+        }
+    }
+
+    // MARK: - Per-chat marker (D3 clean cut)
+
+    @Test("ChatSession engine marker: files persisted before the field decode as legacy; stamps round-trip")
+    func chatSessionEngineDecode() throws {
+        // A v2-envelope file written before the marker existed — no `engine`
+        // key at all — must decode (nil marker = legacy chat), never throw.
+        let oldJSON = """
+        {"storeVersion":2,"id":"22222222-2222-2222-2222-222222222222","scope":"explorer",
+         "title":"Old v2","createdAt":807271200.0,"lastUsedAt":807271200.0,"messages":[]}
+        """
+        let old = try AppJSON.decoder.decode(ChatSession.self, from: Data(oldJSON.utf8))
+        #expect(old.engine == nil)
+
+        // A stamped chat round-trips through the store's encoder.
+        let stamped = ChatSession(scope: .explorer, engine: AgentV2Selection.sessionEngineV2)
+        let data = try AppJSON.encoder.encode(stamped)
+        #expect(try AppJSON.decoder.decode(ChatSession.self, from: data).engine
+               == AgentV2Selection.sessionEngineV2)
+    }
+
+    @Test("engineForNewChat: stamps v2 iff the toggle is on at creation")
+    func engineForNewChatStamp() {
+        let suite = "agent-v2-newchat-test"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        #expect(AgentV2Selection.engineForNewChat(defaults: defaults) == nil,
+                "toggle off (the default) mints a legacy chat")
+        defaults.set(true, forKey: AgentV2Selection.toggleKey)
+        #expect(AgentV2Selection.engineForNewChat(defaults: defaults) == AgentV2Selection.sessionEngineV2)
+    }
+
+    @Test("mintFreshSession stamps the chat's engine from the toggle; the stamp survives, later mints don't touch it")
+    func mintStampsEngineMarker() async throws {
+        try await withTempStore {
+            let key = AgentV2Selection.toggleKey
+            let prev = UserDefaults.standard.bool(forKey: key)
+            UserDefaults.standard.set(true, forKey: key)
+            defer { UserDefaults.standard.set(prev, forKey: key) }
+
+            let engine = ChatEngine(scope: .explorer, transport: ScriptedLegacyTransport())
+            engine.mintFreshSession()
+            let v2Chat = UUID(uuidString: engine.currentSessionIDString)!
+            #expect(ChatSessionStore.load(id: v2Chat)?.engine == AgentV2Selection.sessionEngineV2)
+            #expect(engine.currentSessionEngineMarker() == AgentV2Selection.sessionEngineV2)
+
+            // Toggle off later: a NEW chat mints legacy, and the v2 chat
+            // keeps its stamp (the clean cut is per chat, not global state).
+            UserDefaults.standard.set(false, forKey: key)
+            let engine2 = ChatEngine(scope: .explorer, transport: ScriptedLegacyTransport())
+            engine2.mintFreshSession()
+            let legacyChat = UUID(uuidString: engine2.currentSessionIDString)!
+            #expect(ChatSessionStore.load(id: legacyChat)?.engine == nil)
+            #expect(ChatSessionStore.load(id: v2Chat)?.engine == AgentV2Selection.sessionEngineV2)
+        }
     }
 
     @Test("setTransport swaps when idle and refuses mid-turn")

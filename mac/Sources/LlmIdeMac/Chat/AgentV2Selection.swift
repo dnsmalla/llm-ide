@@ -4,7 +4,9 @@ import Foundation
 /// engine-selection transport. Everything here exists so the rest of the
 /// system can treat "which engine answers this turn" as one rule with one
 /// implementation: the user's beta toggle, resolved against the turn's
-/// provider the same way the panel resolves it for the wire.
+/// provider the same way the panel resolves it for the wire, AND the chat's
+/// per-session engine marker (the D3 clean cut — legacy chats stay legacy,
+/// v2 chats stay v2, the toggle only decides at creation + kills globally).
 enum AgentV2Selection {
 
     /// `@AppStorage`/UserDefaults key for the user's engine toggle. The
@@ -30,10 +32,22 @@ enum AgentV2Selection {
         resolvedProvider == anthropicProvider
     }
 
+    /// Per-chat engine marker (spec D3 clean cut), stored as
+    /// `ChatSession.engine`: a chat stamped with this value at creation runs
+    /// on the Agent v2 engine for its lifetime; an unstamped (nil) chat —
+    /// including every chat persisted before the marker existed — stays on
+    /// the legacy engine forever.
+    static let sessionEngineV2 = "agentV2"
+
     /// The whole selection rule: the Agent engine answers a turn only when
-    /// the user opted in AND the turn's provider is Anthropic.
-    static func useV2(toggleOn: Bool, resolvedProvider: String?) -> Bool {
-        toggleOn && providerIsAnthropic(resolvedProvider)
+    /// the user opted in (toggle off = global kill switch, v2 chats
+    /// included), the turn's provider is Anthropic, AND the chat itself was
+    /// created as a v2 chat (its engine marker). The marker is what makes
+    /// the clean cut per-chat rather than per-turn: flipping the toggle
+    /// mid-chat can never hand a legacy chat a context-blind fresh SDK
+    /// session, nor replay a v2 chat's history through the legacy loop.
+    static func useV2(toggleOn: Bool, resolvedProvider: String?, sessionEngine: String?) -> Bool {
+        toggleOn && sessionEngine == sessionEngineV2 && providerIsAnthropic(resolvedProvider)
     }
 
     /// Current toggle value. Read at ENGINE-CREATION time (the factory) and
@@ -41,6 +55,14 @@ enum AgentV2Selection {
     /// an already-constructed engine without a relaunch.
     static func toggleEnabled(defaults: UserDefaults = .standard) -> Bool {
         defaults.bool(forKey: toggleKey)
+    }
+
+    /// Engine marker to stamp on a NEWLY MINTED chat: the Agent v2 engine
+    /// iff the beta toggle is on at the moment of creation, else nil
+    /// (legacy). The one place the toggle decides a chat's engine — after
+    /// this stamp, `useV2` keeps the chat on the engine it was created with.
+    static func engineForNewChat(defaults: UserDefaults = .standard) -> String? {
+        toggleEnabled(defaults: defaults) ? sessionEngineV2 : nil
     }
 
     /// The plan-like modes whose v2 RESULT turns offer the "Save Plan"
@@ -100,7 +122,8 @@ enum ChatTransportFactory {
 ///   phone's live channel on external turns). If the fresh attempt also
 ///   fails, the error propagates and the turn surfaces as failed.
 ///
-/// Legacy routing (toggle off, or a non-Anthropic provider) delegates
+/// Legacy routing (toggle off — the global kill switch —, a non-Anthropic
+/// provider, or a chat whose `engine` marker isn't `agentV2`) delegates
 /// verbatim to `legacy`; the v2 streamer is never contacted.
 @MainActor
 final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
@@ -118,6 +141,13 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
     /// Toggle read at TURN time (injected so tests script it without touching
     /// process-global UserDefaults; production uses the UserDefaults default).
     let isV2Enabled: () -> Bool
+    /// Engine marker of the chat the turn runs against (`ChatSession.engine`),
+    /// read at TURN time. Injected like `isV2Enabled`, but WIRED rather than
+    /// defaulted: `ChatEngine.connectTransportObservers` points it at the
+    /// engine's current session, because only the engine knows which chat is
+    /// loaded. The default claims legacy (nil) on purpose — a composite
+    /// nobody wired stays fail-closed on /code-assist.
+    var sessionEngineMarker: () -> String?
     /// Fired when a stale-server 404 forced a legacy fallback — the engine
     /// raises its transient notice banner. Wired by `ChatEngine` itself
     /// (init and `setTransport`), so the panel needs no plumbing.
@@ -125,10 +155,12 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
 
     init(v2: AgentV2Transport,
          legacy: ChatTransport,
-         isV2Enabled: @escaping () -> Bool = { AgentV2Selection.toggleEnabled() }) {
+         isV2Enabled: @escaping () -> Bool = { AgentV2Selection.toggleEnabled() },
+         sessionEngineMarker: @escaping () -> String? = { nil }) {
         self.v2 = v2
         self.legacy = legacy
         self.isV2Enabled = isV2Enabled
+        self.sessionEngineMarker = sessionEngineMarker
     }
 
     /// SDK-session forwarding so `ChatEngine.agentV2SessionId` and the
@@ -221,7 +253,9 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
     // MARK: - Policy
 
     private func selectsV2(_ input: ChatTransportInput) -> Bool {
-        AgentV2Selection.useV2(toggleOn: isV2Enabled(), resolvedProvider: input.provider)
+        AgentV2Selection.useV2(toggleOn: isV2Enabled(),
+                               resolvedProvider: input.provider,
+                               sessionEngine: sessionEngineMarker())
     }
 
     /// The stale-server shape: `LlmIdeAPIClient.agentV2Stream` throws its

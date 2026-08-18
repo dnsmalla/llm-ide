@@ -292,6 +292,13 @@ final class ChatEngine {
         engineTransport.onStaleServer = { [weak self] in
             self?.agentV2Notice = AgentV2EngineTransport.staleServerBannerText
         }
+        // D3 clean cut: selection is per-chat, so the composite must see the
+        // CURRENT session's engine marker — only this engine knows which
+        // chat is loaded. Unwired (nil), the composite stays fail-closed on
+        // legacy, so an engine with no session can never take a v2 turn.
+        engineTransport.sessionEngineMarker = { [weak self] in
+            self?.currentSessionEngineMarker()
+        }
     }
 
     // MARK: - Turn lifecycle
