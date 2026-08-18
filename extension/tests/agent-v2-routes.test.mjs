@@ -124,6 +124,44 @@ test('stream: happy path emits init → mode_set → … → result, maps sessio
   });
 });
 
+// A turn whose client sent no `model` must still be metered: the engine's
+// init event carries the actually-resolved model, and recordUsage skips rows
+// without one — losing them would blind the per-model usage caps.
+test('stream: model-less turn meters under the engine-resolved model from init', async () => {
+  const db = getDb();
+  const user = newUser('v2route-nomodel@example.com');
+  let gotModel;
+  const fakeTurn = async ({ onEvent, model }) => {
+    gotModel = model;
+    onEvent({ type: 'init', sessionId: 'sdk-nm', claudeCodeVersion: '2.1.234', model: 'claude-sonnet-5', tools: [], capabilities: [] });
+    onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-nm', stopReason: 'end_turn' });
+    return { result: { subtype: 'success' }, usageTotals: { inputTokens: 7, outputTokens: 3 } };
+  };
+  const res = makeRes();
+  const handled = await handleAgentV2Routes(makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: { message: 'hi', agentContext: { chatSessionId: 'chat-nm', workspaceRoot: '/tmp/w' } }, // no `model`
+    user,
+  }), res, { runTurn: fakeTurn });
+  assert.equal(handled, true);
+  assert.equal(res.ended, true);
+  assert.equal(gotModel, null); // the engine got no requested model…
+  // …but the ledger row exists under the model init reported.
+  const rows = db.prepare('SELECT model, endpoint, input_tokens, output_tokens FROM usage_ledger WHERE user_id=?').all(user.id);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0], {
+    model: 'claude-sonnet-5',
+    endpoint: '/agent/v2/stream',
+    input_tokens: 7,
+    output_tokens: 3,
+  });
+  // The mapping row records the resolved model too.
+  const mapping = getOrCreateAgentSession(db, user.id, 'chat-nm', 'explorer');
+  assert.equal(mapping.sdk_session_id, 'sdk-nm');
+  assert.equal(mapping.model, 'claude-sonnet-5');
+});
+
 test('stream: second turn resumes the recorded sdk session; fresh:true starts over', async () => {
   const user = newUser('v2route-resume@example.com');
   const seen = [];

@@ -128,8 +128,15 @@ async function handleV2Stream(req, res, userId, deps) {
   // mode_set rides right after the first init event (spec §4 ordering) —
   // the engine doesn't know its resolved mode is a UI concern.
   let initSeen = false;
+  // The model the engine actually ran, mirrored from currentSdkSessionId's
+  // capture pattern: the SDK's system/init reports it (result events don't
+  // carry model, so one guard covers exactly the init). Without it, a turn
+  // whose client sent no `model` would meter model:null — recordUsage skips
+  // such rows entirely, blinding the per-model usage caps.
+  let resolvedModel = null;
   const onEvent = (ev) => {
     if (ev && typeof ev.sessionId === 'string' && ev.sessionId) currentSdkSessionId = ev.sessionId;
+    if (typeof ev?.model === 'string' && ev.model) resolvedModel = ev.model;
     send(ev);
     if (!initSeen && ev && ev.type === 'init') {
       initSeen = true;
@@ -152,16 +159,21 @@ async function handleV2Stream(req, res, userId, deps) {
       signal: ac.signal,
     });
     // Success bookkeeping: bind/refresh the mapping with the session the
-    // stream reported, then meter the turn. (recordUsage's real params are
-    // userId/provider/model/source/endpoint/inputTokens/outputTokens/runs/
-    // requestId — cost is not a ledger column, so costUsd is not passed.)
+    // stream reported, then meter the turn. The engine-resolved model wins
+    // over the client's request (the SDK resolves defaults/fallbacks); with
+    // neither, model is null and recordUsage skips the row — accepted, since
+    // there is then genuinely no model name to meter under. (recordUsage's
+    // real params are userId/provider/model/source/endpoint/inputTokens/
+    // outputTokens/runs/requestId — cost is not a ledger column, so costUsd
+    // is not passed.)
+    const meteredModel = resolvedModel ?? model;
     if (currentSdkSessionId) {
-      markAgentSessionUsed(db, userId, chatSessionId, { sdkSessionId: currentSdkSessionId, model, mode });
+      markAgentSessionUsed(db, userId, chatSessionId, { sdkSessionId: currentSdkSessionId, model: meteredModel, mode });
     }
     recordUsage(db, {
       userId,
       provider: 'anthropic',
-      model,
+      model: meteredModel,
       endpoint: '/agent/v2/stream',
       inputTokens: usageTotals?.inputTokens,
       outputTokens: usageTotals?.outputTokens,
