@@ -9,10 +9,17 @@
 // Tool restrictions for these modes are derived from the registry's `kind`
 // field — see tools/registry.mjs for the rationale on which tools have
 // `kind: 'read'` (allowed in these modes) vs `kind: 'act'` (not allowed).
+// Exception: task-list is excluded despite being kind:'read', because these
+// modes describe single-turn prose output (a plan proposal, review feedback,
+// or documentation), never the "work autonomously through a task list"
+// behavior — so task-list has no legitimate use here. Leaving it reachable
+// would let a model populate agentPendingTasks and trigger the Mac app's
+// PlanTimelineCard/auto-continue reflex for a turn that was never meant to
+// have a tracked plan.
 
 import { entries } from '../tools/registry.mjs';
 
-const READ_ONLY_TOOL_NAMES = new Set(entries().filter((e) => e.kind === 'read').map((e) => e.name));
+const READ_ONLY_TOOL_NAMES = new Set(entries().filter((e) => e.kind === 'read' && e.name !== 'task-list').map((e) => e.name));
 
 // The plan-like modes: both get save-plan added on top of READ_ONLY_TOOL_NAMES
 // (see allowedToolNames below) — review/document must not even see it in

@@ -77,7 +77,7 @@ const ENTRIES = [
   // slightly richer {query, limit} schema and {hits, total} shape). One
   // execute, one name, per the spec's §4 finding.
   { name: 'search-kb', kind: 'read', execute: (args, ctx) => searchKb(args, { kb: ctx.kb, userId: ctx.userId }) },
-  { name: 'task-list', kind: 'act', gate: autoGate, execute: (args, ctx) => ({ tasks: tasks.listTasks(ctx.userId, ctx.sessionId) }) },
+  { name: 'task-list', kind: 'read', execute: (args, ctx) => ({ tasks: tasks.listTasks(ctx.userId, ctx.sessionId) }) },
   {
     name: 'task-create',
     kind: 'act',
@@ -130,8 +130,7 @@ const ENTRIES = [
   },
   {
     name: 'project_memory',
-    kind: 'act',
-    gate: autoGate,
+    kind: 'read',
     // No llm_agent/global/project-memory.md yet (v2-only until P2e) — inline
     // fallback consumed by sdk/tools.mjs's toSdkTool when skillFor() finds no
     // .md-backed skill for this name.

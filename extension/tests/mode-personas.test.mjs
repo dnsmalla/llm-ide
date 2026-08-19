@@ -93,13 +93,18 @@ test('READ_ONLY_TOOL_NAMES is derived from the registry, not hand-maintained', a
   assert.ok(!/const READ_ONLY_TOOL_NAMES = new Set\(\[\s*\n\s*'ask-internal',/.test(src), 'the old hand-maintained literal should be gone');
 });
 
-test('allowedToolNames(execute) output is unchanged by the refactor', () => {
+test('allowedToolNames(execute) includes all kind:read tools except task-list', () => {
   const names = [...allowedToolNames('execute')].sort();
-  assert.deepEqual(names, ['ask-internal', 'ask-subagent', 'fetch-url', 'find-code', 'list-files', 'read-file', 'search-kb', 'web-search']);
+  assert.deepEqual(names, ['ask-internal', 'ask-subagent', 'fetch-url', 'find-code', 'list-files', 'project_memory', 'read-file', 'search-kb', 'web-search']);
 });
 
-test('allowedToolNames(plan) still adds save-plan on top of the read set', () => {
+test('allowedToolNames(execute) explicitly excludes task-list despite it being kind:read', () => {
+  const names = allowedToolNames('execute');
+  assert.equal(names.has('task-list'), false, 'task-list should be excluded even though it is kind:read in the registry');
+});
+
+test('allowedToolNames(plan) adds save-plan on top of the base 9-tool read set', () => {
   const names = [...allowedToolNames('plan')].sort();
   assert.ok(names.includes('save-plan'));
-  assert.equal(names.length, 9);
+  assert.equal(names.length, 10);
 });
