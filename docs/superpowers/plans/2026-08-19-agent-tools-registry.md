@@ -1315,17 +1315,26 @@ test('READ_ONLY_TOOL_NAMES is derived from the registry, not hand-maintained', a
   assert.ok(!/const READ_ONLY_TOOL_NAMES = new Set\(\[\s*\n\s*'ask-internal',/.test(src), 'the old hand-maintained literal should be gone');
 });
 
-test('allowedToolNames(execute) output is unchanged by the refactor', () => {
+test('allowedToolNames(execute) is the OLD 8 names PLUS project_memory (already kind:read since Task 3) MINUS task-list (excluded for UX, not safety)', () => {
   const names = [...allowedToolNames('execute')].sort();
-  assert.deepEqual(names, ['ask-internal', 'ask-subagent', 'fetch-url', 'find-code', 'list-files', 'read-file', 'search-kb', 'web-search']);
+  assert.deepEqual(names, [
+    'ask-internal', 'ask-subagent', 'fetch-url', 'find-code', 'list-files',
+    'project_memory', 'read-file', 'search-kb', 'web-search',
+  ]);
+});
+
+test('task-list is kind:read but still excluded from restricted modes (UX, not safety)', () => {
+  assert.ok(!allowedToolNames('execute').has('task-list'));
 });
 
 test('allowedToolNames(plan) still adds save-plan on top of the read set', () => {
   const names = [...allowedToolNames('plan')].sort();
   assert.ok(names.includes('save-plan'));
-  assert.equal(names.length, 9);
+  assert.equal(names.length, 10);
 });
 ```
+
+**Note on the exact count:** this is NOT an 8→8 "behavior-preserving" refactor in the strictest sense — `project_memory` is already `kind:'read'` in the registry as of Task 3 (regardless of whether it has a `.md` file yet, which only affects legacy prompt-teaching, not the `kind` field), so a naive `entries().filter(e => e.kind === 'read')` derivation legitimately produces 9 names today, correctly gaining `project_memory` for plan/review/document modes (helpful there, no reason to exclude it). What must stay excluded is `task-list` — it has ALWAYS been `kind:'read'` since Task 1 (it's genuinely safe/read-only), but the ORIGINAL hand-maintained list never included it, for a UX reason unrelated to safety: these modes describe single-turn prose output, never "work through a tracked task list" behavior (see the deleted comment block's original rationale, preserved in Step 3 below). A naive `kind==='read'` filter with no exclusion would wrongly re-admit `task-list` (and would also tempt a "fix" of reclassifying it to `kind:'act'` in the registry to force a match — do NOT do this; `kind` is the safety/gating axis Task 7's `canUseTool` branches on, not a mode-restriction knob, and `task-list` genuinely needs no approval gate). Task 3's own contract test (`tests/tools-registry.test.mjs`) pins `kind:'act'` to exactly `run-bash`/`task-create`/`task-update` — any change to that set is a real, reviewable behavior change to the v2 approval-gate surface, not a side effect of a mode-restriction refactor.
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -1340,10 +1349,20 @@ import { entries } from '../tools/registry.mjs';
 // Replace the hand-maintained READ_ONLY_TOOL_NAMES literal (and its long
 // explanatory comment about run-bash's misleading .md kind — see
 // tools/registry.mjs's own kind field, which is now the honest source) with:
-const READ_ONLY_TOOL_NAMES = new Set(entries().filter((e) => e.kind === 'read').map((e) => e.name));
+// task-list is genuinely kind:'read' (safe, no gating needed) but was never
+// in this list even before the registry existed — task-list/create/update
+// describe tracked, multi-step work, and these modes are single-turn prose
+// output (a plan proposal, review feedback, documentation), never "work
+// through a task list." That's a UX exclusion, not a safety one, so it's
+// carried forward explicitly here rather than expressed via `kind` (which
+// Task 7's v2 canUseTool gate depends on meaning something else — do not
+// "fix" a mode-restriction mismatch by reclassifying a tool's registry kind).
+const READ_ONLY_TOOL_NAMES = new Set(
+  entries().filter((e) => e.kind === 'read' && e.name !== 'task-list').map((e) => e.name),
+);
 ```
 
-Delete the large comment block explaining why `run-bash`'s `.md` `kind: read` can't be trusted for mode restriction, and the per-name rationale list above `READ_ONLY_TOOL_NAMES` — that reasoning now lives in `tools/registry.mjs`'s own header comment and the `Global Constraints` note at the top of this plan/spec.
+Delete the large comment block explaining why `run-bash`'s `.md` `kind: read` can't be trusted for mode restriction, and the per-name rationale list above `READ_ONLY_TOOL_NAMES` — most of that reasoning now lives in `tools/registry.mjs`'s own header comment; the one piece that doesn't (`task-list`'s UX-not-safety exclusion) is preserved in the comment above, since it's specific to mode-restriction and isn't something `tools/registry.mjs` itself needs to know or express.
 
 - [ ] **Step 4: Run — expect PASS, plus full regression**
 
@@ -1445,7 +1464,7 @@ Remove `inlineMeta` from `project_memory`'s registry entry (`tools/registry.mjs`
 - [ ] **Step 4: Run — expect PASS, plus full regression**
 
 Run: `cd extension && node --test tests/global-handlers-sync.test.mjs tests/agent-v2-tools.test.mjs && node --test`
-Expected: all pass. In particular confirm `mode-personas.test.mjs` (Task 10) still passes — `project_memory` is now `kind:'read'` in the registry, so `allowedToolNames('execute')` GAINS it; if Task 10's golden test asserted an exact 8-name list, update that assertion here to 9 names including `project_memory` (call this out explicitly rather than leaving a stale assertion — this is the dependency the spec flagged in §8/§9).
+Expected: all pass. `mode-personas.test.mjs` (Task 10) needs no change here — Task 10 already accounted for `project_memory` being `kind:'read'` (it was added to the registry back in Task 3, before Task 10 ever ran), so its golden test already asserts the 9-name set including `project_memory`. This task doesn't move that count again; it only gives `project_memory` a `.md` file so the LEGACY engine's prompt can teach the model about it (v2 already had it via Task 3/4).
 
 - [ ] **Step 5: Commit**
 
