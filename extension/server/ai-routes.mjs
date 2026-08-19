@@ -2,6 +2,7 @@ import { runClaude, runClaudeStream, streamModelReply, resolveLanguage } from '.
 import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON } from '../core/utils.mjs';
 import { selectAttachments, buildSkillsText } from '../core/prompt-framing.mjs';
 import { handleCodeAssist } from '../llm_agent/runtime/route.mjs';
+import { answerDecision } from '../llm_agent/sdk/decisions.mjs';
 import { runSpikeQuery } from '../llm_agent/sdk/spike-engine.mjs';
 import { selectHistoryTurns } from '../llm_agent/runtime/loop.mjs';
 import { config } from '../core/config.mjs';
@@ -582,6 +583,34 @@ export async function handleAIRoutes(req, res) {
         error: { code: 'INTERNAL_ERROR', message: 'The assistant is temporarily unavailable. Please try again.' },
       });
     }
+    return true;
+  }
+
+  // POST /code-assist/decision — resolves a parked run-bash ToolApproval
+  // (llm_agent/sdk/decisions.mjs), the legacy-engine counterpart of
+  // POST /agent/v2/decision (routes/agent-v2.mjs). Same registry, same
+  // shape: the registry owns tenancy (deciding user AND session — here
+  // the legacy chat's agentContext.sessionId — must match the parked entry).
+  if (req.method === 'POST' && req.url === '/code-assist/decision') {
+    const body = parseJSON(await readBody(req, 64 * 1024)) || {};
+    const out = answerDecision({
+      requestId: body.requestId,
+      sdkSessionId: body.sdkSessionId,
+      userId: req.user?.id,
+      action: body.action,
+      answers: body.answers,
+    });
+    if (out.ok) {
+      sendJSON(res, 200, { ok: true });
+      return true;
+    }
+    if (out.reason === 'tenancy') {
+      sendJSON(res, 403, { error: { code: 'DECISION_FORBIDDEN', message: 'This decision belongs to another user or session' } });
+      return true;
+    }
+    sendJSON(res, 404, {
+      error: { code: out.reason === 'expired' ? 'DECISION_EXPIRED' : 'DECISION_UNKNOWN', message: `No pending decision for this requestId (${out.reason})` },
+    });
     return true;
   }
 

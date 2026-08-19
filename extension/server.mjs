@@ -67,13 +67,20 @@ const HOST = config.host;
 //     init/mode_set/delta/tool_*/approval_*/result/error events),
 //     POST /agent/v2/decision (AskUserQuestion approval answers), and
 //     DELETE /agent/v2/session (chat→SDK-session mapping + transcripts).
-const SERVER_API_VERSION = 33;
+// 33→34: legacy engine's run-bash tool is now gated the same way as v2's
+//     act tools (Tasks 5-7): a 'prompt'-tier command parks a ToolApproval
+//     decision and emits an approval_request progress event instead of
+//     running unattended. New POST /code-assist/decision resolves it,
+//     reusing the same llm_agent/sdk/decisions.mjs registry as
+//     /agent/v2/decision.
+const SERVER_API_VERSION = 34;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
   '/generate-doc',
   '/chat',
   '/code-assist',
+  '/code-assist/decision',
   '/agent-sdk/spike',
   '/agent/v2/stream',
   '/agent/v2/decision',

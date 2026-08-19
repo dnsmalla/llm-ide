@@ -29,6 +29,8 @@ import { tasks } from '../runtime/handlers/session-tasks.mjs';
 import { handleRunBash } from '../runtime/handlers/run-bash.mjs';
 import { handleProjectMemory } from '../runtime/handlers/project-memory.mjs';
 import { runBashGate, autoGate } from './gates.mjs';
+import { registerDecision, abortDecisionsForSession } from '../sdk/decisions.mjs';
+import { hasAlwaysAllow, setAlwaysAllow } from '../../kb/tool-approvals.mjs';
 
 const ENTRIES = [
   {
@@ -92,7 +94,33 @@ const ENTRIES = [
     name: 'run-bash',
     kind: 'act',
     gate: (args) => runBashGate(args.command),
-    execute: (args, ctx) => handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot }),
+    async execute(args, ctx) {
+      // Gate FIRST, always-allow only short-circuits the 'prompt' tier —
+      // see the identical fix + rationale in Task 7's canUseTool. Checking
+      // always-allow before the gate would let a run-bash always-allowed for
+      // one safe command bypass the blocked check on every later invocation.
+      const decision = runBashGate(args.command);
+      if (decision === 'blocked') return { error: 'Command blocked for safety. Confirm destructive operations with the user before running.' };
+      if (decision === 'auto') return handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot });
+      // decision === 'prompt' — always-allow only matters here.
+      if (hasAlwaysAllow(ctx.userId, 'run-bash')) {
+        return handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot });
+      }
+      // Same park-and-await pattern as v2's canUseTool, reusing the SAME
+      // dependency-free decisions.mjs registry (spec §7).
+      const sessionKey = ctx.agentContext?.sessionId;
+      const { requestId, promise } = registerDecision({ sdkSessionId: sessionKey, userId: ctx.userId, kind: 'ToolApproval' });
+      try {
+        ctx.emit?.({ phase: 'approval_request', requestId, kind: 'ToolApproval', toolName: 'run-bash', argsSummary: args.command });
+      } catch {
+        abortDecisionsForSession(sessionKey);
+        return { error: 'Failed to surface the approval request.' };
+      }
+      const outcome = await promise;
+      if (outcome.action === 'always-allow') { setAlwaysAllow(ctx.userId, 'run-bash'); return handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot }); }
+      if (outcome.action === 'allow') return handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot });
+      return { error: 'Command not approved by the user.' };
+    },
   },
   {
     name: 'project_memory',

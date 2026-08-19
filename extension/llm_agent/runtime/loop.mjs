@@ -585,7 +585,7 @@ export async function runAgentLoop({
       // run at. The +1 happens HERE — the single enforcement point — so
       // handler authors forward ctx.depth verbatim and can't forget the
       // increment (forgetting it would silently disable the nesting cap).
-      result = await runReadHandler(skill.name, validation.value, { userId, kb, handlers, depth: depth + 1 });
+      result = await runReadHandler(skill.name, validation.value, { userId, kb, handlers, depth: depth + 1, emit });
       if (!result.error) {
         if (readCache.size >= MAX_CACHE_SIZE) {
           readCache.delete(readCache.keys().next().value);
