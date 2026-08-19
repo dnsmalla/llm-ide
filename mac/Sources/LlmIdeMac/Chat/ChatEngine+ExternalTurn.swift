@@ -217,7 +217,7 @@ extension ChatEngine {
                 },
                 onChunk: { [self] text in appendStreamedChunk(streamingID, text) },
                 onApproval: { [self] approval in
-                    handleApprovalArrival(approval, legacySessionId: input.agentContext?.sessionId)
+                    handleApprovalArrival(approval, legacySessionId: legacySessionIdForApproval(input))
                     // handleApprovalArrival recorded the Mac-pending note
                     // into the turn's tool steps for the mirrored transcript;
                     // the phone's LIVE label channel doesn't observe

@@ -21,8 +21,10 @@ final class AgentV2ApprovalState {
     /// (unlike `AgentV2Transport`, which persists its `sdkSessionId` across
     /// the turn) holds no session state of its own. Nil for a v2-engine
     /// approval, which instead reads `ChatEngine.agentV2SessionId` at submit
-    /// time; `submitToolDecision` picks whichever is non-nil for the
-    /// engine actually holding this approval.
+    /// time. Non-nil here is the AUTHORITATIVE signal that the LEGACY engine
+    /// parked this approval, so `submitToolDecision` prefers it over
+    /// `agentV2SessionId` — which can linger from an earlier v2 turn in the
+    /// same chat and would route the answer to the wrong endpoint.
     let legacySessionId: String?
     /// True only after the server ACCEPTED a decision for this approval.
     /// Stays false through retries — a failed POST is not a submission.
@@ -99,6 +101,27 @@ extension ChatEngine {
             && currentSessionEngineMarker() == AgentV2Selection.sessionEngineV2
     }
 
+    /// The `legacySessionId` to tag an approval arriving from THIS turn with:
+    /// the chat's `agentContext.sessionId` when the turn ran on the legacy
+    /// engine, `nil` when it ran on v2 (whose approvals key on the SDK session
+    /// id instead, read at submit time).
+    ///
+    /// Both ids are normally non-nil — `CodeAssistantPanel+Agent` fills
+    /// `AgentContext.sessionId` on EVERY turn, v2 included — so "was this
+    /// approval parked by the legacy engine?" cannot be inferred from the
+    /// context alone. The transport that actually ran the turn is the only
+    /// honest source, and it is per-TURN, not per-chat: a v2-selected turn
+    /// can still land on legacy through the stale-server 404 fallback.
+    func legacySessionIdForApproval(_ input: ChatTransportInput) -> String? {
+        if let composite = transport as? AgentV2EngineTransport {
+            return composite.lastTurnRanLegacy ? input.agentContext?.sessionId : nil
+        }
+        // A bare v2 transport never parks a legacy approval; anything else
+        // (CodeAssistTransport and its doubles) always does.
+        if transport is AgentV2Transport { return nil }
+        return input.agentContext?.sessionId
+    }
+
     /// Sink for the transport's 4-callback `onApproval`. Called by every
     /// round-trip site (runTurn / sendFollowup / performExternalTurn), so the
     /// card appears for Mac-driven and phone-driven turns alike — the Mac
@@ -160,12 +183,18 @@ extension ChatEngine {
     /// Posts the user's decision for a parked `ToolApproval` — `action` is
     /// one of "deny" | "allow" | "always-allow", never an `answers`
     /// dictionary (that shape is `AskUserQuestion`-only; see
-    /// `submitApproval`). Routes to whichever engine actually holds this
-    /// approval: the v2 transport's `agentV2SessionId` (`POST
-    /// /agent/v2/decision`, Task 7) if present, else the state's own
-    /// `legacySessionId` (`POST /code-assist/decision`, Task 8) — a v2 and a
-    /// legacy engine never coexist on one `ChatEngine`, so exactly one of
-    /// the two is ever available for a given approval.
+    /// `submitApproval`).
+    ///
+    /// Routes to whichever engine actually PARKED this approval, and
+    /// `legacySessionId` is checked FIRST because it is the ground truth for
+    /// THIS approval: it is non-nil exactly when the legacy `CodeAssistTransport`
+    /// delivered it, captured at arrival. `agentV2SessionId` is not — it reads
+    /// the v2 transport's `sdkSessionId`, which persists for the whole chat
+    /// once any v2 turn has run. A chat that takes a v2 turn and then falls
+    /// back to a legacy turn (e.g. a stale-server 404) therefore has BOTH
+    /// non-nil, and the old v2-first order posted the legacy decision to
+    /// `/agent/v2/decision` with a stale SDK session id — a 403
+    /// `DECISION_FORBIDDEN`, i.e. an unanswerable card.
     ///
     /// Same submit/retry contract as `submitApproval`: `{ok:true}` marks the
     /// state submitted and drops the card (identity-checked against a
@@ -175,10 +204,10 @@ extension ChatEngine {
         guard let state = pendingApproval else { return }
         do {
             let ok: Bool
-            if let sdkSessionId = agentV2SessionId {
-                ok = try await postToolDecision(state.approval.requestId, sdkSessionId, action)
-            } else if let legacySessionId = state.legacySessionId {
+            if let legacySessionId = state.legacySessionId {
                 ok = try await postLegacyToolDecision(state.approval.requestId, legacySessionId, action)
+            } else if let sdkSessionId = agentV2SessionId {
+                ok = try await postToolDecision(state.approval.requestId, sdkSessionId, action)
             } else {
                 state.recordSubmitFailure("No session id for this engine — cannot post the decision. Try a new turn.")
                 return

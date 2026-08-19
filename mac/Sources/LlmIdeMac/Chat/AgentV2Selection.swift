@@ -163,6 +163,20 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
         self.sessionEngineMarker = sessionEngineMarker
     }
 
+    /// Whether the round-trip currently in flight (or the most recent one)
+    /// ran on the LEGACY transport. Set at the top of every branch below,
+    /// before delegating, so a callback fired DURING the round-trip already
+    /// reads the right value.
+    ///
+    /// `ChatEngine` needs this to tag an arriving `ToolApproval` with the
+    /// session id it was actually parked under: a legacy approval keys on
+    /// `agentContext.sessionId`, a v2 one on the SDK session id. Both are
+    /// non-nil on a normal turn, and `sdkSessionId` survives for the chat's
+    /// whole lifetime once any v2 turn has run — so "which engine ran THIS
+    /// turn" is the only reliable discriminator, and a stale-server 404
+    /// fallback makes it genuinely per-turn rather than per-chat.
+    private(set) var lastTurnRanLegacy = false
+
     /// SDK-session forwarding so `ChatEngine.agentV2SessionId` and the
     /// session-swap reset keep working through the composite (they cast for
     /// `AgentV2Transport` and would otherwise miss it).
@@ -184,13 +198,16 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
         onChunk: @escaping @MainActor (String) -> Void
     ) async throws -> ChatTransportResult {
         guard selectsV2(input) else {
+            lastTurnRanLegacy = true
             return try await legacy.roundTrip(input, onProgress: onProgress, onChunk: onChunk)
         }
+        lastTurnRanLegacy = false
         do {
             return try await v2.roundTrip(input, onProgress: onProgress, onChunk: onChunk)
         } catch {
             if Self.isStaleServer404(error) {
                 onStaleServer?()
+                lastTurnRanLegacy = true
                 return try await legacy.roundTrip(input, onProgress: onProgress, onChunk: onChunk)
             }
             throw error
@@ -209,8 +226,10 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
             // it reaches `onApproval` instead of silently vanishing the way
             // dropping to the 3-callback overload would (that overload only
             // exists for the v2-only "answerless" fallback below).
+            lastTurnRanLegacy = true
             return try await legacy.roundTrip(input, onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
         }
+        lastTurnRanLegacy = false
         do {
             return try await v2.roundTrip(input, fresh: false,
                                           onProgress: onProgress, onChunk: onChunk,
@@ -253,6 +272,7 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
         onApproval: @escaping @MainActor (AgentV2Approval) -> Void
     ) async throws -> ChatTransportResult {
         onStaleServer?()
+        lastTurnRanLegacy = true
         return try await legacy.roundTrip(input, onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
     }
 

@@ -403,7 +403,7 @@ final class ChatEngine {
                 onProgress: { [self] progress in recordProgress(progress) },
                 onChunk: { [self] text in appendStreamedChunk(streamingID, text) },
                 onApproval: { [self] approval in
-                    handleApprovalArrival(approval, legacySessionId: input.agentContext?.sessionId)
+                    handleApprovalArrival(approval, legacySessionId: legacySessionIdForApproval(input))
                 }
             )
             // If Stop fired during the await, don't append the (now-unwanted) reply.
@@ -539,7 +539,7 @@ final class ChatEngine {
                 onProgress: { [self] progress in recordProgress(progress) },
                 onChunk: { [self] text in appendStreamedChunk(streamingID, text) },
                 onApproval: { [self] approval in
-                    handleApprovalArrival(approval, legacySessionId: input.agentContext?.sessionId)
+                    handleApprovalArrival(approval, legacySessionId: legacySessionIdForApproval(input))
                 }
             )
             if let idx = messages.firstIndex(where: { $0.id == streamingID }) {
