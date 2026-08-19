@@ -159,7 +159,12 @@ const MAX_PROMPT_CHARS = 20_000;
  */
 export function buildEngineOptions(
   { userId, mode, model, language, message, skills, agentContext, attachments } = {},
-  { readSkill = readSkillInstructions, roots = buildReadableRoots, sessionMemory = listSessionMemory } = {},
+  {
+    readSkill = readSkillInstructions,
+    roots = buildReadableRoots,
+    sessionMemory = listSessionMemory,
+    getPersona = getAgentPersona,
+  } = {},
 ) {
   const resolvedMode = typeof mode === 'string' && mode ? mode : 'execute';
   const persona = personaForMode(resolvedMode);
@@ -184,7 +189,7 @@ export function buildEngineOptions(
   // engines. Best-effort: a stray DB error here shouldn't break a v2 turn,
   // and users with no persona set pay zero extra token cost.
   try {
-    const activePersona = userId ? getAgentPersona(userId) : null;
+    const activePersona = userId ? getPersona(userId) : null;
     const name = sanitizePersonaSuffix((activePersona?.name || '').trim()).slice(0, 80);
     const suffix = sanitizePersonaSuffix((activePersona?.promptSuffix || '').trim());
     if (name || suffix) {

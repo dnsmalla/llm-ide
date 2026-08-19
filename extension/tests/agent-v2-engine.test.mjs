@@ -226,11 +226,41 @@ test('buildEngineOptions appends the user persona suffix, sanitized', async () =
 });
 
 test('buildEngineOptions: no persona set costs zero extra tokens (no Persona block)', () => {
+  // getAgentPersona('no-persona-user') returns null cleanly (no throw) since
+  // an unregistered user id just yields zero rows — this exercises the
+  // "user has no persona" branch, NOT the DB-error branch (see the
+  // dedicated forced-failure test below for that).
   const { queryOptions } = buildEngineOptions(
     { userId: 'no-persona-user', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' } },
     { readSkill: () => null, roots: () => [] },
   );
   assert.ok(!queryOptions.systemPrompt.append.includes('Persona'), 'no Persona block when the user has no custom persona');
+});
+
+test('buildEngineOptions: a persona-lookup error is swallowed — turn proceeds without the Persona block', () => {
+  const { queryOptions } = buildEngineOptions(
+    { userId: 'some-user', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' } },
+    {
+      readSkill: () => null,
+      roots: () => [],
+      getPersona: () => { throw new Error('boom: simulated DB failure'); },
+    },
+  );
+  assert.ok(!queryOptions.systemPrompt.append.includes('Persona'), 'a thrown persona lookup must not surface a Persona block');
+  // The rest of the append (e.g. no crash, options object still well-formed)
+  // proves the turn genuinely proceeds rather than the whole call throwing.
+  assert.equal(typeof queryOptions.systemPrompt.append, 'string');
+});
+
+test('buildEngineOptions: mode persona and user persona coexist — neither clobbers the other', async () => {
+  const { setAgentPersona } = await import('../kb/personas.mjs');
+  const u = registerUser(getDb(), { email: 'v2persona-coexist@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+  setAgentPersona(u.id, { name: 'Ada', promptSuffix: 'Be terse and precise.' });
+  const { queryOptions } = buildEngineOptions({ userId: u.id, mode: 'plan', message: 'hi', agentContext: { workspaceRoot: process.cwd() } });
+  const append = queryOptions.systemPrompt.append;
+  assert.ok(append.includes('You are in PLAN mode'), 'the mode persona (plan) must still be present');
+  assert.ok(append.includes('Ada'), 'the user persona name must also be present');
+  assert.ok(append.includes('Be terse and precise.'), 'the user persona suffix must also be present');
 });
 
 // --- resolveAnthropicKey move ------------------------------------------------
