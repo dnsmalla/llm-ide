@@ -24,7 +24,6 @@ const AUTO_SAFE_PATTERNS = [
   /^ls\b/,
   /^cat\b/,
   /^(grep|rg)\b/,
-  /^find\b.*(-type\s+f|-name)/, // read-only find flags only
   /^(npm|node|swift)\s+test\b/,
   /^node\s+--test\b/,
 ];

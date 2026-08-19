@@ -35,3 +35,10 @@ test('autoGate always returns auto', () => {
   assert.equal(autoGate(), 'auto');
   assert.equal(autoGate({ anything: 'ignored' }), 'auto');
 });
+
+test('find commands with destructive flags prompt, not auto — removed from AUTO_SAFE due to bypass risk', () => {
+  // find ... -delete would bypass because the old pattern only checked for -type f or -name
+  // but didn't exclude -delete appearing later — now it falls through to 'prompt'.
+  assert.equal(runBashGate('find . -type f -delete'), 'prompt');
+  assert.equal(runBashGate("find . -name '*.txt' -exec rm {} \\;"), 'prompt');
+});
