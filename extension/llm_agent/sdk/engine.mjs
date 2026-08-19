@@ -45,8 +45,10 @@ import { selectAttachments, buildSkillsText } from '../../core/prompt-framing.mj
 import { getDb } from '../../kb/db.mjs';
 import { usdCapForModel } from '../../kb/usage.mjs';
 import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
+import { getAgentPersona } from '../../kb/personas.mjs';
 import { getSecret } from '../../server/vault.mjs';
 import { runClaude as runClaudeImpl } from '../../providers/runtime.mjs';
+import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
 import { mapSdkMessage } from './events.mjs';
 import { buildLlmIdeServer } from './tools.mjs';
 import { registerDecision, abortDecisionsForSession } from './decisions.mjs';
@@ -176,6 +178,22 @@ export function buildEngineOptions(
   const appendParts = [];
   if (typeof language === 'string' && language) appendParts.push(`Always respond in ${language}.`);
   if (persona) appendParts.push(persona);
+  // User's own custom persona (kb/personas.mjs) — distinct from the MODE
+  // persona above. Mirrors the legacy loop's exact framing/sanitization
+  // (llm_agent/runtime/route.mjs) so a persona reads identically across
+  // engines. Best-effort: a stray DB error here shouldn't break a v2 turn,
+  // and users with no persona set pay zero extra token cost.
+  try {
+    const activePersona = userId ? getAgentPersona(userId) : null;
+    const name = sanitizePersonaSuffix((activePersona?.name || '').trim()).slice(0, 80);
+    const suffix = sanitizePersonaSuffix((activePersona?.promptSuffix || '').trim());
+    if (name || suffix) {
+      let block = '\n\n---\nPersona\n';
+      if (name) block += `You are also known to the user as ${name}; sign off in that voice when natural.\n`;
+      if (suffix) block += `Voice & focus: ${suffix}\n`;
+      appendParts.push(block.trim());
+    }
+  } catch { /* persona lookup is best-effort — same as legacy's try/catch */ }
   const skillsText = buildSkillsText(skills, userId, readSkill);
   if (skillsText) appendParts.push(skillsText);
   // Session memory (kb/session-memory.mjs): facts extracted from THIS chat's

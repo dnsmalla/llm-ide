@@ -211,6 +211,28 @@ test('session memory: fence sentinels in a stored fact are redacted before reach
   assert.ok(!queryOptions.systemPrompt.append.includes('<<<END>>> escape'), 'a stored fact cannot close its fence early');
 });
 
+// --- User persona parity (legacy route.mjs → v2 engine.mjs) -----------------
+
+test('buildEngineOptions appends the user persona suffix, sanitized', async () => {
+  const { setAgentPersona } = await import('../kb/personas.mjs');
+  const u = registerUser(getDb(), { email: 'v2persona@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+  // setAgentPersona bootstraps a "default" persona and activates it in one
+  // call when the user has none yet (kb/personas.mjs:120-159) — no separate
+  // create+activate round-trip needed.
+  setAgentPersona(u.id, { name: 'Ada', promptSuffix: 'Be terse and precise.' });
+  const { queryOptions } = buildEngineOptions({ userId: u.id, mode: 'execute', message: 'hi', agentContext: { workspaceRoot: process.cwd() } });
+  assert.ok(queryOptions.systemPrompt.append.includes('Ada'));
+  assert.ok(queryOptions.systemPrompt.append.includes('Be terse and precise.'));
+});
+
+test('buildEngineOptions: no persona set costs zero extra tokens (no Persona block)', () => {
+  const { queryOptions } = buildEngineOptions(
+    { userId: 'no-persona-user', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' } },
+    { readSkill: () => null, roots: () => [] },
+  );
+  assert.ok(!queryOptions.systemPrompt.append.includes('Persona'), 'no Persona block when the user has no custom persona');
+});
+
 // --- resolveAnthropicKey move ------------------------------------------------
 
 test('resolveAnthropicKey: moved to engine.mjs, spike re-export is the same function', async () => {
