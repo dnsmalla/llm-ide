@@ -423,20 +423,45 @@ extension CodeAssistantPanel {
             ? modelState.customProviders.first(where: { "custom:\($0.id)" == modelState.selectedProvider })
             : nil
 
+        // Spec §8: "Model picker filters to anthropic models when v2 is on."
+        // "On" means `engine.usesAgentV2Engine` — toggle AND transport AND
+        // the LOADED CHAT's own engine marker (D3 clean cut) — not the bare
+        // toggle: a chat stamped legacy at creation stays legacy forever
+        // regardless of the toggle, and may already be using a non-Anthropic
+        // provider, so gating on the toggle alone would wrongly lock a
+        // legacy chat's picker to Anthropic-only. Mirrors the same rule
+        // `usesAgentV2Engine` already applies to the save-plan affordance
+        // (AgentV2ApprovalState.swift), so this can't drift from it.
+        //
+        // The Agent v2 engine only runs turns whose resolved provider is
+        // Anthropic (AgentV2Selection.providerIsAnthropic); picking a
+        // different provider mid v2-chat would silently fall back that turn
+        // to the legacy loop while the v2 SDK session sits untouched, so the
+        // NEXT v2 turn resumes with no memory of what happened in between.
+        // While this chat is on the v2 engine, don't offer that footgun at
+        // all — custom providers carry no "anthropic" id either, so they're
+        // hidden too. Off, every provider is available again, unchanged from
+        // before this filter existed.
+        let restrictToAnthropic = engine.usesAgentV2Engine
+        let providerChoices = restrictToAnthropic
+            ? AICliTool.selectable.filter { $0.provider == AgentV2Selection.anthropicProvider }
+            : AICliTool.selectable
+        let customProviderChoices = restrictToAnthropic ? [] : modelState.customProviders
+
         return HStack(spacing: 6) {
             // Provider chip — a menu to switch among the direct-API providers
             // (Claude / OpenAI / Gemini) and custom providers.
             Menu {
                 // Built-in tools
-                ForEach(AICliTool.selectable) { tool in
+                ForEach(providerChoices) { tool in
                     Button { switchProvider(.builtIn(tool)) } label: {
                         Label(tool.displayName, systemImage: tool.icon)
                     }
                 }
-                if !modelState.customProviders.isEmpty {
+                if !customProviderChoices.isEmpty {
                     Divider()
                     // Custom providers
-                    ForEach(modelState.customProviders) { provider in
+                    ForEach(customProviderChoices) { provider in
                         Button { switchProvider(.custom(provider)) } label: {
                             Label(provider.name, systemImage: "network")
                         }
