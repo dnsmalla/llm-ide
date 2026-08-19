@@ -34,7 +34,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { personaForMode, PLAN_LIKE_MODES } from '../runtime/mode-personas.mjs';
+import {
+  personaForMode, PLAN_LIKE_MODES, restrictsTools, allowedToolNames,
+} from '../runtime/mode-personas.mjs';
 import { readSkillInstructions, buildPerUserSkillSet, internalSkills } from '../skills/index.mjs';
 import { buildReadableRoots } from '../runtime/handlers/repo-files.mjs';
 import { redactFence } from '../runtime/redaction.mjs';
@@ -52,7 +54,7 @@ import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
 import { mapSdkMessage } from './events.mjs';
 import { buildLlmIdeServer } from './tools.mjs';
 import { registerDecision, abortDecisionsForSession } from './decisions.mjs';
-import { get as registryGet } from '../tools/registry.mjs';
+import { get as registryGet, entries as registryEntries } from '../tools/registry.mjs';
 import { hasAlwaysAllow, setAlwaysAllow } from '../../kb/tool-approvals.mjs';
 
 // --- Auth: per-user vault key first, operator env as fallback -------------
@@ -113,26 +115,64 @@ function buildAttachmentsText(files) {
 
 // --- The composition ---------------------------------------------------------
 
-// The v2 tool allowlist: Claude Code read-only built-ins plus every
-// registry-mounted `read`-kind llmide tool, named explicitly (Task 4 —
-// llm_agent/tools/registry.mjs is the single source of truth for the mounted
-// set; this list mirrors its `kind: 'read'` entries so an SDK permission
-// check has real names to match against instead of a wildcard). No Bash/
-// Write/Edit — a v2 chat turn is read-and-answer; writes keep their own
-// approval flow. ask-internal/ask-subagent are read-only delegation tools
-// already gated to safe sub-loops in the legacy engine — mounting them here
-// is intentional parity, not new write capability. Mode restriction beyond
-// this (save-plan for plan-like modes) is the permissionMode/persona pair
-// below, not a different list: SDK plan mode already denies write tools
-// while allowing read-only research.
+// The v2 tool allowlist. `allowedTools` means exactly ONE thing to the SDK
+// (sdk.d.ts): "List of tool names that are auto-allowed without prompting for
+// permission. These tools will execute automatically without asking the user
+// for approval." — i.e. a name listed here NEVER reaches `canUseTool`.
+//
+// So this list carries the Claude Code read-only built-ins plus every
+// `kind: 'read'` registry tool, and DELIBERATELY EXCLUDES every `kind: 'act'`
+// tool (run-bash / task-create / task-update). Listing an act tool here would
+// pre-approve it and silently bypass the safety gate in `canUseTool` below —
+// which is the whole point of the gate. Act tools are still MOUNTED (see
+// sdk/tools.mjs, which mounts all registry entries) and still callable; they
+// just fall through to `canUseTool`, where the blocked/auto/prompt gate runs.
+//
+// The mcp names are DERIVED from llm_agent/tools/registry.mjs rather than
+// hand-listed: a hand-maintained fourth copy of the tool-name list already
+// went stale once on this branch (task-list was omitted). Adding a `kind:
+// 'read'` entry to the registry now auto-allows it here with no edit; adding a
+// `kind: 'act'` entry correctly routes it through the gate with no edit.
+//
+// No Bash/Write/Edit built-ins — a v2 chat turn is read-and-answer; writes
+// keep their own approval flow. ask-internal/ask-subagent are read-only
+// delegation tools already gated to safe sub-loops in the legacy engine —
+// allowing them here is intentional parity, not new write capability.
+const V2_BUILTIN_ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];
+const MCP_PREFIX = 'mcp__llmide__';
 const V2_ALLOWED_TOOLS = [
-  'Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
-  'mcp__llmide__ask-internal', 'mcp__llmide__ask-subagent',
-  'mcp__llmide__web-search', 'mcp__llmide__fetch-url',
-  'mcp__llmide__list-files', 'mcp__llmide__read-file', 'mcp__llmide__find-code',
-  'mcp__llmide__search-kb', 'mcp__llmide__project_memory', 'mcp__llmide__task-list',
-  'mcp__llmide__run-bash', 'mcp__llmide__task-create', 'mcp__llmide__task-update',
+  ...V2_BUILTIN_ALLOWED_TOOLS,
+  ...registryEntries().filter((e) => e.kind === 'read').map((e) => `${MCP_PREFIX}${e.name}`),
 ];
+// Every llmide tool the MCP server mounts, act tools included — the universe
+// a restricted mode has to subtract from (see v2ToolPolicyForMode).
+const V2_ALL_MCP_TOOLS = registryEntries().map((e) => `${MCP_PREFIX}${e.name}`);
+
+/**
+ * The (allowedTools, disallowedTools) pair for `mode`.
+ *
+ * Unrestricted modes get the full auto-allow list and disallow nothing.
+ *
+ * A restricted mode (plan/assist_plan/review/document — `restrictsTools`)
+ * gets its llmide tools narrowed to `allowedToolNames(mode)`, exactly the set
+ * the LEGACY engine's dispatch is filtered to, so both engines expose the same
+ * roster for the same mode. `disallowedTools` carries the actual enforcement:
+ * per sdk.d.ts it removes a tool "from the model's context" so it "cannot be
+ * used, even if it would otherwise be allowed" — dropping a name from
+ * `allowedTools` alone would only demote it to a `canUseTool` consult, which
+ * would happily allow an 'auto'-tier run-bash in Plan mode.
+ */
+export function v2ToolPolicyForMode(mode) {
+  if (!restrictsTools(mode)) {
+    return { allowedTools: [...V2_ALLOWED_TOOLS], disallowedTools: [] };
+  }
+  const permitted = allowedToolNames(mode);
+  const keep = (n) => !n.startsWith(MCP_PREFIX) || permitted.has(n.slice(MCP_PREFIX.length));
+  return {
+    allowedTools: V2_ALLOWED_TOOLS.filter(keep),
+    disallowedTools: V2_ALL_MCP_TOOLS.filter((n) => !keep(n)),
+  };
+}
 
 const MAX_PROMPT_CHARS = 20_000;
 
@@ -169,6 +209,7 @@ export function buildEngineOptions(
   const resolvedMode = typeof mode === 'string' && mode ? mode : 'execute';
   const persona = personaForMode(resolvedMode);
   const planLike = PLAN_LIKE_MODES.has(resolvedMode);
+  const { allowedTools, disallowedTools } = v2ToolPolicyForMode(resolvedMode);
 
   const workspaceRoot = typeof agentContext?.workspaceRoot === 'string' ? agentContext.workspaceRoot : '';
   // All validated readable roots (DB repo allow-list ∪ the validated
@@ -233,9 +274,12 @@ export function buildEngineOptions(
     additionalDirectories,
     permissionMode: planLike ? 'plan' : 'default',
     ...(planLike ? { planModeInstructions: persona } : {}),
-    // Fresh array per call — V2_ALLOWED_TOOLS is a shared constant and must
-    // never be handed to a caller that could mutate it.
-    allowedTools: [...V2_ALLOWED_TOOLS],
+    // Fresh arrays per call — V2_ALLOWED_TOOLS is a shared constant and must
+    // never be handed to a caller that could mutate it. In a restricted mode
+    // (plan/review/document) the llmide act tools are BOTH un-auto-allowed and
+    // hard-disallowed, matching legacy's dispatch filter for the same mode.
+    allowedTools,
+    ...(disallowedTools.length ? { disallowedTools } : {}),
     systemPrompt: { type: 'preset', preset: 'claude_code', append: appendParts.join('\n\n') },
     ...(typeof model === 'string' && model ? { model } : {}),
   };
@@ -362,6 +406,16 @@ export async function runAgentV2Turn(
       return { behavior: 'deny', message: DENY_NEXT_RELEASE };
     }
     if (entry && entry.kind === 'act') {
+      // Mode restriction, belt-and-braces with buildEngineOptions'
+      // disallowedTools: a restricted mode (plan/review/document) exposes the
+      // same roster the legacy engine's dispatch is filtered to, and an act
+      // tool outside that roster is refused here even if it somehow reached
+      // the model. Without this, dropping run-bash from `allowedTools` would
+      // merely demote it to a canUseTool consult that the 'auto' tier allows.
+      const requestedMode = typeof mode === 'string' && mode ? mode : 'execute';
+      if (restrictsTools(requestedMode) && !allowedToolNames(requestedMode).has(entry.name)) {
+        return { behavior: 'deny', message: `${entry.name} is not available in ${requestedMode} mode.` };
+      }
       // The gate runs FIRST and unconditionally — 'blocked' is a hard safety
       // rail (docs/superpowers/specs/2026-08-19-agent-tools-registry-design.md
       // §7: "a blocked command stays blocked even if the tool was

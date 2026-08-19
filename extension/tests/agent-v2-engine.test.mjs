@@ -62,14 +62,22 @@ test('allowlist is read-only + llmide; skills inject via append; cwd + dirs from
     userId: 'u', mode: 'execute', language: 'Japanese',
     skills: ['family/one'], agentContext: { workspaceRoot: '/tmp/w', indexedRepos: ['/tmp/r'] },
   }, { readSkill: () => ({ name: 'one', content: '# One\ninstructions' }), roots: () => ['/tmp/w', '/tmp/r'] });
+  // Built-ins + every kind:'read' registry tool, in registry order. The three
+  // kind:'act' tools (run-bash/task-create/task-update) are DELIBERATELY
+  // absent: `allowedTools` means "auto-allowed without prompting", so listing
+  // an act tool there would skip canUseTool — i.e. skip the safety gate.
   assert.deepEqual(queryOptions.allowedTools, [
     'Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
     'mcp__llmide__ask-internal', 'mcp__llmide__ask-subagent',
     'mcp__llmide__web-search', 'mcp__llmide__fetch-url',
     'mcp__llmide__list-files', 'mcp__llmide__read-file', 'mcp__llmide__find-code',
-    'mcp__llmide__search-kb', 'mcp__llmide__project_memory', 'mcp__llmide__task-list',
-    'mcp__llmide__run-bash', 'mcp__llmide__task-create', 'mcp__llmide__task-update',
+    'mcp__llmide__search-kb', 'mcp__llmide__task-list', 'mcp__llmide__project_memory',
   ]);
+  for (const act of ['mcp__llmide__run-bash', 'mcp__llmide__task-create', 'mcp__llmide__task-update']) {
+    assert.ok(!queryOptions.allowedTools.includes(act), `${act} must NOT be pre-approved — it has to reach canUseTool`);
+  }
+  // Nothing is hard-disallowed in an unrestricted mode.
+  assert.ok(!('disallowedTools' in queryOptions));
   assert.equal(queryOptions.cwd, '/tmp/w');
   assert.deepEqual(queryOptions.additionalDirectories, ['/tmp/r']);
   assert.match(queryOptions.systemPrompt.append, /One/);

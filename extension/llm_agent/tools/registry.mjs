@@ -11,7 +11,11 @@
 // recreate the exact two-place-drift bug class this module exists to close.
 // `execute(args, ctx)` is a thin reference to the existing handler; `ctx` is
 // the same superset context object route.mjs already builds per request
-// PLUS `loopCtx` (only `ask-internal`/`ask-subagent` read it, for `depth`).
+// PLUS `loopCtx` (`ask-internal`/`ask-subagent` read it for `depth`;
+// `run-bash` reads it for `emit`). `loopCtx` is also the ENGINE
+// DISCRIMINATOR: only the legacy dispatch path (buildDispatch, below) ever
+// sets it — v2 calls `execute` with sdk/tools.mjs's flat toolCtx, which has no
+// such field. run-bash relies on that to know which engine owns its gate.
 //
 // `kind` is a NEW safety axis, independent of the .md frontmatter's
 // 'read'/'write' kind (which drives the unrelated client-side pendingTool
@@ -95,6 +99,24 @@ const ENTRIES = [
     kind: 'act',
     gate: (args) => runBashGate(args.command),
     async execute(args, ctx) {
+      // ONE gate per engine. `ctx.loopCtx` is the discriminator:
+      //
+      //  - PRESENT  => legacy engine. buildDispatch (below) always nests the
+      //    loop's per-call ctx under `loopCtx`, and loop.mjs always passes one
+      //    (`{ userId, kb, handlers, depth, emit }`). Legacy has no SDK-level
+      //    permission hook, so THIS function is the gate — full gate + park
+      //    logic below, unchanged.
+      //  - ABSENT   => v2 engine. sdk/tools.mjs's toolCtx has no `loopCtx`
+      //    field at all. On v2 the SOLE gate is engine.mjs's `canUseTool`
+      //    (run-bash is deliberately NOT in `allowedTools`, so the SDK must
+      //    consult it): by the time the SDK actually invokes the mounted tool
+      //    function, canUseTool has already returned 'allow' for this exact
+      //    invocation. Re-gating here would be redundant AND broken — there is
+      //    no emit channel on v2, so a second parked decision could never be
+      //    answered and would hang the full 300 s before denying.
+      if (!ctx.loopCtx) {
+        return handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot });
+      }
       // Gate FIRST, always-allow only short-circuits the 'prompt' tier —
       // see the identical fix + rationale in Task 7's canUseTool. Checking
       // always-allow before the gate would let a run-bash always-allowed for
@@ -105,6 +127,14 @@ const ENTRIES = [
       // decision === 'prompt' — always-allow only matters here.
       if (hasAlwaysAllow(ctx.userId, 'run-bash')) {
         return handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot });
+      }
+      // No live emit channel => no human can ever see this approval. That is
+      // exactly the BUFFERED (non-SSE) /code-assist path, which passes no
+      // onProgress at all (server/ai-routes.mjs): parking there would hang the
+      // turn for the registry's full 300 s and then deny anyway. Fail fast
+      // with an actionable message instead.
+      if (typeof ctx.loopCtx.emit !== 'function') {
+        return { error: 'This command needs interactive approval — please use a message that streams a live response.' };
       }
       // Same park-and-await pattern as v2's canUseTool, reusing the SAME
       // dependency-free decisions.mjs registry (spec §7).

@@ -83,20 +83,13 @@ test('assertReadSkillsWired is silent when every read skill has a handler', () =
   }));
 });
 
-test('drift guard throws when the handlers map omits a declared global handler', async () => {
-  // Simulate the exact bug class this whole check exists to prevent:
-  // pretend a handler was declared in GLOBAL_HANDLER_NAMES / a skill file
-  // but never wired into route.mjs's dispatch table. We can't easily
-  // monkeypatch route.mjs's internal `handlers` object from outside (it's
-  // rebuilt fresh per call and not exported), so instead we assert the
-  // general shape of the guard directly: any handlers object missing one
-  // of GLOBAL_HANDLER_NAMES's entries must be flagged as unequal — the
-  // same comparison route.mjs performs internally.
-  const wiredNames = GLOBAL_HANDLER_NAMES.slice(1); // drop the first entry — simulate a forgotten handler
-  const expectedNames = GLOBAL_HANDLER_NAMES;
-  const isInSync = wiredNames.length === expectedNames.length && expectedNames.every((n) => wiredNames.includes(n));
-  assert.equal(isInSync, false, 'expected the drift comparison to detect a missing handler');
-});
+// (Removed: 'drift guard throws when the handlers map omits a declared global
+// handler'. It imported no production code — it re-implemented a comparison
+// inline and asserted that comparison worked — and it described a runtime
+// throw that no longer exists anywhere: route.mjs builds its dispatch via
+// registry.buildDispatch, so the keys ARE registry.names() by construction and
+// there is no drift check left to guard. The tests above/below cover the real
+// invariant.)
 
 test('project_memory is reachable from the legacy loop (parity fix)', async () => {
   const fakeClaude = async (prompt) => {
@@ -138,4 +131,37 @@ test('legacy dispatch, v2 mounted tools, and registry.names() name exactly the s
 
   assert.deepEqual([...v2Names].sort(), [...registryNames].sort(), 'a v2-mounted tool name diverged from the registry');
   assert.deepEqual([...legacyNames].sort(), [...registryNames].sort(), 'a legacy-dispatched tool name diverged from the registry');
+
+  await client.close();
+  await server.instance.close();
+});
+
+// The FOURTH list that used to drift: engine.mjs's V2_ALLOWED_TOOLS (the SDK
+// `allowedTools` option). It was hand-maintained and already went stale once
+// on this branch — task-list was omitted when the act tools were added. It is
+// now derived from registry.entries(), and this pins both halves of that
+// derivation:
+//   * every kind:'read' entry IS auto-allowed (so a read tool never needs a
+//     canUseTool round-trip), and
+//   * every kind:'act' entry is NOT — `allowedTools` means "auto-allowed
+//     without prompting for permission" per the SDK's own sdk.d.ts, so an act
+//     tool listed there would never reach canUseTool, silently bypassing the
+//     blocked/auto/prompt safety gate. That is exactly the bug this test
+//     exists to prevent recurring.
+test('V2_ALLOWED_TOOLS auto-allows every read registry tool and no act one', async () => {
+  const { entries } = await import('../llm_agent/tools/registry.mjs');
+  const { buildEngineOptions } = await import('../llm_agent/sdk/engine.mjs');
+  const { queryOptions } = buildEngineOptions(
+    { userId: 'sync-u', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' } },
+    { readSkill: () => null, roots: () => ['/tmp/w'], sessionMemory: () => [], getPersona: () => null },
+  );
+  const allowed = new Set(queryOptions.allowedTools);
+  for (const e of entries()) {
+    const mcpName = `mcp__llmide__${e.name}`;
+    if (e.kind === 'read') {
+      assert.ok(allowed.has(mcpName), `${mcpName} is kind:'read' but is not auto-allowed`);
+    } else {
+      assert.ok(!allowed.has(mcpName), `${mcpName} is kind:'act' — pre-approving it bypasses the canUseTool safety gate`);
+    }
+  }
 });
