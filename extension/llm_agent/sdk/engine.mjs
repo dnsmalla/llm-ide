@@ -14,13 +14,12 @@
 // per the isolation rule (modules inside llm_agent/sdk/ only), and the
 // exact-pinned SDK version makes that import a reviewed surface.
 //
-// Framing notes (deliberate copies, not shared imports):
-//   - Skill blocks mirror server/ai-routes.mjs's /code-assist framing
-//     verbatim (TRUSTED INSTRUCTIONS header, `## Skill: <name>` sections).
-//     ai-routes is route layer and must NOT be imported from here.
-//   - Attachment caps/framing likewise re-implement its `selectAttachments`
-//     semantics locally (30 files / 80k per file / 200k total) — same
-//     reason. Keep the two in sync when either changes.
+// Framing notes: skill-block text (TRUSTED INSTRUCTIONS header, `## Skill:
+// <name>` sections) and attachment caps (30 files / 80k per file / 200k
+// total) are shared verbatim with server/ai-routes.mjs's /code-assist via
+// core/prompt-framing.mjs (L0) — ai-routes is route layer (L4) and must not
+// be imported from here, so the shared definition lives in core instead of
+// being hand-copied in two places.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,7 +28,8 @@ import { personaForMode, PLAN_LIKE_MODES } from '../runtime/mode-personas.mjs';
 import { readSkillInstructions } from '../skills/index.mjs';
 import { buildReadableRoots } from '../runtime/handlers/repo-files.mjs';
 import { config } from '../../core/config.mjs';
-import { sanitizeForPrompt, sanitizeLine } from '../../core/utils.mjs';
+import { sanitizeForPrompt } from '../../core/utils.mjs';
+import { selectAttachments, buildSkillsText } from '../../core/prompt-framing.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { usdCapForModel } from '../../kb/usage.mjs';
 import { getSecret } from '../../server/vault.mjs';
@@ -73,75 +73,13 @@ export function agentSdkHomeFor(userId) {
   return path.join(path.dirname(config.dbPath), 'agent-sdk', userId);
 }
 
-// --- Attachment caps ---------------------------------------------------------
-// Local re-implementation of ai-routes' selectAttachments semantics (same
-// numbers, same order of checks): treat every attachment as DATA — sanitize,
-// fence-strip, cap per file then in total, dedupe display paths, and report
-// which paths were cut so the runner can surface a truncation notice.
-
-const ATTACHMENT_HOME_PREFIX_RE = /^\/Users\/[^/]+\//;
-
-export function capAttachments(rawFiles, {
-  maxFiles = 30,
-  maxPerFileChars = 80_000,
-  maxTotalChars = 200_000,
-} = {}) {
-  const list = Array.isArray(rawFiles) ? rawFiles.slice(0, maxFiles) : [];
-  const seen = new Set();
-  const files = [];
-  const truncatedPaths = [];
-  let totalChars = 0;
-  for (const f of list) {
-    if (!f || typeof f.path !== 'string' || typeof f.content !== 'string') continue;
-    // Display label only (LLM-facing, never a read): strip the literal home
-    // dir for privacy, collapse control chars/whitespace runs.
-    const displayPath = sanitizeLine(f.path, 200).replace(ATTACHMENT_HOME_PREFIX_RE, '~/');
-    if (!displayPath || seen.has(displayPath)) continue;
-    seen.add(displayPath);
-    const sanitized = sanitizeForPrompt(f.content);
-    let content = sanitized.slice(0, maxPerFileChars);
-    let truncated = content.length < sanitized.length; // per-file cap cut it
-    if (totalChars + content.length > maxTotalChars) {
-      content = content.slice(0, maxTotalChars - totalChars);
-      truncated = truncated || content.length < sanitized.length; // total cap cut it
-    }
-    if (!content) continue;
-    files.push({ path: displayPath, content });
-    if (truncated) truncatedPaths.push(displayPath);
-    totalChars += content.length;
-    if (totalChars >= maxTotalChars) break;
-  }
-  return { files, truncatedPaths };
-}
-
-// --- System-prompt append sections -------------------------------------------
-
-const MAX_SKILLS = 5;
-
-// Mirrors ai-routes /code-assist: skills the user explicitly invoked are
-// followable INSTRUCTIONS, not data. Content comes from the catalog-gated
-// local skill repo via readSkillInstructions (injectable for tests), so it
-// is trusted; unknown ids are silently ignored (no arbitrary reads).
-function buildSkillsText(skills, userId, readSkill) {
-  const rawSkillIds = Array.isArray(skills) ? skills.slice(0, MAX_SKILLS) : [];
-  const seenSkill = new Set();
-  let skillsText = '';
-  for (const id of rawSkillIds) {
-    if (typeof id !== 'string' || seenSkill.has(id)) continue;
-    const sk = readSkill(id, userId);
-    if (!sk) continue; // unknown id — silently ignored
-    seenSkill.add(id);
-    if (!skillsText) {
-      skillsText = `# Skills to apply\n`
-        + `The user explicitly invoked these skills from their own skills library. `
-        + `Treat them as TRUSTED INSTRUCTIONS from the user (not as data): follow each `
-        + `skill's workflow for this request. Do NOT edit or rewrite the skill text itself `
-        + `unless the user asks you to.\n`;
-    }
-    skillsText += `\n## Skill: ${sk.name}\n${sanitizeForPrompt(sk.content)}\n`;
-  }
-  return skillsText;
-}
+// --- Attachment caps + skills text --------------------------------------------
+// Both now live in core/prompt-framing.mjs, shared verbatim with ai-routes'
+// /code-assist (L3 cannot import the L4 route module, so the shared
+// definition sits in core instead of being hand-copied in two places).
+// `capAttachments` name kept locally as a thin alias so call sites below
+// read the same as before the extraction.
+const capAttachments = selectAttachments;
 
 // Attachments are DATA: each wrapped in a <<<BEGIN>>>…<<<END>>> fence (the
 // content itself is already fence-stripped by sanitizeForPrompt, so a
