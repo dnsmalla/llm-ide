@@ -202,3 +202,79 @@ test('buildDispatch wiring: handlers[\'run-bash\'] surfaces approval_request thr
   const result = await runPromise;
   assert.ok(result.error, 'a denied command must not run');
 });
+
+// --- I5.2: the BUFFERED (non-SSE) /code-assist path has no emit channel ----
+//
+// server/ai-routes.mjs's buffered branch passes no onProgress/onChunk at all,
+// so loop.mjs's per-call ctx carries no `emit`. Parking there produced an
+// approval nobody could ever see or answer: a guaranteed 300 s hang followed
+// by a denial, on every prompt-tier command. Deny immediately and say why.
+test('legacy dispatch with no emit channel denies immediately instead of parking an unanswerable approval', async () => {
+  const { buildDispatch } = await import('../llm_agent/tools/registry.mjs');
+  const user = registerUser(getDb(), { email: 'code-assist-decision-7@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+  const handlers = buildDispatch({
+    agentContext: { sessionId: 'legacy-s7', workspaceRoot: process.cwd() },
+    userId: user.id,
+  });
+
+  const started = Date.now();
+  // loopCtx present (legacy), but no `emit` — exactly the buffered path.
+  const result = await handlers['run-bash']({ command: 'echo should-not-run' }, { userId: user.id });
+  assert.ok(Date.now() - started < 5_000, 'must fail fast, not wait on the 300 s registry timeout');
+  assert.match(result.error, /interactive approval/i);
+  assert.equal(result.stdout, undefined, 'the command must not have run');
+});
+
+test('an auto-safe command still runs on the buffered path (the no-emit guard only affects the prompt tier)', async () => {
+  const { buildDispatch } = await import('../llm_agent/tools/registry.mjs');
+  const user = registerUser(getDb(), { email: 'code-assist-decision-8@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+  const handlers = buildDispatch({
+    agentContext: { sessionId: 'legacy-s8', workspaceRoot: process.cwd() },
+    userId: user.id,
+  });
+  const result = await handlers['run-bash']({ command: 'git status --porcelain=v1' }, { userId: user.id });
+  assert.ok(!result.error, `unexpected error: ${result.error}`);
+});
+
+// --- I5.1: a dropped SSE panel must unpark, not leave a 300 s zombie -------
+test('the SSE /code-assist close handler aborts the session\'s parked decisions', async () => {
+  const { handleAIRoutes } = await import('../server/ai-routes.mjs');
+  const user = registerUser(getDb(), { email: 'code-assist-decision-9@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+
+  const closeHandlers = [];
+  const req = {
+    method: 'POST',
+    url: '/code-assist',
+    headers: { accept: 'text/event-stream' },
+    user: { id: user.id },
+    on(event, cb) {
+      if (event === 'close') closeHandlers.push(cb);
+      if (event === 'data') cb(Buffer.from(JSON.stringify({
+        message: 'hi',
+        // `provider` without `model` is route.mjs's fail-fast guard: the turn
+        // errors out before any model call, so this test exercises the REAL
+        // SSE branch (which registers the close handler before running the
+        // turn) without spawning a CLI or hitting the network.
+        provider: 'deepseek',
+        agentContext: { sessionId: 'legacy-s9', workspaceRoot: process.cwd(), recentIssues: [], indexedRepos: [] },
+      })));
+      if (event === 'end') cb();
+    },
+  };
+  const events = [];
+  const res = {
+    writableEnded: false,
+    writeHead() {},
+    write(chunk) { events.push(chunk); },
+    end() { res.writableEnded = true; },
+  };
+  await handleAIRoutes(req, res);
+  assert.ok(closeHandlers.length > 0, 'the SSE branch must register a close handler');
+
+  // Park a decision under the same session key run-bash's execute uses
+  // (agentContext.sessionId), then drop the client.
+  const { promise } = registerDecision({ sdkSessionId: 'legacy-s9', userId: user.id, kind: 'ToolApproval' });
+  for (const cb of closeHandlers) cb();
+  const outcome = await promise;
+  assert.equal(outcome.action, 'aborted', 'a dropped panel must unpark its approvals immediately');
+});

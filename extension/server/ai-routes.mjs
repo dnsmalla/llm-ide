@@ -2,7 +2,7 @@ import { runClaude, runClaudeStream, streamModelReply, resolveLanguage } from '.
 import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON } from '../core/utils.mjs';
 import { selectAttachments, buildSkillsText } from '../core/prompt-framing.mjs';
 import { handleCodeAssist } from '../llm_agent/runtime/route.mjs';
-import { answerDecision } from '../llm_agent/sdk/decisions.mjs';
+import { answerDecision, abortDecisionsForSession } from '../llm_agent/sdk/decisions.mjs';
 import { runSpikeQuery } from '../llm_agent/sdk/spike-engine.mjs';
 import { selectHistoryTurns } from '../llm_agent/runtime/loop.mjs';
 import { config } from '../core/config.mjs';
@@ -421,6 +421,13 @@ export async function handleAIRoutes(req, res) {
           // read-only file tools. Validated server-side in buildReadableRoots.
           workspaceRoot: typeof body.agentContext.workspaceRoot === 'string' ? body.agentContext.workspaceRoot : null,
           sessionId,
+          // The client's STABLE chat id, distinct from the volatile per-turn
+          // `sessionId`. resolveChatSessionId (kb/session-memory.mjs) prefers
+          // it for everything keyed to "this chat" — session memory AND the
+          // task tools — on both engines. Without forwarding it here the
+          // resolver always fell back to `sessionId`, so a chat's tasks were
+          // keyed to whatever session id that turn happened to carry.
+          chatSessionId: typeof body.agentContext.chatSessionId === 'string' ? body.agentContext.chatSessionId : null,
         };
 
         // Build the attachments block + language directive separately
@@ -457,7 +464,16 @@ export async function handleAIRoutes(req, res) {
             'X-Accel-Buffering': 'no',
           });
           const ac = new AbortController();
-          req.on('close', () => ac.abort());
+          // A dropped panel must also unpark any run-bash ToolApproval this
+          // turn left waiting — otherwise the decision sits for the registry's
+          // full 300 s with nobody left to answer it. Mirrors what
+          // routes/agent-v2.mjs does on its own SSE close, against the SAME
+          // session key run-bash's execute parks under (agentContext.sessionId
+          // — also the `legacySessionId` the Mac card posts back).
+          req.on('close', () => {
+            ac.abort();
+            if (sessionId) abortDecisionsForSession(sessionId);
+          });
           const writeEvent = (obj) => {
             if (!res.writableEnded && !ac.signal.aborted) {
               res.write(`data: ${JSON.stringify(obj)}\n\n`);
