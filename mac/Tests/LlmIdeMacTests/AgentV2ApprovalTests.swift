@@ -26,6 +26,34 @@ final class ScriptedDecisionPoster: @unchecked Sendable {
     }
 }
 
+/// Decision-poster double for `ChatEngine.postToolDecision`/
+/// `postLegacyToolDecision` — the `ToolApproval`-answering counterpart of
+/// `ScriptedDecisionPoster` above (no `answers` dictionary; `action` instead).
+/// `sessionId` is whichever the calling closure was handed: an SDK session
+/// id for `postToolDecision`, or the legacy chat's own
+/// `agentContext.sessionId` for `postLegacyToolDecision` — the same double
+/// type serves both so a test can assert exactly one of the two posters
+/// ever received a call.
+@MainActor
+final class ScriptedToolDecisionPoster: @unchecked Sendable {
+    struct Call: Equatable {
+        let requestId: String
+        let sessionId: String
+        let action: String
+    }
+
+    var result: Result<Bool, Error> = .success(true)
+    private(set) var calls: [Call] = []
+
+    func post(requestId: String, sessionId: String, action: String) async throws -> Bool {
+        calls.append(Call(requestId: requestId, sessionId: sessionId, action: action))
+        switch result {
+        case .success(let ok): return ok
+        case .failure(let error): throw error
+        }
+    }
+}
+
 /// Task 11 — the ChatEngine approval state machine over the v2 transport:
 /// a parked `AskUserQuestion` surfaces as `pendingApproval`, is answered via
 /// the decision POST (keeping the card on failure so the user can retry),
@@ -89,6 +117,24 @@ struct AgentV2ApprovalTests {
             .init_(AgentV2Init(sessionId: sdkSessionId, claudeCodeVersion: nil, model: nil,
                                tools: [], capabilities: [], mcpServers: [])),
             .delta("plain answer"),
+            .result(AgentV2Result(subtype: nil, costUsd: nil, numTurns: nil,
+                                  durationMs: nil, sessionId: nil, stopReason: nil)),
+        ]
+    }
+
+    /// One scripted v2 turn parking a `ToolApproval` (Task 9's act-tool gate)
+    /// instead of an `AskUserQuestion` — same shape as `approvalTurnEvents`,
+    /// just a different `kind` on the parked approval.
+    func toolApprovalTurnEvents(requestId: String, sdkSessionId: String?,
+                                toolName: String = "run-bash",
+                                argsSummary: String = "echo hi") -> [AgentV2Event] {
+        [
+            .init_(AgentV2Init(sessionId: sdkSessionId, claudeCodeVersion: nil, model: nil,
+                               tools: [], capabilities: [], mcpServers: [])),
+            .delta("Running a command.\n\n"),
+            .approvalRequest(AgentV2Approval(requestId: requestId, kind: "ToolApproval",
+                                             toolName: toolName, argsSummary: argsSummary)),
+            .delta("Done."),
             .result(AgentV2Result(subtype: nil, costUsd: nil, numTurns: nil,
                                   durationMs: nil, sessionId: nil, stopReason: nil)),
         ]
@@ -174,6 +220,139 @@ struct AgentV2ApprovalTests {
         await engine.submitApproval(answers: ["Which file?": "A.md"])
         #expect(poster.calls.isEmpty)
         #expect(engine.pendingApproval?.lastError != nil)
+    }
+
+    // MARK: - Tool decision (ToolApproval, Task 9)
+    //
+    // `submitToolDecision` is `submitApproval`'s sibling for the `ToolApproval`
+    // kind: no `answers` dictionary, just an `action` string, and — unlike
+    // `submitApproval`, which only ever talks to the v2 decision endpoint —
+    // it branches between TWO endpoints depending on which engine actually
+    // holds the approval (`agentV2SessionId` non-nil → v2's
+    // `postToolDecision`; else the state's own `legacySessionId` →
+    // `postLegacyToolDecision`). These tests cover both branches plus the
+    // same success/failure/ok:false contract `submitApproval` already has.
+
+    @Test("v2 ToolApproval: submitToolDecision posts requestId/sdkSessionId/action via postToolDecision and clears on ok")
+    func v2ToolDecisionSubmitSucceeds() async throws {
+        let stream = ScriptedAgentV2Stream()
+        let engine = ChatEngine(scope: .explorer, transport: AgentV2Transport(streamer: stream))
+        let poster = ScriptedToolDecisionPoster()
+        engine.postToolDecision = { requestId, sdkSessionId, action in
+            try await poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
+        }
+        stream.events = toolApprovalTurnEvents(requestId: "req-tool-1", sdkSessionId: "sdk-99")
+
+        await engine.runTurn("run a command")
+        #expect(engine.pendingApproval?.approval.kind == "ToolApproval")
+        #expect(engine.pendingApproval?.approval.toolName == "run-bash")
+        #expect(engine.pendingApproval?.legacySessionId == nil)
+
+        await engine.submitToolDecision(action: "allow")
+        #expect(poster.calls == [.init(requestId: "req-tool-1", sessionId: "sdk-99", action: "allow")])
+        #expect(engine.pendingApproval == nil)
+    }
+
+    @Test("v2 ToolApproval: failed submit keeps the card and records the error; retry succeeds and clears")
+    func v2ToolDecisionFailedSubmitKeepsCardForRetry() async throws {
+        let stream = ScriptedAgentV2Stream()
+        let engine = ChatEngine(scope: .explorer, transport: AgentV2Transport(streamer: stream))
+        let poster = ScriptedToolDecisionPoster()
+        engine.postToolDecision = { requestId, sdkSessionId, action in
+            try await poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
+        }
+        stream.events = toolApprovalTurnEvents(requestId: "req-tool-1", sdkSessionId: "sdk-99")
+        await engine.runTurn("run a command")
+
+        poster.result = .failure(APIError.http(status: 503, code: "UNAVAILABLE",
+                                                message: "backend down", details: nil))
+        await engine.submitToolDecision(action: "deny")
+        // Card SURVIVES a failed decision so the user can retry.
+        #expect(engine.pendingApproval?.approval.requestId == "req-tool-1")
+        #expect(engine.pendingApproval?.lastError != nil)
+        #expect(engine.pendingApproval?.submitted == false)
+        #expect(poster.calls.count == 1)
+
+        poster.result = .success(true)
+        await engine.submitToolDecision(action: "allow")
+        #expect(poster.calls.count == 2)
+        #expect(poster.calls[1].action == "allow")
+        #expect(engine.pendingApproval == nil)
+    }
+
+    @Test("v2 ToolApproval: ok:false keeps the card too — a server-declined decision is retryable state, not success")
+    func v2ToolDecisionFalseSubmitKeepsCard() async throws {
+        let stream = ScriptedAgentV2Stream()
+        let engine = ChatEngine(scope: .explorer, transport: AgentV2Transport(streamer: stream))
+        let poster = ScriptedToolDecisionPoster()
+        engine.postToolDecision = { requestId, sdkSessionId, action in
+            try await poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
+        }
+        stream.events = toolApprovalTurnEvents(requestId: "req-tool-1", sdkSessionId: "sdk-99")
+        await engine.runTurn("run a command")
+
+        poster.result = .success(false)
+        await engine.submitToolDecision(action: "always-allow")
+        #expect(engine.pendingApproval != nil)
+        #expect(engine.pendingApproval?.lastError != nil)
+        #expect(poster.calls.count == 1)
+    }
+
+    @Test("ToolApproval with no session id anywhere (v2 init carried none, no legacy context) → no POST, failure recorded, card kept")
+    func toolDecisionMissingSessionIdSurfacesFailure() async throws {
+        let stream = ScriptedAgentV2Stream()
+        let engine = ChatEngine(scope: .explorer, transport: AgentV2Transport(streamer: stream))
+        let poster = ScriptedToolDecisionPoster()
+        engine.postToolDecision = { requestId, sdkSessionId, action in
+            try await poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
+        }
+        stream.events = toolApprovalTurnEvents(requestId: "req-tool-1", sdkSessionId: nil)
+        await engine.runTurn("run a command")
+        #expect(engine.pendingApproval != nil)
+        #expect(engine.pendingApproval?.legacySessionId == nil)
+
+        await engine.submitToolDecision(action: "allow")
+        #expect(poster.calls.isEmpty)
+        #expect(engine.pendingApproval?.lastError != nil)
+    }
+
+    @Test("Legacy ToolApproval: submitToolDecision routes to postLegacyToolDecision using the captured legacySessionId, never postToolDecision")
+    func legacyToolDecisionRoutesToLegacyEndpoint() async throws {
+        // ScriptedLegacyTransport (AgentV2SelectionTests.swift) now supports
+        // firing a scripted approval through its 4-callback roundTrip — the
+        // same capability Task 9's fix needed AgentV2EngineTransport to
+        // forward. Driving it directly (no composite) here isolates
+        // `submitToolDecision`'s endpoint-branch selection from that
+        // composite-forwarding concern, which AgentV2SelectionTests covers
+        // separately.
+        let legacy = ScriptedLegacyTransport()
+        let approval = AgentV2Approval(requestId: "req-legacy-9", kind: "ToolApproval",
+                                       toolName: "run-bash", argsSummary: "npm test")
+        legacy.approvalToFire = approval
+        let engine = ChatEngine(scope: .explorer, transport: legacy)
+        engine.resolveTransportInput = { message, history, attachments, skills in
+            ChatTransportInput(message: message, history: history, attachments: attachments,
+                              skills: skills,
+                              agentContext: AgentContext(indexedRepos: [], sessionId: "legacy-sess-1"),
+                              language: nil, model: nil, provider: nil, mode: nil)
+        }
+        let v2Poster = ScriptedToolDecisionPoster()
+        let legacyPoster = ScriptedToolDecisionPoster()
+        engine.postToolDecision = { requestId, sdkSessionId, action in
+            try await v2Poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
+        }
+        engine.postLegacyToolDecision = { requestId, sessionId, action in
+            try await legacyPoster.post(requestId: requestId, sessionId: sessionId, action: action)
+        }
+
+        await engine.runTurn("run a command")
+        #expect(engine.pendingApproval?.approval.kind == "ToolApproval")
+        #expect(engine.pendingApproval?.legacySessionId == "legacy-sess-1")
+
+        await engine.submitToolDecision(action: "allow")
+        #expect(legacyPoster.calls == [.init(requestId: "req-legacy-9", sessionId: "legacy-sess-1", action: "allow")])
+        #expect(v2Poster.calls.isEmpty)
+        #expect(engine.pendingApproval == nil)
     }
 
     // MARK: - Replacement + staleness

@@ -35,6 +35,12 @@ final class ScriptedLegacyTransport: ChatTransport, @unchecked Sendable {
     var result = ChatTransportResult(reply: "legacy reply", pendingTool: nil, tasks: nil,
                                      continueNeeded: nil, usage: nil, mode: "plan")
     private(set) var inputs: [ChatTransportInput] = []
+    /// Scripted approval to fire via the 4-callback `roundTrip` below — nil
+    /// (the default) means this double never parks anything, matching every
+    /// pre-Task-9 test that drives it. Set this to prove a legacy-engine
+    /// `ToolApproval` reaches `onApproval`, including THROUGH
+    /// `AgentV2EngineTransport`'s legacy-routing branches (Task 9).
+    var approvalToFire: AgentV2Approval?
 
     func roundTrip(
         _ input: ChatTransportInput,
@@ -42,6 +48,29 @@ final class ScriptedLegacyTransport: ChatTransport, @unchecked Sendable {
         onChunk: @escaping @MainActor (String) -> Void
     ) async throws -> ChatTransportResult {
         inputs.append(input)
+        await onChunk("legacy reply")
+        return result
+    }
+
+    /// 4-callback override — Task 9: the legacy engine's gated `run-bash`
+    /// now genuinely parks a `ToolApproval`, so this double must be able to
+    /// fire one too. Without this override, calling this double through the
+    /// 4-callback entry point would fall through to `ChatTransport`'s
+    /// default (which forwards to the 3-callback method above and silently
+    /// drops `onApproval`) — exactly the shape of the bug
+    /// `AgentV2EngineTransport` had before Task 9's fix, and exactly why
+    /// that fix was otherwise unprovable: without this override the double
+    /// COULD NOT produce an approval for any test to observe.
+    func roundTrip(
+        _ input: ChatTransportInput,
+        onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
+        onChunk: @escaping @MainActor (String) -> Void,
+        onApproval: @escaping @MainActor (AgentV2Approval) -> Void
+    ) async throws -> ChatTransportResult {
+        inputs.append(input)
+        if let approval = approvalToFire {
+            onApproval(approval)
+        }
         await onChunk("legacy reply")
         return result
     }
@@ -241,6 +270,66 @@ struct AgentV2SelectionTests {
         }
         #expect(legacy.inputs.isEmpty)
         #expect(staleBanner == 0)
+    }
+
+    // MARK: - Legacy-routed approval forwarding (Task 9 regression)
+    //
+    // Before Task 9's fix, every "route to legacy" branch below called
+    // `legacy.roundTrip(input, onProgress:onChunk:)` — the 3-callback form —
+    // which (per `ChatTransport`'s own default-forwarding extension) drops
+    // `onApproval` on the floor. That was correct pre-Task-8 (the legacy
+    // engine never parked anything), but is now a real bug: the legacy
+    // engine's gated `run-bash` DOES park a `ToolApproval`. These two tests
+    // pin the fix at both call sites — the top-level guard (never touches
+    // v2 at all) and `fallbackToLegacy` (reached after a v2 stale-404) —
+    // using `ScriptedLegacyTransport`'s new `approvalToFire`, which only
+    // exists because the double now implements the 4-callback `roundTrip`
+    // itself (see its doc comment: without that, the double could not
+    // produce an approval for either test to observe, fix or no fix).
+
+    @Test("Toggle off routes straight to legacy — its parked ToolApproval still reaches onApproval")
+    func legacyRoutedCompositeForwardsApproval() async throws {
+        let stream = QueuedAgentV2Stream()
+        let legacy = ScriptedLegacyTransport()
+        let approval = AgentV2Approval(requestId: "req-legacy-1", kind: "ToolApproval",
+                                       toolName: "run-bash", argsSummary: "echo hi")
+        legacy.approvalToFire = approval
+        let (composite, _) = makeComposite(stream: stream, legacy: legacy, toggle: { false })
+
+        var received: AgentV2Approval?
+        let result = try await composite.roundTrip(
+            makeInput(provider: "anthropic"),
+            onProgress: { _ in }, onChunk: { _ in },
+            onApproval: { received = $0 })
+
+        #expect(result.reply == "legacy reply")
+        #expect(received?.requestId == "req-legacy-1")
+        #expect(received?.kind == "ToolApproval")
+        #expect(received?.toolName == "run-bash")
+        #expect(received?.argsSummary == "echo hi")
+    }
+
+    @Test("Stale-404 fallback to legacy also forwards onApproval (fallbackToLegacy path)")
+    func staleServer404FallbackForwardsApproval() async throws {
+        let stream = QueuedAgentV2Stream()
+        stream.thrownErrors = [APIError.http(status: 404, code: "HTTP_ERROR",
+                                             message: "Agent v2 stream request failed (404)",
+                                             details: nil)]
+        let legacy = ScriptedLegacyTransport()
+        let approval = AgentV2Approval(requestId: "req-legacy-2", kind: "ToolApproval",
+                                       toolName: "run-bash", argsSummary: "npm test")
+        legacy.approvalToFire = approval
+        let (composite, _) = makeComposite(stream: stream, legacy: legacy, toggle: { true })
+
+        var received: AgentV2Approval?
+        let result = try await composite.roundTrip(
+            makeInput(provider: "anthropic"),
+            onProgress: { _ in }, onChunk: { _ in },
+            onApproval: { received = $0 })
+
+        #expect(result.reply == "legacy reply")
+        #expect(received?.requestId == "req-legacy-2")
+        #expect(received?.kind == "ToolApproval")
     }
 
     // MARK: - Per-turn routing
