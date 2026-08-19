@@ -342,6 +342,156 @@ test('stream: validation — missing message/chatSessionId/workspaceRoot → 400
   assert.equal(res.headers['Content-Type'], 'application/json');
 });
 
+// --- mode resolution + slash-command expansion (parity with the legacy loop) --
+//
+// The legacy /code-assist loop resolves mode BEFORE the turn: "auto"
+// classifies the message, an explicit mode must be a known MODES member,
+// anything else runs execute (llm_agent/runtime/route.mjs). The v2 route
+// originally passed body.mode through verbatim — "auto" (the Mac client's
+// default) ran as a mode personaForMode doesn't know, so assist_plan/plan/
+// review/document never activated on v2. Same story for leading-slash
+// plugin commands: legacy expands them server-side (expandSlashCommand).
+
+test('stream: mode "auto" is classified; the engine and mode_set see the resolved mode', async () => {
+  const user = newUser('v2route-auto@example.com');
+  const classifyCalls = [];
+  let sawMode;
+  const fakeTurn = async ({ mode, onEvent }) => {
+    sawMode = mode;
+    onEvent({ type: 'init', sessionId: 'sdk-auto', tools: [], capabilities: [] });
+    onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-auto', stopReason: 'end_turn' });
+    return { result: { subtype: 'success' }, usageTotals: { inputTokens: 1, outputTokens: 1 } };
+  };
+  const classifyMode = async (message, { userId }) => {
+    classifyCalls.push({ message, userId });
+    return { mode: 'assist_plan' };
+  };
+  const res = makeRes();
+  await handleAgentV2Routes(makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: {
+      message: 'plan this with me over several turns',
+      mode: 'auto',
+      agentContext: { chatSessionId: 'chat-auto', workspaceRoot: '/tmp/w' },
+    },
+    user,
+  }), res, { runTurn: fakeTurn, classifyMode });
+  assert.equal(classifyCalls.length, 1);
+  assert.equal(classifyCalls[0].userId, user.id);
+  assert.equal(classifyCalls[0].message, 'plan this with me over several turns');
+  assert.equal(sawMode, 'assist_plan');
+  assert.equal(res.sseEvents().find((e) => e.type === 'mode_set').mode, 'assist_plan');
+});
+
+test('stream: missing mode runs execute (back-compat) and never calls the classifier', async () => {
+  const user = newUser('v2route-nomode@example.com');
+  let sawMode;
+  const fakeTurn = async ({ mode, onEvent }) => {
+    sawMode = mode;
+    onEvent({ type: 'init', sessionId: 'sdk-nm2', tools: [], capabilities: [] });
+    onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-nm2', stopReason: 'end_turn' });
+    return { result: { subtype: 'success' }, usageTotals: { inputTokens: 1, outputTokens: 1 } };
+  };
+  const classifyMode = async () => { throw new Error('classifier must not run for a mode-less turn'); };
+  const res = makeRes();
+  await handleAgentV2Routes(makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: { message: 'hi', agentContext: { chatSessionId: 'chat-nomode', workspaceRoot: '/tmp/w' } },
+    user,
+  }), res, { runTurn: fakeTurn, classifyMode });
+  assert.equal(sawMode, 'execute');
+  assert.equal(res.sseEvents().find((e) => e.type === 'mode_set').mode, 'execute');
+});
+
+test('stream: a mode string outside MODES falls back to execute (no unrestricted pass-through)', async () => {
+  const user = newUser('v2route-typo@example.com');
+  let sawMode;
+  const fakeTurn = async ({ mode, onEvent }) => {
+    sawMode = mode;
+    onEvent({ type: 'init', sessionId: 'sdk-typo', tools: [], capabilities: [] });
+    onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-typo', stopReason: 'end_turn' });
+    return { result: { subtype: 'success' }, usageTotals: { inputTokens: 1, outputTokens: 1 } };
+  };
+  const res = makeRes();
+  await handleAgentV2Routes(makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    // "assist-plan" — the hyphen typo mode-classify.mjs's header warns about
+    body: { message: 'hi', mode: 'assist-plan', agentContext: { chatSessionId: 'chat-typo', workspaceRoot: '/tmp/w' } },
+    user,
+  }), res, { runTurn: fakeTurn });
+  assert.equal(sawMode, 'execute');
+});
+
+test('stream: classifier failure falls back to execute; the turn still runs', async () => {
+  const user = newUser('v2route-classifyfail@example.com');
+  let sawMode;
+  const fakeTurn = async ({ mode, onEvent }) => {
+    sawMode = mode;
+    onEvent({ type: 'init', sessionId: 'sdk-cf', tools: [], capabilities: [] });
+    onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-cf', stopReason: 'end_turn' });
+    return { result: { subtype: 'success' }, usageTotals: { inputTokens: 1, outputTokens: 1 } };
+  };
+  const classifyMode = async () => { throw new Error('classifier exploded'); };
+  const res = makeRes();
+  await handleAgentV2Routes(makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: { message: 'hi', mode: 'auto', agentContext: { chatSessionId: 'chat-cf', workspaceRoot: '/tmp/w' } },
+    user,
+  }), res, { runTurn: fakeTurn, classifyMode });
+  assert.equal(sawMode, 'execute');
+  assert.equal(res.sseEvents().at(-1).type, 'result');
+});
+
+test('stream: a leading-slash message is expanded via the user command set before the turn', async () => {
+  const user = newUser('v2route-slash@example.com');
+  const expandCalls = [];
+  let sawMessage;
+  const fakeTurn = async ({ message, onEvent }) => {
+    sawMessage = message;
+    onEvent({ type: 'init', sessionId: 'sdk-slash', tools: [], capabilities: [] });
+    onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-slash', stopReason: 'end_turn' });
+    return { result: { subtype: 'success' }, usageTotals: { inputTokens: 1, outputTokens: 1 } };
+  };
+  const expandSlash = (message, userId) => {
+    expandCalls.push({ message, userId });
+    return { prompt: 'EXPANDED PROMPT TEXT', trigger: '/deploy' };
+  };
+  const res = makeRes();
+  await handleAgentV2Routes(makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: { message: '/deploy prod', agentContext: { chatSessionId: 'chat-slash', workspaceRoot: '/tmp/w' } },
+    user,
+  }), res, { runTurn: fakeTurn, expandSlash });
+  assert.equal(expandCalls.length, 1);
+  assert.equal(expandCalls[0].userId, user.id);
+  assert.equal(sawMessage, 'EXPANDED PROMPT TEXT');
+});
+
+test('stream: slash expansion error answers 400 JSON before the SSE headers', async () => {
+  const user = newUser('v2route-slasherr@example.com');
+  let turnRan = false;
+  const fakeTurn = async () => { turnRan = true; return { result: null, usageTotals: {} }; };
+  const expandSlash = () => ({ error: 'Unknown command /nope' });
+  const res = makeRes();
+  await handleAgentV2Routes(makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: { message: '/nope', agentContext: { chatSessionId: 'chat-slasherr', workspaceRoot: '/tmp/w' } },
+    user,
+  }), res, { runTurn: fakeTurn, expandSlash });
+  assert.equal(turnRan, false);
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.headers['Content-Type'], 'application/json'); // JSON, not SSE framing
+  assert.equal(res.sseEvents().length, 0);
+  assert.equal(res.json().error.code, 'SLASH_COMMAND_FAILED');
+  assert.match(res.json().error.message, /Unknown command/);
+});
+
 // --- POST /agent/v2/decision -------------------------------------------------
 
 test('decision: owner answers (200), foreign user 403, unknown/expired 404', async () => {

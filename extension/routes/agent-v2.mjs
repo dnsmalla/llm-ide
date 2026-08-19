@@ -21,6 +21,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runAgentV2Turn, agentSdkHomeFor } from '../llm_agent/sdk/engine.mjs';
 import { answerDecision, abortDecisionsForSession } from '../llm_agent/sdk/decisions.mjs';
+import { classifyCodeAssistMode, MODES } from '../llm_agent/runtime/mode-classify.mjs';
+import { buildPerUserSkillSet } from '../llm_agent/skills/registry.mjs';
+import { expandSlashCommand } from '../plugins/loader.mjs';
 import { getDb } from '../kb/db.mjs';
 import {
   getOrCreateAgentSession,
@@ -33,6 +36,15 @@ import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 // Mirrors buildEngineOptions' mode default so the mode_set echo reports
 // what actually ran. Keep the two in sync.
 const DEFAULT_MODE = 'execute';
+
+// Leading-slash plugin commands expand exactly like the legacy loop
+// (llm_agent/runtime/route.mjs): the enabled command set for THIS user,
+// then template expansion before the turn runs. Default seam so tests can
+// pin the route contract without plugin state on disk.
+function expandUserSlashCommand(message, userId) {
+  const { commands: userCommands } = buildPerUserSkillSet(userId);
+  return expandSlashCommand(message, userCommands);
+}
 
 // One v2 turn at a time per (user, chat session): `agent_sessions` has no
 // row-level lock, so two overlapping streams for the same chat would both
@@ -47,7 +59,11 @@ function chatSessionLockKey(userId, chatSessionId) {
   return `${userId}:${chatSessionId}`;
 }
 
-export async function handleAgentV2Routes(req, res, deps = { runTurn: runAgentV2Turn }) {
+export async function handleAgentV2Routes(
+  req,
+  res,
+  deps = { runTurn: runAgentV2Turn, classifyMode: classifyCodeAssistMode, expandSlash: expandUserSlashCommand },
+) {
   const url = req.url || '';
   if (!url.startsWith('/agent/v2')) return false;
 
@@ -108,7 +124,41 @@ async function handleV2Stream(req, res, userId, deps) {
     return true;
   }
 
-  const mode = typeof body.mode === 'string' && body.mode ? body.mode : DEFAULT_MODE;
+  // Mode resolution — parity with the legacy loop (llm_agent/runtime/
+  // route.mjs): "auto" (the Mac client's default) classifies the message
+  // into a concrete mode, an explicit mode must be a known MODES member,
+  // and anything else (missing / typo / stale client) runs execute rather
+  // than a mode string the engine's personas don't recognize. Resolved
+  // BEFORE the lock so the per-chat lock never spans the classifier's LLM
+  // call; the classifier's own failure fallback (execute) is defended here
+  // too so a classify infrastructure error can never fail the turn.
+  const requestedMode = typeof body.mode === 'string' && body.mode ? body.mode : '';
+  let mode;
+  if (requestedMode === 'auto') {
+    try {
+      const classified = (await deps.classifyMode(message, { userId }))?.mode;
+      mode = typeof classified === 'string' && MODES.has(classified) ? classified : DEFAULT_MODE;
+    } catch {
+      mode = DEFAULT_MODE;
+    }
+  } else {
+    mode = requestedMode && MODES.has(requestedMode) ? requestedMode : DEFAULT_MODE;
+  }
+
+  // Slash-command expansion — parity with the legacy loop: a message that
+  // starts with "/" is looked up against the user's enabled command set
+  // and its template expanded before the turn. An unknown/bad command
+  // answers pre-SSE JSON like the other validation failures.
+  let effectiveMessage = message;
+  if (message.trim().startsWith('/')) {
+    const expansion = deps.expandSlash(message, userId);
+    if (expansion && expansion.error) {
+      sendJSON(res, 400, { error: { code: 'SLASH_COMMAND_FAILED', message: expansion.error } });
+      return true;
+    }
+    if (expansion) effectiveMessage = expansion.prompt;
+  }
+
   const model = typeof body.model === 'string' && body.model ? body.model : null;
 
   const lockKey = chatSessionLockKey(userId, chatSessionId);
@@ -120,7 +170,7 @@ async function handleV2Stream(req, res, userId, deps) {
   }
   inFlightChatSessions.add(lockKey);
   try {
-    return await runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, message, body, deps);
+    return await runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, effectiveMessage, body, deps);
   } finally {
     inFlightChatSessions.delete(lockKey);
   }
