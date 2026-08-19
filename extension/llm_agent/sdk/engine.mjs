@@ -126,7 +126,7 @@ const V2_ALLOWED_TOOLS = [
   'mcp__llmide__ask-internal', 'mcp__llmide__ask-subagent',
   'mcp__llmide__web-search', 'mcp__llmide__fetch-url',
   'mcp__llmide__list-files', 'mcp__llmide__read-file', 'mcp__llmide__find-code',
-  'mcp__llmide__search-kb', 'mcp__llmide__project_memory',
+  'mcp__llmide__search-kb', 'mcp__llmide__project_memory', 'mcp__llmide__task-list',
 ];
 
 const MAX_PROMPT_CHARS = 20_000;
