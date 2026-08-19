@@ -111,7 +111,13 @@ const ENTRIES = [
       const sessionKey = ctx.agentContext?.sessionId;
       const { requestId, promise } = registerDecision({ sdkSessionId: sessionKey, userId: ctx.userId, kind: 'ToolApproval' });
       try {
-        ctx.emit?.({ phase: 'approval_request', requestId, kind: 'ToolApproval', toolName: 'run-bash', argsSummary: args.command });
+        // buildDispatch's dispatch function is `(args, loopCtx) =>
+        // entry.execute(args, { ...ctx, loopCtx })` — the per-call ctx that
+        // runReadHandler/runNativeAgentLoop pass in arrives HERE as
+        // `ctx.loopCtx`, not spread onto `ctx` itself (same convention
+        // ask-internal/ask-subagent already rely on for `ctx.loopCtx?.depth`).
+        // `emit` therefore lives at `ctx.loopCtx.emit`, never `ctx.emit`.
+        ctx.loopCtx?.emit?.({ phase: 'approval_request', requestId, kind: 'ToolApproval', toolName: 'run-bash', argsSummary: args.command });
       } catch {
         abortDecisionsForSession(sessionKey);
         return { error: 'Failed to surface the approval request.' };

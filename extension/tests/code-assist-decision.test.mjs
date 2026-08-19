@@ -12,6 +12,22 @@
 // `grep`/`rg`, and test runners are. Swapped in `git status` (the same
 // command Task 7's analogous test uses) so the auto-tier assertion
 // actually holds instead of hanging on an unresolved approval.
+//
+// FIX-ROUND NOTE: the first four tests below call `entry.execute` directly
+// with a hand-built ctx — that's a unit test of run-bash's own gating
+// logic, not of the real dispatch wiring, and it is exactly why a real bug
+// slipped through the first round: `buildDispatch` (tools/registry.mjs)
+// nests the per-call ctx under `loopCtx` rather than spreading it —
+// `entry.execute(args, { ...ctx, loopCtx })` — the same convention
+// ask-internal/ask-subagent already rely on for `ctx.loopCtx?.depth`. So in
+// production `emit` arrives at `ctx.loopCtx.emit`, never bare `ctx.emit`.
+// run-bash's execute was fixed to read `ctx.loopCtx?.emit?.(...)`
+// accordingly, and the four direct-execute tests below now build their ctx
+// with `loopCtx: { emit }` to match that real contract. The LAST test in
+// this file is the one that actually proves the wiring end to end: it goes
+// through `buildDispatch` + the resulting `handlers['run-bash']` — the
+// exact integration point that broke — instead of calling `entry.execute`
+// directly.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -39,7 +55,7 @@ test('run-bash registry entry parks a ToolApproval decision for a prompt-tier co
   const ctx = {
     userId: user.id,
     agentContext: { sessionId: 'legacy-s1', workspaceRoot: process.cwd() },
-    emit: (e) => events.push(e),
+    loopCtx: { emit: (e) => events.push(e) },
   };
   const runPromise = entry.execute({ command: 'npm install left-pad' }, ctx);
   // Give the execute() microtask queue a tick to reach the parked await.
@@ -62,7 +78,7 @@ test('an auto-safe command runs immediately with no approval event', async () =>
   const result = await entry.execute({ command: 'git status' }, {
     userId: user.id,
     agentContext: { sessionId: 'legacy-s2', workspaceRoot: process.cwd() },
-    emit: (e) => events.push(e),
+    loopCtx: { emit: (e) => events.push(e) },
   });
   assert.equal(events.length, 0);
   assert.ok(!result.error, `unexpected error: ${result.error}`);
@@ -78,7 +94,7 @@ test('a blocked command is denied even with always-allow set (gate runs before h
   const result = await entry.execute({ command: 'sudo rm -rf /' }, {
     userId: user.id,
     agentContext: { sessionId: 'legacy-s3', workspaceRoot: process.cwd() },
-    emit: (e) => events.push(e),
+    loopCtx: { emit: (e) => events.push(e) },
   });
   assert.equal(events.length, 0, 'a blocked command never parks an approval');
   assert.ok(result.error, 'a blocked command must not run');
@@ -97,7 +113,7 @@ test('an always-allowed prompt-tier command runs immediately with no approval ev
   const result = await entry.execute({ command: 'echo hello' }, {
     userId: user.id,
     agentContext: { sessionId: 'legacy-s4', workspaceRoot: process.cwd() },
-    emit: (e) => events.push(e),
+    loopCtx: { emit: (e) => events.push(e) },
   });
   assert.equal(events.length, 0, 'always-allow skips the approval round-trip');
   assert.ok(!result.error, `unexpected error: ${result.error}`);
@@ -150,4 +166,39 @@ test('POST /code-assist/decision resolves a parked decision the same way /agent/
   assert.equal(handled2, true);
   assert.equal(res2.statusCode, 404);
   assert.equal(res2.body.error.code, 'DECISION_UNKNOWN');
+});
+
+// --- Regression: the REAL dispatch path (this is the integration point the
+// first round's bug lived in, and the one the direct entry.execute() tests
+// above cannot catch) --------------------------------------------------
+//
+// route.mjs builds `handlers` via buildDispatch(baseCtx) once per request,
+// then runReadHandler/runNativeAgentLoop (llm_agent/runtime/loop.mjs) call
+// `handlers[name](args, loopCtx)` — buildDispatch's dispatch function is
+// `(args, loopCtx) => entry.execute(args, { ...baseCtx, loopCtx })`, so
+// `emit` (which loop.mjs threads into its own per-call ctx) only ever
+// reaches run-bash's execute as `ctx.loopCtx.emit`. This test builds a real
+// dispatch table and calls it exactly the way loop.mjs does, so it fails if
+// that wiring ever regresses again.
+test('buildDispatch wiring: handlers[\'run-bash\'] surfaces approval_request through the real ctx.loopCtx.emit path', async () => {
+  const { buildDispatch } = await import('../llm_agent/tools/registry.mjs');
+  const user = registerUser(getDb(), { email: 'code-assist-decision-6@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+
+  const handlers = buildDispatch({
+    agentContext: { sessionId: 'legacy-s6', workspaceRoot: process.cwd() },
+    userId: user.id,
+  });
+
+  const events = [];
+  const runPromise = handlers['run-bash']({ command: 'npm install left-pad' }, { userId: user.id, emit: (e) => events.push(e) });
+  // Give the execute() microtask queue a tick to reach the parked await.
+  await new Promise((r) => setImmediate(r));
+  const req = events.find((e) => e.phase === 'approval_request');
+  assert.ok(req, 'expected an approval_request progress event to surface through the real dispatch path');
+  assert.equal(req.toolName, 'run-bash');
+
+  const out = answerDecision({ requestId: req.requestId, sdkSessionId: 'legacy-s6', userId: user.id, action: 'deny' });
+  assert.equal(out.ok, true);
+  const result = await runPromise;
+  assert.ok(result.error, 'a denied command must not run');
 });

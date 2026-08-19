@@ -738,7 +738,7 @@ export async function runNativeAgentLoop({
       emit({ phase: 'tool', tool: skill.name, detail: toolActivityDetail(skill.name, validation.value), iteration: i + 1 });
       let result;
       try {
-        result = await handlers[skill.name](validation.value, { userId, kb, handlers, depth: depth + 1 });
+        result = await handlers[skill.name](validation.value, { userId, kb, handlers, depth: depth + 1, emit });
       } catch (err) {
         result = { error: `Tool ${skill.name} threw: ${err.message}` };
       }
