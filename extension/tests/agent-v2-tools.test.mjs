@@ -2,7 +2,7 @@
 // extracted from the P0 spike so the v2 engine can mount the same KB tool
 // without importing the spike module.
 //
-// Hermetic: no network, no SDK subprocess. kb_search is exercised over a
+// Hermetic: no network, no SDK subprocess. search-kb is exercised over a
 // real MCP surface — an in-memory transport + Client pair (the MCP SDK's
 // documented server-testing pattern) — because createSdkMcpServer returns
 // { type, name, instance } and registered tools are reachable only through
@@ -25,7 +25,7 @@ const tmpDb = path.join(__dirname, '_agent-v2-tools-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
 
-test('kb_search handler returns redacted hits for a tenanted user', async () => {
+test('search-kb handler returns redacted hits for a tenanted user', async () => {
   const { registerUser } = await import('../server/users.mjs');
   const { getDb } = await import('../kb/db.mjs');
   const { ingestMeeting } = await import('../kb/meetings.mjs');
@@ -53,18 +53,17 @@ test('kb_search handler returns redacted hits for a tenanted user', async () => 
   await client.connect(clientTransport);
   try {
     const { tools } = await client.listTools();
-    const kbSearch = tools.find((t) => t.name === 'kb_search');
-    assert.ok(kbSearch, 'kb_search registered');
-    // alwaysLoad keeps kb_search in the prompt instead of deferred behind
+    const searchKbTool = tools.find((t) => t.name === 'search-kb');
+    assert.ok(searchKbTool, 'search-kb registered');
+    // alwaysLoad keeps search-kb in the prompt instead of deferred behind
     // tool search — the v2 engine depends on this being pre-approved.
-    assert.equal(kbSearch._meta?.['anthropic/alwaysLoad'], true);
+    assert.equal(searchKbTool._meta?.['anthropic/alwaysLoad'], true);
 
-    const out = await client.callTool({ name: 'kb_search', arguments: { query: 'meeting', limit: 3 } });
-    assert.ok(!out.isError, `kb_search call failed: ${JSON.stringify(out)}`);
+    const out = await client.callTool({ name: 'search-kb', arguments: { query: 'meeting' } });
+    assert.ok(!out.isError, `search-kb call failed: ${JSON.stringify(out)}`);
     const parsed = JSON.parse(out.content[0].text);
     assert.ok(Array.isArray(parsed.hits));
-    assert.equal(typeof parsed.total, 'number');
-    assert.equal(parsed.total, 1, 'only the caller tenant\'s meeting may return');
+    assert.equal(parsed.hits.length, 1, 'only the caller tenant\'s meeting may return');
     const [hit] = parsed.hits;
     assert.equal(hit.kind, 'meeting');
     // Fence sentinels neutralised with a zero-width joiner.
@@ -161,4 +160,22 @@ test('project_memory tool: fence sentinels in the rendered memory are redacted b
     await client.close();
     await server.instance.close();
   }
+});
+
+test('list-files is mounted on the llmide MCP server and enforces readable-roots', async () => {
+  const { buildLlmIdeServer } = await import('../llm_agent/sdk/tools.mjs');
+  const server = buildLlmIdeServer('some-user-id', { workspaceRoot: __dirname });
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'test', version: '1.0.0' });
+  await Promise.all([client.connect(clientTransport), server.instance.connect(serverTransport)]);
+  const tools = await client.listTools();
+  const names = tools.tools.map((t) => t.name);
+  assert.ok(names.includes('list-files'), `expected list-files among ${names.join(', ')}`);
+  assert.ok(names.includes('find-code'));
+  assert.ok(names.includes('ask-internal'));
+  assert.ok(names.includes('search-kb'));
+  assert.ok(!names.includes('kb_search'), 'kb_search should no longer exist as a separate tool name');
+  assert.ok(names.includes('project_memory'));
 });
