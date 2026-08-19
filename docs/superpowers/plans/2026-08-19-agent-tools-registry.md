@@ -912,11 +912,19 @@ const canUseTool = async (toolName, input, callOpts) => {
     return { behavior: 'deny', message: DENY_NEXT_RELEASE };
   }
   if (entry && entry.kind === 'act') {
-    if (hasAlwaysAllow(userId, entry.name)) return { behavior: 'allow', updatedInput: input };
+    // Gate FIRST, always-allow only short-circuits the 'prompt' tier's
+    // interactive approval — NOT the blocked/auto classification itself.
+    // Checking always-allow before the gate would let a tool a user
+    // once always-allowed (e.g. run-bash for a safe command) bypass the
+    // blocked check forever after, on ANY later invocation including a
+    // genuinely destructive one — exactly the bypass §7/§12 promise never
+    // happens ("blocked patterns are NOT re-checked against always-allow").
     const decision = entry.gate(input);
     if (decision === 'blocked') return { behavior: 'deny', message: 'Command blocked for safety.' };
     if (decision === 'auto') return { behavior: 'allow', updatedInput: input };
-    // decision === 'prompt'
+    // decision === 'prompt' — always-allow only matters here: skip the
+    // interactive round-trip if this exact tool was already approved.
+    if (hasAlwaysAllow(userId, entry.name)) return { behavior: 'allow', updatedInput: input };
     const sessionId = currentSdkSessionId;
     const { requestId, promise } = registerDecision({ sdkSessionId: sessionId, userId, kind: 'ToolApproval' });
     const onAbort = () => { abortDecisionsForSession(sessionId); };
@@ -1045,14 +1053,19 @@ import { hasAlwaysAllow, setAlwaysAllow } from '../../kb/tool-approvals.mjs';
   kind: 'act',
   gate: (args) => runBashGate(args.command),
   async execute(args, ctx) {
-    if (hasAlwaysAllow(ctx.userId, 'run-bash')) {
-      return handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot });
-    }
+    // Gate FIRST, always-allow only short-circuits the 'prompt' tier —
+    // see the identical fix + rationale in Task 7's canUseTool. Checking
+    // always-allow before the gate would let a run-bash always-allowed for
+    // one safe command bypass the blocked check on every later invocation.
     const decision = runBashGate(args.command);
     if (decision === 'blocked') return { error: 'Command blocked for safety. Confirm destructive operations with the user before running.' };
     if (decision === 'auto') return handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot });
-    // decision === 'prompt' — same park-and-await pattern as v2's canUseTool,
-    // reusing the SAME dependency-free decisions.mjs registry (spec §7).
+    // decision === 'prompt' — always-allow only matters here.
+    if (hasAlwaysAllow(ctx.userId, 'run-bash')) {
+      return handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot });
+    }
+    // Same park-and-await pattern as v2's canUseTool, reusing the SAME
+    // dependency-free decisions.mjs registry (spec §7).
     const sessionKey = ctx.agentContext?.sessionId;
     const { requestId, promise } = registerDecision({ sdkSessionId: sessionKey, userId: ctx.userId, kind: 'ToolApproval' });
     try {
