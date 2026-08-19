@@ -97,3 +97,21 @@ test('drift guard throws when the handlers map omits a declared global handler',
   const isInSync = wiredNames.length === expectedNames.length && expectedNames.every((n) => wiredNames.includes(n));
   assert.equal(isInSync, false, 'expected the drift comparison to detect a missing handler');
 });
+
+test('project_memory is reachable from the legacy loop (parity fix)', async () => {
+  const fakeClaude = async (prompt) => {
+    // A minimal fence call to project_memory, then a plain follow-up.
+    if (prompt.includes('<<<TOOL_RESULT>>>')) return 'Got it.';
+    return '<<<TOOL_CALL>>>\n{"name": "project_memory", "arguments": {}}\n<<<END_TOOL_CALL>>>';
+  };
+  const { handleCodeAssist } = await import('../llm_agent/runtime/route.mjs');
+  const out = await handleCodeAssist({
+    message: 'what do we know about this project?',
+    history: [],
+    agentContext: { recentIssues: [], recentMeetings: [], workspaceRoot: process.cwd() },
+    runClaude: fakeClaude,
+    kb: { search: () => [], listMeetings: () => ({ items: [] }) },
+    userId: 'user-1',
+  });
+  assert.ok(out.reply, 'expected a reply after project_memory resolved (no "Unknown tool" error)');
+});

@@ -131,13 +131,6 @@ const ENTRIES = [
   {
     name: 'project_memory',
     kind: 'read',
-    // No llm_agent/global/project-memory.md yet (v2-only until P2e) — inline
-    // fallback consumed by sdk/tools.mjs's toSdkTool when skillFor() finds no
-    // .md-backed skill for this name.
-    inlineMeta: {
-      description: 'Retrieve this project\'s accumulated memory — durable, auto-generated facts, decisions, and Q&A distilled from past sessions in this repo/workspace. Call this when grounded project-specific context would improve the answer, instead of guessing.',
-      schema: { focus: { type: 'string', required: false, description: 'Optional topic to prioritize; defaults to the current user message.' } },
-    },
     execute: (args, ctx) => handleProjectMemory(args, { agentContext: ctx.agentContext, userId: ctx.userId, currentMessage: ctx.currentMessage, renderMemory: ctx.renderMemory }),
   },
 ];
