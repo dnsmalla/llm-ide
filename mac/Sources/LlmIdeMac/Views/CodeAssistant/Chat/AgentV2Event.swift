@@ -92,14 +92,42 @@ struct AgentV2ApprovalQuestion: Sendable, Equatable, Codable {
     }
 }
 
-/// A parked approval the engine is blocking on (`canUseTool`). P1 `kind`
-/// is always "AskUserQuestion"; the shape is tool-approval-ready for P2.
+/// A parked approval the engine is blocking on. `kind` distinguishes the two
+/// P2 shapes: "AskUserQuestion" (questions/options, P1) and "ToolApproval"
+/// (a gated act tool asking allow/deny/always-allow, P2) — see
+/// extension/llm_agent/sdk/engine.mjs's canUseTool and
+/// extension/llm_agent/tools/registry.mjs's run-bash entry. `toolName`/
+/// `argsSummary` are populated only for a `ToolApproval`; `questions` is
+/// populated only for an `AskUserQuestion`. `kind` defaults to
+/// "AskUserQuestion" and `questions` to `[]` on decode so a payload from an
+/// older server (or any fixture predating this field) still decodes exactly
+/// as it always did.
 struct AgentV2Approval: Sendable, Equatable, Codable {
     let requestId: String
     let kind: String
     let questions: [AgentV2ApprovalQuestion]
+    let toolName: String?
+    let argsSummary: String?
 
-    enum CodingKeys: String, CodingKey { case requestId, kind, questions }
+    init(requestId: String, kind: String = "AskUserQuestion", questions: [AgentV2ApprovalQuestion] = [],
+         toolName: String? = nil, argsSummary: String? = nil) {
+        self.requestId = requestId
+        self.kind = kind
+        self.questions = questions
+        self.toolName = toolName
+        self.argsSummary = argsSummary
+    }
+
+    enum CodingKeys: String, CodingKey { case requestId, kind, questions, toolName, argsSummary }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        requestId = try c.decode(String.self, forKey: .requestId)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "AskUserQuestion"
+        questions = try c.decodeIfPresent([AgentV2ApprovalQuestion].self, forKey: .questions) ?? []
+        toolName = try c.decodeIfPresent(String.self, forKey: .toolName)
+        argsSummary = try c.decodeIfPresent(String.self, forKey: .argsSummary)
+    }
 }
 
 /// Terminal event of a successful turn (the SDK's result message mapped

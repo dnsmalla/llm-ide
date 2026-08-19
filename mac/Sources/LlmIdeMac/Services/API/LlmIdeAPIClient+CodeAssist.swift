@@ -126,7 +126,7 @@ extension LlmIdeAPIClient {
     // One SSE event from the streaming /code-assist endpoint.
     private struct CodeAssistSSEEvent: Decodable {
         let type: String                 // "progress" | "chunk" | "done" | "error"
-        let phase: String?               // progress: "thinking" | "tool" | "writing"
+        let phase: String?               // progress: "thinking" | "tool" | "writing" | "approval_request"
         let tool: String?                // progress (phase == "tool"): tool name
         let detail: String?              // progress (phase == "tool"): what it's acting on
         let text: String?                // chunk: a text delta
@@ -137,6 +137,14 @@ extension LlmIdeAPIClient {
         let tasks: [AgentTask]?          // tasks — task list from the agent
         let mode: String?                // done — resolved mode
         let error: String?               // error
+        // progress (phase == "approval_request"): the legacy engine's gated
+        // run-bash parking a ToolApproval (Task 8's `ctx.loopCtx.emit`) —
+        // wrapped in the same `{type:'progress', ...ev}` envelope as every
+        // other progress event by ai-routes.mjs's `onProgress` writer.
+        let requestId: String?
+        let kind: String?
+        let toolName: String?
+        let argsSummary: String?
     }
 
     /// One live progress update. Carries the structured fields alongside the
@@ -210,6 +218,7 @@ extension LlmIdeAPIClient {
         mode: String? = nil,
         onProgress: @escaping @MainActor (AgentProgress) -> Void,
         onChunk: @escaping @MainActor (String) -> Void,
+        onApproval: (@MainActor (AgentV2Approval) -> Void)? = nil,
     ) async throws -> CodeAssistResponse {
         guard let url = URL(string: baseURL + "/code-assist") else { throw APIError.invalidURL }
         var req = URLRequest(url: url)
@@ -249,6 +258,18 @@ extension LlmIdeAPIClient {
             switch evt.type {
             case "progress":
                 sawProgress = true
+                // The legacy engine's gated run-bash parking a ToolApproval
+                // (Task 8) — arrives as a progress event whose phase is
+                // "approval_request" rather than the usual thinking/tool/
+                // writing labels. Route it to onApproval instead of
+                // rendering it as a status line; sawProgress is still set
+                // above so a disconnect after this point never falls back
+                // to the buffered endpoint and re-runs the parked command.
+                if evt.phase == "approval_request", let requestId = evt.requestId, let kind = evt.kind {
+                    await onApproval?(AgentV2Approval(requestId: requestId, kind: kind,
+                                                       toolName: evt.toolName, argsSummary: evt.argsSummary))
+                    continue
+                }
                 let label = Self.progressLabel(phase: evt.phase, tool: evt.tool, detail: evt.detail)
                 await onProgress(AgentProgress(label: label, phase: evt.phase,
                                                tool: evt.tool, detail: evt.detail))
@@ -379,6 +400,50 @@ extension LlmIdeAPIClient {
         let resp: AgentV2DecisionResponse = try await post(
             "/agent/v2/decision",
             body: AgentV2DecisionRequest(requestId: requestId, sdkSessionId: sdkSessionId, answers: answers),
+            authenticated: true,
+        )
+        return resp.ok
+    }
+
+    struct AgentV2ToolDecisionRequest: Encodable {
+        let requestId: String
+        let sdkSessionId: String
+        let action: String
+    }
+
+    /// Answers a parked `ToolApproval` (act-tool gate) on the V2 engine via
+    /// `POST /agent/v2/decision` — sibling to `agentV2Decision`, which
+    /// answers an `AskUserQuestion` with `answers`. This posts `action`
+    /// instead (no `answers` field), matching Task 7's `answerDecision`
+    /// action vocabulary ("allow" | "deny" | "always-allow"). Same
+    /// house-error-convention as `agentV2Decision`: a 403/404 throws.
+    func agentV2ToolDecision(requestId: String, sdkSessionId: String, action: String) async throws -> Bool {
+        let resp: AgentV2DecisionResponse = try await post(
+            "/agent/v2/decision",
+            body: AgentV2ToolDecisionRequest(requestId: requestId, sdkSessionId: sdkSessionId, action: action),
+            authenticated: true,
+        )
+        return resp.ok
+    }
+
+    struct CodeAssistDecisionRequest: Encodable {
+        let requestId: String
+        let sdkSessionId: String
+        let action: String
+    }
+
+    /// Answers a parked `ToolApproval` on the LEGACY engine via
+    /// `POST /code-assist/decision` (Task 8) — the legacy-engine counterpart
+    /// of `agentV2ToolDecision`, reusing the same dependency-free decisions
+    /// registry server-side. The wire key is `sdkSessionId` even though the
+    /// value passed in is the legacy chat's own `agentContext.sessionId` —
+    /// that's the field name `ai-routes.mjs`'s `/code-assist/decision`
+    /// handler reads (`body.sdkSessionId`) into the same `answerDecision`
+    /// call the v2 route uses.
+    func codeAssistDecision(requestId: String, sessionId: String, action: String) async throws -> Bool {
+        let resp: AgentV2DecisionResponse = try await post(
+            "/code-assist/decision",
+            body: CodeAssistDecisionRequest(requestId: requestId, sdkSessionId: sessionId, action: action),
             authenticated: true,
         )
         return resp.ok

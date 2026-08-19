@@ -154,31 +154,51 @@ struct ChatMessageList: View {
                                 .padding(.top, 4)
                                 .transition(.opacity)
                             }
-                            // v2 AskUserQuestion — placed like the
+                            // A parked approval — placed like the
                             // pending-action card above (under the last
                             // assistant message), but driven purely off the
                             // engine's approval state: it appears MID-turn
-                            // while the v2 engine parks on the answer, and
-                            // survives a failed submit so Submit can retry.
-                            // NOT gated on the turn's origin — the Mac panel
-                            // owns the shared engine, so a phone-driven
-                            // turn's question renders here too.
+                            // while the engine parks on an answer, and
+                            // survives a failed submit so the action can
+                            // retry. NOT gated on the turn's origin — the
+                            // Mac panel owns the shared engine, so a
+                            // phone-driven turn's approval renders here too.
+                            // `kind` distinguishes the two P2 shapes: a
+                            // "ToolApproval" (either engine's gated run-bash,
+                            // Tasks 7-8) renders the deny/allow/always-allow
+                            // card; anything else (only "AskUserQuestion"
+                            // today, v2-only, P1) renders the existing
+                            // question form — never both for one approval.
                             if let approvalState = engine.pendingApproval,
                                turn.id == history.last?.id,
                                turn.role == .assistant {
-                                ApprovalQuestionCard(
-                                    state: approvalState,
-                                    onSubmit: { answers in
-                                        await engine.submitApproval(answers: answers)
-                                    },
-                                    onDismiss: { engine.dismissApproval() }
-                                )
-                                // Keyed by requestId: a second approval must
-                                // not inherit the previous card's @State
-                                // selection.
-                                .id(approvalState.approval.requestId)
-                                .padding(.top, 4)
-                                .transition(.opacity)
+                                if approvalState.approval.kind == "ToolApproval" {
+                                    ToolApprovalCard(
+                                        state: approvalState,
+                                        onDecide: { action in
+                                            await engine.submitToolDecision(action: action)
+                                        }
+                                    )
+                                    // Keyed by requestId: a second approval must
+                                    // not inherit the previous card's @State.
+                                    .id(approvalState.approval.requestId)
+                                    .padding(.top, 4)
+                                    .transition(.opacity)
+                                } else {
+                                    ApprovalQuestionCard(
+                                        state: approvalState,
+                                        onSubmit: { answers in
+                                            await engine.submitApproval(answers: answers)
+                                        },
+                                        onDismiss: { engine.dismissApproval() }
+                                    )
+                                    // Keyed by requestId: a second approval must
+                                    // not inherit the previous card's @State
+                                    // selection.
+                                    .id(approvalState.approval.requestId)
+                                    .padding(.top, 4)
+                                    .transition(.opacity)
+                                }
                             }
                             // v2 plan-like RESULT turns: no save-plan
                             // pendingTool ever arrives (the plan IS the

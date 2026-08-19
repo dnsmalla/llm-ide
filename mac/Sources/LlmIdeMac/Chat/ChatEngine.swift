@@ -256,6 +256,21 @@ final class ChatEngine {
     /// connects the real `LlmIdeAPIClient.agentV2Decision`.
     var postApprovalDecision: (String, String, [String: String]) async throws -> Bool = { _, _, _ in false }
 
+    /// Posts a `ToolApproval` decision (`{requestId, sdkSessionId, action}`,
+    /// no `answers`) on the V2 engine via `POST /agent/v2/decision` — sibling
+    /// to `postApprovalDecision`, which answers an `AskUserQuestion`. Default
+    /// reports failure, same convention as every other network collaborator
+    /// here; the panel wires the real `LlmIdeAPIClient.agentV2ToolDecision`.
+    var postToolDecision: (String, String, String) async throws -> Bool = { _, _, _ in false }
+
+    /// Posts a `ToolApproval` decision on the LEGACY engine via
+    /// `POST /code-assist/decision` (Task 8) — the legacy-engine counterpart
+    /// of `postToolDecision`. The session id is the legacy chat's own
+    /// `agentContext.sessionId` (`AgentV2ApprovalState.legacySessionId`), not
+    /// an SDK session id. The panel wires the real
+    /// `LlmIdeAPIClient.codeAssistDecision`.
+    var postLegacyToolDecision: (String, String, String) async throws -> Bool = { _, _, _ in false }
+
     init(scope: ChatScope, transport: ChatTransport) {
         self.scope = scope
         self.transport = transport
@@ -387,7 +402,9 @@ final class ChatEngine {
                 input,
                 onProgress: { [self] progress in recordProgress(progress) },
                 onChunk: { [self] text in appendStreamedChunk(streamingID, text) },
-                onApproval: { [self] approval in handleApprovalArrival(approval) }
+                onApproval: { [self] approval in
+                    handleApprovalArrival(approval, legacySessionId: input.agentContext?.sessionId)
+                }
             )
             // If Stop fired during the await, don't append the (now-unwanted) reply.
             try Task.checkCancellation()
@@ -521,7 +538,9 @@ final class ChatEngine {
                 input,
                 onProgress: { [self] progress in recordProgress(progress) },
                 onChunk: { [self] text in appendStreamedChunk(streamingID, text) },
-                onApproval: { [self] approval in handleApprovalArrival(approval) }
+                onApproval: { [self] approval in
+                    handleApprovalArrival(approval, legacySessionId: input.agentContext?.sessionId)
+                }
             )
             if let idx = messages.firstIndex(where: { $0.id == streamingID }) {
                 messages[idx].content = resp.reply

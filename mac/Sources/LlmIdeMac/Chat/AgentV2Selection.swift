@@ -204,9 +204,12 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
         onApproval: @escaping @MainActor (AgentV2Approval) -> Void
     ) async throws -> ChatTransportResult {
         guard selectsV2(input) else {
-            // Legacy engines never park a question — dropping `onApproval`
-            // matches the protocol's own default-forwarding semantics.
-            return try await legacy.roundTrip(input, onProgress: onProgress, onChunk: onChunk)
+            // As of Task 8-9, the legacy engine's own gated `run-bash` DOES
+            // park a ToolApproval — forward through the 4-callback entry so
+            // it reaches `onApproval` instead of silently vanishing the way
+            // dropping to the 3-callback overload would (that overload only
+            // exists for the v2-only "answerless" fallback below).
+            return try await legacy.roundTrip(input, onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
         }
         do {
             return try await v2.roundTrip(input, fresh: false,
@@ -227,27 +230,30 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
                                               onApproval: onApproval)
             } catch {
                 if Self.isStaleServer404(error) {
-                    return try await fallbackToLegacy(input, onProgress: onProgress, onChunk: onChunk)
+                    return try await fallbackToLegacy(input, onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
                 }
                 throw error
             }
         } catch {
             if Self.isStaleServer404(error) {
-                return try await fallbackToLegacy(input, onProgress: onProgress, onChunk: onChunk)
+                return try await fallbackToLegacy(input, onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
             }
             throw error
         }
     }
 
     /// Banner + one legacy round-trip — the shared tail of both stale-server
-    /// branches above.
+    /// branches above. Forwards `onApproval` too (see the guard-branch
+    /// comment above): a v2 turn falling back mid-flight still lands on the
+    /// same legacy transport that can itself park a ToolApproval.
     private func fallbackToLegacy(
         _ input: ChatTransportInput,
         onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
-        onChunk: @escaping @MainActor (String) -> Void
+        onChunk: @escaping @MainActor (String) -> Void,
+        onApproval: @escaping @MainActor (AgentV2Approval) -> Void
     ) async throws -> ChatTransportResult {
         onStaleServer?()
-        return try await legacy.roundTrip(input, onProgress: onProgress, onChunk: onChunk)
+        return try await legacy.roundTrip(input, onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
     }
 
     // MARK: - Policy

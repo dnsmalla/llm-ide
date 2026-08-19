@@ -1,18 +1,29 @@
 import Foundation
 
-/// Live state of ONE parked `AskUserQuestion` the v2 engine is blocking on.
+/// Live state of ONE parked approval either chat engine is blocking on —
+/// an `AskUserQuestion` (v2 only, P1) or a `ToolApproval` (either engine,
+/// P2; see `AgentV2Approval.kind`).
 ///
 /// Held by `ChatEngine.pendingApproval` (not the raw `AgentV2Approval`) so
 /// the card can render submit/error status that changes after arrival: a
 /// failed decision POST records `lastError` and KEEPS the card so the user
 /// can retry, and only a server-accepted answer (`{ok:true}`) marks it
 /// `submitted` and lets the engine drop it. `@Observable` for the same
-/// reason every other engine state is: `ApprovalQuestionCard` binds to it
-/// and must re-render when the submit outcome lands.
+/// reason every other engine state is: `ApprovalQuestionCard`/
+/// `ToolApprovalCard` bind to it and must re-render when the submit outcome
+/// lands.
 @MainActor
 @Observable
 final class AgentV2ApprovalState {
     let approval: AgentV2Approval
+    /// The legacy chat's own `agentContext.sessionId` at the moment this
+    /// approval arrived — captured because the legacy `CodeAssistTransport`
+    /// (unlike `AgentV2Transport`, which persists its `sdkSessionId` across
+    /// the turn) holds no session state of its own. Nil for a v2-engine
+    /// approval, which instead reads `ChatEngine.agentV2SessionId` at submit
+    /// time; `submitToolDecision` picks whichever is non-nil for the
+    /// engine actually holding this approval.
+    let legacySessionId: String?
     /// True only after the server ACCEPTED a decision for this approval.
     /// Stays false through retries — a failed POST is not a submission.
     private(set) var submitted = false
@@ -21,8 +32,9 @@ final class AgentV2ApprovalState {
     /// approval mints a fresh state.
     private(set) var lastError: String?
 
-    init(approval: AgentV2Approval) {
+    init(approval: AgentV2Approval, legacySessionId: String? = nil) {
         self.approval = approval
+        self.legacySessionId = legacySessionId
     }
 
     func markSubmitted() {
@@ -98,8 +110,8 @@ extension ChatEngine {
     /// step takes (`recordProgress`): it lands in the streaming message's
     /// `toolSteps`, persisted with the turn and visible wherever the session
     /// renders.
-    func handleApprovalArrival(_ approval: AgentV2Approval) {
-        pendingApproval = AgentV2ApprovalState(approval: approval)
+    func handleApprovalArrival(_ approval: AgentV2Approval, legacySessionId: String? = nil) {
+        pendingApproval = AgentV2ApprovalState(approval: approval, legacySessionId: legacySessionId)
         guard isExternalTurn else { return }
         recordProgress(LlmIdeAPIClient.AgentProgress(
             label: Self.externalApprovalNote, phase: "tool", tool: nil, detail: nil
@@ -143,5 +155,44 @@ extension ChatEngine {
     /// paths deny it), so dismissal is purely client-side teardown.
     func dismissApproval() {
         pendingApproval = nil
+    }
+
+    /// Posts the user's decision for a parked `ToolApproval` — `action` is
+    /// one of "deny" | "allow" | "always-allow", never an `answers`
+    /// dictionary (that shape is `AskUserQuestion`-only; see
+    /// `submitApproval`). Routes to whichever engine actually holds this
+    /// approval: the v2 transport's `agentV2SessionId` (`POST
+    /// /agent/v2/decision`, Task 7) if present, else the state's own
+    /// `legacySessionId` (`POST /code-assist/decision`, Task 8) — a v2 and a
+    /// legacy engine never coexist on one `ChatEngine`, so exactly one of
+    /// the two is ever available for a given approval.
+    ///
+    /// Same submit/retry contract as `submitApproval`: `{ok:true}` marks the
+    /// state submitted and drops the card (identity-checked against a
+    /// possible replacement while the POST was in flight); anything else
+    /// records `lastError` and keeps the card up for a retry.
+    func submitToolDecision(action: String) async {
+        guard let state = pendingApproval else { return }
+        do {
+            let ok: Bool
+            if let sdkSessionId = agentV2SessionId {
+                ok = try await postToolDecision(state.approval.requestId, sdkSessionId, action)
+            } else if let legacySessionId = state.legacySessionId {
+                ok = try await postLegacyToolDecision(state.approval.requestId, legacySessionId, action)
+            } else {
+                state.recordSubmitFailure("No session id for this engine — cannot post the decision. Try a new turn.")
+                return
+            }
+            guard ok else {
+                state.recordSubmitFailure("The server declined the decision. Try again.")
+                return
+            }
+            state.markSubmitted()
+            if pendingApproval === state {
+                pendingApproval = nil
+            }
+        } catch {
+            state.recordSubmitFailure(error.localizedDescription)
+        }
     }
 }

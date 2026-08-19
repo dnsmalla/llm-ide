@@ -174,6 +174,40 @@ struct CodeAssistTransport: ChatTransport {
         }
     }
 
+    /// 4-callback override: unlike the protocol's default (which drops
+    /// `onApproval` entirely, correct for the transports that truly never
+    /// park one), the legacy engine's gated `run-bash` DOES now park a
+    /// `ToolApproval` (Task 8) — it surfaces as a `progress` SSE event with
+    /// `phase: "approval_request"`, which `codeAssistStream` already decodes
+    /// into an `AgentV2Approval` and forwards here. Same buffered-fallback
+    /// policy as the 3-callback overload above; the buffered `/code-assist`
+    /// endpoint has no equivalent streaming approval channel, but a fallback
+    /// only fires when `sawProgress` was false, and a parked approval always
+    /// sets it true (see `codeAssistStream`), so this path can't silently
+    /// re-run a gated command without its approval ever having been seen.
+    func roundTrip(
+        _ input: ChatTransportInput,
+        onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
+        onChunk: @escaping @MainActor (String) -> Void,
+        onApproval: @escaping @MainActor (AgentV2Approval) -> Void
+    ) async throws -> ChatTransportResult {
+        do {
+            let response = try await api.codeAssistStream(
+                message: input.message, language: input.language, model: input.model,
+                provider: input.provider, history: input.history, attachments: input.attachments,
+                skills: input.skills, agentContext: input.agentContext, mode: input.mode,
+                onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
+            return ChatTransportResult(response)
+        } catch let e as APIError {
+            guard Self.shouldFallbackBuffered(error: e, sawProgress: false) else { throw e }
+            let response = try await api.codeAssist(
+                message: input.message, language: input.language, model: input.model,
+                provider: input.provider, history: input.history, attachments: input.attachments,
+                skills: input.skills, agentContext: input.agentContext, mode: input.mode)
+            return ChatTransportResult(response)
+        }
+    }
+
     /// Pure policy: is this error safe to retry on the buffered endpoint?
     /// Only a transport failure (`.http`) that happened before any progress
     /// was observed is safe — retrying after progress was seen would re-run
