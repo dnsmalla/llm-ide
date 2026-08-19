@@ -429,8 +429,13 @@ function metaFor(entry) {
   return entry.inlineMeta || { description: entry.name, schema: {} };
 }
 
-export function buildLlmIdeServer(userId, agentContext, currentMessage, { renderMemory } = {}) {
-  const toolCtx = { userId, agentContext, currentMessage, renderMemory, kb: undefined, readableRoots: undefined };
+export function buildLlmIdeServer(userId, agentContext, currentMessage, {
+  renderMemory, runClaude, userSkills, userSubagents, internalSkills,
+} = {}) {
+  const toolCtx = {
+    userId, agentContext, currentMessage, renderMemory, kb: undefined, readableRoots: undefined,
+    runClaude, userSkills, userSubagents, internalSkills,
+  };
   const sdkTools = entries().filter((e) => e.kind === 'read').map((entry) => {
     const meta = metaFor(entry);
     return tool(
@@ -462,10 +467,13 @@ import * as kb from '../../kb/db.mjs';
 import { buildReadableRoots } from '../runtime/handlers/repo-files.mjs';
 // inside buildLlmIdeServer, before building toolCtx:
 const readableRoots = buildReadableRoots({ userId, workspaceRoot: agentContext?.workspaceRoot });
-const toolCtx = { userId, agentContext, currentMessage, renderMemory, kb, readableRoots };
+const toolCtx = {
+  userId, agentContext, currentMessage, renderMemory, kb, readableRoots,
+  runClaude, userSkills, userSubagents, internalSkills,
+};
 ```
 
-`ask-internal`/`ask-subagent` additionally need `runClaude`, `userSkills`, `userSubagents`, `internalSkills` — v2 has none of these wired either. Pass them through `buildLlmIdeServer`'s existing callers (`sdk/engine.mjs`'s `runAgentV2Turn`, which already has `runClaude` injectable and can resolve `userSkills`/`userSubagents`/`internalSkills` the same way `route.mjs` does via `buildPerUserSkillSet`/`internalSkills` from `skills/index.mjs`) — done in Task 4, since it's a `sdk/engine.mjs` change, not a `sdk/tools.mjs` one.
+`ask-internal`/`ask-subagent` additionally need `runClaude`, `userSkills`, `userSubagents`, `internalSkills` in `toolCtx` — the destructuring/forwarding above already covers this (Task 3 owns `sdk/tools.mjs`, so it wires the full pass-through even though every caller today only ever supplies `renderMemory`). v2 has no VALUES for these yet, though — every caller (there is exactly one today, `sdk/engine.mjs`'s `runAgentV2Turn`) still only passes `{renderMemory}`, so `ctx.runClaude`/`ctx.userSkills`/`ctx.userSubagents`/`ctx.internalSkills` are `undefined` until Task 4 updates that call site to actually supply them. That's fine within this task's own scope (`ask-internal`/`ask-subagent` mount successfully and the plumbing exists; calling them end-to-end on v2 before Task 4 would fail on the missing values, but nothing in Task 3's own tests calls them — the mount-coverage test only asserts tool *names* are present, not that every tool is independently callable pre-Task-4).
 
 - [ ] **Step 4: Run — expect PASS**
 
