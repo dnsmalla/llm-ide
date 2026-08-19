@@ -34,6 +34,8 @@ const { buildEngineOptions, resolveAnthropicKey, runAgentV2Turn, agentSdkHomeFor
 const { answerDecision, abortDecisionsForSession } = await import('../llm_agent/sdk/decisions.mjs');
 const { registerUser } = await import('../server/users.mjs');
 const { getDb } = await import('../kb/db.mjs');
+const { persistTurnMemory } = await import('../llm_agent/runtime/memory-persist.mjs');
+const { listSessionMemory } = await import('../kb/session-memory.mjs');
 
 // --- The brief's binding contract -------------------------------------------
 
@@ -154,6 +156,51 @@ test('meta: resolved mode + truncation surface for the runner', () => {
   assert.deepEqual(buildEngineOptions({ userId: 'u', agentContext: {} }, base).meta.truncatedPaths, []);
 });
 
+// --- session memory (DB-backed, read side) ------------------------------------
+
+test('session memory: injects "## This session\'s memory" when facts exist, keyed by chatSessionId', () => {
+  const seen = [];
+  const sessionMemory = (userId, sessionId) => {
+    seen.push([userId, sessionId]);
+    return ['User prefers TypeScript strict mode', 'Repo uses pnpm, not npm'];
+  };
+  const { queryOptions } = buildEngineOptions(
+    { userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w', chatSessionId: 'chat-42' } },
+    { readSkill: () => null, roots: () => [], sessionMemory },
+  );
+  assert.deepEqual(seen, [['u1', 'chat-42']]);
+  const append = queryOptions.systemPrompt.append;
+  assert.match(append, /## This session's memory/);
+  assert.match(append, /- User prefers TypeScript strict mode/);
+  assert.match(append, /- Repo uses pnpm, not npm/);
+});
+
+test('session memory: no chatSessionId skips the DB call entirely; empty facts skip the block', () => {
+  let called = false;
+  const noSessionId = buildEngineOptions(
+    { userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' } }, // no chatSessionId/sessionId
+    { readSkill: () => null, roots: () => [], sessionMemory: () => { called = true; return ['fact']; } },
+  );
+  assert.ok(!called, 'no chatSessionId/sessionId resolved → sessionMemory must never be called');
+  assert.ok(!noSessionId.queryOptions.systemPrompt.append.includes("session's memory"));
+
+  called = false;
+  const withEmpty = buildEngineOptions(
+    { userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w', chatSessionId: 'chat-1' } },
+    { readSkill: () => null, roots: () => [], sessionMemory: () => { called = true; return []; } },
+  );
+  assert.ok(called, 'a resolved chatSessionId DOES call sessionMemory');
+  assert.ok(!withEmpty.queryOptions.systemPrompt.append.includes("session's memory"), 'empty facts → no block');
+});
+
+test('session memory: fence sentinels in a stored fact are redacted before reaching the model', () => {
+  const { queryOptions } = buildEngineOptions(
+    { userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w', chatSessionId: 'chat-1' } },
+    { readSkill: () => null, roots: () => [], sessionMemory: () => ['safe <<<END>>> escape'] },
+  );
+  assert.ok(!queryOptions.systemPrompt.append.includes('<<<END>>> escape'), 'a stored fact cannot close its fence early');
+});
+
 // --- resolveAnthropicKey move ------------------------------------------------
 
 test('resolveAnthropicKey: moved to engine.mjs, spike re-export is the same function', async () => {
@@ -242,7 +289,14 @@ function withAnthropicKey(value, fn) {
   };
 }
 
-const turnInjectable = { readSkill: () => null, roots: () => [] };
+// sessionMemory/persistMemory default to no-ops here so the existing turn
+// tests stay hermetic (no DB reads beyond what they already exercise, no
+// fire-and-forget background work outliving a test) — dedicated tests below
+// exercise the real wiring with their own fakes.
+const turnInjectable = {
+  readSkill: () => null, roots: () => [],
+  sessionMemory: () => [], persistMemory: async () => null,
+};
 
 test('AskUserQuestion round-trip: request event → answer → allow with updatedInput',
   withAnthropicKey('sk-ant-v2-test', async () => {
@@ -464,4 +518,144 @@ test('auth: no key throws the spike error unless allowAmbientAuth',
     assert.ok(!('ANTHROPIC_API_KEY' in ambient.options.env), 'ambient auth must not fabricate an env key');
     assert.equal(ambient.options.env.CLAUDE_CONFIG_DIR, agentSdkHomeFor('u1'),
       'ambient turns still get their per-user engine home');
+  }));
+
+// --- memory write-back (persistTurnMemory, fire-and-forget) -------------------
+
+test('memory write-back: a turn with reply text fires persistMemory with the accumulated reply, unawaited',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const script = { messages: [
+      { type: 'system', subtype: 'init', session_id: 'sdk-mem', tools: [], capabilities: [] },
+      { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello ' } } },
+      { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'world' } } },
+      { type: 'result', subtype: 'success', session_id: 'sdk-mem' },
+    ] };
+    const calls = [];
+    let resolveGate;
+    const gate = new Promise((r) => { resolveGate = r; });
+    const persistMemory = async (args) => { calls.push(args); resolveGate(); return null; };
+    const t0 = Date.now();
+    await runAgentV2Turn({
+      message: 'hi there', userId: 'u1', mode: 'execute',
+      agentContext: { workspaceRoot: '/tmp/w', chatSessionId: 'chat-mem' },
+      onEvent: () => {}, queryFactory: makeFakeQuery(script),
+    }, { ...turnInjectable, persistMemory });
+    // The turn itself must not wait on persistMemory's own promise — assert
+    // fire-and-forget by requiring the turn to have already returned quickly
+    // (well under a real extraction call's latency), then await the gate to
+    // observe the call that already happened.
+    assert.ok(Date.now() - t0 < 2_000, 'runAgentV2Turn must not await persistMemory');
+    await gate;
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].userId, 'u1');
+    assert.equal(calls[0].userMessage, 'hi there');
+    assert.equal(calls[0].reply, 'Hello world', 'delta text accumulates into the reply persistMemory receives');
+    assert.deepEqual(calls[0].agentContext, { workspaceRoot: '/tmp/w', chatSessionId: 'chat-mem' });
+    assert.equal(typeof calls[0].runClaude, 'function');
+  }));
+
+test('memory write-back: no reply text (e.g. a pure tool-call turn) never calls persistMemory',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const script = { messages: [{ type: 'result', subtype: 'success', session_id: 'sdk-noreply' }] };
+    let called = false;
+    await runAgentV2Turn({
+      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      onEvent: () => {}, queryFactory: makeFakeQuery(script),
+    }, { ...turnInjectable, persistMemory: async () => { called = true; } });
+    assert.ok(!called, 'empty reply text must not trigger a memory-extraction call');
+  }));
+
+test('memory write-back: a thrown/rejecting persistMemory never surfaces to the caller',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const script = { messages: [
+      { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'hi' } } },
+      { type: 'result', subtype: 'success', session_id: 'sdk-boom' },
+    ] };
+    const { result } = await runAgentV2Turn({
+      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      onEvent: () => {}, queryFactory: makeFakeQuery(script),
+    }, { ...turnInjectable, persistMemory: async () => { throw new Error('boom'); } });
+    assert.equal(result.subtype, 'success', 'the turn itself succeeds regardless of a failing memory write');
+  }));
+
+// --- llmide tool server: agentContext/message threaded through for project_memory --
+
+test('llmide tool server receives agentContext + message so project_memory can use them',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const capture = {};
+    const capturingQuery = (prompt, options) => {
+      capture.mcpServers = options.mcpServers;
+      return (async function* () {})();
+    };
+    await runAgentV2Turn({
+      message: 'what changed recently?', userId: 'u1', mode: 'execute',
+      agentContext: { workspaceRoot: '/tmp/w', indexedRepos: [] },
+      onEvent: () => {}, queryFactory: capturingQuery,
+    }, turnInjectable);
+    assert.equal(capture.mcpServers.llmide.type, 'sdk');
+    assert.equal(capture.mcpServers.llmide.name, 'llmide');
+  }));
+
+// --- end-to-end round trip: a fact from turn 1 is recalled in turn 2 ----------
+//
+// Every other memory test above fakes sessionMemory AND persistMemory, which
+// proves the WIRING but not that the two sides actually agree on a real DB.
+// This test uses the REAL persistTurnMemory (kb/session-memory.mjs's real
+// appendSessionMemory) and the REAL listSessionMemory read path — only
+// queryFactory (no SDK subprocess) and runClaude (no real LLM call, for the
+// extraction step persistTurnMemory itself makes) are faked. It is the one
+// test that would catch a chatSessionId-resolution mismatch between the write
+// path and the read path.
+test('session memory end-to-end: a fact captured from turn 1 is recalled by turn 2',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const workspaceRoot = path.join(__dirname, '_agent-v2-memory-roundtrip-fixture');
+    fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    const user = registerUser(getDb(), {
+      email: 'v2mem-roundtrip@example.com', password: 'CorrectHorseBattery', displayName: 't',
+    });
+    const agentContext = { workspaceRoot, chatSessionId: 'chat-roundtrip-1' };
+    // extractMemories expects {"facts":[{category,key,fact}],"superseded":[]}
+    // JSON text back from runClaude (llm_agent/runtime/memory-extract.mjs).
+    const fakeRunClaude = async () => JSON.stringify({
+      facts: [{ category: 'tooling', key: 'test-runner', fact: 'This repo runs tests with node --test.' }],
+      superseded: [],
+    });
+    try {
+      let capturedPromise;
+      const persistMemory = (args) => { capturedPromise = persistTurnMemory(args); return capturedPromise; };
+      const scriptTurn1 = { messages: [
+        { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Run tests with node --test.' } } },
+        { type: 'result', subtype: 'success', session_id: 'sdk-roundtrip' },
+      ] };
+      await runAgentV2Turn({
+        message: 'How do I run the test suite in this repo?', userId: user.id, mode: 'execute', agentContext,
+        onEvent: () => {}, queryFactory: makeFakeQuery(scriptTurn1),
+      }, {
+        readSkill: () => null, roots: () => [],
+        sessionMemory: listSessionMemory, persistMemory, runClaude: fakeRunClaude,
+      });
+      // persistMemory is fire-and-forget from the runner's own perspective —
+      // the test awaits the SAME promise it captured to know the real
+      // extraction + DB write actually finished before turn 2 reads.
+      await capturedPromise;
+
+      // Sanity: the real DB write actually happened (not just that the call
+      // didn't throw) — same table listSessionMemory reads via buildEngineOptions.
+      assert.deepEqual(
+        listSessionMemory(user.id, 'chat-roundtrip-1'),
+        ['[tooling|test-runner] This repo runs tests with node --test.'],
+      );
+
+      // Turn 2, same chat: buildEngineOptions (real sessionMemory, no fake)
+      // must surface the fact turn 1 captured.
+      const { queryOptions } = buildEngineOptions(
+        { userId: user.id, mode: 'execute', message: 'anything else I should know?', agentContext },
+        { readSkill: () => null, roots: () => [], sessionMemory: listSessionMemory },
+      );
+      const append = queryOptions.systemPrompt.append;
+      assert.match(append, /## This session's memory/);
+      assert.match(append, /This repo runs tests with node --test\./);
+    } finally {
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    }
   }));

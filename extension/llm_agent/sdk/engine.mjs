@@ -20,6 +20,16 @@
 // core/prompt-framing.mjs (L0) — ai-routes is route layer (L4) and must not
 // be imported from here, so the shared definition lives in core instead of
 // being hand-copied in two places.
+//
+// Memory parity with the legacy loop: DB-backed session memory
+// (kb/session-memory.mjs) is read into the system prompt here (always-on,
+// same framing as legacy) and written back by runAgentV2Turn via
+// persistTurnMemory, fire-and-forget, after each turn. Project memory
+// (Graphify, graphkit/memory.mjs) is deliberately NOT injected the same
+// way — it's exposed as a callable tool (project_memory, ./tools.mjs)
+// instead, matching v2's tool-driven design (same reasoning as kb_search):
+// the model reaches for grounded project context when it helps, rather than
+// paying its token cost on every turn.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,12 +37,16 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { personaForMode, PLAN_LIKE_MODES } from '../runtime/mode-personas.mjs';
 import { readSkillInstructions } from '../skills/index.mjs';
 import { buildReadableRoots } from '../runtime/handlers/repo-files.mjs';
+import { redactFence } from '../runtime/redaction.mjs';
+import { persistTurnMemory } from '../runtime/memory-persist.mjs';
 import { config } from '../../core/config.mjs';
 import { sanitizeForPrompt } from '../../core/utils.mjs';
 import { selectAttachments, buildSkillsText } from '../../core/prompt-framing.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { usdCapForModel } from '../../kb/usage.mjs';
+import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { getSecret } from '../../server/vault.mjs';
+import { runClaude as runClaudeImpl } from '../../providers/runtime.mjs';
 import { mapSdkMessage } from './events.mjs';
 import { buildLlmIdeServer } from './tools.mjs';
 import { registerDecision, abortDecisionsForSession } from './decisions.mjs';
@@ -106,10 +120,10 @@ const V2_ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'mcp_
 const MAX_PROMPT_CHARS = 20_000;
 
 /**
- * Compose SDK query options from a Mac chat request. Pure except for the two
- * injected side-effecting lookups (readSkill, roots — both overridable via
- * the second argument for tests). Returns `{ queryOptions, prompt, meta }`;
- * does NOT start a query.
+ * Compose SDK query options from a Mac chat request. Pure except for the
+ * three injected side-effecting lookups (readSkill, roots, sessionMemory —
+ * all overridable via the second argument for tests). Returns
+ * `{ queryOptions, prompt, meta }`; does NOT start a query.
  *
  *   queryOptions.model              — present only when a non-empty string
  *   queryOptions.permissionMode     — 'plan' for plan-like modes (with
@@ -117,14 +131,18 @@ const MAX_PROMPT_CHARS = 20_000;
  *                                     persona), else 'default'
  *   queryOptions.systemPrompt       — preset claude_code + append (language
  *                                     directive, mode persona, skill blocks,
- *                                     fenced attachments)
+ *                                     session-memory facts, fenced
+ *                                     attachments). Project memory (Graphify)
+ *                                     is deliberately NOT here — it's a v2
+ *                                     TOOL (project_memory, tools.mjs), not
+ *                                     always-on injection; see that module.
  *   prompt                          — the user message, sanitized, 20k cap
  *   meta                            — { mode, model, truncatedPaths } for the
  *                                     runner (session bookkeeping + notices)
  */
 export function buildEngineOptions(
   { userId, mode, model, language, message, skills, agentContext, attachments } = {},
-  { readSkill = readSkillInstructions, roots = buildReadableRoots } = {},
+  { readSkill = readSkillInstructions, roots = buildReadableRoots, sessionMemory = listSessionMemory } = {},
 ) {
   const resolvedMode = typeof mode === 'string' && mode ? mode : 'execute';
   const persona = personaForMode(resolvedMode);
@@ -145,6 +163,24 @@ export function buildEngineOptions(
   if (persona) appendParts.push(persona);
   const skillsText = buildSkillsText(skills, userId, readSkill);
   if (skillsText) appendParts.push(skillsText);
+  // Session memory (kb/session-memory.mjs): facts extracted from THIS chat's
+  // own prior turns — a real DB-backed record, not the SDK's own resumed-
+  // session continuity (which only covers turn text, not distilled facts,
+  // and disappears if the SDK session is ever unresumable/reset). Mirrors
+  // the legacy loop's exact framing (llm_agent/runtime/route.mjs) so recall
+  // reads identically across engines. redactFence for the same reason
+  // legacy applies it: the facts are extracted from prior user/assistant
+  // turns, which can carry untrusted text.
+  try {
+    const chatSessionId = resolveChatSessionId(agentContext);
+    if (chatSessionId && userId) {
+      const sessionFacts = sessionMemory(userId, chatSessionId);
+      if (Array.isArray(sessionFacts) && sessionFacts.length > 0) {
+        const block = `## This session's memory\n${sessionFacts.map((f) => `- ${f}`).join('\n')}`;
+        appendParts.push(redactFence(block));
+      }
+    }
+  } catch { /* memory is best-effort — keep the base without it */ }
   const attachmentsText = buildAttachmentsText(files);
   if (attachmentsText) appendParts.push(attachmentsText);
 
@@ -234,6 +270,11 @@ const DENY_NO_ANSWER = 'The user did not answer the question.';
  * set and the iteration fails with a /session|conversation|resume/i error —
  * the route layer's cue to restart from a fresh session.
  *
+ * On a successful iteration, fires persistTurnMemory fire-and-forget with the
+ * turn's accumulated delta text as `reply` — the same auto-capture the
+ * legacy loop runs, writing BOTH the project's chat-memory.md and the
+ * DB-backed session_memory row set from one extraction pass.
+ *
  * Returns `{ result, usageTotals }`: the mapped result event (or null) and
  * summed { inputTokens, outputTokens, cacheReadTokens, costUsd, numTurns,
  * durationMs }.
@@ -244,7 +285,10 @@ export async function runAgentV2Turn(
     resumeSdkSessionId, onEvent, signal, allowAmbientAuth = false,
     queryFactory = sdkQueryFactory,
   } = {},
-  { readSkill = readSkillInstructions, roots = buildReadableRoots, resolveBudget = resolveMaxBudgetUsd } = {},
+  {
+    readSkill = readSkillInstructions, roots = buildReadableRoots, resolveBudget = resolveMaxBudgetUsd,
+    sessionMemory = listSessionMemory, persistMemory = persistTurnMemory, runClaude = runClaudeImpl,
+  } = {},
 ) {
   // Without a workspace the SDK would inherit the server process's cwd —
   // a v2 turn is always rooted in the request's workspace or not run at all.
@@ -323,7 +367,7 @@ export async function runAgentV2Turn(
 
   const { queryOptions, prompt } = buildEngineOptions(
     { userId, mode, model, language, message, skills, agentContext, attachments },
-    { readSkill, roots },
+    { readSkill, roots, sessionMemory },
   );
 
   // Spec §7 — when the user's limits config yields a usable USD cap for the
@@ -336,7 +380,7 @@ export async function runAgentV2Turn(
 
   const q = queryFactory(prompt, {
     ...queryOptions,
-    mcpServers: { llmide: buildLlmIdeServer(userId) },
+    mcpServers: { llmide: buildLlmIdeServer(userId, agentContext, message) },
     canUseTool,
     maxTurns: MAX_TURNS,
     ...(maxBudgetUsd ? { maxBudgetUsd } : {}),
@@ -359,11 +403,14 @@ export async function runAgentV2Turn(
 
   const usageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0, numTurns: 0, durationMs: 0 };
   let result = null;
+  let replyText = '';
   try {
     for await (const msg of q) {
       if (msg?.session_id) currentSdkSessionId = msg.session_id;
       for (const ev of mapSdkMessage(msg)) {
-        if (ev.type === 'usage') {
+        if (ev.type === 'delta' && typeof ev.text === 'string') {
+          replyText += ev.text;
+        } else if (ev.type === 'usage') {
           usageTotals.inputTokens += ev.inputTokens;
           usageTotals.outputTokens += ev.outputTokens;
           usageTotals.cacheReadTokens += ev.cacheReadTokens;
@@ -383,6 +430,17 @@ export async function runAgentV2Turn(
       throw Object.assign(new Error(err?.message ?? String(err)), { code: 'SESSION_UNRESUMABLE' });
     }
     throw err;
+  }
+  // Auto project/session-memory capture — the v2 parity for the legacy
+  // loop's persistTurnMemory call (llm_agent/runtime/route.mjs): distills
+  // durable facts from this turn and writes them to BOTH the project's
+  // chat-memory.md (read back next turn via the project_memory tool) and
+  // the DB-backed per-session copy (kb/session-memory.mjs, read back above)
+  // from ONE extraction pass. Fire-and-forget — never awaited, so it adds no
+  // latency to the turn — and persistTurnMemory swallows all of its own
+  // errors; the trailing catch is belt-and-braces.
+  if (replyText) {
+    void persistMemory({ agentContext, userId, userMessage: message, reply: replyText, runClaude }).catch(() => {});
   }
   return { result, usageTotals };
 }

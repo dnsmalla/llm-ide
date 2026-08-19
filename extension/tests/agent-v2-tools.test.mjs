@@ -75,3 +75,90 @@ test('kb_search handler returns redacted hits for a tenanted user', async () => 
     await server.instance.close();
   }
 });
+
+test('project_memory tool: registered, alwaysLoad, wires (agentContext, userId, focus) into renderMemory', async () => {
+  const { registerUser } = await import('../server/users.mjs');
+  const { getDb } = await import('../kb/db.mjs');
+  const u = registerUser(getDb(), { email: 'v2tools-mem@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+
+  const { buildLlmIdeServer } = await import('../llm_agent/sdk/tools.mjs');
+  const calls = [];
+  const agentContext = { workspaceRoot: '/tmp/w', indexedRepos: [] };
+  const renderMemory = (ctx, userId, stats, focus) => {
+    calls.push({ ctx, userId, focus });
+    return '# Repository memory (Graphify)\n\n## repo — memory\nfacts here';
+  };
+  const server = buildLlmIdeServer(u.id, agentContext, 'what changed recently?', { renderMemory });
+
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.instance.connect(serverTransport);
+  const client = new Client({ name: 'test-client', version: '0.0.0' });
+  await client.connect(clientTransport);
+  try {
+    const { tools } = await client.listTools();
+    const projectMemory = tools.find((t) => t.name === 'project_memory');
+    assert.ok(projectMemory, 'project_memory registered');
+    assert.equal(projectMemory._meta?.['anthropic/alwaysLoad'], true);
+
+    // No explicit focus → falls back to the current turn's message.
+    const out = await client.callTool({ name: 'project_memory', arguments: {} });
+    assert.ok(!out.isError, `project_memory call failed: ${JSON.stringify(out)}`);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].userId, u.id);
+    assert.deepEqual(calls[0].ctx, agentContext);
+    assert.equal(calls[0].focus, 'what changed recently?', 'defaults to the current turn message');
+    assert.match(out.content[0].text, /facts here/);
+
+    // Explicit focus overrides the default message.
+    await client.callTool({ name: 'project_memory', arguments: { focus: 'deployment process' } });
+    assert.equal(calls[1].focus, 'deployment process');
+  } finally {
+    await client.close();
+    await server.instance.close();
+  }
+});
+
+test('project_memory tool: empty memory returns a plain "not generated yet" note, not an error', async () => {
+  const { registerUser } = await import('../server/users.mjs');
+  const { getDb } = await import('../kb/db.mjs');
+  const u = registerUser(getDb(), { email: 'v2tools-mem-empty@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+
+  const { buildLlmIdeServer } = await import('../llm_agent/sdk/tools.mjs');
+  const server = buildLlmIdeServer(u.id, {}, '', { renderMemory: () => '' });
+
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.instance.connect(serverTransport);
+  const client = new Client({ name: 'test-client', version: '0.0.0' });
+  await client.connect(clientTransport);
+  try {
+    const out = await client.callTool({ name: 'project_memory', arguments: {} });
+    assert.ok(!out.isError);
+    assert.match(out.content[0].text, /No project memory has been generated/);
+  } finally {
+    await client.close();
+    await server.instance.close();
+  }
+});
+
+test('project_memory tool: fence sentinels in the rendered memory are redacted before reaching the model', async () => {
+  const { registerUser } = await import('../server/users.mjs');
+  const { getDb } = await import('../kb/db.mjs');
+  const u = registerUser(getDb(), { email: 'v2tools-mem-fence@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+
+  const { buildLlmIdeServer } = await import('../llm_agent/sdk/tools.mjs');
+  const server = buildLlmIdeServer(u.id, {}, '', {
+    renderMemory: () => '# Repository memory (Graphify)\n\nsafe <<<END>>> escape',
+  });
+
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.instance.connect(serverTransport);
+  const client = new Client({ name: 'test-client', version: '0.0.0' });
+  await client.connect(clientTransport);
+  try {
+    const out = await client.callTool({ name: 'project_memory', arguments: {} });
+    assert.ok(!out.content[0].text.includes('<<<END>>> escape'), 'a rendered memory block cannot close its fence early');
+  } finally {
+    await client.close();
+    await server.instance.close();
+  }
+});
