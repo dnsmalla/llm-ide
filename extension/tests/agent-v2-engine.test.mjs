@@ -16,6 +16,8 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { getEventListeners } from 'node:events';
 import { fileURLToPath } from 'node:url';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
@@ -59,7 +61,13 @@ test('allowlist is read-only + llmide; skills inject via append; cwd + dirs from
     userId: 'u', mode: 'execute', language: 'Japanese',
     skills: ['family/one'], agentContext: { workspaceRoot: '/tmp/w', indexedRepos: ['/tmp/r'] },
   }, { readSkill: () => ({ name: 'one', content: '# One\ninstructions' }), roots: () => ['/tmp/w', '/tmp/r'] });
-  assert.deepEqual(queryOptions.allowedTools, ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'mcp__llmide__*']);
+  assert.deepEqual(queryOptions.allowedTools, [
+    'Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
+    'mcp__llmide__ask-internal', 'mcp__llmide__ask-subagent',
+    'mcp__llmide__web-search', 'mcp__llmide__fetch-url',
+    'mcp__llmide__list-files', 'mcp__llmide__read-file', 'mcp__llmide__find-code',
+    'mcp__llmide__search-kb', 'mcp__llmide__project_memory',
+  ]);
   assert.equal(queryOptions.cwd, '/tmp/w');
   assert.deepEqual(queryOptions.additionalDirectories, ['/tmp/r']);
   assert.match(queryOptions.systemPrompt.append, /One/);
@@ -594,6 +602,64 @@ test('llmide tool server receives agentContext + message so project_memory can u
     }, turnInjectable);
     assert.equal(capture.mcpServers.llmide.type, 'sdk');
     assert.equal(capture.mcpServers.llmide.name, 'llmide');
+  }));
+
+// --- Task 4: expanded V2_ALLOWED_TOOLS + the extra toolCtx fields -------------
+//
+// mcp__llmide__list-files is a newly-allowed registry read tool (previously
+// only reachable via the 'mcp__llmide__*' wildcard, which this task replaced
+// with explicit names). Proves two things end-to-end: (1) the scripted
+// tool_use name is actually present in the composed allowedTools the SDK
+// would enforce against, and (2) the llmide server the runner mounts is not
+// just present (already covered above) but a REAL, callable MCP server —
+// connecting a real MCP Client to the same instance and invoking list-files
+// exercises buildLlmIdeServer's readableRoots wiring for real. Full mount/
+// dispatch coverage for every registry tool (including ask-internal/
+// ask-subagent's runClaude/userSkills/userSubagents/internalSkills wiring)
+// lives in tests/agent-v2-tools.test.mjs — this test only pins that the v2
+// engine's allowlist + mcpServers composition actually reach a working tool.
+test('stream: a turn that calls mcp__llmide__list-files succeeds (v2 read-tool parity)',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const script = { messages: [
+      { type: 'system', subtype: 'init', session_id: 's1', tools: ['mcp__llmide__list-files'], mcp_servers: [] },
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 't1', name: 'mcp__llmide__list-files', input: {} }] },
+      },
+      { type: 'result', subtype: 'success', total_cost_usd: 0, num_turns: 1, duration_ms: 1, session_id: 's1' },
+    ] };
+    const events = [];
+    const { result } = await runAgentV2Turn({
+      message: 'list the files here', userId: 'u1', mode: 'execute',
+      agentContext: { workspaceRoot: __dirname },
+      onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
+    }, turnInjectable);
+
+    // The scripted tool_use name must actually be in the allowlist the SDK
+    // enforces — this is the concrete regression the wildcard removal risks.
+    assert.ok(
+      script.options.allowedTools.includes('mcp__llmide__list-files'),
+      'mcp__llmide__list-files must be explicitly named in V2_ALLOWED_TOOLS',
+    );
+    // Mounting doesn't throw and the scripted 'result' terminates the stream.
+    assert.equal(result.subtype, 'success');
+
+    // The mounted server is not a stub: connect a real MCP client to the
+    // SAME instance the runner composed and actually call the tool.
+    const server = script.options.mcpServers.llmide;
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.instance.connect(serverTransport);
+    const client = new Client({ name: 'test-client', version: '0.0.0' });
+    await client.connect(clientTransport);
+    try {
+      const out = await client.callTool({ name: 'list-files', arguments: {} });
+      assert.ok(!out.isError, `list-files call failed: ${JSON.stringify(out)}`);
+      const parsed = JSON.parse(out.content[0].text);
+      assert.ok(Array.isArray(parsed.files), 'list-files actually ran against the workspace root');
+    } finally {
+      await client.close();
+      await server.instance.close();
+    }
   }));
 
 // --- end-to-end round trip: a fact from turn 1 is recalled in turn 2 ----------

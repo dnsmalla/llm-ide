@@ -35,7 +35,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { personaForMode, PLAN_LIKE_MODES } from '../runtime/mode-personas.mjs';
-import { readSkillInstructions } from '../skills/index.mjs';
+import { readSkillInstructions, buildPerUserSkillSet, internalSkills } from '../skills/index.mjs';
 import { buildReadableRoots } from '../runtime/handlers/repo-files.mjs';
 import { redactFence } from '../runtime/redaction.mjs';
 import { persistTurnMemory } from '../runtime/memory-persist.mjs';
@@ -109,13 +109,25 @@ function buildAttachmentsText(files) {
 
 // --- The composition ---------------------------------------------------------
 
-// The v2 tool allowlist: Claude Code read-only built-ins plus every llmide
-// in-process MCP tool (the runner registers `mcp__llmide__*`). No Bash/Write/
-// Edit — a v2 chat turn is read-and-answer; writes keep their own approval
-// flow. Mode restriction beyond this (save-plan for plan-like modes) is the
-// permissionMode/persona pair below, not a different list: SDK plan mode
-// already denies write tools while allowing read-only research.
-const V2_ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'mcp__llmide__*'];
+// The v2 tool allowlist: Claude Code read-only built-ins plus every
+// registry-mounted `read`-kind llmide tool, named explicitly (Task 4 —
+// llm_agent/tools/registry.mjs is the single source of truth for the mounted
+// set; this list mirrors its `kind: 'read'` entries so an SDK permission
+// check has real names to match against instead of a wildcard). No Bash/
+// Write/Edit — a v2 chat turn is read-and-answer; writes keep their own
+// approval flow. ask-internal/ask-subagent are read-only delegation tools
+// already gated to safe sub-loops in the legacy engine — mounting them here
+// is intentional parity, not new write capability. Mode restriction beyond
+// this (save-plan for plan-like modes) is the permissionMode/persona pair
+// below, not a different list: SDK plan mode already denies write tools
+// while allowing read-only research.
+const V2_ALLOWED_TOOLS = [
+  'Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
+  'mcp__llmide__ask-internal', 'mcp__llmide__ask-subagent',
+  'mcp__llmide__web-search', 'mcp__llmide__fetch-url',
+  'mcp__llmide__list-files', 'mcp__llmide__read-file', 'mcp__llmide__find-code',
+  'mcp__llmide__search-kb', 'mcp__llmide__project_memory',
+];
 
 const MAX_PROMPT_CHARS = 20_000;
 
@@ -378,9 +390,25 @@ export async function runAgentV2Turn(
   // what the limits system stores and why runs/tokens caps don't map here.
   const maxBudgetUsd = resolveBudget(userId, model);
 
+  // Per-user plugin view (spec parity with the legacy loop's route.mjs):
+  // cheap enough to build per turn so a user toggling a plugin in Settings
+  // is reflected immediately. userSkills/userSubagents feed ask-internal/
+  // ask-subagent (llm_agent/tools/registry.mjs); internalSkills.base is the
+  // fence-contract markdown both handlers prepend — same shape route.mjs
+  // passes into buildDispatch (`{ base: internalSkills.base }`), not the raw
+  // module export.
+  const { skills: userSkills, subagents: userSubagents } = buildPerUserSkillSet(userId);
+
   const q = queryFactory(prompt, {
     ...queryOptions,
-    mcpServers: { llmide: buildLlmIdeServer(userId, agentContext, message) },
+    mcpServers: {
+      llmide: buildLlmIdeServer(userId, agentContext, message, {
+        runClaude,
+        userSkills,
+        userSubagents,
+        internalSkills: { base: internalSkills.base },
+      }),
+    },
     canUseTool,
     maxTurns: MAX_TURNS,
     ...(maxBudgetUsd ? { maxBudgetUsd } : {}),
