@@ -44,6 +44,9 @@ mac/.build/
 mac/LlmIdeMac.app/
 mac/LlmIdeMac_*.dmg
 
+# Mac local dev signing identity (machine-local; see Scripts/make-dev-cert.sh)
+mac/Scripts/.sign-identity
+
 # Editor / OS
 .DS_Store
 .idea/
