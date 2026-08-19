@@ -378,7 +378,7 @@ import { handleProjectMemory } from '../runtime/handlers/project-memory.mjs';
 {
   name: 'project_memory',
   kind: 'read',
-  // No llm_agent/global/project-memory.md yet (v2-only until P2e) — inline
+  // No llm_agent/global/project_memory.md yet (v2-only until P2e) — inline
   // fallback consumed by sdk/tools.mjs's toSdkTool when skillFor() finds no
   // .md-backed skill for this name.
   inlineMeta: {
@@ -1378,10 +1378,10 @@ git commit -m "refactor(server): derive mode tool-restriction from the tools reg
 
 ---
 
-### Task 11: `project-memory.md` skill file — legacy gets `project_memory`
+### Task 11: `project_memory.md` skill file — legacy gets `project_memory`
 
 **Files:**
-- Create: `extension/llm_agent/global/project-memory.md`
+- Create: `extension/llm_agent/global/project_memory.md`
 - Modify: `extension/llm_agent/tools/registry.mjs` (remove `project_memory`'s `inlineMeta`, now resolved via the `.md` file like every other entry)
 - Test: extend `extension/tests/global-handlers-sync.test.mjs`, `extension/tests/agent-v2-tools.test.mjs`
 
@@ -1420,7 +1420,7 @@ Expected: FAIL — `project_memory` has no `.md` file, so `skills.get('project_m
 - [ ] **Step 3: Implement**
 
 ```markdown
-<!-- extension/llm_agent/global/project-memory.md -->
+<!-- extension/llm_agent/global/project_memory.md -->
 ---
 name: project_memory
 kind: read
@@ -1469,7 +1469,7 @@ Expected: all pass. `mode-personas.test.mjs` (Task 10) needs no change here — 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add extension/llm_agent/global/project-memory.md extension/llm_agent/tools/registry.mjs extension/tests/global-handlers-sync.test.mjs extension/tests/mode-personas.test.mjs
+git add extension/llm_agent/global/project_memory.md extension/llm_agent/tools/registry.mjs extension/tests/global-handlers-sync.test.mjs extension/tests/mode-personas.test.mjs
 git commit -m "feat(server): expose project_memory to the legacy engine too"
 ```
 
