@@ -266,7 +266,10 @@ export async function handleCodeAssist({
   // turn would inject stale Execute-mode task-list/skill-guidance text into
   // a prompt whose tools have already been stripped to read-only,
   // contradicting that mode's own persona one paragraph later.
-  const sessionId = agentContext?.sessionId;
+  // Same resolver the task-tool dispatch ctx (buildDispatch, below) and the
+  // response's tasks/continueNeeded fields use — all three MUST agree, or a
+  // turn writes its tasks under one key and reads them back under another.
+  const sessionId = resolveChatSessionId(agentContext);
   const sessionTasks = tasks.listTasks(userId, sessionId);
   if (sessionTasks.length > 0 && !restrictsTools(resolvedMode)) {
     const taskLines = sessionTasks.map((t) => `- ${taskStatusIcon(t.status)} (id:${t.id}) ${t.title}`).join('\n');
@@ -505,12 +508,17 @@ export async function handleCodeAssist({
   // guard against this and would re-fire every ~0.8s+round-trip
   // indefinitely. Mirrors the same gate already applied to the task-list
   // PROMPT injection above; this closes the matching gap in the RESPONSE.
+  // resolveChatSessionId, not the raw agentContext.sessionId — the SAME key
+  // the task tools were dispatched with (buildDispatch above) and the prompt's
+  // task-list block was built from. Reading a different key here would report
+  // an empty/stale task list for a chat whose tools just wrote real ones.
+  const taskSessionId = resolveChatSessionId(agentContext);
   const continueNeeded = restrictsTools(resolvedMode)
     ? false
-    : tasks.hasPendingWork(userId, agentContext?.sessionId);
+    : tasks.hasPendingWork(userId, taskSessionId);
   const currentTasks = restrictsTools(resolvedMode)
     ? []
-    : tasks.listTasks(userId, agentContext?.sessionId);
+    : tasks.listTasks(userId, taskSessionId);
   return {
     ...out,
     memoryUsage,
