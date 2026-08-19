@@ -34,6 +34,19 @@ import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 // what actually ran. Keep the two in sync.
 const DEFAULT_MODE = 'execute';
 
+// One v2 turn at a time per (user, chat session): `agent_sessions` has no
+// row-level lock, so two overlapping streams for the same chat would both
+// read the same `sdk_session_id` and call `resume:` on it concurrently — the
+// SDK has no defined behavior for resuming one session from two callers at
+// once. In-process Set is sufficient (single Node server, single writer);
+// a second request for a key already running is rejected fast, before any
+// session-row or engine work, rather than raced.
+const inFlightChatSessions = new Set();
+
+function chatSessionLockKey(userId, chatSessionId) {
+  return `${userId}:${chatSessionId}`;
+}
+
 export async function handleAgentV2Routes(req, res, deps = { runTurn: runAgentV2Turn }) {
   const url = req.url || '';
   if (!url.startsWith('/agent/v2')) return false;
@@ -98,6 +111,24 @@ async function handleV2Stream(req, res, userId, deps) {
   const mode = typeof body.mode === 'string' && body.mode ? body.mode : DEFAULT_MODE;
   const model = typeof body.model === 'string' && body.model ? body.model : null;
 
+  const lockKey = chatSessionLockKey(userId, chatSessionId);
+  if (inFlightChatSessions.has(lockKey)) {
+    sendJSON(res, 409, {
+      error: { code: 'TURN_IN_PROGRESS', message: 'A turn is already in progress for this chat session' },
+    });
+    return true;
+  }
+  inFlightChatSessions.add(lockKey);
+  try {
+    return await runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, message, body, deps);
+  } finally {
+    inFlightChatSessions.delete(lockKey);
+  }
+}
+
+// The rest of the turn, once this chat session's lock is held — split out so
+// the lock's try/finally above stays a thin wrapper around it.
+async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, message, body, deps) {
   const db = getDb();
   const row = getOrCreateAgentSession(db, userId, chatSessionId);
   const resumeSdkSessionId = body.fresh ? null : row.sdk_session_id;

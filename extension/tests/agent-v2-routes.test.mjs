@@ -262,6 +262,56 @@ test('stream: client close aborts the turn and unparks decisions for the live sd
   assert.equal(getOrCreateAgentSession(db, user.id, 'chat-ab', 'explorer').sdk_session_id, null);
 });
 
+test('stream: a second turn for the same chat session while one is in flight gets 409, not a race', async () => {
+  const db = getDb();
+  const user = newUser('v2route-concurrent@example.com');
+  let releaseFirst;
+  const firstGate = new Promise((r) => { releaseFirst = r; });
+  let firstStarted = false;
+  const fakeTurn = async ({ onEvent }) => {
+    firstStarted = true;
+    onEvent({ type: 'init', sessionId: 'sdk-conc', claudeCodeVersion: '2.1.234', tools: [], capabilities: [] });
+    await firstGate;
+    onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-conc', stopReason: 'end_turn' });
+    return { result: { subtype: 'success' }, usageTotals: { inputTokens: 1, outputTokens: 1 } };
+  };
+  const req = (body) => makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: { message: 'hi', agentContext: { chatSessionId: 'chat-conc', workspaceRoot: '/tmp/w' }, ...body },
+    user,
+  });
+
+  const firstP = handleAgentV2Routes(req({}), makeRes(), { runTurn: fakeTurn });
+  while (!firstStarted) await new Promise((r) => setImmediate(r)); // let the first turn actually start
+
+  // A second stream for the SAME (user, chatSessionId) while the first is
+  // still parked must be rejected fast, before touching agent_sessions —
+  // never queued or raced against the in-flight resume.
+  const secondRes = makeRes();
+  const secondHandled = await handleAgentV2Routes(req({}), secondRes, {
+    runTurn: async () => { throw new Error('must not run while a turn is in flight'); },
+  });
+  assert.equal(secondHandled, true);
+  assert.equal(secondRes.statusCode, 409);
+  assert.equal(secondRes.json().error.code, 'TURN_IN_PROGRESS');
+
+  releaseFirst();
+  assert.equal(await firstP, true);
+
+  // Lock released after the first turn completes — a third request proceeds normally.
+  const thirdRes = makeRes();
+  const thirdHandled = await handleAgentV2Routes(req({}), thirdRes, {
+    runTurn: async ({ onEvent }) => {
+      onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-conc', stopReason: 'end_turn' });
+      return { result: { subtype: 'success' }, usageTotals: {} };
+    },
+  });
+  assert.equal(thirdHandled, true);
+  assert.equal(thirdRes.statusCode, 200);
+  assert.equal(getOrCreateAgentSession(db, user.id, 'chat-conc', 'explorer').sdk_session_id, 'sdk-conc');
+});
+
 test('stream: validation — missing message/chatSessionId/workspaceRoot → 400 pre-SSE; no user → 401', async () => {
   const user = newUser('v2route-validation@example.com');
   const run = async (body, u) => {
