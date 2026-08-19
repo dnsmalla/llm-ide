@@ -1069,7 +1069,14 @@ import { hasAlwaysAllow, setAlwaysAllow } from '../../kb/tool-approvals.mjs';
     const sessionKey = ctx.agentContext?.sessionId;
     const { requestId, promise } = registerDecision({ sdkSessionId: sessionKey, userId: ctx.userId, kind: 'ToolApproval' });
     try {
-      ctx.emit?.({ phase: 'approval_request', requestId, kind: 'ToolApproval', toolName: 'run-bash', argsSummary: args.command });
+      // NOTE: read via ctx.loopCtx?.emit, NOT ctx.emit — buildDispatch
+      // (Task 2) nests the loop's per-call ctx under `loopCtx` rather than
+      // spreading it (`(args, loopCtx) => entry.execute(args, {...ctx, loopCtx})`),
+      // exactly like `ask-internal`/`ask-subagent`'s existing `ctx.loopCtx?.depth`
+      // reads above. `ctx.emit` is always undefined here; this was a real bug
+      // caught in SDD review (see ledger) — an earlier version of this sample
+      // wrote `ctx.emit?.(...)`, which silently no-oped on every real call.
+      ctx.loopCtx?.emit?.({ phase: 'approval_request', requestId, kind: 'ToolApproval', toolName: 'run-bash', argsSummary: args.command });
     } catch {
       abortDecisionsForSession(sessionKey);
       return { error: 'Failed to surface the approval request.' };
@@ -1088,7 +1095,9 @@ In `extension/llm_agent/runtime/loop.mjs`, thread `emit` into the ctx `runReadHa
 result = await runReadHandler(skill.name, validation.value, { userId, kb, handlers, depth: depth + 1, emit });
 ```
 
-`runReadHandler` already forwards its whole `ctx` object to the handler (`return await handler(args, ctx)`), so no change needed there — `handlers['run-bash']` (built by `buildDispatch`, Task 2) merges this `ctx` into the entry's own `ctx` param, and `ctx.emit` reaches `run-bash`'s `execute` unchanged.
+`runReadHandler` already forwards its whole `ctx` object to the handler (`return await handler(args, ctx)`), so no change needed there — `handlers['run-bash']` (built by `buildDispatch`, Task 2) receives this object as its SECOND positional argument (`loopCtx`) and nests it: `entry.execute(args, {...ctx, loopCtx})`. So `emit` arrives at `ctx.loopCtx.emit` inside `run-bash`'s `execute`, not `ctx.emit` — read it accordingly (see the corrected code above). Also add `emit` to the SAME ctx object in `runNativeAgentLoop`'s dispatch call site (`loop.mjs`, the OpenAI-style native tool-calling path used by deepseek/openai/custom providers — it calls `handlers[skill.name](validation.value, { userId, kb, handlers, depth: depth + 1 })` at its own call site, missing `emit` entirely today) so a `'prompt'`-tier `run-bash` on THAT path can also surface its approval, not just the Anthropic fence-loop path.
+
+Add a regression test that goes through the REAL dispatch path — `buildDispatch(ctx)` → `handlers['run-bash'](args, loopCtx)` — not `registry.get('run-bash').execute(args, ctx)` directly, since calling `execute` directly bypasses the exact `loopCtx`-nesting this note exists to get right and would not have caught the original bug.
 
 Add the decision route to `extension/server/ai-routes.mjs` (near the existing `/code-assist` handler, `server/ai-routes.mjs:315`):
 
