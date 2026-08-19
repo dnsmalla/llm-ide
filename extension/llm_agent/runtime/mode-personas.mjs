@@ -6,73 +6,13 @@
 // this replaced the original design's "route to a different pipeline" idea
 // (neither /kb/generate-plan nor a review/guardrail pipeline fit).
 //
-// IMPORTANT: tool restriction uses an explicit allowlist of tool NAMES, not
-// each skill's `kind` field. `run-bash` (extension/llm_agent/global/run-bash.md)
-// is `kind: read` but executes arbitrary shell commands server-side with NO
-// user confirmation — filtering by kind alone would leave it available in
-// these "no write tools" modes and defeat the whole point. Every name below
-// was checked individually against its actual handler, not just its kind
-// label:
-//   - ask-internal, ask-subagent (handlers/ask-internal.mjs, ask-subagent.mjs):
-//     these are included in the allowlist because they're legitimate
-//     read-oriented delegation tools, NOT because their nested loop is
-//     itself filtered to this allowlist — it is NOT. route.mjs passes
-//     ctx.internalSkills.skills = the FULL per-user skill set (including
-//     any plugin's write-kind skills) into askInternal, and loop.mjs
-//     returns `pendingTool` for a `kind: 'write'` skill BEFORE its handler
-//     map is ever consulted. So a plugin write-skill IS reachable through
-//     ask-internal's nested loop, completely unfiltered by mode. The ONLY
-//     thing that actually prevents this from surfacing today is
-//     route.mjs's belt-and-suspenders post-loop null-out of `pendingTool`
-//     for restricted modes (see enforceModeToolRestriction there) — that
-//     null-out is NOT redundant with this allowlist and must never be
-//     removed as such.
-//   - list-files, read-file (handlers/repo-files.mjs): read-only filesystem
-//     access, scoped to an allow-listed root, traversal- and secret-proof.
-//   - find-code (handlers/find-code.mjs): read-only query over the symbol index
-//     and code graph. No filesystem writes and no shell; it only touches disk
-//     via existsSync to pick the path form read-file can open, and every path it
-//     returns is gated on the same readable roots. Genuinely useful in these
-//     modes — scoping a plan or a review is exactly when the agent needs to
-//     locate code cheaply.
-//   - fetch-url, web-search (handlers/fetch-url.mjs, web-search.mjs):
-//     outbound network reads (SSRF-guarded); no mutation of any local or
-//     remote state.
-//   - search-kb (handlers/search-kb.mjs): read-only KB query.
-//   - save-plan is NOT in this base set — see PLAN_LIKE_MODES below: it's
-//     the one deliberate write-kind carve-out, but added ONLY for the
-//     plan-like modes (`plan`, `assist_plan`), not review/document. It
-//     takes no `path` argument — the Mac client always resolves it to
-//     <workspaceRoot>/llm-doc/plans/, so even though it is `kind: write`,
-//     it cannot be redirected into editing an arbitrary file the way
-//     update-file/bash could. enforceModeToolRestriction (route.mjs) also
-//     special-cases this name so its pendingTool survives for those modes
-//     specifically.
-// Excluded despite `kind: read`:
-//   - run-bash (handlers/run-bash.mjs): executes arbitrary shell commands
-//     on the server via /bin/sh with no user confirmation. Must never be
-//     reachable from a "no write tools" mode.
-//   - task-list, task-create, task-update (handlers/session-tasks.mjs): these
-//     modes describe single-turn prose output (a plan proposal, review
-//     feedback, or documentation), never the "work autonomously through a
-//     task list" behavior — so they have no legitimate use for task
-//     tracking. Leaving them reachable would let a model populate
-//     agentPendingTasks and trigger the Mac app's PlanTimelineCard/
-//     auto-continue reflex for a turn that was never meant to have a
-//     tracked plan. See Task 4 of
-//     docs/superpowers/plans/2026-08-09-code-assistant-modes-phase2.md.
-// Never included (kind: write, excluded trivially): bash, git-op, update-file.
+// Tool restrictions for these modes are derived from the registry's `kind`
+// field — see tools/registry.mjs for the rationale on which tools have
+// `kind: 'read'` (allowed in these modes) vs `kind: 'act'` (not allowed).
 
-const READ_ONLY_TOOL_NAMES = new Set([
-  'ask-internal',
-  'ask-subagent',
-  'list-files',
-  'read-file',
-  'find-code',
-  'fetch-url',
-  'web-search',
-  'search-kb',
-]);
+import { entries } from '../tools/registry.mjs';
+
+const READ_ONLY_TOOL_NAMES = new Set(entries().filter((e) => e.kind === 'read').map((e) => e.name));
 
 // The plan-like modes: both get save-plan added on top of READ_ONLY_TOOL_NAMES
 // (see allowedToolNames below) — review/document must not even see it in

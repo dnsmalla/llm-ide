@@ -1,6 +1,9 @@
 // extension/tests/mode-personas.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { fileURLToPath } from 'url';
 import { personaForMode, restrictsTools, allowedToolNames, PLAN_LIKE_MODES } from '../llm_agent/runtime/mode-personas.mjs';
 
 test('personaForMode returns mode-specific text for plan/assist_plan/review/document', () => {
@@ -81,4 +84,22 @@ test('allowedToolNames includes save-plan on top of the base read-only set for e
 
 test('PLAN_LIKE_MODES is exactly {plan, assist_plan}', () => {
   assert.deepEqual([...PLAN_LIKE_MODES].sort(), ['assist_plan', 'plan']);
+});
+
+test('READ_ONLY_TOOL_NAMES is derived from the registry, not hand-maintained', async () => {
+  const __dirname = fileURLToPath(new URL('.', import.meta.url));
+  const src = readFileSync(join(__dirname, '..', 'llm_agent', 'runtime', 'mode-personas.mjs'), 'utf8');
+  assert.ok(src.includes("kind === 'read'"), 'expected the read-only set to be derived from registry entry.kind');
+  assert.ok(!/const READ_ONLY_TOOL_NAMES = new Set\(\[\s*\n\s*'ask-internal',/.test(src), 'the old hand-maintained literal should be gone');
+});
+
+test('allowedToolNames(execute) output is unchanged by the refactor', () => {
+  const names = [...allowedToolNames('execute')].sort();
+  assert.deepEqual(names, ['ask-internal', 'ask-subagent', 'fetch-url', 'find-code', 'list-files', 'read-file', 'search-kb', 'web-search']);
+});
+
+test('allowedToolNames(plan) still adds save-plan on top of the read set', () => {
+  const names = [...allowedToolNames('plan')].sort();
+  assert.ok(names.includes('save-plan'));
+  assert.equal(names.length, 9);
 });
