@@ -1101,6 +1101,42 @@ paths:
         '502': { description: 'Upstream LLM error (error code INTERNAL_ERROR)' }
         '429': { description: Rate limited }
 
+  /code-assist/decision:
+    post:
+      summary: Answer a parked act-tool approval from a legacy /code-assist stream
+      description: >
+        The legacy-engine counterpart of POST /agent/v2/decision, backed by the
+        same in-process decision registry. A 'prompt'-tier run-bash command
+        parks an approval and emits a progress event of phase
+        `approval_request`; this route resolves it. Tenancy-checked: the
+        deciding user AND the session the approval was parked under (the legacy
+        chat's `agentContext.sessionId`) must both match, or the answer is 403.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, sdkSessionId, action]
+              properties:
+                requestId:    { type: string, description: 'Id from the approval_request progress event' }
+                sdkSessionId: { type: string, description: "The legacy chat's agentContext.sessionId" }
+                action:
+                  type: string
+                  enum: [allow, deny, always-allow]
+                  description: "'always-allow' also persists a per-(user, tool) row so later prompt-tier calls skip the approval"
+      responses:
+        '200':
+          description: Decision delivered; the parked tool call resumes (or is denied) and the stream continues
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        '403': { description: DECISION_FORBIDDEN — belongs to another user or session, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: DECISION_EXPIRED / DECISION_UNKNOWN — nothing pending, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /generate-questions:
     post:
       summary: Generate targeted follow-up questions from a transcript
