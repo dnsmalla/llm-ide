@@ -17,6 +17,7 @@ import * as kb from '../../kb/db.mjs';
 import { entries } from '../tools/registry.mjs';
 import { globalSkills } from '../skills/index.mjs';
 import { buildReadableRoots } from '../runtime/handlers/repo-files.mjs';
+import { resolveChatSessionId } from '../../kb/session-memory.mjs';
 
 function zodFor(paramDef) {
   let z_;
@@ -50,8 +51,15 @@ export function buildLlmIdeServer(userId, agentContext, currentMessage, {
   const toolCtx = {
     userId, agentContext, currentMessage, renderMemory, kb, readableRoots,
     runClaude, userSkills, userSubagents, internalSkills,
+    // Same resolver the legacy loop uses (kb/session-memory.mjs) — a chat's
+    // task-create/task-update/task-list calls must key onto the SAME
+    // session id across both engines, not a raw agentContext.sessionId.
+    sessionId: resolveChatSessionId(agentContext),
   };
-  const sdkTools = entries().filter((e) => e.kind === 'read').map((entry) => {
+  // ALL registry entries mount now, read AND act — canUseTool (sdk/
+  // engine.mjs) is what actually restricts act tools (always-allow → gate
+  // → allow/deny/prompt), not this mount list.
+  const sdkTools = entries().map((entry) => {
     const meta = metaFor(entry);
     return tool(
       entry.name,

@@ -50,6 +50,8 @@ import { runClaude as runClaudeImpl } from '../../providers/runtime.mjs';
 import { mapSdkMessage } from './events.mjs';
 import { buildLlmIdeServer } from './tools.mjs';
 import { registerDecision, abortDecisionsForSession } from './decisions.mjs';
+import { get as registryGet } from '../tools/registry.mjs';
+import { hasAlwaysAllow, setAlwaysAllow } from '../../kb/tool-approvals.mjs';
 
 // --- Auth: per-user vault key first, operator env as fallback -------------
 // (Moved here from spike-engine.mjs, which re-exports it for compatibility —
@@ -127,6 +129,7 @@ const V2_ALLOWED_TOOLS = [
   'mcp__llmide__web-search', 'mcp__llmide__fetch-url',
   'mcp__llmide__list-files', 'mcp__llmide__read-file', 'mcp__llmide__find-code',
   'mcp__llmide__search-kb', 'mcp__llmide__project_memory', 'mcp__llmide__task-list',
+  'mcp__llmide__run-bash', 'mcp__llmide__task-create', 'mcp__llmide__task-update',
 ];
 
 const MAX_PROMPT_CHARS = 20_000;
@@ -330,8 +333,53 @@ export async function runAgentV2Turn(
   let currentSdkSessionId = resume;
 
   const canUseTool = async (toolName, input, callOpts) => {
-    if (toolName !== 'AskUserQuestion') {
+    const registryName = toolName.startsWith('mcp__llmide__') ? toolName.slice('mcp__llmide__'.length) : null;
+    const entry = registryName ? registryGet(registryName) : null;
+    if (toolName !== 'AskUserQuestion' && !(entry && entry.kind === 'act')) {
       return { behavior: 'deny', message: DENY_NEXT_RELEASE };
+    }
+    if (entry && entry.kind === 'act') {
+      // The gate runs FIRST and unconditionally — 'blocked' is a hard safety
+      // rail (docs/superpowers/specs/2026-08-19-agent-tools-registry-design.md
+      // §7: "a blocked command stays blocked even if the tool was
+      // always-allowed"), so hasAlwaysAllow must never be consulted before
+      // it: doing so would let a user who once always-allowed e.g. run-bash
+      // bypass the blocklist entirely for every later command under that
+      // same tool name. always-allow only ever shortcuts the PROMPT tier
+      // (below) — skipping the interactive approval, never the gate itself.
+      const decision = entry.gate(input);
+      if (decision === 'blocked') return { behavior: 'deny', message: 'Command blocked for safety.' };
+      if (decision === 'auto') return { behavior: 'allow', updatedInput: input };
+      // decision === 'prompt' — always-allow (kb/tool-approvals.mjs) skips
+      // straight to auto-run here, exactly as it would after a live
+      // 'always-allow' answer below; a fresh 'prompt' decision genuinely
+      // blocks on a human when no such row exists.
+      if (hasAlwaysAllow(userId, entry.name)) return { behavior: 'allow', updatedInput: input };
+      // Genuinely block on a human decision, parked
+      // the same way an AskUserQuestion is (requestId, approval_request/
+      // approval_resolved events, abort-on-disconnect).
+      const sessionId = currentSdkSessionId;
+      const { requestId, promise } = registerDecision({ sdkSessionId: sessionId, userId, kind: 'ToolApproval' });
+      const onAbort = () => { abortDecisionsForSession(sessionId); };
+      const signals = [callOpts?.signal, signal].filter(Boolean);
+      for (const s of signals) {
+        if (s.aborted) onAbort();
+        else s.addEventListener('abort', onAbort, { once: true });
+      }
+      const detach = () => { for (const s of signals) s.removeEventListener('abort', onAbort); };
+      try {
+        onEvent?.({ type: 'approval_request', requestId, kind: 'ToolApproval', toolName: entry.name, argsSummary: JSON.stringify(input) });
+        const outcome = await promise;
+        onEvent?.({ type: 'approval_resolved', requestId, outcome: outcome.action });
+        if (outcome.action === 'always-allow') {
+          setAlwaysAllow(userId, entry.name);
+          return { behavior: 'allow', updatedInput: input };
+        }
+        if (outcome.action === 'allow') return { behavior: 'allow', updatedInput: input };
+        return { behavior: 'deny', message: DENY_NO_ANSWER };
+      } finally {
+        detach();
+      }
     }
     // Park the decision; the SDK await below may legitimately block for
     // minutes while a human decides on the other side of the SSE stream.

@@ -341,7 +341,11 @@ export async function handleCodeAssist({
     internalModel: INTERNAL_AGENT_MODEL,
     subagentModel: SUBAGENT_MODEL,
     readableRoots,
-    sessionId: agentContext?.sessionId,
+    // Same resolver v2 uses (kb/session-memory.mjs) — a chat's tasks must
+    // key onto the SAME session id across both engines, not a raw
+    // agentContext.sessionId (resolveChatSessionId prefers the client's
+    // stable chatSessionId, falling back to sessionId only when absent).
+    sessionId: resolveChatSessionId(agentContext),
   });
 
   // Native tool-calling loop for OpenAI-compatible providers (deepseek/openai/

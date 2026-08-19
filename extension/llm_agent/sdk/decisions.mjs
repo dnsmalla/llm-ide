@@ -48,17 +48,22 @@ function rememberExpired(requestId) {
 
 /**
  * Park a decision. The engine calls this inside `canUseTool` and awaits the
- * returned promise; it resolves with `{ action: 'answer', answers }`,
+ * returned promise; it resolves with `{ action: 'answer', answers }` (or,
+ * for a `ToolApproval` decision, `{ action: 'allow' | 'deny' | 'always-allow' }`),
  * `{ action: 'expired' }` (timeout), or `{ action: 'aborted' }` (session
  * dropped). Callers also pass `questions` (the approval prompts) — accepted
  * but not retained here: the engine streams them to the client, and the
- * registry only needs to know how to resolve.
+ * registry only needs to know how to resolve. `kind` distinguishes the two
+ * decision shapes this registry now parks (`'AskUserQuestion'`, the default,
+ * back-compat with the original single-kind registry, vs `'ToolApproval'`
+ * for act-tool gating) — stored for bookkeeping only; the registry itself
+ * resolves identically either way.
  */
-export function registerDecision({ sdkSessionId, userId, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+export function registerDecision({ sdkSessionId, userId, kind = 'AskUserQuestion', timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const requestId = randomUUID();
   let resolve;
   const promise = new Promise((r) => { resolve = r; });
-  const entry = { sdkSessionId, userId, resolve, timer: null };
+  const entry = { sdkSessionId, userId, kind, resolve, timer: null };
   entry.timer = setTimeout(() => {
     settle(requestId, entry, { action: 'expired' });
     rememberExpired(requestId);
@@ -71,9 +76,15 @@ export function registerDecision({ sdkSessionId, userId, timeoutMs = DEFAULT_TIM
  * Answer a parked decision (decision route). Tenancy is checked against
  * both the owning user and session before the answer is released. Reasons:
  * `unknown` (no such pending request), `tenancy` (caller is not the owner),
- * `expired` (it timed out — the promise already resolved as such).
+ * `expired` (it timed out — the promise already resolved as such),
+ * `invalid_action` (neither `action` nor `answers` names a valid outcome).
+ *
+ * `action` is one of `'answer' | 'allow' | 'deny' | 'always-allow'`; when
+ * omitted it defaults to `'answer'` if `answers` is present — back-compat
+ * with the original AskUserQuestion-only call site, which never passed
+ * `action` at all.
  */
-export function answerDecision({ requestId, sdkSessionId, userId, answers } = {}) {
+export function answerDecision({ requestId, sdkSessionId, userId, action, answers } = {}) {
   const entry = pending.get(requestId);
   if (!entry) {
     return expiredAt.has(requestId)
@@ -83,7 +94,11 @@ export function answerDecision({ requestId, sdkSessionId, userId, answers } = {}
   if (entry.sdkSessionId !== sdkSessionId || entry.userId !== userId) {
     return { ok: false, reason: 'tenancy' };
   }
-  settle(requestId, entry, { action: 'answer', answers });
+  const resolvedAction = action || (answers !== undefined ? 'answer' : undefined);
+  if (!['answer', 'allow', 'deny', 'always-allow'].includes(resolvedAction)) {
+    return { ok: false, reason: 'invalid_action' };
+  }
+  settle(requestId, entry, resolvedAction === 'answer' ? { action: 'answer', answers } : { action: resolvedAction });
   return { ok: true };
 }
 

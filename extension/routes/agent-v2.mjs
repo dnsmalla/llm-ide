@@ -297,6 +297,7 @@ async function handleV2Decision(req, res, userId) {
     requestId: body.requestId,
     sdkSessionId: body.sdkSessionId,
     userId,
+    action: body.action,
     answers: body.answers,
   });
   if (out.ok) {

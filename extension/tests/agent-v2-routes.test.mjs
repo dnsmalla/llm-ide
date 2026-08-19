@@ -523,6 +523,33 @@ test('decision: owner answers (200), foreign user 403, unknown/expired 404', asy
   }
 });
 
+test('decision: passes through action for a ToolApproval decision (allow/deny/always-allow)', async () => {
+  const user = newUser('v2route-toolapproval@example.com');
+  const post = async (body) => {
+    const r = makeRes();
+    const handled = await handleAgentV2Routes(makeReq({
+      method: 'POST', url: '/agent/v2/decision', body, user,
+    }), r);
+    assert.equal(handled, true);
+    return r;
+  };
+
+  const d1 = registerDecision({ sdkSessionId: 'sdk-ta', userId: user.id, kind: 'ToolApproval' });
+  let res = await post({ requestId: d1.requestId, sdkSessionId: 'sdk-ta', action: 'allow' });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(await d1.promise, { action: 'allow' });
+
+  const d2 = registerDecision({ sdkSessionId: 'sdk-ta', userId: user.id, kind: 'ToolApproval' });
+  res = await post({ requestId: d2.requestId, sdkSessionId: 'sdk-ta', action: 'deny' });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(await d2.promise, { action: 'deny' });
+
+  const d3 = registerDecision({ sdkSessionId: 'sdk-ta', userId: user.id, kind: 'ToolApproval' });
+  res = await post({ requestId: d3.requestId, sdkSessionId: 'sdk-ta', action: 'always-allow' });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(await d3.promise, { action: 'always-allow' });
+});
+
 // --- DELETE /agent/v2/session --------------------------------------------------
 
 test('session delete: drops the mapping, best-effort deletes SDK transcripts', async () => {

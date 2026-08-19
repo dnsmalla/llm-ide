@@ -38,6 +38,7 @@ const { registerUser } = await import('../server/users.mjs');
 const { getDb } = await import('../kb/db.mjs');
 const { persistTurnMemory } = await import('../llm_agent/runtime/memory-persist.mjs');
 const { listSessionMemory } = await import('../kb/session-memory.mjs');
+const { hasAlwaysAllow, setAlwaysAllow } = await import('../kb/tool-approvals.mjs');
 
 // --- The brief's binding contract -------------------------------------------
 
@@ -67,6 +68,7 @@ test('allowlist is read-only + llmide; skills inject via append; cwd + dirs from
     'mcp__llmide__web-search', 'mcp__llmide__fetch-url',
     'mcp__llmide__list-files', 'mcp__llmide__read-file', 'mcp__llmide__find-code',
     'mcp__llmide__search-kb', 'mcp__llmide__project_memory', 'mcp__llmide__task-list',
+    'mcp__llmide__run-bash', 'mcp__llmide__task-create', 'mcp__llmide__task-update',
   ]);
   assert.equal(queryOptions.cwd, '/tmp/w');
   assert.deepEqual(queryOptions.additionalDirectories, ['/tmp/r']);
@@ -353,6 +355,140 @@ test('non-question tools are denied with an explanatory message',
     const d = await script.options.canUseTool('Bash', { command: 'rm -rf /' });
     assert.equal(d.behavior, 'deny');
     assert.match(d.message, /next engine release/);
+  }));
+
+// --- Task 7: act-tool gating (mcp__llmide__run-bash/task-create/task-update) --
+//
+// canUseTool's act-tool branch: always-allow FIRST, then the tool's own
+// gate; 'blocked' denies unconditionally (never overridable by always-allow
+// — that's WHY always-allow is checked first but the gate still runs after
+// it, rather than short-circuiting it), 'auto' allows immediately, 'prompt'
+// genuinely blocks on a parked ToolApproval decision.
+
+test('act tool: run-bash with a blocked command is denied even with always-allow set',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const user = registerUser(getDb(), { email: 'v2eng-blocked@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+    setAlwaysAllow(user.id, 'run-bash'); // must NOT override a blocked classification
+    const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
+    await runAgentV2Turn({
+      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      onEvent: () => {}, queryFactory: makeFakeQuery(script),
+    }, turnInjectable);
+    const d = await script.options.canUseTool('mcp__llmide__run-bash', { command: 'sudo rm -rf /' });
+    assert.equal(d.behavior, 'deny');
+    assert.match(d.message, /blocked/i);
+  }));
+
+test('act tool: run-bash with an auto-safe command allows immediately, no approval parked',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const user = registerUser(getDb(), { email: 'v2eng-auto@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+    const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
+    const events = [];
+    await runAgentV2Turn({
+      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
+    }, turnInjectable);
+    const d = await script.options.canUseTool('mcp__llmide__run-bash', { command: 'git status' });
+    assert.equal(d.behavior, 'allow');
+    assert.deepEqual(d.updatedInput, { command: 'git status' });
+    assert.ok(!events.some((e) => e.type === 'approval_request'), 'an auto command never parks an approval');
+  }));
+
+test('act tool: task-create/task-update are always-gated auto (autoGate) — no prompt',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const user = registerUser(getDb(), { email: 'v2eng-taskauto@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+    const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
+    await runAgentV2Turn({
+      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      onEvent: () => {}, queryFactory: makeFakeQuery(script),
+    }, turnInjectable);
+    const dCreate = await script.options.canUseTool('mcp__llmide__task-create', { title: 'do the thing' });
+    assert.equal(dCreate.behavior, 'allow');
+    const dUpdate = await script.options.canUseTool('mcp__llmide__task-update', { taskId: 1, status: 'in_progress' });
+    assert.equal(dUpdate.behavior, 'allow');
+  }));
+
+test('act tool: run-bash with an unrecognized command parks a ToolApproval and genuinely blocks until answered',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const user = registerUser(getDb(), { email: 'v2eng-prompt@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+    const script = { messages: [
+      { type: 'system', subtype: 'init', session_id: 'sdk-rb1', tools: [], capabilities: [] },
+      { type: 'result', subtype: 'success', session_id: 'sdk-rb1' },
+    ] };
+    const events = [];
+    await runAgentV2Turn({
+      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      resumeSdkSessionId: 'sdk-rb1', onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
+    }, turnInjectable);
+    const decision = script.options.canUseTool('mcp__llmide__run-bash', { command: 'some-unknown-cli --deploy' });
+    // Genuinely blocked — not yet settled after a microtask tick.
+    let settled = false;
+    decision.then(() => { settled = true; });
+    await new Promise((r) => setImmediate(r));
+    assert.equal(settled, false, 'a prompt decision must not optimistically allow before an answer arrives');
+    const req = events.find((e) => e.type === 'approval_request');
+    assert.ok(req, 'approval_request emitted');
+    assert.equal(req.kind, 'ToolApproval');
+    assert.equal(req.toolName, 'run-bash');
+    const res = answerDecision({ requestId: req.requestId, sdkSessionId: 'sdk-rb1', userId: user.id, action: 'allow' });
+    assert.equal(res.ok, true);
+    const d = await decision;
+    assert.equal(d.behavior, 'allow');
+    assert.ok(events.some((e) => e.type === 'approval_resolved' && e.outcome === 'allow'));
+    // The always-allow table was NOT written for a plain 'allow' — only 'always-allow' persists it.
+    assert.equal(hasAlwaysAllow(user.id, 'run-bash'), false);
+  }));
+
+test('act tool: run-bash prompt decision answered "deny" denies the tool',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const user = registerUser(getDb(), { email: 'v2eng-deny@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+    const script = { messages: [
+      { type: 'system', subtype: 'init', session_id: 'sdk-rb2', tools: [], capabilities: [] },
+      { type: 'result', subtype: 'success', session_id: 'sdk-rb2' },
+    ] };
+    const events = [];
+    await runAgentV2Turn({
+      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      resumeSdkSessionId: 'sdk-rb2', onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
+    }, turnInjectable);
+    const decision = script.options.canUseTool('mcp__llmide__run-bash', { command: 'some-other-unknown-cli' });
+    const req = events.find((e) => e.type === 'approval_request');
+    assert.ok(req, 'approval_request emitted');
+    const res = answerDecision({ requestId: req.requestId, sdkSessionId: 'sdk-rb2', userId: user.id, action: 'deny' });
+    assert.equal(res.ok, true);
+    const d = await decision;
+    assert.equal(d.behavior, 'deny');
+    assert.ok(events.some((e) => e.type === 'approval_resolved' && e.outcome === 'deny'));
+    assert.equal(hasAlwaysAllow(user.id, 'run-bash'), false);
+  }));
+
+test('act tool: run-bash prompt decision answered "always-allow" persists the approval and allows',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const user = registerUser(getDb(), { email: 'v2eng-alwaysallow@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+    const script = { messages: [
+      { type: 'system', subtype: 'init', session_id: 'sdk-rb3', tools: [], capabilities: [] },
+      { type: 'result', subtype: 'success', session_id: 'sdk-rb3' },
+    ] };
+    const events = [];
+    await runAgentV2Turn({
+      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      resumeSdkSessionId: 'sdk-rb3', onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
+    }, turnInjectable);
+    assert.equal(hasAlwaysAllow(user.id, 'run-bash'), false);
+    const decision = script.options.canUseTool('mcp__llmide__run-bash', { command: 'yet-another-unknown-cli' });
+    const req = events.find((e) => e.type === 'approval_request');
+    answerDecision({ requestId: req.requestId, sdkSessionId: 'sdk-rb3', userId: user.id, action: 'always-allow' });
+    const d = await decision;
+    assert.equal(d.behavior, 'allow');
+    assert.equal(hasAlwaysAllow(user.id, 'run-bash'), true);
+
+    // A SECOND call, even with a fresh unrecognized command, now allows
+    // immediately with no new approval parked — always-allow short-circuits
+    // the gate on the next call.
+    const before = events.length;
+    const d2 = await script.options.canUseTool('mcp__llmide__run-bash', { command: 'brand-new-unknown-cli' });
+    assert.equal(d2.behavior, 'allow');
+    assert.equal(events.length, before, 'no new approval_request for an always-allowed tool');
   }));
 
 test('resume failure maps to SESSION_UNRESUMABLE',
