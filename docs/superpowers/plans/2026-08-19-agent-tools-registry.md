@@ -660,10 +660,16 @@ const AUTO_SAFE_PATTERNS = [
   /^ls\b/,
   /^cat\b/,
   /^(grep|rg)\b/,
-  /^find\b.*(-type\s+f|-name)/, // read-only find flags only
   /^(npm|node|swift)\s+test\b/,
   /^node\s+--test\b/,
 ];
+// No `find` entry: `-type f`/`-name` alone don't rule out a destructive
+// action flag appearing later in the same command (`find . -type f -delete`,
+// `find . -name '*.txt' -exec rm {} \;` both matched the original naive
+// `/^find\b.*(-type\s+f|-name)/` pattern and would have auto-run unattended
+// — a real bypass caught in SDD review, ruled out rather than patched with a
+// negative-lookahead that invites the next bypass. `find` commands fall
+// through to 'prompt', which is the safe default for anything unmatched.
 
 export function runBashGate(command) {
   const cmd = typeof command === 'string' ? command : '';
