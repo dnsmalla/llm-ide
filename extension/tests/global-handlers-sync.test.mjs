@@ -115,3 +115,27 @@ test('project_memory is reachable from the legacy loop (parity fix)', async () =
   });
   assert.ok(out.reply, 'expected a reply after project_memory resolved (no "Unknown tool" error)');
 });
+
+test('legacy dispatch, v2 mounted tools, and registry.names() name exactly the same set', async () => {
+  const { names } = await import('../llm_agent/tools/registry.mjs');
+  const { buildLlmIdeServer } = await import('../llm_agent/sdk/tools.mjs');
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+
+  const server = buildLlmIdeServer('sync-test-user', { workspaceRoot: process.cwd() });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'sync-test', version: '1.0.0' });
+  await Promise.all([client.connect(clientTransport), server.instance.connect(serverTransport)]);
+  const v2Names = new Set((await client.listTools()).tools.map((t) => t.name));
+
+  // names()/buildDispatch() both iterate ALL registry entries, which already
+  // includes project_memory (added in Task 3) alongside the original 12
+  // GLOBAL_HANDLER_NAMES — so registryNames/legacyNames are 13 names, not 12,
+  // with no manual addition needed here.
+  const registryNames = new Set(names());
+  const { buildDispatch } = await import('../llm_agent/tools/registry.mjs');
+  const legacyNames = new Set(Object.keys(buildDispatch({})));
+
+  assert.deepEqual([...v2Names].sort(), [...registryNames].sort(), 'a v2-mounted tool name diverged from the registry');
+  assert.deepEqual([...legacyNames].sort(), [...registryNames].sort(), 'a legacy-dispatched tool name diverged from the registry');
+});
