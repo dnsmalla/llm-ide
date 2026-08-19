@@ -9,20 +9,6 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_CHARS = 20_000;
 
-// Commands that are never safe to run server-side.
-const BLOCKED_PATTERNS = [
-  /rm\s+-rf\s+\/(?!\S)/,      // rm -rf / (root wipe)
-  /\bsudo\b/,
-  /\bsu\s+-/,
-  /\bmkfs\b/,
-  />\s*\/dev\/(s?d[a-z]|nvme)/, // direct disk writes
-  /\bdd\s+.*of=\/dev\//,
-];
-
-function isBlocked(command) {
-  return BLOCKED_PATTERNS.some((re) => re.test(command));
-}
-
 /**
  * Execute a shell command and return stdout + stderr.
  * @param {object} args
@@ -35,10 +21,6 @@ function isBlocked(command) {
 export async function handleRunBash(args, ctx = {}) {
   const command = (args?.command || '').trim();
   if (!command) return { error: 'Missing command argument.' };
-
-  if (isBlocked(command)) {
-    return { error: 'Command blocked for safety. Confirm destructive operations with the user before running.' };
-  }
 
   const timeoutMs = Math.min(
     typeof args?.timeout === 'number' && args.timeout > 0 ? args.timeout : DEFAULT_TIMEOUT_MS,
@@ -102,22 +84,6 @@ export async function runTests() {
     fn: async () => {
       const r = await handleRunBash({});
       assert(r.error && r.error.includes('Missing'), 'expected missing error');
-    },
-  });
-
-  tests.push({
-    name: 'blocks rm -rf /',
-    fn: async () => {
-      const r = await handleRunBash({ command: 'rm -rf /' });
-      assert(r.error && r.error.includes('blocked'), `expected blocked: ${r.error}`);
-    },
-  });
-
-  tests.push({
-    name: 'blocks sudo',
-    fn: async () => {
-      const r = await handleRunBash({ command: 'sudo ls' });
-      assert(r.error && r.error.includes('blocked'), `expected blocked: ${r.error}`);
     },
   });
 
