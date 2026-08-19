@@ -106,3 +106,20 @@ export function names() {
 export function get(name) {
   return ENTRIES.find((e) => e.name === name);
 }
+
+// Builds the dispatch table (name -> (args, loopCtx) => result) that
+// route.mjs's runAgentLoop/runNativeAgentLoop hand to loop.mjs's
+// runReadHandler. `ctx` is the per-request superset context (agentContext,
+// runClaude, kb, userId, userSkills, userSubagents, internalSkills,
+// internalModel, subagentModel, readableRoots, sessionId — see route.mjs's
+// call site); `loopCtx` is per-call loop state (only depth, read by
+// ask-internal/ask-subagent) threaded through by the caller, not by this
+// function. Always produces exactly names()'s keys, so there is nothing
+// left to drift-check against GLOBAL_HANDLER_NAMES.
+export function buildDispatch(ctx) {
+  const dispatch = {};
+  for (const entry of ENTRIES) {
+    dispatch[entry.name] = (args, loopCtx) => entry.execute(args, { ...ctx, loopCtx });
+  }
+  return dispatch;
+}

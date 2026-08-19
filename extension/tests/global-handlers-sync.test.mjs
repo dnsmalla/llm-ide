@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync } from 'node:fs';
 
-import { handleCodeAssist } from '../llm_agent/runtime/route.mjs';
 import { GLOBAL_HANDLER_NAMES } from '../llm_agent/runtime/global-handlers.mjs';
 import { globalSkills, assertReadSkillsWired } from '../llm_agent/skills/index.mjs';
 
@@ -19,47 +18,22 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // in GLOBAL_HANDLED", it never cross-checked GLOBAL_HANDLED against what
 // route.mjs actually wires up.
 //
-// Fix: both files now import the single GLOBAL_HANDLER_NAMES array from
-// runtime/global-handlers.mjs, and route.mjs asserts (at the top of every
-// handleCodeAssist call) that its constructed `handlers` object's keys
-// equal that array exactly — throwing loudly if not. These tests exercise
-// that guard from both directions.
+// Fix: route.mjs now builds its `handlers` object via
+// llm_agent/tools/registry.mjs's buildDispatch(), and GLOBAL_HANDLER_NAMES
+// (runtime/global-handlers.mjs) is just Object.freeze(registry.names()) —
+// both derive from the same ENTRIES list, so there is nothing left to
+// drift-check: the dispatch table's keys are registry.names() by
+// construction.
 
-test('GLOBAL_HANDLER_NAMES matches the handlers actually wired in route.mjs', async () => {
-  // handleCodeAssist throws synchronously (before any runClaude call) if
-  // the handlers map it builds doesn't match GLOBAL_HANDLER_NAMES. A
-  // trivial success path here proves the two are in sync today.
-  const fakeClaude = async () => 'plain reply, no tool calls';
-  const out = await handleCodeAssist({
-    message: 'hello',
-    history: [],
-    agentContext: { recentIssues: [], recentMeetings: [] },
-    runClaude: fakeClaude,
-    kb: { search: () => [], listMeetings: () => ({ items: [] }) },
-    userId: 'user-1',
-  });
-  assert.equal(out.pendingTool, null);
+test('route.mjs dispatch is built from registry.buildDispatch, not a literal object', () => {
+  const routeSrc = readFileSync(join(__dirname, '..', 'llm_agent', 'runtime', 'route.mjs'), 'utf8');
+  assert.ok(routeSrc.includes('buildDispatch'), 'route.mjs should build its handlers via registry.buildDispatch');
+  assert.ok(!/const handlers = \{\s*\n\s*'ask-internal':/.test(routeSrc), 'the old hand-built handlers literal should be gone');
 });
 
-test('GLOBAL_HANDLER_NAMES lists exactly the handler keys route.mjs source defines', () => {
-  // Static cross-check independent of the runtime assertion above: parse
-  // route.mjs's source for the literal keys of its `handlers = { ... }`
-  // object and diff them against GLOBAL_HANDLER_NAMES. This catches drift
-  // even if someone weakens or removes the runtime throw in route.mjs,
-  // and pinpoints exactly which name is missing/extra when it fails.
-  const routeSrc = readFileSync(join(__dirname, '..', 'llm_agent', 'runtime', 'route.mjs'), 'utf8');
-  const handlersBlockMatch = routeSrc.match(/const handlers = \{([\s\S]*?)\n  \};/);
-  assert.ok(handlersBlockMatch, 'expected to find a `const handlers = { ... };` block in route.mjs');
-  const handlersBlock = handlersBlockMatch[1];
-  // Match top-level string-literal keys: 'name': ...  (single-quoted, as
-  // written in route.mjs) at the start of a line (2-space indent).
-  const keyNames = [...handlersBlock.matchAll(/^\s{4}'([a-z-]+)':/gm)].map((m) => m[1]);
-  assert.ok(keyNames.length > 0, 'expected to parse at least one handler key out of route.mjs');
-  assert.deepEqual(
-    [...keyNames].sort(),
-    [...GLOBAL_HANDLER_NAMES].sort(),
-    'route.mjs handlers keys and GLOBAL_HANDLER_NAMES have drifted apart — update both (see global-handlers.mjs)',
-  );
+test('registry.names() still matches GLOBAL_HANDLER_NAMES', async () => {
+  const { names } = await import('../llm_agent/tools/registry.mjs');
+  assert.deepEqual([...names()].sort(), [...GLOBAL_HANDLER_NAMES].sort());
 });
 
 test('every global read skill file has a name present in GLOBAL_HANDLER_NAMES', () => {

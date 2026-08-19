@@ -8,10 +8,6 @@
 // llm_agent/skills/registry.mjs. This file only orchestrates.
 
 import { runAgentLoop, runNativeAgentLoop } from './loop.mjs';
-import { askInternal } from './handlers/ask-internal.mjs';
-import { askSubagent } from './handlers/ask-subagent.mjs';
-import { handleWebSearch } from './handlers/web-search.mjs';
-import { handleFetchUrl } from './handlers/fetch-url.mjs';
 import { composeGlobalPrompt } from '../global/compose-prompt.mjs';
 import { expandSlashCommand } from '../../plugins/loader.mjs';
 import { globalSkills, internalSkills, buildPerUserSkillSet } from '../skills/index.mjs';
@@ -19,14 +15,11 @@ import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
 import { renderGraphifyMemory } from '../../graphkit/index.mjs';
 import { persistTurnMemory } from './memory-persist.mjs';
 import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
-import { buildReadableRoots, handleListFiles, handleReadFile } from './handlers/repo-files.mjs';
-import { handleFindCode } from './handlers/find-code.mjs';
-import { searchKb } from './handlers/search-kb.mjs';
-import { handleRunBash } from './handlers/run-bash.mjs';
+import { buildReadableRoots } from './handlers/repo-files.mjs';
 import { tasks, taskStatusIcon } from './handlers/session-tasks.mjs';
 import { redactFence } from './redaction.mjs';
 import { logger } from '../../core/logger.mjs';
-import { GLOBAL_HANDLER_NAMES } from './global-handlers.mjs';
+import { buildDispatch } from '../tools/registry.mjs';
 import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider, resolveCustomProviderDispatch, assertSafeBaseUrlResolved } from '../../providers/providers.mjs';
 import { skillsToOpenAITools } from './openai-tools.mjs';
 import { classifyCodeAssistMode, MODES } from './mode-classify.mjs';
@@ -331,103 +324,25 @@ export async function handleCodeAssist({
   // the allow-list fresh from the DB rather than trusting the client.
   const readableRoots = buildReadableRoots({ userId, workspaceRoot: agentContext?.workspaceRoot });
 
-  const handlers = {
-    'ask-internal': (args, loopCtx) => askInternal(args, {
-      agentContext,
-      runClaude,
-      kb,
-      userId,
-      // loopCtx.depth is already incremented by the loop engine —
-      // forward it verbatim.
-      depth: loopCtx?.depth ?? 1,
-      // Pass the per-user view; ask-internal already reads
-      // ctx.internalSkills.{skills, base}.
-      internalSkills: {
-        skills: userSkills,
-        base: internalSkills.base,
-      },
-      model: INTERNAL_AGENT_MODEL,
-    }),
-    'ask-subagent': (args, loopCtx) => askSubagent(args, {
-      runClaude,
-      kb,
-      userId,
-      subagents: userSubagents,
-      defaultModel: SUBAGENT_MODEL,
-      // loopCtx.depth is already incremented by the loop engine —
-      // forward it verbatim.
-      depth: loopCtx?.depth ?? 1,
-      // Subagents that declare allowed_tools need the fence-shape
-      // contract; reuse internal's _base.md so authors don't have to
-      // duplicate the protocol description.
-      internalSkillsBase: internalSkills.base,
-    }),
-    // Web tools resolve their own backend (Anthropic API key → native
-    // web_search/web_fetch, else the `claude` CLI's built-in tools, else
-    // SerpAPI/direct fetch). They only need the userId to look up a
-    // per-user Anthropic/SerpAPI key.
-    'web-search': (args) => handleWebSearch(args, { userId }),
-    'fetch-url': (args) => handleFetchUrl(args, { userId }),
-    // Read-only repo file access, scoped to the open workspace + the user's
-    // indexed repos (built fresh per request from the DB allow-list + the
-    // client's workspaceRoot; see buildReadableRoots for the security gate).
-    // This is what lets "find the README and review it" work without an attach.
-    'list-files': (args) => handleListFiles(args, { roots: readableRoots }),
-    'read-file': (args) => handleReadFile(args, { roots: readableRoots }),
-    // Index→graph code search. Turns "where is X / what touches X" into ONE
-    // call against the symbol index + code graph + FTS, instead of the grep
-    // loop the agent used to run (see handlers/find-code.mjs for the cost
-    // rationale). Same readable-roots gate as read-file, so every path it
-    // hands back is one the agent is allowed to open.
-    'find-code': (args) => handleFindCode(args, {
-      userId,
-      roots: readableRoots,
-      // Same root run-bash uses as its cwd, so the `sed -n` follow-up this tool
-      // recommends runs against the tree the returned paths are relative to.
-      workspaceRoot: agentContext?.workspaceRoot,
-    }),
-    // KB search: meetings, decisions, action items, sources — the same FTS
-    // the internal agent uses, now first-class so "what did we decide about
-    // X?" doesn't need an ask-internal round-trip.
-    'search-kb': (args) => searchKb(args, { kb, userId }),
-    'task-list': () => {
-      const sessionId = agentContext?.sessionId;
-      return { tasks: tasks.listTasks(userId, sessionId) };
-    },
-    'task-create': (args) => {
-      const sessionId = agentContext?.sessionId;
-      return tasks.createTask(userId, sessionId, args.title);
-    },
-    'task-update': (args) => {
-      const sessionId = agentContext?.sessionId;
-      return tasks.updateTask(userId, sessionId, args.taskId, {
-        status: args.status,
-        title: args.title,
-      });
-    },
-    'run-bash': (args) => handleRunBash(args, {
-      workspaceRoot: agentContext?.workspaceRoot,
-    }),
-  };
-
-  // Drift guard: this handlers map and GLOBAL_HANDLER_NAMES (imported from
-  // global-handlers.mjs, the single source of truth also used by
-  // skills/registry.mjs's startup wiring check) must name exactly the same
-  // handlers. Without this, adding a branch here without updating
-  // global-handlers.mjs — or vice versa — would ship silently: the startup
-  // check only validates skill-files-have-a-handler-NAME, it never
-  // cross-checks against what's actually wired up here. Throwing at request
-  // time (cheap Set/array comparison, not a perf concern) turns that class
-  // of bug into an immediate, loud failure instead of a runtime
-  // "no handler for X" surprise deep in a user session.
-  const wiredNames = Object.keys(handlers);
-  const expectedNames = GLOBAL_HANDLER_NAMES;
-  if (wiredNames.length !== expectedNames.length || !expectedNames.every((n) => wiredNames.includes(n))) {
-    throw new Error(
-      `[llm_agent] global handler drift: route.mjs wires [${wiredNames.sort().join(', ')}] but ` +
-      `global-handlers.mjs declares [${[...expectedNames].sort().join(', ')}] — keep both in sync.`,
-    );
-  }
+  // Dispatch table for every "special function" the agent loop can call —
+  // built from the single engine-agnostic registry (llm_agent/tools/registry.mjs)
+  // instead of a hand-maintained literal here. `buildDispatch` always produces
+  // exactly registry.names()'s keys, so there is no drift to guard against
+  // between this table and GLOBAL_HANDLER_NAMES (also derived from the
+  // registry — see global-handlers.mjs).
+  const handlers = buildDispatch({
+    agentContext,
+    runClaude,
+    kb,
+    userId,
+    userSkills,
+    userSubagents,
+    internalSkills: { base: internalSkills.base },
+    internalModel: INTERNAL_AGENT_MODEL,
+    subagentModel: SUBAGENT_MODEL,
+    readableRoots,
+    sessionId: agentContext?.sessionId,
+  });
 
   // Native tool-calling loop for OpenAI-compatible providers (deepseek/openai/
   // custom) AND user-registered custom:<uuid> providers. They speak the OpenAI
