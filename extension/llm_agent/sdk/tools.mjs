@@ -19,13 +19,32 @@ import { globalSkills } from '../skills/index.mjs';
 import { buildReadableRoots } from '../runtime/handlers/repo-files.mjs';
 import { resolveChatSessionId } from '../../kb/session-memory.mjs';
 
-function zodFor(paramDef) {
+// The .md frontmatter param types this compiler understands. An unrecognized
+// type used to fall through to `z.string()` silently — a skill declaring e.g.
+// `type: boolean` would mount with a wrong-but-plausible schema and only fail
+// at call time, deep inside a handler. Fail loudly at mount instead.
+function zodFor(paramDef, key) {
   let z_;
   switch (paramDef.type) {
+    case 'string': z_ = z.string(); break;
     case 'number': z_ = z.number(); break;
-    default: z_ = z.string();
+    case 'boolean': z_ = z.boolean(); break;
+    case 'string[]': z_ = z.array(z.string()); break;
+    default:
+      throw new Error(`unsupported schema type "${paramDef.type}" for param "${key}" — llm_agent/sdk/tools.mjs must learn it before a skill can declare it`);
   }
-  if (Array.isArray(paramDef.enum)) z_ = z.enum(paramDef.enum);
+  if (Array.isArray(paramDef.enum)) {
+    z_ = z.enum(paramDef.enum);
+  } else if (paramDef.type === 'string' || paramDef.type === 'string[]') {
+    // Length caps declared in the .md frontmatter (e.g. run-bash's 2000-char
+    // command cap) were dropped entirely before — documented but unenforced on
+    // v2, so a mounted tool accepted input the legacy validator rejected.
+    // `.min`/`.max` mean LENGTH for strings and arrays (never for numbers,
+    // where they'd mean value bounds — hence the type guard); an enum carries
+    // its own domain, so it's left alone.
+    if (Number.isFinite(paramDef.maxLength)) z_ = z_.max(paramDef.maxLength);
+    if (Number.isFinite(paramDef.minLength)) z_ = z_.min(paramDef.minLength);
+  }
   if (paramDef.description) z_ = z_.describe(paramDef.description);
   if (!paramDef.required) z_ = z_.optional();
   if (paramDef.default !== undefined) z_ = z_.default(paramDef.default);
@@ -34,9 +53,14 @@ function zodFor(paramDef) {
 
 function zodSchemaFor(schema) {
   const shape = {};
-  for (const [key, def] of Object.entries(schema || {})) shape[key] = zodFor(def);
+  for (const [key, def] of Object.entries(schema || {})) shape[key] = zodFor(def, key);
   return shape;
 }
+
+// Test-only seam: the compiler is module-private (no domain logic belongs to
+// callers), but its throw-on-unknown-type contract needs direct coverage that
+// doesn't depend on shipping a deliberately-broken skill file.
+export const __zodSchemaForTest = zodSchemaFor;
 
 function metaFor(entry) {
   const skill = globalSkills.skills.get(entry.name);
@@ -69,7 +93,11 @@ export function buildLlmIdeServer(userId, agentContext, currentMessage, {
         const result = await Promise.resolve(entry.execute(args, toolCtx));
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       },
-      { annotations: { readOnlyHint: true }, alwaysLoad: true },
+      // readOnlyHint must tell the TRUTH per entry: MCP hosts use it to decide
+      // whether a call needs approval at all, so hardcoding `true` for
+      // run-bash/task-create/task-update actively undercut the gate whose
+      // whole job is to require approval for exactly those.
+      { annotations: { readOnlyHint: entry.kind === 'read' }, alwaysLoad: true },
     );
   });
 
