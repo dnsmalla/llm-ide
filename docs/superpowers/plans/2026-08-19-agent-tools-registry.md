@@ -1569,11 +1569,13 @@ test('legacy dispatch, v2 mounted tools, and registry.names() name exactly the s
   await Promise.all([client.connect(clientTransport), server.instance.connect(serverTransport)]);
   const v2Names = new Set((await client.listTools()).tools.map((t) => t.name));
 
+  // names()/buildDispatch() both iterate ALL registry entries, which already
+  // includes project_memory (added in Task 3) alongside the original 12
+  // GLOBAL_HANDLER_NAMES — so registryNames/legacyNames are 13 names, not 12,
+  // with no manual addition needed here.
   const registryNames = new Set(names());
-  registryNames.add('project_memory'); // registry.names() is the legacy 12; project_memory is v2/legacy-parity but not in GLOBAL_HANDLER_NAMES's original 12 — both v2Names and legacy handlers must still include it (see Task 11)
   const { buildDispatch } = await import('../llm_agent/tools/registry.mjs');
   const legacyNames = new Set(Object.keys(buildDispatch({})));
-  legacyNames.add('project_memory');
 
   assert.deepEqual([...v2Names].sort(), [...registryNames].sort(), 'a v2-mounted tool name diverged from the registry');
   assert.deepEqual([...legacyNames].sort(), [...registryNames].sort(), 'a legacy-dispatched tool name diverged from the registry');
