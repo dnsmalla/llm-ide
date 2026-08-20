@@ -38,6 +38,7 @@ import {
   personaForMode, PLAN_LIKE_MODES, restrictsTools, allowedToolNames,
 } from '../runtime/mode-personas.mjs';
 import { readSkillInstructions, buildPerUserSkillSet, internalSkills } from '../skills/index.mjs';
+import { composeSystemContext } from '../internal/context/compose.mjs';
 import { buildReadableRoots, isTooBroadRoot } from '../runtime/handlers/repo-files.mjs';
 import { expandTilde } from '../../graphkit/memory.mjs';
 import { redactFence } from '../runtime/redaction.mjs';
@@ -256,6 +257,14 @@ export function buildEngineOptions(
 
   const appendParts = [];
   if (typeof language === 'string' && language) appendParts.push(`Always respond in ${language}.`);
+  // Ground the agent in the app — active project, indexed repos, recent
+  // issues, app capabilities: the same System context the legacy loop
+  // injects (composeSystemContext in loop.mjs), minus the Graphify memory
+  // block, which v2 exposes as the callable project_memory tool instead.
+  // Without this the agent doesn't know the chat is bound to a GitLab
+  // project or what "Auto Tasks" means here, and answers like vanilla
+  // Claude Code (checks git, reaches for harness cron tools).
+  appendParts.push(composeSystemContext(agentContext, userId, message, { memory: false }));
   if (persona) appendParts.push(persona);
   // User's own custom persona (kb/personas.mjs) — distinct from the MODE
   // persona above. Mirrors the legacy loop's exact framing/sanitization

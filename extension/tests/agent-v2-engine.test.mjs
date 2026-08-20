@@ -266,7 +266,10 @@ test('buildEngineOptions: no persona set costs zero extra tokens (no Persona blo
     { userId: 'no-persona-user', mode: 'execute', agentContext: { workspaceRoot: WS } },
     { readSkill: () => null, roots: () => [] },
   );
-  assert.ok(!queryOptions.systemPrompt.append.includes('Persona'), 'no Persona block when the user has no custom persona');
+  // Match the persona block's own header, not the bare word — the always-
+  // injected System context (app-capabilities prose) could legitimately
+  // mention "Personas" someday without a persona block existing.
+  assert.ok(!queryOptions.systemPrompt.append.includes('---\nPersona'), 'no Persona block when the user has no custom persona');
 });
 
 test('buildEngineOptions: a persona-lookup error is swallowed — turn proceeds without the Persona block', () => {
@@ -278,7 +281,7 @@ test('buildEngineOptions: a persona-lookup error is swallowed — turn proceeds 
       getPersona: () => { throw new Error('boom: simulated DB failure'); },
     },
   );
-  assert.ok(!queryOptions.systemPrompt.append.includes('Persona'), 'a thrown persona lookup must not surface a Persona block');
+  assert.ok(!queryOptions.systemPrompt.append.includes('---\nPersona'), 'a thrown persona lookup must not surface a Persona block');
   // The rest of the append (e.g. no crash, options object still well-formed)
   // proves the turn genuinely proceeds rather than the whole call throwing.
   assert.equal(typeof queryOptions.systemPrompt.append, 'string');
@@ -293,6 +296,33 @@ test('buildEngineOptions: mode persona and user persona coexist — neither clob
   assert.ok(append.includes('You are in PLAN mode'), 'the mode persona (plan) must still be present');
   assert.ok(append.includes('Ada'), 'the user persona name must also be present');
   assert.ok(append.includes('Be terse and precise.'), 'the user persona suffix must also be present');
+});
+
+// --- System context injection (parity with the legacy loop) -------------------
+
+// The legacy loop grounds every turn in composeSystemContext (loop.mjs) —
+// active project, indexed repos, recent issues, app capabilities. Without
+// the same block the v2 agent doesn't know the chat is bound to a GitLab
+// project or what "Auto Tasks" means in this app, and answers like vanilla
+// Claude Code (checks git, reaches for harness cron tools).
+test('buildEngineOptions: system prompt carries the System context block (project, issues, capabilities)', () => {
+  const { queryOptions } = buildEngineOptions({
+    userId: null, mode: 'execute', message: 'check open issues',
+    agentContext: {
+      workspaceRoot: WS,
+      activeProject: { name: 'iis_summary', url: 'https://gitlab.example/iis_summary', provider: 'gitlab' },
+      recentIssues: [{ iid: 7, title: 'Fix the summarizer', labels: ['bug'] }],
+    },
+  });
+  const append = queryOptions.systemPrompt.append;
+  assert.ok(append.includes('# System context'), 'the System context block must be present');
+  assert.ok(append.includes('iis_summary'), 'the active project must be named');
+  assert.ok(append.includes('#7 Fix the summarizer'), 'recent issues must be listed');
+  assert.ok(append.includes('Auto Tasks'), 'app capabilities must brief the agent on app concepts');
+  // Graphify project memory stays tool-driven on v2 (project_memory tool) —
+  // its block must NOT be inlined into every turn.
+  assert.ok(!append.includes('# Repository memory (Graphify)'),
+    'Graphify memory must not be injected (v2 exposes it as the project_memory tool)');
 });
 
 // --- workspaceRoot: tilde expansion + existence -------------------------------

@@ -23,7 +23,12 @@ const appCapabilities = readFileSync(APP_CAPABILITIES_PATH, 'utf8').trim();
 // only to rank curated chat-memory facts by relevance inside
 // renderGraphifyMemory; omitting it degrades that selection to newest-first,
 // never to an error.
-export function composeSystemContext(agentContext, userId, userMessage = '') {
+//
+// `memory: false` (v2 engine) skips the Graphify block: v2 exposes project
+// memory as the callable project_memory tool instead of paying its token
+// cost on every turn, but still needs the light sections (project, issues,
+// capabilities) to know what app it lives in.
+export function composeSystemContext(agentContext, userId, userMessage = '', { memory = true } = {}) {
   const sections = [
     '# System context',
     '',
@@ -39,7 +44,7 @@ export function composeSystemContext(agentContext, userId, userMessage = '') {
     // registered repo allow-list. `stats` is omitted deliberately: route.mjs
     // already logs one `memory_context` line per turn for the global agent's
     // copy of this same block, and a second sink would double-count it.
-    renderGraphifyMemory(agentContext, userId, undefined, userMessage),
+    ...(memory ? [renderGraphifyMemory(agentContext, userId, undefined, userMessage)] : []),
   ];
   // Neutralise fence sentinels across the whole block: issue titles, meeting
   // content, repo names, and Graphify memory are all external/user-derived and
