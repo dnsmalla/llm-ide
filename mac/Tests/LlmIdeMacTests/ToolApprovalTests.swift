@@ -74,4 +74,29 @@ struct ToolApprovalTests {
         let state = AgentV2ApprovalState(approval: approval)
         #expect(state.legacySessionId == nil)
     }
+
+    @Test("Decodes a ToolApproval's new structured args (Edit)")
+    func decodesEditArgs() throws {
+        let json = #"{"type":"approval_request","requestId":"r1","kind":"ToolApproval","toolName":"Edit","argsSummary":"/w/a.txt","args":{"filePath":"/w/a.txt","oldString":"old","newString":"new"}}"#
+        let data = Data(json.utf8)
+        guard case .approvalRequest(let approval)? = AgentV2Event.decode(fromJSON: data) else {
+            Issue.record("expected an approvalRequest event")
+            return
+        }
+        #expect(approval.args?.filePath == "/w/a.txt")
+        #expect(approval.args?.oldString == "old")
+        #expect(approval.args?.newString == "new")
+        #expect(approval.args?.truncated == nil)
+    }
+
+    @Test("Decodes ToolApproval with missing args field as nil")
+    func missingArgsDecodesAsNil() throws {
+        let json = #"{"type":"approval_request","requestId":"r2","kind":"ToolApproval","toolName":"Bash","argsSummary":"git push"}"#
+        let data = Data(json.utf8)
+        guard case .approvalRequest(let approval)? = AgentV2Event.decode(fromJSON: data) else {
+            Issue.record("expected an approvalRequest event")
+            return
+        }
+        #expect(approval.args == nil)
+    }
 }

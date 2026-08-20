@@ -92,6 +92,21 @@ struct AgentV2ApprovalQuestion: Sendable, Equatable, Codable {
     }
 }
 
+/// Structured payload of a ToolApproval — what the card renders as a diff /
+/// command / content preview. Every field is optional: which ones are
+/// populated depends on the tool (Edit: filePath/oldString/newString;
+/// Write: filePath/contentPreview/totalChars; Bash: command). `truncated`
+/// is present only when the server cut a field to its 20k cap.
+struct AgentV2ApprovalArgs: Sendable, Equatable, Codable {
+    let filePath: String?
+    let oldString: String?
+    let newString: String?
+    let contentPreview: String?
+    let totalChars: Int?
+    let command: String?
+    let truncated: Bool?
+}
+
 /// A parked approval the engine is blocking on. `kind` distinguishes the two
 /// P2 shapes: "AskUserQuestion" (questions/options, P1) and "ToolApproval"
 /// (a gated act tool asking allow/deny/always-allow, P2) — see
@@ -108,17 +123,19 @@ struct AgentV2Approval: Sendable, Equatable, Codable {
     let questions: [AgentV2ApprovalQuestion]
     let toolName: String?
     let argsSummary: String?
+    let args: AgentV2ApprovalArgs?
 
     init(requestId: String, kind: String = "AskUserQuestion", questions: [AgentV2ApprovalQuestion] = [],
-         toolName: String? = nil, argsSummary: String? = nil) {
+         toolName: String? = nil, argsSummary: String? = nil, args: AgentV2ApprovalArgs? = nil) {
         self.requestId = requestId
         self.kind = kind
         self.questions = questions
         self.toolName = toolName
         self.argsSummary = argsSummary
+        self.args = args
     }
 
-    enum CodingKeys: String, CodingKey { case requestId, kind, questions, toolName, argsSummary }
+    enum CodingKeys: String, CodingKey { case requestId, kind, questions, toolName, argsSummary, args }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -127,6 +144,7 @@ struct AgentV2Approval: Sendable, Equatable, Codable {
         questions = try c.decodeIfPresent([AgentV2ApprovalQuestion].self, forKey: .questions) ?? []
         toolName = try c.decodeIfPresent(String.self, forKey: .toolName)
         argsSummary = try c.decodeIfPresent(String.self, forKey: .argsSummary)
+        args = try c.decodeIfPresent(AgentV2ApprovalArgs.self, forKey: .args)
     }
 }
 
