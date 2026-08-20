@@ -443,6 +443,30 @@ struct AgentV2TransportTests {
         }
     }
 
+    // MARK: - Error surfacing (LocalizedError)
+
+    // The panel shows `error.localizedDescription` — without LocalizedError
+    // conformance that renders as the useless "The operation couldn't be
+    // completed. (LlmIdeMacLib.AgentV2Error error 0.)", discarding the
+    // server's actual message. Each case must render a human-readable
+    // description, and `.engine` must carry the server's message verbatim.
+    @Test("AgentV2Error: localizedDescription carries the server message, not an NSError code")
+    func errorDescriptionsAreHumanReadable() {
+        // The generic ENGINE_ERROR code is noise for the user — message only.
+        let generic = AgentV2Error.engine(code: "ENGINE_ERROR", message: "Claude Code is not logged in")
+        #expect(generic.localizedDescription == "Agent engine error: Claude Code is not logged in")
+
+        // A specific code is diagnostic signal and stays visible.
+        let coded = AgentV2Error.engine(code: "RATE_LIMITED", message: "try later")
+        #expect(coded.localizedDescription == "Agent engine error (RATE_LIMITED): try later")
+
+        let codeless = AgentV2Error.engine(code: nil, message: "boom")
+        #expect(codeless.localizedDescription == "Agent engine error: boom")
+
+        #expect(AgentV2Error.sessionUnresumable.localizedDescription.contains("session"))
+        #expect(AgentV2Error.streamEndedWithoutResult.localizedDescription.contains("stream"))
+    }
+
     // MARK: - Protocol-extension default (legacy conformers)
 
     @Test("Legacy-shaped conformer: 4-callback roundTrip compiles, forwards, never fires onApproval")

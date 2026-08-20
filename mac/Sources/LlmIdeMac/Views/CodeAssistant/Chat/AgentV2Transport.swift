@@ -29,6 +29,28 @@ enum AgentV2Error: Error, Equatable, Sendable {
     case streamEndedWithoutResult
 }
 
+// The panel's error banner shows `error.localizedDescription`; without this
+// conformance Foundation renders the useless "The operation couldn't be
+// completed. (LlmIdeMacLib.AgentV2Error error 0.)" and the server's actual
+// message never reaches the user.
+extension AgentV2Error: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .sessionUnresumable:
+            return "The chat's engine session could not be resumed."
+        case .engine(let code, let message):
+            // The catch-all ENGINE_ERROR code adds nothing for the user;
+            // a specific code (rate limit, auth, …) is worth showing.
+            if let code, !code.isEmpty, code != "ENGINE_ERROR" {
+                return "Agent engine error (\(code)): \(message)"
+            }
+            return "Agent engine error: \(message)"
+        case .streamEndedWithoutResult:
+            return "The engine stream ended without a result."
+        }
+    }
+}
+
 /// Deferred failure capture for one turn. Stream-event callbacks are
 /// non-throwing, so failures detected inside them — an `error` event, or
 /// (on the 3-callback path) an approval nobody can answer — are recorded
