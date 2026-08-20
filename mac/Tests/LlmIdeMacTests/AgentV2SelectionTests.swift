@@ -485,14 +485,20 @@ struct AgentV2SelectionTests {
 
     @Test("Toggle defaults to on when unset")
     func toggleDefaultsOnWhenUnset() {
-        let defaults = UserDefaults(suiteName: "v2-default-on-\(UUID().uuidString)")!
+        let suite = "v2-default-on-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
         #expect(AgentV2Selection.toggleEnabled(defaults: defaults) == true)
         #expect(AgentV2Selection.engineForNewChat(defaults: defaults) == AgentV2Selection.sessionEngineV2)
     }
 
     @Test("Explicit opt-out is honored")
     func explicitOptOutIsHonored() {
-        let defaults = UserDefaults(suiteName: "v2-opt-out-\(UUID().uuidString)")!
+        let suite = "v2-opt-out-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
         defaults.set(false, forKey: AgentV2Selection.toggleKey)
         #expect(AgentV2Selection.toggleEnabled(defaults: defaults) == false)
         #expect(AgentV2Selection.engineForNewChat(defaults: defaults) == nil)
@@ -505,10 +511,11 @@ struct AgentV2SelectionTests {
         defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
 
+        #expect(AgentV2Selection.engineForNewChat(defaults: defaults) == AgentV2Selection.sessionEngineV2,
+                "toggle on (the default) mints a v2 chat")
+        defaults.set(false, forKey: AgentV2Selection.toggleKey)
         #expect(AgentV2Selection.engineForNewChat(defaults: defaults) == nil,
-                "toggle off (the default) mints a legacy chat")
-        defaults.set(true, forKey: AgentV2Selection.toggleKey)
-        #expect(AgentV2Selection.engineForNewChat(defaults: defaults) == AgentV2Selection.sessionEngineV2)
+                "toggle off explicitly mints a legacy chat")
     }
 
     @Test("mintFreshSession stamps the chat's engine from the toggle; the stamp survives, later mints don't touch it")
