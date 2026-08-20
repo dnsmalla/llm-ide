@@ -14,6 +14,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { getEventListeners } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -32,7 +33,9 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 const agentSdkRoot = path.join(path.dirname(tmpDb), 'agent-sdk');
 try { fs.rmSync(agentSdkRoot, { recursive: true, force: true }); } catch { /* ok */ }
 
-const { buildEngineOptions, resolveAnthropicKey, runAgentV2Turn, agentSdkHomeFor, resolveMaxBudgetUsd } = await import('../llm_agent/sdk/engine.mjs');
+const {
+  buildEngineOptions, resolveAnthropicKey, runAgentV2Turn, agentSdkHomeFor, resolveMaxBudgetUsd, approvalArgsFor,
+} = await import('../llm_agent/sdk/engine.mjs');
 const { answerDecision, abortDecisionsForSession } = await import('../llm_agent/sdk/decisions.mjs');
 const { registerUser } = await import('../server/users.mjs');
 const { getDb } = await import('../kb/db.mjs');
@@ -405,17 +408,123 @@ test('AskUserQuestion round-trip: request event → answer → allow with update
     assert.ok(events.some((e) => e.type === 'approval_resolved' && e.outcome === 'answer'));
   }));
 
-test('non-question tools are denied with an explanatory message',
-  withAnthropicKey('sk-ant-v2-test', async () => {
-    const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
-    await runAgentV2Turn({
-      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
-      onEvent: () => {}, queryFactory: makeFakeQuery(script),
-    }, turnInjectable);
-    const d = await script.options.canUseTool('Bash', { command: 'rm -rf /' });
-    assert.equal(d.behavior, 'deny');
-    assert.match(d.message, /next engine release/);
-  }));
+test('an unknown native tool is denied with the not-enabled message', withAnthropicKey('sk-ant-v2-test', async () => {
+  const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
+  await runAgentV2Turn({
+    message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+    onEvent: () => {}, queryFactory: makeFakeQuery(script),
+  }, turnInjectable);
+  const d = await script.options.canUseTool('NotebookEdit', { notebook_path: '/tmp/x.ipynb' });
+  assert.equal(d.behavior, 'deny');
+  assert.match(d.message, /not enabled/);
+}));
+
+test('native Bash: blocked command is denied even with always-allow set', withAnthropicKey('sk-ant-v2-test', async () => {
+  const user = registerUser(getDb(), { email: 'v2native-blocked@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+  setAlwaysAllow(user.id, 'Bash');
+  const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
+  await runAgentV2Turn({
+    message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+    onEvent: () => {}, queryFactory: makeFakeQuery(script),
+  }, turnInjectable);
+  const d = await script.options.canUseTool('Bash', { command: 'sudo rm -rf /' });
+  assert.equal(d.behavior, 'deny');
+  assert.match(d.message, /blocked/i);
+}));
+
+test('native Bash: auto-safe command allows with no approval parked', withAnthropicKey('sk-ant-v2-test', async () => {
+  const user = registerUser(getDb(), { email: 'v2native-auto@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+  const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
+  const events = [];
+  await runAgentV2Turn({
+    message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+    onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
+  }, turnInjectable);
+  const d = await script.options.canUseTool('Bash', { command: 'git status' });
+  assert.equal(d.behavior, 'allow');
+  assert.ok(!events.some((e) => e.type === 'approval_request'));
+}));
+
+test('native Bash: prompt-tier command parks a ToolApproval carrying args.command', withAnthropicKey('sk-ant-v2-test', async () => {
+  const user = registerUser(getDb(), { email: 'v2native-prompt@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+  const script = { messages: [{ type: 'init', session_id: 'sdk-nb1' }, { type: 'result', subtype: 'success', session_id: 'sdk-nb1' }] };
+  const events = [];
+  await runAgentV2Turn({
+    message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+    resumeSdkSessionId: 'sdk-nb1', onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
+  }, turnInjectable);
+  const decision = script.options.canUseTool('Bash', { command: 'npm run build' });
+  const req = events.find((e) => e.type === 'approval_request');
+  assert.equal(req.kind, 'ToolApproval');
+  assert.equal(req.toolName, 'Bash');
+  assert.deepEqual(req.args, { command: 'npm run build' });
+  answerDecision({ requestId: req.requestId, sdkSessionId: 'sdk-nb1', userId: user.id, action: 'allow' });
+  const d = await decision;
+  assert.equal(d.behavior, 'allow');
+}));
+
+test('native Edit: in-workspace target parks with diff args; always-allow persists per tool', withAnthropicKey('sk-ant-v2-test', async () => {
+  const user = registerUser(getDb(), { email: 'v2native-edit@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'v2edit-'));
+  fs.writeFileSync(path.join(workspace, 'a.txt'), 'old');
+  const script = { messages: [{ type: 'init', session_id: 'sdk-ed1' }, { type: 'result', subtype: 'success', session_id: 'sdk-ed1' }] };
+  const events = [];
+  await runAgentV2Turn({
+    message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: workspace },
+    resumeSdkSessionId: 'sdk-ed1', onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
+  }, turnInjectable);
+  const input = { file_path: path.join(workspace, 'a.txt'), old_string: 'old', new_string: 'new' };
+  const decision = script.options.canUseTool('Edit', input);
+  const req = events.find((e) => e.type === 'approval_request');
+  assert.equal(req.toolName, 'Edit');
+  assert.deepEqual(req.args, { filePath: input.file_path, oldString: 'old', newString: 'new' });
+  answerDecision({ requestId: req.requestId, sdkSessionId: 'sdk-ed1', userId: user.id, action: 'always-allow' });
+  const d = await decision;
+  assert.equal(d.behavior, 'allow');
+  assert.equal(hasAlwaysAllow(user.id, 'Edit'), true);
+  // The always-allow row now shortcuts the prompt tier for the next Edit.
+  const d2 = await script.options.canUseTool('Edit', input);
+  assert.equal(d2.behavior, 'allow');
+}));
+
+test('native Write: an out-of-workspace target is denied, never parked', withAnthropicKey('sk-ant-v2-test', async () => {
+  const user = registerUser(getDb(), { email: 'v2native-escape@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'v2esc-'));
+  const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
+  const events = [];
+  await runAgentV2Turn({
+    message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: workspace },
+    onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
+  }, turnInjectable);
+  const d = await script.options.canUseTool('Write', { file_path: '../evil.txt', content: 'x' });
+  assert.equal(d.behavior, 'deny');
+  assert.match(d.message, /workspace/i);
+  assert.ok(!events.some((e) => e.type === 'approval_request'));
+}));
+
+test('native tools are denied in a restricted mode', withAnthropicKey('sk-ant-v2-test', async () => {
+  const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
+  await runAgentV2Turn({
+    message: 'm', userId: 'u1', mode: 'plan', agentContext: { workspaceRoot: '/tmp/w' },
+    onEvent: () => {}, queryFactory: makeFakeQuery(script),
+  }, turnInjectable);
+  const d = await script.options.canUseTool('Edit', { file_path: '/tmp/w/a.txt', old_string: 'a', new_string: 'b' });
+  assert.equal(d.behavior, 'deny');
+  assert.match(d.message, /plan mode/);
+}));
+
+test('approvalArgsFor caps every string field at 20k and marks truncation', () => {
+  const long = 'x'.repeat(25_000);
+  const edit = approvalArgsFor('Edit', { file_path: '/w/a.txt', old_string: long, new_string: 'n' });
+  assert.equal(edit.oldString.length, 20_000);
+  assert.equal(edit.truncated, true);
+  const write = approvalArgsFor('Write', { file_path: '/w/a.txt', content: long });
+  assert.equal(write.contentPreview.length, 20_000);
+  assert.equal(write.totalChars, 25_000);
+  assert.equal(write.truncated, true);
+  const bash = approvalArgsFor('Bash', { command: 'git status' });
+  assert.deepEqual(bash, { command: 'git status' });
+});
 
 // --- Task 7: act-tool gating (mcp__llmide__run-bash/task-create/task-update) --
 //

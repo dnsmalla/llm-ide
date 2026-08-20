@@ -56,6 +56,7 @@ import { buildLlmIdeServer } from './tools.mjs';
 import { registerDecision, abortDecisionsForSession } from './decisions.mjs';
 import { get as registryGet, entries as registryEntries } from '../tools/registry.mjs';
 import { hasAlwaysAllow, setAlwaysAllow } from '../../kb/tool-approvals.mjs';
+import { runBashGate, writePathGate } from '../tools/gates.mjs';
 
 // --- Auth: per-user vault key first, operator env as fallback -------------
 // (Moved here from spike-engine.mjs, which re-exports it for compatibility —
@@ -325,10 +326,39 @@ export function resolveMaxBudgetUsd(userId, model, { usdCap = usdCapForModel } =
   return usdCap(getDb(), userId, 'anthropic', typeof model === 'string' && model ? model : null);
 }
 
-// v2 is read-and-answer: write/shell tools are not wired yet, so a deny with
-// an instruction to re-plan reads better to the model than a silent hang.
-const DENY_NEXT_RELEASE = 'Writes and shell commands arrive in the next engine release; re-plan using read-only tools.';
+// Native tools outside the gated roster (and any unknown tool) stay denied —
+// a deny with a reason reads better to the model than a silent hang.
+const DENY_UNKNOWN_TOOL = 'This tool is not enabled in the LLM-IDE chat engine.';
 const DENY_NO_ANSWER = 'The user did not answer the question.';
+
+// Cap for every string carried in approval_request.args — the payload is a
+// UI preview, not the transport for the edit itself (the SDK already holds
+// the real input).
+const APPROVAL_ARG_CAP = 20_000;
+
+/** Structured approval-card payload for a native tool, capped per field. */
+export function approvalArgsFor(toolName, input) {
+  let truncated = false;
+  const cut = (s) => {
+    const str = typeof s === 'string' ? s : '';
+    if (str.length > APPROVAL_ARG_CAP) { truncated = true; return str.slice(0, APPROVAL_ARG_CAP); }
+    return str;
+  };
+  if (toolName === 'Bash') {
+    const args = { command: cut(input?.command) };
+    return truncated ? { ...args, truncated } : args;
+  }
+  if (toolName === 'Edit') {
+    const args = { filePath: cut(input?.file_path), oldString: cut(input?.old_string), newString: cut(input?.new_string) };
+    return truncated ? { ...args, truncated } : args;
+  }
+  if (toolName === 'Write') {
+    const content = typeof input?.content === 'string' ? input.content : '';
+    const args = { filePath: cut(input?.file_path), contentPreview: cut(content), totalChars: content.length };
+    return truncated ? { ...args, truncated } : args;
+  }
+  return null;
+}
 
 /**
  * Run one v2 chat turn against the Agent SDK and stream its wire events.
@@ -399,6 +429,11 @@ export async function runAgentV2Turn(
   // whatever the stream reports (the init message carries it first).
   let currentSdkSessionId = resume;
 
+  // Roots native Edit/Write may target — assigned right after
+  // buildEngineOptions computes additionalDirectories; the canUseTool
+  // closure reads it at call time, which is always after that assignment.
+  let allowedWriteRoots = [];
+
   // Park one ToolApproval and await the human decision — the shared tail of
   // the act-tool branch and (Task 3) the native Edit/Write/Bash branch.
   // `args` is the structured payload the Mac renders as a diff; older
@@ -431,8 +466,35 @@ export async function runAgentV2Turn(
   const canUseTool = async (toolName, input, callOpts) => {
     const registryName = toolName.startsWith('mcp__llmide__') ? toolName.slice('mcp__llmide__'.length) : null;
     const entry = registryName ? registryGet(registryName) : null;
-    if (toolName !== 'AskUserQuestion' && !(entry && entry.kind === 'act')) {
-      return { behavior: 'deny', message: DENY_NEXT_RELEASE };
+    const NATIVE_GATED = new Set(['Bash', 'Edit', 'Write']);
+    if (toolName !== 'AskUserQuestion' && !(entry && entry.kind === 'act') && !NATIVE_GATED.has(toolName)) {
+      return { behavior: 'deny', message: DENY_UNKNOWN_TOOL };
+    }
+    if (NATIVE_GATED.has(toolName)) {
+      const requestedMode = typeof mode === 'string' && mode ? mode : 'execute';
+      if (restrictsTools(requestedMode)) {
+        return { behavior: 'deny', message: `${toolName} is not available in ${requestedMode} mode.` };
+      }
+      if (toolName === 'Bash') {
+        const decision = runBashGate(input?.command);
+        if (decision === 'blocked') return { behavior: 'deny', message: 'Command blocked for safety.' };
+        if (decision === 'auto' || hasAlwaysAllow(userId, 'Bash')) {
+          return { behavior: 'allow', updatedInput: input };
+        }
+        return awaitToolApproval({
+          toolName: 'Bash', argsSummary: String(input?.command ?? ''),
+          args: approvalArgsFor('Bash', input), input, callSignal: callOpts?.signal,
+        });
+      }
+      // Edit / Write — containment first; a 'blocked' path is final.
+      if (writePathGate(input?.file_path, allowedWriteRoots) === 'blocked') {
+        return { behavior: 'deny', message: `${toolName} refused: the target must stay inside the project workspace.` };
+      }
+      if (hasAlwaysAllow(userId, toolName)) return { behavior: 'allow', updatedInput: input };
+      return awaitToolApproval({
+        toolName, argsSummary: String(input?.file_path ?? ''),
+        args: approvalArgsFor(toolName, input), input, callSignal: callOpts?.signal,
+      });
     }
     if (entry && entry.kind === 'act') {
       // Mode restriction, belt-and-braces with buildEngineOptions'
@@ -519,6 +581,7 @@ export async function runAgentV2Turn(
     { userId, mode, model, language, message, skills, agentContext, attachments },
     { readSkill, roots, sessionMemory },
   );
+  allowedWriteRoots = [workspaceRoot, ...(queryOptions.additionalDirectories || [])].filter(Boolean);
 
   // Spec §7 — when the user's limits config yields a usable USD cap for the
   // model, cap this query's spend (the SDK stops with an error_max_budget_usd
