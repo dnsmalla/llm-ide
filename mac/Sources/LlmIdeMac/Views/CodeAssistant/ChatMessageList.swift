@@ -448,7 +448,7 @@ struct ChatMessageList: View {
             HStack(alignment: .top, spacing: Spacing.sm) {
                 if isUser { Spacer(minLength: 40) }
                 VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-                    Text(isUser ? "You" : "Claude")
+                    Text(isUser ? "You" : "llm-agent")
                         .font(Typography.caption)
                         .foregroundStyle(theme.current.textMuted)
                     if !isUser, let raw = turn.metadata?.mode,
