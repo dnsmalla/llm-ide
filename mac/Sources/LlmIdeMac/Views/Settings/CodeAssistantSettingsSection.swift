@@ -6,17 +6,17 @@ import SwiftUI
 /// engines use (see `AgentV2Selection` / `ChatTransportFactory`).
 struct CodeAssistantSettingsSection: View {
     @EnvironmentObject var theme: ThemeStore
-    @AppStorage(AgentV2Selection.toggleKey) private var useAgentV2 = false
+    @AppStorage(AgentV2Selection.toggleKey) private var useAgentV2 = true
 
     var body: some View {
         SettingsSectionCard(icon: "sparkles", title: "Code Assistant") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 Toggle(isOn: $useAgentV2) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Agent engine (beta)")
+                        Text("Agent engine")
                             .font(Typography.body)
                             .foregroundStyle(theme.current.text)
-                        Text("Uses the new Claude engine for new chats (Anthropic provider only).")
+                        Text("New chats use the Claude Agent engine (Anthropic provider only). Turn off to use the classic engine.")
                             .font(Typography.caption)
                             .foregroundStyle(theme.current.textMuted)
                     }

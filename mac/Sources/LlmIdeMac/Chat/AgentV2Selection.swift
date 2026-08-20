@@ -50,11 +50,11 @@ enum AgentV2Selection {
         toggleOn && sessionEngine == sessionEngineV2 && providerIsAnthropic(resolvedProvider)
     }
 
-    /// Current toggle value. Read at ENGINE-CREATION time (the factory) and
-    /// at TURN time (the composite), so a flip applies to the next turn of
-    /// an already-constructed engine without a relaunch.
+    /// Current toggle value. UNSET defaults to true (the Agent engine is the
+    /// default for new chats since P3); an explicit user opt-out (false) is
+    /// honored forever. Read at ENGINE-CREATION time and at TURN time.
     static func toggleEnabled(defaults: UserDefaults = .standard) -> Bool {
-        defaults.bool(forKey: toggleKey)
+        defaults.object(forKey: toggleKey) == nil ? true : defaults.bool(forKey: toggleKey)
     }
 
     /// Engine marker to stamp on a NEWLY MINTED chat: the Agent v2 engine

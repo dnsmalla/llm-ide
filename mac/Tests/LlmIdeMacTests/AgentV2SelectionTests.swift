@@ -483,6 +483,21 @@ struct AgentV2SelectionTests {
                == AgentV2Selection.sessionEngineV2)
     }
 
+    @Test("Toggle defaults to on when unset")
+    func toggleDefaultsOnWhenUnset() {
+        let defaults = UserDefaults(suiteName: "v2-default-on-\(UUID().uuidString)")!
+        #expect(AgentV2Selection.toggleEnabled(defaults: defaults) == true)
+        #expect(AgentV2Selection.engineForNewChat(defaults: defaults) == AgentV2Selection.sessionEngineV2)
+    }
+
+    @Test("Explicit opt-out is honored")
+    func explicitOptOutIsHonored() {
+        let defaults = UserDefaults(suiteName: "v2-opt-out-\(UUID().uuidString)")!
+        defaults.set(false, forKey: AgentV2Selection.toggleKey)
+        #expect(AgentV2Selection.toggleEnabled(defaults: defaults) == false)
+        #expect(AgentV2Selection.engineForNewChat(defaults: defaults) == nil)
+    }
+
     @Test("engineForNewChat: stamps v2 iff the toggle is on at creation")
     func engineForNewChatStamp() {
         let suite = "agent-v2-newchat-test"
