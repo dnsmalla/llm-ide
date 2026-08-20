@@ -46,7 +46,7 @@ function isWithin(child, root) {
   return c === r || c.startsWith(r.endsWith(sep) ? r : r + sep);
 }
 
-function isDeniedPath(absPath) {
+export function isDeniedPath(absPath) {
   if (absPath.split(sep).some((s) => DENY_SEGMENTS.has(s))) return true;
   const base = basename(absPath);
   if (DENY_BASENAMES.has(base)) return true;

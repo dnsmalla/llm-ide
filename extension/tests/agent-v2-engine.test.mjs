@@ -483,15 +483,20 @@ test('native Edit: in-workspace target parks with diff args; always-allow persis
   fs.writeFileSync(path.join(workspace, 'a.txt'), 'old');
   const script = { messages: [{ type: 'init', session_id: 'sdk-ed1' }, { type: 'result', subtype: 'success', session_id: 'sdk-ed1' }] };
   const events = [];
+  // C1's fix builds allowedWriteRoots from `roots()` (the same validated
+  // roots the read path uses), so this test's roots fake must actually
+  // resolve to the workspace it writes into — turnInjectable's `roots: ()
+  // => []` (used by the containment-failure tests) would wrongly block
+  // every write here.
   await runAgentV2Turn({
     message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: workspace },
     resumeSdkSessionId: 'sdk-ed1', onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
-  }, turnInjectable);
+  }, { ...turnInjectable, roots: () => [workspace] });
   const input = { file_path: path.join(workspace, 'a.txt'), old_string: 'old', new_string: 'new' };
   const decision = script.options.canUseTool('Edit', input);
   const req = events.find((e) => e.type === 'approval_request');
   assert.equal(req.toolName, 'Edit');
-  assert.deepEqual(req.args, { filePath: input.file_path, oldString: 'old', newString: 'new' });
+  assert.deepEqual(req.args, { filePath: input.file_path, oldString: 'old', newString: 'new', replaceAll: false });
   answerDecision({ requestId: req.requestId, sdkSessionId: 'sdk-ed1', userId: user.id, action: 'always-allow' });
   const d = await decision;
   assert.equal(d.behavior, 'allow');
@@ -516,6 +521,42 @@ test('native Write: an out-of-workspace target is denied, never parked', withAnt
   assert.ok(!events.some((e) => e.type === 'approval_request'));
 }));
 
+test('native Write: an over-broad workspace root (e.g. the home directory) is denied, matching the read path\'s own refusal',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    // Deliberately do NOT override `roots` — this must exercise the REAL
+    // buildReadableRoots (same as the read path's list-files/read-file) so
+    // isTooBroadRoot's rejection of $HOME is actually exercised, proving the
+    // containment gate no longer trusts the raw client-supplied
+    // workspaceRoot string (final whole-branch review, C1).
+    const homeInjectable = { readSkill: () => null, sessionMemory: () => [], persistMemory: async () => null };
+    const user = registerUser(getDb(), { email: 'v2native-homeroot@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+    const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
+    const events = [];
+    await runAgentV2Turn({
+      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: os.homedir() },
+      onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
+    }, homeInjectable);
+    const d = await script.options.canUseTool('Write', { file_path: path.join(os.homedir(), '.zshrc'), content: 'x' });
+    assert.equal(d.behavior, 'deny');
+    assert.ok(!events.some((e) => e.type === 'approval_request'), 'an over-broad root must never even reach a parked approval');
+  }));
+
+test('native Write: a blocked (out-of-workspace) target is denied even with always-allow set',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const user = registerUser(getDb(), { email: 'v2native-blocked-write@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+    setAlwaysAllow(user.id, 'Write'); // must NOT override a containment 'blocked' classification
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'v2blk-'));
+    const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
+    const events = [];
+    await runAgentV2Turn({
+      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: workspace },
+      onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
+    }, turnInjectable);
+    const d = await script.options.canUseTool('Write', { file_path: '../evil.txt', content: 'x' });
+    assert.equal(d.behavior, 'deny');
+    assert.ok(!events.some((e) => e.type === 'approval_request'));
+  }));
+
 test('native tools are denied in a restricted mode', withAnthropicKey('sk-ant-v2-test', async () => {
   const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
   await runAgentV2Turn({
@@ -538,6 +579,26 @@ test('approvalArgsFor caps every string field at 20k and marks truncation', () =
   assert.equal(write.truncated, true);
   const bash = approvalArgsFor('Bash', { command: 'git status' });
   assert.deepEqual(bash, { command: 'git status' });
+});
+
+test('approvalArgsFor(Edit): replaceAll is forwarded as a real boolean, not run through the string cap', () => {
+  const withReplaceAll = approvalArgsFor('Edit', { file_path: 'a.txt', old_string: 'x', new_string: 'y', replace_all: true });
+  assert.equal(withReplaceAll.replaceAll, true);
+  const withoutReplaceAll = approvalArgsFor('Edit', { file_path: 'a.txt', old_string: 'x', new_string: 'y' });
+  assert.equal(withoutReplaceAll.replaceAll, false, 'omitted replace_all must decode to false, not undefined');
+  const explicitFalse = approvalArgsFor('Edit', { file_path: 'a.txt', old_string: 'x', new_string: 'y', replace_all: false });
+  assert.equal(explicitFalse.replaceAll, false);
+});
+
+test('approvalArgsFor(Write): exists reports whether the target already exists on disk', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'v2write-exists-'));
+  const existingFile = path.join(dir, 'already-here.txt');
+  fs.writeFileSync(existingFile, 'old content');
+  const overwrite = approvalArgsFor('Write', { file_path: existingFile, content: 'new content' });
+  assert.equal(overwrite.exists, true);
+  const newFile = path.join(dir, 'not-here-yet.txt');
+  const create = approvalArgsFor('Write', { file_path: newFile, content: 'new content' });
+  assert.equal(create.exists, false);
 });
 
 // --- Task 7: act-tool gating (mcp__llmide__run-bash/task-create/task-update) --

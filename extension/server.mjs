@@ -73,7 +73,11 @@ const HOST = config.host;
 //     running unattended. New POST /code-assist/decision resolves it,
 //     reusing the same llm_agent/sdk/decisions.mjs registry as
 //     /agent/v2/decision.
-const SERVER_API_VERSION = 34;
+// 34→35: the `approval_request` SSE event's `args` payload gained new
+//     additive fields (Edit's replaceAll, Write's exists) for the native
+//     Edit/Write/Bash approval ladder — an additive wire-format change per
+//     docs/explanation/invariants.md (final whole-branch review, M1).
+const SERVER_API_VERSION = 35;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

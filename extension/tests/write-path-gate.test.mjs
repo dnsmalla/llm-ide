@@ -63,3 +63,19 @@ test('empty, non-string, or missing roots are blocked', () => {
   assert.equal(writePathGate(null, [f.workspace]), 'blocked');
   assert.equal(writePathGate('a.txt', []), 'blocked');
 });
+
+// I1 (final whole-branch review): a sensitivity hit is final regardless of
+// containment — the same denylist the read path applies (repo-files.mjs's
+// isDeniedPath) — so an approved (or always-allowed) write can't land in
+// .git/hooks, .env, private keys, etc. just because the target sits inside
+// an allowed root.
+test('a target inside .git/hooks is blocked even though it is inside the workspace', () => {
+  const f = makeFixture();
+  fs.mkdirSync(path.join(f.workspace, '.git', 'hooks'), { recursive: true });
+  assert.equal(writePathGate(path.join(f.workspace, '.git', 'hooks', 'pre-commit'), [f.workspace]), 'blocked');
+});
+
+test('a .env target directly inside the workspace is blocked (no file need exist)', () => {
+  const f = makeFixture();
+  assert.equal(writePathGate(path.join(f.workspace, '.env'), [f.workspace]), 'blocked');
+});

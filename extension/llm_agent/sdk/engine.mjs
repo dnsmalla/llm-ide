@@ -151,8 +151,13 @@ const V2_ALL_MCP_TOOLS = registryEntries().map((e) => `${MCP_PREFIX}${e.name}`);
 
 const RUN_BASH_MCP = `${MCP_PREFIX}run-bash`;
 // Native write/shell tools a restricted mode must remove from model context
-// entirely (canUseTool re-checks as the belt; this is the braces).
+// entirely (canUseTool re-checks as the belt; this is the braces). Single
+// source of truth for both the array form (v2ToolPolicyForMode's
+// disallowedTools spread) and the Set form (canUseTool's membership check
+// below) — previously canUseTool re-literaled its own Set every single call
+// (final whole-branch review, I6).
 const NATIVE_GATED_TOOLS = ['Edit', 'Write', 'Bash'];
+const NATIVE_GATED = new Set(NATIVE_GATED_TOOLS);
 
 /**
  * The (allowedTools, disallowedTools) pair for `mode`.
@@ -362,12 +367,25 @@ export function approvalArgsFor(toolName, input) {
     return truncated ? { ...args, truncated } : args;
   }
   if (toolName === 'Edit') {
-    const args = { filePath: cut(input?.file_path), oldString: cut(input?.old_string), newString: cut(input?.new_string) };
+    // replaceAll is a boolean flag, not a string field — never run through
+    // cut(). Included unconditionally (not gated behind `truncated`) so the
+    // approval card can always tell a single replacement from a global one
+    // (final whole-branch review, I4).
+    const args = {
+      filePath: cut(input?.file_path), oldString: cut(input?.old_string), newString: cut(input?.new_string),
+      replaceAll: input?.replace_all === true,
+    };
     return truncated ? { ...args, truncated } : args;
   }
   if (toolName === 'Write') {
     const content = typeof input?.content === 'string' ? input.content : '';
-    const args = { filePath: cut(input?.file_path), contentPreview: cut(content), totalChars: content.length };
+    // exists tells the approval card whether this Write would overwrite a
+    // file already on disk vs. create a new one — included unconditionally
+    // (final whole-branch review, I5).
+    const args = {
+      filePath: cut(input?.file_path), contentPreview: cut(content), totalChars: content.length,
+      exists: typeof input?.file_path === 'string' && fs.existsSync(input.file_path),
+    };
     return truncated ? { ...args, truncated } : args;
   }
   return null;
@@ -479,7 +497,6 @@ export async function runAgentV2Turn(
   const canUseTool = async (toolName, input, callOpts) => {
     const registryName = toolName.startsWith('mcp__llmide__') ? toolName.slice('mcp__llmide__'.length) : null;
     const entry = registryName ? registryGet(registryName) : null;
-    const NATIVE_GATED = new Set(['Bash', 'Edit', 'Write']);
     if (toolName !== 'AskUserQuestion' && !(entry && entry.kind === 'act') && !NATIVE_GATED.has(toolName)) {
       return { behavior: 'deny', message: DENY_UNKNOWN_TOOL };
     }
@@ -594,7 +611,14 @@ export async function runAgentV2Turn(
     { userId, mode, model, language, message, skills, agentContext, attachments },
     { readSkill, roots, sessionMemory },
   );
-  allowedWriteRoots = [workspaceRoot, ...(queryOptions.additionalDirectories || [])].filter(Boolean);
+  // Same validated roots the READ path uses (buildReadableRoots / `roots`) —
+  // NOT the raw workspaceRoot string. A raw client-supplied workspaceRoot
+  // (e.g. the user's home directory) has not been through isTooBroadRoot or
+  // the `..`/non-absolute checks the read path applies, so building this set
+  // from workspaceRoot directly would let native Edit/Write treat an
+  // over-broad root as valid containment even though list-files/read-file
+  // would refuse it outright (final whole-branch review, C1).
+  allowedWriteRoots = roots({ userId, workspaceRoot: workspaceRoot || undefined });
 
   // Spec §7 — when the user's limits config yields a usable USD cap for the
   // model, cap this query's spend (the SDK stops with an error_max_budget_usd

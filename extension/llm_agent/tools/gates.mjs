@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { isDeniedPath } from '../runtime/handlers/repo-files.mjs';
 
 //
 // Safety classification for 'act'-kind registry entries (tools/registry.mjs),
@@ -96,6 +97,12 @@ export function writePathGate(filePath, roots) {
   } catch {
     return 'blocked';
   }
+  // A sensitive-path hit is final regardless of containment — the same
+  // denylist the read path applies (repo-files.mjs's isDeniedPath), so an
+  // approved (or always-allowed) Write/Edit can't reach .git/hooks, .env,
+  // private keys, etc. just because they happen to sit inside an allowed
+  // root (final whole-branch review, I1).
+  if (isDeniedPath(resolved)) return 'blocked';
   const inside = (root) => {
     let realRoot;
     try { realRoot = fs.realpathSync(root); } catch { return false; }
