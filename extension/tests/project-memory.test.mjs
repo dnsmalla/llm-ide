@@ -918,3 +918,28 @@ test('a long fact re-captured verbatim is a no-op, not a phantom update', () => 
   assert.equal(meta.added, 0);
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+// Extraction model: chain-derived default (never a hard-coded literal) and
+// overridable per turn, so a non-anthropic chat extracts on its own
+// provider's fast tier instead of forcing an Anthropic call.
+test('extractMemories model: chain-derived default; opts.model overrides per turn', async () => {
+  const { fastModelFor } = await import('../kb/usage.mjs');
+  const { EXTRACT_MODEL } = extract;
+  assert.equal(EXTRACT_MODEL,
+    process.env.LLMIDE_SUMMARIZE_MODEL || process.env.LLMIDE_MODEL || fastModelFor('anthropic'));
+
+  const seen = [];
+  const fake = async (p, opts) => { seen.push(opts.model); return '{"facts":[],"superseded":[]}'; };
+  await extract.extractMemories({
+    userMessage: 'we switched to uv for python deps management going forward',
+    reply: 'Noted, uv it is — updating the setup docs accordingly.',
+    existingFacts: [], runClaude: fake, userId: 'u1', model: 'o3-mini',
+  });
+  assert.deepEqual(seen, ['o3-mini'], 'a per-turn model override must reach runClaude');
+  await extract.extractMemories({
+    userMessage: 'we switched to uv for python deps management going forward',
+    reply: 'Noted, uv it is — updating the setup docs accordingly.',
+    existingFacts: [], runClaude: fake, userId: 'u1',
+  });
+  assert.equal(seen[1], EXTRACT_MODEL, 'without an override the chain-derived default rides');
+});

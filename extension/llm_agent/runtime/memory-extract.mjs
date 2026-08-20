@@ -12,15 +12,17 @@
 //    chatter ("fix this typo", "what does foo do").
 
 import { tryParseJSON } from '../../providers/runtime.mjs';
+import { fastModelFor } from '../../kb/usage.mjs';
 import { factKey, factIndex } from '../../graphkit/memory-writer.mjs';
 
 // Fast tier by default: extraction is a 512-token classification-style call
 // that runs fire-and-forget after EVERY turn — on the CLI path it measured
-// minutes on the server's default model, pure overhead for a task Haiku
-// handles. Env overrides keep working for operators who want a bigger model.
+// minutes on the server's default model, pure overhead for a task the
+// chain's smallest model handles. Chain-derived (kb/usage.mjs), never a
+// hard-coded literal; env overrides keep working.
 export const EXTRACT_MODEL = process.env.LLMIDE_SUMMARIZE_MODEL
   || process.env.LLMIDE_MODEL
-  || 'claude-haiku-4-5-20251001';
+  || fastModelFor('anthropic');
 const MAX_NEW_FACTS = 5;
 const MAX_FACT_CHARS = 280;
 // Keep the inputs bounded so a huge turn can't blow the extractor's budget.
@@ -224,7 +226,9 @@ function buildPrompt({ userMessage, reply, existingFacts }) {
 // Returns { facts, superseded }: facts are NEW facts (sanitised + capped, NOT
 // yet deduped against disk — appendChatMemory does that); superseded are
 // EXISTING facts the model marked outdated, canonicalised via factKey.
-export async function extractMemories({ userMessage, reply, existingFacts, runClaude, userId, meta }) {
+// `model` (optional) lets the caller extract on the TURN's own provider
+// fast tier — a codex/OpenAI chat must not force an Anthropic call.
+export async function extractMemories({ userMessage, reply, existingFacts, runClaude, userId, meta, model }) {
   const empty = { facts: [], superseded: [] };
   if (typeof runClaude !== 'function') return empty;
   // Local pre-filter: skip the paid summarize-tier call on turns that can't
@@ -245,7 +249,7 @@ export async function extractMemories({ userMessage, reply, existingFacts, runCl
     const prompt = buildPrompt({ userMessage, reply, existingFacts });
     const raw = await runClaude(prompt, {
       userId,
-      model: EXTRACT_MODEL,
+      model: model || EXTRACT_MODEL,
       maxTokens: 512,
     });
     // Optional observability sink: rough token cost of THIS extraction call

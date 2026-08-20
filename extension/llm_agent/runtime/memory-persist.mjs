@@ -23,7 +23,9 @@ import { logger } from '../../core/logger.mjs';
 // memory and never writes out. The claim above was therefore false for two
 // years of `grep project_memory kb/server.log`: it returned nothing whether
 // capture had worked, silently skipped, or found nothing durable.
-export async function persistTurnMemory({ agentContext, userId, userMessage, reply, runClaude }) {
+// `model` (optional) rides through to extractMemories — the caller picks the
+// turn's own provider fast tier (see route.mjs's utilityModel).
+export async function persistTurnMemory({ agentContext, userId, userMessage, reply, runClaude, model }) {
   try {
     const indexed = Array.isArray(agentContext?.indexedRepos) ? agentContext.indexedRepos : [];
     const wsRoot = agentContext?.workspaceRoot;
@@ -66,6 +68,7 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
       runClaude,
       userId,
       meta: extractMeta,
+      model,
     });
     const extractTokens = extractMeta.approxTokens ?? 0;
     if (!facts.length && !superseded.length) {

@@ -19,19 +19,25 @@
 // Same-provider only by design — we never auto-switch providers. `custom` has
 // no built-ins; its models come from the user's own config.
 // ---------------------------------------------------------------------------
+// `fast: true` marks the provider's fast/cheap tier for background utility
+// calls (mode classify, memory extraction) — an EXPLICIT flag, not a chain
+// position: priority order and "fastest" don't coincide (openai's tail is
+// o3-mini, a reasoning model whose thinking tokens eat a small
+// max_completion_tokens budget and return empty content for structured
+// prompts).
 export const DEFAULT_CHAINS = {
   anthropic: [
     { model: 'claude-opus-4-8',            label: 'Opus 4.8' },
     { model: 'claude-sonnet-4-6',          label: 'Sonnet 4.6' },
-    { model: 'claude-haiku-4-5-20251001',  label: 'Haiku 4.5' },
+    { model: 'claude-haiku-4-5-20251001',  label: 'Haiku 4.5', fast: true },
   ],
   openai: [
     { model: 'gpt-4o',       label: 'GPT-4o' },
-    { model: 'gpt-4o-mini',  label: 'GPT-4o mini' },
+    { model: 'gpt-4o-mini',  label: 'GPT-4o mini', fast: true },
     { model: 'o3-mini',      label: 'o3-mini' },
   ],
   google: [
-    { model: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+    { model: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', fast: true },
     { model: 'gemini-1.5-pro',   label: 'Gemini 1.5 Pro' },
     { model: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
   ],
@@ -39,6 +45,20 @@ export const DEFAULT_CHAINS = {
 };
 
 export const PROVIDERS = Object.keys(DEFAULT_CHAINS);
+
+// The fast tier for background/utility calls (mode classify, memory
+// extraction): the chain entry flagged `fast: true` (see DEFAULT_CHAINS —
+// the flag exists because chain POSITION means priority, not speed), with
+// the tail as a fallback should a future chain forget the flag. Derived
+// here so no utility caller hard-codes a model literal (a fixed name broke
+// non-anthropic setups and goes stale when snapshots retire). Unknown or
+// empty-chain providers (custom:<uuid>) return null — callers treat that as
+// "no preference".
+export function fastModelFor(provider) {
+  const chain = DEFAULT_CHAINS[provider];
+  if (!Array.isArray(chain) || chain.length === 0) return null;
+  return (chain.find((entry) => entry.fast === true) ?? chain.at(-1)).model;
+}
 const VALID_UNITS = new Set(['runs', 'tokens']);
 const VALID_WINDOWS = new Set(['daily', 'monthly']);
 const VALID_SOURCES = new Set(['api', 'cli', 'auto-task']);

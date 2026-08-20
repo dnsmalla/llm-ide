@@ -63,3 +63,24 @@ test('buildPrompt draws an explicit line between plan (one-shot) and assist_plan
   // complexity alone — that's the actual collision risk with "plan".
   assert.match(prompt, /don't infer it just because the topic sounds complex/);
 });
+
+// The classify model: derived from the provider chain (never a hard-coded
+// literal), and overridable per turn so a non-anthropic chat classifies on
+// its OWN provider's fast tier instead of forcing an Anthropic call.
+test('classify model: chain-derived default; opts.model overrides per turn', async () => {
+  const { fastModelFor } = await import('../kb/usage.mjs');
+  const { MODEL } = await import('../llm_agent/runtime/mode-classify.mjs');
+  assert.equal(MODEL, process.env.LLMIDE_MODE_CLASSIFY_MODEL || process.env.LLMIDE_MODEL || fastModelFor('anthropic'));
+
+  const seen = [];
+  await classifyCodeAssistMode('review this diff', {
+    _runClaude: async (p, opts) => { seen.push(opts.model); return '{"mode":"review"}'; },
+    model: 'o3-mini',
+  });
+  assert.deepEqual(seen, ['o3-mini'], 'a per-turn model override must reach runClaude');
+
+  await classifyCodeAssistMode('review this diff', {
+    _runClaude: async (p, opts) => { seen.push(opts.model); return '{"mode":"review"}'; },
+  });
+  assert.equal(seen[1], MODEL, 'without an override the chain-derived default rides');
+});

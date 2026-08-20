@@ -22,6 +22,7 @@ import { logger } from '../../core/logger.mjs';
 import { buildDispatch } from '../tools/registry.mjs';
 import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider, resolveCustomProviderDispatch, assertSafeBaseUrlResolved } from '../../providers/providers.mjs';
 import { skillsToOpenAITools } from './openai-tools.mjs';
+import { fastModelFor } from '../../kb/usage.mjs';
 import { classifyCodeAssistMode, MODES } from './mode-classify.mjs';
 import { personaForMode, restrictsTools, allowedToolNames, PLAN_LIKE_MODES } from './mode-personas.mjs';
 import { classifyTaskType } from './task-skill-routing.mjs';
@@ -125,8 +126,23 @@ export async function handleCodeAssist({
   // also falls back to "execute" rather than silently resolving to a
   // string restrictsTools() doesn't recognize — that would run the request
   // with full unrestricted access instead of the mode the client asked for.
+  // The turn's effective provider — hoisted so the utility-model derivation
+  // here and the native-dispatch routing below share ONE rule (two copies
+  // drift the moment one is edited).
+  const effProvider = (typeof provider === 'string' && provider) || resolveProvider(model);
+  // Utility model for this turn's background calls (mode classify below,
+  // memory extraction at the bottom): the fast tier of the TURN's OWN
+  // provider chain, so a codex/OpenAI chat never forces an Anthropic call
+  // for its bookkeeping. Chainless known providers (deepseek) fall back to
+  // the turn's own chat model — provider-correct beats fast-tier. Custom
+  // providers stay null (no preference): passing their chat model would
+  // make downstream provider re-derivation route it to the WRONG backend
+  // (e.g. a custom endpoint's gpt-* id re-deriving to real OpenAI).
+  const utilityModel = fastModelFor(effProvider)
+    || (effProvider.startsWith('custom') ? null : model);
+
   const resolvedMode = requestedMode === 'auto'
-    ? (await _classifyMode(message, { userId })).mode
+    ? (await _classifyMode(message, { userId, model: utilityModel })).mode
     : (requestedMode && MODES.has(requestedMode) ? requestedMode : 'execute');
 
   // MCP plugins (Claude CLI path only). Restricted modes get none; execute
@@ -358,7 +374,7 @@ export async function handleCodeAssist({
   // instead of the text-fence loop, which those models don't follow and which
   // loops when results come back as fences.
   const NATIVE_PROVIDERS = new Set(['deepseek', 'openai', 'custom']);
-  const effProvider = (typeof provider === 'string' && provider) || resolveProvider(model);
+  // effProvider is hoisted next to utilityModel above — one derivation rule.
 
   // If the caller explicitly selected a non-Anthropic provider (custom, glm,
   // deepseek, custom:<uuid>, …) but supplied no model, fail loudly with an
@@ -498,6 +514,7 @@ export async function handleCodeAssist({
       userMessage: effectiveMessage,
       reply: out.reply,
       runClaude,
+      model: utilityModel,
     }).catch(() => {});
   }
 

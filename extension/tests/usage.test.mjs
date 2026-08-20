@@ -317,3 +317,22 @@ test('0019 migration creates usage_ledger, model_limits, quota_state', async () 
   ).all().map((r) => r.name).sort();
   assert.deepEqual(tables, ['model_limits', 'quota_state', 'usage_ledger']);
 });
+
+// The fast-tier model for background/utility calls (mode classify, memory
+// extraction) is DERIVED from the provider's built-in chain — never a
+// hard-coded model literal in llm_agent (a fixed name broke non-anthropic
+// setups and goes stale when snapshots retire). The pick is the entry
+// FLAGGED `fast: true`, not a chain position: priority order and "fastest"
+// don't coincide (openai's tail is o3-mini, a reasoning model that returns
+// empty content on small structured-output budgets).
+test('fastModelFor: the flagged fast entry per provider; null when the chain is empty/unknown', async () => {
+  const { fastModelFor } = await import('../kb/usage.mjs');
+  // Asserted by id on purpose — a chain reorder or flag move must FAIL here
+  // and be a conscious choice, not a silent re-pick.
+  assert.equal(fastModelFor('anthropic'), 'claude-haiku-4-5-20251001');
+  assert.equal(fastModelFor('openai'), 'gpt-4o-mini', 'NOT o3-mini: reasoning tokens eat small budgets');
+  assert.equal(fastModelFor('google'), 'gemini-2.0-flash');
+  assert.equal(fastModelFor('custom'), null);
+  assert.equal(fastModelFor('custom:abc-123'), null);
+  assert.equal(fastModelFor(undefined), null);
+});

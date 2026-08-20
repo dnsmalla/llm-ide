@@ -7,6 +7,7 @@
 // behavior they didn't ask for.
 
 import { runClaude as defaultRunClaude, tryParseJSON } from '../../providers/runtime.mjs';
+import { fastModelFor } from '../../kb/usage.mjs';
 import { logger } from '../../core/logger.mjs';
 
 const log = logger.child({ component: 'mode-classify' });
@@ -20,12 +21,13 @@ const log = logger.child({ component: 'mode-classify' });
 export const MODES = new Set(['plan', 'assist_plan', 'review', 'document', 'execute']);
 
 // Fast tier by default: a 5-way mode classification in ≤128 tokens is well
-// within Haiku, and this call runs SERIALLY before every 'auto' turn (and
-// before the v2 per-chat lock) — on the CLI path each spawn of a big default
-// model added seconds of pure pre-turn latency. Env overrides still win.
+// within the chain's smallest model, and this call runs SERIALLY before
+// every 'auto' turn (and before the v2 per-chat lock) — on the CLI path each
+// spawn of a big default model added seconds of pure pre-turn latency.
+// Chain-derived (kb/usage.mjs), never a hard-coded literal; env wins.
 export const MODEL = process.env.LLMIDE_MODE_CLASSIFY_MODEL
            || process.env.LLMIDE_MODEL
-           || 'claude-haiku-4-5-20251001';
+           || fastModelFor('anthropic');
 
 // Exported so a test can assert on the disambiguating language directly —
 // mocking `_runClaude` can only verify the JSON-plumbing round-trip, not
@@ -49,9 +51,12 @@ ${message}
 }
 
 export async function classifyCodeAssistMode(message, opts = {}) {
-  const { _runClaude = defaultRunClaude, userId } = opts;
+  // `model` lets the caller classify on the TURN's own provider fast tier
+  // (fastModelFor(provider)) — a codex/OpenAI chat must not force an
+  // Anthropic call for its classification.
+  const { _runClaude = defaultRunClaude, userId, model } = opts;
   try {
-    const raw = await _runClaude(buildPrompt(message), { userId, model: MODEL, maxTokens: 128 });
+    const raw = await _runClaude(buildPrompt(message), { userId, model: model || MODEL, maxTokens: 128 });
     const parsed = tryParseJSON(raw);
     const mode = parsed && MODES.has(parsed.mode) ? parsed.mode : 'execute';
     return { mode };
