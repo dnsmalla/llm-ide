@@ -149,30 +149,43 @@ const V2_ALLOWED_TOOLS = [
 // a restricted mode has to subtract from (see v2ToolPolicyForMode).
 const V2_ALL_MCP_TOOLS = registryEntries().map((e) => `${MCP_PREFIX}${e.name}`);
 
+const RUN_BASH_MCP = `${MCP_PREFIX}run-bash`;
+// Native write/shell tools a restricted mode must remove from model context
+// entirely (canUseTool re-checks as the belt; this is the braces).
+const NATIVE_GATED_TOOLS = ['Edit', 'Write', 'Bash'];
+
 /**
  * The (allowedTools, disallowedTools) pair for `mode`.
  *
- * Unrestricted modes get the full auto-allow list and disallow nothing.
+ * Every mode disallows mcp__llmide__run-bash — native Bash (canUseTool-gated,
+ * Task 3) replaces it on v2, and offering both would double-gate one shell.
+ *
+ * Unrestricted modes get the full auto-allow list (minus run-bash).
  *
  * A restricted mode (plan/assist_plan/review/document — `restrictsTools`)
  * gets its llmide tools narrowed to `allowedToolNames(mode)`, exactly the set
  * the LEGACY engine's dispatch is filtered to, so both engines expose the same
- * roster for the same mode. `disallowedTools` carries the actual enforcement:
- * per sdk.d.ts it removes a tool "from the model's context" so it "cannot be
- * used, even if it would otherwise be allowed" — dropping a name from
+ * roster for the same mode. Additionally, it disallows the native Edit/Write/Bash
+ * tools from the model's context entirely. `disallowedTools` carries the actual
+ * enforcement: per sdk.d.ts it removes a tool "from the model's context" so it
+ * "cannot be used, even if it would otherwise be allowed" — dropping a name from
  * `allowedTools` alone would only demote it to a `canUseTool` consult, which
  * would happily allow an 'auto'-tier run-bash in Plan mode.
  */
 export function v2ToolPolicyForMode(mode) {
   if (!restrictsTools(mode)) {
-    return { allowedTools: [...V2_ALLOWED_TOOLS], disallowedTools: [] };
+    // run-bash is v2-retired in every mode: native Bash (canUseTool-gated)
+    // replaces it, and offering both would be two shells with one gate.
+    return { allowedTools: [...V2_ALLOWED_TOOLS], disallowedTools: [RUN_BASH_MCP] };
   }
   const permitted = allowedToolNames(mode);
   const keep = (n) => !n.startsWith(MCP_PREFIX) || permitted.has(n.slice(MCP_PREFIX.length));
-  return {
-    allowedTools: V2_ALLOWED_TOOLS.filter(keep),
-    disallowedTools: V2_ALL_MCP_TOOLS.filter((n) => !keep(n)),
-  };
+  const disallowed = new Set([
+    ...V2_ALL_MCP_TOOLS.filter((n) => !keep(n)),
+    RUN_BASH_MCP,
+    ...NATIVE_GATED_TOOLS,
+  ]);
+  return { allowedTools: V2_ALLOWED_TOOLS.filter(keep), disallowedTools: [...disallowed] };
 }
 
 const MAX_PROMPT_CHARS = 20_000;

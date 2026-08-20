@@ -34,7 +34,7 @@ const agentSdkRoot = path.join(path.dirname(tmpDb), 'agent-sdk');
 try { fs.rmSync(agentSdkRoot, { recursive: true, force: true }); } catch { /* ok */ }
 
 const {
-  buildEngineOptions, resolveAnthropicKey, runAgentV2Turn, agentSdkHomeFor, resolveMaxBudgetUsd, approvalArgsFor,
+  buildEngineOptions, resolveAnthropicKey, runAgentV2Turn, agentSdkHomeFor, resolveMaxBudgetUsd, approvalArgsFor, v2ToolPolicyForMode,
 } = await import('../llm_agent/sdk/engine.mjs');
 const { answerDecision, abortDecisionsForSession } = await import('../llm_agent/sdk/decisions.mjs');
 const { registerUser } = await import('../server/users.mjs');
@@ -79,14 +79,28 @@ test('allowlist is read-only + llmide; skills inject via append; cwd + dirs from
   for (const act of ['mcp__llmide__run-bash', 'mcp__llmide__task-create', 'mcp__llmide__task-update']) {
     assert.ok(!queryOptions.allowedTools.includes(act), `${act} must NOT be pre-approved — it has to reach canUseTool`);
   }
-  // Nothing is hard-disallowed in an unrestricted mode.
-  assert.ok(!('disallowedTools' in queryOptions));
+  // run-bash is hard-disallowed in every mode: native Bash replaces it on v2.
+  assert.deepEqual(queryOptions.disallowedTools, ['mcp__llmide__run-bash']);
   assert.equal(queryOptions.cwd, '/tmp/w');
   assert.deepEqual(queryOptions.additionalDirectories, ['/tmp/r']);
   assert.match(queryOptions.systemPrompt.append, /One/);
   assert.match(queryOptions.systemPrompt.append, /Japanese/);
   assert.deepEqual(queryOptions.settingSources, []);
   assert.equal(queryOptions.systemPrompt.type, 'preset');
+});
+
+// --- v2ToolPolicyForMode: run-bash disallow + restricted modes ----------------
+
+test('v2ToolPolicyForMode: run-bash is disallowed on v2 in every mode (native Bash replaces it)', () => {
+  assert.ok(v2ToolPolicyForMode('execute').disallowedTools.includes('mcp__llmide__run-bash'));
+  assert.ok(v2ToolPolicyForMode('plan').disallowedTools.includes('mcp__llmide__run-bash'));
+});
+
+test('v2ToolPolicyForMode: restricted modes disallow the native write/shell tools', () => {
+  const plan = v2ToolPolicyForMode('plan');
+  for (const t of ['Edit', 'Write', 'Bash']) assert.ok(plan.disallowedTools.includes(t), t);
+  const execute = v2ToolPolicyForMode('execute');
+  for (const t of ['Edit', 'Write', 'Bash']) assert.ok(!execute.disallowedTools.includes(t), t);
 });
 
 // --- Composition details the brief's tests don't pin -------------------------
