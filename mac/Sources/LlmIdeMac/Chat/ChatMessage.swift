@@ -189,6 +189,10 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         var skills: [String]?
         var failedError: String?
         var retryPayload: RetryPayload?
+        /// v2 plan messages: this message's plan was saved (retires the
+        /// "Save Plan" affordance). Optional so pre-existing persisted
+        /// sessions decode unchanged.
+        var planSaved: Bool?
     }
 
     struct RetryPayload: Codable, Equatable, Sendable {

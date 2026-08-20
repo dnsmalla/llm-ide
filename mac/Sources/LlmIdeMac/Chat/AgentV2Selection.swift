@@ -76,11 +76,15 @@ enum AgentV2Selection {
     ]
 
     /// Visibility rule for the "Save Plan" action on a v2 assistant message:
-    /// plan-like mode, v2 selected, and no pending tool (a pending
+    /// plan-like mode, v2 selected, no pending tool (a pending
     /// `save-plan`/`update-file` card means the legacy proposal flow owns
-    /// the turn, and the action would be a second way to do the same save).
-    static func showsSavePlanAction(mode: String?, v2Selected: Bool, hasPendingTool: Bool) -> Bool {
-        guard v2Selected, !hasPendingTool, let mode else { return false }
+    /// the turn, and the action would be a second way to do the same save),
+    /// and not already saved — the saved-plan card is a .toolResult message
+    /// that doesn't shift lastAssistantTurnId, so without the flag the
+    /// button stayed live and re-saved the same plan on every click.
+    static func showsSavePlanAction(mode: String?, v2Selected: Bool, hasPendingTool: Bool,
+                                    planSaved: Bool = false) -> Bool {
+        guard v2Selected, !hasPendingTool, !planSaved, let mode else { return false }
         return planLikeModes.contains(mode)
     }
 }

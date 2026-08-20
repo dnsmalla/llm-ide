@@ -573,6 +573,26 @@ struct AgentV2SelectionTests {
         #expect(!AgentV2Selection.showsSavePlanAction(mode: "plan", v2Selected: true, hasPendingTool: true))
     }
 
+    // After a successful save the affordance must retire: the saved-plan
+    // card (a .toolResult message) doesn't shift lastAssistantTurnId, so
+    // without this flag the button stayed live and re-saved on every click.
+    @Test("Save Plan action: hidden once this message's plan was saved")
+    func savePlanActionHiddenAfterSave() {
+        #expect(!AgentV2Selection.showsSavePlanAction(
+            mode: "plan", v2Selected: true, hasPendingTool: false, planSaved: true))
+        #expect(AgentV2Selection.showsSavePlanAction(
+            mode: "plan", v2Selected: true, hasPendingTool: false, planSaved: false))
+    }
+
+    // The Execute action must never fire "Execute the attached plan" with
+    // nothing attached: file attached OR the card's own plan text, else no send.
+    @Test("Execute plan: fires only when the plan file or its text is attachable")
+    func executePlanFireRule() {
+        #expect(CodeAssistantPanel.executePlanCanFire(attached: true, hasPlanContent: false))
+        #expect(CodeAssistantPanel.executePlanCanFire(attached: false, hasPlanContent: true))
+        #expect(!CodeAssistantPanel.executePlanCanFire(attached: false, hasPlanContent: false))
+    }
+
     @Test("Plan title derivation: first non-empty heading line, hashes stripped, capped")
     func planTitleDerivation() {
         #expect(CodeAssistantPanel.planTitle(from: "# Add dark mode\n\nSteps…") == "Add dark mode")

@@ -212,7 +212,8 @@ struct ChatMessageList: View {
                                AgentV2Selection.showsSavePlanAction(
                                    mode: turn.metadata?.mode,
                                    v2Selected: engine.usesAgentV2Engine,
-                                   hasPendingTool: pendingTool != nil) {
+                                   hasPendingTool: pendingTool != nil,
+                                   planSaved: turn.metadata?.planSaved == true) {
                                 Button {
                                     onSavePlanFromMessage(turn)
                                 } label: {
