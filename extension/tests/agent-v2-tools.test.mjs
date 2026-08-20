@@ -21,6 +21,13 @@ process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// runAgentV2Turn now existence-checks workspaceRoot (a stale root must fail
+// clearly, not as an SDK spawn misdiagnosis) — materialize a fixture root.
+// Kept under the tests dir, NOT /tmp: /tmp is unwritable under sandboxed
+// runs, and a module-load mkdir failure would wipe out this whole file.
+const WS = path.join(__dirname, '_agent-v2-ws-fixture');
+fs.mkdirSync(WS, { recursive: true });
 const tmpDb = path.join(__dirname, '_agent-v2-tools-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
@@ -82,7 +89,7 @@ test('project_memory tool: registered, alwaysLoad, wires (agentContext, userId, 
 
   const { buildLlmIdeServer } = await import('../llm_agent/sdk/tools.mjs');
   const calls = [];
-  const agentContext = { workspaceRoot: '/tmp/w', indexedRepos: [] };
+  const agentContext = { workspaceRoot: WS, indexedRepos: [] };
   const renderMemory = (ctx, userId, stats, focus) => {
     calls.push({ ctx, userId, focus });
     return '# Repository memory (Graphify)\n\n## repo — memory\nfacts here';

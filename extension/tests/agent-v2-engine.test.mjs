@@ -25,6 +25,13 @@ process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// runAgentV2Turn now existence-checks workspaceRoot (a stale root must fail
+// clearly, not as an SDK spawn misdiagnosis) — materialize a fixture root.
+// Kept under the tests dir, NOT /tmp: /tmp is unwritable under sandboxed
+// runs, and a module-load mkdir failure would wipe out this whole file.
+const WS = path.join(__dirname, '_agent-v2-ws-fixture');
+fs.mkdirSync(WS, { recursive: true });
 const tmpDb = path.join(__dirname, '_agent-v2-engine-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
@@ -47,14 +54,14 @@ const { hasAlwaysAllow, setAlwaysAllow } = await import('../kb/tool-approvals.mj
 
 test('mode mapping: plan-like modes become SDK plan mode with persona instructions', () => {
   for (const mode of ['plan', 'assist_plan']) {
-    const { queryOptions } = buildEngineOptions({ userId: 'u', mode, agentContext: { workspaceRoot: '/tmp/w' } },
-      { readSkill: () => null, roots: () => ['/tmp/w'] });
+    const { queryOptions } = buildEngineOptions({ userId: 'u', mode, agentContext: { workspaceRoot: WS } },
+      { readSkill: () => null, roots: () => [WS] });
     assert.equal(queryOptions.permissionMode, 'plan');
     assert.equal(typeof queryOptions.planModeInstructions, 'string');
   }
 });
 test('mode mapping: execute/auto default; review/document persona-only', () => {
-  const base = { readSkill: () => null, roots: () => ['/tmp/w'] };
+  const base = { readSkill: () => null, roots: () => [WS] };
   assert.equal(buildEngineOptions({ userId: 'u', mode: 'auto', agentContext: {} }, base).queryOptions.permissionMode, 'default');
   const rev = buildEngineOptions({ userId: 'u', mode: 'review', agentContext: {} }, base);
   assert.equal(rev.queryOptions.permissionMode, 'default');
@@ -63,8 +70,8 @@ test('mode mapping: execute/auto default; review/document persona-only', () => {
 test('allowlist is read-only + llmide; skills inject via append; cwd + dirs from workspace', () => {
   const { queryOptions } = buildEngineOptions({
     userId: 'u', mode: 'execute', language: 'Japanese',
-    skills: ['family/one'], agentContext: { workspaceRoot: '/tmp/w', indexedRepos: ['/tmp/r'] },
-  }, { readSkill: () => ({ name: 'one', content: '# One\ninstructions' }), roots: () => ['/tmp/w', '/tmp/r'] });
+    skills: ['family/one'], agentContext: { workspaceRoot: WS, indexedRepos: ['/tmp/r'] },
+  }, { readSkill: () => ({ name: 'one', content: '# One\ninstructions' }), roots: () => [WS, '/tmp/r'] });
   // Built-ins + every kind:'read' registry tool, in registry order. The three
   // kind:'act' tools (run-bash/task-create/task-update) are DELIBERATELY
   // absent: `allowedTools` means "auto-allowed without prompting", so listing
@@ -81,7 +88,7 @@ test('allowlist is read-only + llmide; skills inject via append; cwd + dirs from
   }
   // run-bash is hard-disallowed in every mode: native Bash replaces it on v2.
   assert.deepEqual(queryOptions.disallowedTools, ['mcp__llmide__run-bash']);
-  assert.equal(queryOptions.cwd, '/tmp/w');
+  assert.equal(queryOptions.cwd, WS);
   assert.deepEqual(queryOptions.additionalDirectories, ['/tmp/r']);
   assert.match(queryOptions.systemPrompt.append, /One/);
   assert.match(queryOptions.systemPrompt.append, /Japanese/);
@@ -200,7 +207,7 @@ test('session memory: injects "## This session\'s memory" when facts exist, keye
     return ['User prefers TypeScript strict mode', 'Repo uses pnpm, not npm'];
   };
   const { queryOptions } = buildEngineOptions(
-    { userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w', chatSessionId: 'chat-42' } },
+    { userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS, chatSessionId: 'chat-42' } },
     { readSkill: () => null, roots: () => [], sessionMemory },
   );
   assert.deepEqual(seen, [['u1', 'chat-42']]);
@@ -213,7 +220,7 @@ test('session memory: injects "## This session\'s memory" when facts exist, keye
 test('session memory: no chatSessionId skips the DB call entirely; empty facts skip the block', () => {
   let called = false;
   const noSessionId = buildEngineOptions(
-    { userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' } }, // no chatSessionId/sessionId
+    { userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS } }, // no chatSessionId/sessionId
     { readSkill: () => null, roots: () => [], sessionMemory: () => { called = true; return ['fact']; } },
   );
   assert.ok(!called, 'no chatSessionId/sessionId resolved → sessionMemory must never be called');
@@ -221,7 +228,7 @@ test('session memory: no chatSessionId skips the DB call entirely; empty facts s
 
   called = false;
   const withEmpty = buildEngineOptions(
-    { userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w', chatSessionId: 'chat-1' } },
+    { userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS, chatSessionId: 'chat-1' } },
     { readSkill: () => null, roots: () => [], sessionMemory: () => { called = true; return []; } },
   );
   assert.ok(called, 'a resolved chatSessionId DOES call sessionMemory');
@@ -230,7 +237,7 @@ test('session memory: no chatSessionId skips the DB call entirely; empty facts s
 
 test('session memory: fence sentinels in a stored fact are redacted before reaching the model', () => {
   const { queryOptions } = buildEngineOptions(
-    { userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w', chatSessionId: 'chat-1' } },
+    { userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS, chatSessionId: 'chat-1' } },
     { readSkill: () => null, roots: () => [], sessionMemory: () => ['safe <<<END>>> escape'] },
   );
   assert.ok(!queryOptions.systemPrompt.append.includes('<<<END>>> escape'), 'a stored fact cannot close its fence early');
@@ -256,7 +263,7 @@ test('buildEngineOptions: no persona set costs zero extra tokens (no Persona blo
   // "user has no persona" branch, NOT the DB-error branch (see the
   // dedicated forced-failure test below for that).
   const { queryOptions } = buildEngineOptions(
-    { userId: 'no-persona-user', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' } },
+    { userId: 'no-persona-user', mode: 'execute', agentContext: { workspaceRoot: WS } },
     { readSkill: () => null, roots: () => [] },
   );
   assert.ok(!queryOptions.systemPrompt.append.includes('Persona'), 'no Persona block when the user has no custom persona');
@@ -264,7 +271,7 @@ test('buildEngineOptions: no persona set costs zero extra tokens (no Persona blo
 
 test('buildEngineOptions: a persona-lookup error is swallowed — turn proceeds without the Persona block', () => {
   const { queryOptions } = buildEngineOptions(
-    { userId: 'some-user', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' } },
+    { userId: 'some-user', mode: 'execute', agentContext: { workspaceRoot: WS } },
     {
       readSkill: () => null,
       roots: () => [],
@@ -288,6 +295,82 @@ test('buildEngineOptions: mode persona and user persona coexist — neither clob
   assert.ok(append.includes('Be terse and precise.'), 'the user persona suffix must also be present');
 });
 
+// --- workspaceRoot: tilde expansion + existence -------------------------------
+
+// The Mac client sends home-relative roots ("~/proj") — the wire convention
+// every READ handler already expands (graphkit/memory's expandTilde). The
+// SDK's `cwd` must expand too: Node spawn does not expand "~", so a literal
+// tilde cwd is ENOENT and the SDK misreports it as a native-binary/libc
+// launch failure (the exact banner the Mac showed).
+test('buildEngineOptions: a home-relative workspaceRoot ("~/…") expands to an absolute cwd', () => {
+  const rel = `~/llmide-v2-cwd-test`;
+  const abs = path.join(os.homedir(), 'llmide-v2-cwd-test');
+  const { queryOptions } = buildEngineOptions({
+    userId: null, mode: 'execute', message: 'hi',
+    agentContext: { workspaceRoot: rel },
+  });
+  assert.equal(queryOptions.cwd, abs, 'cwd must be the expanded absolute path, never a literal "~"');
+});
+
+test('runAgentV2Turn: a nonexistent workspaceRoot fails with a clear error, not an SDK spawn misdiagnosis', async () => {
+  await assert.rejects(
+    runAgentV2Turn({
+      message: 'm', userId: 'u1', mode: 'execute',
+      agentContext: { workspaceRoot: '/nonexistent/llmide-v2-root' },
+      allowAmbientAuth: true, onEvent: () => {}, queryFactory: makeFakeQuery({ messages: [] }),
+    }, turnInjectable),
+    (e) => /workspaceRoot does not exist/.test(e.message) && e.message.includes('/nonexistent/llmide-v2-root'),
+  );
+});
+
+// The SDK grants read access to cwd, so cwd must clear the same breadth bar
+// buildReadableRoots applies ("~" would grant the whole home dir — repo-files
+// refuses it as a root, and the engine must refuse it as a cwd).
+test('runAgentV2Turn: a too-broad workspaceRoot ("~") is refused, not granted as cwd', async () => {
+  await assert.rejects(
+    runAgentV2Turn({
+      message: 'm', userId: 'u1', mode: 'execute',
+      agentContext: { workspaceRoot: '~' },
+      allowAmbientAuth: true, onEvent: () => {}, queryFactory: makeFakeQuery({ messages: [] }),
+    }, turnInjectable),
+    (e) => /workspaceRoot is too broad/.test(e.message),
+  );
+});
+
+// isTooBroadRoot compares normalized paths — a literal ".." spelling of the
+// home dir must not slip past it (read roots already reject "..";
+// repo-files.mjs:97), so the engine resolves before checking.
+test('runAgentV2Turn: a ".."-spelled too-broad workspaceRoot is still refused', async () => {
+  const home = os.homedir();
+  const dotted = path.join(home, '..', path.basename(home)); // resolves back to home
+  await assert.rejects(
+    runAgentV2Turn({
+      message: 'm', userId: 'u1', mode: 'execute',
+      agentContext: { workspaceRoot: `${home}/../${path.basename(home)}` },
+      allowAmbientAuth: true, onEvent: () => {}, queryFactory: makeFakeQuery({ messages: [] }),
+    }, turnInjectable),
+    (e) => /workspaceRoot is too broad/.test(e.message),
+    `literal "${dotted}" must resolve to the home dir and be refused`,
+  );
+});
+
+test('runAgentV2Turn: a file-valued workspaceRoot is refused (spawn needs a directory cwd)', async () => {
+  const filePath = path.join(__dirname, '_agent-v2-ws-file-fixture');
+  fs.writeFileSync(filePath, 'not a dir\n');
+  try {
+    await assert.rejects(
+      runAgentV2Turn({
+        message: 'm', userId: 'u1', mode: 'execute',
+        agentContext: { workspaceRoot: filePath },
+        allowAmbientAuth: true, onEvent: () => {}, queryFactory: makeFakeQuery({ messages: [] }),
+      }, turnInjectable),
+      (e) => /workspaceRoot is not a directory/.test(e.message) && e.message.includes(filePath),
+    );
+  } finally {
+    fs.rmSync(filePath, { force: true });
+  }
+});
+
 // --- resolveAnthropicKey move ------------------------------------------------
 
 test('resolveAnthropicKey: moved to engine.mjs, spike re-export is the same function', async () => {
@@ -305,10 +388,13 @@ test('resolveAnthropicKey: moved to engine.mjs, spike re-export is the same func
 
 // --- runAgentV2Turn: the turn runner + approval round-trip --------------------
 
-// Per-user engine homes (spec §6): every v2 turn composes CLAUDE_CONFIG_DIR
-// from agentSdkHomeFor — the DB directory + /agent-sdk/<userId>/ — so one
-// tenant's SDK transcripts/credentials can never cross to another, keyed or
-// ambient. (The same derivation backs the route's transcript cleanup.)
+// Per-user engine homes (spec §6, amended): every KEYED v2 turn composes
+// CLAUDE_CONFIG_DIR from agentSdkHomeFor — the DB directory +
+// /agent-sdk/<userId>/ — so one keyed tenant's SDK transcripts/credentials
+// can never cross to another. Ambient turns deliberately skip the override
+// (see the dedicated auth test below): the operator's login lives under the
+// default config dir. (The same derivation backs the route's transcript
+// cleanup, which scans both roots.)
 test('agentSdkHomeFor: per-user dir under the server data dir; rejects unsafe ids', () => {
   assert.equal(agentSdkHomeFor('user-a'), path.join(path.dirname(tmpDb), 'agent-sdk', 'user-a'));
   for (const bad of [null, undefined, '', 42, '../escape', 'a/b', 'a..b']) {
@@ -316,7 +402,7 @@ test('agentSdkHomeFor: per-user dir under the server data dir; rejects unsafe id
   }
 });
 
-test('per-user CLAUDE_CONFIG_DIR: composed for every turn, keyed or ambient',
+test('per-user CLAUDE_CONFIG_DIR: composed for every KEYED turn',
   withAnthropicKey('sk-ant-v2-test', async () => {
     // A capturing factory (makeFakeQuery's shape, without the script) so the
     // composed options survive the turn for inspection.
@@ -327,7 +413,7 @@ test('per-user CLAUDE_CONFIG_DIR: composed for every turn, keyed or ambient',
       return (async function* () {})();
     };
     const turn = (userId) => runAgentV2Turn({
-      message: 'm', userId, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      message: 'm', userId, mode: 'execute', agentContext: { workspaceRoot: WS },
       onEvent: () => {}, queryFactory: capturingQuery,
     }, turnInjectable);
 
@@ -344,6 +430,20 @@ test('per-user CLAUDE_CONFIG_DIR: composed for every turn, keyed or ambient',
     // The home dir itself was created (isolation must not depend on the SDK
     // quietly making it later).
     assert.ok(fs.existsSync(agentSdkHomeFor('user-a')));
+
+    // The discriminator is "a key resolved", NOT "ambient was disallowed":
+    // the production route always passes allowAmbientAuth: true, so a keyed
+    // turn under that flag must STILL be isolated. Pins against a refactor
+    // to `allowAmbientAuth ? null : sdkHome`, which would silently strip
+    // isolation from every keyed turn the route runs.
+    const keyedAmbientOk = {};
+    await runAgentV2Turn({
+      message: 'm', userId: 'user-a', mode: 'execute', agentContext: { workspaceRoot: WS },
+      allowAmbientAuth: true, onEvent: () => {},
+      queryFactory: (p, o) => { keyedAmbientOk.options = o; return (async function* () {})(); },
+    }, turnInjectable);
+    assert.equal(keyedAmbientOk.options.env.CLAUDE_CONFIG_DIR, agentSdkHomeFor('user-a'),
+      'a keyed turn keeps its per-user home even when ambient auth is allowed');
   }));
 
 // The fake SDK query: captures the (prompt, options) the runner composed so
@@ -394,7 +494,7 @@ test('AskUserQuestion round-trip: request event → answer → allow with update
     ] };
     const events = [];
     const { result, usageTotals } = await runAgentV2Turn({
-      message: 'hi', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      message: 'hi', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
       resumeSdkSessionId: 'sdk-9', onEvent: (e) => events.push(e),
       queryFactory: makeFakeQuery(script),
     }, turnInjectable);
@@ -425,7 +525,7 @@ test('AskUserQuestion round-trip: request event → answer → allow with update
 test('an unknown native tool is denied with the not-enabled message', withAnthropicKey('sk-ant-v2-test', async () => {
   const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
   await runAgentV2Turn({
-    message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+    message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
     onEvent: () => {}, queryFactory: makeFakeQuery(script),
   }, turnInjectable);
   const d = await script.options.canUseTool('NotebookEdit', { notebook_path: '/tmp/x.ipynb' });
@@ -438,7 +538,7 @@ test('native Bash: blocked command is denied even with always-allow set', withAn
   setAlwaysAllow(user.id, 'Bash');
   const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
   await runAgentV2Turn({
-    message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+    message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: WS },
     onEvent: () => {}, queryFactory: makeFakeQuery(script),
   }, turnInjectable);
   const d = await script.options.canUseTool('Bash', { command: 'sudo rm -rf /' });
@@ -451,7 +551,7 @@ test('native Bash: auto-safe command allows with no approval parked', withAnthro
   const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
   const events = [];
   await runAgentV2Turn({
-    message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+    message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: WS },
     onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
   }, turnInjectable);
   const d = await script.options.canUseTool('Bash', { command: 'git status' });
@@ -464,7 +564,7 @@ test('native Bash: prompt-tier command parks a ToolApproval carrying args.comman
   const script = { messages: [{ type: 'init', session_id: 'sdk-nb1' }, { type: 'result', subtype: 'success', session_id: 'sdk-nb1' }] };
   const events = [];
   await runAgentV2Turn({
-    message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+    message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: WS },
     resumeSdkSessionId: 'sdk-nb1', onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
   }, turnInjectable);
   const decision = script.options.canUseTool('Bash', { command: 'npm run build' });
@@ -521,24 +621,42 @@ test('native Write: an out-of-workspace target is denied, never parked', withAnt
   assert.ok(!events.some((e) => e.type === 'approval_request'));
 }));
 
-test('native Write: an over-broad workspace root (e.g. the home directory) is denied, matching the read path\'s own refusal',
+test('native Write: an over-broad workspace root (e.g. the home directory) refuses the whole turn up front',
   withAnthropicKey('sk-ant-v2-test', async () => {
-    // Deliberately do NOT override `roots` — this must exercise the REAL
-    // buildReadableRoots (same as the read path's list-files/read-file) so
-    // isTooBroadRoot's rejection of $HOME is actually exercised, proving the
-    // containment gate no longer trusts the raw client-supplied
-    // workspaceRoot string (final whole-branch review, C1).
+    // Stronger than the original containment contract (final whole-branch
+    // review, C1): the raw client-supplied workspaceRoot no longer even
+    // reaches the SDK — the turn is refused before spawn with the same
+    // isTooBroadRoot bar the read path applies, so an over-broad root can
+    // never be granted as cwd, let alone reach the Write gate.
     const homeInjectable = { readSkill: () => null, sessionMemory: () => [], persistMemory: async () => null };
     const user = registerUser(getDb(), { email: 'v2native-homeroot@example.com', password: 'CorrectHorseBattery', displayName: 't' });
     const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
-    const events = [];
+    await assert.rejects(
+      runAgentV2Turn({
+        message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: os.homedir() },
+        onEvent: () => {}, queryFactory: makeFakeQuery(script),
+      }, homeInjectable),
+      (e) => /workspaceRoot is too broad/.test(e.message),
+    );
+    assert.equal(script.options, undefined, 'the SDK must never have been invoked for an over-broad root');
+  }));
+
+// Pins the C1 guard now that over-broad roots are refused upstream: the
+// Write containment set must come from roots() (buildReadableRoots), never
+// from the raw workspaceRoot — a revert to `[workspaceRoot]` would allow
+// this in-workspace write even though roots() granted a different dir.
+test('native Write: containment follows roots(), not the raw workspaceRoot',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const user = registerUser(getDb(), { email: 'v2native-rootsrc@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'v2rootsrc-'));
+    const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), 'v2other-'));
+    const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
     await runAgentV2Turn({
-      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: os.homedir() },
-      onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
-    }, homeInjectable);
-    const d = await script.options.canUseTool('Write', { file_path: path.join(os.homedir(), '.zshrc'), content: 'x' });
-    assert.equal(d.behavior, 'deny');
-    assert.ok(!events.some((e) => e.type === 'approval_request'), 'an over-broad root must never even reach a parked approval');
+      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: workspace },
+      onEvent: () => {}, queryFactory: makeFakeQuery(script),
+    }, { ...turnInjectable, roots: () => [otherDir] });
+    const d = await script.options.canUseTool('Write', { file_path: path.join(workspace, 'a.txt'), content: 'x' });
+    assert.equal(d.behavior, 'deny', 'an in-workspace target must still be denied when roots() does not grant the workspace');
   }));
 
 test('native Write: a blocked (out-of-workspace) target is denied even with always-allow set',
@@ -560,7 +678,7 @@ test('native Write: a blocked (out-of-workspace) target is denied even with alwa
 test('native tools are denied in a restricted mode', withAnthropicKey('sk-ant-v2-test', async () => {
   const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
   await runAgentV2Turn({
-    message: 'm', userId: 'u1', mode: 'plan', agentContext: { workspaceRoot: '/tmp/w' },
+    message: 'm', userId: 'u1', mode: 'plan', agentContext: { workspaceRoot: WS },
     onEvent: () => {}, queryFactory: makeFakeQuery(script),
   }, turnInjectable);
   const d = await script.options.canUseTool('Edit', { file_path: '/tmp/w/a.txt', old_string: 'a', new_string: 'b' });
@@ -615,7 +733,7 @@ test('act tool: run-bash with a blocked command is denied even with always-allow
     setAlwaysAllow(user.id, 'run-bash'); // must NOT override a blocked classification
     const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
     await runAgentV2Turn({
-      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: WS },
       onEvent: () => {}, queryFactory: makeFakeQuery(script),
     }, turnInjectable);
     const d = await script.options.canUseTool('mcp__llmide__run-bash', { command: 'sudo rm -rf /' });
@@ -629,7 +747,7 @@ test('act tool: run-bash with an auto-safe command allows immediately, no approv
     const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
     const events = [];
     await runAgentV2Turn({
-      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: WS },
       onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
     }, turnInjectable);
     const d = await script.options.canUseTool('mcp__llmide__run-bash', { command: 'git status' });
@@ -643,7 +761,7 @@ test('act tool: task-create/task-update are always-gated auto (autoGate) — no 
     const user = registerUser(getDb(), { email: 'v2eng-taskauto@example.com', password: 'CorrectHorseBattery', displayName: 't' });
     const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
     await runAgentV2Turn({
-      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: WS },
       onEvent: () => {}, queryFactory: makeFakeQuery(script),
     }, turnInjectable);
     const dCreate = await script.options.canUseTool('mcp__llmide__task-create', { title: 'do the thing' });
@@ -661,7 +779,7 @@ test('act tool: run-bash with an unrecognized command parks a ToolApproval and g
     ] };
     const events = [];
     await runAgentV2Turn({
-      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: WS },
       resumeSdkSessionId: 'sdk-rb1', onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
     }, turnInjectable);
     const decision = script.options.canUseTool('mcp__llmide__run-bash', { command: 'some-unknown-cli --deploy' });
@@ -692,7 +810,7 @@ test('act tool: run-bash prompt decision answered "deny" denies the tool',
     ] };
     const events = [];
     await runAgentV2Turn({
-      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: WS },
       resumeSdkSessionId: 'sdk-rb2', onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
     }, turnInjectable);
     const decision = script.options.canUseTool('mcp__llmide__run-bash', { command: 'some-other-unknown-cli' });
@@ -715,7 +833,7 @@ test('act tool: run-bash prompt decision answered "always-allow" persists the ap
     ] };
     const events = [];
     await runAgentV2Turn({
-      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: WS },
       resumeSdkSessionId: 'sdk-rb3', onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
     }, turnInjectable);
     assert.equal(hasAlwaysAllow(user.id, 'run-bash'), false);
@@ -740,7 +858,7 @@ test('resume failure maps to SESSION_UNRESUMABLE',
     const boom = () => (async function* () { throw new Error('No conversation found with session id: x'); })();
     await assert.rejects(
       runAgentV2Turn({
-        message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+        message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
         resumeSdkSessionId: 'x', onEvent: () => {}, queryFactory: boom,
       }, turnInjectable),
       (e) => e.code === 'SESSION_UNRESUMABLE',
@@ -754,7 +872,7 @@ test('aborted approval denies with the no-answer message; session id captured fr
     const script = { messages: [{ type: 'system', subtype: 'init', session_id: 'sdk-cap', tools: [], capabilities: [] }] };
     const events = [];
     await runAgentV2Turn({
-      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
       onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
     }, turnInjectable);
     const decision = script.options.canUseTool('AskUserQuestion', { questions: [{ question: 'Q?' }] });
@@ -776,7 +894,7 @@ test('abort wiring: turn/per-call signals deny a parked approval promptly and li
     const events = [];
     const turnAc = new AbortController();
     const base = {
-      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
       onEvent: (e) => events.push(e),
     };
     await runAgentV2Turn({ ...base, signal: turnAc.signal, queryFactory: makeFakeQuery(scriptA) }, turnInjectable);
@@ -842,7 +960,7 @@ test('maxBudgetUsd: a usable cap flows into query options; no cap → option abs
     const capped = { messages: [] };
     await runAgentV2Turn({
       message: 'm', userId: 'u1', mode: 'execute', model: 'claude-sonnet-5',
-      agentContext: { workspaceRoot: '/tmp/w' },
+      agentContext: { workspaceRoot: WS },
       onEvent: () => {}, queryFactory: makeFakeQuery(capped),
     }, { ...turnInjectable, resolveBudget: (...args) => { seen.push(args); return 1.25; } });
     assert.deepEqual(seen, [['u1', 'claude-sonnet-5']], 'resolver sees (userId, requested model)');
@@ -851,7 +969,7 @@ test('maxBudgetUsd: a usable cap flows into query options; no cap → option abs
     const uncapped = { messages: [] };
     await runAgentV2Turn({
       message: 'm', userId: 'u1', mode: 'execute', model: 'claude-sonnet-5',
-      agentContext: { workspaceRoot: '/tmp/w' },
+      agentContext: { workspaceRoot: WS },
       onEvent: () => {}, queryFactory: makeFakeQuery(uncapped),
     }, { ...turnInjectable, resolveBudget: () => null });
     assert.ok(!('maxBudgetUsd' in uncapped.options), 'no usable cap → option absent');
@@ -890,22 +1008,27 @@ test('auth: no key throws the spike error unless allowAmbientAuth',
     // the runner must refuse rather than silently use operator ambient auth.
     await assert.rejects(
       runAgentV2Turn({
-        message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+        message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
         onEvent: () => {}, queryFactory: makeFakeQuery({ messages: [] }),
       }, turnInjectable),
       (e) => /No Anthropic API key available/.test(e.message),
     );
-    // Ambient opt-in: the turn runs and the composed env carries the
-    // per-user engine home but NO fabricated key — ambient auth means the
-    // subprocess finds the operator's login on its own.
+    // Ambient opt-in: the turn runs and the composed env carries NO
+    // fabricated key AND no CLAUDE_CONFIG_DIR override — ambient auth means
+    // the subprocess finds the operator's login on its own, and that login
+    // lives under the operator's DEFAULT config dir. Redirecting the config
+    // dir to the (empty) per-user home makes the CLI "Not logged in" and
+    // fails every ambient turn — the regression behind the Mac chat's
+    // ENGINE_ERROR banner.
     const ambient = { messages: [] };
     await runAgentV2Turn({
-      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
       allowAmbientAuth: true, onEvent: () => {}, queryFactory: makeFakeQuery(ambient),
     }, turnInjectable);
-    assert.ok(!('ANTHROPIC_API_KEY' in ambient.options.env), 'ambient auth must not fabricate an env key');
-    assert.equal(ambient.options.env.CLAUDE_CONFIG_DIR, agentSdkHomeFor('u1'),
-      'ambient turns still get their per-user engine home');
+    const env = ambient.options.env ?? {};
+    assert.ok(!('ANTHROPIC_API_KEY' in env), 'ambient auth must not fabricate an env key');
+    assert.ok(!('CLAUDE_CONFIG_DIR' in env),
+      'ambient turns must not redirect CLAUDE_CONFIG_DIR — the operator login lives in the default config dir');
   }));
 
 // --- memory write-back (persistTurnMemory, fire-and-forget) -------------------
@@ -925,7 +1048,7 @@ test('memory write-back: a turn with reply text fires persistMemory with the acc
     const t0 = Date.now();
     await runAgentV2Turn({
       message: 'hi there', userId: 'u1', mode: 'execute',
-      agentContext: { workspaceRoot: '/tmp/w', chatSessionId: 'chat-mem' },
+      agentContext: { workspaceRoot: WS, chatSessionId: 'chat-mem' },
       onEvent: () => {}, queryFactory: makeFakeQuery(script),
     }, { ...turnInjectable, persistMemory });
     // The turn itself must not wait on persistMemory's own promise — assert
@@ -938,7 +1061,7 @@ test('memory write-back: a turn with reply text fires persistMemory with the acc
     assert.equal(calls[0].userId, 'u1');
     assert.equal(calls[0].userMessage, 'hi there');
     assert.equal(calls[0].reply, 'Hello world', 'delta text accumulates into the reply persistMemory receives');
-    assert.deepEqual(calls[0].agentContext, { workspaceRoot: '/tmp/w', chatSessionId: 'chat-mem' });
+    assert.deepEqual(calls[0].agentContext, { workspaceRoot: WS, chatSessionId: 'chat-mem' });
     assert.equal(typeof calls[0].runClaude, 'function');
   }));
 
@@ -947,7 +1070,7 @@ test('memory write-back: no reply text (e.g. a pure tool-call turn) never calls 
     const script = { messages: [{ type: 'result', subtype: 'success', session_id: 'sdk-noreply' }] };
     let called = false;
     await runAgentV2Turn({
-      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
       onEvent: () => {}, queryFactory: makeFakeQuery(script),
     }, { ...turnInjectable, persistMemory: async () => { called = true; } });
     assert.ok(!called, 'empty reply text must not trigger a memory-extraction call');
@@ -960,7 +1083,7 @@ test('memory write-back: a thrown/rejecting persistMemory never surfaces to the 
       { type: 'result', subtype: 'success', session_id: 'sdk-boom' },
     ] };
     const { result } = await runAgentV2Turn({
-      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: '/tmp/w' },
+      message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
       onEvent: () => {}, queryFactory: makeFakeQuery(script),
     }, { ...turnInjectable, persistMemory: async () => { throw new Error('boom'); } });
     assert.equal(result.subtype, 'success', 'the turn itself succeeds regardless of a failing memory write');
@@ -977,7 +1100,7 @@ test('llmide tool server receives agentContext + message so project_memory can u
     };
     await runAgentV2Turn({
       message: 'what changed recently?', userId: 'u1', mode: 'execute',
-      agentContext: { workspaceRoot: '/tmp/w', indexedRepos: [] },
+      agentContext: { workspaceRoot: WS, indexedRepos: [] },
       onEvent: () => {}, queryFactory: capturingQuery,
     }, turnInjectable);
     assert.equal(capture.mcpServers.llmide.type, 'sdk');
@@ -1056,6 +1179,9 @@ test('session memory end-to-end: a fact captured from turn 1 is recalled by turn
   withAnthropicKey('sk-ant-v2-test', async () => {
     const workspaceRoot = path.join(__dirname, '_agent-v2-memory-roundtrip-fixture');
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    // runAgentV2Turn existence-checks workspaceRoot — start from a clean but
+    // EXISTING fixture root, as production always would.
+    fs.mkdirSync(workspaceRoot, { recursive: true });
     const user = registerUser(getDb(), {
       email: 'v2mem-roundtrip@example.com', password: 'CorrectHorseBattery', displayName: 't',
     });

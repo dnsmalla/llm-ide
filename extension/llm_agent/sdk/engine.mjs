@@ -38,7 +38,8 @@ import {
   personaForMode, PLAN_LIKE_MODES, restrictsTools, allowedToolNames,
 } from '../runtime/mode-personas.mjs';
 import { readSkillInstructions, buildPerUserSkillSet, internalSkills } from '../skills/index.mjs';
-import { buildReadableRoots } from '../runtime/handlers/repo-files.mjs';
+import { buildReadableRoots, isTooBroadRoot } from '../runtime/handlers/repo-files.mjs';
+import { expandTilde } from '../../graphkit/memory.mjs';
 import { redactFence } from '../runtime/redaction.mjs';
 import { persistTurnMemory } from '../runtime/memory-persist.mjs';
 import { config } from '../../core/config.mjs';
@@ -79,13 +80,16 @@ export function resolveAnthropicKey(userId) {
 //
 // CLAUDE_CONFIG_DIR = <dataDir>/agent-sdk/<userId>/ isolates each tenant's
 // SDK transcripts and credentials (settingSources: [] isolates the operator's
-// SETTINGS; the config dir isolates everything else the SDK writes). The base
+// SETTINGS; the config dir isolates everything else the SDK writes). Applied
+// to KEYED turns only: an ambient-auth turn relies on the operator's
+// `claude login`, which lives under the operator's default config dir, so
+// redirecting it would leave the subprocess "Not logged in". The base
 // follows the server's canonical data dir — the DB's directory (core/config:
 // <repo>/kb by default, wherever LLMIDE_DB_PATH points) — so engine homes sit
 // next to the other per-install runtime data. User ids are server-minted hex
 // (users.mjs); the charset guard keeps even a hand-edited id from escaping
 // the base via path traversal. Shared by the runner (composes the env every
-// turn) and the route's transcript cleanup — one derivation, never two.
+// keyed turn) and the route's transcript cleanup — one derivation, never two.
 
 const USER_ID_RE = /^[A-Za-z0-9_-]+$/;
 
@@ -230,7 +234,17 @@ export function buildEngineOptions(
   const planLike = PLAN_LIKE_MODES.has(resolvedMode);
   const { allowedTools, disallowedTools } = v2ToolPolicyForMode(resolvedMode);
 
-  const workspaceRoot = typeof agentContext?.workspaceRoot === 'string' ? agentContext.workspaceRoot : '';
+  // The wire convention is home-relative roots ("~/proj" — what the Mac
+  // sends); every READ handler expands them (graphkit/memory's expandTilde,
+  // the same one repo-files imports), and the SDK's cwd must too: Node
+  // spawn does not expand "~", so a literal
+  // tilde cwd is ENOENT and the SDK misreports it as a native-binary/libc
+  // launch failure. Expanding here also lets the additionalDirectories
+  // filter below actually match the (already-expanded) roots() output.
+  const rawWorkspaceRoot = typeof agentContext?.workspaceRoot === 'string' ? agentContext.workspaceRoot : '';
+  // path.resolve so a literal ".." spelling can't dodge the breadth
+  // check — isTooBroadRoot compares normalized paths (review R1).
+  const workspaceRoot = rawWorkspaceRoot ? path.resolve(expandTilde(rawWorkspaceRoot)) : '';
   // All validated readable roots (DB repo allow-list ∪ the validated
   // workspace root). The SDK already grants cwd, so additionalDirectories
   // is the roots result minus cwd — indexed repos and any other roots.
@@ -435,8 +449,29 @@ export async function runAgentV2Turn(
 ) {
   // Without a workspace the SDK would inherit the server process's cwd —
   // a v2 turn is always rooted in the request's workspace or not run at all.
-  const workspaceRoot = typeof agentContext?.workspaceRoot === 'string' ? agentContext.workspaceRoot : '';
+  // Expanded ("~/…" is the wire convention) and existence-checked up front:
+  // a stale/nonexistent root would otherwise surface as the SDK's misleading
+  // "native binary failed to launch (libc)" spawn error instead of naming
+  // the actual problem.
+  const rawWorkspaceRoot = typeof agentContext?.workspaceRoot === 'string' ? agentContext.workspaceRoot : '';
+  // path.resolve so a literal ".." spelling can't dodge the breadth
+  // check — isTooBroadRoot compares normalized paths (review R1).
+  const workspaceRoot = rawWorkspaceRoot ? path.resolve(expandTilde(rawWorkspaceRoot)) : '';
   if (!workspaceRoot) throw new Error('workspaceRoot is required');
+  let rootStat = null;
+  try { rootStat = fs.statSync(workspaceRoot); } catch { /* handled below */ }
+  if (!rootStat) {
+    throw new Error(`workspaceRoot does not exist: ${workspaceRoot}`);
+  }
+  if (!rootStat.isDirectory()) {
+    throw new Error(`workspaceRoot is not a directory: ${workspaceRoot}`);
+  }
+  // The SDK grants read access to cwd, so it must clear the same breadth bar
+  // buildReadableRoots applies — "~" as a workspace would silently grant the
+  // whole home directory.
+  if (isTooBroadRoot(workspaceRoot)) {
+    throw new Error(`workspaceRoot is too broad: ${workspaceRoot}`);
+  }
 
   // Same auth ladder as the spike: per-user vault key → operator ambient
   // auth. Ambient is opt-in so hermetic tests can assert the no-key error.
@@ -445,12 +480,14 @@ export async function runAgentV2Turn(
     throw new Error('No Anthropic API key available (set vault claude.apiKey or ANTHROPIC_API_KEY)');
   }
 
-  // Per-user engine home (spec §6): EVERY v2 turn — keyed or ambient — runs
-  // with its own CLAUDE_CONFIG_DIR so transcripts and credentials never cross
-  // tenants. Created up front (best-effort): the CLI would create it too, but
-  // if it ever fell back to ~/.claude on a missing dir, isolation would be
-  // silently gone — an empty dir is cheap insurance.
-  const sdkHome = agentSdkHomeFor(userId);
+  // Per-user engine home (spec §6): every KEYED v2 turn runs with its own
+  // CLAUDE_CONFIG_DIR so transcripts and credentials never cross tenants.
+  // Ambient turns skip the override — the operator's login lives under the
+  // default config dir, and redirecting it breaks their auth (see the env
+  // composition below). Created up front (best-effort): the CLI would create
+  // it too, but if it ever fell back to ~/.claude on a missing dir,
+  // isolation would be silently gone — an empty dir is cheap insurance.
+  const sdkHome = key ? agentSdkHomeFor(userId) : null;
   if (sdkHome) {
     try { fs.mkdirSync(sdkHome, { recursive: true }); } catch { /* SDK may still create it; best-effort */ }
   }
@@ -652,13 +689,27 @@ export async function runAgentV2Turn(
     ...(maxBudgetUsd ? { maxBudgetUsd } : {}),
     // `env` REPLACES the subprocess environment — always spread process.env.
     // The key (when one resolved) and the per-user engine home ride along in
-    // the SAME composed env; an ambient-auth turn sets no key but still gets
-    // its tenant-isolated CLAUDE_CONFIG_DIR.
-    ...(key || sdkHome
+    // the SAME composed env. The engine home rides ONLY on keyed turns: an
+    // ambient-auth turn depends on the operator's `claude login`, whose
+    // credentials/onboarding state live under the operator's DEFAULT config
+    // dir — redirecting CLAUDE_CONFIG_DIR to the (empty) per-user home makes
+    // the subprocess "Not logged in" and fails every ambient turn. Tenant
+    // isolation of transcripts is therefore a keyed-turn property; ambient
+    // turns all run as the operator anyway, so there is no cross-tenant
+    // credential exposure to isolate against. Two accepted consequences:
+    // ambient turns can discover operator-level agents/skills/plugins/MCP
+    // config from the default config dir (settingSources: [] only isolates
+    // SETTINGS), and all ambient tenants' transcripts share that dir — the
+    // same exposure class as the filesystem itself, which this never
+    // sandboxed. A user who later removes their vault key flips to ambient
+    // and their next resume misses (transcripts stayed in the per-user
+    // home) — SESSION_UNRESUMABLE, which the client recovers from with a
+    // fresh-session retry.
+    ...(key
       ? {
           env: {
             ...process.env,
-            ...(key ? { ANTHROPIC_API_KEY: key } : {}),
+            ANTHROPIC_API_KEY: key,
             ...(sdkHome ? { CLAUDE_CONFIG_DIR: sdkHome } : {}),
           },
         }

@@ -83,7 +83,7 @@ Rules:
 
 - New table **`agent_sessions`** (migration `0029`): `id TEXT PK, user_id, chat_scope, mac_chat_session_id, sdk_session_id, model, created_at, last_used_at, last_mode, status`; `UNIQUE(user_id, mac_chat_session_id)`.
 - The **Mac never tracks SDK session ids**. Each request carries `agentContext.chatSessionId`; the server resolves or creates the mapping; resume = `query({resume: sdkSessionId})`. Restart-tolerant between turns (no live connection). *(Judgment call ④.)*
-- Per-user engine homes: `CLAUDE_CONFIG_DIR = <app-support>/agent-sdk/<userId>/` isolating SDK transcripts and credentials per tenant.
+- Per-user engine homes: `CLAUDE_CONFIG_DIR = <app-support>/agent-sdk/<userId>/` isolating SDK transcripts and credentials per tenant. **Amended 2026-08-20: keyed turns only.** An ambient-auth turn (operator `claude login`, no per-user key) must NOT get the override — the login lives under the operator's default config dir, and redirecting it leaves the subprocess "Not logged in", failing every ambient turn. Transcript cleanup on session delete scans both roots.
 - Mac `ChatSessionStore` remains the UI source of truth (list/titles/delete). Chat deletion → `DELETE /agent/v2/session {chatSessionId}` → drop mapping row + best-effort SDK transcript cleanup + the existing session-memory cleanup.
 - Old chats never migrate (clean cut, D3). A v2 chat whose SDK session file is missing/corrupt → server 409 `SESSION_UNRESUMABLE` → Mac starts a fresh SDK session for that chat (mapping row replaced) and says so in-chat.
 
@@ -126,7 +126,7 @@ Legacy concepts that do not exist in v2 turns and are **not emulated**: `pending
 
 ## 11. Security & tenancy
 
-Every engine call is user-scoped: KB tool handlers take `userId` first (tenancy guard spike-proven — `userId: null` is rejected inside the tool); decisions are tenancy-checked; per-user `CLAUDE_CONFIG_DIR` + `settingSources: []` isolate operator config; attachments/skills keep the legacy trust boundaries (attachments are DATA-fenced; skills are trusted-instruction blocks read server-side by id).
+Every engine call is user-scoped: KB tool handlers take `userId` first (tenancy guard spike-proven — `userId: null` is rejected inside the tool); decisions are tenancy-checked; per-user `CLAUDE_CONFIG_DIR` (keyed turns only — see the amendment above) + `settingSources: []` isolate operator config; attachments/skills keep the legacy trust boundaries (attachments are DATA-fenced; skills are trusted-instruction blocks read server-side by id).
 
 ## 12. Phase pointers
 

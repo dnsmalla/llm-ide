@@ -13,6 +13,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
@@ -20,6 +21,13 @@ process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// runAgentV2Turn now existence-checks workspaceRoot (a stale root must fail
+// clearly, not as an SDK spawn misdiagnosis) — materialize a fixture root.
+// Kept under the tests dir, NOT /tmp: /tmp is unwritable under sandboxed
+// runs, and a module-load mkdir failure would wipe out this whole file.
+const WS = path.join(__dirname, '_agent-v2-ws-fixture');
+fs.mkdirSync(WS, { recursive: true });
 const tmpDb = path.join(__dirname, '_agent-v2-routes-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
@@ -96,7 +104,7 @@ test('stream: happy path emits init → mode_set → … → result, maps sessio
       message: 'hello',
       mode: 'plan',
       model: 'claude-sonnet-5',
-      agentContext: { chatSessionId: 'chat-1', workspaceRoot: '/tmp/w' },
+      agentContext: { chatSessionId: 'chat-1', workspaceRoot: WS },
     },
     user,
   }), res, { runTurn: fakeTurn });
@@ -141,7 +149,7 @@ test('stream: model-less turn meters under the engine-resolved model from init',
   const handled = await handleAgentV2Routes(makeReq({
     method: 'POST',
     url: '/agent/v2/stream',
-    body: { message: 'hi', agentContext: { chatSessionId: 'chat-nm', workspaceRoot: '/tmp/w' } }, // no `model`
+    body: { message: 'hi', agentContext: { chatSessionId: 'chat-nm', workspaceRoot: WS } }, // no `model`
     user,
   }), res, { runTurn: fakeTurn });
   assert.equal(handled, true);
@@ -179,7 +187,7 @@ test('stream: route enables the operator-ambient auth rung for the engine', asyn
   const handled = await handleAgentV2Routes(makeReq({
     method: 'POST',
     url: '/agent/v2/stream',
-    body: { message: 'hi', agentContext: { chatSessionId: 'chat-amb', workspaceRoot: '/tmp/w' } },
+    body: { message: 'hi', agentContext: { chatSessionId: 'chat-amb', workspaceRoot: WS } },
     user,
   }), res, { runTurn: fakeTurn });
   assert.equal(handled, true);
@@ -198,7 +206,7 @@ test('stream: second turn resumes the recorded sdk session; fresh:true starts ov
   const req = (body) => makeReq({
     method: 'POST',
     url: '/agent/v2/stream',
-    body: { message: 'hi', agentContext: { chatSessionId: 'chat-r', workspaceRoot: '/tmp/w' }, ...body },
+    body: { message: 'hi', agentContext: { chatSessionId: 'chat-r', workspaceRoot: WS }, ...body },
     user,
   });
   await handleAgentV2Routes(req({}), makeRes(), { runTurn: fakeTurn });
@@ -220,7 +228,7 @@ test('stream: SESSION_UNRESUMABLE surfaces as an error event, not a crash', asyn
   const handled = await handleAgentV2Routes(makeReq({
     method: 'POST',
     url: '/agent/v2/stream',
-    body: { message: 'hi', agentContext: { chatSessionId: 'chat-2', workspaceRoot: '/tmp/w' } },
+    body: { message: 'hi', agentContext: { chatSessionId: 'chat-2', workspaceRoot: WS } },
     user,
   }), res, { runTurn: fakeTurn });
   assert.equal(handled, true);
@@ -244,7 +252,7 @@ test('stream: client close aborts the turn and unparks decisions for the live sd
   const req = makeReq({
     method: 'POST',
     url: '/agent/v2/stream',
-    body: { message: 'hi', agentContext: { chatSessionId: 'chat-ab', workspaceRoot: '/tmp/w' } },
+    body: { message: 'hi', agentContext: { chatSessionId: 'chat-ab', workspaceRoot: WS } },
     user,
   });
   const res = makeRes();
@@ -278,7 +286,7 @@ test('stream: a second turn for the same chat session while one is in flight get
   const req = (body) => makeReq({
     method: 'POST',
     url: '/agent/v2/stream',
-    body: { message: 'hi', agentContext: { chatSessionId: 'chat-conc', workspaceRoot: '/tmp/w' }, ...body },
+    body: { message: 'hi', agentContext: { chatSessionId: 'chat-conc', workspaceRoot: WS }, ...body },
     user,
   });
 
@@ -322,15 +330,15 @@ test('stream: validation — missing message/chatSessionId/workspaceRoot → 400
     return r;
   };
 
-  let res = await run({ message: 'hi', agentContext: { chatSessionId: 'c', workspaceRoot: '/tmp/w' } }, null);
+  let res = await run({ message: 'hi', agentContext: { chatSessionId: 'c', workspaceRoot: WS } }, null);
   assert.equal(res.statusCode, 401);
   assert.equal(res.json().error.code, 'AUTH_REQUIRED');
 
-  res = await run({ agentContext: { chatSessionId: 'c', workspaceRoot: '/tmp/w' } }, user);
+  res = await run({ agentContext: { chatSessionId: 'c', workspaceRoot: WS } }, user);
   assert.equal(res.statusCode, 400);
   assert.equal(res.json().error.code, 'VALIDATION_FAILED');
 
-  res = await run({ message: 'hi', agentContext: { workspaceRoot: '/tmp/w' } }, user);
+  res = await run({ message: 'hi', agentContext: { workspaceRoot: WS } }, user);
   assert.equal(res.statusCode, 400);
   assert.match(res.json().error.message, /chatSessionId/);
 
@@ -373,7 +381,7 @@ test('stream: mode "auto" is classified; the engine and mode_set see the resolve
     body: {
       message: 'plan this with me over several turns',
       mode: 'auto',
-      agentContext: { chatSessionId: 'chat-auto', workspaceRoot: '/tmp/w' },
+      agentContext: { chatSessionId: 'chat-auto', workspaceRoot: WS },
     },
     user,
   }), res, { runTurn: fakeTurn, classifyMode });
@@ -398,7 +406,7 @@ test('stream: missing mode runs execute (back-compat) and never calls the classi
   await handleAgentV2Routes(makeReq({
     method: 'POST',
     url: '/agent/v2/stream',
-    body: { message: 'hi', agentContext: { chatSessionId: 'chat-nomode', workspaceRoot: '/tmp/w' } },
+    body: { message: 'hi', agentContext: { chatSessionId: 'chat-nomode', workspaceRoot: WS } },
     user,
   }), res, { runTurn: fakeTurn, classifyMode });
   assert.equal(sawMode, 'execute');
@@ -419,7 +427,7 @@ test('stream: a mode string outside MODES falls back to execute (no unrestricted
     method: 'POST',
     url: '/agent/v2/stream',
     // "assist-plan" — the hyphen typo mode-classify.mjs's header warns about
-    body: { message: 'hi', mode: 'assist-plan', agentContext: { chatSessionId: 'chat-typo', workspaceRoot: '/tmp/w' } },
+    body: { message: 'hi', mode: 'assist-plan', agentContext: { chatSessionId: 'chat-typo', workspaceRoot: WS } },
     user,
   }), res, { runTurn: fakeTurn });
   assert.equal(sawMode, 'execute');
@@ -439,7 +447,7 @@ test('stream: classifier failure falls back to execute; the turn still runs', as
   await handleAgentV2Routes(makeReq({
     method: 'POST',
     url: '/agent/v2/stream',
-    body: { message: 'hi', mode: 'auto', agentContext: { chatSessionId: 'chat-cf', workspaceRoot: '/tmp/w' } },
+    body: { message: 'hi', mode: 'auto', agentContext: { chatSessionId: 'chat-cf', workspaceRoot: WS } },
     user,
   }), res, { runTurn: fakeTurn, classifyMode });
   assert.equal(sawMode, 'execute');
@@ -464,7 +472,7 @@ test('stream: a leading-slash message is expanded via the user command set befor
   await handleAgentV2Routes(makeReq({
     method: 'POST',
     url: '/agent/v2/stream',
-    body: { message: '/deploy prod', agentContext: { chatSessionId: 'chat-slash', workspaceRoot: '/tmp/w' } },
+    body: { message: '/deploy prod', agentContext: { chatSessionId: 'chat-slash', workspaceRoot: WS } },
     user,
   }), res, { runTurn: fakeTurn, expandSlash });
   assert.equal(expandCalls.length, 1);
@@ -481,7 +489,7 @@ test('stream: slash expansion error answers 400 JSON before the SSE headers', as
   await handleAgentV2Routes(makeReq({
     method: 'POST',
     url: '/agent/v2/stream',
-    body: { message: '/nope', agentContext: { chatSessionId: 'chat-slasherr', workspaceRoot: '/tmp/w' } },
+    body: { message: '/nope', agentContext: { chatSessionId: 'chat-slasherr', workspaceRoot: WS } },
     user,
   }), res, { runTurn: fakeTurn, expandSlash });
   assert.equal(turnRan, false);
@@ -555,18 +563,18 @@ test('decision: passes through action for a ToolApproval decision (allow/deny/al
 test('session delete: drops the mapping, best-effort deletes SDK transcripts', async () => {
   const db = getDb();
   const user = newUser('v2route-del@example.com');
-  markAgentSessionUsed(db, user.id, 'chat-del', { sdkSessionId: 'sdk-del-1234', model: 'claude-sonnet-5', mode: 'execute' });
+  markAgentSessionUsed(db, user.id, 'chat-del', { sdkSessionId: '11111111-2222-4333-8444-555555555555', model: 'claude-sonnet-5', mode: 'execute' });
 
-  // The cleanup root is the SAME per-user engine home the engine composes
-  // (agentSdkHomeFor — derived from the data dir, NOT an env var production
-  // never sets), so this test scripts transcripts exactly where a live turn
-  // would have written them.
+  // KEYED turns write under the per-user engine home the engine composes
+  // (agentSdkHomeFor — derived from the data dir), so this test scripts
+  // transcripts exactly where a live keyed turn would have written them.
+  // The ambient location is pinned by the dedicated test below.
   const home = agentSdkHomeFor(user.id);
   assert.ok(home, 'registered user id resolves an engine home');
   const ws = path.join(home, 'projects', '-tmp-w');
   fs.mkdirSync(ws, { recursive: true });
   try {
-    fs.writeFileSync(path.join(ws, 'sdk-del-1234.jsonl'), '{}\n');
+    fs.writeFileSync(path.join(ws, '11111111-2222-4333-8444-555555555555.jsonl'), '{}\n');
     fs.writeFileSync(path.join(ws, 'unrelated.jsonl'), '{}\n');
 
     const res = makeRes();
@@ -578,9 +586,9 @@ test('session delete: drops the mapping, best-effort deletes SDK transcripts', a
     }), res);
     assert.equal(handled, true);
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(res.json(), { ok: true, sdkSessionId: 'sdk-del-1234' });
+    assert.deepEqual(res.json(), { ok: true, sdkSessionId: '11111111-2222-4333-8444-555555555555' });
     // Transcript matching the sdk id is gone; other sessions' files stay.
-    assert.equal(fs.existsSync(path.join(ws, 'sdk-del-1234.jsonl')), false);
+    assert.equal(fs.existsSync(path.join(ws, '11111111-2222-4333-8444-555555555555.jsonl')), false);
     assert.equal(fs.existsSync(path.join(ws, 'unrelated.jsonl')), true);
     assert.equal(deleteAgentSession(db, user.id, 'chat-del'), null); // mapping row gone
   } finally {
@@ -607,6 +615,78 @@ test('session delete: drops the mapping, best-effort deletes SDK transcripts', a
     method: 'DELETE', url: '/agent/v2/session', body: { chatSessionId: 'x' },
   }), rej);
   assert.equal(rej.statusCode, 401);
+});
+
+// Ambient turns run without a CLAUDE_CONFIG_DIR override, so their SDK
+// transcripts land under the DEFAULT config dir (env CLAUDE_CONFIG_DIR, or
+// ~/.claude). Session delete must clean that root too — otherwise every
+// ambient chat's transcript survives its deletion as a privacy remnant.
+test('session delete: ambient transcripts under the default config dir are cleaned too', async () => {
+  const db = getDb();
+  const user = newUser('v2route-del-ambient@example.com');
+  markAgentSessionUsed(db, user.id, 'chat-del-amb', { sdkSessionId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', model: 'claude-sonnet-5', mode: 'execute' });
+
+  const prevEnv = process.env.CLAUDE_CONFIG_DIR;
+  const ambientRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-ambient-home-'));
+  process.env.CLAUDE_CONFIG_DIR = ambientRoot;
+  const ws = path.join(ambientRoot, 'projects', '-tmp-w');
+  fs.mkdirSync(ws, { recursive: true });
+  try {
+    fs.writeFileSync(path.join(ws, 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jsonl'), '{}\n');
+    fs.writeFileSync(path.join(ws, 'unrelated.jsonl'), '{}\n');
+
+    const res = makeRes();
+    await handleAgentV2Routes(makeReq({
+      method: 'DELETE',
+      url: '/agent/v2/session',
+      body: { chatSessionId: 'chat-del-amb' },
+      user,
+    }), res);
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json(), { ok: true, sdkSessionId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' });
+    assert.equal(fs.existsSync(path.join(ws, 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jsonl')), false,
+      'the ambient transcript must be removed from the default config dir');
+    assert.equal(fs.existsSync(path.join(ws, 'unrelated.jsonl')), true,
+      'other sessions’ transcripts must survive');
+  } finally {
+    if (prevEnv === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = prevEnv;
+    fs.rmSync(ambientRoot, { recursive: true, force: true });
+  }
+});
+
+// The ambient root is the operator's REAL config dir, so cleanup there must
+// be conservative: a degenerate (short/garbage) sdk session id must delete
+// nothing — `includes()` matching with a short needle could otherwise wipe
+// unrelated transcript files or whole encoded-workspace directories.
+test('session delete: a degenerate sdk session id deletes nothing', async () => {
+  const db = getDb();
+  const user = newUser('v2route-del-shortid@example.com');
+  markAgentSessionUsed(db, user.id, 'chat-del-short', { sdkSessionId: 'ab', model: 'claude-sonnet-5', mode: 'execute' });
+
+  const prevEnv = process.env.CLAUDE_CONFIG_DIR;
+  const ambientRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-ambient-short-'));
+  process.env.CLAUDE_CONFIG_DIR = ambientRoot;
+  const ws = path.join(ambientRoot, 'projects', '-tmp-w');
+  fs.mkdirSync(ws, { recursive: true });
+  try {
+    fs.writeFileSync(path.join(ws, 'ab.jsonl'), '{}\n');
+    fs.writeFileSync(path.join(ws, 'collateral-abc.jsonl'), '{}\n');
+
+    const res = makeRes();
+    await handleAgentV2Routes(makeReq({
+      method: 'DELETE', url: '/agent/v2/session', body: { chatSessionId: 'chat-del-short' }, user,
+    }), res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(fs.existsSync(path.join(ws, 'ab.jsonl')), true,
+      'a degenerate id must not trigger any deletion');
+    assert.equal(fs.existsSync(path.join(ws, 'collateral-abc.jsonl')), true,
+      'nor take out files that merely contain it');
+  } finally {
+    if (prevEnv === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = prevEnv;
+    fs.rmSync(ambientRoot, { recursive: true, force: true });
+  }
 });
 
 // --- dispatcher contract --------------------------------------------------------

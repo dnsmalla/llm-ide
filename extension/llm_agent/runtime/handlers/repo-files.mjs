@@ -57,7 +57,9 @@ export function isDeniedPath(absPath) {
 }
 
 // Refuse roots so broad that "read within" would mean "read most of the disk".
-function isTooBroadRoot(real) {
+// Exported: the v2 engine applies the same bar to the SDK's cwd (which the
+// SDK grants read access to) — one breadth rule, never two.
+export function isTooBroadRoot(real) {
   const home = canon(homedir()) || homedir();
   if (real === '/' || real === home) return true;
   if (cmp(real) === cmp(home)) return true;
