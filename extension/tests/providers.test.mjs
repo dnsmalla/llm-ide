@@ -305,6 +305,27 @@ test('formatCliSpawnError: not-logged-in stdout never leaks argv prompt', () => 
   assert.doesNotMatch(msg, /x{10}/);
 });
 
+test('formatCliSpawnError: raw CLI output is collapsed to one labeled line', () => {
+  const err = {
+    code: 1,
+    stdout: 'INFO some startup banner\nActual error: quota exceeded\n',
+    stderr: 'warning: something else\n',
+  };
+  const msg = formatCliSpawnError(err, { bin: 'claude' });
+  assert.match(msg, /^claude failed: /, 'raw CLI output must be labeled as a CLI failure, not shown bare');
+  assert.doesNotMatch(msg, /\n/, 'multi-line CLI dumps must collapse to one line for the chat error bubble');
+  assert.match(msg, /quota exceeded/, 'the diagnostic content itself must survive');
+});
+
+test('formatCliSpawnError: a key spanning the length cap is redacted before truncation', () => {
+  // Redaction must run on the FULL text, then truncate — slicing first
+  // leaves the head of a credential visible when it straddles the boundary.
+  const key = 'sk-boundary-secret-key-value';
+  const err = { code: 1, stdout: 'x'.repeat(290) + ' ' + key + ' tail', stderr: '' };
+  const msg = formatCliSpawnError(err, { bin: 'claude', apiKey: key });
+  assert.doesNotMatch(msg, /sk-bounda/, 'no fragment of the key may survive truncation');
+});
+
 test('formatCliSpawnError: empty streams falls back to actionable hint', () => {
   const msg = formatCliSpawnError({ code: 1, message: 'Command failed: claude -p huge', stdout: '', stderr: '' }, { bin: 'claude' });
   assert.match(msg, /claude login|API key/i);

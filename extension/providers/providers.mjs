@@ -866,7 +866,13 @@ export function formatCliSpawnError(err, { bin = 'claude', apiKey, provider = 'a
     return `${bin} timed out. Try again or add a ${providerLabel} API key in Settings → Model Providers.`;
   }
   if (combined) {
-    return redactWithKey(combined.slice(0, 300), apiKey);
+    // Collapse the dump to one labeled line: this string lands verbatim in
+    // the chat's error bubble, where a bare multi-line stdout/stderr blob
+    // reads as if the assistant itself produced garbage. Redact BEFORE
+    // truncating (same order as redact() above) — slicing first would leave
+    // the head of a credential that straddles the cap visible.
+    const oneLine = combined.replace(/\s+/g, ' ').trim();
+    return `${bin} failed: ${redactWithKey(oneLine, apiKey).slice(0, 300)}`;
   }
   // Never surface err.message — it contains the full command + prompt.
   const exit = typeof err?.code === 'number' ? err.code : '?';

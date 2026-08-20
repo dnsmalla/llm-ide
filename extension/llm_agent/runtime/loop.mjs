@@ -83,6 +83,22 @@ function resolveDeadline(deadlineMs) {
   return Number.isFinite(deadlineMs) && deadlineMs > 0 ? deadlineMs : DEFAULT_DEADLINE_MS;
 }
 
+// replyMode: 'final' — a final pass shorter than this falls back to the
+// accumulated narration. prompt.md tells the model to explain a failure
+// BEFORE calling task-update, so a one-line closing ack ("Marked as
+// failed.", 17 units) must not become the whole reply while the explanation
+// vanishes. 24 rather than 40 because the unit is UTF-16 code units and a
+// complete Japanese answer is short in those ("はい、auth.mjs の 42 行目を
+// 修正しました。" ≈ 27) — 40 re-glued the work log onto exactly the concise
+// complete answers this mode exists to keep clean.
+const MIN_FINAL_REPLY_CHARS = 24;
+
+// Abnormal endings (deadline / iteration cap / echo stall) return the
+// accumulated narration so the user sees what the turn had so far — but
+// tail-capped: the global agent runs with maxIterations 1000, and an
+// uncapped work log from a runaway turn would flood the chat bubble.
+const ABNORMAL_REPLY_MAX_CHARS = 4000;
+
 // Aggregate cap on skill bodies in one system prompt. Each skill file
 // is individually capped at 32 KB by the loader, but a user with many
 // enabled plugins could still stack enough of them to crowd out the
@@ -388,8 +404,18 @@ export function makeSniffingChunkHandler(outerOnChunk) {
 export async function runAgentLoop({
   skills, userMessage, history, agentContext, runClaude, kb, userId, handlers,
   maxIterations, deadlineMs, model, maxTokens, depth = 0, onProgress, onChunk,
-  mcpConfig,
+  mcpConfig, replyMode = 'accumulated',
 }) {
+  // replyMode decides what `reply` means on a clean finish:
+  //  - 'accumulated' (default): every iteration's text concatenated — the
+  //    contract ask-internal / ask-subagent depend on, where the reply is
+  //    MACHINE input the outer agent re-synthesizes and dropping the
+  //    tool-hop narration would drop facts ("Found 3 meetings: …").
+  //  - 'final': the last iteration's text only — the user-visible chat
+  //    turn (route.mjs's global call), where gluing every "Let me read
+  //    that file." onto the answer made replies read like a work log.
+  //    Guarded: an empty or sub-MIN_FINAL_REPLY_CHARS final pass falls
+  //    back to the accumulated text so stated facts can't vanish.
   // onProgress is an optional best-effort callback used to surface live
   // status to the client (the macOS Code Assistant turns these into a status
   // line instead of a frozen "Thinking…"). Never let a progress callback
@@ -446,13 +472,28 @@ export async function runAgentLoop({
   let lastToolResultJson = null;
   let echoNudged = false;
 
+  // Accumulated-narration text for an abnormal ending, tail-capped (the
+  // most recent narration is the part still worth reading) — see
+  // ABNORMAL_REPLY_MAX_CHARS.
+  const abnormalText = () => {
+    const t = stripFenceRemnants(preToolText.trim());
+    if (t.length <= ABNORMAL_REPLY_MAX_CHARS) return t;
+    let start = t.length - ABNORMAL_REPLY_MAX_CHARS;
+    // Never start on a low surrogate — that halves an astral character
+    // (emoji, CJK extensions) and the resulting lone surrogate makes
+    // ai-routes' JSON.stringify emit a raw \udXXX escape that Swift's
+    // JSONDecoder rejects, so the Mac drops the whole `done` event.
+    if (t.charCodeAt(start) >= 0xDC00 && t.charCodeAt(start) <= 0xDFFF) start += 1;
+    return `…${t.slice(start)}`;
+  };
+
   // Return the standard graceful "ran out of time" reply. Shared by the
   // between-iteration check and the in-flight abort path so both look
   // identical to the client.
   const deadlineReply = (iters) => {
     const elapsed = Math.round((Date.now() - startTs) / 1000);
     return {
-      reply: (stripFenceRemnants(preToolText.trim()) + `\n\n_(reached the ${elapsed}s deadline — try again)_`),
+      reply: (abnormalText() + `\n\n_(reached the ${elapsed}s deadline — try again)_`),
       pendingTool: null, iterations: iters, cacheHits,
     };
   };
@@ -482,7 +523,14 @@ export async function runAgentLoop({
     // runClaude keeps its own last-resort socket hang breaker.
     const callSignal = remaining === null ? undefined : AbortSignal.timeout(remaining);
     let out;
-    const sniff = typeof onChunk === 'function' ? makeSniffingChunkHandler(onChunk) : null;
+    // Mirror of what the sniffer actually forwarded this call. On an
+    // in-flight abort `out` never materializes, so this is the only record
+    // of the text the user already watched stream — the deadline reply must
+    // include it, or the client's final-overwrite erases it from the bubble.
+    let streamedThisCall = '';
+    const sniff = typeof onChunk === 'function'
+      ? makeSniffingChunkHandler((t) => { streamedThisCall += t; onChunk(t); })
+      : null;
     try {
       out = await runClaude(prompt, {
         userId,
@@ -493,7 +541,18 @@ export async function runAgentLoop({
         ...(sniff ? { onChunk: sniff.onChunk } : {}),
       });
     } catch (err) {
-      if (callSignal?.aborted) return deadlineReply(i);
+      if (callSignal?.aborted) {
+        // Release the sniffer's held-back tail (a possible fence-marker
+        // prefix, ≤14 chars of real prose) so the streamed bubble isn't
+        // missing the last characters the model actually produced — the
+        // flush lands in `streamedThisCall` via the wrapper above, and
+        // folding that into preToolText is what carries the aborted
+        // iteration's partial text into the deadline reply the client
+        // overwrites the bubble with.
+        if (sniff) sniff.flush();
+        preToolText += streamedThisCall;
+        return deadlineReply(i);
+      }
       throw err;
     }
     turnLog.push({ kind: 'assistant', text: out });
@@ -526,7 +585,7 @@ export async function runAgentLoop({
       // user-facing symptom this guard exists to remove, one iteration later.
       if (sniff) sniff.flush();
       return {
-        reply: `${stripFenceRemnants(preToolText.trim())}\n\n_(the model stalled repeating a tool result — try again)_`,
+        reply: `${abnormalText()}\n\n_(the model stalled repeating a tool result — try again)_`,
         pendingTool: null, iterations: i + 1, cacheHits,
       };
     }
@@ -538,8 +597,18 @@ export async function runAgentLoop({
         continue;
       }
       if (sniff) sniff.flush();
+      // replyMode 'final': the reply is this last iteration's text only —
+      // earlier tool-hop narration lives in turnLog for the model and in
+      // the client's tool-step rows for the user; gluing it onto the
+      // answer is what used to make replies read like a work log. A final
+      // pass that is empty or too brief to stand alone (the "Marked as
+      // failed." closing ack) falls back to the accumulated text so facts
+      // stated before a tool call can't vanish. 'accumulated' keeps the
+      // old concatenation — see the parameter doc at the top.
+      const finalText = text.trim();
+      const useFinalOnly = replyMode === 'final' && finalText.length >= MIN_FINAL_REPLY_CHARS;
       return {
-        reply: stripFenceRemnants(preToolText.trim() || text.trim()),
+        reply: stripFenceRemnants(useFinalOnly ? finalText : (preToolText.trim() || finalText)),
         pendingTool: null, iterations: i + 1, cacheHits,
       };
     }
@@ -564,8 +633,14 @@ export async function runAgentLoop({
     logger.info('skill_invoked', { skill: skill.name, kind: skill.kind, userId, iteration: i + 1 });
 
     if (skill.kind === 'write') {
+      // replyMode 'final': the prose immediately before THIS write fence is
+      // the proposal's explanation; earlier iterations' narration is noise
+      // next to the pending-action card. No brevity guard here — the card
+      // itself carries the substance, so a short proposal line is fine.
       return {
-        reply: stripFenceRemnants(preToolText.trim()),
+        reply: stripFenceRemnants(replyMode === 'final'
+          ? (text.trim() || preToolText.trim())
+          : preToolText.trim()),
         pendingTool: { name: fence.name, arguments: validation.value },
       };
     }
@@ -603,7 +678,9 @@ export async function runAgentLoop({
     // the write came from the active agent or a nested one.
     if (result.pendingTool) {
       return {
-        reply: stripFenceRemnants(preToolText.trim()),
+        reply: stripFenceRemnants(replyMode === 'final'
+          ? (text.trim() || preToolText.trim())
+          : preToolText.trim()),
         pendingTool: result.pendingTool,
         iterations: i + 1,
         cacheHits,
@@ -617,7 +694,7 @@ export async function runAgentLoop({
   }
 
   const capMsg = `\n\n_(reached the ${cap}-call tool iteration limit — try again)_`;
-  return { reply: (stripFenceRemnants(preToolText.trim()) + capMsg), pendingTool: null, iterations: cap, cacheHits };
+  return { reply: (abnormalText() + capMsg), pendingTool: null, iterations: cap, cacheHits };
 }
 
 /**
@@ -701,6 +778,11 @@ export async function runNativeAgentLoop({
 
     // No tool calls → the model produced its user-facing answer. Natural
     // termination — no artificial iteration cap needed for well-behaved models.
+    // NOTE: deliberately no replyMode/MIN_FINAL_REPLY_CHARS machinery here —
+    // native tool-calling models already keep inter-tool commentary in their
+    // own assistant turns (fed back via `messages`), so the final text has
+    // always been the whole reply on this loop. See runAgentLoop's replyMode
+    // doc for the fence loop, where that separation had to be added.
     if (!Array.isArray(toolCalls) || !toolCalls.length) {
       return { reply: stripFenceRemnants((text || '').trim()), pendingTool: null, iterations: i + 1, cacheHits: 0 };
     }

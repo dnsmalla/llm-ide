@@ -461,6 +461,12 @@ export async function handleCodeAssist({
       onChunk,
       model: GLOBAL_AGENT_MODEL,
       mcpConfig,
+      // This is the USER-VISIBLE chat turn, so the reply is the final
+      // iteration's text — not the concatenated tool-hop narration. The
+      // delegation sub-loops (ask-internal / ask-subagent) keep the
+      // accumulated default: their reply is machine input for this outer
+      // loop, where dropping narration would drop facts.
+      replyMode: 'final',
       maxIterations: maxIterationsOverride ?? 1000,  // global cap raised; see runAgentLoop DEFAULT_MAX_ITERATIONS (10)
       // No deadlineMs. This is the call that produced "reached the 360s
       // deadline — try again": a deep multi-hop turn legitimately outran the
