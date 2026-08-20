@@ -29,4 +29,12 @@ struct ToolApprovalCardTests {
         #expect(ToolApprovalCard.icon(toolName: "Bash") == "terminal.fill")
         #expect(ToolApprovalCard.icon(toolName: nil) == "terminal.fill")
     }
+
+    @Test("alwaysAllowLabel(toolName:) names the tool it always-allows")
+    func alwaysAllowLabelPerTool() {
+        #expect(ToolApprovalCard.alwaysAllowLabel(toolName: "Edit") == "Always Allow Edit")
+        #expect(ToolApprovalCard.alwaysAllowLabel(toolName: "Write") == "Always Allow Write")
+        #expect(ToolApprovalCard.alwaysAllowLabel(toolName: "Bash") == "Always Allow Bash")
+        #expect(ToolApprovalCard.alwaysAllowLabel(toolName: nil) == "Always Allow")
+    }
 }

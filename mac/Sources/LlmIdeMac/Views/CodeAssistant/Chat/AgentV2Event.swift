@@ -94,9 +94,12 @@ struct AgentV2ApprovalQuestion: Sendable, Equatable, Codable {
 
 /// Structured payload of a ToolApproval — what the card renders as a diff /
 /// command / content preview. Every field is optional: which ones are
-/// populated depends on the tool (Edit: filePath/oldString/newString;
-/// Write: filePath/contentPreview/totalChars; Bash: command). `truncated`
-/// is present only when the server cut a field to its 20k cap.
+/// populated depends on the tool (Edit: filePath/oldString/newString/
+/// replaceAll; Write: filePath/contentPreview/totalChars/exists; Bash:
+/// command). `truncated` is present only when the server cut a field to its
+/// 20k cap. `replaceAll`/`exists` ride Swift's automatic Codable synthesis
+/// (no custom CodingKeys/init(from:) on this struct) — adding a field here
+/// is sufficient, no decode-side change needed.
 struct AgentV2ApprovalArgs: Sendable, Equatable, Codable {
     let filePath: String?
     let oldString: String?
@@ -105,6 +108,12 @@ struct AgentV2ApprovalArgs: Sendable, Equatable, Codable {
     let totalChars: Int?
     let command: String?
     let truncated: Bool?
+    /// Edit only: true when the tool call would replace every occurrence,
+    /// not just one (final whole-branch review, I4).
+    let replaceAll: Bool?
+    /// Write only: true when the target file already exists on disk, i.e.
+    /// this call overwrites rather than creates (final whole-branch review, I5).
+    let exists: Bool?
 }
 
 /// A parked approval the engine is blocking on. `kind` distinguishes the two

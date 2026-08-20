@@ -124,6 +124,14 @@ struct ToolApprovalCard: View {
                 }
             }
             .frame(maxHeight: 220)
+            // A global replace touches EVERY occurrence, not just the one
+            // shown above — call that out so approving isn't mistaken for a
+            // single-site edit (final whole-branch review, I4).
+            if args.replaceAll == true {
+                Text("Replaces ALL occurrences")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.orange)
+            }
         }
     }
 
@@ -141,7 +149,12 @@ struct ToolApprovalCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxHeight: 220)
-            Text("New file content · \(args.totalChars ?? 0) chars")
+            // A write that overwrites an existing file is a strictly more
+            // dangerous case than creating a new one — say so instead of the
+            // same neutral caption either way (final whole-branch review, I5).
+            Text(args.exists == true
+                 ? "Overwriting existing file · \(args.totalChars ?? 0) chars"
+                 : "New file content · \(args.totalChars ?? 0) chars")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
         }
@@ -184,10 +197,22 @@ struct ToolApprovalCard: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .disabled(state.submitted)
-            Button("Always Allow") { Task { await onDecide("always-allow") } }
+            Button(Self.alwaysAllowLabel(toolName: state.approval.toolName)) { Task { await onDecide("always-allow") } }
                 .controlSize(.small)
                 .disabled(state.submitted)
             Spacer(minLength: 0)
         }
+    }
+
+    /// "Always Allow Edit" / "Always Allow Write" / "Always Allow Bash" — this
+    /// is now a permanent, irrevocable grant for a native write/shell tool
+    /// (previously only run-bash), so the button must say which tool it
+    /// always-allows rather than a bare "Always Allow" (final whole-branch
+    /// review, I2). Falls back to the bare label (no trailing space) when the
+    /// server didn't send a `toolName`. Pure, matching `title`/`icon`'s
+    /// unit-testable style.
+    static func alwaysAllowLabel(toolName: String?) -> String {
+        guard let name = toolName, !name.isEmpty else { return "Always Allow" }
+        return "Always Allow \(name)"
     }
 }

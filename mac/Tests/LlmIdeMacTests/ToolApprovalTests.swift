@@ -89,6 +89,28 @@ struct ToolApprovalTests {
         #expect(approval.args?.truncated == nil)
     }
 
+    @Test("Decodes an Edit's replaceAll flag")
+    func decodesEditReplaceAll() throws {
+        let json = #"{"type":"approval_request","requestId":"r1b","kind":"ToolApproval","toolName":"Edit","args":{"filePath":"/w/a.txt","oldString":"old","newString":"new","replaceAll":true}}"#
+        let data = Data(json.utf8)
+        guard case .approvalRequest(let approval)? = AgentV2Event.decode(fromJSON: data) else {
+            Issue.record("expected an approvalRequest event")
+            return
+        }
+        #expect(approval.args?.replaceAll == true)
+    }
+
+    @Test("Decodes a Write's exists flag")
+    func decodesWriteExists() throws {
+        let json = #"{"type":"approval_request","requestId":"r1c","kind":"ToolApproval","toolName":"Write","args":{"filePath":"/w/a.txt","contentPreview":"hi","totalChars":2,"exists":true}}"#
+        let data = Data(json.utf8)
+        guard case .approvalRequest(let approval)? = AgentV2Event.decode(fromJSON: data) else {
+            Issue.record("expected an approvalRequest event")
+            return
+        }
+        #expect(approval.args?.exists == true)
+    }
+
     @Test("Decodes ToolApproval with missing args field as nil")
     func missingArgsDecodesAsNil() throws {
         let json = #"{"type":"approval_request","requestId":"r2","kind":"ToolApproval","toolName":"Bash","argsSummary":"git push"}"#
