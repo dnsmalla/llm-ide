@@ -15,11 +15,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // threads mcpConfig into spawnCli's `args`.
 //
 // This test therefore documents the contract: read the source and confirm
-// runClaude's spawnCli call uses buildAnthropicCliArgs(prompt, mcpConfig).
-test('runClaude threads mcpConfig into the spawnCli argsOverride (source-level contract)', () => {
+// runClaude's spawnCli call uses buildAnthropicCliArgs(prompt, mcpConfig,
+// resolvedModel) — the third argument is what finally carries the caller's
+// model onto the CLI argv (--model), which the subscription path used to
+// silently drop.
+test('runClaude threads mcpConfig + resolvedModel into the spawnCli argsOverride (source-level contract)', () => {
   const src = readFileSync(join(__dirname, '..', 'providers', 'runtime.mjs'), 'utf8');
   assert.match(src, /buildAnthropicCliArgs/, 'runtime.mjs must import + use buildAnthropicCliArgs');
   assert.match(src, /mcpConfig/, 'runClaude must accept an mcpConfig option');
-  assert.match(src, /args:\s*buildAnthropicCliArgs\(prompt,\s*mcpConfig\)/,
-    'the spawnCli CLI-fallback call must pass args: buildAnthropicCliArgs(prompt, mcpConfig)');
+  assert.match(src, /args:\s*buildAnthropicCliArgs\(prompt,\s*mcpConfig,\s*resolvedModel\)/,
+    'the spawnCli CLI-fallback call must pass args: buildAnthropicCliArgs(prompt, mcpConfig, resolvedModel)');
 });

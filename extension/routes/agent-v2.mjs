@@ -26,6 +26,7 @@ import { classifyCodeAssistMode, MODES } from '../llm_agent/runtime/mode-classif
 import { buildPerUserSkillSet } from '../llm_agent/skills/registry.mjs';
 import { expandSlashCommand } from '../plugins/loader.mjs';
 import { getDb } from '../kb/db.mjs';
+import { deleteSessionMemory } from '../kb/session-memory.mjs';
 import {
   getOrCreateAgentSession,
   markAgentSessionUsed,
@@ -258,6 +259,16 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
     const meteredModel = resolvedModel ?? model;
     if (currentSdkSessionId) {
       markAgentSessionUsed(db, userId, chatSessionId, { sdkSessionId: currentSdkSessionId, model: meteredModel, mode });
+      // A fresh turn (or an unresumable-session recovery) REPLACES the
+      // recorded SDK session — the old session's transcript then belongs to
+      // no mapping, so session delete could never find it again. Clean it
+      // now. Gated on "no resume was attempted" rather than a bare
+      // id-comparison: today a resumed turn reports the SAME id (verified
+      // live), but if a future SDK resumes-as-fork, an id-only check would
+      // delete the parent transcript holding the conversation's history.
+      if (!resumeSdkSessionId && row.sdk_session_id && row.sdk_session_id !== currentSdkSessionId) {
+        deleteSdkTranscripts(userId, row.sdk_session_id);
+      }
     }
     recordUsage(db, {
       userId,
@@ -333,6 +344,11 @@ async function handleV2SessionDelete(req, res, userId) {
   const dropped = deleteAgentSession(getDb(), userId, chatSessionId);
   const sdkSessionId = dropped?.sdkSessionId ?? null;
   deleteSdkTranscripts(userId, sdkSessionId);
+  // The chat's DB-backed session-memory facts go with it — one route call
+  // cleans everything, instead of trusting every client to also call
+  // DELETE /kb/agent/session-memory (session memory keys on the same
+  // chatSessionId — see resolveChatSessionId).
+  try { deleteSessionMemory(userId, chatSessionId); } catch { /* best-effort, like the transcript cleanup */ }
   sendJSON(res, 200, { ok: true, sdkSessionId });
   return true;
 }

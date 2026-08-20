@@ -450,14 +450,29 @@ const ANTHROPIC_DEFAULT_PROMPT = 'You are a helpful AI assistant.';
 // it the CLI also boots every MCP server from the OPERATOR's own
 // `~/.claude.json`/project config, defeating the whole point of gating
 // dispatch on this user's own enabled+consented set.
-export function buildAnthropicCliArgs(prompt, mcpConfig) {
+export function buildAnthropicCliArgs(prompt, mcpConfig, model) {
   // Callers pass `null` for "no MCP this turn" (buildMcpConfigForUser's
   // return value for a restricted mode or zero enabled+consented plugins —
   // i.e. the common case) as well as `undefined`/omitted — a destructured
   // default parameter only covers the latter, so read via optional chaining
   // instead of `{ mcpConfigJson } = {}`, which throws on a literal `null`.
   const mcpConfigJson = mcpConfig?.mcpConfigJson;
-  const tail = ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '--system-prompt', ANTHROPIC_DEFAULT_PROMPT, '-p', prompt];
+  // `--model` rides the argv when the caller requested one — without it the
+  // CLI ran its own default for every call, silently ignoring the user's
+  // model picker AND the fast-model defaults of the mode classifier and
+  // memory extraction (a large chunk of per-turn latency on subscription
+  // installs, where every model call is a CLI spawn).
+  //
+  // Gated HERE, not per call site: picker values arrive raw and can hold
+  // non-Anthropic ids (Cursor/Copilot/Gemini) that the CLI path always
+  // silently dropped — passing them through would fail turns that work
+  // today. Claude ids and the CLI's own bare aliases pass; anything else
+  // (foreign id, dash-prefixed junk) omits the flag, keeping the CLI
+  // default those turns always ran on. Note CLAUDE_MODEL_RE (runtime.mjs)
+  // is NOT reusable here — it rejects the bare aliases.
+  const CLI_MODEL_OK = /^(claude-[a-z0-9.-]+|sonnet|haiku|opus)$/;
+  const modelArgs = typeof model === 'string' && CLI_MODEL_OK.test(model) ? ['--model', model] : [];
+  const tail = [...modelArgs, '--strict-mcp-config', '--setting-sources', '', '--tools', '', '--system-prompt', ANTHROPIC_DEFAULT_PROMPT, '-p', prompt];
   if (typeof mcpConfigJson === 'string' && mcpConfigJson.length > 0) {
     let serverIds = [];
     try { serverIds = Object.keys(JSON.parse(mcpConfigJson)?.mcpServers || {}); } catch { /* malformed → no servers allowed */ }
@@ -498,6 +513,10 @@ const CLI_ARG_BUILDERS = {
   // the real system prompt (persona, skills, tool defs) arrives in the user
   // message where the agent loop embeds it; this flag only clears the identity
   // conflict.
+  // NOTE: this default-builder entry carries NO model — it is unreachable in
+  // production today (runClaude's anthropic branch always passes argsOverride
+  // with the resolved model). If anthropic ever routes through runViaCli,
+  // thread the model here too or the model-drop latency bug returns silently.
   anthropic: (p) => buildAnthropicCliArgs(p),
   openai:    (p) => ['exec', p],   // codex exec "<prompt>"
   google:    (p) => ['-p', p],     // gemini -p "<prompt>"

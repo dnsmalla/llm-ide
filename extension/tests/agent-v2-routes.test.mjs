@@ -689,6 +689,95 @@ test('session delete: a degenerate sdk session id deletes nothing', async () => 
   }
 });
 
+// A fresh turn (or an unresumable-session recovery) REPLACES the chat's SDK
+// session mapping — the old session's transcript then belongs to no mapping
+// and session delete can never find it. The replacement itself must clean
+// the old session's transcripts, or every fresh retry leaks one on disk.
+test('stream: replacing the SDK session cleans the old session\'s transcripts', async () => {
+  const db = getDb();
+  const user = newUser('v2route-fresh-clean@example.com');
+  const oldId = '99999999-8888-4777-a666-555555555555';
+  const newId = '12121212-3434-4565-a787-909090909090';
+  markAgentSessionUsed(db, user.id, 'chat-fresh-clean', { sdkSessionId: oldId, model: 'claude-sonnet-5', mode: 'execute' });
+
+  const prevEnv = process.env.CLAUDE_CONFIG_DIR;
+  const ambientRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-fresh-clean-'));
+  process.env.CLAUDE_CONFIG_DIR = ambientRoot;
+  const ws = path.join(ambientRoot, 'projects', '-tmp-w');
+  fs.mkdirSync(ws, { recursive: true });
+  try {
+    fs.writeFileSync(path.join(ws, `${oldId}.jsonl`), '{}\n');
+
+    const fakeTurn = async ({ onEvent }) => {
+      onEvent({ type: 'init', sessionId: newId, tools: [], capabilities: [] });
+      onEvent({ type: 'result', subtype: 'success', sessionId: newId });
+      return { result: { subtype: 'success' }, usageTotals: {} };
+    };
+    const res = makeRes();
+    await handleAgentV2Routes(makeReq({
+      method: 'POST',
+      url: '/agent/v2/stream',
+      body: { message: 'go', mode: 'execute', fresh: true,
+              agentContext: { chatSessionId: 'chat-fresh-clean', workspaceRoot: WS } },
+      user,
+    }), res, { runTurn: fakeTurn });
+    assert.equal(res.ended, true);
+    assert.equal(getOrCreateAgentSession(db, user.id, 'chat-fresh-clean', 'explorer').sdk_session_id, newId);
+    assert.equal(fs.existsSync(path.join(ws, `${oldId}.jsonl`)), false,
+      'the replaced session\'s transcript must be cleaned up');
+
+    // Resume-as-fork protection: on a RESUMED turn (no fresh flag) that
+    // reports a different id, the old transcript is the conversation's
+    // parent history and must be KEPT — only replacement without a resume
+    // may clean it.
+    const forkParent = '77777777-6666-4555-a444-333333333333';
+    const forkChild = '20202020-3030-4040-a505-606060606060';
+    markAgentSessionUsed(db, user.id, 'chat-fork-keep', { sdkSessionId: forkParent, model: 'claude-sonnet-5', mode: 'execute' });
+    fs.writeFileSync(path.join(ws, `${forkParent}.jsonl`), '{}\n');
+    const forkTurn = async ({ onEvent }) => {
+      onEvent({ type: 'init', sessionId: forkChild, tools: [], capabilities: [] });
+      onEvent({ type: 'result', subtype: 'success', sessionId: forkChild });
+      return { result: { subtype: 'success' }, usageTotals: {} };
+    };
+    const res2 = makeRes();
+    await handleAgentV2Routes(makeReq({
+      method: 'POST',
+      url: '/agent/v2/stream',
+      body: { message: 'go', mode: 'execute',
+              agentContext: { chatSessionId: 'chat-fork-keep', workspaceRoot: WS } }, // no fresh → resume attempted
+      user,
+    }), res2, { runTurn: forkTurn });
+    assert.equal(res2.ended, true);
+    assert.equal(fs.existsSync(path.join(ws, `${forkParent}.jsonl`)), true,
+      'a resumed turn\'s parent transcript must never be deleted');
+  } finally {
+    if (prevEnv === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = prevEnv;
+    fs.rmSync(ambientRoot, { recursive: true, force: true });
+  }
+});
+
+// Chat deletion must not leave the chat's DB-backed session-memory facts
+// behind: the Mac's delete flow calls this route, and requiring a second
+// endpoint call for the memory rows makes cleanup depend on every client
+// remembering to make it.
+test('session delete: also removes the chat\'s session-memory rows', async () => {
+  const db = getDb();
+  const { appendSessionMemory, listSessionMemory } = await import('../kb/session-memory.mjs');
+  const user = newUser('v2route-del-memrows@example.com');
+  markAgentSessionUsed(db, user.id, 'chat-del-mem', { sdkSessionId: 'abcdefab-1111-4222-a333-444444444444', model: 'claude-sonnet-5', mode: 'execute' });
+  appendSessionMemory(user.id, 'chat-del-mem', ['[tooling|x] fact one']);
+  assert.equal(listSessionMemory(user.id, 'chat-del-mem').length, 1);
+
+  const res = makeRes();
+  await handleAgentV2Routes(makeReq({
+    method: 'DELETE', url: '/agent/v2/session', body: { chatSessionId: 'chat-del-mem' }, user,
+  }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(listSessionMemory(user.id, 'chat-del-mem').length, 0,
+    'session-memory rows must be removed with the chat');
+});
+
 // --- dispatcher contract --------------------------------------------------------
 
 test('non-/agent/v2 URLs fall through untouched (returns false)', async () => {

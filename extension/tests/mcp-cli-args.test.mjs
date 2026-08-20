@@ -33,3 +33,41 @@ test('a literal null mcpConfig (buildMcpConfigForUser\'s "no MCP" return value) 
   const args = buildAnthropicCliArgs('hello', null);
   assert.deepEqual(args, ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '--system-prompt', 'You are a helpful AI assistant.', '-p', 'hello']);
 });
+
+// The CLI path historically dropped the caller's model entirely — the model
+// picker and the fast-model defaults (mode classify, memory extraction) were
+// silently ignored on subscription installs. `--model` must ride the argv
+// when a model is requested, and stay absent otherwise.
+test('model → adds --model <name>; absent when no model requested', () => {
+  const withModel = buildAnthropicCliArgs('hello', null, 'claude-haiku-4-5-20251001');
+  assert.equal(withModel[withModel.indexOf('--model') + 1], 'claude-haiku-4-5-20251001');
+  assert.equal(withModel[withModel.length - 1], 'hello'); // -p prompt still last
+
+  const without = buildAnthropicCliArgs('hello', null);
+  assert.ok(!without.includes('--model'));
+  const emptyModel = buildAnthropicCliArgs('hello', null, '');
+  assert.ok(!emptyModel.includes('--model'));
+});
+
+// The gate lives in the builder itself so every call site is safe: the Mac
+// picker can hold non-Anthropic ids (Cursor/Copilot/Gemini) that used to be
+// silently dropped on the CLI path — passing them through would turn those
+// working subscription turns into CLI errors. Claude ids and the CLI's own
+// bare aliases pass; anything else (foreign id, dash-prefixed junk) omits
+// the flag, restoring the CLI-default behavior those turns always had.
+test('model gate: foreign/dash-prefixed ids are omitted; claude ids and bare aliases pass', () => {
+  assert.ok(!buildAnthropicCliArgs('h', null, 'gpt-4o').includes('--model'));
+  assert.ok(!buildAnthropicCliArgs('h', null, 'gemini-2.0-flash').includes('--model'));
+  assert.ok(!buildAnthropicCliArgs('h', null, '--verbose').includes('--model'));
+  const alias = buildAnthropicCliArgs('h', null, 'haiku');
+  assert.equal(alias[alias.indexOf('--model') + 1], 'haiku');
+  const full = buildAnthropicCliArgs('h', null, 'claude-sonnet-4-6');
+  assert.equal(full[full.indexOf('--model') + 1], 'claude-sonnet-4-6');
+});
+
+test('model composes with mcpConfigJson (both flag groups present)', () => {
+  const json = '{"mcpServers":{"slack":{"command":"npx","args":[]}}}';
+  const args = buildAnthropicCliArgs('hello', { mcpConfigJson: json }, 'claude-haiku-4-5-20251001');
+  assert.ok(args.includes('--mcp-config'));
+  assert.equal(args[args.indexOf('--model') + 1], 'claude-haiku-4-5-20251001');
+});

@@ -427,7 +427,7 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
         // common no-MCP case. SP1: MCP reaches the CLI fallback only; the
         // Anthropic HTTP API (the fetch branch above) cannot carry
         // --mcp-config, so this argsOverride is deliberately NOT applied there.
-        args: buildAnthropicCliArgs(prompt, mcpConfig),
+        args: buildAnthropicCliArgs(prompt, mcpConfig, resolvedModel),
       });
       // Subscription/CLI mode can't report tokens — record one run so it still
       // counts toward run-based limits and the dashboard.
@@ -619,7 +619,7 @@ export async function streamModelReply(prompt, {
       : undefined;
     // mcpConfig only means anything for the anthropic CLI's own argv shape
     // (buildAnthropicCliArgs); openai/google keep their default argv.
-    const argsOverride = provider === 'anthropic' ? buildAnthropicCliArgs(prompt, mcpConfig) : undefined;
+    const argsOverride = provider === 'anthropic' ? buildAnthropicCliArgs(prompt, mcpConfig, model) : undefined;
     try {
       // apiKey is never truthy here for the anthropic case — if it were, the
       // direct-API branch above would already have returned. No provider's

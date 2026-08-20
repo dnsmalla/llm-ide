@@ -14,7 +14,13 @@
 import { tryParseJSON } from '../../providers/runtime.mjs';
 import { factKey, factIndex } from '../../graphkit/memory-writer.mjs';
 
-const EXTRACT_MODEL = process.env.LLMIDE_SUMMARIZE_MODEL || process.env.LLMIDE_MODEL || undefined;
+// Fast tier by default: extraction is a 512-token classification-style call
+// that runs fire-and-forget after EVERY turn — on the CLI path it measured
+// minutes on the server's default model, pure overhead for a task Haiku
+// handles. Env overrides keep working for operators who want a bigger model.
+export const EXTRACT_MODEL = process.env.LLMIDE_SUMMARIZE_MODEL
+  || process.env.LLMIDE_MODEL
+  || 'claude-haiku-4-5-20251001';
 const MAX_NEW_FACTS = 5;
 const MAX_FACT_CHARS = 280;
 // Keep the inputs bounded so a huge turn can't blow the extractor's budget.

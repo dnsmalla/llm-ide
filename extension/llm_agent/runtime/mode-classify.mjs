@@ -19,9 +19,13 @@ const log = logger.child({ component: 'mode-classify' });
 // access instead of the intended restriction. See route.mjs's resolvedMode.
 export const MODES = new Set(['plan', 'assist_plan', 'review', 'document', 'execute']);
 
-const MODEL = process.env.LLMIDE_MODE_CLASSIFY_MODEL
+// Fast tier by default: a 5-way mode classification in ≤128 tokens is well
+// within Haiku, and this call runs SERIALLY before every 'auto' turn (and
+// before the v2 per-chat lock) — on the CLI path each spawn of a big default
+// model added seconds of pure pre-turn latency. Env overrides still win.
+export const MODEL = process.env.LLMIDE_MODE_CLASSIFY_MODEL
            || process.env.LLMIDE_MODEL
-           || 'claude-sonnet-4-6';
+           || 'claude-haiku-4-5-20251001';
 
 // Exported so a test can assert on the disambiguating language directly —
 // mocking `_runClaude` can only verify the JSON-plumbing round-trip, not
