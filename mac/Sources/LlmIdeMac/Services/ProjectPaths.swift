@@ -28,9 +28,30 @@ enum ProjectPaths {
     }
 
     /// True when `url` lives inside `root` (directory-boundary aware).
+    /// Compared on canonical paths (symlinks resolved, case-insensitive):
+    /// the same folder can be spelled with a different case or reached via
+    /// a symlink — macOS volumes are case-insensitive by default — and a
+    /// literal prefix compare then misclassifies an in-project folder as
+    /// external (double-indexing every file) or copies an in-project file
+    /// onto itself. Must stay in step with the store's canonical
+    /// `projectRoot` (LibraryItemStore.bindProject) — one rule, two sides.
     static func isInside(_ url: URL, root: URL) -> Bool {
-        let r = root.standardizedFileURL.path
-        let p = url.standardizedFileURL.path
-        return p == r || p.hasPrefix(r.hasSuffix("/") ? r : r + "/")
+        let r = canonicalPath(root)
+        let p = canonicalPath(url)
+        if p.compare(r, options: .caseInsensitive) == .orderedSame { return true }
+        let prefix = r.hasSuffix("/") ? r : r + "/"
+        guard p.count > prefix.count else { return false }
+        return String(p.prefix(prefix.count)).compare(prefix, options: .caseInsensitive) == .orderedSame
+    }
+
+    /// On-disk canonical path (case + symlinks) when the entry exists;
+    /// the standardized spelling otherwise — nonexistent paths still
+    /// compare consistently against themselves.
+    private static func canonicalPath(_ url: URL) -> String {
+        let standardized = url.standardizedFileURL
+        if let canonical = (try? standardized.resourceValues(forKeys: [.canonicalPathKey]))?.canonicalPath {
+            return canonical
+        }
+        return standardized.resolvingSymlinksInPath().path
     }
 }

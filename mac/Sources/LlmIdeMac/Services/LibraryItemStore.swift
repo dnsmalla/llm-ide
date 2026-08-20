@@ -49,7 +49,12 @@ final class LibraryItemStore {
     /// legacy migration before the first scan.  Always finishes with a
     /// `rescan()` so `items` reflects the freshly-bound project.
     func bindProject(root: URL?) {
-        let normalized = root?.standardizedFileURL
+        // Resolve to the ON-DISK canonical path (case + symlinks): the
+        // recents list can carry a differently-cased spelling of the same
+        // folder ("…/LLM" vs "…/llm"), and every downstream prefix
+        // comparison against enumerator-reported paths assumes the on-disk
+        // case. Fall back to the standardized URL when the folder is gone.
+        let normalized = Self.canonicalRoot(root)
         if normalized?.path == projectRoot?.path { return }
         projectRoot = normalized
         if let root = normalized {
@@ -316,6 +321,20 @@ final class LibraryItemStore {
         rescan()
     }
 
+    /// Resolve a project root to its ON-DISK canonical URL (case +
+    /// symlinks); a missing folder falls back to the standardized URL.
+    /// Pure (bar the one resourceValues read) and nonisolated so tests can
+    /// pin it without going through `bindProject` — whose legacy-index
+    /// migration touches the real Application Support directory.
+    nonisolated static func canonicalRoot(_ root: URL?) -> URL? {
+        guard let root else { return nil }
+        let url = root.standardizedFileURL
+        if let canonical = (try? url.resourceValues(forKeys: [.canonicalPathKey]))?.canonicalPath {
+            return URL(fileURLWithPath: canonical)
+        }
+        return url
+    }
+
     /// The single place external-folder paths are normalized.  Standardizes
     /// each path (resolves `..`, `~`, trailing slash) so membership checks and
     /// dedup compare standardized-vs-standardized — avoiding duplicate refs
@@ -331,8 +350,18 @@ final class LibraryItemStore {
     nonisolated static func relativeDirComponents(of fileURL: URL, under root: URL) -> [String] {
         let rootComps = root.standardizedFileURL.pathComponents
         let fileComps = fileURL.standardizedFileURL.pathComponents
-        guard fileComps.count > rootComps.count,
-              Array(fileComps.prefix(rootComps.count)) == rootComps else { return [] }
+        guard fileComps.count > rootComps.count else { return [] }
+        // Case-insensitive prefix match: FileManager.enumerator reports the
+        // ON-DISK case while the caller's root keeps whatever case it was
+        // opened with — macOS volumes are case-insensitive by default, so
+        // "…/Desktop/LLM" and "…/Desktop/llm" are the same directory. A
+        // case-sensitive compare here returned [] for every file and
+        // flattened the whole CODE tree. Callers only ever pass a file
+        // against the root it was enumerated from, so on a case-SENSITIVE
+        // volume this can never merge two genuinely distinct directories.
+        guard zip(rootComps, fileComps).allSatisfy({
+            $0.compare($1, options: .caseInsensitive) == .orderedSame
+        }) else { return [] }
         // Drop the filename (last component); keep the dirs in between.
         return Array(fileComps[rootComps.count..<(fileComps.count - 1)])
     }
