@@ -75,10 +75,17 @@ export function authenticate(req) {
   return true;
 }
 
-// Helper for handlers that must be admin-only.  Use sparingly — most
-// authorization is "owner of resource" which lives in the route logic.
+// Historically gated admin-only handlers. Product decision (2026-08-20):
+// LLM-IDE is a local-first, single-operator install — there is no admin
+// role distinction, and every authenticated user has full permission.
+// (The old first-registered-user-becomes-admin bootstrap was silently
+// defeated on real installs whose first-user slot was consumed by the
+// legacy-migration row or leaked fixture rows, permanently locking every
+// user out of the gated features with no recovery path.) The function and
+// its call sites stay so a future multi-operator deployment can reintroduce
+// a real check in one place; today it only requires authentication.
 export function requireAdmin(req) {
-  if (!req.user || req.user.role !== 'admin') {
-    throw errForbidden('Admin role required');
+  if (!req.user) {
+    throw errForbidden('Authentication required');
   }
 }

@@ -489,21 +489,25 @@ test('POST /auth/me/plugins/toggle validates the plugin slug and installed-state
   assert.equal(notInstalled.statusCode, 400);
 });
 
-test('plugin admin-gated routes reject a non-admin caller', async () => {
+test('plugin management routes are open to every authenticated user (no admin concept)', async () => {
+  // Product decision (2026-08-20): LLM-IDE is a local-first single-operator
+  // install — there is no admin role distinction; every authenticated user
+  // has full permission. These calls may still fail per-route validation,
+  // but never with a 403 permission wall.
   const { user } = await registerAndLogin();
-  const u = { id: user.id }; // no role -> not 'admin'
+  const u = { id: user.id }; // no role claim — previously rejected as non-admin
 
   const reload = await callAuth({ method: 'POST', url: '/auth/me/plugins/reload', user: u });
-  assert.equal(reload.statusCode, 403);
+  assert.notEqual(reload.statusCode, 403);
 
   const install = await callAuth({ method: 'POST', url: '/auth/me/plugins/install', user: u, rawBody: Buffer.from('not a zip') });
-  assert.equal(install.statusCode, 403);
+  assert.notEqual(install.statusCode, 403);
 
   const uninstallRes = await callAuth({ method: 'DELETE', url: '/auth/me/plugins/uninstall/whatever', user: u });
-  assert.equal(uninstallRes.statusCode, 403);
+  assert.notEqual(uninstallRes.statusCode, 403);
 
   const importReq = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/import', user: u, body: { source: 'installed', name: 'whatever' } });
-  assert.equal(importReq.statusCode, 403);
+  assert.notEqual(importReq.statusCode, 403);
 });
 
 test('DELETE /auth/me/plugins/uninstall/<name> rejects a path-traversal name before touching the filesystem', async () => {
@@ -813,18 +817,18 @@ test('POST /auth/me/llm-sources/refresh-default forwards noSources through the w
   assert.ok(rebuilt.json().counts.sources >= 1);
 });
 
-test('llm-sources admin-gated routes reject a non-admin caller', async () => {
+test('llm-sources management routes are open to every authenticated user (no admin concept)', async () => {
   const { user } = await registerAndLogin();
-  const u = { id: user.id }; // no role -> not 'admin'
+  const u = { id: user.id }; // no role claim — previously rejected as non-admin
 
   const add = await callAuth({ method: 'POST', url: '/auth/me/llm-sources/add', user: u, body: { path: '/tmp' } });
-  assert.equal(add.statusCode, 403);
+  assert.notEqual(add.statusCode, 403);
 
   const update = await callAuth({ method: 'POST', url: '/auth/me/llm-sources/update', user: u, body: { id: 'builtin' } });
-  assert.equal(update.statusCode, 403);
+  assert.notEqual(update.statusCode, 403);
 
   const remove = await callAuth({ method: 'DELETE', url: '/auth/me/llm-sources/whatever', user: u });
-  assert.equal(remove.statusCode, 403);
+  assert.notEqual(remove.statusCode, 403);
 });
 
 test('DELETE /auth/me/llm-sources/<id> rejects an invalid id and rejects removing builtin', async () => {
@@ -910,15 +914,15 @@ test('GET /auth/me/llm-sources reports agentCount + hookCount + mcpCount alongsi
 
 // ---- MCP plugins (SP1) --------------------------------------------------
 
-test('mcp-plugins admin-gated routes reject a non-admin caller', async () => {
+test('mcp-plugins routes are open to every authenticated user (no admin concept)', async () => {
   const { user } = await registerAndLogin();
-  const u = { id: user.id }; // not admin
+  const u = { id: user.id }; // no role claim — previously rejected as non-admin
   const scan = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins/claude-sources', user: u });
-  assert.equal(scan.statusCode, 403);
+  assert.equal(scan.statusCode, 200, 'the scan is read-only and must succeed outright for any user');
   const codexScan = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins/codex-sources', user: u });
-  assert.equal(codexScan.statusCode, 403);
+  assert.equal(codexScan.statusCode, 200);
   const add = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: u, body: { command: 'npx', args: [] } });
-  assert.equal(add.statusCode, 403);
+  assert.notEqual(add.statusCode, 403, 'add may fail validation but never on permissions');
 });
 
 test('GET /auth/me/mcp-plugins/codex-sources scans config.toml; POST add via codexName resolves it server-side', async () => {

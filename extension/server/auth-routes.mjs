@@ -1243,16 +1243,17 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
 
   // MCP plugins (SP1): servers imported from ~/.claude.json or registered
   // manually, gated by per-user consent + enable before they reach the
-  // Claude CLI's --mcp-config. Admin registers/scans/removes; any user
+  // Claude CLI's --mcp-config. Every authenticated user registers/scans/
+  // removes (no admin concept — see requireAdmin's doc comment); any user
   // consents + enables their own dispatch. See docs/superpowers/specs/
   // 2026-08-12-mcp-plugin-runtime-design.md.
   // GET    /auth/me/mcp-plugins                 → list + per-user consent/enable
-  // GET    /auth/me/mcp-plugins/claude-sources   → scan ~/.claude.json      (admin)
-  // GET    /auth/me/mcp-plugins/codex-sources    → scan ~/.codex/config.toml (admin)
-  // POST   /auth/me/mcp-plugins/add              → { command,args,env,name,source } | { claudeName } | { codexName } (admin)
+  // GET    /auth/me/mcp-plugins/claude-sources   → scan ~/.claude.json
+  // GET    /auth/me/mcp-plugins/codex-sources    → scan ~/.codex/config.toml
+  // POST   /auth/me/mcp-plugins/add              → { command,args,env,name,source } | { claudeName } | { codexName }
   // POST   /auth/me/mcp-plugins/consent          → { id, consented }
   // POST   /auth/me/mcp-plugins/toggle           → { id, enabled }
-  // DELETE /auth/me/mcp-plugins/<id>                                       (admin)
+  // DELETE /auth/me/mcp-plugins/<id>
   if (method === 'GET' && url.split('?')[0] === '/auth/me/mcp-plugins') {
     const { listMcpPluginsWithState } = await import('../mcp/state.mjs');
     const { plugins } = listMcpPluginsWithState(req.user.id);

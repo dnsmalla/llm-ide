@@ -1090,9 +1090,9 @@ struct LibraryView: View {
 
     private func refreshMcpPlugins() async { await loadMcpPlugins() }
 
-    /// Admin-only scan; a non-admin caller's 403 is swallowed here — the
-    /// submenu just stays empty, matching the read-only nature of the scan
-    /// (nothing actionable for a non-admin to retry).
+    /// Read-only scan, available to every authenticated user (the server
+    /// dropped its admin gate — LLM-IDE has no admin concept). A transport
+    /// failure is swallowed: the submenu just stays empty until a Rescan.
     private func scanClaudeSources() async {
         mcpClaudeSources = (try? await api.scanClaudeMcpSources()) ?? []
     }
@@ -1107,9 +1107,9 @@ struct LibraryView: View {
         }
     }
 
-    /// Admin-only scan; a non-admin caller's 403 is swallowed here — the
-    /// submenu just stays empty, matching the read-only nature of the scan
-    /// (nothing actionable for a non-admin to retry).
+    /// Read-only scan, available to every authenticated user (the server
+    /// dropped its admin gate — LLM-IDE has no admin concept). A transport
+    /// failure is swallowed: the submenu just stays empty until a Rescan.
     private func scanCodexSources() async {
         mcpCodexSources = (try? await api.scanCodexMcpSources()) ?? []
     }
