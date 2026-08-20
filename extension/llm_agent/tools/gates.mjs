@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 //
 // Safety classification for 'act'-kind registry entries (tools/registry.mjs),
 // consulted identically by both engines (spec §7). Three tiers:
@@ -59,4 +62,44 @@ export function runBashGate(command) {
 
 export function autoGate() {
   return 'auto';
+}
+
+/**
+ * Containment gate for native Edit/Write targets on the v2 engine.
+ *
+ * 'prompt'  — the target resolves inside one of `roots` (the approval ladder
+ *             continues: always-allow, then a parked ToolApproval).
+ * 'blocked' — everything else. Like a blocked bash command, this tier is
+ *             never promptable and never always-allowable: symlink and `..`
+ *             escapes must not be one careless click away.
+ *
+ * The file itself may not exist yet (Write creates files), so containment is
+ * checked on the nearest EXISTING ancestor's realpath plus the remaining
+ * lexical suffix — a symlink anywhere in the existing part cannot escape.
+ */
+export function writePathGate(filePath, roots) {
+  if (typeof filePath !== 'string' || !filePath) return 'blocked';
+  if (!Array.isArray(roots) || roots.length === 0) return 'blocked';
+  const primary = roots[0];
+  const abs = path.isAbsolute(filePath) ? path.normalize(filePath) : path.resolve(primary, filePath);
+  let existing = abs;
+  while (!fs.existsSync(existing)) {
+    const parent = path.dirname(existing);
+    if (parent === existing) return 'blocked';
+    existing = parent;
+  }
+  let resolved;
+  try {
+    const real = fs.realpathSync(existing);
+    const suffix = path.relative(existing, abs);
+    resolved = suffix ? path.join(real, suffix) : real;
+  } catch {
+    return 'blocked';
+  }
+  const inside = (root) => {
+    let realRoot;
+    try { realRoot = fs.realpathSync(root); } catch { return false; }
+    return resolved === realRoot || resolved.startsWith(realRoot + path.sep);
+  };
+  return roots.some(inside) ? 'prompt' : 'blocked';
 }
