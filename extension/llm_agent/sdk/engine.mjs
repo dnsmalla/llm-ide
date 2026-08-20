@@ -399,6 +399,35 @@ export async function runAgentV2Turn(
   // whatever the stream reports (the init message carries it first).
   let currentSdkSessionId = resume;
 
+  // Park one ToolApproval and await the human decision — the shared tail of
+  // the act-tool branch and (Task 3) the native Edit/Write/Bash branch.
+  // `args` is the structured payload the Mac renders as a diff; older
+  // clients ignore it and keep reading argsSummary.
+  const awaitToolApproval = async ({ toolName, argsSummary, args = null, input, callSignal }) => {
+    const sessionId = currentSdkSessionId;
+    const { requestId, promise } = registerDecision({ sdkSessionId: sessionId, userId, kind: 'ToolApproval' });
+    const onAbort = () => { abortDecisionsForSession(sessionId); };
+    const signals = [callSignal, signal].filter(Boolean);
+    for (const s of signals) {
+      if (s.aborted) onAbort();
+      else s.addEventListener('abort', onAbort, { once: true });
+    }
+    const detach = () => { for (const s of signals) s.removeEventListener('abort', onAbort); };
+    try {
+      onEvent?.({ type: 'approval_request', requestId, kind: 'ToolApproval', toolName, argsSummary, ...(args ? { args } : {}) });
+      const outcome = await promise;
+      onEvent?.({ type: 'approval_resolved', requestId, outcome: outcome.action });
+      if (outcome.action === 'always-allow') {
+        setAlwaysAllow(userId, toolName);
+        return { behavior: 'allow', updatedInput: input };
+      }
+      if (outcome.action === 'allow') return { behavior: 'allow', updatedInput: input };
+      return { behavior: 'deny', message: DENY_NO_ANSWER };
+    } finally {
+      detach();
+    }
+  };
+
   const canUseTool = async (toolName, input, callOpts) => {
     const registryName = toolName.startsWith('mcp__llmide__') ? toolName.slice('mcp__llmide__'.length) : null;
     const entry = registryName ? registryGet(registryName) : null;
@@ -435,28 +464,12 @@ export async function runAgentV2Turn(
       // Genuinely block on a human decision, parked
       // the same way an AskUserQuestion is (requestId, approval_request/
       // approval_resolved events, abort-on-disconnect).
-      const sessionId = currentSdkSessionId;
-      const { requestId, promise } = registerDecision({ sdkSessionId: sessionId, userId, kind: 'ToolApproval' });
-      const onAbort = () => { abortDecisionsForSession(sessionId); };
-      const signals = [callOpts?.signal, signal].filter(Boolean);
-      for (const s of signals) {
-        if (s.aborted) onAbort();
-        else s.addEventListener('abort', onAbort, { once: true });
-      }
-      const detach = () => { for (const s of signals) s.removeEventListener('abort', onAbort); };
-      try {
-        onEvent?.({ type: 'approval_request', requestId, kind: 'ToolApproval', toolName: entry.name, argsSummary: JSON.stringify(input) });
-        const outcome = await promise;
-        onEvent?.({ type: 'approval_resolved', requestId, outcome: outcome.action });
-        if (outcome.action === 'always-allow') {
-          setAlwaysAllow(userId, entry.name);
-          return { behavior: 'allow', updatedInput: input };
-        }
-        if (outcome.action === 'allow') return { behavior: 'allow', updatedInput: input };
-        return { behavior: 'deny', message: DENY_NO_ANSWER };
-      } finally {
-        detach();
-      }
+      return awaitToolApproval({
+        toolName: entry.name,
+        argsSummary: JSON.stringify(input),
+        input,
+        callSignal: callOpts?.signal,
+      });
     }
     // Park the decision; the SDK await below may legitimately block for
     // minutes while a human decides on the other side of the SSE stream.
