@@ -105,4 +105,43 @@ final class LoopMessagesTests: XCTestCase {
         XCTAssertEqual(try roundTrip(LoopHistoryRequest(limit: 5)).limit, 5)
         XCTAssertNil(try roundTrip(LoopHistoryRequest()).limit)
     }
+
+    // MARK: — loop_start_stage (per-stage run)
+
+    func testStartStageTagIsStableAndRoutes() {
+        XCTAssertEqual(MobileProtocol.Tag.loopStartStage, "loop_start_stage")
+        XCTAssertTrue(MobileProtocol.Tag.loopStartStage.hasPrefix("loop_"), "would not route")
+    }
+
+    func testStartStageRoundTripsAndCarriesOnlyTypeAndStageId() throws {
+        let msg = LoopStartStage(stageId: "stage-uuid-1")
+        let back = try roundTrip(msg)
+        XCTAssertEqual(back, msg)
+        XCTAssertEqual(back.type, MobileProtocol.Tag.loopStartStage)
+        XCTAssertEqual(back.stageId, "stage-uuid-1")
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(msg)) as? [String: Any])
+        XCTAssertEqual(Set(json.keys), ["type", "stageId"])
+    }
+
+    /// A stage row from a NEW Mac carries the Mac-side stage id the phone
+    /// targets with loop_start_stage.
+    func testStageInfoRoundTripsStageId() throws {
+        let info = LoopStageInfo(name: "Test", kind: "shellCommand", severity: "blocking",
+                                 enabled: false, order: 1, stageId: "stage-uuid-2")
+        let back = try roundTrip(info)
+        XCTAssertEqual(back.stageId, "stage-uuid-2")
+    }
+
+    /// A stage row from an OLD Mac (no stageId key) must decode with nil —
+    /// the phone then hides its per-stage run button instead of failing the
+    /// whole snapshot decode.
+    func testStageInfoDecodesOldMacJSONWithoutStageId() throws {
+        let oldMacJSON = Data("""
+        {"name":"Regression","kind":"regressionSweep","severity":"blocking","enabled":true,"order":0}
+        """.utf8)
+        let info = try JSONDecoder().decode(LoopStageInfo.self, from: oldMacJSON)
+        XCTAssertNil(info.stageId)
+        XCTAssertEqual(info.name, "Regression")
+    }
 }

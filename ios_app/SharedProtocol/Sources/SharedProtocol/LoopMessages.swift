@@ -26,14 +26,20 @@ public struct LoopStageInfo: Codable, Equatable, Identifiable {
     public let severity: String
     public let enabled: Bool
     public let order: Int
+    /// Mac-side `LoopStage.id` — the handle `loop_start_stage` targets.
+    /// Optional: an older Mac's snapshot omits it, and the phone then hides
+    /// its per-stage run buttons rather than sending an id it doesn't have.
+    public let stageId: String?
     public var id: String { "\(order)-\(name)" }
 
-    public init(name: String, kind: String, severity: String, enabled: Bool, order: Int) {
+    public init(name: String, kind: String, severity: String, enabled: Bool, order: Int,
+                stageId: String? = nil) {
         self.name = name
         self.kind = kind
         self.severity = severity
         self.enabled = enabled
         self.order = order
+        self.stageId = stageId
     }
 }
 
@@ -95,6 +101,20 @@ public struct LoopStart: Codable, Equatable {
     public let type = MobileProtocol.Tag.loopStart
     public init() {}
     private enum CodingKeys: String, CodingKey { case type }
+}
+
+/// Run exactly one stage of the active project's loop — the Mac force-enables
+/// it and disables every other stage for this one run, the same semantics as
+/// the desktop's "Run this stage only" menu action. A NEW tag rather than an
+/// optional field on `LoopStart`: an older Mac ignores unknown JSON fields, so
+/// a one-stage request would silently run the WHOLE pipeline; an unknown tag
+/// gets no reply at all, which the phone already surfaces as "the Mac didn't
+/// answer".
+public struct LoopStartStage: Codable, Equatable {
+    public let type = MobileProtocol.Tag.loopStartStage
+    public let stageId: String
+    public init(stageId: String) { self.stageId = stageId }
+    private enum CodingKeys: String, CodingKey { case type, stageId }
 }
 
 /// Stop the in-flight run.
