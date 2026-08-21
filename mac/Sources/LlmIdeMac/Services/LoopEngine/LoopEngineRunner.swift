@@ -45,6 +45,16 @@ final class LoopEngineRunner: ObservableObject {
     /// catch that, since each caller constructs its own runner instance.
     @MainActor private static var activeRoots: Set<String> = []
 
+    /// Whether ANY runner instance is mid-run on `gitRoot`, resolved the same
+    /// way `activeRoots` keys it. Read-only view of the guard above, for
+    /// callers that need to report on a run they do not own — the mobile
+    /// bridge asks this so the phone can never show "idle" while the desktop
+    /// is mid-run, without either side having to share a runner instance.
+    @MainActor
+    static func isRunActive(gitRoot: URL) -> Bool {
+        activeRoots.contains(gitRoot.resolvingSymlinksInPath().path)
+    }
+
     private let verifier: FaultVerifier
     private let stageRepairer: LoopStageRepairer
     private let regressionSweep: RegressionSweepRunning

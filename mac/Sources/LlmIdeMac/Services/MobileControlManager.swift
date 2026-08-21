@@ -62,6 +62,11 @@ final class MobileControlManager {
     /// Local Node backend supervisor — used for `mac_status` snapshots.
     var backendManager: BackendManager?
 
+    /// True while a run this manager triggered is in flight. Purely for
+    /// reporting — the authority on whether a loop is running is the runner's
+    /// process-wide guard, which also covers runs started on the desktop.
+    private var loopStartedHere = false
+
     /// Persisted `@file` / `/skill` browse indexes under Application Support settings/.
     let exploreIndex = MobileExploreIndexStore()
 
@@ -331,6 +336,8 @@ final class MobileControlManager {
             handleExplore(type: t, data: data)
         case let t where t.hasPrefix("auto_task_"):
             handleAutoTask(type: t, data: data)
+        case let t where t.hasPrefix("loop_"):
+            handleLoop(type: t, data: data)
         default:
             append(.info, "Unhandled inbound type: \(env.type)")
         }
@@ -804,6 +811,133 @@ final class MobileControlManager {
             return name
         }
         return ProcessInfo.processInfo.hostName
+    }
+
+    // MARK: - Loop (remote control)
+
+    /// Handle `loop_*` messages: snapshot / start / stop / history for the
+    /// active project's Loop.
+    ///
+    /// The phone is a CONTROL SURFACE only — no part of running a loop lives
+    /// on it or in this handler. Starting one delegates to the Mac's existing
+    /// `loopEngineering` auto task, which is the single path that already
+    /// wires every dependency a run needs (stage repairer, regression sweep,
+    /// skill executor, journal) and produces a journal record identical to a
+    /// scheduled run's. Reimplementing that here would have been a second
+    /// runner construction to keep in step with the first.
+    private func handleLoop(type: String, data: Data) {
+        switch type {
+        case MobileProtocol.Tag.loopStatusList:
+            reply(buildLoopState())
+
+        case MobileProtocol.Tag.loopStart:
+            guard let autoCode else {
+                replyNotConfigured(commandId: "loop_start", logLabel: "loop_start")
+                return
+            }
+            let state = buildLoopState()
+            // Refuse for a concrete reason rather than firing a run that the
+            // Mac would reject a moment later for the same reason.
+            guard state.configured else {
+                append(.stderr, "loop_start: no project or no saved loop config")
+                reply(LoopAck(accepted: false,
+                              message: "No loop is set up for the active project. Create one on the Mac first."))
+                return
+            }
+            guard !state.running else {
+                append(.info, "loop_start ignored — a run is already in flight")
+                reply(LoopAck(accepted: false, message: "A loop run is already in progress."))
+                return
+            }
+            // runSingle is @MainActor-sync and spins its own Task; false means
+            // the scheduler declined (already busy).
+            let started = autoCode.runSingle(.loopEngineering)
+            loopStartedHere = started
+            append(started ? .info : .stderr, "loop_start \(started ? "accepted" : "declined by scheduler")")
+            reply(LoopAck(accepted: started,
+                          message: started ? "Loop started." : "The Mac declined to start a run right now."))
+
+        case MobileProtocol.Tag.loopStop:
+            guard let autoCode else {
+                replyNotConfigured(commandId: "loop_stop", logLabel: "loop_stop")
+                return
+            }
+            autoCode.stop()
+            loopStartedHere = false
+            append(.info, "loop_stop requested from phone")
+            reply(LoopAck(accepted: true, message: "Stop requested."))
+
+        case MobileProtocol.Tag.loopHistory:
+            let limit = (try? decoder.decode(LoopHistoryRequest.self, from: data))?.limit ?? 15
+            reply(LoopHistoryReply(runs: loopHistory(limit: min(max(limit, 1), 50))))
+
+        default:
+            append(.info, "Unhandled loop type: \(type)")
+        }
+    }
+
+    /// Snapshot of the active project's loop. `running` deliberately reads the
+    /// runner's PROCESS-WIDE guard rather than anything this manager owns, so a
+    /// run started on the desktop or by the scheduler is reported honestly
+    /// instead of appearing idle to the phone.
+    private func buildLoopState() -> LoopState {
+        guard let config, let projectStore,
+              let project = projectStore.activeProject,
+              let context = WorkspaceRoot.context(config: config, projectStore: projectStore) else {
+            return LoopState(configured: false, projectName: nil, running: false, startedHere: false,
+                             iteration: 0, maxIterations: 0, logTail: [], lastStatusSummary: nil,
+                             lastFinishedAt: nil, stages: [])
+        }
+        let projectId = project.bundle.id
+        let loopConfig = LoopEngineConfigStore.load(projectRoot: context.projectRoot, projectId: projectId)
+        let running = context.gitRoot.map { LoopEngineRunner.isRunActive(gitRoot: $0) } ?? false
+        let recent = loopHistory(limit: 1).first
+
+        let tail = (logStore?.buffers[AutoTask.loopEngineering.rawValue] ?? [])
+            .suffix(40)
+            .map { "\($0.text)" }
+
+        return LoopState(
+            configured: loopConfig != nil,
+            projectName: project.bundle.displayName,
+            running: running,
+            // Cleared whenever a run is not in flight, so a stale "started
+            // here" can't outlive the run it described.
+            startedHere: running && loopStartedHere,
+            // The runner's live iteration count is instance state on a runner
+            // this manager does not own, so it is not reported as a number the
+            // phone could misread as authoritative. The log tail carries the
+            // per-iteration lines the desktop shows.
+            iteration: 0,
+            maxIterations: loopConfig?.maxIterations ?? 0,
+            logTail: Array(tail),
+            lastStatusSummary: recent?.statusSummary,
+            lastFinishedAt: recent.map { $0.startedAt + $0.durationSeconds },
+            stages: (loopConfig?.stages ?? [])
+                .sorted { $0.order < $1.order }
+                .map {
+                    LoopStageInfo(name: $0.name, kind: $0.kind.rawValue,
+                                  severity: $0.severity.rawValue,
+                                  enabled: $0.enabled ?? true, order: $0.order)
+                }
+        )
+    }
+
+    /// Finished runs from the Mac's append-only journal index. The journal is
+    /// written once per run at completion, so this is history only — live
+    /// progress comes from the log tail above.
+    private func loopHistory(limit: Int) -> [LoopRunSummary] {
+        guard let config, let projectStore,
+              let context = WorkspaceRoot.context(config: config, projectStore: projectStore) else { return [] }
+        return FileLoopRunJournal().recentRuns(root: context.projectRoot, limit: limit).map {
+            LoopRunSummary(id: $0.id,
+                           startedAt: $0.startedAt.timeIntervalSince1970,
+                           durationSeconds: $0.durationSeconds,
+                           iterationsUsed: $0.iterationsUsed,
+                           statusCode: $0.statusCode,
+                           statusSummary: $0.statusSummary,
+                           trigger: $0.trigger.rawValue)
+        }
     }
 
     private func append(_ stream: MobileLogLine.Stream, _ text: String) {
