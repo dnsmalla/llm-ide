@@ -79,10 +79,32 @@ struct RegisterRequest: Encodable {
 }
 
 struct SessionResponse: Decodable {
-    let user: UserInfo
+    /// Optional because older servers omit `user` on /auth/refresh (login
+    /// always sends it). Treating it as required made the refresh response
+    /// undecodable, which dropped the just-rotated refresh token on the
+    /// floor and ended in a full logout via the server's reuse detection.
+    /// `SessionStore.adopt` keeps the current user when this is nil.
+    let user: UserInfo?
     let accessToken: String
     let refreshToken: String
     let accessTokenTTLSec: Int
+
+    enum CodingKeys: String, CodingKey {
+        case user, accessToken, refreshToken, accessTokenTTLSec
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // `try?` so a present-but-malformed `user` (server drift) degrades
+        // to the keep-current-user path instead of failing the whole
+        // response — by the time this decodes, the server has ALREADY
+        // rotated the refresh token, and losing that response is what
+        // caused the silent-logout cascade this type documents above.
+        user = try? c.decodeIfPresent(UserInfo.self, forKey: .user)
+        accessToken = try c.decode(String.self, forKey: .accessToken)
+        refreshToken = try c.decode(String.self, forKey: .refreshToken)
+        accessTokenTTLSec = try c.decode(Int.self, forKey: .accessTokenTTLSec)
+    }
 }
 
 struct RefreshRequest: Encodable {

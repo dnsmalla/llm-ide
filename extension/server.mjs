@@ -86,7 +86,13 @@ const HOST = config.host;
 //     GET /auth/me/mcp-plugins/catalog serves the curated one-click list, and
 //     POST /auth/me/mcp-plugins/add accepts { catalogId, arg } alongside the
 //     existing shapes. /auth/* path — not tracked in ENDPOINTS by convention.
-const SERVER_API_VERSION = 36;
+// 36→37: POST /auth/refresh now returns the `user` object alongside the
+//     rotated tokens, matching /auth/login. Additive, but load-bearing: the
+//     Mac app's SessionResponse required `user`, so its absence made every
+//     refresh fail decoding after rotation had already committed — the stale
+//     token replay then tripped reuse detection and silently logged the user
+//     out of every session. /auth/* path — not tracked in ENDPOINTS.
+const SERVER_API_VERSION = 37;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

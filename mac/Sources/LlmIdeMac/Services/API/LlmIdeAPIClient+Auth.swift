@@ -26,6 +26,14 @@ extension LlmIdeAPIClient {
         try await post("/auth/refresh", body: RefreshRequest(refreshToken: refreshToken), authenticated: false)
     }
 
+    /// Fetch the signed-in user's profile. Used to complete a launch
+    /// refresh against an older server whose /auth/refresh response
+    /// omits `user` — without it the tokens adopt but the UI stays on
+    /// the login screen (`isAuthenticated` requires a non-nil user).
+    func me() async throws -> UserInfo {
+        try await get("/auth/me", authenticated: true)
+    }
+
     func getUserPrefs() async throws -> UserPrefs {
         let r: UserPrefsWrap = try await get("/auth/me/prefs", authenticated: true)
         return r.prefs

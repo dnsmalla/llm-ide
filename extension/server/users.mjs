@@ -205,6 +205,12 @@ export function refreshSession(db, { refreshToken, userAgent }) {
   }
   const access = signAccessToken({ userId: row.user_id, role: row.role });
   return {
+    // `user` is part of the session contract: the Mac app decodes this
+    // response with the same required-`user` shape as /auth/login. Omitting
+    // it made every refresh fail decoding client-side AFTER rotation had
+    // committed, so the client replayed the old token and the reuse
+    // heuristic below revoked the whole session family (silent logout).
+    user: findUserById(db, row.user_id),
     accessToken: access,
     refreshToken: newToken,
     accessTokenTTLSec: config.accessTokenTTLSec,

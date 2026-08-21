@@ -202,6 +202,27 @@ test('POST /auth/refresh rotates the refresh token (old token dies on reuse)', a
   assert.equal(second.statusCode, 401, 'reuse-detection revokes the whole session family, including the just-rotated sibling');
 });
 
+test('POST /auth/refresh response carries the user object (client session contract)', async () => {
+  // The Mac app decodes this response as SessionResponse, whose `user`
+  // field is required. When refresh omitted `user`, every refresh failed
+  // decoding client-side AFTER the server had already rotated the token;
+  // the client kept the old (revoked) token, replayed it ~25s later, and
+  // the theft heuristic in refreshSession logged the user out everywhere.
+  const { email, refreshToken } = await registerAndLogin();
+  const r = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken } });
+  assert.equal(r.statusCode, 200, r._body);
+  const session = r.json();
+  assert.ok(session.user, 'refresh response must include the user object');
+  assert.equal(session.user.email, email);
+  // Pin every field the Mac's UserInfo decoder requires (id, email,
+  // displayName, role) — a missing one fails the whole client-side decode,
+  // which is the exact bug class this test exists to prevent.
+  assert.equal(typeof session.user.id, 'string');
+  assert.equal(typeof session.user.displayName, 'string');
+  assert.equal(typeof session.user.role, 'string');
+  assert.equal(typeof session.accessTokenTTLSec, 'number');
+});
+
 test('POST /auth/refresh rotation: rotated token works when the old one is never replayed', async () => {
   // Companion to the theft-detection test above: absent any replay of a
   // revoked token, the newly rotated token is fully usable. This isolates

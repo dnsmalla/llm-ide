@@ -79,6 +79,14 @@ final class SessionStore: ObservableObject {
         do {
             let session = try await api.refresh(refreshToken: stored)
             adopt(session: session)
+            // Older servers omit `user` on /auth/refresh (or send one this
+            // client can't decode). The tokens are valid and adopted; fetch
+            // the profile separately so the session actually restores —
+            // otherwise `isAuthenticated` stays false and the user lands on
+            // the login screen every launch despite a live refresh token.
+            if user == nil {
+                user = try? await api.me()
+            }
             unreachable = false
         } catch {
             if Self.isDefinitiveAuthRejection(error) {
@@ -108,7 +116,10 @@ final class SessionStore: ObservableObject {
 
     @MainActor
     func adopt(session: SessionResponse) {
-        user = session.user
+        // /auth/refresh on older servers omits `user`; keep the one we
+        // already have rather than logging the UI out (`isAuthenticated`
+        // requires a non-nil user). Login responses always carry it.
+        if let refreshedUser = session.user { user = refreshedUser }
         accessToken = session.accessToken
         refreshToken = session.refreshToken
         KeychainStore.saveToken(session.refreshToken, host: host)
