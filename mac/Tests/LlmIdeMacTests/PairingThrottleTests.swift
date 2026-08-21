@@ -36,7 +36,14 @@ struct PairingThrottleTests {
         var now = t0
         for _ in 0..<PairingThrottle.lockoutThreshold {
             throttle.registerFailure(host: "1.2.3.4", now: now)
-            now = now.addingTimeInterval(600) // wait out any escalating delay
+            // Wait out the escalating per-failure delay, which is capped at
+            // delayCap — derived, not a magic number. A hardcoded 600 s here
+            // silently outlived a reduction of lockoutDuration to 15 min: it
+            // pushed the LAST failure so far back that `now + lockoutDuration/2`
+            // already sat outside the lockout window, so the "still locked out"
+            // assertion below failed. Deriving both from the constants keeps
+            // this test honest when they are tuned again.
+            now = now.addingTimeInterval(PairingThrottle.delayCap + 1)
         }
         #expect(throttle.decision(for: "1.2.3.4", now: now) == .lockedOut)
         // Still locked out well inside the window…
@@ -132,7 +139,12 @@ struct PairingThrottleTests {
                 throttle.registerFailure(host: "attacker", now: now)
             case .wait(let seconds):
                 now = now.addingTimeInterval(seconds)
-            case .lockedOut:
+            case .lockedOut, .serverThrottled:
+                // Both refuse until a lockout window elapses — the per-host
+                // one for .lockedOut, the server-wide budget's for
+                // .serverThrottled — so an attacker's only move is to wait it
+                // out. (This case was added to Decision without updating the
+                // switch, which broke the whole test target's compile.)
                 now = now.addingTimeInterval(PairingThrottle.lockoutDuration)
             }
             now = now.addingTimeInterval(0.05) // LAN round-trip
