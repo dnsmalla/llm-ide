@@ -72,5 +72,14 @@ public enum MobileProtocol {
         public static let autoTaskHistoryReply = "auto_task_history_reply"
         public static let autoTaskLogsList = "auto_task_logs_list"
         public static let autoTaskLogsReply = "auto_task_logs_reply"
+
+        // MARK: Loop channel — remote control only; see LoopMessages.swift
+        public static let loopStatusList = "loop_status_list"
+        public static let loopState = "loop_state"
+        public static let loopStart = "loop_start"
+        public static let loopStop = "loop_stop"
+        public static let loopAck = "loop_ack"
+        public static let loopHistory = "loop_history"
+        public static let loopHistoryReply = "loop_history_reply"
     }
 }
