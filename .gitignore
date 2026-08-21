@@ -131,3 +131,4 @@ extension/tests/mcp-plugins-state.json
 # source and must stay tracked. (A bare `services/` silently ignored new
 # *Service.swift files there.)
 /services/
+extension/tests/_connector-routes-repo-root-fixture/

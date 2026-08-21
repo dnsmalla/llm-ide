@@ -193,6 +193,10 @@ export function isAuthRoute(url) {
       || path === '/auth/me/mcp-plugins/consent'
       || path === '/auth/me/mcp-plugins/toggle'
       || path.startsWith('/auth/me/mcp-plugins/')
+      || path === '/auth/me/connectors'
+      || path === '/auth/me/connectors/catalog'
+      || path === '/auth/me/connectors/add'
+      || path.startsWith('/auth/me/connectors/')
       || path === '/auth/google/start'
       || path === '/auth/google/callback'
       || path === '/auth/google/status'
@@ -1414,6 +1418,70 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     if (result.error) { send(res, result.status || 400, { error: { code: 'REMOVE_FAILED', message: result.error } }); return; }
     safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua, action: 'mcp-plugin.remove', resource: id, outcome: 'success' });
     send(res, 200, result);
+    return;
+  }
+
+  // Connector catalog (connector-catalog spec phase 1): the Library's
+  // "Add from catalog…" list plus the per-user selection that drives which
+  // cards Settings → Connections renders. Meeting and Email are fixed
+  // defaults and are deliberately NOT catalog entries. Removing a connector
+  // only hides it — no fetched file or note is deleted.
+  // GET    /auth/me/connectors          → the user's selected connectors
+  // GET    /auth/me/connectors/catalog  → the full catalog + `selected` flag
+  // POST   /auth/me/connectors/add      → { id }
+  // DELETE /auth/me/connectors/<id>
+  if (method === 'GET' && url.split('?')[0] === '/auth/me/connectors') {
+    const { selectedConnectors } = await import('../connectors/connector-state.mjs');
+    const { CONNECTOR_CATALOG } = await import('../connectors/connector-catalog.mjs');
+    const selected = selectedConnectors(req.user.id);
+    send(res, 200, {
+      connectors: CONNECTOR_CATALOG
+        .filter((e) => selected.has(e.id))
+        .map(({ id, name, description, icon, authKind, docsUrl, pipelineReady }) =>
+          ({ id, name, description, icon, authKind, docsUrl, pipelineReady })),
+    });
+    return;
+  }
+
+  if (method === 'GET' && url.split('?')[0] === '/auth/me/connectors/catalog') {
+    const { selectedConnectors } = await import('../connectors/connector-state.mjs');
+    const { CONNECTOR_CATALOG } = await import('../connectors/connector-catalog.mjs');
+    const selected = selectedConnectors(req.user.id);
+    send(res, 200, {
+      catalog: CONNECTOR_CATALOG.map((e) => ({ ...e, selected: selected.has(e.id) })),
+    });
+    return;
+  }
+
+  if (method === 'POST' && url === '/auth/me/connectors/add') {
+    let body;
+    try { body = await readJson(req, bodyLimit); }
+    catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
+    if (!body || typeof body.id !== 'string' || !/^[a-z][a-z0-9-]{1,20}$/.test(body.id)) {
+      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'id must be a connector slug' } });
+      return;
+    }
+    const { selectConnector } = await import('../connectors/connector-state.mjs');
+    if (!selectConnector(req.user.id, body.id)) {
+      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: `unknown connector '${body.id}'` } });
+      return;
+    }
+    safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
+      action: 'connector.select', resource: body.id, outcome: 'success' });
+    send(res, 200, { ok: true, id: body.id });
+    return;
+  }
+
+  if (method === 'DELETE' && url.startsWith('/auth/me/connectors/')) {
+    const id = decodeURIComponent(url.slice('/auth/me/connectors/'.length).split('?')[0]);
+    if (!/^[a-z][a-z0-9-]{1,20}$/.test(id)) {
+      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid id' } }); return;
+    }
+    const { deselectConnector } = await import('../connectors/connector-state.mjs');
+    deselectConnector(req.user.id, id);
+    safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
+      action: 'connector.deselect', resource: id, outcome: 'success' });
+    send(res, 200, { ok: true, id });
     return;
   }
 
