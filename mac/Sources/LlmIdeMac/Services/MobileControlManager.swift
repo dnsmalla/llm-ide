@@ -862,6 +862,49 @@ final class MobileControlManager {
             reply(LoopAck(accepted: started,
                           message: started ? "Loop started." : "The Mac declined to start a run right now."))
 
+        case MobileProtocol.Tag.loopStartStage:
+            guard let req = try? decoder.decode(LoopStartStage.self, from: data),
+                  !req.stageId.isEmpty else {
+                reply(CommandError(commandId: "loop_start_stage",
+                                   message: "Malformed loop_start_stage payload."))
+                return
+            }
+            guard let autoCode else {
+                append(.stderr, "loop_start_stage: auto-code service not wired")
+                reply(CommandError(commandId: "loop_start_stage",
+                                   message: "The Mac app can't run a loop right now — its auto-code service isn't wired up."))
+                return
+            }
+            let state = buildLoopState()
+            guard state.configured else {
+                append(.stderr, "loop_start_stage: no project or no saved loop config")
+                reply(LoopAck(accepted: false,
+                              message: "No loop is set up for the active project. Create one on the Mac first."))
+                return
+            }
+            guard !state.running else {
+                append(.info, "loop_start_stage ignored — a run is already in flight")
+                reply(LoopAck(accepted: false, message: "A loop run is already in progress."))
+                return
+            }
+            // The stage can vanish between the phone's snapshot and this tap
+            // (deleted or replaced on the Mac). Refuse by name-able identity
+            // rather than letting the sweep discover it later — the phone gets
+            // an actionable message instead of a task error it can't see.
+            guard let stage = state.stages.first(where: { $0.stageId == req.stageId }) else {
+                append(.stderr, "loop_start_stage: unknown stage id")
+                reply(LoopAck(accepted: false,
+                              message: "That stage no longer exists — refresh and try again."))
+                return
+            }
+            let started = autoCode.runSingleLoopStage(stageId: req.stageId)
+            loopStartedHere = started
+            append(started ? .info : .stderr,
+                   "loop_start_stage \(started ? "accepted" : "declined by scheduler") — \(stage.name)")
+            reply(LoopAck(accepted: started,
+                          message: started ? "Stage \"\(stage.name)\" started."
+                                           : "The Mac declined to start a run right now."))
+
         case MobileProtocol.Tag.loopStop:
             guard let autoCode else {
                 append(.stderr, "loop_stop: auto-code service not wired")
@@ -927,7 +970,8 @@ final class MobileControlManager {
                 .map {
                     LoopStageInfo(name: $0.name, kind: $0.kind.rawValue,
                                   severity: $0.severity.rawValue,
-                                  enabled: $0.enabled ?? true, order: $0.order)
+                                  enabled: $0.enabled ?? true, order: $0.order,
+                                  stageId: $0.id)
                 }
         )
     }
