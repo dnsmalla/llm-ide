@@ -36,6 +36,16 @@ final class LoopEngineRunner: ObservableObject {
     @Published private(set) var status: LoopEngineStatus?
     @Published private(set) var iteration = 0
 
+    /// Optional mirror for every log line this runner emits, so a surface that
+    /// does not own the runner can still follow a run.
+    ///
+    /// `log` above is instance state on a `@StateObject`, which means it is
+    /// reachable only from the view that owns it. Nothing else — the Auto Tasks
+    /// page, the activity feed, the iPhone — could see progress WITHIN a run;
+    /// they got the terminal outcome and nothing else. A sink at the single
+    /// append site is enough to fix that without moving any ownership.
+    var onLog: ((LogLine) -> Void)?
+
     /// Process-wide set of git roots with a run currently in flight,
     /// keyed by symlink-resolved filesystem path. Guards against two
     /// *different* `LoopEngineRunner` instances (e.g. a chat-triggered
@@ -733,7 +743,9 @@ final class LoopEngineRunner: ObservableObject {
     }
 
     private func appendLog(_ level: LogLine.Level, _ text: String) {
-        log.append(LogLine(at: Date(), level: level, text: text))
+        let line = LogLine(at: Date(), level: level, text: text)
+        log.append(line)
+        onLog?(line)
     }
 
     /// Returns the stage's command when non-nil and non-blank; nil

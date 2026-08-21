@@ -706,6 +706,14 @@ extension AutoCodeUpdateService {
             // tell these runs apart from ones a human watched.
             trigger: .autoTask
         )
+        // Mirror every line into the shared per-task log as it happens. Before
+        // this the buffer only ever received the TERMINAL line below, so the
+        // Auto Tasks page — and the iPhone, which reads the same buffer —
+        // showed a loop as "running" with nothing to show for it.
+        runner.onLog = { [weak logStore] line in
+            logStore?.append(AutoTask.loopEngineering.rawValue, line.text,
+                             level: line.level == .error ? .error : .info)
+        }
         // run() returns LoopEngineStatus? — nil means this call was rejected
         // (a run is already in progress for this repo, instance- or
         // process-wide). Use the RETURN VALUE, not runner.status, which per

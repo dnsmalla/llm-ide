@@ -45,6 +45,11 @@ struct LoopEngineView: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
+    /// The shared per-task log. This page owns its runner, so without mirroring
+    /// into here a run started FROM THIS PAGE was invisible to every other
+    /// surface — including the iPhone, which can see that a run is in flight
+    /// (the runner's process-wide guard) but had no lines to show for it.
+    @EnvironmentObject var logStore: TaskLogStore
 
     /// Owns the run — a `@StateObject` (not a locally-constructed value
     /// per run) so its `@Published log`/`running`/`iteration` actually
@@ -176,6 +181,15 @@ struct LoopEngineView: View {
         // AppShell only recreates section views on a section switch, not
         // on a project switch. Mirrors GraphMemorySettingsSection's
         // `.task(id: projectStore.activeProject?.bundle.id)` pattern.
+        .onAppear {
+            // Same buffer the Auto Tasks page and the phone read. Page-driven
+            // runs therefore appear in that log too: it is one loop with one
+            // activity trail, and this page keeps its own richer log pane.
+            runner.onLog = { [weak logStore] line in
+                logStore?.append(AutoTask.loopEngineering.rawValue, line.text,
+                                 level: line.level == .error ? .error : .info)
+            }
+        }
         .task(id: activeProjectId) {
             selectedStageId = nil
             runner.clearLog()

@@ -228,6 +228,48 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(repairer.repairCount, 0)
     }
 
+    /// `log` is instance state on a runner a view owns, so before `onLog`
+    /// existed no other surface could follow a run in progress: the shared
+    /// per-task buffer received only the terminal line, which is why the
+    /// iPhone showed a loop as "running" with nothing to show for it.
+    func testOnLogMirrorsEveryLineWhileTheRunProceeds() async {
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")])
+        )
+        var mirrored: [String] = []
+        runner.onLog = { mirrored.append($0.text) }
+
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertFalse(mirrored.isEmpty, "the sink saw nothing — a watcher would show an empty log")
+        // Mirrors, never diverts: the runner's own log is still complete, so
+        // the page that owns it is unaffected by a watcher being attached.
+        XCTAssertEqual(mirrored, runner.log.map(\.text))
+    }
+
+    func testRunWithNoLogSinkAttachedStillLogsLocally() async {
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")])
+        )
+        _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertFalse(runner.log.isEmpty, "an absent sink must not suppress the runner's own log")
+    }
+
     func testOneFailureThenFixThenPassSucceedsOnSecondIteration() async {
         var callIndex = 0
         let outcomes = [VerifyOutcome(exitCode: 1, output: "boom"), VerifyOutcome(exitCode: 0, output: "")]
