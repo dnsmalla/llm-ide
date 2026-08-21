@@ -1121,8 +1121,15 @@ struct LoopEngineView: View {
             saveConfig()
         }
         var runConfig = currentConfig
-        if let solo = single,
-           let soloed = LoopStage.soloing(runConfig.stages, id: solo.id) {
+        if let solo = single {
+            guard let soloed = LoopStage.soloing(runConfig.stages, id: solo.id) else {
+                // Refuse rather than fall through: running the WHOLE pipeline
+                // when one stage was asked for is the worst possible fallback.
+                // Unreachable today (solo comes from the live stages array),
+                // kept fail-closed per LoopStage.soloing's contract.
+                didRejectLastRun = true
+                return
+            }
             // "Run this stage only" — see LoopStage.soloing for why the full
             // stage list is kept with the others disabled.
             runConfig.stages = soloed
