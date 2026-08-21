@@ -210,9 +210,11 @@ final class ActivityStore {
 
     /// One raw activity row from the server.
     ///
-    /// `detail` is stored as an opaque JSON string by the server (or
-    /// as a raw `TEXT` column).  We decode it as `String?` here and
-    /// then parse it with `JSONSerialization` in `toActivityItem()`.
+    /// `detail` arrives either as a JSON string (rows this app reported)
+    /// or as a parsed object (the server JSON-parses its TEXT column
+    /// before sending, so agent-written rows come back as dictionaries).
+    /// The custom `init(from:)` accepts both and normalizes to a JSON
+    /// string, which `toActivityItem()` parses with `JSONSerialization`.
     ///
     /// `created_at` arrives as a SQLite `datetime('now')` string
     /// ("YYYY-MM-DD HH:MM:SS"), which `JSONDecoder`'s built-in date
@@ -223,13 +225,42 @@ final class ActivityStore {
         let id: Int
         let kind: String?
         let title: String
-        let detail: String?     // JSON text or nil
+        let detail: String?     // normalized JSON text or nil
         let link: String?
         let createdAt: String   // "YYYY-MM-DD HH:MM:SS"
 
         enum CodingKeys: String, CodingKey {
             case id, kind, title, detail, link
             case createdAt = "created_at"
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(Int.self, forKey: .id)
+            kind = try c.decodeIfPresent(String.self, forKey: .kind)
+            title = try c.decode(String.self, forKey: .title)
+            link = try c.decodeIfPresent(String.self, forKey: .link)
+            createdAt = try c.decode(String.self, forKey: .createdAt)
+            // The server JSON-parses the stored detail TEXT before sending,
+            // so rows written by server-side agents arrive as objects while
+            // rows this app reported arrive as strings. Decoding only
+            // `String?` made ONE object-detail row throw and kill the whole
+            // feed page. Accept both; normalize objects back to JSON text
+            // so `toActivityItem()` keeps a single parse path.
+            if let s = try? c.decodeIfPresent(String.self, forKey: .detail) {
+                detail = s
+            } else if let any = try? c.decodeIfPresent(AnyCodable.self, forKey: .detail),
+                      let value = any.value,
+                      JSONSerialization.isValidJSONObject(value),
+                      let data = try? JSONSerialization.data(withJSONObject: value) {
+                detail = String(data: data, encoding: .utf8)
+            } else {
+                // Bare scalars (a detail that parses to a number/bool) fail
+                // isValidJSONObject and are deliberately dropped — the server
+                // only ever stores stringified objects, and toActivityItem()
+                // only consumes dictionaries.
+                detail = nil
+            }
         }
 
         func toActivityItem() -> ActivityItem {
