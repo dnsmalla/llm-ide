@@ -121,7 +121,7 @@ struct LoopEngineConfig: Codable, Equatable {
     }
 
     /// Whether an auto-detected stage list is safe to persist as the
-    /// project's permanent config. `LoopStageDetector.detectDefaultStages`
+    /// project's permanent config. `LoopStageDetector.defaultStages(gitRoot:)`
     /// always includes the bare Regression stage, so an all-Regression
     /// detection is indistinguishable from "no test tooling found YET"
     /// (e.g. a clone-into-code checkout that hasn't finished populating) —

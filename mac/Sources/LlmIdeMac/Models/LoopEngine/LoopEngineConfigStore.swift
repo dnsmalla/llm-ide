@@ -104,14 +104,6 @@ enum LoopEngineConfigStore {
         write(store, to: fileURL(projectRoot: projectRoot))
     }
 
-    /// Whether this project has a saved contract. Goes through `load`, so a
-    /// project still on an old schema is migrated by asking this question —
-    /// idempotent, and the earliest point we want the migration to happen.
-    static func exists(projectRoot: URL?, projectId: String,
-                       defaults: UserDefaults = .standard) -> Bool {
-        load(projectRoot: projectRoot, projectId: projectId, defaults: defaults) != nil
-    }
-
     /// This project's loops **as the app actually runs them**: `load`, then
     /// `LoopStageDetector.ensureDefaultLoops` — which creates the built-in
     /// default loops (Regression / Test / System Check), migrates a pre-split

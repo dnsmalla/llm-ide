@@ -903,12 +903,12 @@ struct LoopEngineView: View {
     /// Single reset path for "no config to show" — used both when no
     /// project is active and when a project has neither a saved config
     /// nor a detectable git root.
-    private func resetStagesToDefaults(stages newStages: [LoopStage] = []) {
+    private func resetStagesToDefaults() {
         // Seeded from the app-wide defaults (Settings → Loop), not from literals:
         // a project being set up for the first time must inherit what the user
         // configured once, and repeating the numbers here would silently diverge
         // from `LoopEngineConfig`'s and the Settings card's own values.
-        let seed = LoopEngineDefaults.newConfig(stages: newStages)
+        let seed = LoopEngineDefaults.newConfig(stages: [])
         stages = seed.stages
         maxIterations = seed.maxIterations
         consecutiveFailureStop = seed.consecutiveFailureStop
@@ -1153,8 +1153,9 @@ struct LoopEngineView: View {
     /// The warning text in the TEMPLATE section says so before the click.
     func applySelectedTemplate() {
         guard let template = selectedTemplate else { return }
-        // One `applied(to:)` call, not two — `wouldApplyEmpty` would run the
-        // same LoopStageDetector probing a second time for no reason.
+        // The no-tooling flag is derived from this one `applied(to:)` call —
+        // a separate emptiness check would run the same LoopStageDetector
+        // probing a second time for no reason.
         let applied = template.applied(to: activeGitRootURL)
         appliedTemplateHadNoTooling = !template.config.stages.isEmpty && applied.stages.isEmpty
         assignConfig(applied)

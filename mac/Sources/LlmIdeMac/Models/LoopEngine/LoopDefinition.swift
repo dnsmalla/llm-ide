@@ -124,11 +124,6 @@ enum LoopDefaultLoopKey {
 struct LoopEngineProjectStore: Codable, Equatable {
     var loops: [LoopDefinition]
 
-    /// The loop carrying `key`, or nil.
-    func loop(defaultKey key: String) -> LoopDefinition? {
-        loops.first { $0.defaultKey == key }
-    }
-
     /// The loops the scheduled `.loopEngineering` Auto Task should run, in list
     /// order — those opted in AND with at least one enabled stage. A loop whose
     /// every stage is switched off is PARKED, not broken (the reasoning

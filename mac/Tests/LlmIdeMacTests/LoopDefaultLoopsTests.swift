@@ -1,6 +1,14 @@
 import XCTest
 @testable import LlmIdeMacLib
 
+/// Test-only lookup helper — production code queries `loops`/`primaryLoop`
+/// directly, so this convenience lives with the tests that use it.
+extension LoopEngineProjectStore {
+    func loop(defaultKey key: String) -> LoopDefinition? {
+        loops.first { $0.defaultKey == key }
+    }
+}
+
 /// The built-in checks are INDEPENDENT LOOPS (Regression / Test / System
 /// Check), not pinned stages sharing one pipeline. Two properties are what
 /// make that hold, and both are one-line-of-code away from silently breaking:
@@ -173,7 +181,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
     /// built-in check as a pinned stage.
     private func legacyAggregateStore(maxIterations: Int = 7,
                                      extraStages: [LoopStage] = []) -> LoopEngineProjectStore {
-        var stages = LoopStageDetector.detectDefaultStages(gitRoot: repo)
+        var stages = LoopStageDetector.defaultStages(gitRoot: repo)
         stages.append(contentsOf: extraStages)
         var config = LoopEngineConfig(stages: LoopStage.renumbered(stages),
                                       maxIterations: maxIterations)

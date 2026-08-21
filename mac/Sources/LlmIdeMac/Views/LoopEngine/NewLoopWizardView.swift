@@ -139,8 +139,9 @@ struct NewLoopWizardView: View {
                 budgets = LoopEngineDefaults.newConfig(stages: [])
                 return
             }
-            // One `applied(to:)` call, not two — `wouldApplyEmpty` would run
-            // the same LoopStageDetector probing a second time for no reason.
+            // The no-tooling flag is derived from this one `applied(to:)` call
+            // — a separate emptiness check would run the same
+            // LoopStageDetector probing a second time for no reason.
             let applied = template.applied(to: gitRoot)
             noToolingDetectedForTemplate = !template.config.stages.isEmpty && applied.stages.isEmpty
             stages = applied.stages

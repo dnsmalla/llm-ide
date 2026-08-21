@@ -22,60 +22,60 @@ final class LoopStageDetectorTests: XCTestCase {
     }
 
     func testAlwaysIncludesRegressionStageFirst() {
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         XCTAssertEqual(stages.first?.kind, .regressionSweep)
         XCTAssertEqual(stages.first?.order, 0)
     }
 
     func testNoRecognizedProjectFileYieldsRegressionOnly() {
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         XCTAssertEqual(stages.count, 1)
     }
 
     func testPackageSwiftYieldsSwiftTest() throws {
         try write("Package.swift")
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         XCTAssertEqual(stages.last?.command, "swift test")
     }
 
     func testPackageJSONWithTestScriptYieldsNpmTest() throws {
         try write("package.json", #"{"scripts": {"test": "vitest"}}"#)
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         XCTAssertEqual(stages.last?.command, "npm test")
     }
 
     func testPackageJSONWithoutTestScriptYieldsRegressionOnly() throws {
         try write("package.json", #"{"scripts": {"build": "vite build"}}"#)
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         XCTAssertEqual(stages.count, 1)
     }
 
     func testPackageJSONWithTestKeywordButNoTestScriptYieldsRegressionOnly() throws {
         try write("package.json", #"{"name": "test", "keywords": ["test"], "scripts": {"build": "vite build"}}"#)
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         XCTAssertEqual(stages.count, 1)
     }
 
     func testMakefileWithTestTargetYieldsMakeTest() throws {
         try write("Makefile", "test:\n\techo hi\n")
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         XCTAssertEqual(stages.last?.command, "make test")
     }
 
     func testMakefileWithoutTestTargetYieldsRegressionOnly() throws {
         try write("Makefile", "build:\n\techo hi\n")
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         XCTAssertEqual(stages.count, 1)
     }
 
     func testPyprojectTomlYieldsPytest() throws {
         try write("pyproject.toml", "[tool.pytest.ini_options]\n")
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         XCTAssertEqual(stages.last?.command, "pytest")
     }
 
     func testDefaultStagesAlwaysIncludeARegressionSweepStage() {
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         // Even with no detectable test tooling, a fresh project must get a
         // regression-sweep stage so Loop Engineering can "run regression
         // and loop until all pass" out of the box.
@@ -84,13 +84,13 @@ final class LoopStageDetectorTests: XCTestCase {
     }
 
     func testDetectorMarksRegressionAsDefault() {
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         XCTAssertEqual(stages.first?.isDefault, true)
     }
 
     func testDetectorMarksTestAsDefaultWhenToolingDetected() throws {
         try write("Package.swift")
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         let testStage = stages.first { $0.kind == .shellCommand }
         XCTAssertNotNil(testStage)
         XCTAssertEqual(testStage?.isDefault, true)
@@ -109,13 +109,13 @@ final class LoopStageDetectorTests: XCTestCase {
         // A repo with none of llm-ide's own files must see exactly what it saw
         // before this existed — this is what makes it safe for the check to
         // live in the GLOBAL detector rather than a special case.
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         XCTAssertEqual(stages.count, 1)
     }
 
     func testSkillsMarkerAddsSkillsStage() throws {
         try writeNested("extension/tests/agent-skills.test.mjs")
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         let skills = stages.first { $0.name == "Skills" }
         XCTAssertNotNil(skills)
         XCTAssertEqual(skills?.kind, .shellCommand)
@@ -125,39 +125,39 @@ final class LoopStageDetectorTests: XCTestCase {
 
     func testPluginsMarkerAddsPluginsStage() throws {
         try writeNested("extension/tests/plugins-loader.test.mjs")
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         XCTAssertNotNil(stages.first { $0.name == "Plugins" })
     }
 
     func testConnectorsMarkerAddsConnectorsStage() throws {
         try writeNested("extension/tests/box-connector.test.mjs")
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         XCTAssertNotNil(stages.first { $0.name == "Connectors" })
     }
 
     func testDispatchMarkerAddsGitHubDispatchStage() throws {
         try writeNested("extension/tests/dispatch-preview.test.mjs")
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         XCTAssertNotNil(stages.first { $0.name == "GitHub dispatch" })
     }
 
     func testExtensionPackageJSONAddsBackendStage() throws {
         try writeNested("extension/package.json", "{}")
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         let backend = stages.first { $0.name == "Backend" }
         XCTAssertEqual(backend?.command, "cd extension && npm test")
     }
 
     func testSharedProtocolMakeTargetAddsProtocolStage() throws {
         try write("Makefile", "test-shared-protocol:\n\techo hi\n")
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         let stage = stages.first { $0.name == "iOS ↔ Mac shared protocol" }
         XCTAssertEqual(stage?.command, "make test-shared-protocol")
     }
 
     func testMacPackageSwiftAddsMacAppStage() throws {
         try writeNested("mac/Package.swift")
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         let stage = stages.first { $0.name == "Mac app" }
         XCTAssertEqual(stage?.command, "cd mac && swift test")
     }
@@ -170,7 +170,7 @@ final class LoopStageDetectorTests: XCTestCase {
         try writeNested("extension/package.json", "{}")
         try write("Makefile", "test-shared-protocol:\n\techo hi\n")
         try writeNested("mac/Package.swift")
-        let stages = LoopStageDetector.detectDefaultStages(gitRoot: tempDir)
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         let names = stages.map(\.name)
         XCTAssertEqual(Set(names).count, names.count, "no duplicate stage names")
         XCTAssertEqual(Set(names), [

@@ -113,9 +113,6 @@ final class LoopEngineRunner: ObservableObject {
         let startedAt: Date
         let loopId: String
         let loopName: String
-        let goal: String?
-        let acceptanceCriteria: String?
-        let scopeGlobs: [String]
     }
     private var currentRunContext: RunContext?
 
@@ -269,8 +266,7 @@ final class LoopEngineRunner: ObservableObject {
         let startedAt = Date()
         currentRunContext = RunContext(config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
                                        projectId: projectId, startedAt: startedAt,
-                                       loopId: loopId, loopName: loopName, goal: goal,
-                                       acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
+                                       loopId: loopId, loopName: loopName)
         defer {
             running = false
             Self.activeRoots.remove(rootKey)

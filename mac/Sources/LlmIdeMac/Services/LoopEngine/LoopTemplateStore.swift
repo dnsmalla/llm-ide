@@ -45,34 +45,11 @@ final class LoopTemplateStore: ObservableObject {
         return template
     }
 
-    /// Overwrites an existing custom template. Built-ins are silently ignored:
-    /// they are the known-good floor a project can always fall back to.
-    func update(_ template: LoopTemplate) {
-        guard !template.isBuiltIn,
-              let index = customTemplates.firstIndex(where: { $0.id == template.id })
-        else { return }
-        customTemplates[index] = template
-        persist()
-    }
-
     /// Deletes a custom template. Built-ins are not deletable.
     func delete(id: UUID) {
         guard let index = customTemplates.firstIndex(where: { $0.id == id }) else { return }
         customTemplates.remove(at: index)
         persist()
-    }
-
-    /// Copies any template — built-in included — into an editable custom one.
-    /// This is how a user starts from a starter and diverges from it.
-    @discardableResult
-    func duplicate(_ template: LoopTemplate) -> LoopTemplate {
-        var copy = template
-        copy.id = UUID()
-        copy.name = uniqueName(from: template.name)
-        copy.isBuiltIn = false
-        customTemplates.append(copy)
-        persist()
-        return copy
     }
 
     /// `name`, or `name 2`, `name 3`… when taken. Compared case-insensitively so

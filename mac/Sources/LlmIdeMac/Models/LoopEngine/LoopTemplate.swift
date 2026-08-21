@@ -55,16 +55,6 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
         return result
     }
 
-    /// True when this template declares stages but `applied(to:)` would drop
-    /// every one of them — i.e. it's built entirely from `detectedTestCommand`
-    /// placeholders and no test tooling was found in `gitRoot`. Lets the UI
-    /// warn with a specific reason instead of showing an empty stage list
-    /// indistinguishable from "nothing picked yet" (see `testOnly`, whose
-    /// single stage is exactly this placeholder).
-    func wouldApplyEmpty(to gitRoot: URL?) -> Bool {
-        !config.stages.isEmpty && applied(to: gitRoot).stages.isEmpty
-    }
-
     // MARK: - Built-in starters
 
     /// Ordered most-general first — the picker shows them in this order, and

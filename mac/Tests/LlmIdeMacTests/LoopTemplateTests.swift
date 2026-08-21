@@ -118,22 +118,23 @@ final class LoopTemplateTests: XCTestCase {
     /// `testOnly`'s single stage IS the placeholder, unlike `testAndFix`/
     /// `fullVerify` which keep a non-placeholder safety-net stage — so with no
     /// detectable tooling it applies to an empty stage list. The UI must be able
-    /// to tell this apart from "nothing configured yet" (see `wouldApplyEmpty`).
+    /// to tell this apart from "nothing configured yet" (it derives the flag
+    /// from `applied(to:)`'s result).
     func testApplyOfTestOnlyWithNoToolingYieldsEmptyStages() {
         let applied = LoopTemplate.testOnly.applied(to: repoRoot)   // empty dir
         XCTAssertTrue(applied.stages.isEmpty)
     }
 
-    func testWouldApplyEmptyIsTrueOnlyWhenEveryStageIsAnUnresolvedPlaceholder() {
-        // testOnly: one stage, all placeholder, no tooling detected → true.
-        XCTAssertTrue(LoopTemplate.testOnly.wouldApplyEmpty(to: repoRoot))
-        // testAndFix: has the same placeholder AND a regression stage → false,
-        // the regression stage survives.
-        XCTAssertFalse(LoopTemplate.testAndFix.wouldApplyEmpty(to: repoRoot))
-        // Tooling present → the placeholder resolves, so still false.
+    func testPlaceholderOnlyTemplateAppliesToNothingWithoutTooling() {
+        // testOnly: one stage, all placeholder, no tooling detected → empty.
+        XCTAssertTrue(LoopTemplate.testOnly.applied(to: repoRoot).stages.isEmpty)
+        // testAndFix: has the same placeholder AND a regression stage → the
+        // regression stage survives, so not empty.
+        XCTAssertFalse(LoopTemplate.testAndFix.applied(to: repoRoot).stages.isEmpty)
+        // Tooling present → the placeholder resolves, so not empty either.
         FileManager.default.createFile(atPath: repoRoot.appendingPathComponent("Package.swift").path,
                                        contents: nil)
-        XCTAssertFalse(LoopTemplate.testOnly.wouldApplyEmpty(to: repoRoot))
+        XCTAssertFalse(LoopTemplate.testOnly.applied(to: repoRoot).stages.isEmpty)
     }
 
     /// `isDefault` is `LoopStageDetector`'s to assign — it re-pins the real

@@ -103,8 +103,6 @@ final class LoopEngineConfigStoreTests: XCTestCase {
     func testLoadReturnsNilForAProjectWithNoConfig() {
         XCTAssertNil(LoopEngineConfigStore.load(projectRoot: projectRoot, projectId: projectId,
                                                 defaults: defaults))
-        XCTAssertFalse(LoopEngineConfigStore.exists(projectRoot: projectRoot, projectId: projectId,
-                                                    defaults: defaults))
     }
 
     func testCorruptFileReadsAsNoConfig() throws {

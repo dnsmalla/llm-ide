@@ -83,8 +83,6 @@ final class AutoCodeUpdateService: ObservableObject {
     let repoManager = RepoManager()
 
     private var timer: Timer?
-    /// Test/observability hook: true while the auto-run timer is armed.
-    var isAutoTimerArmed: Bool { timer != nil }
     private var cancellable: AnyCancellable?
     /// The in-flight run, so it can be cancelled (Stop button / timer
     /// shutdown). nil when no run is active. Only touched from the
@@ -136,16 +134,6 @@ final class AutoCodeUpdateService: ObservableObject {
                 self.isEnabled = value
                 if value { self.start() } else { self.stop() }
             }
-    }
-
-    /// Backwards-compat init for callers still passing a GitLabClient.
-    /// New code should pass a `RepoBackend` (or nil to auto-resolve).
-    convenience init(config: AppConfig, autoTaskSettings: AutoTaskSettings, gitLabClient: GitLabClient,
-                     registry: ProcessedActionsRegistry, projectStore: ProjectStore? = nil,
-                     api: LlmIdeAPIClient? = nil, logStore: TaskLogStore) {
-        self.init(config: config, autoTaskSettings: autoTaskSettings,
-                  backend: RepoBackendFactory.guarded(gitLabClient, config: config),
-                  registry: registry, projectStore: projectStore, api: api, logStore: logStore)
     }
 
     // MARK: - Lifecycle

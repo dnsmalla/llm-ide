@@ -18,10 +18,6 @@ import Foundation
 /// no detectable test tooling gets Regression alone — exactly what such a repo
 /// got before the split.
 enum LoopStageDetector {
-    static func detectDefaultStages(gitRoot: URL) -> [LoopStage] {
-        defaultStages(gitRoot: gitRoot)
-    }
-
     /// The PRE-SPLIT flat catalogue of default stages, each marked
     /// `isDefault = true`. It is deliberately still the legacy nine and does
     /// NOT include the Regression loop's own `regression-test` verify stage
@@ -36,7 +32,7 @@ enum LoopStageDetector {
     /// Connectors, GitHub dispatch, Backend, iOS↔Mac shared protocol, Mac
     /// app), each only when ITS marker is found — see `systemCheckStages`.
     /// `gitRoot == nil` ⇒ Regression only (no tooling to detect).
-    private static func defaultStages(gitRoot: URL?) -> [LoopStage] {
+    static func defaultStages(gitRoot: URL?) -> [LoopStage] {
         var stages: [LoopStage] = [
             LoopStage(name: "Regression", kind: .regressionSweep, command: nil, order: 0,
                       isDefault: true, defaultKey: "regression")

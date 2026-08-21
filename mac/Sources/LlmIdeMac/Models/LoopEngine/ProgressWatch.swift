@@ -66,9 +66,4 @@ struct ProgressWatch {
     mutating func clear(key: String) {
         state[key] = nil
     }
-
-    /// The last recorded score for `key`, if any.
-    func lastScore(key: String) -> Int? {
-        state[key]?.score
-    }
 }

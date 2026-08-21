@@ -99,15 +99,8 @@ final class ProgressWatchTests: XCTestCase {
         _ = watch.record(key: "a", score: 3, hash: "h1")
         _ = watch.record(key: "a", score: 3, hash: "h1")
         watch.clear(key: "a")
-        XCTAssertNil(watch.lastScore(key: "a"))
         // The next failure is a FIRST failure again, not a resumed streak of 3.
         XCTAssertEqual(watch.record(key: "a", score: 3, hash: "h1").streak, 1)
     }
 
-    func testLastScoreReportsMostRecentRecordedScore() {
-        var watch = ProgressWatch()
-        _ = watch.record(key: "a", score: 5, hash: "h1")
-        _ = watch.record(key: "a", score: 2, hash: "h2")
-        XCTAssertEqual(watch.lastScore(key: "a"), 2)
-    }
 }

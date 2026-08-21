@@ -29,16 +29,11 @@ final class LoopTemplateStoreTests: XCTestCase {
     }
 
     /// Built-ins are the known-good floor: a project must always be able to fall
-    /// back to one, so they cannot be deleted or edited away.
-    func testBuiltInsCannotBeDeletedOrUpdated() {
+    /// back to one, so they cannot be deleted.
+    func testBuiltInsCannotBeDeleted() {
         let store = LoopTemplateStore(defaults: defaults)
         store.delete(id: LoopTemplate.testAndFix.id)
         XCTAssertNotNil(store.template(id: LoopTemplate.testAndFix.id))
-
-        var edited = LoopTemplate.testAndFix
-        edited.name = "Hijacked"
-        store.update(edited)
-        XCTAssertEqual(store.template(id: LoopTemplate.testAndFix.id)?.name, "Test & Fix")
     }
 
     /// Built-ins are a static constant, never persisted — otherwise an improved
@@ -92,15 +87,7 @@ final class LoopTemplateStoreTests: XCTestCase {
                        "Test & Fix 2")
     }
 
-    // MARK: - Update / delete / duplicate
-
-    func testUpdateReplacesACustomTemplate() {
-        let store = LoopTemplateStore(defaults: defaults)
-        var saved = store.save(name: "Mine", summary: "before", config: makeConfig())
-        saved.summary = "after"
-        store.update(saved)
-        XCTAssertEqual(store.template(id: saved.id)?.summary, "after")
-    }
+    // MARK: - Delete
 
     func testDeleteRemovesACustomTemplate() {
         let store = LoopTemplateStore(defaults: defaults)
@@ -108,19 +95,6 @@ final class LoopTemplateStoreTests: XCTestCase {
         store.delete(id: saved.id)
         XCTAssertNil(store.template(id: saved.id))
         XCTAssertTrue(store.customTemplates.isEmpty)
-    }
-
-    /// Duplicating a built-in is how a user starts from a starter and diverges —
-    /// the copy must be editable even though its source was not.
-    func testDuplicatingABuiltInProducesAnEditableCopy() {
-        let store = LoopTemplateStore(defaults: defaults)
-        let copy = store.duplicate(LoopTemplate.fullVerify)
-        XCTAssertFalse(copy.isBuiltIn)
-        XCTAssertNotEqual(copy.id, LoopTemplate.fullVerify.id)
-        XCTAssertEqual(copy.name, "Full Verify 2")
-        XCTAssertEqual(copy.config, LoopTemplate.fullVerify.config)
-        store.delete(id: copy.id)
-        XCTAssertNil(store.template(id: copy.id))
     }
 
     // MARK: - Persistence
