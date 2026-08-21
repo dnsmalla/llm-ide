@@ -73,6 +73,15 @@ final class LoopStore: ObservableObject {
         connection?.sendEncodable(LoopStart())
     }
 
+    /// Run exactly one stage. The Mac force-enables it and disables the rest
+    /// for this run — the same semantics as the desktop's "Run this stage
+    /// only" menu action. Declines (already running, stage vanished) arrive as
+    /// a `LoopAck` with `accepted: false`, shown as a status like `start()`'s.
+    func startStage(stageId: String) {
+        lastError = nil
+        connection?.sendEncodable(LoopStartStage(stageId: stageId))
+    }
+
     func stop() {
         lastError = nil
         connection?.sendEncodable(LoopStop())

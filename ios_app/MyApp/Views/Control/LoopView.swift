@@ -169,9 +169,25 @@ struct LoopView: View {
                                 .foregroundColor(DesignSystem.Colors.textTertiary)
                         }
                         Spacer()
+                        // Only a Mac new enough to send stage ids can run one
+                        // stage — hide the button entirely on older snapshots
+                        // rather than showing a control that cannot work.
+                        // Enabled even for disabled stages: the Mac
+                        // force-enables the target for a solo run, matching
+                        // the desktop's "Run this stage only".
+                        if let stageId = stage.stageId {
+                            Button {
+                                loopStore.startStage(stageId: stageId)
+                            } label: {
+                                Image(systemName: "play.circle")
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(s.running || !isConnected)
+                            .accessibilityLabel("Run \(stage.name) only")
+                        }
                     }
                 }
-                Text("Edit stages on the Mac.")
+                Text("Edit stages on the Mac. ▶ runs just that stage.")
                     .font(DesignSystem.Typography.footnoteFont)
                     .foregroundColor(DesignSystem.Colors.textTertiary)
             }
