@@ -41,6 +41,11 @@ import SwiftUI
 
 struct LoopEngineView: View {
     let api: LlmIdeAPIClient
+    /// Which `LoopDefinition` within the active project this instance is the
+    /// workspace for — set once by `LoopEngineHomeView` for the selected row
+    /// in its loop list. Everything below that used to key off only
+    /// `activeProjectId` now keys off `(activeProjectId, loopId)`.
+    let loopId: String
 
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
@@ -95,25 +100,22 @@ struct LoopEngineView: View {
     /// is what makes `Task.isCancelled` true everywhere down the call tree
     /// `runner.run` awaits through, including inside `ShellFaultVerifier`.
     @State private var runTask: Task<Void, Never>?
-    /// Drives the "New Loop" sheet — the top-level create-from-template flow,
-    /// distinct from the stages pane's `+` (adds one bare stage) and the
-    /// Template section's Apply (overwrites with an un-configured template).
-    @State private var isPresentingNewLoopWizard = false
     /// Debounced autosave of the current config (see `scheduleAutosave`).
     @State private var autosaveTask: Task<Void, Never>?
     /// The not-yet-written autosave payload. Held separately from the task so a
     /// project switch or view teardown can FLUSH it (write now) instead of the
     /// cancel-and-lose that a bare task would force.
     @State private var pendingAutosave: PendingAutosave?
-    /// What the active project currently has persisted (`nil` ⇒ no saved config
-    /// yet). The autosave baseline: loading a project must not trigger a write
-    /// of the file it just read, and a no-op edit round-trip must not rewrite a
-    /// committed `system/loop.json`. Also stands in for `LoopEngineConfigStore.
-    /// exists` (`!= nil`), so the guard costs no disk read per keystroke.
-    @State private var persistedConfig: LoopEngineConfig?
+    /// What THIS loop currently has persisted (`nil` ⇒ no saved entry for this
+    /// `loopId` yet). The autosave baseline: loading a loop must not trigger a
+    /// write of the file it just read, and a no-op edit round-trip must not
+    /// rewrite a committed `system/loop.json`. Also stands in for "does this
+    /// loop already exist in the store" (`!= nil`), so the guard costs no disk
+    /// read per keystroke.
+    @State private var persistedLoop: LoopDefinition?
 
     struct PendingAutosave {
-        let config: LoopEngineConfig
+        let loop: LoopDefinition
         let projectId: String
         let projectRoot: URL?
     }
@@ -136,14 +138,31 @@ struct LoopEngineView: View {
     /// "last written" line. Read from disk rather than the note index so an
     /// unindexed/hand-deleted note cannot make the row lie.
     @State var lastSummaryNoteName: String?
+    /// This loop's own display name — editable (see Task 9, not yet done).
+    @State var loopName: String = ""
+    /// This loop's free-text goal/acceptance-criteria — `nil`/empty for
+    /// every loop that has never set one, which is byte-identical to
+    /// pre-multi-loop behavior. Edited in the OVERVIEW section.
+    @State var goal: String = ""
+    @State var acceptanceCriteria: String = ""
+    /// Optional path allowlist, edited in the SETTINGS section. Empty means
+    /// unrestricted — see `LoopDefinition.scopeGlobs`.
+    @State var scopeGlobs: [String] = []
+    /// Whether the loop this page represents is CURRENTLY the project's
+    /// Primary loop — read fresh on every `loadConfig()`, since Primary can
+    /// be reassigned from the loop-list pane while this page stays mounted.
+    /// Used only to attribute legacy (pre-migration) journal entries — whose
+    /// `loopId` is `nil` — to the Primary loop's Past Runs list.
+    @State var isPrimaryLoop = false
 
     /// Reads `<projectRoot>/system/loop-runs/` for the "past runs" list. A
     /// separate instance from the runner's own journal is fine — the file layout
     /// is the contract, and this one only ever reads.
     private let journal = FileLoopRunJournal()
 
-    init(api: LlmIdeAPIClient) {
+    init(api: LlmIdeAPIClient, loopId: String) {
         self.api = api
+        self.loopId = loopId
         let approvals = VerifyApprovalStore()
         self.approvals = approvals
         // Same transport/model tier the regression sweep uses for its own
@@ -190,7 +209,7 @@ struct LoopEngineView: View {
                                  level: line.level == .error ? .error : .info)
             }
         }
-        .task(id: activeProjectId) {
+        .task(id: reloadKey) {
             selectedStageId = nil
             runner.clearLog()
             lastStatus = nil
@@ -203,14 +222,14 @@ struct LoopEngineView: View {
         // the bottom of SETTINGS and Run is not always the next step. Guarded
         // inside scheduleAutosave by the same shouldPersist rule runLoop's
         // implicit save uses (so it can't lock in an unconfirmed
-        // bare-Regression detection) and by the persistedConfig baseline (so
-        // merely loading a project never rewrites the committed file).
+        // bare-Regression detection) and by the persistedLoop baseline (so
+        // merely loading a loop never rewrites the committed file).
         // Every exit flushes the pending write rather than dropping it:
-        // project switch (loadConfig), leaving this page (onDisappear), and
-        // app quit (willTerminate below — a sleeping Task dies with the
+        // project/loop switch (loadConfig), leaving this page (onDisappear),
+        // and app quit (willTerminate below — a sleeping Task dies with the
         // process on Cmd-Q, the same reason LoopEngineRunner installs its
         // own termination handler).
-        .onChange(of: currentConfig) { _, updated in
+        .onChange(of: currentLoop) { _, updated in
             scheduleAutosave(updated)
         }
         .onDisappear {
@@ -219,13 +238,6 @@ struct LoopEngineView: View {
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.willTerminateNotification)) { _ in
             flushPendingAutosave()
-        }
-        .sheet(isPresented: $isPresentingNewLoopWizard) {
-            NewLoopWizardView(
-                templateStore: templateStore,
-                skillCatalog: skillCatalog,
-                gitRoot: activeGitRootURL,
-                onCreate: applyNewLoopConfig)
         }
     }
 
@@ -480,15 +492,6 @@ struct LoopEngineView: View {
 
     private var toolbar: some View {
         HStack(spacing: Spacing.md) {
-            Button {
-                isPresentingNewLoopWizard = true
-            } label: {
-                Label("New Loop", systemImage: "plus.circle")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .help("Create a loop from a template — choose the recipe, then each stage's skill and input")
-            Divider().frame(height: 16)
             Button(runner.running ? "Running… (iteration \(runner.iteration))" : "Run") {
                 startRun()
             }
@@ -762,6 +765,15 @@ struct LoopEngineView: View {
     /// different configs for the same project.
     private var activeProjectId: String? { projectStore.activeProject?.bundle.id }
 
+    /// Combines project and loop identity so switching EITHER — a project
+    /// switch, or the home view moving the selection to a different loop
+    /// within the same project — triggers a reload. A plain `activeProjectId`
+    /// alone would leave a project-switch-only `.task(id:)` blind to a loop
+    /// switch within the same project.
+    private var reloadKey: String {
+        "\(activeProjectId ?? "none")::\(loopId)"
+    }
+
     /// The two-root context (`projectRoot` for faults/index/memory, `gitRoot`
     /// for the actual git working tree) — the single source of truth for
     /// resolving the two roots. In the "clone-into-code" layout these differ
@@ -779,11 +791,8 @@ struct LoopEngineView: View {
         workspaceContext?.gitRoot
     }
 
-    /// The config this page currently represents — the single builder used by
-    /// save AND run. Composing it in one place is what stops a newly added
-    /// `LoopEngineConfig` field from being silently reset to its default by a
-    /// call site that forgot to thread it through (the same hazard
-    /// `LoopStageDetector.ensureDefaultStages` copies-and-mutates to avoid).
+    /// The config this page currently represents — unchanged in shape; still
+    /// just the budgets/stages half of the loop.
     private var currentConfig: LoopEngineConfig {
         LoopEngineConfig(
             stages: stages,
@@ -796,40 +805,54 @@ struct LoopEngineView: View {
             writeSummaryNote: writeSummaryNote)
     }
 
+    /// The full `LoopDefinition` this page currently represents — `currentConfig`
+    /// plus this loop's identity and contract fields. The single builder used
+    /// by every save/autosave/run path, so a field added to `LoopDefinition`
+    /// can't be silently dropped by one call site forgetting to thread it —
+    /// same rationale `currentConfig`'s own doc comment gives for its half.
+    private var currentLoop: LoopDefinition {
+        LoopDefinition(id: loopId, name: loopName, isPrimary: isPrimaryLoop,
+                       goal: goal.isEmpty ? nil : goal,
+                       acceptanceCriteria: acceptanceCriteria.isEmpty ? nil : acceptanceCriteria,
+                       scopeGlobs: scopeGlobs, config: currentConfig)
+    }
+
     private func loadConfig() {
-        // A pending autosave belongs to the PREVIOUS project — loadConfig runs
-        // on project switch, and the state assignments below will fire
-        // onChange for the NEW project. Write the old project's edits out
-        // first; cancelling here would lose exactly the edit autosave exists
-        // to keep.
+        // A pending autosave belongs to the PREVIOUS loop — loadConfig runs
+        // on project/loop switch, and the state assignments below will fire
+        // onChange for the NEW loop. Write the old loop's edits out first;
+        // cancelling here would lose exactly the edit autosave exists to keep.
         flushPendingAutosave()
         // Reset up front: this flag is set by applySelectedTemplate() for
-        // THIS project's Template section, and a project switch (the sole
-        // caller of loadConfig(), via .task(id: activeProjectId)) must not
-        // let it survive into a different project's empty-stages state for
-        // an unrelated reason (no saved config, no git root).
+        // THIS loop's Template section, and a project/loop switch (the sole
+        // caller of loadConfig(), via .task(id: reloadKey)) must not let it
+        // survive into a different loop's empty-stages state for an
+        // unrelated reason (no saved config, no git root).
         appliedTemplateHadNoTooling = false
         guard let projectId = activeProjectId else {
             resetStagesToDefaults()
             return
         }
-        loadPastRuns()
-        if let saved = LoopEngineConfigStore.load(projectRoot: workspaceContext?.projectRoot, projectId: projectId) {
-            let ensured = LoopStageDetector.ensureDefaultStages(in: saved, gitRoot: activeGitRootURL)
-            stages = ensured.stages
-            maxIterations = ensured.maxIterations
-            consecutiveFailureStop = ensured.consecutiveFailureStop
-            wallClockMinutes = LoopBudgetsEditor.minutes(fromSeconds: ensured.wallClockBudgetSeconds)
-            maxRepairsPerStage = ensured.maxRepairsPerStage
-            protectedPathPolicy = ensured.protectedPathPolicy
-            extraProtectedGlobs = ensured.extraProtectedGlobs
-            writeSummaryNote = ensured.writeSummaryNote
-            // Baseline = the exact value onChange will see for this state, so
-            // the load itself cannot schedule a write. Set from currentConfig
-            // (not `saved`/`ensured`) on purpose: any lossy round-trip (e.g.
-            // seconds → whole minutes) would otherwise register as an "edit"
-            // and rewrite the committed file on open.
-            persistedConfig = currentConfig
+        let store = LoopEngineConfigStore.load(projectRoot: workspaceContext?.projectRoot, projectId: projectId)
+        if let existing = store?.loops.first(where: { $0.id == loopId }) {
+            let ensuredConfig = LoopStageDetector.ensureDefaultStages(in: existing.config, gitRoot: activeGitRootURL)
+            stages = ensuredConfig.stages
+            maxIterations = ensuredConfig.maxIterations
+            consecutiveFailureStop = ensuredConfig.consecutiveFailureStop
+            wallClockMinutes = LoopBudgetsEditor.minutes(fromSeconds: ensuredConfig.wallClockBudgetSeconds)
+            maxRepairsPerStage = ensuredConfig.maxRepairsPerStage
+            protectedPathPolicy = ensuredConfig.protectedPathPolicy
+            extraProtectedGlobs = ensuredConfig.extraProtectedGlobs
+            writeSummaryNote = ensuredConfig.writeSummaryNote
+            loopName = existing.name
+            isPrimaryLoop = existing.isPrimary
+            goal = existing.goal ?? ""
+            acceptanceCriteria = existing.acceptanceCriteria ?? ""
+            scopeGlobs = existing.scopeGlobs
+            // Baseline set from currentLoop (not `existing`) so a lossy
+            // round-trip cannot register as an edit and rewrite the file on
+            // open — same reasoning the pre-multi-loop version documented.
+            persistedLoop = currentLoop
         } else if let gitRoot = activeGitRootURL {
             let detected = LoopStageDetector.detectDefaultStages(gitRoot: gitRoot)
             resetStagesToDefaults(stages: detected)
@@ -839,20 +862,17 @@ struct LoopEngineView: View {
             // page can't permanently lock in a Regression-only config for
             // the project before the repo is fully populated/detectable.
             if LoopEngineConfig.shouldPersist(detected) {
-                var toSave = currentConfig
-                toSave.stages = detected
-                LoopEngineConfigStore.save(toSave, projectRoot: workspaceContext?.projectRoot,
-                                           projectId: projectId)
-                persistedConfig = toSave
+                saveConfig()
             }
         } else {
             // No saved config AND no git root to detect defaults from
             // (e.g. the project folder isn't resolvable yet) — reset
             // instead of falling through and leaving a PREVIOUS
-            // project's stages displayed (and later saved/run against
-            // THIS project's id/gitRoot).
+            // loop's stages displayed (and later saved/run against
+            // THIS loop's id/gitRoot).
             resetStagesToDefaults()
         }
+        loadPastRuns()
     }
 
     /// Live-fetch the central skill catalog (best-effort, latched on success)
@@ -882,11 +902,20 @@ struct LoopEngineView: View {
         protectedPathPolicy = seed.protectedPathPolicy
         extraProtectedGlobs = seed.extraProtectedGlobs
         writeSummaryNote = seed.writeSummaryNote
+        // Reset the loop-identity/contract state too — without this, closing
+        // a project that had a loop with a Goal set and opening one with no
+        // config yet would leave that Goal text displayed against the new,
+        // unrelated project.
+        loopName = "Main Loop"
+        goal = ""
+        acceptanceCriteria = ""
+        scopeGlobs = []
+        isPrimaryLoop = false
         pastRuns = []
         lastSummaryNoteName = nil
-        // Nothing is persisted for this project (that is what "reset to
+        // Nothing is persisted for this loop (that is what "reset to
         // defaults" means here) — autosave's exists-check must say so.
-        persistedConfig = nil
+        persistedLoop = nil
     }
 
     /// Append a non-default copy of `stage` (new id, cleared isDefault +
@@ -925,35 +954,35 @@ struct LoopEngineView: View {
     }
 
     /// Whether implicit persistence (autosave, Run's implicit save) may write
-    /// `config`. One predicate for both paths — the composed rule lived inline
+    /// `loop`. One predicate for both paths — the composed rule lived inline
     /// at each site once and had already diverged by review time.
     ///
     /// - Empty stage lists are never implicitly saved: a template whose stages
-    ///   all resolved to nothing (no test tooling) must not wipe the project's
+    ///   all resolved to nothing (no test tooling) must not wipe the loop's
     ///   saved stages moments after Apply. Explicit Save still can.
     /// - Otherwise the same rule as always: a real config (`shouldPersist`) or
-    ///   a project that already has one — implicit saves can't lock in an
+    ///   a loop that already has one — implicit saves can't lock in an
     ///   unconfirmed bare-Regression detection.
-    private func isSafeToPersistImplicitly(_ config: LoopEngineConfig) -> Bool {
-        guard !config.stages.isEmpty else { return false }
-        return LoopEngineConfig.shouldPersist(config.stages) || persistedConfig != nil
+    private func isSafeToPersistImplicitly(_ loop: LoopDefinition) -> Bool {
+        guard !loop.config.stages.isEmpty else { return false }
+        return LoopEngineConfig.shouldPersist(loop.config.stages) || persistedLoop != nil
     }
 
-    /// Debounced persistence of `config` for the active project.
+    /// Debounced persistence of `loop` for the active project.
     ///
-    /// The payload (config + project identity) is captured in `pendingAutosave`
+    /// The payload (loop + project identity) is captured in `pendingAutosave`
     /// at schedule time, and a switch to a DIFFERENT project **flushes** it —
-    /// `loadConfig` (the project-switch handler) writes the old project's edits
-    /// under the old project's key before touching any state. Cancelling on
-    /// switch, as the first version did, would lose exactly the edit this
-    /// feature exists to keep.
-    private func scheduleAutosave(_ config: LoopEngineConfig) {
+    /// `loadConfig` (the project/loop-switch handler) writes the old loop's
+    /// edits under the old project's key before touching any state.
+    /// Cancelling on switch, as the first version did, would lose exactly the
+    /// edit this feature exists to keep.
+    private func scheduleAutosave(_ loop: LoopDefinition) {
         guard let projectId = activeProjectId else { return }
         // Baseline: what's already on disk (or the just-loaded equivalent).
-        // Loading a project fires onChange too — without this, opening the
+        // Loading a loop fires onChange too — without this, opening the
         // page would rewrite a committed file it only read.
-        guard config != persistedConfig else { return }
-        guard isSafeToPersistImplicitly(config) else { return }
+        guard loop != persistedLoop else { return }
+        guard isSafeToPersistImplicitly(loop) else { return }
         // Defensive: a pending save for another project is flushed, never
         // replaced. loadConfig already flushes on switch, so this is normally
         // a no-op, but this method must stay safe on its own.
@@ -961,7 +990,7 @@ struct LoopEngineView: View {
             flushPendingAutosave()
         }
         autosaveTask?.cancel()
-        pendingAutosave = PendingAutosave(config: config, projectId: projectId,
+        pendingAutosave = PendingAutosave(loop: loop, projectId: projectId,
                                           projectRoot: workspaceContext?.projectRoot)
         autosaveTask = Task {
             try? await Task.sleep(nanoseconds: 800_000_000)
@@ -971,17 +1000,16 @@ struct LoopEngineView: View {
     }
 
     /// Writes the pending autosave now, if any. Called by the debounce task on
-    /// fire, by `loadConfig` before a project switch overwrites state, and on
-    /// `onDisappear` when the user leaves the Loop page.
+    /// fire, by `loadConfig` before a project/loop switch overwrites state, and
+    /// on `onDisappear` when the user leaves the Loop page.
     func flushPendingAutosave() {
         guard let pending = pendingAutosave else { return }
         pendingAutosave = nil
         autosaveTask?.cancel()
         autosaveTask = nil
-        LoopEngineConfigStore.save(pending.config, projectRoot: pending.projectRoot,
-                                   projectId: pending.projectId)
+        writeLoop(pending.loop, projectRoot: pending.projectRoot, projectId: pending.projectId)
         if pending.projectId == activeProjectId {
-            persistedConfig = pending.config
+            persistedLoop = pending.loop
         }
     }
 
@@ -999,9 +1027,24 @@ struct LoopEngineView: View {
         pendingAutosave = nil
         autosaveTask?.cancel()
         autosaveTask = nil
-        LoopEngineConfigStore.save(currentConfig, projectRoot: workspaceContext?.projectRoot,
-                                   projectId: projectId)
-        persistedConfig = currentConfig
+        writeLoop(currentLoop, projectRoot: workspaceContext?.projectRoot, projectId: projectId)
+        persistedLoop = currentLoop
+    }
+
+    /// Writes `loop` into this project's full loop list — replacing the
+    /// existing entry with the same id, or appending when this is the first
+    /// save of a brand-new loop (e.g. one just created by the home view).
+    /// Read-modify-write is required here because `LoopEngineConfigStore`
+    /// persists the WHOLE list per project, not one loop at a time.
+    private func writeLoop(_ loop: LoopDefinition, projectRoot: URL?, projectId: String) {
+        var store = LoopEngineConfigStore.load(projectRoot: projectRoot, projectId: projectId)
+            ?? LoopEngineProjectStore(loops: [])
+        if let index = store.loops.firstIndex(where: { $0.id == loop.id }) {
+            store.loops[index] = loop
+        } else {
+            store.loops.append(loop)
+        }
+        LoopEngineConfigStore.save(store, projectRoot: projectRoot, projectId: projectId)
     }
 
     /// Refreshes the "past runs" list from the journal on disk. Best-effort: an
@@ -1011,7 +1054,11 @@ struct LoopEngineView: View {
             pastRuns = []
             return
         }
-        pastRuns = journal.recentRuns(root: root, limit: 15)
+        // Read more than the display limit — a project journal interleaves
+        // every loop's runs, so filtering down to this loop must not starve
+        // the list.
+        let recent = journal.recentRuns(root: root, limit: 60)
+        pastRuns = Array(recent.filter { $0.loopId == loopId || ($0.loopId == nil && isPrimaryLoop) }.prefix(15))
         lastSummaryNoteName = Self.newestSummaryNoteName(projectRoot: root)
     }
 
@@ -1075,17 +1122,6 @@ struct LoopEngineView: View {
         assignConfig(applied)
     }
 
-    /// Applies a config assembled by the New Loop wizard and saves it right
-    /// away — unlike `applySelectedTemplate`, which persists via the debounced
-    /// autosave, this saves synchronously: finishing the wizard IS the
-    /// confirmation (the user picked a recipe and configured its stages in a
-    /// dedicated flow), so there is no reason to leave a 0.8s window.
-    func applyNewLoopConfig(_ applied: LoopEngineConfig) {
-        assignConfig(applied)
-        selectedTemplateId = nil
-        saveConfig()
-    }
-
     func saveCurrentAsTemplate() {
         let saved = templateStore.save(
             name: newTemplateName, summary: newTemplateSummary, config: currentConfig)
@@ -1117,7 +1153,7 @@ struct LoopEngineView: View {
         // in-memory `stages` happens to be Regression-only right now — that
         // reflects a real edit (e.g. the user removed the Test stage), not
         // an unconfirmed auto-detection.
-        if isSafeToPersistImplicitly(currentConfig) {
+        if isSafeToPersistImplicitly(currentLoop) {
             saveConfig()
         }
         var runConfig = currentConfig
@@ -1135,7 +1171,11 @@ struct LoopEngineView: View {
             runConfig.stages = soloed
         }
         let result = await runner.run(config: runConfig, faultsRoot: context.projectRoot,
-                                      gitRoot: gitRoot, projectId: projectId)
+                                      gitRoot: gitRoot, projectId: projectId,
+                                      loopId: loopId, loopName: loopName,
+                                      goal: goal.isEmpty ? nil : goal,
+                                      acceptanceCriteria: acceptanceCriteria.isEmpty ? nil : acceptanceCriteria,
+                                      scopeGlobs: scopeGlobs)
         lastStatus = result
         didRejectLastRun = (result == nil)
         // The run just journalled itself; re-read so the list reflects it.
