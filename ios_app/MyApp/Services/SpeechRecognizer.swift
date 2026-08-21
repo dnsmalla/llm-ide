@@ -74,7 +74,7 @@ final class SpeechRecognizer: ObservableObject {
     }
 
     /// `AVAudioSession.requestRecordPermission` is deprecated from iOS 17.
-    private func requestMicrophone(_ completion: @escaping (Bool) -> Void) {
+    private func requestMicrophone(_ completion: @escaping @Sendable (Bool) -> Void) {
         if #available(iOS 17.0, *) {
             AVAudioApplication.requestRecordPermission(completionHandler: completion)
         } else {

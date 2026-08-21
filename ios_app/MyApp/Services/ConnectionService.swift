@@ -355,7 +355,7 @@ final class ConnectionService: ObservableObject {
             return
         }
         task.send(.string(string)) { [weak self] err in
-            if let err {
+            if err != nil {
                 Task { @MainActor in
                     guard let self else { return }
                     let message = "Couldn't reach your Mac — check the connection and try again."
