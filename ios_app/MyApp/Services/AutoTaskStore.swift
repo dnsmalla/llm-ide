@@ -30,6 +30,13 @@ final class AutoTaskStore: ObservableObject {
     private var actionStatusTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
     private var logPollTask: Task<Void, Never>?
+    /// Generation stamps so a cancelled polling loop can never clear the handle
+    /// of the loop that replaced it (which used to spawn duplicate timers).
+    private var pollGeneration = 0
+    private var logPollGeneration = 0
+    /// True once this run has auto-opened the run-log screen. Latches so the
+    /// 1s/2s pollers can't re-present it after the user backs out.
+    private var hasAutoPresentedRun = false
 
     weak var connection: ConnectionService?
 
@@ -56,6 +63,7 @@ final class AutoTaskStore: ObservableObject {
     func autoTaskRun(_ task: String? = nil) {
         lastError = nil
         focusedLogTaskId = task
+        hasAutoPresentedRun = false   // this run may auto-open the log once
         // Send BEFORE opening the log screen. Setting `isRunLogPresented` first
         // can trigger SwiftUI navigation/re-entrancy before the WebSocket frame
         // is queued — the Mac never sees the run and the log page looks empty.
@@ -131,6 +139,9 @@ final class AutoTaskStore: ObservableObject {
     /// can fire disappear during parent re-renders while the screen is still visible.
     func dismissRunLog() {
         isRunLogPresented = false
+        // Consume the latch: the user chose to leave, so nothing may re-present
+        // this run's log behind their back.
+        hasAutoPresentedRun = true
         stopLogPolling()
     }
 
@@ -203,26 +214,66 @@ final class AutoTaskStore: ObservableObject {
 
     func clearError() { lastError = nil }
 
+    /// Blank slate for a newly paired Mac — stop both pollers and drop the
+    /// previous machine's task state, history and logs.
+    func resetForNewDevice() {
+        stopPolling()
+        stopLogPolling()
+        actionStatusTask?.cancel()
+        actionStatusTask = nil
+        hasAutoPresentedRun = false
+        isRunLogPresented = false
+        focusedLogTaskId = nil
+        autoTaskState = nil
+        autoTaskLogGroups = []
+        autoTaskHistoryEntries = []
+        actionStatus = nil
+        lastError = nil
+    }
+
     // MARK: — Log polling
 
     /// Poll logs while a run is active or the log screen is open (Mac also pushes).
     func startLogPollingIfNeeded() {
         guard logPollTask == nil else { return }
+        logPollGeneration &+= 1
+        let generation = logPollGeneration
         logPollTask = Task { @MainActor [weak self] in
-            defer { self?.stopLogPolling() }
+            // NO `defer { stopLogPolling() }`: a cancelled task doesn't finish
+            // synchronously — it wakes from the sleep and runs its defer LATER,
+            // by which time `logPollTask` may hold a NEWER task. The defer then
+            // cancelled+nilled the successor's handle while it kept looping, and
+            // the next start spawned a SECOND concurrent 1s loop. Clear the
+            // handle only if this generation still owns it.
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
-                guard !Task.isCancelled else { return }
-                guard let self else { return }
+                guard !Task.isCancelled, let self, generation == self.logPollGeneration else { return }
+                // A dropped socket used to leave this looping for the app's
+                // lifetime: `isRunning` stays true in the stale snapshot, so
+                // every tick issued a send that silently returned false.
+                guard self.connection?.connectionStatus == .connected else {
+                    self.clearLogPollTask(generation: generation)
+                    return
+                }
                 let shouldPoll = self.isRunLogPresented || self.autoTaskState?.isRunning == true
-                guard shouldPoll else { return }
+                guard shouldPoll else {
+                    self.clearLogPollTask(generation: generation)
+                    return
+                }
                 self.autoTaskLogsList()
             }
         }
     }
 
     func stopLogPolling() {
+        logPollGeneration &+= 1
         logPollTask?.cancel()
+        logPollTask = nil
+    }
+
+    /// Release the handle only when this loop's generation still owns it.
+    private func clearLogPollTask(generation: Int) {
+        guard generation == logPollGeneration else { return }
         logPollTask = nil
     }
 
@@ -251,19 +302,31 @@ final class AutoTaskStore: ObservableObject {
     /// counts stay in sync without manual refresh.
     private func startPollingIfNeeded() {
         guard pollTask == nil else { return }
+        pollGeneration &+= 1
+        let generation = pollGeneration
         pollTask = Task { @MainActor [weak self] in
-            defer { self?.stopPolling() }
+            // See startLogPollingIfNeeded for why there is no `defer` here.
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
-                guard !Task.isCancelled else { return }
-                guard let self, self.autoTaskState?.isRunning == true else { return }
+                guard !Task.isCancelled, let self, generation == self.pollGeneration else { return }
+                guard self.connection?.connectionStatus == .connected,
+                      self.autoTaskState?.isRunning == true else {
+                    self.clearPollTask(generation: generation)
+                    return
+                }
                 self.autoTaskList()
             }
         }
     }
 
     private func stopPolling() {
+        pollGeneration &+= 1
         pollTask?.cancel()
+        pollTask = nil
+    }
+
+    private func clearPollTask(generation: Int) {
+        guard generation == pollGeneration else { return }
         pollTask = nil
     }
 
@@ -282,7 +345,11 @@ final class AutoTaskStore: ObservableObject {
         if focusedLogTaskId == nil, let current = reply.currentTask {
             focusedLogTaskId = current
         }
-        if reply.currentTask != nil, autoTaskState?.isRunning == true {
+        // Auto-present ONCE per run. Re-asserting it on every log reply meant
+        // backing out during a run put the screen straight back within ~1s —
+        // the user was trapped in the run log until the run finished.
+        if reply.currentTask != nil, autoTaskState?.isRunning == true, !hasAutoPresentedRun {
+            hasAutoPresentedRun = true
             isRunLogPresented = true
         }
         // Mac always sends all task buckets; if decode succeeded but tasks is

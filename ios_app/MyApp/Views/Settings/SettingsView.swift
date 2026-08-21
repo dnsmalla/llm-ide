@@ -52,6 +52,7 @@ struct SettingsView: View {
                             Button(role: .destructive) {
                                 connection.disconnect()
                                 connectionStore.clear()
+                                connection.resetStoresForNewDevice()
                             } label: {
                                 HStack {
                                     Image(systemName: "xmark.circle")

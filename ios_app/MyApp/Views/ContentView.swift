@@ -3,6 +3,8 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var connectionStore: ConnectionStore
+    @EnvironmentObject var macStatusStore: MacStatusStore
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         if connectionStore.hasDevice {
@@ -22,6 +24,24 @@ struct ContentView: View {
                                 port: connectionStore.devicePort,
                                 pin: connectionStore.devicePIN
                             )
+                        }
+                    }
+                    // iOS suspends the WebSocket in the background, and
+                    // `onAppear` does NOT re-fire on foregrounding — so
+                    // recovery used to depend on whichever came first, a stale
+                    // receive callback or the next heartbeat tick, with no
+                    // resync of the mirrored Mac state.
+                    .onChange(of: scenePhase) { phase in
+                        guard phase == .active, connectionStore.hasDevice else { return }
+                        if connection.connectionStatus == .disconnected, !connection.userClosed {
+                            connection.connectDirect(
+                                ip: connectionStore.deviceIP,
+                                port: connectionStore.devicePort,
+                                pin: connectionStore.devicePIN
+                            )
+                        } else if connection.connectionStatus == .connected {
+                            // Live socket, but the snapshot may be minutes old.
+                            macStatusStore.requestMacStatus()
                         }
                     }
             }

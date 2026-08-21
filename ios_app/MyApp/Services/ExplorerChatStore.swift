@@ -31,6 +31,8 @@ final class ExplorerChatStore: ObservableObject {
     /// chat is one-in-flight, but a Set mirrors `LlmIdeChatStore` and is robust
     /// to overlapping done/stream frames.
     private var exploreCommandIds: Set<String> = []
+    /// The turn Stop should cancel — most recently minted commandId.
+    private var currentCommandId: String?
 
     private struct PendingExploreSend {
         let text: String
@@ -122,6 +124,7 @@ final class ExplorerChatStore: ObservableObject {
         )
         exploreCurrent?.history = messages
         isStreaming = true
+        currentCommandId = id
         startStreamTimeout(for: id)
         let chat = ExploreChat(sessionId: sessionId, commandId: id, text: text,
                                files: files, refs: refs, skills: skills)
@@ -261,23 +264,56 @@ final class ExplorerChatStore: ObservableObject {
         if done {
             streamTimeoutTask?.cancel()
             isStreaming = false
-            if let id = commandId { exploreCommandIds.remove(id) }
+            if let id = commandId {
+                exploreCommandIds.remove(id)
+                if currentCommandId == id { currentCommandId = nil }
+            }
         }
     }
 
     func handleChatError(commandId: String? = nil) {
         streamTimeoutTask?.cancel()
         isStreaming = false
-        if let commandId { exploreCommandIds.remove(commandId) }
+        if let commandId {
+            exploreCommandIds.remove(commandId)
+            if currentCommandId == commandId { currentCommandId = nil }
+        } else {
+            // Connection-wide failure: every in-flight turn is dead. Orphans
+            // left here would make a later Stop cancel a corpse and let a
+            // replayed frame append into a live transcript.
+            exploreCommandIds.removeAll()
+            currentCommandId = nil
+        }
         if var current = exploreCurrent {
             removeTrailingEmptyAssistant(&current.history)
             exploreCurrent = current
         }
     }
 
+    /// Blank slate for a newly paired Mac: the previous machine's session id is
+    /// meaningless there, and `exploreCurrent != nil` would make
+    /// `prepareSessionIfNeeded` short-circuit so the first send goes out
+    /// against a session that doesn't exist.
+    func resetForNewDevice() {
+        streamTimeoutTask?.cancel()
+        streamTimeoutTask = nil
+        sessionPrepTimeoutTask?.cancel()
+        sessionPrepTimeoutTask = nil
+        sessionPrepGeneration &+= 1
+        isPreparingSession = false
+        isStreaming = false
+        exploreCommandIds.removeAll()
+        currentCommandId = nil
+        pendingSend = nil
+        loadingSessionId = nil
+        exploreCurrent = nil
+        exploreSessions = []
+    }
+
     /// Cancel the in-flight explore chat turn on the Mac.
     func cancelStreaming() {
-        guard let commandId = exploreCommandIds.first else { return }
+        // Not `Set.first` — that's nondeterministic with two ids in flight.
+        guard let commandId = currentCommandId else { return }
         connection?.sendEncodable(ExploreCancel(commandId: commandId))
     }
 
@@ -375,6 +411,9 @@ final class ExplorerChatStore: ObservableObject {
     private func cancelSessionPrep(message: String) {
         completeSessionPrep()
         loadingSessionId = nil
+        // Drop the queued turn: `flushPendingSend` fires on the NEXT successful
+        // session load, which can be minutes later and a different session.
+        pendingSend = nil
         connection?.errorMessage = message
     }
 

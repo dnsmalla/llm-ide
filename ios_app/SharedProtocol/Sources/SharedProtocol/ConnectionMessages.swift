@@ -33,10 +33,21 @@ public struct Connected: Codable, Equatable {
     private enum CodingKeys: String, CodingKey { case type, deviceName }
 }
 
-/// Server → client: PIN rejected; sent before closing the socket.
+/// Server → client: pairing refused; sent before closing the socket.
+///
+/// `retryable` separates "your PIN is wrong" from "you're going too fast".
+/// The client DELETES its stored PIN on a rejection, which is right for a
+/// genuinely wrong PIN and destructive for a throttle/lockout refusal — one
+/// mistyped attempt followed by the CORRECT PIN inside the penalty window
+/// would otherwise wipe a good PIN and force a re-pair. Optional on decode so
+/// an older Mac (no field) keeps its current meaning: not retryable.
 public struct AuthFailed: Codable, Equatable {
     public let type = MobileProtocol.Tag.authFailed
     public let message: String
-    public init(message: String) { self.message = message }
-    private enum CodingKeys: String, CodingKey { case type, message }
+    public let retryable: Bool?
+    public init(message: String, retryable: Bool? = nil) {
+        self.message = message
+        self.retryable = retryable
+    }
+    private enum CodingKeys: String, CodingKey { case type, message, retryable }
 }

@@ -381,6 +381,11 @@ struct ExplorerChatView: View {
                 .foregroundColor(DesignSystem.Colors.textPrimary)
                 .lineLimit(1)
             Button {
+                // Bounds-checked: the chips are keyed by array OFFSET, so a
+                // stale index after a prior removal used to trap on
+                // `Index out of range` (the llm-ide chat already guards this
+                // exact call — `LlmIdeControlView.removeFile(at:)`).
+                guard pendingFiles.indices.contains(idx) else { return }
                 pendingFiles.remove(at: idx)
                 haptic(.light)
             } label: {
@@ -388,6 +393,7 @@ struct ExplorerChatView: View {
                     .font(.system(size: 18))
                     .foregroundColor(DesignSystem.Colors.textTertiary)
             }
+            .accessibilityLabel("Remove attachment \(file.name)")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)

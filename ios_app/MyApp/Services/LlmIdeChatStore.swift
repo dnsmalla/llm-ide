@@ -17,6 +17,10 @@ final class LlmIdeChatStore: ObservableObject {
 
     /// Command ids whose streamed reply belongs to this transcript.
     private var llmIdeCommandIds: Set<String> = []
+    /// The turn Stop should cancel — the most recently minted commandId. The id
+    /// SET stays (a late frame for an older turn must still be routable), but
+    /// cancellation needs a deterministic target.
+    private var currentCommandId: String?
     private var streamTimeoutTask: Task<Void, Never>?
 
     weak var connection: ConnectionService?
@@ -51,6 +55,7 @@ final class LlmIdeChatStore: ObservableObject {
             imageData: images.first?.data
         )
         isStreaming = true
+        currentCommandId = id
         startStreamTimeout(for: id)
         let chatImages = images.map { ChatImage(mediaType: $0.mediaType, data: $0.data.base64EncodedString()) }
         let chat = LlmIdeChat(commandId: id, text: text, history: history, images: chatImages, files: files)
@@ -83,7 +88,9 @@ final class LlmIdeChatStore: ObservableObject {
 
     /// Cancel the in-flight llm-ide chat turn on the Mac.
     func cancelStreaming() {
-        guard let commandId = llmIdeCommandIds.first else { return }
+        // `Set.first` is nondeterministic — with two ids in flight Stop could
+        // cancel the wrong turn. Track the live one explicitly.
+        guard let commandId = currentCommandId else { return }
         connection?.sendEncodable(LlmIdeCancel(commandId: commandId))
     }
 
@@ -127,7 +134,10 @@ final class LlmIdeChatStore: ObservableObject {
         if done {
             streamTimeoutTask?.cancel()
             isStreaming = false
-            if let id = commandId { llmIdeCommandIds.remove(id) }
+            if let id = commandId {
+                llmIdeCommandIds.remove(id)
+                if currentCommandId == id { currentCommandId = nil }
+            }
             loadSharedHistory()
         }
     }
@@ -135,8 +145,30 @@ final class LlmIdeChatStore: ObservableObject {
     func handleChatError(commandId: String? = nil) {
         streamTimeoutTask?.cancel()
         isStreaming = false
-        if let commandId { llmIdeCommandIds.remove(commandId) }
+        if let commandId {
+            llmIdeCommandIds.remove(commandId)
+            if currentCommandId == commandId { currentCommandId = nil }
+        } else {
+            // No id = the whole connection went down (ConnectionService
+            // .disconnect). Every in-flight turn is dead, so drop them all:
+            // leaving orphans behind means a later Stop cancels a command that
+            // no longer exists, a late/replayed frame for that id appends into
+            // the live transcript, and the set grows per dropped connection.
+            llmIdeCommandIds.removeAll()
+            currentCommandId = nil
+        }
         removeTrailingEmptyAssistant(&llmIdeMessages)
+    }
+
+    /// Blank slate for a newly paired Mac. Without this the previous machine's
+    /// transcript stays on screen (and its in-flight ids stay routable).
+    func resetForNewDevice() {
+        streamTimeoutTask?.cancel()
+        streamTimeoutTask = nil
+        isStreaming = false
+        llmIdeCommandIds.removeAll()
+        currentCommandId = nil
+        llmIdeMessages.removeAll()
     }
 
     private func startStreamTimeout(for commandId: String) {

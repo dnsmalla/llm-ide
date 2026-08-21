@@ -110,6 +110,8 @@ extension/tests/_claude-plugins-fixture/
 extension/tests/_codex-home-fixture/
 extension/tests/_llmide-plugins-fixture/
 extension/tests/_auth-routes-repo-root-fixture/
+kb/server.log
+kb/agent-sdk/
 extension/tests/_agent-v2-ws-fixture/
 extension/tests/_agent-v2-memory-roundtrip-fixture/
 extension/tests/plugin-state.json

@@ -105,6 +105,13 @@ final class ConnectionService: ObservableObject {
     weak var connectionStore: ConnectionStore?
 
     private var webSocketTask: URLSessionWebSocketTask?
+    /// ONE session for the app's lifetime. Creating a `URLSession` per connect
+    /// attempt leaked it (and its delegate queue) every time, and the reconnect
+    /// loop can run indefinitely — see `scheduleReconnect`.
+    private let session = URLSession(configuration: .default)
+    /// Fires when a socket opens but the pairing handshake never completes.
+    private var pairingDeadlineTask: Task<Void, Never>?
+    private static let pairingTimeout: TimeInterval = 12
     private var reconnectAttempt = 0
     /// Bumped whenever the active socket is replaced or torn down. Receive
     /// callbacks capture this at registration time and ignore stale results so
@@ -136,35 +143,85 @@ final class ConnectionService: ObservableObject {
            directIP == ip, directPort == port, directPIN == pin {
             return
         }
+        // Re-pointing at a DIFFERENT Mac: every store still holds the previous
+        // one's transcripts, session ids and status. Left in place, the first
+        // explorer send goes out with a sessionId that doesn't exist on the new
+        // Mac, and the dashboard shows the old machine's data.
+        if let previous = directIP, previous != ip {
+            resetStoresForNewDevice()
+        }
         directIP   = ip
         directPort = port
         directPIN  = pin
+        // Clear the previous attempt's reason: the receive-failure path only
+        // writes when `errorMessage == nil`, so a stale value silenced every
+        // later failure — and an unchanged value never re-triggers the
+        // banner's onChange either.
+        errorMessage = nil
         reconnectTask?.cancel()
         reconnectTask = nil
         invalidateSocket()
         connectionStatus = .connecting
         let generation = connectionGeneration
-        guard let encoded = pin.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "ws://\(ip):\(port)/ws?pin=\(encoded)") else {
+        // Built with URLComponents, and the PIN is NOT in the URL: it only ever
+        // travels in the `Pairing` frame below. The query copy was redundant
+        // (the Mac stopped reading it) and put the pairing secret into
+        // CFNetwork/URLSession diagnostics for free.
+        var components = URLComponents()
+        components.scheme = "ws"
+        // An IPv6 literal must be bracketed in a URL authority; URLComponents
+        // does not add them, so `fe80::1` would fail to build.
+        components.host = ip.contains(":") && !ip.hasPrefix("[") ? "[\(ip)]" : ip
+        components.port = port
+        components.path = "/ws"
+        guard let url = components.url else {
             errorMessage = "Invalid connection details"
             connectionStatus = .disconnected
             return
         }
-        webSocketTask = URLSession(configuration: .default).webSocketTask(with: url)
+        webSocketTask = session.webSocketTask(with: url)
         webSocketTask?.resume()
         // Message-based pairing: the first frame after the WS opens must be a
         // Pairing{pin} message. The Mac replies Connected{deviceName} (handled
         // in handleMessage → "connected") or AuthFailed{message} (→ "auth_failed",
-        // which stops retrying). The ?pin= query is no longer required by the Mac
-        // but is left in the URL harmlessly to minimize churn.
+        // which stops retrying).
         if let data = try? JSONEncoder().encode(Pairing(pin: pin)),
            let str = String(data: data, encoding: .utf8) {
             sendTextFrame(str)
         } else {
             errorMessage = "Failed to encode pairing message"
             disconnect(clearDirect: true)
+            return
         }
+        startPairingDeadline(generation: generation)
         receiveMessage(generation: generation)
+    }
+
+    /// TCP can connect while the handshake never completes — Mac app up but
+    /// its server stopped, a half-open NAT path, a wedged main actor. The
+    /// heartbeat watchdog only arms AFTER `connected`, so without this the app
+    /// sat in "Connecting…" forever with nothing to time it out.
+    private func startPairingDeadline(generation: Int) {
+        pairingDeadlineTask?.cancel()
+        pairingDeadlineTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.pairingTimeout * 1_000_000_000))
+            guard let self, !Task.isCancelled,
+                  generation == self.connectionGeneration,
+                  self.connectionStatus != .connected else { return }
+            self.errorMessage = "The Mac didn't answer the pairing request. Check that LLM-IDE is running and Mobile Control is started."
+            self.invalidateSocket()
+            self.connectionStatus = .disconnected
+            self.scheduleReconnect()
+        }
+    }
+
+    /// Wipe every mirrored surface so a newly paired Mac starts from a blank
+    /// slate. Also the single place the two "Forget this Mac" call sites use.
+    func resetStoresForNewDevice() {
+        llmIdeStore?.resetForNewDevice()
+        explorerStore?.resetForNewDevice()
+        autoTaskStore?.resetForNewDevice()
+        macStatusStore?.resetForNewDevice()
     }
 
     func disconnect() { disconnect(clearDirect: true) }
@@ -200,6 +257,8 @@ final class ConnectionService: ObservableObject {
         connectionGeneration += 1
         heartbeatTask?.cancel()
         heartbeatTask = nil
+        pairingDeadlineTask?.cancel()
+        pairingDeadlineTask = nil
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
     }
@@ -309,8 +368,14 @@ final class ConnectionService: ObservableObject {
                         }
                     @unknown default: break
                     }
-                case .failure:
+                case .failure(let error):
                     guard generation == self.connectionGeneration else { return }
+                    // Report BEFORE scheduleReconnect flips the status back to
+                    // .connecting: without a message every failure mode looked
+                    // identical to "still connecting", forever.
+                    if self.errorMessage == nil {
+                        self.errorMessage = Self.describeFailure(error, attempt: self.reconnectAttempt)
+                    }
                     self.invalidateSocket()
                     self.connectionStatus = .disconnected
                     self.scheduleReconnect()
@@ -334,6 +399,8 @@ final class ConnectionService: ObservableObject {
         let type = json["type"] as? String ?? ""
         switch type {
         case "connected":
+            pairingDeadlineTask?.cancel()
+            pairingDeadlineTask = nil
             connectionStatus = .connected
             errorMessage = nil
             reconnectAttempt = 0
@@ -344,8 +411,29 @@ final class ConnectionService: ObservableObject {
         case "heartbeat_ack":
             lastAck = Date()
         case "auth_failed":
-            // Wrong PIN — reconnecting with the same PIN is pointless.
-            errorMessage = "Wrong PIN. Check the 6-digit code in LLM-IDE → Settings → Mobile Control on your Mac."
+            // Wrong PIN / throttled / locked out — reconnecting is pointless.
+            // Prefer the Mac's own wording (it distinguishes a wrong PIN from a
+            // lockout); fall back to the generic hint.
+            let failure = try? JSONDecoder().decode(AuthFailed.self, from: data)
+            let reason = failure?.message
+            errorMessage = (reason?.isEmpty == false ? reason : nil)
+                ?? "Wrong PIN. Check the 6-digit code in LLM-IDE → Settings → Mobile Control on your Mac."
+            // `retryable` = the Mac refused without examining the PIN (rate
+            // limit / lockout). Discarding a possibly-CORRECT PIN there would
+            // force a needless re-pair, so keep it and let the user retry.
+            // Absent field (older Mac) = treat as a genuine wrong PIN.
+            if failure?.retryable == true {
+                // Keep the pairing AND keep trying: `.wait`/`.lockedOut` do not
+                // charge another failure, so an auto-retry can't extend the
+                // penalty, and the common "typo, then the right PIN" case heals
+                // itself instead of stranding the user on a message that says
+                // "try again" while nothing does.
+                reconnectAttempt = 0
+                invalidateSocket()
+                connectionStatus = .disconnected
+                scheduleReconnect()
+                return
+            }
             directPIN = nil
             // Drop the persisted PIN too: if it's stale (Mac changed its PIN
             // across a reinstall/update), auto-connect and manual pre-fill
@@ -400,6 +488,22 @@ final class ConnectionService: ObservableObject {
             }
         default:
             break
+        }
+    }
+
+    /// Human-readable cause for a dropped/failed socket. Distinguishes the
+    /// two cases users actually hit (Mac unreachable vs. network gone) and says
+    /// that retrying is happening, so a spinner is never the only feedback.
+    static func describeFailure(_ error: Error, attempt: Int) -> String {
+        let suffix = attempt > 0 ? " Retrying…" : ""
+        let code = (error as NSError).code
+        switch code {
+        case NSURLErrorCannotConnectToHost, NSURLErrorCannotFindHost, NSURLErrorTimedOut:
+            return "Couldn't reach the Mac. Check it's awake, on the same network, and Mobile Control is started.\(suffix)"
+        case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost:
+            return "Network connection lost.\(suffix)"
+        default:
+            return "Disconnected from the Mac.\(suffix)"
         }
     }
 

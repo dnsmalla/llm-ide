@@ -46,9 +46,23 @@ struct ConnectView: View {
         .onAppear {
             ip  = connectionStore.deviceIP
             pin = connectionStore.devicePIN
+            // Carry over a failure that happened while another view was up —
+            // an `auth_failed` clears the saved PIN, which remounts this view,
+            // so its own onChange can never observe that transition.
+            if let pending = connection.errorMessage { errorMessage = pending }
             discovery.start()
         }
         .onDisappear { discovery.stop() }
+        // Observe the MESSAGE, not only the status: the service sets
+        // .disconnected and then .connecting within one MainActor turn while
+        // auto-retrying, so SwiftUI coalesces them and the status-only path saw
+        // no failure at all — every error looked like "still connecting".
+        .onChange(of: connection.errorMessage) { message in
+            if let message, !message.isEmpty {
+                errorMessage = message
+                connectAttempted = false
+            }
+        }
         .onChange(of: connection.connectionStatus) { status in
             switch status {
             case .disconnected where connectAttempted:
@@ -56,6 +70,7 @@ struct ConnectView: View {
                     ?? "Could not reach the Mac. Check it's on the same network (or Tailscale) and the agent is running."
                 connectAttempted = false
             case .connected:
+                errorMessage = nil
                 connectAttempted = false
             default:
                 break
@@ -135,7 +150,12 @@ struct ConnectView: View {
                     onConnect: { resolvedPIN in
                         errorMessage = nil
                         connectAttempted = true
-                        let portToUse = connectionStore.devicePort > 0 ? connectionStore.devicePort : 3006
+                        // `device.port` is what Bonjour resolved for THIS Mac;
+                        // the saved port may belong to another one. Fall back to
+                        // the saved/default only when discovery gave us none.
+                        let portToUse = device.port > 0
+                            ? device.port
+                            : (connectionStore.devicePort > 0 ? connectionStore.devicePort : PairingInfo.defaultPort)
                         connectionStore.save(ip: device.host, port: portToUse, pin: resolvedPIN)
                         connection.connectDirect(ip: device.host, port: portToUse, pin: resolvedPIN)
                     }
@@ -168,10 +188,23 @@ struct ConnectView: View {
                        text: $pin, keyboard: .numberPad, isSecure: true)
 
             Button {
+                let host = ip.trimmingCharacters(in: .whitespaces)
+                let code = pin.trimmingCharacters(in: .whitespaces)
+                // Same validation as a scanned code — a typo'd host would
+                // otherwise be saved and retried forever.
+                guard PairingInfo.isPrivateHost(host) else {
+                    errorMessage = "Enter your Mac's local address (e.g. 192.168.0.100, a 100.x Tailscale address, or name.local)."
+                    return
+                }
+                guard PairingInfo.isWellFormedPin(code) else {
+                    errorMessage = "The PIN is the 6 digits shown in LLM-IDE → Settings → Mobile Control."
+                    return
+                }
                 errorMessage = nil
                 connectAttempted = true
-                connectionStore.save(ip: ip, port: 3006, pin: pin)
-                connection.connectDirect(ip: ip, port: 3006, pin: pin)
+                let port = connectionStore.devicePort > 0 ? connectionStore.devicePort : PairingInfo.defaultPort
+                connectionStore.save(ip: host, port: port, pin: code)
+                connection.connectDirect(ip: host, port: port, pin: code)
             } label: {
                 HStack(spacing: DesignSystem.Spacing.sm) {
                     if isConnecting { ProgressView().tint(.white).scaleEffect(0.85) }

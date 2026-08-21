@@ -40,6 +40,19 @@
   </array>
   <key>NSAppTransportSecurity</key>
   <dict>
+    <!-- WHY this is still ArbitraryLoads rather than the narrower
+         NSAllowsLocalNetworking: the Mac PREFERS its Tailscale address in the
+         pairing QR (MobileConnectionInfo), and 100.64.0.0/10 is RFC 6598
+         shared address space — NOT one of the RFC 1918 / link-local / .local
+         ranges NSAllowsLocalNetworking exempts. Narrowing the key would very
+         likely block the primary documented pairing path over a tailnet.
+         Blast radius is bounded: URLSession appears in exactly one file
+         (ConnectionService) and reaches only the paired Mac.
+         The REAL fix is to stop needing an ATS exemption at all — TLS with
+         an SPKI hash carried in the QR and pinned here, or moving the socket
+         to NWConnection (which ATS does not police). Tracked as the follow-up
+         to this security pass; narrowing this key requires an on-device test
+         over Tailscale first. -->
     <key>NSAllowsArbitraryLoads</key>
     <true/>
   </dict>
@@ -48,9 +61,9 @@
   <key>NSCameraUsageDescription</key>
   <string>LLM-IDE uses the camera to scan the pairing QR code shown on your Mac.</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>LLM-IDE uses the microphone for voice commands — speak to open apps and type text on your computer.</string>
+  <string>LLM-IDE uses the microphone so you can dictate chat messages to your Mac instead of typing them.</string>
   <key>NSSpeechRecognitionUsageDescription</key>
-  <string>LLM-IDE converts your speech to text on-device to control your computer by voice.</string>
+  <string>LLM-IDE converts your speech to text on-device so dictated chat messages stay on your phone until you send them.</string>
   <key>NSBonjourServices</key>
   <array>
     <string>_llmide._tcp</string>

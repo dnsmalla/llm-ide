@@ -26,8 +26,12 @@ final class ConnectionStore: ObservableObject {
 
         // Migrate a PIN stored by older versions in UserDefaults (plaintext).
         if let legacy = defaults.string(forKey: "agent_pin"), !legacy.isEmpty {
-            PinKeychain.save(legacy)
-            defaults.removeObject(forKey: "agent_pin")
+            // Drop the plaintext copy ONLY on a confirmed keychain write: the
+            // unconditional remove meant a failed add wiped the sole copy and
+            // the user silently had to re-pair.
+            if PinKeychain.save(legacy) {
+                defaults.removeObject(forKey: "agent_pin")
+            }
         }
         devicePIN = PinKeychain.load() ?? ""
     }
@@ -82,13 +86,21 @@ private enum PinKeychain {
          kSecAttrAccount as String: "saved-mac"]
     }
 
-    static func save(_ pin: String) {
+    /// Returns true when the PIN is stored. `ThisDeviceOnly` is the
+    /// load-bearing half (`AfterFirstUnlock` matches the Mac's own policy and
+    /// avoids failing to read while the device is locked):
+    /// without it the pairing secret is included in encrypted device backups and
+    /// RESTORES onto a different phone. A pairing secret must never leave the
+    /// handset — the Mac side already uses the ThisDeviceOnly policy
+    /// (`MobilePin`), so this closes the asymmetry.
+    @discardableResult
+    static func save(_ pin: String) -> Bool {
         delete()
-        guard !pin.isEmpty else { return }
+        guard !pin.isEmpty else { return false }
         var query = baseQuery
         query[kSecValueData as String] = Data(pin.utf8)
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(query as CFDictionary, nil)
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
     }
 
     static func load() -> String? {

@@ -51,7 +51,6 @@ struct MobileHomeView: View {
         .toolbar { toolbarContent }
         .toolbarBackground(DesignSystem.Colors.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
         .navigationDestination(isPresented: $showSettings) { SettingsView() }
         .sheet(isPresented: $showLlmIde) {
             LlmIdeControlView()
@@ -421,6 +420,10 @@ struct MobileHomeView: View {
                     Button(role: .destructive) {
                         connection.disconnect()
                         connectionStore.clear()
+                        // Drop every mirrored surface too: clearing the pairing
+                        // alone left the previous Mac's transcripts, session ids
+                        // and status on screen for the next device.
+                        connection.resetStoresForNewDevice()
                     } label: {
                         Label("Forget this Mac", systemImage: "xmark.circle")
                     }
