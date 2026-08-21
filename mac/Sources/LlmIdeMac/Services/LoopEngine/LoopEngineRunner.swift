@@ -65,6 +65,21 @@ final class LoopEngineRunner: ObservableObject {
         activeRoots.contains(gitRoot.resolvingSymlinksInPath().path)
     }
 
+    /// Which loop owns the in-flight run on each `gitRoot`, keyed the same
+    /// way `activeRoots` is. Lets any surface's running-indicator (e.g. the
+    /// loop-list pane's dot) land on the correct loop regardless of whether
+    /// the run was started from this page, another window, or the Auto Task
+    /// scheduler — same reasoning `MobileControlManager.buildLoopState()`
+    /// already documents for `running` itself.
+    @MainActor private static var activeLoopIds: [String: String] = [:]
+
+    /// The loop id owning the in-flight run on `gitRoot`, or `nil` when no
+    /// run is active there.
+    @MainActor
+    static func activeLoopId(gitRoot: URL) -> String? {
+        activeLoopIds[gitRoot.resolvingSymlinksInPath().path]
+    }
+
     private let verifier: FaultVerifier
     private let stageRepairer: LoopStageRepairer
     private let regressionSweep: RegressionSweepRunning
@@ -96,6 +111,11 @@ final class LoopEngineRunner: ObservableObject {
         let gitRoot: URL
         let projectId: String?
         let startedAt: Date
+        let loopId: String
+        let loopName: String
+        let goal: String?
+        let acceptanceCriteria: String?
+        let scopeGlobs: [String]
     }
     private var currentRunContext: RunContext?
 
@@ -163,7 +183,8 @@ final class LoopEngineRunner: ObservableObject {
             gitRoot: ctx.gitRoot.path, startedAt: ctx.startedAt, endedAt: Date(),
             iterationsUsed: iteration, config: LoopRunConfigSnapshot(ctx.config),
             iterations: iterationRecords, statusCode: LoopEngineStatus.aborted.code,
-            statusSummary: LoopEngineStatus.aborted.summary)
+            statusSummary: LoopEngineStatus.aborted.summary,
+            loopId: ctx.loopId, loopName: ctx.loopName)
         _ = journal.write(record, root: ctx.faultsRoot)
     }
 
@@ -203,9 +224,24 @@ final class LoopEngineRunner: ObservableObject {
     ///     approvals are keyed against, and the concurrency lock key.
     ///   - projectId: recorded in the journal so runs can be attributed to a
     ///     project later. Optional — a missing id degrades analysis, never the run.
+    ///   - loopId: which `LoopDefinition` this run executes — recorded on the
+    ///     journal and exposed via `activeLoopId(gitRoot:)`. Defaulted so every
+    ///     pre-existing caller (and every existing test) is unaffected; real
+    ///     callers pass the loop's actual id.
+    ///   - loopName: the loop's name at run time, recorded alongside `loopId`.
+    ///   - goal: free text describing what this loop is trying to achieve. When
+    ///     set, woven into the repair/skill prompts this run builds (a later
+    ///     task wires this up — for now the parameter is only accepted and
+    ///     stored/passed through).
+    ///   - acceptanceCriteria: same treatment as `goal` (also wired up later).
+    ///   - scopeGlobs: optional path allowlist. Empty (the default) means
+    ///     unrestricted — a later task wires up the actual enforcement; for now
+    ///     this is only threaded down to `withScopeGuard`'s call sites.
     @discardableResult
     func run(config: LoopEngineConfig, faultsRoot: URL, gitRoot: URL,
-             projectId: String? = nil) async -> LoopEngineStatus? {
+             projectId: String? = nil, loopId: String = "primary", loopName: String = "Loop",
+             goal: String? = nil, acceptanceCriteria: String? = nil,
+             scopeGlobs: [String] = []) async -> LoopEngineStatus? {
         guard !running else {
             appendLog(.warn, "Loop not started · this runner instance is already running")
             return nil
@@ -224,16 +260,20 @@ final class LoopEngineRunner: ObservableObject {
             return nil
         }
         Self.activeRoots.insert(rootKey)
+        Self.activeLoopIds[rootKey] = loopId
         running = true
         status = nil
         iteration = 0
         iterationRecords = []
         let startedAt = Date()
         currentRunContext = RunContext(config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
-                                       projectId: projectId, startedAt: startedAt)
+                                       projectId: projectId, startedAt: startedAt,
+                                       loopId: loopId, loopName: loopName, goal: goal,
+                                       acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
         defer {
             running = false
             Self.activeRoots.remove(rootKey)
+            Self.activeLoopIds.removeValue(forKey: rootKey)
             currentRunContext = nil
         }
 
@@ -251,7 +291,8 @@ final class LoopEngineRunner: ObservableObject {
             appendLog(.warn, "Loop not run · \(reason)")
             return await finish(.error(reason),
                                 config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
-                                projectId: projectId, startedAt: startedAt)
+                                projectId: projectId, startedAt: startedAt,
+                                loopId: loopId, loopName: loopName)
         }
         let skippedNote = disabledCount > 0 ? " (\(disabledCount) disabled stage(s) skipped)" : ""
         appendLog(.info, "Loop started · \(orderedStages.count) stage(s), max \(config.maxIterations) iteration(s)\(skippedNote)")
@@ -267,13 +308,15 @@ final class LoopEngineRunner: ObservableObject {
                 guard let command = Self.validCommand(stage) else {
                     return await finish(.error("Stage \"\(stage.name)\" has no command"),
                                         config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
-                                        projectId: projectId, startedAt: startedAt)
+                                        projectId: projectId, startedAt: startedAt,
+                                        loopId: loopId, loopName: loopName)
                 }
                 guard approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: command) else {
                     appendLog(.warn, "  [\(stage.name)] needs approval: \(command)")
                     return await finish(.needsApproval(stageName: stage.name),
                                         config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
-                                        projectId: projectId, startedAt: startedAt)
+                                        projectId: projectId, startedAt: startedAt,
+                                        loopId: loopId, loopName: loopName)
                 }
             case .skill:
                 // A generate stage with no skill chosen would fire a bare
@@ -284,7 +327,8 @@ final class LoopEngineRunner: ObservableObject {
                       !skillId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     return await finish(.error("Stage \"\(stage.name)\" has no skill chosen"),
                                         config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
-                                        projectId: projectId, startedAt: startedAt)
+                                        projectId: projectId, startedAt: startedAt,
+                                        loopId: loopId, loopName: loopName)
                 }
             case .regressionSweep:
                 break
@@ -338,9 +382,12 @@ final class LoopEngineRunner: ObservableObject {
                 case .shellCommand:
                     decision = await runShellStage(
                         stage, config: config, gitRoot: gitRoot,
-                        progress: &progress, repairsUsed: &repairsUsed)
+                        progress: &progress, repairsUsed: &repairsUsed,
+                        goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
                 case .skill:
-                    decision = await runSkillStage(stage, config: config, gitRoot: gitRoot)
+                    decision = await runSkillStage(
+                        stage, config: config, gitRoot: gitRoot,
+                        goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
                 }
 
                 switch decision {
@@ -372,7 +419,8 @@ final class LoopEngineRunner: ObservableObject {
         }
         return await finish(status ?? .givenUp(reason: .maxIterations),
                             config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
-                            projectId: projectId, startedAt: startedAt)
+                            projectId: projectId, startedAt: startedAt,
+                            loopId: loopId, loopName: loopName)
     }
 
     // MARK: - Stage execution
@@ -419,7 +467,9 @@ final class LoopEngineRunner: ObservableObject {
 
     private func runShellStage(_ stage: LoopStage, config: LoopEngineConfig, gitRoot: URL,
                                progress: inout ProgressWatch,
-                               repairsUsed: inout [String: Int]) async -> StageDecision {
+                               repairsUsed: inout [String: Int],
+                               goal: String? = nil, acceptanceCriteria: String? = nil,
+                               scopeGlobs: [String] = []) async -> StageDecision {
         // Preflight already validated this once per stage; if a command somehow
         // becomes invalid by the time we get here, fail closed instead of
         // force-unwrapping.
@@ -509,7 +559,8 @@ final class LoopEngineRunner: ObservableObject {
             attempt: used + 1, previousScore: verdict.previousScore, currentScore: score,
             improved: verdict.improved, streak: verdict.streak)
 
-        let guarded = await withScopeGuard(stage: stage, config: config, gitRoot: gitRoot) {
+        let guarded = await withScopeGuard(stage: stage, config: config, gitRoot: gitRoot,
+                                           scopeGlobs: scopeGlobs) {
             try await stageRepairer.repair(
                 stageName: stage.name, command: command,
                 failureOutput: outcome.output, evidence: evidence, repoRoot: gitRoot)
@@ -535,7 +586,9 @@ final class LoopEngineRunner: ObservableObject {
     }
 
     private func runSkillStage(_ stage: LoopStage, config: LoopEngineConfig,
-                              gitRoot: URL) async -> StageDecision {
+                              gitRoot: URL,
+                              goal: String? = nil, acceptanceCriteria: String? = nil,
+                              scopeGlobs: [String] = []) async -> StageDecision {
         let skillId = stage.skillId ?? ""
         let message = Self.composeSkillMessage(stage)
         let startedAt = Date()
@@ -544,7 +597,8 @@ final class LoopEngineRunner: ObservableObject {
         // A skill stage is a generate step that edits the tree, so it gets the
         // same protected-path guard as a repair: "make the tests pass" is as
         // available to a skill as it is to the repairer.
-        let guarded = await withScopeGuard(stage: stage, config: config, gitRoot: gitRoot) {
+        let guarded = await withScopeGuard(stage: stage, config: config, gitRoot: gitRoot,
+                                           scopeGlobs: scopeGlobs) {
             try await skillExecutor.execute(skillId: skillId, targetPath: stage.targetPath, message: message)
         }
         let duration = Date().timeIntervalSince(startedAt)
@@ -589,6 +643,7 @@ final class LoopEngineRunner: ObservableObject {
     /// policy other than `.off` is configured — a project that has opted out
     /// should not pay for two `git status` calls per repair.
     private func withScopeGuard(stage: LoopStage, config: LoopEngineConfig, gitRoot: URL,
+                                scopeGlobs: [String] = [],
                                 edit: () async throws -> Void) async -> GuardedEditResult {
         guard config.protectedPathPolicy != .off else {
             do { try await edit() } catch { return .failed(error) }
@@ -674,7 +729,7 @@ final class LoopEngineRunner: ObservableObject {
     /// run without journalling it.
     private func finish(_ terminal: LoopEngineStatus, config: LoopEngineConfig,
                         faultsRoot: URL, gitRoot: URL, projectId: String?,
-                        startedAt: Date) async -> LoopEngineStatus {
+                        startedAt: Date, loopId: String, loopName: String) async -> LoopEngineStatus {
         status = terminal
         appendLog(logLevel(for: terminal), "Loop finished · \(terminal.summary)")
 
@@ -683,7 +738,7 @@ final class LoopEngineRunner: ObservableObject {
             gitRoot: gitRoot.path, startedAt: startedAt, endedAt: Date(),
             iterationsUsed: iteration, config: LoopRunConfigSnapshot(config),
             iterations: iterationRecords, statusCode: terminal.code,
-            statusSummary: terminal.summary)
+            statusSummary: terminal.summary, loopId: loopId, loopName: loopName)
         // Fail-open: telemetry never gates the work it observes.
         if let reason = journal.write(record, root: faultsRoot) {
             appendLog(.warn, "Run journal not written: \(reason)")

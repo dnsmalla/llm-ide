@@ -1722,4 +1722,72 @@ final class LoopEngineRunnerTests: XCTestCase {
         await repairer.release.fire()
         _ = await task1.value
     }
+
+    // MARK: - Loop identity (multi-loop)
+
+    func testRunRecordsTheLoopIdAndNamePassedIn() async {
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            journal: journal
+        )
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5)
+        _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot,
+                             loopId: "loop-42", loopName: "Fix flaky tests")
+        XCTAssertEqual(journal.written.last?.loopId, "loop-42")
+        XCTAssertEqual(journal.written.last?.loopName, "Fix flaky tests")
+    }
+
+    /// Existing call sites that don't pass a loop identity (every test above
+    /// this one) must keep working — the defaults exist precisely so this
+    /// file didn't need touching for Task 4.
+    func testRunWithNoLoopIdentityPassedStillJournalsSomeDefault() async {
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            journal: journal
+        )
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5)
+        _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertFalse(journal.written.last?.loopId?.isEmpty ?? true)
+    }
+
+    func testActiveLoopIdReflectsWhichLoopOwnsAnInFlightRun() async {
+        let repairer = BlockingRepairer()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") },
+            stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")])
+        )
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5, consecutiveFailureStop: 5)
+
+        XCTAssertNil(LoopEngineRunner.activeLoopId(gitRoot: repoRoot))
+        let task = Task {
+            await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot,
+                             loopId: "loop-active", loopName: "Active")
+        }
+        await repairer.started.wait()
+        XCTAssertEqual(LoopEngineRunner.activeLoopId(gitRoot: repoRoot), "loop-active")
+
+        await repairer.release.fire()
+        _ = await task.value
+        XCTAssertNil(LoopEngineRunner.activeLoopId(gitRoot: repoRoot),
+                    "must clear once the run finishes")
+    }
 }
