@@ -1014,13 +1014,26 @@ final class MobileControlManager {
         return LoopEngineDefaults.newConfig(stages: LoopStageDetector.detectDefaultStages(gitRoot: gitRoot))
     }
 
-    /// Finished runs from the Mac's append-only journal index. The journal is
-    /// written once per run at completion, so this is history only — live
-    /// progress comes from the log tail above.
+    /// Finished runs from the Mac's append-only journal index, scoped to the
+    /// project's PRIMARY loop. The journal is written once per run at
+    /// completion, so this is history only — live progress comes from the
+    /// log tail above. The phone only ever sees one loop's status/history
+    /// (the design commitment predating multi-loop support), so this must
+    /// filter out any other loop's runs the same way `LoopEngineView`'s own
+    /// past-runs list does.
     private func loopHistory(limit: Int) -> [LoopRunSummary] {
         guard let config, let projectStore,
+              let project = projectStore.activeProject,
               let context = WorkspaceRoot.context(config: config, projectStore: projectStore) else { return [] }
-        return FileLoopRunJournal().recentRuns(root: context.projectRoot, limit: limit).map {
+        let primaryId = LoopEngineConfigStore.primaryLoop(projectRoot: context.projectRoot,
+                                                           projectId: project.bundle.id)?.id
+        // Read more than the requested limit — a project's journal
+        // interleaves every loop's runs, so filtering down to the Primary
+        // loop AFTER limiting would starve the result. Mirrors
+        // LoopEngineView.loadPastRuns's identical reasoning.
+        let candidates = FileLoopRunJournal().recentRuns(root: context.projectRoot, limit: limit * 4)
+        let scoped = candidates.filter { $0.loopId == primaryId || $0.loopId == nil }
+        return scoped.prefix(limit).map {
             LoopRunSummary(id: $0.id,
                            startedAt: $0.startedAt.timeIntervalSince1970,
                            durationSeconds: $0.durationSeconds,
