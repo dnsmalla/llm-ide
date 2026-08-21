@@ -182,7 +182,7 @@ Detail: [`knowledge-base.md` §4](knowledge-base.md#4-tenancy-contract).
 
 ### Stale-server detection
 
-`SERVER_API_VERSION = 36` (`server.mjs:89`). Both `GET /` and `GET /health` return this value as `apiVersion`. Clients compare against their expected version; a mismatch surfaces "restart the server" rather than a raw 404. The `endpoints` array is also returned so clients can detect missing capabilities by name.
+`SERVER_API_VERSION = 37` (`server.mjs:95`). Both `GET /` and `GET /health` return this value as `apiVersion`. Clients compare against their expected version; a mismatch surfaces "restart the server" rather than a raw 404. The `endpoints` array is also returned so clients can detect missing capabilities by name.
 
 Detail: [`api-server.md` §2](api-server.md#2-request-pipeline) (API version and stale-server detection).
 
