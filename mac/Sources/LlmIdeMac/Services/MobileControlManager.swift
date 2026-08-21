@@ -997,9 +997,15 @@ final class MobileControlManager {
     ///    "not set up" and disable Start for a loop the Mac would have run —
     ///    which is what made this page look empty.
     ///
-    /// Read-only on purpose: `LoopEngineView` decides when a detected config
-    /// is worth persisting (`LoopEngineConfig.shouldPersist`), and a phone
-    /// asking for a snapshot must not be what writes a project's contract.
+    /// Read-only on purpose: the desktop decides when a detected config is
+    /// worth persisting (`LoopEngineConfig.shouldPersist`), and a phone asking
+    /// for a snapshot must not be what writes a project's contract. One
+    /// exception: on a legacy-schema project, `LoopEngineConfigStore.primaryLoop`
+    /// → `load` performs the one-shot schema migration write, so the first
+    /// snapshot after an upgrade can be what triggers it. That is intentional —
+    /// the migration is idempotent and one-shot, matching the precedent the
+    /// pre-existing UserDefaults→file migration already set — and it never
+    /// invents a config the desktop wouldn't have.
     /// Detection touches the filesystem, but only on the no-saved-config path
     /// and only for a handful of marker checks.
     /// `nonisolated` because it touches no manager state — only the config
@@ -1030,8 +1036,12 @@ final class MobileControlManager {
         // Read more than the requested limit — a project's journal
         // interleaves every loop's runs, so filtering down to the Primary
         // loop AFTER limiting would starve the result. Mirrors
-        // LoopEngineView.loadPastRuns's identical reasoning.
-        let candidates = FileLoopRunJournal().recentRuns(root: context.projectRoot, limit: limit * 4)
+        // LoopEngineView.loadPastRuns's identical reasoning. The absolute
+        // floor matters for the `limit: 1` call in buildLoopState: a bare
+        // 4-run window is emptied by four consecutive non-Primary runs, and
+        // the phone would then show no last status at all.
+        let candidates = FileLoopRunJournal().recentRuns(root: context.projectRoot,
+                                                         limit: max(limit * 4, 20))
         let scoped = candidates.filter { $0.loopId == primaryId || $0.loopId == nil }
         return scoped.prefix(limit).map {
             LoopRunSummary(id: $0.id,

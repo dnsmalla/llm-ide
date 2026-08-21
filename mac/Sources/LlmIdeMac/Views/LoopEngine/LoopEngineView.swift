@@ -148,11 +148,15 @@ struct LoopEngineView: View {
     /// Optional path allowlist, edited in the SETTINGS section. Empty means
     /// unrestricted — see `LoopDefinition.scopeGlobs`.
     @State var scopeGlobs: [String] = []
-    /// Whether the loop this page represents is CURRENTLY the project's
-    /// Primary loop — read fresh on every `loadConfig()`, since Primary can
-    /// be reassigned from the loop-list pane while this page stays mounted.
-    /// Used only to attribute legacy (pre-migration) journal entries — whose
-    /// `loopId` is `nil` — to the Primary loop's Past Runs list.
+    /// Whether the loop this page represents was the project's Primary loop
+    /// as of the last `loadConfig()` — i.e. refreshed on a project/loop
+    /// switch only, NOT when Primary is reassigned from the loop-list pane
+    /// while this page stays mounted (`reloadKey` doesn't change for that,
+    /// so `loadConfig()` never re-runs). Used only to attribute legacy
+    /// (pre-migration) journal entries — whose `loopId` is `nil` — to the
+    /// Primary loop's Past Runs list in `loadPastRuns()`. Deliberately NOT
+    /// the source of truth for persistence: `writeLoop` takes `isPrimary`
+    /// from disk instead, precisely because this copy can be stale.
     @State var isPrimaryLoop = false
 
     /// Reads `<projectRoot>/system/loop-runs/` for the "past runs" list. A
@@ -854,16 +858,15 @@ struct LoopEngineView: View {
             // open — same reasoning the pre-multi-loop version documented.
             persistedLoop = currentLoop
         } else if let gitRoot = activeGitRootURL {
+            // No entry for `loopId` in this project's list. Populate state for
+            // display, but deliberately do NOT persist: `LoopEngineHomeView` is
+            // the only creator of loops and always saves before selecting, so
+            // reaching here means either a mid-project-switch render still
+            // holding the previous project's loopId, or a loop deleted out from
+            // under this view — writing in either case would put a phantom loop
+            // into an unrelated project's committed loop.json.
             let detected = LoopStageDetector.detectDefaultStages(gitRoot: gitRoot)
             resetStagesToDefaults(stages: detected)
-            // Only persist when detection found real tooling beyond the bare
-            // Regression stage — same policy as the Auto Task sweep's own
-            // guard in AutoCodeUpdateService+PipelineTasks.swift, so this
-            // page can't permanently lock in a Regression-only config for
-            // the project before the repo is fully populated/detectable.
-            if LoopEngineConfig.shouldPersist(detected) {
-                saveConfig()
-            }
         } else {
             // No saved config AND no git root to detect defaults from
             // (e.g. the project folder isn't resolvable yet) — reset
@@ -1031,19 +1034,37 @@ struct LoopEngineView: View {
         persistedLoop = currentLoop
     }
 
-    /// Writes `loop` into this project's full loop list — replacing the
-    /// existing entry with the same id, or appending when this is the first
-    /// save of a brand-new loop (e.g. one just created by the home view).
-    /// Read-modify-write is required here because `LoopEngineConfigStore`
-    /// persists the WHOLE list per project, not one loop at a time.
+    /// Writes `loop` into this project's full loop list, replacing the entry
+    /// with the same id. Read-modify-write is required because
+    /// `LoopEngineConfigStore` persists the WHOLE list per project, not one
+    /// loop at a time.
+    ///
+    /// Two things this deliberately does NOT do:
+    ///
+    /// - **It never writes `isPrimary` from this view's state.** Primary is
+    ///   assigned by `LoopEngineHomeView`, which writes the list directly;
+    ///   this page's `isPrimaryLoop` is only refreshed by `loadConfig()`,
+    ///   which does not re-run on a Primary reassignment (its `reloadKey`
+    ///   doesn't change). Trusting the in-memory copy therefore let an
+    ///   ordinary edit-after-reassignment write a stale flag back, leaving a
+    ///   project with zero or two primaries — and `primaryLoop()`'s
+    ///   `?? first` fallback then silently pointed the scheduled Auto Task
+    ///   and the phone at a loop the user never designated. The on-disk flag
+    ///   is authoritative.
+    /// - **It never APPENDS.** A missing entry means the loop was deleted
+    ///   (possibly moments ago, inside autosave's 800ms debounce) or that
+    ///   this view still holds a previous project's `loopId` mid-switch.
+    ///   Appending in either case resurrects a deleted loop or writes a
+    ///   phantom one into an unrelated project's committed `loop.json`.
+    ///   `LoopEngineHomeView` is the only creator of loops, and it saves
+    ///   before selecting, so there is no legitimate append case left.
     private func writeLoop(_ loop: LoopDefinition, projectRoot: URL?, projectId: String) {
-        var store = LoopEngineConfigStore.load(projectRoot: projectRoot, projectId: projectId)
-            ?? LoopEngineProjectStore(loops: [])
-        if let index = store.loops.firstIndex(where: { $0.id == loop.id }) {
-            store.loops[index] = loop
-        } else {
-            store.loops.append(loop)
-        }
+        guard var store = LoopEngineConfigStore.load(projectRoot: projectRoot, projectId: projectId),
+              let index = store.loops.firstIndex(where: { $0.id == loop.id })
+        else { return }
+        var toWrite = loop
+        toWrite.isPrimary = store.loops[index].isPrimary
+        store.loops[index] = toWrite
         LoopEngineConfigStore.save(store, projectRoot: projectRoot, projectId: projectId)
     }
 

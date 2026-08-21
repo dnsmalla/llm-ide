@@ -315,6 +315,12 @@ extension LoopEngineView {
             Text("Scope — restrict this loop to specific paths (optional)")
                 .font(Typography.caption)
                 .foregroundStyle(t.textMuted)
+            if protectedPathPolicy == .off, !scopeGlobs.isEmpty {
+                Text("Not enforced — the policy above is Off, which disables the scope check too.")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.accent4)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if scopeGlobs.isEmpty {
                 Text("Unrestricted — this loop's repairs may touch any path not otherwise protected.")
                     .font(Typography.caption)
