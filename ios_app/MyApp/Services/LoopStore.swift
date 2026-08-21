@@ -20,6 +20,7 @@ final class LoopStore: ObservableObject {
     @Published var lastError: String?
 
     private var actionStatusTask: Task<Void, Never>?
+    private var firstReplyWatchdog: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
     /// Generation stamp so a cancelled poll loop can never clear the handle of
     /// the loop that replaced it — the duplicate-timer bug AutoTaskStore hit.
@@ -37,6 +38,22 @@ final class LoopStore: ObservableObject {
     /// Ask for the current snapshot. The Mac replies `loop_state`.
     func refresh() {
         connection?.sendEncodable(LoopStatusList())
+        armFirstReplyWatchdog()
+    }
+
+    /// A Mac that does not understand `loop_status_list` logs "unhandled
+    /// inbound type" and sends NOTHING back, so the page would sit on
+    /// "Loading loop status…" forever with no clue why. That is exactly what a
+    /// Mac app older than this feature does, which is the most likely reason
+    /// this page ever looks empty — so say so instead of spinning.
+    private func armFirstReplyWatchdog() {
+        guard state == nil else { return }        // only the very first answer
+        firstReplyWatchdog?.cancel()
+        firstReplyWatchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            guard let self, !Task.isCancelled, self.state == nil else { return }
+            self.lastError = "Your Mac didn't answer. Update and relaunch the Mac app — this page needs a build that supports Loop."
+        }
     }
 
     func loadHistory(limit: Int = 15) {
@@ -100,11 +117,16 @@ final class LoopStore: ObservableObject {
         actionStatus = nil
         lastError = nil
         stopPolling()
+        firstReplyWatchdog?.cancel()
+        firstReplyWatchdog = nil
     }
 
     // MARK: — Inbound
 
     func handleInbound(type: String, data: Data) {
+        // Any reply at all proves the Mac understands this channel.
+        firstReplyWatchdog?.cancel()
+        firstReplyWatchdog = nil
         switch type {
         case MobileProtocol.Tag.loopState:
             guard let s = try? JSONDecoder().decode(LoopState.self, from: data) else { return }
