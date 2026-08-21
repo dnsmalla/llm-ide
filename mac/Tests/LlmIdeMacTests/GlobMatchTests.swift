@@ -69,6 +69,17 @@ final class GlobMatchTests: XCTestCase {
         XCTAssertTrue(GlobMatch.matches(path: "c.swift", pattern: "**/*.swift"))
     }
 
+    /// The exact pattern shape the Loop Engine's scope allowlist uses
+    /// (`"src/auth/**"`): `**` must extend into subdirectories (so a deeper
+    /// file under the scoped dir is still in scope) but must NOT match a
+    /// sibling directory that merely shares the prefix ("authentication" is
+    /// not "auth") — a glob loose enough to blur that boundary would let
+    /// out-of-scope edits slip past unnoticed.
+    func testDoubleStarSuffixMatchesNestedPathButNotPrefixSharingSibling() {
+        XCTAssertTrue(GlobMatch.matches(path: "src/auth/sub/Deep.swift", pattern: "src/auth/**"))
+        XCTAssertFalse(GlobMatch.matches(path: "src/authentication/Other.swift", pattern: "src/auth/**"))
+    }
+
     // MARK: - `?`
 
     func testQuestionMarkMatchesExactlyOneNonSlashChar() {

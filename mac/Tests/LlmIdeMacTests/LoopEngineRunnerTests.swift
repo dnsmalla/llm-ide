@@ -1243,6 +1243,101 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertTrue(scopeGuard.revertedPaths.isEmpty)
     }
 
+    // MARK: - Scope allowlist
+
+    /// A changed path OUTSIDE every `scopeGlobs` entry must be blocked the
+    /// same way a protected-path violation is — even though the scope guard
+    /// itself reported `.clean` (no denylist hit).
+    func testChangeOutsideScopeAllowlistIsBlockedEvenWhenNotProtected() async {
+        let scopeGuard = StubScopeGuard(result: .clean(changedPaths: ["src/other/File.swift"]))
+        let repairer = StubRepairer()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") },
+            stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            scopeGuard: scopeGuard
+        )
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 3, consecutiveFailureStop: 5, protectedPathPolicy: .revert)
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot,
+                                      scopeGlobs: ["src/auth/**"])
+        guard case .blocked(let reason) = result else {
+            return XCTFail("expected .blocked, got \(String(describing: result))")
+        }
+        guard case .repairOutOfScope(_, let paths) = reason else {
+            return XCTFail("expected .repairOutOfScope, got \(reason)")
+        }
+        XCTAssertEqual(paths, ["src/other/File.swift"])
+        XCTAssertEqual(scopeGuard.revertedPaths, ["src/other/File.swift"])
+    }
+
+    /// A changed path INSIDE the allowlist is clean, same as today.
+    func testChangeInsideScopeAllowlistIsClean() async {
+        let scopeGuard = StubScopeGuard(result: .clean(changedPaths: ["src/auth/Login.swift"]))
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            scopeGuard: scopeGuard
+        )
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 1, consecutiveFailureStop: 5)
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot,
+                                      scopeGlobs: ["src/auth/**"])
+        XCTAssertNotEqual(result, .blocked(reason: .repairOutOfScope(stageName: "Test", paths: [])))
+        XCTAssertTrue(scopeGuard.revertedPaths.isEmpty)
+    }
+
+    /// An empty `scopeGlobs` (the default — every loop before this feature,
+    /// and any loop that never sets one) must change nothing: a denylist-only
+    /// `.clean` result stays clean.
+    func testEmptyScopeGlobsChangesNothing() async {
+        let scopeGuard = StubScopeGuard(result: .clean(changedPaths: ["src/anywhere/File.swift"]))
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            scopeGuard: scopeGuard
+        )
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 1, consecutiveFailureStop: 5)
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertNotEqual(result, .blocked(reason: .repairOutOfScope(stageName: "Test", paths: [])))
+    }
+
+    /// A path that is BOTH out-of-scope and denylist-protected reports the
+    /// union of both violation sets — no path is silently dropped.
+    func testViolationsFromDenylistAndScopeAllowlistAreMerged() async {
+        let scopeGuard = StubScopeGuard(result: .violated(
+            paths: ["mac/Tests/Some.swift"], allChangedPaths: ["mac/Tests/Some.swift", "src/other/File.swift"]))
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            scopeGuard: scopeGuard
+        )
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 3, consecutiveFailureStop: 5, protectedPathPolicy: .revert)
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot,
+                                      scopeGlobs: ["src/auth/**"])
+        guard case .blocked(let reason) = result, case .repairOutOfScope(_, let paths) = reason else {
+            return XCTFail("expected .blocked/.repairOutOfScope, got \(String(describing: result))")
+        }
+        XCTAssertEqual(Set(paths), Set(["mac/Tests/Some.swift", "src/other/File.swift"]))
+    }
+
     // MARK: - Scored progress
 
     /// The case a hash comparison cannot see: three DIFFERENT failures that never

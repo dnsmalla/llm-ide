@@ -22,7 +22,11 @@ enum LoopEngineStatus: Equatable {
     /// means "the agent tried something it is not allowed to do".
     enum BlockedReason: Equatable {
         /// A repair edited a protected path — a test, a build file, or the
-        /// harness's own state. See `RepairScopeGuard`.
+        /// harness's own state — or a path outside the loop's optional scope
+        /// allowlist. See `RepairScopeGuard` and `LoopEngineRunner.withScopeGuard`.
+        /// The two triggers share one case because the runner merges both
+        /// violation sets before reporting: `paths` never says which rule a
+        /// given entry broke.
         case repairOutOfScope(stageName: String, paths: [String])
     }
 
@@ -52,7 +56,7 @@ extension LoopEngineStatus {
         case .blocked(.repairOutOfScope(let name, let paths)):
             let list = paths.prefix(3).joined(separator: ", ")
             let more = paths.count > 3 ? " (+\(paths.count - 3) more)" : ""
-            return "blocked — repair for \"\(name)\" edited protected path(s): \(list)\(more)"
+            return "blocked — repair for \"\(name)\" touched a protected or out-of-scope path(s): \(list)\(more)"
         case .needsApproval(let name): return "needs approval: \(name)"
         case .error(let msg): return "error: \(msg)"
         case .aborted: return "aborted"

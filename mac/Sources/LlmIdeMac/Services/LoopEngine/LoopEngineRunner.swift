@@ -235,8 +235,9 @@ final class LoopEngineRunner: ObservableObject {
     ///     stored/passed through).
     ///   - acceptanceCriteria: same treatment as `goal` (also wired up later).
     ///   - scopeGlobs: optional path allowlist. Empty (the default) means
-    ///     unrestricted — a later task wires up the actual enforcement; for now
-    ///     this is only threaded down to `withScopeGuard`'s call sites.
+    ///     unrestricted. Enforcement is live in `withScopeGuard`: a changed
+    ///     path matching none of these globs is treated as a violation exactly
+    ///     like a protected-path hit (same revert/warn/stop policy).
     @discardableResult
     func run(config: LoopEngineConfig, faultsRoot: URL, gitRoot: URL,
              projectId: String? = nil, loopId: String = "primary", loopName: String = "Loop",
@@ -624,7 +625,7 @@ final class LoopEngineRunner: ObservableObject {
             // the violation it caused in the run summary.
             let clean = violations.isEmpty
             record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
-                   passed: clean, output: clean ? "" : "edited protected path(s): \(violations.joined(separator: ", "))",
+                   passed: clean, output: clean ? "" : "touched a protected or out-of-scope path(s): \(violations.joined(separator: ", "))",
                    score: nil, changedPaths: changed, scopeVerdict: verdictScope)
             if let terminal = scopeTermination(stage: stage, config: config,
                                               verdict: verdictScope, violations: violations) {
@@ -660,6 +661,11 @@ final class LoopEngineRunner: ObservableObject {
         switch await scopeGuard.check(since: before, gitRoot: gitRoot,
                                       protectedGlobs: config.protectedGlobs) {
         case .clean(let changed):
+            let outOfScope = Self.outOfScopePaths(changed, scopeGlobs: scopeGlobs)
+            guard outOfScope.isEmpty else {
+                return await handleViolation(outOfScope, changed: changed, stage: stage,
+                                             config: config, gitRoot: gitRoot)
+            }
             return .completed(.clean, violations: [], changed: changed)
 
         case .indeterminate(let reason):
@@ -674,17 +680,40 @@ final class LoopEngineRunner: ObservableObject {
             return .completed(.indeterminate, violations: [], changed: [])
 
         case .violated(let paths, let changed):
-            appendLog(.error, "  [\(stage.name)] repair edited protected path(s): \(paths.joined(separator: ", "))")
-            guard config.protectedPathPolicy == .revert else {
-                return .completed(.violated, violations: paths, changed: changed)
-            }
-            if let error = await scopeGuard.revert(paths: paths, gitRoot: gitRoot) {
-                appendLog(.error, "  [\(stage.name)] could not revert protected path(s): \(error)")
-                return .completed(.violated, violations: paths, changed: changed)
-            }
-            appendLog(.info, "  [\(stage.name)] reverted \(paths.count) protected path(s)")
-            return .completed(.violatedReverted, violations: paths, changed: changed)
+            let outOfScope = Self.outOfScopePaths(changed, scopeGlobs: scopeGlobs)
+            let merged = Array(Set(paths).union(outOfScope)).sorted()
+            return await handleViolation(merged, changed: changed, stage: stage,
+                                         config: config, gitRoot: gitRoot)
         }
+    }
+
+    /// `changed` paths that match none of `scopeGlobs` — `[]` whenever
+    /// `scopeGlobs` is empty, so an unset allowlist (every loop before this
+    /// feature, and any loop that never sets one) flags nothing.
+    private static func outOfScopePaths(_ changed: [String], scopeGlobs: [String]) -> [String] {
+        guard !scopeGlobs.isEmpty else { return [] }
+        return changed.filter { path in
+            !scopeGlobs.contains { GlobMatch.matches(path: path, pattern: $0) }
+        }
+    }
+
+    /// Shared violation handling for both a denylist hit and an out-of-scope
+    /// change — logs, and under `.revert` attempts to undo exactly `paths`.
+    /// Factored out of the old inline `.violated` branch so the scope-allowlist
+    /// path (which can reach a violation from a `.clean` scope-guard result)
+    /// gets identical policy handling instead of a second copy of it.
+    private func handleViolation(_ paths: [String], changed: [String], stage: LoopStage,
+                                 config: LoopEngineConfig, gitRoot: URL) async -> GuardedEditResult {
+        appendLog(.error, "  [\(stage.name)] repair edited protected/out-of-scope path(s): \(paths.joined(separator: ", "))")
+        guard config.protectedPathPolicy == .revert else {
+            return .completed(.violated, violations: paths, changed: changed)
+        }
+        if let error = await scopeGuard.revert(paths: paths, gitRoot: gitRoot) {
+            appendLog(.error, "  [\(stage.name)] could not revert protected/out-of-scope path(s): \(error)")
+            return .completed(.violated, violations: paths, changed: changed)
+        }
+        appendLog(.info, "  [\(stage.name)] reverted \(paths.count) protected/out-of-scope path(s)")
+        return .completed(.violatedReverted, violations: paths, changed: changed)
     }
 
     /// The terminal status a scope verdict forces, or `nil` to keep looping.
