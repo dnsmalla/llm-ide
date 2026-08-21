@@ -87,10 +87,16 @@ test('spawnCliStream kills the child process when the signal aborts mid-stream',
       setTimeout(() => {}, 5000); // hang — the test proves this never completes naturally
     `],
   });
-  await new Promise((r) => setTimeout(r, 200)); // let the first chunk arrive
+  // Wait for the first chunk by condition, not a fixed sleep: under full-suite
+  // CPU load the child can take >200ms just to spawn, and aborting before it
+  // emitted anything made this test fail with chunks=[] (flaky pre-push gate).
+  const deadline = Date.now() + 10_000;
+  while (chunks.length === 0 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  assert.deepEqual(chunks, ['partial'], 'first chunk must arrive before the abort');
   ac.abort();
   await assert.rejects(runPromise, /aborted/i);
-  assert.deepEqual(chunks, ['partial']);
 });
 
 test('spawnCliStream rejects on non-zero exit even for a provider with no parser', async () => {
