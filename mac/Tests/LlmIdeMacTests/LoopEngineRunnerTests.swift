@@ -1913,7 +1913,12 @@ final class LoopEngineRunnerTests: XCTestCase {
         )
         let config = LoopEngineConfig(stages: [
             LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
-        ], maxIterations: 1, consecutiveFailureStop: 5)
+        // maxIterations: 2, not 1 — the runner deliberately refuses to repair
+        // when no iteration is left to verify the repair in (the
+        // `iteration >= maxIterations` gate runs BEFORE the repair), so a
+        // 1-iteration run can never reach the repairer this test asserts on.
+        // Two iterations produce exactly one repair attempt.
+        ], maxIterations: 2, consecutiveFailureStop: 5)
         _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot,
                              goal: "Stabilize auth", acceptanceCriteria: "swift test passes")
         XCTAssertEqual(repairer.receivedFailureOutputs.count, 1)
@@ -1944,7 +1949,12 @@ final class LoopEngineRunnerTests: XCTestCase {
         )
         let config = LoopEngineConfig(stages: [
             LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
-        ], maxIterations: 1, consecutiveFailureStop: 5)
+        // maxIterations: 2, not 1 — the runner deliberately refuses to repair
+        // when no iteration is left to verify the repair in (the
+        // `iteration >= maxIterations` gate runs BEFORE the repair), so a
+        // 1-iteration run can never reach the repairer this test asserts on.
+        // Two iterations produce exactly one repair attempt.
+        ], maxIterations: 2, consecutiveFailureStop: 5)
         _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot,
                              goal: "Stabilize auth", acceptanceCriteria: "swift test passes")
         // Simulate AgentLoopStageRepairer.buildPrompt's own downstream
@@ -1974,7 +1984,8 @@ final class LoopEngineRunnerTests: XCTestCase {
         )
         let config = LoopEngineConfig(stages: [
             LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
-        ], maxIterations: 1, consecutiveFailureStop: 5)
+        // See the sibling above: a repair needs a second iteration to exist.
+        ], maxIterations: 2, consecutiveFailureStop: 5)
         _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
         XCTAssertEqual(repairer.receivedFailureOutputs, ["boom"])
     }
