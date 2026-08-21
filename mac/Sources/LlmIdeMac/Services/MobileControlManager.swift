@@ -889,7 +889,9 @@ final class MobileControlManager {
                              lastFinishedAt: nil, stages: [])
         }
         let projectId = project.bundle.id
-        let loopConfig = LoopEngineConfigStore.load(projectRoot: context.projectRoot, projectId: projectId)
+        let loopConfig = Self.resolveLoopConfig(projectRoot: context.projectRoot,
+                                                projectId: projectId,
+                                                gitRoot: context.gitRoot)
         let running = context.gitRoot.map { LoopEngineRunner.isRunActive(gitRoot: $0) } ?? false
         let recent = loopHistory(limit: 1).first
 
@@ -921,6 +923,35 @@ final class MobileControlManager {
                                   enabled: $0.enabled ?? true, order: $0.order)
                 }
         )
+    }
+
+    /// The loop config as the Mac would actually RUN it — not the raw saved
+    /// file. Mirrors `LoopEngineView.loadConfig`, and it has to, because the
+    /// two divergences here both made the phone lie:
+    ///
+    ///  • A saved config is run through `ensureDefaultStages` before the Mac
+    ///    shows or runs it, so reading the file alone under-reported stages —
+    ///    the phone listed fewer than the desktop for the same project.
+    ///  • With NO saved config the Mac detects defaults from the repo and the
+    ///    loop is perfectly runnable. Returning nil there made the phone say
+    ///    "not set up" and disable Start for a loop the Mac would have run —
+    ///    which is what made this page look empty.
+    ///
+    /// Read-only on purpose: `LoopEngineView` decides when a detected config
+    /// is worth persisting (`LoopEngineConfig.shouldPersist`), and a phone
+    /// asking for a snapshot must not be what writes a project's contract.
+    /// Detection touches the filesystem, but only on the no-saved-config path
+    /// and only for a handful of marker checks.
+    /// `nonisolated` because it touches no manager state — only the config
+    /// store and the stage detector — which also makes it directly testable
+    /// without hopping onto the main actor.
+    nonisolated static func resolveLoopConfig(projectRoot: URL?, projectId: String,
+                                              gitRoot: URL?) -> LoopEngineConfig? {
+        if let saved = LoopEngineConfigStore.load(projectRoot: projectRoot, projectId: projectId) {
+            return LoopStageDetector.ensureDefaultStages(in: saved, gitRoot: gitRoot)
+        }
+        guard let gitRoot else { return nil }
+        return LoopEngineDefaults.newConfig(stages: LoopStageDetector.detectDefaultStages(gitRoot: gitRoot))
     }
 
     /// Finished runs from the Mac's append-only journal index. The journal is
