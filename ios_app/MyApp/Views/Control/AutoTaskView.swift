@@ -52,8 +52,8 @@ struct AutoTaskView: View {
                     Button {
                         autoTaskStore.refreshAll()
                     } label: { Image(systemName: "arrow.clockwise") }
+                        .accessibilityLabel("Refresh auto tasks")
                 }
-                .accessibilityLabel("Refresh auto tasks")
             }
             .onAppear {
                 autoTaskStore.refreshAll()

@@ -52,8 +52,8 @@ struct ExplorerChatView: View {
                         showSessionPicker = true
                         explorerStore.exploreListSessions()
                     } label: { Image(systemName: "sidebar.left") }
+                        .accessibilityLabel("Browse sessions")
                 }
-                .accessibilityLabel("Browse sessions")
                 if explorerStore.isStreaming {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button(role: .destructive) {
