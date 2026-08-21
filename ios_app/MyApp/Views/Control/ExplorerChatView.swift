@@ -53,6 +53,7 @@ struct ExplorerChatView: View {
                         explorerStore.exploreListSessions()
                     } label: { Image(systemName: "sidebar.left") }
                 }
+                .accessibilityLabel("Browse sessions")
                 if explorerStore.isStreaming {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button(role: .destructive) {
@@ -61,6 +62,7 @@ struct ExplorerChatView: View {
                         } label: {
                             Image(systemName: "stop.fill")
                         }
+                        .accessibilityLabel("Stop the reply")
                     }
                 }
             }
@@ -158,11 +160,11 @@ struct ExplorerChatView: View {
                     .foregroundColor(DesignSystem.Colors.primary)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(session.title.isEmpty ? "Untitled" : session.title)
-                        .font(.system(size: DesignSystem.Typography.body))
+                        .font(DesignSystem.Typography.bodyFont)
                         .foregroundColor(DesignSystem.Colors.textPrimary)
                         .lineLimit(1)
                     Text(Date(epochSeconds: session.lastUsedAt).relativeTimeShort())
-                        .font(.system(size: DesignSystem.Typography.footnote))
+                        .font(DesignSystem.Typography.footnoteFont)
                         .foregroundColor(DesignSystem.Colors.textTertiary)
                 }
                 Spacer(minLength: 0)
@@ -207,7 +209,7 @@ struct ExplorerChatView: View {
                         VStack(spacing: DesignSystem.Spacing.sm) {
                             ProgressView()
                             Text("Starting session on your Mac…")
-                                .font(.system(size: DesignSystem.Typography.callout, weight: .medium))
+                                .font(DesignSystem.Typography.calloutFont.weight(.medium))
                                 .foregroundColor(DesignSystem.Colors.textSecondary)
                         }
                         .frame(maxWidth: .infinity)
@@ -237,17 +239,17 @@ struct ExplorerChatView: View {
                 .font(.system(size: 34))
                 .foregroundColor(DesignSystem.Colors.textTertiary)
             Text("No session selected")
-                .font(.system(size: DesignSystem.Typography.callout, weight: .medium))
+                .font(DesignSystem.Typography.calloutFont.weight(.medium))
                 .foregroundColor(DesignSystem.Colors.textSecondary)
             Text("Pick or create a session to begin.")
-                .font(.system(size: DesignSystem.Typography.footnote))
+                .font(DesignSystem.Typography.footnoteFont)
                 .foregroundColor(DesignSystem.Colors.textTertiary)
             Button {
                 showSessionPicker = true
                 explorerStore.exploreListSessions()
             } label: {
                 Label("Browse sessions", systemImage: "list.bullet")
-                    .font(.system(size: DesignSystem.Typography.body, weight: .medium))
+                    .font(DesignSystem.Typography.bodyFont.weight(.medium))
                     .foregroundColor(DesignSystem.Colors.primary)
                     .padding(.horizontal, DesignSystem.Spacing.md)
                     .padding(.vertical, DesignSystem.Spacing.sm)
@@ -331,7 +333,7 @@ struct ExplorerChatView: View {
                 .font(.system(size: 16))
                 .foregroundColor(DesignSystem.Colors.primary)
             Text(skill.displayLabel)
-                .font(.system(size: DesignSystem.Typography.footnote))
+                .font(DesignSystem.Typography.footnoteFont)
                 .foregroundColor(DesignSystem.Colors.textPrimary)
                 .lineLimit(1)
             Button {
@@ -355,7 +357,7 @@ struct ExplorerChatView: View {
                 .font(.system(size: 16))
                 .foregroundColor(DesignSystem.Colors.primary)
             Text(ref.displayLabel)
-                .font(.system(size: DesignSystem.Typography.footnote))
+                .font(DesignSystem.Typography.footnoteFont)
                 .foregroundColor(DesignSystem.Colors.textPrimary)
                 .lineLimit(1)
             Button {
@@ -379,7 +381,7 @@ struct ExplorerChatView: View {
                 .font(.system(size: 16))
                 .foregroundColor(DesignSystem.Colors.primary)
             Text(file.name)
-                .font(.system(size: DesignSystem.Typography.footnote))
+                .font(DesignSystem.Typography.footnoteFont)
                 .foregroundColor(DesignSystem.Colors.textPrimary)
                 .lineLimit(1)
             Button {

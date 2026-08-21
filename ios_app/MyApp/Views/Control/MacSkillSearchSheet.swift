@@ -83,10 +83,10 @@ struct MacSkillSearchSheet: View {
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.name)
-                    .font(.system(size: DesignSystem.Typography.body, weight: .medium))
+                    .font(DesignSystem.Typography.bodyFont.weight(.medium))
                     .foregroundColor(DesignSystem.Colors.textPrimary)
                 Text(entry.description)
-                    .font(.system(size: DesignSystem.Typography.footnote))
+                    .font(DesignSystem.Typography.footnoteFont)
                     .foregroundColor(DesignSystem.Colors.textTertiary)
                     .lineLimit(2)
             }
@@ -94,7 +94,7 @@ struct MacSkillSearchSheet: View {
             Button(alreadyAdded ? "Added" : "/skill") {
                 addSkill(ref)
             }
-            .font(.system(size: DesignSystem.Typography.footnote, weight: .semibold))
+            .font(DesignSystem.Typography.footnoteFont.weight(.semibold))
             .foregroundColor(alreadyAdded ? DesignSystem.Colors.textTertiary : DesignSystem.Colors.primary)
             .disabled(alreadyAdded)
         }
@@ -120,12 +120,12 @@ struct MacSkillSearchSheet: View {
                 .font(.system(size: 34))
                 .foregroundColor(DesignSystem.Colors.textTertiary)
             Text(title)
-                .font(.system(size: DesignSystem.Typography.callout, weight: .medium))
+                .font(DesignSystem.Typography.calloutFont.weight(.medium))
                 .foregroundColor(DesignSystem.Colors.textSecondary)
                 .multilineTextAlignment(.center)
             if let subtitle {
                 Text(subtitle)
-                    .font(.system(size: DesignSystem.Typography.footnote))
+                    .font(DesignSystem.Typography.footnoteFont)
                     .foregroundColor(DesignSystem.Colors.textTertiary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, DesignSystem.Spacing.lg)

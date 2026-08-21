@@ -24,7 +24,7 @@ struct ConnectView: View {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundColor(DesignSystem.Colors.danger)
                         Text(err)
-                            .font(.system(size: DesignSystem.Typography.footnote))
+                            .font(DesignSystem.Typography.footnoteFont)
                             .foregroundColor(DesignSystem.Colors.danger)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -91,10 +91,10 @@ struct ConnectView: View {
                     .foregroundColor(DesignSystem.Colors.primary)
             }
             Text("Connect to Your Mac")
-                .font(.system(size: DesignSystem.Typography.title, weight: .bold))
+                .font(DesignSystem.Typography.titleFont.weight(.bold))
                 .foregroundColor(DesignSystem.Colors.textPrimary)
             Text("Start Mobile Control on your Mac (Settings → Mobile Control), then scan the QR or pick your Mac below.")
-                .font(.system(size: DesignSystem.Typography.body))
+                .font(DesignSystem.Typography.bodyFont)
                 .foregroundColor(DesignSystem.Colors.textSecondary)
                 .multilineTextAlignment(.center)
 
@@ -105,7 +105,7 @@ struct ConnectView: View {
                     Image(systemName: "qrcode.viewfinder")
                         .font(.system(size: 18))
                     Text("Scan QR Code")
-                        .font(.system(size: DesignSystem.Typography.body, weight: .semibold))
+                        .font(DesignSystem.Typography.bodyFont.weight(.semibold))
                 }
                 .foregroundColor(.white)
                 .padding(.horizontal, DesignSystem.Spacing.lg)
@@ -132,7 +132,7 @@ struct ConnectView: View {
                 HStack(spacing: DesignSystem.Spacing.sm) {
                     ProgressView().scaleEffect(0.8)
                     Text("Scanning for Macs on your network…")
-                        .font(.system(size: DesignSystem.Typography.subheadline))
+                        .font(DesignSystem.Typography.subheadlineFont)
                         .foregroundColor(DesignSystem.Colors.textSecondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -167,7 +167,7 @@ struct ConnectView: View {
                     withAnimation { showManual.toggle() }
                 } label: {
                     Text(showManual ? "Hide manual entry" : "Enter details manually")
-                        .font(.system(size: DesignSystem.Typography.footnote))
+                        .font(DesignSystem.Typography.footnoteFont)
                         .foregroundColor(DesignSystem.Colors.primary)
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -178,7 +178,7 @@ struct ConnectView: View {
     private var manualSection: some View {
         VStack(spacing: DesignSystem.Spacing.lg) {
             Text(discovery.devices.isEmpty ? "Enter your Mac's details" : "Manual entry")
-                .font(.system(size: DesignSystem.Typography.subheadline, weight: .semibold))
+                .font(DesignSystem.Typography.subheadlineFont.weight(.semibold))
                 .foregroundColor(DesignSystem.Colors.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -209,7 +209,7 @@ struct ConnectView: View {
                 HStack(spacing: DesignSystem.Spacing.sm) {
                     if isConnecting { ProgressView().tint(.white).scaleEffect(0.85) }
                     Text(isConnecting ? "Connecting…" : "Connect")
-                        .font(.system(size: DesignSystem.Typography.body, weight: .semibold))
+                        .font(DesignSystem.Typography.bodyFont.weight(.semibold))
                 }
                 .frame(maxWidth: .infinity)
                 .padding(DesignSystem.Spacing.md)
@@ -232,7 +232,7 @@ struct ConnectView: View {
                             isSecure: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
             Text(label)
-                .font(.system(size: DesignSystem.Typography.subheadline, weight: .medium))
+                .font(DesignSystem.Typography.subheadlineFont.weight(.medium))
                 .foregroundColor(DesignSystem.Colors.textPrimary)
             Group {
                 if isSecure {
@@ -279,10 +279,10 @@ private struct DiscoveredDeviceCard: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(device.name)
-                        .font(.system(size: DesignSystem.Typography.body, weight: .semibold))
+                        .font(DesignSystem.Typography.bodyFont.weight(.semibold))
                         .foregroundColor(DesignSystem.Colors.textPrimary)
                     Text(device.host)
-                        .font(.system(size: DesignSystem.Typography.footnote, design: .monospaced))
+                        .font(DesignSystem.Typography.footnoteFont.monospaced())
                         .foregroundColor(DesignSystem.Colors.textSecondary)
                 }
                 Spacer()
@@ -292,7 +292,7 @@ private struct DiscoveredDeviceCard: View {
                         onConnect(savedPIN)
                     } label: {
                         Text(isConnecting ? "Connecting…" : "Connect")
-                            .font(.system(size: DesignSystem.Typography.subheadline, weight: .semibold))
+                            .font(DesignSystem.Typography.subheadlineFont.weight(.semibold))
                             .foregroundColor(.white)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
@@ -307,7 +307,7 @@ private struct DiscoveredDeviceCard: View {
                         if showPINField { pinFocused = true }
                     } label: {
                         Text("Enter PIN")
-                            .font(.system(size: DesignSystem.Typography.subheadline, weight: .semibold))
+                            .font(DesignSystem.Typography.subheadlineFont.weight(.semibold))
                             .foregroundColor(DesignSystem.Colors.primary)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)

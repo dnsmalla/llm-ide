@@ -50,6 +50,15 @@ public struct DesignSystem {
         public static let shadowOpacitySmall: Double = 0.04
     }
 
+    /// Point sizes plus DYNAMIC-TYPE-AWARE `Font` values.
+    ///
+    /// The raw `CGFloat`s were consumed exclusively as `.font(.system(size:))`,
+    /// which is a FIXED size — so no text in the app responded to the system
+    /// text-size setting and 12pt captions were unusable at accessibility
+    /// sizes. The `*Font` values below pair each size with the text style it
+    /// scales against (`relativeTo:`), so they grow and shrink with the user's
+    /// setting while keeping this design system's proportions. The `CGFloat`s
+    /// stay for the few places that need a bare number (icon sizing).
     public struct Typography {
         public static let largeTitle: CGFloat = 34
         public static let title: CGFloat = 28
@@ -61,6 +70,20 @@ public struct DesignSystem {
         public static let subheadline: CGFloat = 14
         public static let footnote: CGFloat = 12
         public static let caption: CGFloat = 12
+
+        public static let largeTitleFont = Font.system(size: largeTitle, relativeTo: .largeTitle)
+        public static let titleFont = Font.system(size: title, relativeTo: .title)
+        public static let title2Font = Font.system(size: title2, relativeTo: .title2)
+        public static let title3Font = Font.system(size: title3, relativeTo: .title3)
+        public static let headlineFont = Font.system(size: headline, relativeTo: .headline)
+        public static let bodyFont = Font.system(size: body, relativeTo: .body)
+        public static let calloutFont = Font.system(size: callout, relativeTo: .callout)
+        public static let subheadlineFont = Font.system(size: subheadline, relativeTo: .subheadline)
+        public static let footnoteFont = Font.system(size: footnote, relativeTo: .footnote)
+        public static let captionFont = Font.system(size: caption, relativeTo: .caption)
+        /// Monospaced variant for code blocks, scaling with `.footnote`.
+        public static let codeFont = Font.system(size: footnote, design: .monospaced)
+            .leading(.tight)
     }
 }
 

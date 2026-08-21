@@ -23,7 +23,7 @@ struct StatusBanner: View {
             HStack(spacing: 8) {
                 Image(systemName: "wifi.slash").font(.system(size: 13))
                 Text(isConnecting ? "Connecting to your Mac…" : "Not connected to your Mac")
-                    .font(.system(size: DesignSystem.Typography.footnote, weight: .medium))
+                    .font(DesignSystem.Typography.footnoteFont.weight(.medium))
                 Spacer()
             }
             .foregroundColor(.white)
@@ -36,7 +36,7 @@ struct StatusBanner: View {
                     .font(.system(size: 13))
                     .foregroundColor(DesignSystem.Colors.danger)
                 Text(message)
-                    .font(.system(size: DesignSystem.Typography.footnote))
+                    .font(DesignSystem.Typography.footnoteFont)
                     .foregroundColor(DesignSystem.Colors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
@@ -45,6 +45,7 @@ struct StatusBanner: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(DesignSystem.Colors.textTertiary)
                 }
+                .accessibilityLabel("Dismiss")
             }
             .padding(.horizontal, DesignSystem.Spacing.md)
             .padding(.vertical, 8)

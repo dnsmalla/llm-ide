@@ -53,7 +53,7 @@ struct ChatInputBar<Leading: View>: View {
         HStack(spacing: DesignSystem.Spacing.sm) {
             leading()
             TextField(placeholder, text: $text, axis: .vertical)
-                .font(.system(size: DesignSystem.Typography.body))
+                .font(DesignSystem.Typography.bodyFont)
                 .textFieldStyle(.plain)
                 .lineLimit(1...4)
                 .focused(isFocused)
@@ -72,6 +72,7 @@ struct ChatInputBar<Leading: View>: View {
                     .foregroundColor(canSend ? DesignSystem.Colors.primary : DesignSystem.Colors.textTertiary)
             }
             .disabled(!canSend)
+            .accessibilityLabel("Send message")
         }
         .padding(DesignSystem.Spacing.md)
         .background(DesignSystem.Colors.surfaceSecondary)

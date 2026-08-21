@@ -53,6 +53,7 @@ struct AutoTaskView: View {
                         autoTaskStore.refreshAll()
                     } label: { Image(systemName: "arrow.clockwise") }
                 }
+                .accessibilityLabel("Refresh auto tasks")
             }
             .onAppear {
                 autoTaskStore.refreshAll()
@@ -82,7 +83,7 @@ struct AutoTaskView: View {
                             .font(.system(size: 12))
                             .foregroundColor(DesignSystem.Colors.danger)
                         Text(err)
-                            .font(.system(size: DesignSystem.Typography.footnote))
+                            .font(DesignSystem.Typography.footnoteFont)
                             .foregroundColor(DesignSystem.Colors.danger)
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
@@ -99,10 +100,10 @@ struct AutoTaskView: View {
                     Toggle(isOn: masterBinding) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Auto Tasks")
-                                .font(.system(size: DesignSystem.Typography.headline, weight: .semibold))
+                                .font(DesignSystem.Typography.headlineFont.weight(.semibold))
                                 .foregroundColor(DesignSystem.Colors.textPrimary)
                             Text(state?.masterEnabled == true ? "Enabled" : "Disabled")
-                                .font(.system(size: DesignSystem.Typography.footnote))
+                                .font(DesignSystem.Typography.footnoteFont)
                                 .foregroundColor(DesignSystem.Colors.textTertiary)
                         }
                     }
@@ -115,7 +116,7 @@ struct AutoTaskView: View {
                             .font(.system(size: 12))
                             .foregroundColor(DesignSystem.Colors.primary)
                         Text(msg)
-                            .font(.system(size: DesignSystem.Typography.footnote))
+                            .font(DesignSystem.Typography.footnoteFont)
                             .foregroundColor(DesignSystem.Colors.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -158,7 +159,7 @@ struct AutoTaskView: View {
                 }
                 if state?.masterEnabled != true {
                     Text("Turn on the master switch above to run tasks from iPhone.")
-                        .font(.system(size: DesignSystem.Typography.caption))
+                        .font(DesignSystem.Typography.captionFont)
                         .foregroundColor(DesignSystem.Colors.textTertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -173,29 +174,29 @@ struct AutoTaskView: View {
             HStack(spacing: 6) {
                 ProgressView().scaleEffect(0.75)
                 Text("Running on Mac")
-                    .font(.system(size: DesignSystem.Typography.subheadline, weight: .semibold))
+                    .font(DesignSystem.Typography.subheadlineFont.weight(.semibold))
                     .foregroundColor(DesignSystem.Colors.primary)
             }
             if let step = state?.currentStep, !step.isEmpty {
                 Text(step)
-                    .font(.system(size: DesignSystem.Typography.body))
+                    .font(DesignSystem.Typography.bodyFont)
                     .foregroundColor(DesignSystem.Colors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             } else if let current = state?.currentTask,
                       let label = state?.tasks.first(where: { $0.id == current })?.label {
                 Text(label)
-                    .font(.system(size: DesignSystem.Typography.body))
+                    .font(DesignSystem.Typography.bodyFont)
                     .foregroundColor(DesignSystem.Colors.textPrimary)
             }
             Text("Execution happens on your Mac — tap below for the full live log.")
-                .font(.system(size: DesignSystem.Typography.caption))
+                .font(DesignSystem.Typography.captionFont)
                 .foregroundColor(DesignSystem.Colors.textTertiary)
             Button {
                 autoTaskStore.openRunLog(focusTask: state?.currentTask)
                 haptic(.light)
             } label: {
                 Label("View live log", systemImage: "doc.text")
-                    .font(.system(size: DesignSystem.Typography.footnote, weight: .semibold))
+                    .font(DesignSystem.Typography.footnoteFont.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
@@ -223,14 +224,14 @@ struct AutoTaskView: View {
                 ProgressView()
                     .scaleEffect(0.6)
                 Text("Running")
-                    .font(.system(size: DesignSystem.Typography.footnote, weight: .medium))
+                    .font(DesignSystem.Typography.footnoteFont.weight(.medium))
             }
             .foregroundColor(DesignSystem.Colors.primary)
         } else if let last = state?.lastRunDate {
             HStack(spacing: 4) {
                 Circle().fill(Color.gray.opacity(0.5)).frame(width: 6, height: 6)
                 Text("Idle · \(Date(epochSeconds: last).relativeTimeShort())")
-                    .font(.system(size: DesignSystem.Typography.footnote))
+                    .font(DesignSystem.Typography.footnoteFont)
             }
             .foregroundColor(DesignSystem.Colors.textTertiary)
         }
@@ -242,10 +243,10 @@ struct AutoTaskView: View {
                 .font(.system(size: 13))
                 .foregroundColor(color)
             Text("\(value)")
-                .font(.system(size: DesignSystem.Typography.title2, weight: .bold, design: .rounded))
+                .font(DesignSystem.Typography.title2Font.weight(.bold).design(.rounded))
                 .foregroundColor(DesignSystem.Colors.textPrimary)
             Text(title)
-                .font(.system(size: DesignSystem.Typography.caption))
+                .font(DesignSystem.Typography.captionFont)
                 .foregroundColor(DesignSystem.Colors.textTertiary)
         }
         .frame(maxWidth: .infinity)
@@ -277,7 +278,7 @@ struct AutoTaskView: View {
 
                 Toggle(isOn: taskBinding(task)) {
                     Text(task.label)
-                        .font(.system(size: DesignSystem.Typography.body))
+                        .font(DesignSystem.Typography.bodyFont)
                         .foregroundColor(DesignSystem.Colors.textPrimary)
                 }
                 .toggleStyle(.switch)
@@ -305,7 +306,7 @@ struct AutoTaskView: View {
                let step = state?.currentStep, !step.isEmpty,
                state?.isRunning == true {
                 Text(step)
-                    .font(.system(size: DesignSystem.Typography.footnote))
+                    .font(DesignSystem.Typography.footnoteFont)
                     .foregroundColor(DesignSystem.Colors.primary)
                     .padding(.leading, 30)
             }
@@ -316,7 +317,7 @@ struct AutoTaskView: View {
                         .font(.system(size: 10))
                         .foregroundColor(DesignSystem.Colors.danger)
                     Text(err)
-                        .font(.system(size: DesignSystem.Typography.footnote))
+                        .font(DesignSystem.Typography.footnoteFont)
                         .foregroundColor(DesignSystem.Colors.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -347,7 +348,7 @@ struct AutoTaskView: View {
         Section {
             if autoTaskStore.autoTaskHistoryEntries.isEmpty {
                 Text("No runs yet")
-                    .font(.system(size: DesignSystem.Typography.footnote))
+                    .font(DesignSystem.Typography.footnoteFont)
                     .foregroundColor(DesignSystem.Colors.textTertiary)
             } else {
                 ForEach(Array(autoTaskStore.autoTaskHistoryEntries.enumerated()), id: \.offset) { _, entry in
@@ -378,15 +379,15 @@ struct AutoTaskView: View {
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.actionText)
-                    .font(.system(size: DesignSystem.Typography.subheadline))
+                    .font(DesignSystem.Typography.subheadlineFont)
                     .foregroundColor(DesignSystem.Colors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 6) {
                     Text(entry.status)
-                        .font(.system(size: DesignSystem.Typography.caption, weight: .medium))
+                        .font(DesignSystem.Typography.captionFont.weight(.medium))
                         .foregroundColor(historyColor(entry.status))
                     Text("· \(Date(epochSeconds: entry.lastUpdated).relativeTimeShort())")
-                        .font(.system(size: DesignSystem.Typography.caption))
+                        .font(DesignSystem.Typography.captionFont)
                         .foregroundColor(DesignSystem.Colors.textTertiary)
                 }
             }
@@ -421,12 +422,12 @@ struct AutoTaskView: View {
                     .font(.system(size: 34))
                     .foregroundColor(DesignSystem.Colors.textTertiary)
                 Text(!isConnected ? "Not connected to your Mac" : "No auto-task state")
-                    .font(.system(size: DesignSystem.Typography.callout, weight: .medium))
+                    .font(DesignSystem.Typography.calloutFont.weight(.medium))
                     .foregroundColor(DesignSystem.Colors.textSecondary)
                 Text(!isConnected
                      ? "Connect to your Mac to view and control auto tasks."
                      : "Tap refresh, or enable Auto Tasks on your Mac.")
-                    .font(.system(size: DesignSystem.Typography.footnote))
+                    .font(DesignSystem.Typography.footnoteFont)
                     .foregroundColor(DesignSystem.Colors.textTertiary)
                     .multilineTextAlignment(.center)
             }

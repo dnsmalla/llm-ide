@@ -11,7 +11,7 @@ struct SettingsView: View {
                 // Connection card
                 VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
                     Text("Connection")
-                        .font(.system(size: DesignSystem.Typography.title, weight: .bold))
+                        .font(DesignSystem.Typography.titleFont.weight(.bold))
                         .foregroundColor(DesignSystem.Colors.textPrimary)
 
                     if connectionStore.hasDevice {
@@ -27,22 +27,21 @@ struct SettingsView: View {
                                 }
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(connectionStore.deviceIP)
-                                        .font(.system(size: DesignSystem.Typography.body,
-                                                      weight: .semibold, design: .monospaced))
+                                        .font(DesignSystem.Typography.bodyFont
+                                            .weight(.semibold).monospaced())
                                         .foregroundColor(DesignSystem.Colors.textPrimary)
                                     HStack(spacing: 4) {
                                         Circle()
                                             .fill(statusColor)
                                             .frame(width: 6, height: 6)
                                         Text(statusLabel)
-                                            .font(.system(size: DesignSystem.Typography.footnote))
+                                            .font(DesignSystem.Typography.footnoteFont)
                                             .foregroundColor(DesignSystem.Colors.textSecondary)
                                     }
                                 }
                                 Spacer()
                                 Text(":\(connectionStore.devicePort)")
-                                    .font(.system(size: DesignSystem.Typography.footnote,
-                                                  design: .monospaced))
+                                    .font(DesignSystem.Typography.footnoteFont.monospaced())
                                     .foregroundColor(DesignSystem.Colors.textTertiary)
                             }
                             .padding(DesignSystem.Spacing.md)
@@ -57,8 +56,7 @@ struct SettingsView: View {
                                 HStack {
                                     Image(systemName: "xmark.circle")
                                     Text("Forget this Mac")
-                                        .font(.system(size: DesignSystem.Typography.body,
-                                                      weight: .medium))
+                                        .font(DesignSystem.Typography.bodyFont.weight(.medium))
                                 }
                                 .frame(maxWidth: .infinity)
                                 .padding(DesignSystem.Spacing.md)
@@ -72,7 +70,7 @@ struct SettingsView: View {
                                 radius: DesignSystem.Layout.shadowRadius, x: 0, y: 2)
                     } else {
                         Text("No Mac connected. Open the main screen to connect.")
-                            .font(.system(size: DesignSystem.Typography.body))
+                            .font(DesignSystem.Typography.bodyFont)
                             .foregroundColor(DesignSystem.Colors.textSecondary)
                             .padding(DesignSystem.Spacing.md)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -90,7 +88,7 @@ struct SettingsView: View {
                             .font(.system(size: 20))
                             .foregroundColor(DesignSystem.Colors.primary)
                         Text("Help & FAQ")
-                            .font(.system(size: DesignSystem.Typography.body, weight: .medium))
+                            .font(DesignSystem.Typography.bodyFont.weight(.medium))
                             .foregroundColor(DesignSystem.Colors.textPrimary)
                         Spacer()
                         Image(systemName: "chevron.right")
@@ -110,11 +108,11 @@ struct SettingsView: View {
                             .font(.system(size: 20))
                             .foregroundColor(DesignSystem.Colors.primary)
                         Text("Version")
-                            .font(.system(size: DesignSystem.Typography.body, weight: .medium))
+                            .font(DesignSystem.Typography.bodyFont.weight(.medium))
                             .foregroundColor(DesignSystem.Colors.textPrimary)
                         Spacer()
                         Text(appVersion)
-                            .font(.system(size: DesignSystem.Typography.subheadline, design: .monospaced))
+                            .font(DesignSystem.Typography.subheadlineFont.monospaced())
                             .foregroundColor(DesignSystem.Colors.textTertiary)
                     }
                     .padding(DesignSystem.Spacing.md)
@@ -122,7 +120,7 @@ struct SettingsView: View {
                     Divider().padding(.horizontal, DesignSystem.Spacing.md)
 
                     Text("LLM-IDE connects directly to your Mac over Wi‑Fi or Tailscale. No cloud, no account — your screen never leaves your network.")
-                        .font(.system(size: DesignSystem.Typography.footnote))
+                        .font(DesignSystem.Typography.footnoteFont)
                         .foregroundColor(DesignSystem.Colors.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(DesignSystem.Spacing.md)

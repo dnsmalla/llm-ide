@@ -146,7 +146,7 @@ struct QRScannerSheet: View {
                             .font(.system(size: 40))
                             .foregroundColor(.white.opacity(0.5))
                         Text("Camera access is needed to scan the QR code.")
-                            .font(.system(size: DesignSystem.Typography.body))
+                            .font(DesignSystem.Typography.bodyFont)
                             .foregroundColor(.white.opacity(0.8))
                             .multilineTextAlignment(.center)
                         Button("Open Settings") {
@@ -184,12 +184,12 @@ struct QRScannerSheet: View {
                             .stroke(Color.white.opacity(0.8), lineWidth: 3)
                             .frame(width: 230, height: 230)
                         Text("Point at the pairing QR in LLM-IDE on your Mac")
-                            .font(.system(size: DesignSystem.Typography.subheadline))
+                            .font(DesignSystem.Typography.subheadlineFont)
                             .foregroundColor(.white.opacity(0.9))
                             .padding(.top, DesignSystem.Spacing.lg)
                         if let rejectionNotice {
                             Text(rejectionNotice)
-                                .font(.system(size: DesignSystem.Typography.footnote))
+                                .font(DesignSystem.Typography.footnoteFont)
                                 .foregroundColor(.white)
                                 .multilineTextAlignment(.center)
                                 .padding(DesignSystem.Spacing.md)

@@ -46,7 +46,7 @@ struct LlmIdeControlView: View {
             .background(DesignSystem.Colors.background.ignoresSafeArea())
             .animation(.easeInOut(duration: 0.2), value: isConnected)
             .animation(.easeInOut(duration: 0.2), value: connection.errorMessage)
-            .navigationTitle("llm-chat")
+            .navigationTitle("llm-agent")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -70,6 +70,7 @@ struct LlmIdeControlView: View {
                         } label: {
                             Image(systemName: "stop.fill")
                         }
+                        .accessibilityLabel("Stop the reply")
                     }
                 }
             }
@@ -139,7 +140,7 @@ struct LlmIdeControlView: View {
                     if llmIdeStore.llmIdeMessages.isEmpty {
                         EmptyChatState(
                             icon: "bubble.left.and.text.bubble.right",
-                            title: "Ask llm-ide anything",
+                            title: "Ask llm-agent anything",
                             subtitle: "Type or tap the mic to dictate."
                         )
                     }
@@ -182,7 +183,7 @@ struct LlmIdeControlView: View {
             }
             ChatInputBar(
                 text: $inputText,
-                placeholder: speech.isListening ? "Listening…" : "Message llm-chat",
+                placeholder: speech.isListening ? "Listening…" : "Message llm-agent",
                 canSend: canSend,
                 isFocused: $isInputFocused,
                 onSend: send
@@ -207,6 +208,7 @@ struct LlmIdeControlView: View {
                         .background(DesignSystem.Colors.surfaceSecondary)
                         .clipShape(Circle())
                 }
+                .accessibilityLabel("Attach a photo or file")
                 .disabled(!isConnected)
 
                 Button {
@@ -220,6 +222,7 @@ struct LlmIdeControlView: View {
                         .background(DesignSystem.Colors.surfaceSecondary)
                         .clipShape(Circle())
                 }
+                .accessibilityLabel(speech.isListening ? "Stop dictating" : "Dictate a message")
             }
         }
     }
@@ -265,7 +268,7 @@ struct LlmIdeControlView: View {
                 .font(.system(size: 16))
                 .foregroundColor(DesignSystem.Colors.primary)
             Text(file.name)
-                .font(.system(size: DesignSystem.Typography.footnote))
+                .font(DesignSystem.Typography.footnoteFont)
                 .foregroundColor(DesignSystem.Colors.textPrimary)
                 .lineLimit(1)
             Button { removeFile(at: index); haptic(.light) } label: {

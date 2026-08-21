@@ -16,10 +16,10 @@ struct EmptyChatState: View {
                 .font(.system(size: 34))
                 .foregroundColor(DesignSystem.Colors.textTertiary)
             Text(title)
-                .font(.system(size: DesignSystem.Typography.callout, weight: .medium))
+                .font(DesignSystem.Typography.calloutFont.weight(.medium))
                 .foregroundColor(DesignSystem.Colors.textSecondary)
             Text(subtitle)
-                .font(.system(size: DesignSystem.Typography.footnote))
+                .font(DesignSystem.Typography.footnoteFont)
                 .foregroundColor(DesignSystem.Colors.textTertiary)
         }
         .frame(maxWidth: .infinity)

@@ -90,26 +90,26 @@ struct AutoTaskRunLogView: View {
                 if isRunning {
                     ProgressView().scaleEffect(0.75)
                     Text("Running on Mac")
-                        .font(.system(size: DesignSystem.Typography.subheadline, weight: .semibold))
+                        .font(DesignSystem.Typography.subheadlineFont.weight(.semibold))
                         .foregroundColor(DesignSystem.Colors.primary)
                 } else {
                     Image(systemName: "checkmark.circle")
                         .foregroundColor(DesignSystem.Colors.textTertiary)
                     Text("Idle")
-                        .font(.system(size: DesignSystem.Typography.subheadline, weight: .semibold))
+                        .font(DesignSystem.Typography.subheadlineFont.weight(.semibold))
                         .foregroundColor(DesignSystem.Colors.textSecondary)
                 }
                 Spacer()
                 if let msg = state?.statusMessage, !msg.isEmpty {
                     Text(msg)
-                        .font(.system(size: DesignSystem.Typography.caption))
+                        .font(DesignSystem.Typography.captionFont)
                         .foregroundColor(DesignSystem.Colors.textTertiary)
                         .lineLimit(1)
                 }
             }
             if let step = state?.currentStep, !step.isEmpty, isRunning {
                 Text(step)
-                    .font(.system(size: DesignSystem.Typography.body))
+                    .font(DesignSystem.Typography.bodyFont)
                     .foregroundColor(DesignSystem.Colors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -133,7 +133,7 @@ struct AutoTaskRunLogView: View {
                                 ProgressView().scaleEffect(0.55)
                             }
                             Text(group.label)
-                                .font(.system(size: DesignSystem.Typography.footnote, weight: .medium))
+                                .font(DesignSystem.Typography.footnoteFont.weight(.medium))
                             if !group.lines.isEmpty {
                                 Text("\(group.lines.count)")
                                     .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -186,7 +186,7 @@ struct AutoTaskRunLogView: View {
                         }
                     } else {
                         Text("Waiting for logs from your Mac…")
-                            .font(.system(size: DesignSystem.Typography.footnote))
+                            .font(DesignSystem.Typography.footnoteFont)
                             .foregroundColor(DesignSystem.Colors.textTertiary)
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 40)
@@ -207,10 +207,10 @@ struct AutoTaskRunLogView: View {
     private func logLineRow(_ line: AutoTaskLogLine) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(Date(epochSeconds: line.timestamp), format: .dateTime.hour().minute().second())
-                .font(.system(size: DesignSystem.Typography.caption, design: .monospaced))
+                .font(DesignSystem.Typography.captionFont.monospaced())
                 .foregroundColor(DesignSystem.Colors.textTertiary)
             Text(line.text)
-                .font(.system(size: DesignSystem.Typography.footnote, design: .monospaced))
+                .font(DesignSystem.Typography.footnoteFont.monospaced())
                 .foregroundColor(line.level == "error"
                                  ? DesignSystem.Colors.danger
                                  : DesignSystem.Colors.textPrimary)
@@ -226,7 +226,7 @@ struct AutoTaskRunLogView: View {
                 HStack(alignment: .top, spacing: 8) {
                     ProgressView().scaleEffect(0.75)
                     Text(step)
-                        .font(.system(size: DesignSystem.Typography.body))
+                        .font(DesignSystem.Typography.bodyFont)
                         .foregroundColor(DesignSystem.Colors.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -234,7 +234,7 @@ struct AutoTaskRunLogView: View {
             Text(isRunning
                  ? "Waiting for log lines from your Mac…"
                  : "No log lines yet for \(group.label).")
-                .font(.system(size: DesignSystem.Typography.footnote))
+                .font(DesignSystem.Typography.footnoteFont)
                 .foregroundColor(DesignSystem.Colors.textTertiary)
                 .multilineTextAlignment(.center)
         }

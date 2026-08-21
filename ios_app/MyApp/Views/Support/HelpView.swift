@@ -6,10 +6,10 @@ struct HelpView: View {
             VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
                 VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
                     Text("Help & FAQ")
-                        .font(.system(size: DesignSystem.Typography.title, weight: .bold))
+                        .font(DesignSystem.Typography.titleFont.weight(.bold))
                         .foregroundColor(DesignSystem.Colors.textPrimary)
                     Text("Get help with LLM-IDE")
-                        .font(.system(size: DesignSystem.Typography.body))
+                        .font(DesignSystem.Typography.bodyFont)
                         .foregroundColor(DesignSystem.Colors.textSecondary)
                 }
 
@@ -72,10 +72,10 @@ private struct HelpSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
             Text(title)
-                .font(.system(size: DesignSystem.Typography.body, weight: .semibold))
+                .font(DesignSystem.Typography.bodyFont.weight(.semibold))
                 .foregroundColor(DesignSystem.Colors.textPrimary)
             Text(content)
-                .font(.system(size: DesignSystem.Typography.body))
+                .font(DesignSystem.Typography.bodyFont)
                 .foregroundColor(DesignSystem.Colors.textSecondary)
             Divider()
         }

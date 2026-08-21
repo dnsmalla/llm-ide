@@ -39,21 +39,21 @@ struct ChatBubble: View {
                 switch segment {
                 case .prose(let text):
                     Text(Self.inlineMarkdown(text))
-                        .font(.system(size: DesignSystem.Typography.body))
+                        .font(DesignSystem.Typography.bodyFont)
                         .foregroundColor(DesignSystem.Colors.textPrimary)
                         .textSelection(.enabled)
                 case .code(let language, let body):
                     VStack(alignment: .leading, spacing: 4) {
                         if let language {
                             Text(language)
-                                .font(.system(size: DesignSystem.Typography.caption, weight: .semibold))
+                                .font(DesignSystem.Typography.captionFont.weight(.semibold))
                                 .foregroundColor(DesignSystem.Colors.textTertiary)
                         }
                         // Code must not reflow: scroll it instead of wrapping
                         // mid-identifier. The row scrolls, never the page.
                         ScrollView(.horizontal, showsIndicators: false) {
                             Text(body)
-                                .font(.system(size: DesignSystem.Typography.footnote, design: .monospaced))
+                                .font(DesignSystem.Typography.footnoteFont.monospaced())
                                 .foregroundColor(DesignSystem.Colors.textPrimary)
                                 .textSelection(.enabled)
                         }
@@ -81,6 +81,20 @@ struct ChatBubble: View {
     }
 
     var body: some View {
+        VStack(alignment: isUser ? .trailing : .leading, spacing: 2) {
+            // Role caption — the Mac labels every turn ("You" / "llm-agent")
+            // and the phone showed no attribution at all.
+            Text(isUser ? "You" : "llm-agent")
+                .font(DesignSystem.Typography.captionFont)
+                .foregroundColor(DesignSystem.Colors.textTertiary)
+                .padding(.horizontal, 2)
+                .accessibilityHidden(true)   // VoiceOver reads the bubble itself
+                .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+            bubbleRow
+        }
+    }
+
+    private var bubbleRow: some View {
         HStack {
             if isUser { Spacer(minLength: 40) }
             Group {
@@ -88,7 +102,7 @@ struct ChatBubble: View {
                     HStack(spacing: 8) {
                         ProgressView().scaleEffect(0.8)
                         Text("Thinking…")
-                            .font(.system(size: DesignSystem.Typography.body))
+                            .font(DesignSystem.Typography.bodyFont)
                             .foregroundColor(DesignSystem.Colors.textSecondary)
                     }
                 } else {
@@ -104,12 +118,12 @@ struct ChatBubble: View {
                                 // User input is literal — never re-interpret it
                                 // as markup.
                                 Text(message.text)
-                                    .font(.system(size: DesignSystem.Typography.body))
+                                    .font(DesignSystem.Typography.bodyFont)
                                     .foregroundColor(.white)
                                     .textSelection(.enabled)
                             } else if isStreaming {
                                 Text(message.text)
-                                    .font(.system(size: DesignSystem.Typography.body))
+                                    .font(DesignSystem.Typography.bodyFont)
                                     .foregroundColor(DesignSystem.Colors.textPrimary)
                                     .textSelection(.enabled)
                             } else {

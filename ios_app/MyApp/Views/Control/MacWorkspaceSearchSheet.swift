@@ -53,7 +53,7 @@ struct MacWorkspaceSearchSheet: View {
 
             if let root = explorerStore.workspaceSearchRoot {
                 Text("Mac root: \(root)")
-                    .font(.system(size: DesignSystem.Typography.footnote))
+                    .font(DesignSystem.Typography.footnoteFont)
                     .foregroundColor(DesignSystem.Colors.textTertiary)
                     .padding(.horizontal, DesignSystem.Spacing.md)
             }
@@ -91,10 +91,10 @@ struct MacWorkspaceSearchSheet: View {
                 .foregroundColor(DesignSystem.Colors.primary)
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.name)
-                    .font(.system(size: DesignSystem.Typography.body, weight: .medium))
+                    .font(DesignSystem.Typography.bodyFont.weight(.medium))
                     .foregroundColor(DesignSystem.Colors.textPrimary)
                 Text(entry.path)
-                    .font(.system(size: DesignSystem.Typography.footnote))
+                    .font(DesignSystem.Typography.footnoteFont)
                     .foregroundColor(DesignSystem.Colors.textTertiary)
                     .lineLimit(2)
             }
@@ -102,7 +102,7 @@ struct MacWorkspaceSearchSheet: View {
             Button(alreadyAdded ? "Added" : (entry.isDirectory ? "@folder" : "@file")) {
                 addRef(entry)
             }
-            .font(.system(size: DesignSystem.Typography.footnote, weight: .semibold))
+            .font(DesignSystem.Typography.footnoteFont.weight(.semibold))
             .foregroundColor(alreadyAdded ? DesignSystem.Colors.textTertiary : DesignSystem.Colors.primary)
             .disabled(alreadyAdded)
         }
@@ -115,12 +115,12 @@ struct MacWorkspaceSearchSheet: View {
                 .font(.system(size: 34))
                 .foregroundColor(DesignSystem.Colors.textTertiary)
             Text(title)
-                .font(.system(size: DesignSystem.Typography.callout, weight: .medium))
+                .font(DesignSystem.Typography.calloutFont.weight(.medium))
                 .foregroundColor(DesignSystem.Colors.textSecondary)
                 .multilineTextAlignment(.center)
             if let subtitle {
                 Text(subtitle)
-                    .font(.system(size: DesignSystem.Typography.footnote))
+                    .font(DesignSystem.Typography.footnoteFont)
                     .foregroundColor(DesignSystem.Colors.textTertiary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, DesignSystem.Spacing.lg)

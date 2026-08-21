@@ -80,7 +80,7 @@ struct MobileHomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
                 Text("Work from your iPhone — data syncs with your Mac over the local connection.")
-                    .font(.system(size: DesignSystem.Typography.footnote))
+                    .font(DesignSystem.Typography.footnoteFont)
                     .foregroundColor(DesignSystem.Colors.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -103,27 +103,27 @@ struct MobileHomeView: View {
             if let status = macStatusStore.macStatus {
                 if let project = status.projectName, !project.isEmpty {
                     Text(project)
-                        .font(.system(size: DesignSystem.Typography.subheadline, weight: .semibold))
+                        .font(DesignSystem.Typography.subheadlineFont.weight(.semibold))
                         .foregroundColor(DesignSystem.Colors.textPrimary)
                         .lineLimit(1)
                 }
                 HStack(spacing: DesignSystem.Spacing.sm) {
                     if let branch = status.gitBranch, !branch.isEmpty {
                         Label(branch, systemImage: "arrow.triangle.branch")
-                            .font(.system(size: DesignSystem.Typography.caption))
+                            .font(DesignSystem.Typography.captionFont)
                             .foregroundColor(DesignSystem.Colors.textSecondary)
                             .lineLimit(1)
                     }
                     if let ws = status.workspacePath, !ws.isEmpty {
                         Text(ws)
-                            .font(.system(size: DesignSystem.Typography.caption, design: .monospaced))
+                            .font(DesignSystem.Typography.captionFont.monospaced())
                             .foregroundColor(DesignSystem.Colors.textTertiary)
                             .lineLimit(1)
                     }
                 }
             } else {
                 Text("Loading Mac status…")
-                    .font(.system(size: DesignSystem.Typography.caption))
+                    .font(DesignSystem.Typography.captionFont)
                     .foregroundColor(DesignSystem.Colors.textTertiary)
             }
         }
@@ -138,7 +138,7 @@ struct MobileHomeView: View {
                 .fill(up ? DesignSystem.Colors.success : DesignSystem.Colors.danger)
                 .frame(width: 7, height: 7)
             Text(label)
-                .font(.system(size: DesignSystem.Typography.caption, weight: .medium))
+                .font(DesignSystem.Typography.captionFont.weight(.medium))
                 .foregroundColor(DesignSystem.Colors.textSecondary)
         }
     }
@@ -147,7 +147,7 @@ struct MobileHomeView: View {
         VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
             HStack {
                 Label("Auto Tasks", systemImage: "bolt.fill")
-                    .font(.system(size: DesignSystem.Typography.headline, weight: .semibold))
+                    .font(DesignSystem.Typography.headlineFont.weight(.semibold))
                     .foregroundColor(DesignSystem.Colors.textPrimary)
                 Spacer()
                 if autoState?.isRunning == true {
@@ -162,7 +162,7 @@ struct MobileHomeView: View {
 
             if let state = autoState {
                 Text(state.statusMessage ?? (state.masterEnabled ? "Enabled on Mac" : "Disabled on Mac"))
-                    .font(.system(size: DesignSystem.Typography.subheadline))
+                    .font(DesignSystem.Typography.subheadlineFont)
                     .foregroundColor(DesignSystem.Colors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -175,7 +175,7 @@ struct MobileHomeView: View {
                 if let current = state.currentTask,
                    let label = state.tasks.first(where: { $0.id == current })?.label {
                     Text("Current: \(label)")
-                        .font(.system(size: DesignSystem.Typography.caption))
+                        .font(DesignSystem.Typography.captionFont)
                         .foregroundColor(DesignSystem.Colors.textTertiary)
                 }
 
@@ -183,7 +183,7 @@ struct MobileHomeView: View {
                     HStack(alignment: .top, spacing: 6) {
                         ProgressView().scaleEffect(0.65)
                         Text(step)
-                            .font(.system(size: DesignSystem.Typography.caption))
+                            .font(DesignSystem.Typography.captionFont)
                             .foregroundColor(DesignSystem.Colors.primary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -194,19 +194,19 @@ struct MobileHomeView: View {
                     showAutoTask = true
                 } label: {
                     Label("View live log", systemImage: "doc.text")
-                        .font(.system(size: DesignSystem.Typography.footnote, weight: .semibold))
+                        .font(DesignSystem.Typography.footnoteFont.weight(.semibold))
                 }
                 .buttonStyle(.bordered)
                 .tint(DesignSystem.Colors.primary)
             } else {
                 Text("Loading auto-task state from Mac…")
-                    .font(.system(size: DesignSystem.Typography.subheadline))
+                    .font(DesignSystem.Typography.subheadlineFont)
                     .foregroundColor(DesignSystem.Colors.textTertiary)
             }
 
             Button { showAutoTask = true } label: {
                 Text("Open Auto Tasks")
-                    .font(.system(size: DesignSystem.Typography.body, weight: .semibold))
+                    .font(DesignSystem.Typography.bodyFont.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
@@ -220,26 +220,26 @@ struct MobileHomeView: View {
     private var exploreSummaryCard: some View {
         VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
             Label("Explorer chat", systemImage: "sidebar.left")
-                .font(.system(size: DesignSystem.Typography.headline, weight: .semibold))
+                .font(DesignSystem.Typography.headlineFont.weight(.semibold))
                 .foregroundColor(DesignSystem.Colors.textPrimary)
 
             if let current = explorerStore.exploreCurrent {
                 Text("Active: \(current.title.isEmpty ? "Untitled" : current.title)")
-                    .font(.system(size: DesignSystem.Typography.subheadline))
+                    .font(DesignSystem.Typography.subheadlineFont)
                     .foregroundColor(DesignSystem.Colors.textSecondary)
                 if let last = current.history.last(where: { !$0.text.isEmpty }) {
                     Text(last.role == .user ? "You: \(last.text)" : last.text)
-                        .font(.system(size: DesignSystem.Typography.footnote))
+                        .font(DesignSystem.Typography.footnoteFont)
                         .foregroundColor(DesignSystem.Colors.textTertiary)
                         .lineLimit(2)
                 }
             } else if explorerStore.exploreSessions.isEmpty {
                 Text("No explorer sessions yet on this Mac.")
-                    .font(.system(size: DesignSystem.Typography.subheadline))
+                    .font(DesignSystem.Typography.subheadlineFont)
                     .foregroundColor(DesignSystem.Colors.textTertiary)
             } else {
                 Text("\(explorerStore.exploreSessions.count) session(s) on Mac")
-                    .font(.system(size: DesignSystem.Typography.subheadline))
+                    .font(DesignSystem.Typography.subheadlineFont)
                     .foregroundColor(DesignSystem.Colors.textSecondary)
             }
 
@@ -247,12 +247,12 @@ struct MobileHomeView: View {
                 ForEach(explorerStore.exploreSessions.prefix(3), id: \.id) { session in
                     HStack {
                         Text(session.title.isEmpty ? "Untitled" : session.title)
-                            .font(.system(size: DesignSystem.Typography.footnote))
+                            .font(DesignSystem.Typography.footnoteFont)
                             .foregroundColor(DesignSystem.Colors.textPrimary)
                             .lineLimit(1)
                         Spacer()
                         Text(Date(epochSeconds: session.lastUsedAt).relativeTimeShort())
-                            .font(.system(size: DesignSystem.Typography.caption))
+                            .font(DesignSystem.Typography.captionFont)
                             .foregroundColor(DesignSystem.Colors.textTertiary)
                     }
                 }
@@ -260,7 +260,7 @@ struct MobileHomeView: View {
 
             Button { showExplore = true } label: {
                 Text("Open Explorer")
-                    .font(.system(size: DesignSystem.Typography.body, weight: .semibold))
+                    .font(DesignSystem.Typography.bodyFont.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
@@ -273,7 +273,7 @@ struct MobileHomeView: View {
 
     private var chatAction: some View {
         Button { showLlmIde = true } label: {
-            featureRow(icon: "bubble.left.and.text.bubble.right", title: "llm-chat", subtitle: "Shared chat with your Mac")
+            featureRow(icon: "bubble.left.and.text.bubble.right", title: "llm-agent", subtitle: "Shared chat with your Mac")
         }
     }
 
@@ -285,10 +285,10 @@ struct MobileHomeView: View {
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: DesignSystem.Typography.body, weight: .semibold))
+                    .font(DesignSystem.Typography.bodyFont.weight(.semibold))
                     .foregroundColor(DesignSystem.Colors.textPrimary)
                 Text(subtitle)
-                    .font(.system(size: DesignSystem.Typography.footnote))
+                    .font(DesignSystem.Typography.footnoteFont)
                     .foregroundColor(DesignSystem.Colors.textTertiary)
             }
             Spacer()
@@ -304,10 +304,10 @@ struct MobileHomeView: View {
     private func metricPill(_ label: String, value: Int) -> some View {
         VStack(spacing: 2) {
             Text("\(value)")
-                .font(.system(size: DesignSystem.Typography.title3, weight: .bold, design: .rounded))
+                .font(DesignSystem.Typography.title3Font.weight(.bold).design(.rounded))
                 .foregroundColor(DesignSystem.Colors.textPrimary)
             Text(label)
-                .font(.system(size: DesignSystem.Typography.caption))
+                .font(DesignSystem.Typography.captionFont)
                 .foregroundColor(DesignSystem.Colors.textTertiary)
         }
         .frame(maxWidth: .infinity)
@@ -336,11 +336,11 @@ struct MobileHomeView: View {
                     .foregroundColor(DesignSystem.Colors.textTertiary)
             }
             Text(connection.connectionStatus == .connecting ? "Connecting…" : "Not connected")
-                .font(.system(size: DesignSystem.Typography.title2, weight: .semibold))
+                .font(DesignSystem.Typography.title2Font.weight(.semibold))
                 .foregroundColor(DesignSystem.Colors.textPrimary)
             if connection.connectionStatus == .disconnected {
                 Text("Your Mac is still saved. Reconnect now, or reopen the app once it's back online.")
-                    .font(.system(size: DesignSystem.Typography.subheadline))
+                    .font(DesignSystem.Typography.subheadlineFont)
                     .foregroundColor(DesignSystem.Colors.textTertiary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, DesignSystem.Spacing.lg)
@@ -352,7 +352,7 @@ struct MobileHomeView: View {
                     )
                 } label: {
                     Text("Reconnect")
-                        .font(.system(size: DesignSystem.Typography.body, weight: .semibold))
+                        .font(DesignSystem.Typography.bodyFont.weight(.semibold))
                         .frame(maxWidth: 200)
                 }
                 .buttonStyle(.borderedProminent)
@@ -401,6 +401,7 @@ struct MobileHomeView: View {
                     Image(systemName: "arrow.clockwise")
                         .foregroundColor(DesignSystem.Colors.textSecondary)
                 }
+                .accessibilityLabel("Refresh Mac status")
                 HStack(spacing: 5) {
                     Circle().fill(statusColor).frame(width: 8, height: 8)
                     Text(statusLabel)
@@ -429,9 +430,10 @@ struct MobileHomeView: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle.fill")
-                        .font(.system(size: DesignSystem.Typography.headline))
+                        .font(DesignSystem.Typography.headlineFont)
                         .foregroundColor(DesignSystem.Colors.textSecondary)
                 }
+                .accessibilityLabel("More actions")
             }
         }
     }
