@@ -67,9 +67,26 @@ struct McpPluginDetailView: View {
     private func infoBlock(_ p: LlmIdeAPIClient.McpPluginInfo) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Details").font(.headline)
-            LabeledContent("Command", value: ([p.command] + p.args).joined(separator: " "))
+            LabeledContent(p.isHosted ? "URL" : "Command", value: p.endpointSummary)
+            LabeledContent("Transport", value: p.transport)
             if let env = p.env, !env.isEmpty {
                 LabeledContent("Environment", value: env.keys.sorted().joined(separator: ", "))
+            }
+            if let headers = p.headers, !headers.isEmpty {
+                // Names only — the server redacts the values, which for a
+                // hosted server is where its bearer token sits.
+                LabeledContent("Headers", value: headers.keys.sorted().joined(separator: ", "))
+            }
+            if let cred = p.credential {
+                LabeledContent("Credential", value: cred.label ?? cred.vaultKey)
+                if p.credentialMissing {
+                    // Registered but unauthenticated: the server is still
+                    // passed to the CLI, so it will fail at connect time until
+                    // the value is stored. Say so rather than let it look fine.
+                    Text("No value stored for \(cred.vaultKey) — this server will fail to authenticate. Add it in Settings → Model Providers.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
             Toggle("Consented", isOn: Binding(
                 get: { p.consented },

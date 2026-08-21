@@ -50,7 +50,7 @@ struct McpPluginRow: View {
             .clipShape(Capsule())
     }
 
-    private var subtitle: String {
-        ([plugin.command] + plugin.args).joined(separator: " ")
-    }
+    /// A hosted server has no command to show — its URL is the identity.
+    /// `endpointSummary` picks the right one for the transport.
+    private var subtitle: String { plugin.endpointSummary }
 }

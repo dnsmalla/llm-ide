@@ -68,6 +68,11 @@ struct LibraryView: View {
     @State private var mcpPluginMessage: String?
     @State private var mcpClaudeSources: [LlmIdeAPIClient.ClaudeMcpSource] = []
     @State private var mcpCodexSources: [LlmIdeAPIClient.CodexMcpSource] = []
+    /// Curated one-click servers. Loaded alongside the plugin list, because
+    /// importing from a CLI config was the ONLY way in before this — and for
+    /// anyone who had configured nothing, that meant no way in at all.
+    @State private var mcpCatalog: [LlmIdeAPIClient.McpCatalogEntry] = []
+    @State private var mcpAddSheet: McpAddSheet.Mode?
     /// Persisted set of COLLAPSED section ids (comma-joined). Absence ⇒
     /// expanded. One uniform mechanism drives every section's chevron.
     /// Every section is seeded collapsed so the library opens in a clean,
@@ -1031,6 +1036,29 @@ struct LibraryView: View {
             tint: theme.current.categoryPurple, count: mcpPlugins.count
         ) {
             Menu {
+                Menu("Add from catalog…") {
+                    if mcpCatalog.isEmpty {
+                        Button("Catalog unavailable") {}.disabled(true)
+                    } else {
+                        ForEach(mcpCatalog) { entry in
+                            Button {
+                                // An entry that needs a directory or DSN opens
+                                // the sheet; everything else adds in one click.
+                                if entry.requiresArg != nil {
+                                    mcpAddSheet = .catalogArg(entry)
+                                } else {
+                                    Task { await addMcpPlugin(catalogId: entry.id, arg: nil, name: nil,
+                                                              transport: nil, command: nil, args: nil, url: nil) }
+                                }
+                            } label: {
+                                Label(entry.registered ? "\(entry.name) (added)" : entry.name,
+                                      systemImage: entry.isHosted ? "cloud" : "terminal")
+                            }
+                            .disabled(entry.registered)
+                        }
+                    }
+                }
+                Divider()
                 Menu("Add from Claude Code…") {
                     if mcpClaudeSources.isEmpty {
                         Button("No servers found in ~/.claude.json") {}.disabled(true)
@@ -1057,6 +1085,8 @@ struct LibraryView: View {
                     Divider()
                     Button("Rescan") { Task { await scanCodexSources() } }
                 }
+                Divider()
+                Button("Add manually…") { mcpAddSheet = .manual }
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 10, weight: .semibold))
@@ -1077,6 +1107,15 @@ struct LibraryView: View {
         } message: {
             Text(mcpPluginMessage ?? "")
         }
+        .sheet(item: $mcpAddSheet) { mode in
+            McpAddSheet(mode: mode) { catalogId, arg, name, transport, command, args, url in
+                Task {
+                    await addMcpPlugin(catalogId: catalogId, arg: arg, name: name,
+                                       transport: transport, command: command, args: args, url: url)
+                }
+            }
+            .environmentObject(theme)
+        }
     }
 
     private func loadMcpPlugins() async {
@@ -1085,6 +1124,26 @@ struct LibraryView: View {
             mcpPluginsError = nil
         } catch {
             mcpPluginsError = error.localizedDescription
+        }
+        // Best-effort: a catalog fetch failure just leaves the submenu empty
+        // rather than reporting an error over the plugin list, which is the
+        // more important thing on this screen.
+        mcpCatalog = (try? await api.fetchMcpCatalog()) ?? mcpCatalog
+    }
+
+    /// One add call for every entry point — the server resolves catalogId,
+    /// claudeName/codexName, or a raw command/url, so the client never has to
+    /// restate what the catalog already knows.
+    private func addMcpPlugin(catalogId: String?, arg: String?, name: String?,
+                              transport: String?, command: String?, args: [String]?, url: String?) async {
+        do {
+            let added = try await api.addMcpPlugin(
+                catalogId: catalogId, arg: arg, command: command, args: args,
+                url: url, transport: transport, name: name)
+            mcpPluginMessage = "Added \(added.name). Consent and enable it to start using it."
+            await refreshMcpPlugins()
+        } catch {
+            mcpPluginMessage = error.localizedDescription
         }
     }
 
