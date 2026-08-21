@@ -942,6 +942,15 @@ final class MobileControlManager {
         let loopConfig = Self.resolveLoopConfig(projectRoot: context.projectRoot,
                                                 projectId: projectId,
                                                 gitRoot: context.gitRoot)
+        // Stage ids from the detector are re-minted on every snapshot (no
+        // saved config) or appended fresh by ensureDefaultStages (saved
+        // config missing a default stage) — either way, an id handed to the
+        // phone here can already be stale by the time a tap's re-check runs.
+        // Only ids that exist in the PERSISTED config are stable enough to
+        // target, so unsaved/detector-appended stages get stageId: nil and
+        // the phone hides ▶ for exactly those, same as it does for old Macs.
+        let saved = LoopEngineConfigStore.load(projectRoot: context.projectRoot, projectId: projectId)
+        let savedStageIds = Set(saved?.stages.map(\.id) ?? [])
         let running = context.gitRoot.map { LoopEngineRunner.isRunActive(gitRoot: $0) } ?? false
         let recent = loopHistory(limit: 1).first
 
@@ -971,7 +980,7 @@ final class MobileControlManager {
                     LoopStageInfo(name: $0.name, kind: $0.kind.rawValue,
                                   severity: $0.severity.rawValue,
                                   enabled: $0.enabled ?? true, order: $0.order,
-                                  stageId: $0.id)
+                                  stageId: savedStageIds.contains($0.id) ? $0.id : nil)
                 }
         )
     }
