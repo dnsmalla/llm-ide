@@ -475,6 +475,29 @@ export async function runAgentV2Turn(
   if (!rootStat.isDirectory()) {
     throw new Error(`workspaceRoot is not a directory: ${workspaceRoot}`);
   }
+  // statSync passing is not the same as the root being USABLE as a cwd. On
+  // macOS a TCC-protected folder (~/Desktop, ~/Documents, ~/Downloads, iCloud
+  // Drive) stats fine but denies opendir/chdir to a process whose responsible
+  // app has no folder grant — and the Node server is spawned by the Mac app,
+  // which inherits the app's TCC identity, not the user's shell. The SDK
+  // spawns the CLI with cwd=workspaceRoot, so that denial surfaces as a
+  // spawn EPERM/EACCES the SDK misreports as a native-binary/libc launch
+  // failure. Probe the directory here so the user gets the real cause.
+  try {
+    fs.opendirSync(workspaceRoot).closeSync();
+  } catch (err) {
+    const code = err?.code;
+    if (code === 'EPERM' || code === 'EACCES') {
+      throw new Error(
+        `workspaceRoot is not readable (${code}): ${workspaceRoot}. `
+        + 'On macOS this is usually a privacy (TCC) denial — grant the LLM-IDE app '
+        + 'access to that folder in System Settings › Privacy & Security › Files and Folders '
+        + '(or Full Disk Access), or move the project outside ~/Desktop, ~/Documents, '
+        + '~/Downloads and iCloud Drive.',
+      );
+    }
+    throw new Error(`workspaceRoot is not readable (${code ?? 'unknown'}): ${workspaceRoot}`);
+  }
   // The SDK grants read access to cwd, so it must clear the same breadth bar
   // buildReadableRoots applies — "~" as a workspace would silently grant the
   // whole home directory.
@@ -754,6 +777,21 @@ export async function runAgentV2Turn(
     // recoverable at the route layer: drop the mapping and start fresh.
     if (resume && /session|conversation|resume/i.test(String(err?.message ?? ''))) {
       throw Object.assign(new Error(err?.message ?? String(err)), { code: 'SESSION_UNRESUMABLE' });
+    }
+    // The SDK reports EVERY spawn-time failure of an existing CLI binary as a
+    // libc/musl mismatch (errorClass 'executable_launch_failed'), which on
+    // macOS is never the real cause: the arm64 binary is fine and the actual
+    // errno — attached to the error as `code` — is almost always a cwd
+    // problem (EPERM/EACCES on a TCC-protected workspace, ENOENT/ENOTDIR on a
+    // stale one). Restate it with the errno and the cwd so the message points
+    // at something the user can act on instead of at their libc.
+    if (err?.errorClass === 'executable_launch_failed') {
+      throw new Error(
+        `Claude Code failed to launch (${err?.code ?? 'unknown'}) with cwd ${workspaceRoot}. `
+        + 'The binary itself is fine; a spawn error at this point is a working-directory problem — '
+        + 'on macOS usually a privacy (TCC) denial on that folder for the app that spawned the server. '
+        + `Original SDK message: ${err?.message ?? String(err)}`,
+      );
     }
     throw err;
   }

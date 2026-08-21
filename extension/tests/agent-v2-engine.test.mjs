@@ -353,6 +353,52 @@ test('runAgentV2Turn: a nonexistent workspaceRoot fails with a clear error, not 
   );
 });
 
+// A root that stats fine but denies opendir (the macOS TCC shape: ~/Desktop,
+// ~/Documents, iCloud Drive seen by an app with no folder grant) must fail
+// with the real cause. Without this the SDK spawns the CLI with that cwd and
+// reports a libc/musl mismatch, which sends the reader after the binary.
+test('runAgentV2Turn: an unreadable workspaceRoot names the access denial, not a libc mismatch', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-v2-noperm-'));
+  fs.chmodSync(dir, 0o000);
+  t.after(() => { try { fs.chmodSync(dir, 0o700); fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ } });
+  // Running as root would read it anyway — the denial is what's under test.
+  if (typeof process.getuid === 'function' && process.getuid() === 0) return;
+  await assert.rejects(
+    runAgentV2Turn({
+      message: 'm', userId: 'u1', mode: 'execute',
+      agentContext: { workspaceRoot: dir },
+      allowAmbientAuth: true, onEvent: () => {}, queryFactory: makeFakeQuery({ messages: [] }),
+    }, turnInjectable),
+    (e) => /workspaceRoot is not readable \((EACCES|EPERM)\)/.test(e.message) && e.message.includes(dir),
+  );
+});
+
+// The SDK labels every spawn-time failure of an existing binary
+// 'executable_launch_failed' and blames libc. The engine must restate it with
+// the errno the SDK attached and the cwd it spawned with.
+test('runAgentV2Turn: an SDK launch failure is restated with the errno and cwd', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-v2-launch-'));
+  // The SDK spawns lazily: the launch failure surfaces while the caller is
+  // iterating the query, not when query() is constructed.
+  const boom = () => ({
+    async *[Symbol.asyncIterator]() {
+      throw Object.assign(
+        new Error('Claude Code native binary at /x/claude exists but failed to launch. This usually means the binary does not match this system\u2019s libc'),
+        { errorClass: 'executable_launch_failed', code: 'EPERM' },
+      );
+    },
+  });
+  await assert.rejects(
+    runAgentV2Turn({
+      message: 'm', userId: 'u1', mode: 'execute',
+      agentContext: { workspaceRoot: dir },
+      allowAmbientAuth: true, onEvent: () => {}, queryFactory: boom,
+    }, turnInjectable),
+    (e) => /failed to launch \(EPERM\)/.test(e.message) && e.message.includes(dir) && /Original SDK message/.test(e.message),
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 // The SDK grants read access to cwd, so cwd must clear the same breadth bar
 // buildReadableRoots applies ("~" would grant the whole home dir — repo-files
 // refuses it as a root, and the engine must refuse it as a cwd).
