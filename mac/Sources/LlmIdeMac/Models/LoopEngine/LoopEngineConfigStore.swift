@@ -124,6 +124,8 @@ enum LoopEngineConfigStore {
         return store.loops.first(where: \.isPrimary) ?? store.loops.first
     }
 
+    /// Fail-quiet: losing a write is bad, but throwing from a SwiftUI action
+    /// or the cron sweep would be worse than the user re-saving.
     private static func write(_ store: LoopEngineProjectStore, to url: URL) {
         do {
             try FileManager.default.createDirectory(
