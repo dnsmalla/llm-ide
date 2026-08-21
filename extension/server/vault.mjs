@@ -166,6 +166,15 @@ const ALLOWED_KEYS = new Set([
 // the apiKey suffix is allowed.
 const CUSTOM_PROVIDER_KEY_RE = /^custom\.[a-z0-9-]+\.apiKey$/;
 
+// MCP server credentials, namespaced `mcp.<server-id>.<field>`. A pattern
+// rather than enumeration because the set is driven by mcp/catalog.mjs plus
+// whatever the user adds by hand — the same reason the custom-provider keys
+// above are a pattern. The token never enters the shared MCP registry file:
+// the registry stores only the vault KEY, and mcp-config.mjs reads the value
+// through here when it builds --mcp-config. `<server-id>` matches the
+// registry's own SLUG_RE shape.
+const MCP_CREDENTIAL_KEY_RE = /^mcp\.[a-z][a-z0-9-]{1,40}\.[a-zA-Z]{1,32}$/;
+
 function ensureAllowed(key) {
   // This one stays in the open: callers (auth-routes) already enumerate
   // the allowed keys in the same response when this fires, so the name
@@ -173,6 +182,7 @@ function ensureAllowed(key) {
   // pathway in auth-routes keeps surfacing "Unknown vault key" verbatim.
   if (ALLOWED_KEYS.has(key)) return;
   if (typeof key === 'string' && CUSTOM_PROVIDER_KEY_RE.test(key)) return;
+  if (typeof key === 'string' && MCP_CREDENTIAL_KEY_RE.test(key)) return;
   throw new Error(`Unknown vault key: ${key}`);
 }
 
@@ -211,6 +221,22 @@ export function listSecretKeys(db, userId) {
 // Fetch multiple secrets in one DB round-trip.  Returns a plain object
 // keyed by secret_key with decrypted values; missing keys are absent.
 // Unknown keys are silently skipped (same policy as getSecret).
+/**
+ * A `(vaultKey) => string` reader bound to one user, for code that must not
+ * import this module directly. `mcp/` is below `server/` in the layer table
+ * (see CLAUDE.md "Module Boundaries") yet needs vault-held MCP credentials
+ * when it builds --mcp-config, so the callers that CAN import this hand it
+ * down instead. Never throws: an unknown key or a decrypt failure reads as
+ * "no credential", which the caller renders as a missing-credential warning
+ * rather than an exception mid-config-build.
+ */
+export function makeSecretReader(db, userId) {
+  return (key) => {
+    if (!userId || typeof key !== 'string' || !key) return '';
+    try { return getSecret(db, userId, key) || ''; } catch { return ''; }
+  };
+}
+
 export function getSecrets(db, userId, keys) {
   const allowed = keys.filter((k) => ALLOWED_KEYS.has(k));
   if (allowed.length === 0) return {};

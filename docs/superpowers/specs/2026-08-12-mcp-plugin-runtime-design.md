@@ -75,6 +75,29 @@ Integration point: **`runClaude`** (`extension/agents/runtime.mjs`) → **`spawn
   ```
   McpPlugin { id, name, command, args[], env?, source: 'claude'|'manual', builtin: false }
   ```
+
+  > **Update (2026-08-21):** the record gained a **transport**. It was stdio-only
+  > (`command` required), which meant none of the servers coders actually reach for
+  > could be registered — GitHub, Sentry, Notion and friends are hosted now — and the
+  > `~/.claude.json` importer had to drop `type: "http"` entries on the floor, so a
+  > config whose only server was remote scanned as empty. Current shape:
+  > ```
+  > McpPlugin { id, name, transport: 'stdio'|'http'|'sse', builtin: false,
+  >             source: 'claude'|'codex'|'catalog'|'manual',
+  >             command?, args[], env?,        // stdio
+  >             url?, headers?,                // http | sse
+  >             credential? }                  // { vaultKey, target, name, template?, label? }
+  > ```
+  > A missing `transport` reads as `stdio` (every pre-existing record required
+  > `command`), so no migration was needed. `credential` is a DESCRIPTOR: the value
+  > lives in the encrypted vault under the `mcp.<server>.<field>` namespace and is
+  > injected by `mcp-config.mjs` when `--mcp-config` is built, so no token is written
+  > into this shared file. Because `mcp/` sits below `server/` in the layer table, the
+  > vault reader is injected (`makeSecretReader`) by the callers that may import it
+  > rather than imported here. Added alongside: a curated catalog
+  > (`mcp/catalog.mjs`, `GET /auth/me/mcp-plugins/catalog`, add via `{ catalogId, arg }`)
+  > and a manual-add form — before this, importing from a CLI config was the only way
+  > in. `SERVER_API_VERSION` 36.
 - **Per-user state:** `mcp-plugins-state.json`, keyed by `userId` → `{ enabled: bool, consented: bool }`.
 - `id` is a server-validated slug (`/^[a-z][a-z0-9-]{1,40}$/`), matching the convention used by llm-sources and plugins.
 

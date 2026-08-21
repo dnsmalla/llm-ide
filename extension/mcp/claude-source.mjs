@@ -1,5 +1,6 @@
 // extension/mcp/claude-source.mjs
-// Read-only scan of ~/.claude.json mcpServers — the SP1 import source.
+// Read-only scan of ~/.claude.json mcpServers — the import source. Reads both
+// stdio (command) and hosted (url) entries.
 // We NEVER write to this file; Claude Code owns it.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,13 +23,29 @@ export function scanClaudeMcpServers(claudeJsonPath) {
     for (const [name, s] of Object.entries(servers)) {
       if (byName.has(name)) continue;
       if (!s || typeof s !== 'object') continue;
-      if (typeof s.command !== 'string') continue; // skip http/url-only entries for SP1
-      byName.set(name, {
-        name,
-        command: s.command,
-        args: Array.isArray(s.args) ? s.args.filter((a) => typeof a === 'string') : [],
-        env: s.env && typeof s.env === 'object' ? s.env : undefined,
-      });
+      if (typeof s.command === 'string') {
+        byName.set(name, {
+          name,
+          transport: 'stdio',
+          command: s.command,
+          args: Array.isArray(s.args) ? s.args.filter((a) => typeof a === 'string') : [],
+          env: s.env && typeof s.env === 'object' ? s.env : undefined,
+        });
+        continue;
+      }
+      // Hosted servers. These used to be skipped outright ("http/url-only
+      // entries for SP1"), which made the importer report NOTHING for a config
+      // whose only server was hosted — the common case now that GitHub,
+      // Sentry, Notion and friends are all remote. `type` may be absent,
+      // 'http', 'sse', or the 'streamable-http' alias.
+      if (typeof s.url === 'string' && s.url.trim()) {
+        byName.set(name, {
+          name,
+          transport: s.type === 'sse' ? 'sse' : 'http',
+          url: s.url.trim(),
+          headers: s.headers && typeof s.headers === 'object' ? s.headers : undefined,
+        });
+      }
     }
   };
   collect(cfg?.mcpServers);

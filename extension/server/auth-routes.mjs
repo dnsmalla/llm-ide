@@ -138,6 +138,13 @@ function redactEnvValues(env) {
   return Object.fromEntries(Object.keys(env).map((k) => [k, '••••']));
 }
 
+// A hosted MCP server's headers carry its bearer token, so they need exactly
+// the same treatment as env: the plugin registry is shared across users and
+// this endpoint is reachable by any authenticated one, so an unredacted
+// passthrough would hand over another user's imported credentials. Key names
+// are kept — the detail view lists them, never values.
+const redactHeaderValues = redactEnvValues;
+
 // Returns true when the request URL is one this module owns.  Caller
 // dispatches us before falling through to the KB router.  The query
 // string is stripped before matching so /auth/me/audit?limit=N still
@@ -179,6 +186,7 @@ export function isAuthRoute(url) {
       || path === '/auth/me/llm-sources/update'
       || path.startsWith('/auth/me/llm-sources/')
       || path === '/auth/me/mcp-plugins'
+      || path === '/auth/me/mcp-plugins/catalog'
       || path === '/auth/me/mcp-plugins/claude-sources'
       || path === '/auth/me/mcp-plugins/codex-sources'
       || path === '/auth/me/mcp-plugins/add'
@@ -1265,7 +1273,34 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     // whether or not they've ever consented to or enabled that plugin.
     // Key NAMES are kept (mirrors vault's listSecretKeys) since the Mac
     // detail view only ever displays the key list, never a value.
-    send(res, 200, { plugins: plugins.map((p) => ({ ...p, env: redactEnvValues(p.env) })) });
+    const { credentialMissing } = await import('../mcp/mcp-config.mjs');
+    const { makeSecretReader } = await import('./vault.mjs');
+    const readSecret = makeSecretReader(db, req.user.id);
+    send(res, 200, {
+      plugins: plugins.map((p) => ({
+        ...p,
+        env: redactEnvValues(p.env),
+        headers: redactHeaderValues(p.headers),
+        // Surfaced rather than silently dropping the server from the effective
+        // config: a catalog entry whose vault key is empty still gets passed to
+        // the CLI (which reports a real auth failure), and the client needs to
+        // be able to say "add the token" instead of leaving the user guessing.
+        credentialMissing: credentialMissing(p, readSecret),
+      })),
+    });
+    return;
+  }
+
+  // GET /auth/me/mcp-plugins/catalog → the curated one-click list. Static and
+  // user-independent, but `registered` marks what this install already has so
+  // the client can avoid offering a duplicate add.
+  if (method === 'GET' && url.split('?')[0] === '/auth/me/mcp-plugins/catalog') {
+    const { MCP_CATALOG } = await import('../mcp/catalog.mjs');
+    const { readMcpRegistry } = await import('../mcp/state.mjs');
+    const existing = new Set(readMcpRegistry().map((p) => p.id));
+    send(res, 200, {
+      servers: MCP_CATALOG.map((e) => ({ ...e, registered: existing.has(e.id) })),
+    });
     return;
   }
 
@@ -1288,16 +1323,34 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     let body;
     try { body = await readJson(req, bodyLimit); }
     catch { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return; }
+    // A catalog add resolves entirely server-side from the id, so the client
+    // never restates a command or URL (and cannot drift from the catalog).
+    if (body?.catalogId) {
+      const { addMcpPluginFromCatalog } = await import('../mcp/state.mjs');
+      const result = addMcpPluginFromCatalog(body.catalogId, { arg: body.arg, name: body.name });
+      if (result.error) {
+        safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
+          action: 'mcp-plugin.add', outcome: 'failure', detail: { error: String(result.error).slice(0, 200) } });
+        send(res, result.status || 400, { error: { code: 'ADD_FAILED', message: result.error } });
+        return;
+      }
+      safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua, action: 'mcp-plugin.add', resource: result.plugin.id, outcome: 'success' });
+      send(res, 200, result);
+      return;
+    }
+    // Imports forward the scanned shape verbatim — including the hosted
+    // (url/headers) one, which used to be dropped here because the scanners
+    // never emitted it.
     if (body?.claudeName) {
       const { scanClaudeMcpServers } = await import('../mcp/claude-source.mjs');
       const found = scanClaudeMcpServers().find((s) => s.name === body.claudeName);
       if (!found) { send(res, 400, { error: { code: 'ADD_FAILED', message: `no Claude MCP server named '${body.claudeName}'` } }); return; }
-      body = { command: found.command, args: found.args, env: found.env, name: body.name || found.name, source: 'claude' };
+      body = { ...found, name: body.name || found.name, source: 'claude' };
     } else if (body?.codexName) {
       const { scanCodexMcpServers } = await import('../mcp/codex-source.mjs');
       const found = scanCodexMcpServers().find((s) => s.name === body.codexName);
       if (!found) { send(res, 400, { error: { code: 'ADD_FAILED', message: `no Codex MCP server named '${body.codexName}'` } }); return; }
-      body = { command: found.command, args: found.args, env: found.env, name: body.name || found.name, source: 'codex' };
+      body = { ...found, name: body.name || found.name, source: 'codex' };
     }
     const { addMcpPlugin } = await import('../mcp/state.mjs');
     const result = addMcpPlugin(body || {});

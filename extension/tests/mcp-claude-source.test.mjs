@@ -45,8 +45,32 @@ test('scanClaudeMcpServers also reads project-scoped mcpServers (claude mcp add 
   }));
   const servers = scanClaudeMcpServers(f);
   const names = servers.map((s) => s.name).sort();
-  assert.deepEqual(names, ['markdownify', 'pandoc'], 'command-type project servers are found; url-only ones stay skipped');
+  assert.deepEqual(names, ['http-only', 'markdownify', 'pandoc'],
+    'both transports are found — hosted entries used to be skipped, which reported an EMPTY scan for a config whose only servers were remote');
   assert.equal(servers.find((s) => s.name === 'markdownify').command, 'uvx');
+});
+
+test('scanClaudeMcpServers reads hosted (url) servers, which used to be dropped', () => {
+  // Before this, `if (typeof s.command !== 'string') continue` skipped every
+  // remote server — so a user whose only configured server was e.g. context7
+  // (type: http) saw "No servers found in ~/.claude.json".
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'claude-src-')), '.claude.json');
+  fs.writeFileSync(f, JSON.stringify({
+    mcpServers: {
+      ctx: { type: 'http', url: 'https://mcp.example.com/mcp', headers: { KEY: 'secret' } },
+      streamy: { type: 'sse', url: 'https://mcp.example.com/sse' },
+      broken: { type: 'http' },                    // no url — must be skipped, not thrown on
+      local: { command: 'uvx', args: ['thing'] },
+    },
+  }));
+  const servers = scanClaudeMcpServers(f);
+  assert.deepEqual(servers.map((s) => s.name).sort(), ['ctx', 'local', 'streamy']);
+  const ctx = servers.find((s) => s.name === 'ctx');
+  assert.equal(ctx.transport, 'http');
+  assert.equal(ctx.url, 'https://mcp.example.com/mcp');
+  assert.equal(ctx.headers.KEY, 'secret');
+  assert.equal(servers.find((s) => s.name === 'streamy').transport, 'sse');
+  assert.equal(servers.find((s) => s.name === 'local').transport, 'stdio');
 });
 
 test('scanClaudeMcpServers: a top-level server wins over a same-named project-scoped one', () => {

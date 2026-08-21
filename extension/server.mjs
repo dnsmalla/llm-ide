@@ -77,7 +77,16 @@ const HOST = config.host;
 //     additive fields (Edit's replaceAll, Write's exists) for the native
 //     Edit/Write/Bash approval ladder — an additive wire-format change per
 //     docs/explanation/invariants.md (final whole-branch review, M1).
-const SERVER_API_VERSION = 35;
+// 35→36: MCP plugins learned the HOSTED transport. GET /auth/me/mcp-plugins
+//     records gain transport/url/headers/credential/credentialMissing, and a
+//     hosted record has NO `command` — a client that still requires that
+//     field fails to decode the whole list, which is why this is a version
+//     bump and not an additive change. The claude-sources/codex-sources scans
+//     likewise now return url-only entries they previously dropped. New
+//     GET /auth/me/mcp-plugins/catalog serves the curated one-click list, and
+//     POST /auth/me/mcp-plugins/add accepts { catalogId, arg } alongside the
+//     existing shapes. /auth/* path — not tracked in ENDPOINTS by convention.
+const SERVER_API_VERSION = 36;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

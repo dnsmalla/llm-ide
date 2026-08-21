@@ -24,13 +24,26 @@ export function scanCodexMcpServers(codexConfigPath) {
   const out = [];
   for (const [name, s] of Object.entries(servers)) {
     if (!s || typeof s !== 'object') continue;
-    if (typeof s.command !== 'string') continue; // skip url-only entries, same as claude-source
-    out.push({
-      name,
-      command: s.command,
-      args: Array.isArray(s.args) ? s.args.filter((a) => typeof a === 'string') : [],
-      env: s.env && typeof s.env === 'object' ? s.env : undefined,
-    });
+    if (typeof s.command === 'string') {
+      out.push({
+        name,
+        transport: 'stdio',
+        command: s.command,
+        args: Array.isArray(s.args) ? s.args.filter((a) => typeof a === 'string') : [],
+        env: s.env && typeof s.env === 'object' ? s.env : undefined,
+      });
+      continue;
+    }
+    // Hosted servers — same reason as claude-source: skipping them made a
+    // url-only config scan as empty.
+    if (typeof s.url === 'string' && s.url.trim()) {
+      out.push({
+        name,
+        transport: s.type === 'sse' ? 'sse' : 'http',
+        url: s.url.trim(),
+        headers: s.headers && typeof s.headers === 'object' ? s.headers : undefined,
+      });
+    }
   }
   return out;
 }

@@ -4,6 +4,7 @@
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
+import { catalogEntry } from './catalog.mjs';
 
 export const SLUG_RE = /^[a-z][a-z0-9-]{1,40}$/;
 
@@ -58,20 +59,96 @@ export function slugifyMcp(name, existing) {
   return id;
 }
 
-export function addMcpPlugin({ name, command, args, env, source }) {
-  if (typeof command !== 'string' || !command.trim()) return { error: 'command is required', status: 400 };
+// A registry record's transport. Records written before transports existed
+// carry no field and are always stdio (they required `command`), so absence
+// reads as 'stdio' rather than needing a migration.
+export function transportOf(plugin) {
+  if (plugin?.transport === 'http' || plugin?.transport === 'sse') return plugin.transport;
+  return 'stdio';
+}
+
+// http(s) only. A stdio server is named by `command`; a URL with any other
+// scheme (file:, ws:, something invented) is not a transport this can express,
+// and passing it through would only fail later inside the CLI.
+function normalizeUrl(url) {
+  if (typeof url !== 'string' || !url.trim()) return null;
+  let parsed;
+  try { parsed = new URL(url.trim()); } catch { return null; }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+  return parsed.toString();
+}
+
+/**
+ * Register an MCP server. Two transports:
+ *
+ *   stdio — { command, args?, env? }   a local subprocess
+ *   http  — { url, headers? }          a hosted server, `transport: 'http'|'sse'`
+ *
+ * HTTP is not a nicety: most vendor servers (GitHub, Sentry, Notion, …) are
+ * hosted now, and while this accepted only `command` none of them could be
+ * registered at all — nor could an imported `type: "http"` entry from the
+ * user's own Claude config, which the importer had to drop on the floor.
+ *
+ * `credential` is a DESCRIPTOR, never a value: { vaultKey, target, name,
+ * template? }. The secret itself lives in the encrypted vault and is injected
+ * when the config is built (see mcp-config.mjs), keeping tokens out of this
+ * registry file — which is shared by every user and only redacted on read.
+ */
+export function addMcpPlugin({ name, command, args, env, url, headers, transport, credential, source }) {
+  const wantsHttp = transport === 'http' || transport === 'sse' || (!command && url);
+  const resolved = { source: (source === 'claude' || source === 'codex' || source === 'catalog') ? source : 'manual' };
+
+  if (wantsHttp) {
+    const normalized = normalizeUrl(url);
+    if (!normalized) return { error: 'a http(s) url is required for an http/sse server', status: 400 };
+    resolved.transport = transport === 'sse' ? 'sse' : 'http';
+    resolved.url = normalized;
+    if (headers && typeof headers === 'object') resolved.headers = headers;
+  } else {
+    if (typeof command !== 'string' || !command.trim()) return { error: 'command is required', status: 400 };
+    resolved.transport = 'stdio';
+    resolved.command = command;
+    resolved.args = Array.isArray(args) ? args.filter((a) => typeof a === 'string') : [];
+    if (env && typeof env === 'object') resolved.env = env;
+  }
+
   const list = readMcpRegistry();
-  const id = slugifyMcp(name || command, new Set(list.map((s) => s.id)));
+  const id = slugifyMcp(name || resolved.command || resolved.url, new Set(list.map((s) => s.id)));
   const plugin = {
-    id, name: name || id, command,
-    args: Array.isArray(args) ? args.filter((a) => typeof a === 'string') : [],
-    env: env && typeof env === 'object' ? env : undefined,
-    source: (source === 'claude' || source === 'codex') ? source : 'manual',
+    id,
+    name: name || id,
+    ...resolved,
+    ...(credential && typeof credential === 'object' ? { credential } : {}),
     builtin: false,
   };
   list.push(plugin);
   writeMcpRegistry(list);
   return { plugin };
+}
+
+/**
+ * Register a curated catalog entry by id. `arg` supplies the trailing argv an
+ * entry declares via `requiresArg` (filesystem's directory, DBHub's DSN) —
+ * refused when the entry needs one and none is given, because registering a
+ * filesystem server with no allowed root produces a server that silently
+ * exposes nothing.
+ */
+export function addMcpPluginFromCatalog(catalogId, { arg, name } = {}) {
+  const entry = catalogEntry(catalogId);
+  if (!entry) return { error: `no catalog entry '${catalogId}'`, status: 400 };
+  if (entry.requiresArg && (typeof arg !== 'string' || !arg.trim())) {
+    return { error: `${entry.name} needs ${entry.requiresArg.label.toLowerCase()}`, status: 400 };
+  }
+  const args = entry.requiresArg ? [...(entry.args || []), arg.trim()] : entry.args;
+  return addMcpPlugin({
+    name: name || entry.name,
+    transport: entry.transport,
+    command: entry.command,
+    args,
+    url: entry.url,
+    credential: entry.credential,
+    source: 'catalog',
+  });
 }
 
 export function removeMcpPlugin(id) {

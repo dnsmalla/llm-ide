@@ -83,3 +83,101 @@ test('removeMcpPlugin prunes per-user state to prevent resurrection (I2)', () =>
   assert.equal(after.enabled, false, 'enabled should be false after remove+re-add (no resurrection)');
   assert.equal(after.consented, false, 'consented should be false after remove+re-add (no resurrection)');
 });
+
+
+// ── HTTP transport + catalog adds ─────────────────────────────────────────
+
+test('addMcpPlugin registers a hosted server and rejects a non-http url', async () => {
+  const { addMcpPlugin, writeMcpRegistry, transportOf } = await import('../mcp/state.mjs');
+  writeMcpRegistry([]);
+  const ok = addMcpPlugin({ name: 'Sentry', transport: 'http', url: 'https://mcp.sentry.dev/mcp' });
+  assert.equal(ok.plugin.transport, 'http');
+  assert.equal(ok.plugin.url, 'https://mcp.sentry.dev/mcp');
+  assert.equal(ok.plugin.command, undefined, 'a hosted record carries no command');
+  assert.equal(transportOf(ok.plugin), 'http');
+
+  // A url alone implies http — the common shape when importing.
+  writeMcpRegistry([]);
+  assert.equal(addMcpPlugin({ name: 'x', url: 'http://localhost:3000/mcp' }).plugin.transport, 'http');
+
+  // Anything that is not http(s) cannot be expressed as a transport, so it is
+  // refused here rather than failing opaquely inside the CLI later.
+  for (const bad of ['file:///etc/passwd', 'ws://x.test', 'notaurl', '']) {
+    const r = addMcpPlugin({ name: 'bad', transport: 'http', url: bad });
+    assert.ok(r.error, `${bad} must be refused`);
+  }
+  // Neither command nor url.
+  assert.ok(addMcpPlugin({ name: 'nope' }).error);
+});
+
+test('addMcpPluginFromCatalog resolves the entry server-side and demands a required arg', async () => {
+  const { addMcpPluginFromCatalog, writeMcpRegistry } = await import('../mcp/state.mjs');
+  const { catalogEntry } = await import('../mcp/catalog.mjs');
+  writeMcpRegistry([]);
+
+  // filesystem declares requiresArg — registering it with no allowed root
+  // would produce a server that exposes nothing, so it is refused.
+  assert.ok(addMcpPluginFromCatalog('filesystem').error);
+  const fsAdd = addMcpPluginFromCatalog('filesystem', { arg: '/tmp/proj' });
+  assert.deepEqual(fsAdd.plugin.args, [...catalogEntry('filesystem').args, '/tmp/proj']);
+  assert.equal(fsAdd.plugin.source, 'catalog');
+
+  // A hosted catalog entry carries its credential DESCRIPTOR, never a value.
+  writeMcpRegistry([]);
+  const gh = addMcpPluginFromCatalog('github').plugin;
+  assert.equal(gh.transport, 'http');
+  assert.equal(gh.credential.vaultKey, 'mcp.github.token');
+  // The descriptor legitimately contains the literal "Bearer ${value}"
+  // template, so assert on the thing that matters: no VALUE is stored. A
+  // hosted record only gains `headers` when a token is injected, and that
+  // happens in mcp-config at build time, never here.
+  assert.equal(gh.headers, undefined, 'no resolved headers in the registry record');
+  assert.deepEqual(Object.keys(gh.credential).sort(), ['label', 'name', 'target', 'template', 'vaultKey'],
+    'credential is a descriptor — any extra key would be somewhere a secret could hide');
+
+  assert.ok(addMcpPluginFromCatalog('does-not-exist').error);
+});
+
+test('every catalog entry is registerable and internally consistent', async () => {
+  const { MCP_CATALOG } = await import('../mcp/catalog.mjs');
+  const { addMcpPluginFromCatalog, writeMcpRegistry } = await import('../mcp/state.mjs');
+  assert.ok(MCP_CATALOG.length >= 15, `catalog should offer at least 15 servers, has ${MCP_CATALOG.length}`);
+  const ids = MCP_CATALOG.map((e) => e.id);
+  assert.equal(new Set(ids).size, ids.length, 'catalog ids must be unique');
+
+  for (const entry of MCP_CATALOG) {
+    assert.ok(entry.name && entry.description, `${entry.id}: needs a name and description`);
+    if (entry.transport === 'http') {
+      assert.match(entry.url, /^https?:\/\//, `${entry.id}: hosted entries need an http(s) url`);
+      assert.equal(entry.command, undefined, `${entry.id}: hosted entries have no command`);
+    } else {
+      assert.ok(entry.command, `${entry.id}: stdio entries need a command`);
+    }
+    // A credential must say where it goes, and OAuth servers must not ask for
+    // one (the CLI does the browser sign-in itself).
+    if (entry.credential) {
+      assert.ok(entry.credential.vaultKey?.startsWith('mcp.'), `${entry.id}: credential must live under the mcp.* vault namespace`);
+      assert.ok(['env', 'header'].includes(entry.credential.target), `${entry.id}: credential needs a target`);
+      assert.ok(entry.credential.name, `${entry.id}: credential needs a header/env name`);
+      assert.ok(!entry.oauth, `${entry.id}: an OAuth server must not also demand a token`);
+    }
+    // And it must actually register.
+    writeMcpRegistry([]);
+    const r = addMcpPluginFromCatalog(entry.id, { arg: entry.requiresArg ? '/tmp/x' : undefined });
+    assert.ok(!r.error, `${entry.id}: failed to register — ${r.error}`);
+  }
+});
+
+test('catalog credential vault keys are accepted by the vault allowlist', async () => {
+  const { MCP_CATALOG } = await import('../mcp/catalog.mjs');
+  const { encrypt } = await import('../server/vault.mjs');
+  // ensureAllowed is private, but setSecret/getSecret run it — encrypt does
+  // not, so assert through the pattern the vault actually applies.
+  const MCP_RE = /^mcp\.[a-z][a-z0-9-]{1,40}\.[a-zA-Z]{1,32}$/;
+  assert.ok(typeof encrypt === 'function');
+  for (const e of MCP_CATALOG) {
+    if (!e.credential) continue;
+    assert.match(e.credential.vaultKey, MCP_RE,
+      `${e.id}: vault would reject '${e.credential.vaultKey}' as an unknown key`);
+  }
+});
