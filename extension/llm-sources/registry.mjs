@@ -3,8 +3,10 @@
 // place — never copied into plugins/. The builtin source points at
 // resolveCentralSkillsRepo(). Each source may contribute any mix of four
 // discoverable kinds: skills (skills/, runtime/ families — SKILL.md), agents
-// (agents/*.md subagent definitions), hooks (.claude-plugin/hooks/hooks.json
-// or hooks/hooks.json, the Claude Code plugin-hook manifest shape), and MCP
+// (agents/*.md subagent definitions), hooks (either Claude Code convention —
+// .claude-plugin/hooks/hooks.json / hooks/hooks.json for plugins, or a `hooks`
+// block in settings.json for project/user settings; see
+// hookManifestCandidates), and MCP
 // servers (.mcp.json or .claude-plugin/.mcp.json, the Claude Code MCP-server
 // manifest shape).
 //
@@ -104,7 +106,12 @@ export function isValidLlmSource(dir) {
     if (existsSync(join(dir, 'registry.yaml'))) return true;
     if (existsSync(join(dir, '.claude-plugin', 'plugin.json')) && existsSync(join(dir, 'skills'))) return true;
     if (existsSync(join(dir, AGENTS_FAMILY))) return true;
+    // Any hook declaration counts, in either convention — but a settings.json
+    // must actually CONTAIN hooks to make a directory a source. Accepting the
+    // mere presence of settings.json would make almost any project directory
+    // "valid", so this asks the reader instead of the filesystem.
     if (existsSync(join(dir, '.claude-plugin', 'hooks', 'hooks.json')) || existsSync(join(dir, 'hooks', 'hooks.json'))) return true;
+    if (listDiscoveryHooks(dir).length > 0) return true;
     if (existsSync(join(dir, '.mcp.json')) || existsSync(join(dir, '.claude-plugin', '.mcp.json'))) return true;
     return false;
   } catch { return false; }
@@ -214,29 +221,71 @@ export function countDiscoveryAgents(dir) {
 //   { "<EventName>": [ { "matcher"?: string, "hooks": [{ "type": "command", "command": string }] } ] }
 // DISCOVERY ONLY — the commands inside are never executed by this server;
 // see the Safety note at the top of this file.
-function hooksManifestPath(dir) {
-  const nested = join(dir, '.claude-plugin', 'hooks', 'hooks.json');
-  if (existsSync(nested)) return nested;
-  const flat = join(dir, 'hooks', 'hooks.json');
-  if (existsSync(flat)) return flat;
-  return null;
+// Where a source may declare hooks. Claude Code has TWO conventions and a
+// source can legitimately use either:
+//
+//   • hooks/hooks.json (optionally nested under .claude-plugin/) — the PLUGIN
+//     convention. The file itself IS the event map.
+//   • settings.json — the SETTINGS convention (project/user settings). The
+//     event map is the `hooks` key; everything else in the file is ignored.
+//
+// Only the plugin form was scanned before, which is why the central skills kit
+// reported ZERO hooks while actually shipping two (a SessionStart memory
+// loader and a PreToolUse Write|Edit check): it declares them the settings
+// way, under config/tool/claude/settings.json. The inner shape is identical in
+// both conventions ({matcher?, hooks: [{type, command}]}), so one reader
+// covers them once the outer wrapper is unwrapped.
+//
+// `key` names the property holding the event map, or null when the document
+// itself is the map.
+function hookManifestCandidates(dir) {
+  return [
+    { path: join(dir, '.claude-plugin', 'hooks', 'hooks.json'), key: null },
+    { path: join(dir, 'hooks', 'hooks.json'), key: null },
+    { path: join(dir, '.claude', 'settings.json'), key: 'hooks' },
+    { path: join(dir, 'settings.json'), key: 'hooks' },
+    // The kit's own layout: per-tool config grouped under config/tool/<tool>/.
+    { path: join(dir, 'config', 'tool', 'claude', 'settings.json'), key: 'hooks' },
+  ];
 }
 
+/**
+ * Every hook a source declares, across both conventions — DISCOVERY ONLY.
+ * Nothing here is ever executed (see the Safety note at the top of this file);
+ * the commands are surfaced so the Library UI can show what a source WOULD run
+ * if the user wired it into their own Claude Code settings.
+ *
+ * Reads EVERY candidate that exists rather than stopping at the first, because
+ * a source may ship a plugin manifest and settings-declared hooks side by side
+ * — taking one and dropping the other is how the count ends up wrong. Results
+ * are de-duplicated on (event, matcher, command) so a kit that declares the
+ * same hook in two places is still counted once.
+ */
 export function listDiscoveryHooks(dir) {
-  const p = hooksManifestPath(dir);
-  if (!p) return [];
-  let manifest;
-  try { manifest = JSON.parse(readFileSync(p, 'utf8')); } catch { return []; }
-  if (!manifest || typeof manifest !== 'object') return [];
   const out = [];
-  for (const [event, entries] of Object.entries(manifest)) {
-    if (!Array.isArray(entries)) continue;
-    for (const entry of entries) {
-      const matcher = typeof entry?.matcher === 'string' ? entry.matcher : undefined;
-      const hooks = Array.isArray(entry?.hooks) ? entry.hooks : [];
-      for (const h of hooks) {
-        if (typeof h?.command !== 'string') continue;
-        out.push({ event, matcher, command: h.command.slice(0, 200) });
+  const seen = new Set();
+  for (const { path: p, key } of hookManifestCandidates(dir)) {
+    if (!existsSync(p)) continue;
+    let doc;
+    try { doc = JSON.parse(readFileSync(p, 'utf8')); } catch { continue; }
+    if (!doc || typeof doc !== 'object') continue;
+    const manifest = key ? doc[key] : doc;
+    if (!manifest || typeof manifest !== 'object') continue;
+    for (const [event, entries] of Object.entries(manifest)) {
+      // Non-array values are metadata, not events (`_note`, `generatedAt`, and
+      // in a settings.json every other setting once `hooks` is unwrapped).
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        const matcher = typeof entry?.matcher === 'string' ? entry.matcher : undefined;
+        const hooks = Array.isArray(entry?.hooks) ? entry.hooks : [];
+        for (const h of hooks) {
+          if (typeof h?.command !== 'string') continue;
+          const command = h.command.slice(0, 200);
+          const dedupe = `${event}\u0000${matcher ?? ''}\u0000${command}`;
+          if (seen.has(dedupe)) continue;
+          seen.add(dedupe);
+          out.push({ event, matcher, command });
+        }
       }
     }
   }

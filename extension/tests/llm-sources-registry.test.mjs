@@ -116,6 +116,58 @@ test('countDiscoveryHooks + listDiscoveryHooks read the Claude-plugin hooks mani
   assert.ok(hooks.some((h) => h.event === 'SessionStart' && h.command === 'echo start'));
 });
 
+// The kit declares hooks the SETTINGS way, not the plugin way, which is why
+// it reported zero hooks while shipping two (a SessionStart memory loader and
+// a PreToolUse Write|Edit check). Both conventions must be read.
+test('listDiscoveryHooks reads a settings.json `hooks` block, including the kit config/tool/claude layout', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-hooks-settings-'));
+  fs.mkdirSync(path.join(dir, 'config', 'tool', 'claude'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'config', 'tool', 'claude', 'settings.json'), JSON.stringify({
+    // A real settings.json is mostly NOT hooks — everything else must be
+    // ignored rather than mistaken for an event.
+    permissions: { deny: ['**/.env'] },
+    env: { PYTHONPATH: '.' },
+    hooks: {
+      SessionStart: [{ hooks: [{ type: 'command', command: './load-memory.sh' }] }],
+      PreToolUse: [{ matcher: 'Write|Edit', hooks: [{ type: 'command', command: './tier-a-check.sh' }] }],
+    },
+  }));
+  const hooks = listDiscoveryHooks(dir);
+  assert.equal(countDiscoveryHooks(dir), 2);
+  assert.ok(hooks.some((h) => h.event === 'SessionStart' && h.command === './load-memory.sh'));
+  assert.ok(hooks.some((h) => h.event === 'PreToolUse' && h.matcher === 'Write|Edit'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('listDiscoveryHooks unions both conventions and de-duplicates a hook declared twice', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-hooks-both-'));
+  fs.mkdirSync(path.join(dir, 'hooks'), { recursive: true });
+  fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+  // Same hook in the plugin manifest and in settings — counted once…
+  const shared = { Stop: [{ hooks: [{ type: 'command', command: './done.sh' }] }] };
+  fs.writeFileSync(path.join(dir, 'hooks', 'hooks.json'), JSON.stringify(shared));
+  fs.writeFileSync(path.join(dir, '.claude', 'settings.json'), JSON.stringify({
+    hooks: { ...shared, SessionEnd: [{ hooks: [{ type: 'command', command: './bye.sh' }] }] },
+  }));
+  // …and the settings-only hook is not lost to the plugin manifest winning.
+  assert.equal(countDiscoveryHooks(dir), 2);
+  const events = listDiscoveryHooks(dir).map((h) => h.event).sort();
+  assert.deepEqual(events, ['SessionEnd', 'Stop']);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('listDiscoveryHooks tolerates a settings.json with no hooks block, and a malformed one', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-hooks-edge-'));
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ permissions: { deny: [] } }));
+  assert.deepEqual(listDiscoveryHooks(dir), []);
+  fs.writeFileSync(path.join(dir, 'settings.json'), '{ not json');
+  assert.deepEqual(listDiscoveryHooks(dir), []);
+  // A hooks key of the wrong type must not throw either.
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ hooks: 'nope' }));
+  assert.deepEqual(listDiscoveryHooks(dir), []);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('countDiscoveryMcpServers + listDiscoveryMcpServers read .mcp.json — discovery only, never spawned', () => {
   fs.writeFileSync(path.join(fakeRepo, '.mcp.json'), JSON.stringify({
     mcpServers: {
