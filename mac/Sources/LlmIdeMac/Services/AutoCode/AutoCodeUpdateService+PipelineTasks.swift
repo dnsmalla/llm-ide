@@ -598,8 +598,10 @@ extension AutoCodeUpdateService {
         }
     }
 
-    /// Loop Engineering sweep: chains Regression -> Test -> any further
-    /// configured stages into one multi-iteration loop with auto-fix retry.
+    /// Loop Engineering sweep: runs each of the project's scheduled LOOPS as
+    /// its own multi-iteration run with auto-fix retry — Regression, Test and
+    /// System Check are independent loops (`LoopDefaultLoopKey`), not stages of
+    /// one pipeline, so each has its own budgets, journal record and outcome.
     /// Additive to `runRegressionSweep` — does not change its behavior.
     ///
     /// - Parameter projectId: The stable llm-ide `Project.id`, resolved by
@@ -615,16 +617,23 @@ extension AutoCodeUpdateService {
     ///   from / saved to. Defaults to `.standard` for production; tests pass
     ///   an isolated suite so the persistence branch (auto-detect + save) is
     ///   exercisable without touching the developer's real UserDefaults.
+    /// - Parameter onlyLoopId: When set, run just this one loop by id — the
+    ///   phone's `loop_start`, which displays and reports on a single loop, so
+    ///   firing the whole scheduled sweep from it would run more than it shows.
+    ///   Ignores `runsOnSchedule` (a hand-started loop is not a scheduled one)
+    ///   and refuses an unknown or fully-disabled loop rather than falling back
+    ///   to the sweep.
     /// - Parameter onlyStageId: When set, run just this one stage — the
     ///   phone's `loop_start_stage` counterpart to the desktop's "Run this
-    ///   stage only". Applied AFTER the config is loaded and
-    ///   `ensureDefaultStages` runs, via the same `LoopStage.soloing` mapping
-    ///   the desktop uses: the target is force-enabled, every other stage is
-    ///   disabled for this run only, and the saved config is untouched. An id
-    ///   that matches no stage refuses the run — falling back to the full
-    ///   pipeline would silently do far more than the user asked for.
+    ///   stage only". The stage is looked up across EVERY loop, and only the
+    ///   loop that owns it runs, via the same `LoopStage.soloing` mapping the
+    ///   desktop uses: the target is force-enabled, every other stage in that
+    ///   loop is disabled for this run only, and the saved config is
+    ///   untouched. An id that matches no stage refuses the run — falling back
+    ///   to the full sweep would silently do far more than the user asked for.
     func runLoopEngineeringSweep(
-        projectRoot: String, gitRoot: String, projectId: String?, defaults: UserDefaults = .standard, onlyStageId: String? = nil
+        projectRoot: String, gitRoot: String, projectId: String?, defaults: UserDefaults = .standard,
+        onlyStageId: String? = nil, onlyLoopId: String? = nil
     ) async {
         guard let api else {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop skipped — no API client wired."
@@ -653,41 +662,30 @@ extension AutoCodeUpdateService {
         let faultsRoot = URL(fileURLWithPath: projectRoot, isDirectory: true)
         let gitRootURL = URL(fileURLWithPath: gitRoot, isDirectory: true)
 
-        // Auto-detection only ever PERSISTS when it found real tooling (any
-        // stage beyond the bare Regression sweep every detection includes).
-        // `detectDefaultStages` always returns at least Regression, so an
-        // all-Regression detection is indistinguishable from "the tree
-        // doesn't have test tooling YET" (clone still populating, or a
-        // genuinely toolless repo) — saving that as the permanent config
-        // would silently and irreversibly turn off the Test stage for every
-        // future run. Using it for just THIS run without saving lets a
-        // later run (once tooling appears, or once the Task 11 settings UI
-        // runs its own one-time auto-detect per `LoopStageDetector`'s doc
-        // comment) get a fresh detection attempt instead of being stuck on
-        // a stale one-stage config. `LoopEngineConfig.shouldPersist` is the
-        // single shared policy for this — `LoopEngineView` and the chat
-        // panel's auto-detect path use the exact same helper so all three
-        // call sites agree on when it's safe to persist.
-        var resolvedLoop: LoopDefinition
-        if let primary = LoopEngineConfigStore.primaryLoop(projectRoot: faultsRoot, projectId: projectId,
-                                                            defaults: defaults) {
-            resolvedLoop = primary
-        } else {
-            let detectedStages = LoopStageDetector.detectDefaultStages(gitRoot: gitRootURL)
-            // Same app-wide defaults as the other two entry points — see
-            // LoopEngineDefaults.newConfig.
-            let detected = LoopEngineDefaults.newConfig(stages: detectedStages)
-            let newLoop = LoopDefinition(name: "Main Loop", isPrimary: true, config: detected)
-            if LoopEngineConfig.shouldPersist(detectedStages) {
-                LoopEngineConfigStore.save(LoopEngineProjectStore(loops: [newLoop]),
-                                           projectRoot: faultsRoot, projectId: projectId,
-                                           defaults: defaults)
-            }
-            resolvedLoop = newLoop
-        }
-        resolvedLoop.config = LoopStageDetector.ensureDefaultStages(in: resolvedLoop.config, gitRoot: gitRootURL)
+        // Every loop this project schedules, each run INDEPENDENTLY: its own
+        // iteration budget, its own journal record, its own goal. They go one
+        // at a time only because a single working tree cannot host two runs
+        // (`LoopEngineRunner`'s per-git-root guard) — NOT because they are one
+        // pipeline. That is the point of the split: a failing Mac-app check no
+        // longer drags the fault sweep and the whole test suite round again on
+        // the next iteration.
+        //
+        // `LoopEngineConfigStore.loops` is the shared entry point (see its doc
+        // comment): it creates this project's default loops, migrates a
+        // pre-split project into them, re-pins each loop's own stages, and
+        // persists the result only when that is safe — the `shouldPersist`
+        // rule this function used to apply inline.
+        let store = LoopEngineConfigStore.loops(projectRoot: faultsRoot, projectId: projectId,
+                                                gitRoot: gitRootURL, defaults: defaults)
+        var targets: [LoopDefinition]
         if let onlyStageId {
-            guard let soloed = LoopStage.soloing(resolvedLoop.config.stages, id: onlyStageId) else {
+            // "Run just this stage" searches EVERY loop, not only the Primary
+            // one: the stages a surface can offer now come from several
+            // independent loops. The soloing mapping is unchanged — the target
+            // is force-enabled, every other stage in ITS loop is disabled for
+            // this run only, and nothing is written back.
+            guard var owner = store.loopContaining(stageId: onlyStageId),
+                  let soloed = LoopStage.soloing(owner.config.stages, id: onlyStageId) else {
                 taskErrors[AutoTask.loopEngineering.rawValue] =
                     "Loop skipped — the requested stage no longer exists."
                 logStore.append(.loopEngineering,
@@ -695,104 +693,147 @@ extension AutoCodeUpdateService {
                                 level: .error)
                 return
             }
-            resolvedLoop.config.stages = soloed
+            owner.config.stages = soloed
+            targets = [owner]
+        } else if let onlyLoopId {
+            // One named loop — the phone's Start, which shows and reports on a
+            // single loop. `runsOnSchedule` is deliberately NOT consulted: the
+            // user asked for THIS loop by hand, and an opted-out loop is still
+            // theirs to run.
+            guard let loop = store.loops.first(where: { $0.id == onlyLoopId }),
+                  loop.config.stages.contains(where: \.enabled) else {
+                taskErrors[AutoTask.loopEngineering.rawValue] =
+                    "Loop skipped — the requested loop no longer exists, or every stage in it is disabled."
+                logStore.append(.loopEngineering,
+                                "Loop skipped — the requested loop is gone or fully disabled.",
+                                level: .error)
+                return
+            }
+            targets = [loop]
+        } else {
+            targets = store.scheduledLoops
         }
-        let projectConfig = resolvedLoop.config
 
-        // A project with every stage disabled is PARKED, not broken — the user
-        // switched the stages off deliberately. Skipping quietly here (info
-        // log, no taskError) beats letting the runner refuse on every cron
-        // tick, which would keep the task banner red and fill the journal
+        // A project with nothing scheduled (or every stage switched off) is
+        // PARKED, not broken — the user did that deliberately. Skipping quietly
+        // here (info log, no taskError) beats letting the runner refuse on every
+        // cron tick, which would keep the task banner red and fill the journal
         // with error records for a state the user considers "off".
-        let enabledStageCount = projectConfig.stages.filter(\.enabled).count
-        guard enabledStageCount > 0 else {
+        guard !targets.isEmpty else {
             taskErrors.removeValue(forKey: AutoTask.loopEngineering.rawValue)
-            logStore.append(.loopEngineering, "Loop skipped — every stage is disabled for this project.")
+            logStore.append(.loopEngineering, store.loops.isEmpty
+                ? "Loop skipped — no loops are configured for this project."
+                : "Loop skipped — no loop is scheduled with an enabled stage.")
             return
         }
 
-        let prompter = CodeAssistPrompter(api: api, agent: config.activeCLI)
-        let judge = CodeAssistJudge(api: api)
-        let repairer = AgentFaultRepairer(api: api)
-        let regressionRunner = RegressionRunner(prompter: prompter, judge: judge,
-                                                verifier: ShellFaultVerifier(), repairer: repairer,
-                                                verifyTimeout: autoTaskSettings.regressionVerifyTimeout, config: config)
-        // Mirrors runRegressionSweep: without this, the inner Regression
-        // stage's per-fault activity reporting is silently dropped.
-        regressionRunner.activity = activity
-        let runner = LoopEngineRunner(
-            stageRepairer: AgentLoopStageRepairer(api: api),
-            regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
-            skillExecutor: AgentLoopSkillExecutor(api: api),
-            // `.autoTask` is the unattended trigger — the journal must be able to
-            // tell these runs apart from ones a human watched.
-            trigger: .autoTask
-        )
-        // Mirror every line into the shared per-task log as it happens. Before
-        // this the buffer only ever received the TERMINAL line below, so the
-        // Auto Tasks page — and the iPhone, which reads the same buffer —
-        // showed a loop as "running" with nothing to show for it.
-        runner.onLog = { [weak logStore] line in
-            logStore?.append(AutoTask.loopEngineering.rawValue, line.text,
-                             level: line.level == .error ? .error : .info)
-        }
-        // run() returns LoopEngineStatus? — nil means this call was rejected
-        // (a run is already in progress for this repo, instance- or
-        // process-wide). Use the RETURN VALUE, not runner.status, which per
-        // its doc comment is only meaningful when run() returns non-nil.
-        let result = await runner.run(config: projectConfig, faultsRoot: faultsRoot,
-                                      gitRoot: gitRootURL, projectId: projectId,
-                                      loopId: resolvedLoop.id, loopName: resolvedLoop.name,
-                                      goal: resolvedLoop.goal, acceptanceCriteria: resolvedLoop.acceptanceCriteria,
-                                      scopeGlobs: resolvedLoop.scopeGlobs)
+        var failures: [String] = []
+        var passed = 0
+        var totalIterations = 0
 
-        switch result {
-        case .success:
-            taskErrors.removeValue(forKey: AutoTask.loopEngineering.rawValue)
-            // Enabled count only — the runner skips disabled stages, and "all
-            // N passed" quoting the full list would claim coverage from
-            // stages the user switched off.
-            let skippedNote = enabledStageCount < projectConfig.stages.count
-                ? " (\(projectConfig.stages.count - enabledStageCount) disabled stage(s) skipped)" : ""
-            logStore.append(.loopEngineering, "Loop finished — all \(enabledStageCount) enabled stage(s) passed after \(runner.iteration) iteration(s)\(skippedNote).")
-        case .givenUp:
-            // `.summary` (not raw `GivenUpReason` interpolation, which
-            // renders as e.g. "maxIterations") so this message and the
-            // activity-feed title below never drift apart for the same run.
-            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop \(result?.summary ?? "gave up")."
-            logStore.append(.loopEngineering, "Stopped after \(runner.iteration) iteration(s) — \(result?.summary ?? "gave up").", level: .error)
-        case .blocked:
-            // A repair edited a protected path (a test, a build file, the
-            // project's system/ state). Distinct from `.givenUp`: the agent did
-            // not fail to fix this, it tried something it is not allowed to do —
-            // so this surfaces as an error a human should read, never as a
-            // near-miss the next cron tick might get past.
-            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop \(result?.summary ?? "blocked")."
+        for loop in targets {
+            // The Stop button cancels the enclosing task; stop starting NEW
+            // loops the moment that happens rather than working through the
+            // rest of the list.
+            if Task.isCancelled {
+                logStore.append(.loopEngineering, "Stopped — remaining loop(s) skipped.", level: .error)
+                break
+            }
+            let enabledStageCount = loop.config.stages.filter(\.enabled).count
             logStore.append(.loopEngineering,
-                            "Stopped after \(runner.iteration) iteration(s) — \(result?.summary ?? "blocked").",
-                            level: .error)
-        case .needsApproval(let stageName):
-            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop needs approval for stage \"\(stageName)\"."
-            logStore.append(.loopEngineering, "Stopped — stage \"\(stageName)\" needs approval on the Loop page.", level: .error)
-        case .error(let message):
-            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop error: \(message)"
-            logStore.append(.loopEngineering, "Error: \(message)", level: .error)
-        case .aborted:
-            // `TaskLogStore.Level` has no `.warn` case (only `.info`/`.error`);
-            // `.error` matches how `LoopEngineRunner.logLevel(for:)` itself
-            // treats every non-`.success` terminal status, aborted included.
-            logStore.append(.loopEngineering, "Run aborted.", level: .error)
-        case nil:
-            // Rejected — a run is already in progress for this repo elsewhere
-            // (e.g. the user started one from the chat panel or the Loop
-            // Engineering page). Leave any existing taskErrors entry as-is.
-            logStore.append(.loopEngineering, "Skipped — a Loop run is already in progress for this repo.")
-            return
+                            "▸ \(loop.name) — \(enabledStageCount) enabled stage(s)")
+
+            let prompter = CodeAssistPrompter(api: api, agent: config.activeCLI)
+            let judge = CodeAssistJudge(api: api)
+            let repairer = AgentFaultRepairer(api: api)
+            let regressionRunner = RegressionRunner(prompter: prompter, judge: judge,
+                                                    verifier: ShellFaultVerifier(), repairer: repairer,
+                                                    verifyTimeout: autoTaskSettings.regressionVerifyTimeout, config: config)
+            // Mirrors runRegressionSweep: without this, the inner Regression
+            // stage's per-fault activity reporting is silently dropped.
+            regressionRunner.activity = activity
+            let runner = LoopEngineRunner(
+                stageRepairer: AgentLoopStageRepairer(api: api),
+                regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
+                skillExecutor: AgentLoopSkillExecutor(api: api),
+                // `.autoTask` is the unattended trigger — the journal must be able to
+                // tell these runs apart from ones a human watched.
+                trigger: .autoTask
+            )
+            // Mirror every line into the shared per-task log as it happens. Before
+            // this the buffer only ever received the TERMINAL line below, so the
+            // Auto Tasks page — and the iPhone, which reads the same buffer —
+            // showed a loop as "running" with nothing to show for it.
+            runner.onLog = { [weak logStore] line in
+                logStore?.append(AutoTask.loopEngineering.rawValue, line.text,
+                                 level: line.level == .error ? .error : .info)
+            }
+            // run() returns LoopEngineStatus? — nil means this call was rejected
+            // (a run is already in progress for this repo, instance- or
+            // process-wide). Use the RETURN VALUE, not runner.status, which per
+            // its doc comment is only meaningful when run() returns non-nil.
+            let result = await runner.run(config: loop.config, faultsRoot: faultsRoot,
+                                          gitRoot: gitRootURL, projectId: projectId,
+                                          loopId: loop.id, loopName: loop.name,
+                                          goal: loop.goal, acceptanceCriteria: loop.acceptanceCriteria,
+                                          scopeGlobs: loop.scopeGlobs)
+            totalIterations += runner.iteration
+
+            switch result {
+            case .success:
+                passed += 1
+                // Enabled count only — the runner skips disabled stages, and "all
+                // N passed" quoting the full list would claim coverage from
+                // stages the user switched off.
+                let skippedNote = enabledStageCount < loop.config.stages.count
+                    ? " (\(loop.config.stages.count - enabledStageCount) disabled stage(s) skipped)" : ""
+                logStore.append(.loopEngineering, "\(loop.name) finished — all \(enabledStageCount) enabled stage(s) passed after \(runner.iteration) iteration(s)\(skippedNote).")
+            case .givenUp:
+                // `.summary` (not raw `GivenUpReason` interpolation, which
+                // renders as e.g. "maxIterations") so this message and the
+                // activity-feed title below never drift apart for the same run.
+                failures.append("\(loop.name) \(result?.summary ?? "gave up")")
+                logStore.append(.loopEngineering, "\(loop.name) stopped after \(runner.iteration) iteration(s) — \(result?.summary ?? "gave up").", level: .error)
+            case .blocked:
+                // A repair edited a protected path (a test, a build file, the
+                // project's system/ state). Distinct from `.givenUp`: the agent did
+                // not fail to fix this, it tried something it is not allowed to do —
+                // so this surfaces as an error a human should read, never as a
+                // near-miss the next cron tick might get past.
+                failures.append("\(loop.name) \(result?.summary ?? "blocked")")
+                logStore.append(.loopEngineering,
+                                "\(loop.name) stopped after \(runner.iteration) iteration(s) — \(result?.summary ?? "blocked").",
+                                level: .error)
+            case .needsApproval(let stageName):
+                failures.append("\(loop.name) needs approval for stage \"\(stageName)\"")
+                logStore.append(.loopEngineering, "\(loop.name) stopped — stage \"\(stageName)\" needs approval on the Loop page.", level: .error)
+            case .error(let message):
+                failures.append("\(loop.name) error: \(message)")
+                logStore.append(.loopEngineering, "\(loop.name) error: \(message)", level: .error)
+            case .aborted:
+                // `TaskLogStore.Level` has no `.warn` case (only `.info`/`.error`);
+                // `.error` matches how `LoopEngineRunner.logLevel(for:)` itself
+                // treats every non-`.success` terminal status, aborted included.
+                logStore.append(.loopEngineering, "\(loop.name) aborted.", level: .error)
+            case nil:
+                // Rejected — a run is already in progress for this repo elsewhere
+                // (e.g. the user started one from the chat panel or the Loop page).
+                // Nothing else in this list can start either, so stop here and
+                // leave any existing taskErrors entry as-is.
+                logStore.append(.loopEngineering, "Skipped — a Loop run is already in progress for this repo.")
+                return
+            }
+        }
+
+        if failures.isEmpty {
+            taskErrors.removeValue(forKey: AutoTask.loopEngineering.rawValue)
+        } else {
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop — " + failures.joined(separator: "; ") + "."
         }
         activity?.report(
             kind: .loopEngineeringDone,
-            title: "Loop complete — \(result.map(\.summary) ?? "unknown")",
-            detail: ["iterations": runner.iteration],
+            title: "Loop complete — \(passed)/\(targets.count) loop(s) passed",
+            detail: ["iterations": totalIterations, "loops": targets.count],
             link: ShellState.Section.loopEngine.rawValue
         )
     }

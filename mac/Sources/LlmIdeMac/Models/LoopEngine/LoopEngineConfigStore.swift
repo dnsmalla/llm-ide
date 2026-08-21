@@ -112,15 +112,49 @@ enum LoopEngineConfigStore {
         load(projectRoot: projectRoot, projectId: projectId, defaults: defaults) != nil
     }
 
-    /// The loop the scheduled Auto Task sweep and the phone target. Resolves
-    /// to the loop marked `isPrimary`, or the first loop if (defensively)
-    /// none is marked — the UI never allows unsetting the only Primary
-    /// without designating a new one first, so this fallback should not be
-    /// reachable in practice.
-    static func primaryLoop(projectRoot: URL?, projectId: String,
+    /// This project's loops **as the app actually runs them**: `load`, then
+    /// `LoopStageDetector.ensureDefaultLoops` — which creates the built-in
+    /// default loops (Regression / Test / System Check), migrates a pre-split
+    /// project's single aggregate loop into them, and re-pins each loop's own
+    /// stages.
+    ///
+    /// Every surface that needs a project's real loop list goes through here,
+    /// so the desktop, the scheduler, the chat command and the phone can never
+    /// disagree about which loops exist — the divergence that made the phone
+    /// under-report stages before.
+    ///
+    /// **When it writes.** Only when the ensure actually changed something AND
+    /// the result is worth committing: either the project already had a saved
+    /// file, or the ensured list contains a stage beyond the bare Regression
+    /// sweep (`LoopEngineConfig.shouldPersist`, applied across all loops). That
+    /// is the same rule as before — an all-Regression detection can mean "the
+    /// tree has not finished populating", and persisting it would silently
+    /// disable a Test loop for good. `projectRoot == nil` never writes.
+    static func loops(projectRoot: URL?, projectId: String, gitRoot: URL?,
+                      defaults: UserDefaults = .standard) -> LoopEngineProjectStore {
+        let saved = load(projectRoot: projectRoot, projectId: projectId, defaults: defaults)
+        let ensured = LoopStageDetector.ensureDefaultLoops(
+            in: saved ?? LoopEngineProjectStore(loops: []), gitRoot: gitRoot, defaults: defaults)
+        guard ensured != saved else { return ensured }
+        let worthKeeping = saved != nil
+            || LoopEngineConfig.shouldPersist(ensured.loops.flatMap(\.config.stages))
+        if worthKeeping {
+            save(ensured, projectRoot: projectRoot, projectId: projectId, defaults: defaults)
+        }
+        return ensured
+    }
+
+    /// The project's Primary loop — the phone's target, and what a surface
+    /// that can only address ONE loop (chat's "run the loop") acts on.
+    ///
+    /// Goes through `loops(...)`, so it sees the same ensured list as every
+    /// other surface, and returns nil only for a project with no loops at all
+    /// (no git root to detect from and nothing saved). `ensureDefaultLoops`
+    /// guarantees exactly one `isPrimary`; the `?? first` is defensive only.
+    static func primaryLoop(projectRoot: URL?, projectId: String, gitRoot: URL?,
                             defaults: UserDefaults = .standard) -> LoopDefinition? {
-        guard let store = load(projectRoot: projectRoot, projectId: projectId, defaults: defaults)
-        else { return nil }
+        let store = loops(projectRoot: projectRoot, projectId: projectId,
+                          gitRoot: gitRoot, defaults: defaults)
         return store.loops.first(where: \.isPrimary) ?? store.loops.first
     }
 

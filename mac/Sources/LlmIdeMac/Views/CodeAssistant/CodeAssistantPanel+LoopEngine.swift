@@ -139,20 +139,23 @@ extension CodeAssistantPanel {
         // share one config per project. `faultsRoot`/`gitRoot` are the two
         // WorkspaceRoot-resolved roots passed in by the button above — NOT
         // necessarily the same URL (clone-into-code layout).
-        let resolvedLoop = LoopEngineConfigStore.primaryLoop(projectRoot: faultsRoot, projectId: projectId) ?? {
-            let detectedStages = LoopStageDetector.detectDefaultStages(gitRoot: gitRoot)
-            // Budgets/policy from the app-wide defaults (Settings → Loop) so a
-            // project first reached from chat inherits the same starting point as
-            // one first opened on the Loop page.
-            let detected = LoopEngineDefaults.newConfig(stages: detectedStages)
-            let newLoop = LoopDefinition(name: "Main Loop", isPrimary: true, config: detected)
-            if LoopEngineConfig.shouldPersist(detectedStages) {
-                LoopEngineConfigStore.save(LoopEngineProjectStore(loops: [newLoop]),
-                                           projectRoot: faultsRoot, projectId: projectId)
-            }
-            return newLoop
-        }()
-        let loopConfig = LoopStageDetector.ensureDefaultStages(in: resolvedLoop.config, gitRoot: gitRoot)
+        // The shared loader creates this project's default loops if it has
+        // none, migrates a pre-split project into them, re-pins each loop's own
+        // stages, and applies the same `shouldPersist` rule this site used to
+        // hand-roll — so a project first reached from chat inherits exactly
+        // what one first opened on the Loop page does.
+        //
+        // Chat addresses ONE loop: the Primary. A project's other loops
+        // (Regression / Test / System Check are independent now) are run from
+        // the Loop page or by the scheduled Auto Task, which runs each of them
+        // on its own.
+        guard let resolvedLoop = LoopEngineConfigStore.primaryLoop(
+            projectRoot: faultsRoot, projectId: projectId, gitRoot: gitRoot) else {
+            engine.setTurnContent(id: placeholderId,
+                                  "No loop is set up for this project yet — open the Loop page to create one.")
+            return
+        }
+        let loopConfig = resolvedLoop.config
         let prompter = CodeAssistPrompter(api: api, language: language)
         let regressionRunner = RegressionRunner(prompter: prompter, judge: CodeAssistJudge(api: api),
                                                 verifier: ShellFaultVerifier(), repairer: AgentFaultRepairer(api: api))

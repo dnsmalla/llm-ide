@@ -69,7 +69,12 @@ final class LoopEngineConfigStoreTests: XCTestCase {
         let text = try String(contentsOf: LoopEngineConfigStore.fileURL(projectRoot: projectRoot),
                               encoding: .utf8)
         XCTAssertTrue(text.contains("\n"), "expected pretty-printed JSON")
-        let keyOrder = ["isPrimary", "loops", "name"]
+        // Keys unique to the loop object, in sorted order. "name" is
+        // deliberately NOT among them: a stage carries a "name" too, so its
+        // first occurrence is inside "config" and says nothing about the order
+        // of the loop's own keys — which is what made this assertion fail
+        // regardless of the encoder's settings.
+        let keyOrder = ["isPrimary", "runsOnSchedule", "scopeGlobs"]
         let positions = keyOrder.compactMap { text.range(of: "\"\($0)\"")?.lowerBound }
         XCTAssertEqual(positions.count, keyOrder.count)
         XCTAssertEqual(positions, positions.sorted(), "keys should be sorted")
@@ -222,24 +227,43 @@ final class LoopEngineConfigStoreTests: XCTestCase {
         ])
         LoopEngineConfigStore.save(store, projectRoot: projectRoot, projectId: projectId, defaults: defaults)
         let primary = LoopEngineConfigStore.primaryLoop(projectRoot: projectRoot, projectId: projectId,
-                                                        defaults: defaults)
+                                                        gitRoot: nil, defaults: defaults)
         XCTAssertEqual(primary?.name, "Main Loop")
     }
 
-    /// Defensive fallback — should never happen via the UI, but a hand-edited
-    /// file with no `isPrimary: true` loop must not resolve to nil.
-    func testPrimaryLoopFallsBackToFirstLoopWhenNoneIsMarkedPrimary() {
+    /// A hand-edited file with no `isPrimary: true` loop must not resolve to
+    /// nil. `ensureDefaultLoops` repairs the invariant rather than papering
+    /// over it with a `?? first` fallback, so exactly one loop comes back
+    /// marked Primary.
+    func testPrimaryLoopRepairsAFileWithNoPrimaryLoop() {
         let store = LoopEngineProjectStore(loops: [
             LoopDefinition(name: "First", isPrimary: false, config: makeConfig())
         ])
         LoopEngineConfigStore.save(store, projectRoot: projectRoot, projectId: projectId, defaults: defaults)
         let primary = LoopEngineConfigStore.primaryLoop(projectRoot: projectRoot, projectId: projectId,
-                                                        defaults: defaults)
-        XCTAssertEqual(primary?.name, "First")
+                                                        gitRoot: nil, defaults: defaults)
+        XCTAssertNotNil(primary)
+        let all = LoopEngineConfigStore.loops(projectRoot: projectRoot, projectId: projectId,
+                                              gitRoot: nil, defaults: defaults)
+        XCTAssertEqual(all.loops.filter(\.isPrimary).count, 1)
     }
 
-    func testPrimaryLoopIsNilWhenNoConfigExists() {
-        XCTAssertNil(LoopEngineConfigStore.primaryLoop(projectRoot: projectRoot, projectId: projectId,
-                                                        defaults: defaults))
+    /// A project with nothing saved but a resolvable working tree still gets
+    /// the built-in Regression loop —
+    /// the Mac would run it, so every surface must be able to see it. It is
+    /// deliberately NOT written to disk: an all-Regression list is
+    /// indistinguishable from "this tree has no test tooling YET"
+    /// (`LoopEngineConfig.shouldPersist`), and committing it would freeze that
+    /// guess in.
+    func testUnsavedProjectResolvesToTheBuiltInRegressionLoopWithoutWriting() {
+        // `projectRoot` doubles as the git root here: a bare directory with no
+        // test tooling, which detects to Regression alone.
+        let primary = LoopEngineConfigStore.primaryLoop(projectRoot: projectRoot, projectId: projectId,
+                                                        gitRoot: projectRoot, defaults: defaults)
+        XCTAssertEqual(primary?.defaultKey, LoopDefaultLoopKey.regression)
+        XCTAssertEqual(primary?.config.stages.map(\.kind), [.regressionSweep])
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: LoopEngineConfigStore.fileURL(projectRoot: projectRoot).path),
+            "an unconfirmed all-Regression detection must not be committed")
     }
 }

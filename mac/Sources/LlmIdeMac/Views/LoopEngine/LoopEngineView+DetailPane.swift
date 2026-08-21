@@ -81,6 +81,13 @@ extension LoopEngineView {
                     overviewFact("Project root", projectRoot.path)
                 }
                 overviewFact("Bounded by", budgetSummary)
+                // This loop runs on its own, so whether the scheduler picks it
+                // up is a property of THIS loop, not of the project. Read-only
+                // here — it is toggled from the loop-list pane's ⋯ menu, the
+                // same place Primary is assigned.
+                overviewFact("Scheduled", runsOnSchedule
+                    ? "yes — the Loop auto task runs this loop on its own"
+                    : "no — run it from here (⋯ in the loop list to schedule it)")
             }
             .padding(.top, 4)
         }

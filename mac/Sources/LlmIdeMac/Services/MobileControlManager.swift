@@ -854,9 +854,25 @@ final class MobileControlManager {
                 reply(LoopAck(accepted: false, message: "A loop run is already in progress."))
                 return
             }
-            // runSingle is @MainActor-sync and spins its own Task; false means
-            // the scheduler declined (already busy).
-            let started = autoCode.runSingle(.loopEngineering)
+            // The PRIMARY loop specifically, not the whole scheduled sweep:
+            // this page shows one loop's stages, log tail and history, and a
+            // project now has several independent loops. Starting the sweep
+            // here would run loops the phone never showed.
+            guard let context = config.flatMap({ cfg in
+                      projectStore.flatMap { WorkspaceRoot.context(config: cfg, projectStore: $0) }
+                  }),
+                  let projectId = projectStore?.activeProject?.bundle.id,
+                  let primary = LoopEngineConfigStore.primaryLoop(
+                      projectRoot: context.projectRoot, projectId: projectId,
+                      gitRoot: context.gitRoot) else {
+                append(.stderr, "loop_start: no resolvable project loop")
+                reply(LoopAck(accepted: false,
+                              message: "No loop is set up for the active project. Create one on the Mac first."))
+                return
+            }
+            // runSingleLoop is @MainActor-sync and spins its own Task; false
+            // means the scheduler declined (already busy).
+            let started = autoCode.runSingleLoop(loopId: primary.id)
             loopStartedHere = started
             append(started ? .info : .stderr, "loop_start \(started ? "accepted" : "declined by scheduler")")
             reply(LoopAck(accepted: started,
@@ -949,7 +965,9 @@ final class MobileControlManager {
         // Only ids that exist in the PERSISTED config are stable enough to
         // target, so unsaved/detector-appended stages get stageId: nil and
         // the phone hides ▶ for exactly those, same as it does for old Macs.
-        let savedPrimary = LoopEngineConfigStore.primaryLoop(projectRoot: context.projectRoot, projectId: projectId)
+        let savedPrimary = LoopEngineConfigStore.primaryLoop(projectRoot: context.projectRoot,
+                                                             projectId: projectId,
+                                                             gitRoot: context.gitRoot)
         let savedStageIds = Set(savedPrimary?.config.stages.map(\.id) ?? [])
         let running = context.gitRoot.map { LoopEngineRunner.isRunActive(gitRoot: $0) } ?? false
         let recent = loopHistory(limit: 1).first
@@ -985,39 +1003,36 @@ final class MobileControlManager {
         )
     }
 
-    /// The loop config as the Mac would actually RUN it — not the raw saved
-    /// file. Mirrors `LoopEngineView.loadConfig`, and it has to, because the
-    /// two divergences here both made the phone lie:
+    /// The PRIMARY loop's config as the Mac would actually RUN it — not the raw
+    /// saved file.
     ///
-    ///  • A saved config is run through `ensureDefaultStages` before the Mac
-    ///    shows or runs it, so reading the file alone under-reported stages —
-    ///    the phone listed fewer than the desktop for the same project.
-    ///  • With NO saved config the Mac detects defaults from the repo and the
-    ///    loop is perfectly runnable. Returning nil there made the phone say
-    ///    "not set up" and disable Start for a loop the Mac would have run —
-    ///    which is what made this page look empty.
+    /// Both divergences this used to hand-roll are now inside
+    /// `LoopEngineConfigStore.primaryLoop` → `loops`, which every surface
+    /// shares: default loops are created when a project has none (so the phone
+    /// cannot say "not set up" for a loop the Mac would happily run), and each
+    /// loop's own pinned stages are re-pinned (so the phone cannot under-report
+    /// stages the desktop shows). Sharing one entry point is what keeps the two
+    /// from drifting apart again.
     ///
-    /// Read-only on purpose: the desktop decides when a detected config is
-    /// worth persisting (`LoopEngineConfig.shouldPersist`), and a phone asking
-    /// for a snapshot must not be what writes a project's contract. One
-    /// exception: on a legacy-schema project, `LoopEngineConfigStore.primaryLoop`
-    /// → `load` performs the one-shot schema migration write, so the first
-    /// snapshot after an upgrade can be what triggers it. That is intentional —
-    /// the migration is idempotent and one-shot, matching the precedent the
-    /// pre-existing UserDefaults→file migration already set — and it never
-    /// invents a config the desktop wouldn't have.
-    /// Detection touches the filesystem, but only on the no-saved-config path
-    /// and only for a handful of marker checks.
+    /// **The phone still sees ONE loop.** A project now has several independent
+    /// loops (Regression / Test / System Check / anything the user added) and
+    /// this reports the Primary one only — the pre-existing design commitment,
+    /// unchanged here. Picking a loop from the phone needs new wire types in
+    /// `SharedProtocol`, so it is deliberately not part of this change; the
+    /// scheduled Auto Task runs every scheduled loop regardless of what the
+    /// phone shows.
+    ///
+    /// Writes are possible as a side effect (the shared loader persists a
+    /// migration or a newly created default loop), which is intentional and
+    /// idempotent — it matches the precedent the UserDefaults→file migration
+    /// set, and never invents a config the desktop wouldn't have.
     /// `nonisolated` because it touches no manager state — only the config
     /// store and the stage detector — which also makes it directly testable
     /// without hopping onto the main actor.
     nonisolated static func resolveLoopConfig(projectRoot: URL?, projectId: String,
                                               gitRoot: URL?) -> LoopEngineConfig? {
-        if let primary = LoopEngineConfigStore.primaryLoop(projectRoot: projectRoot, projectId: projectId) {
-            return LoopStageDetector.ensureDefaultStages(in: primary.config, gitRoot: gitRoot)
-        }
-        guard let gitRoot else { return nil }
-        return LoopEngineDefaults.newConfig(stages: LoopStageDetector.detectDefaultStages(gitRoot: gitRoot))
+        LoopEngineConfigStore.primaryLoop(projectRoot: projectRoot, projectId: projectId,
+                                          gitRoot: gitRoot)?.config
     }
 
     /// Finished runs from the Mac's append-only journal index, scoped to the
@@ -1032,7 +1047,8 @@ final class MobileControlManager {
               let project = projectStore.activeProject,
               let context = WorkspaceRoot.context(config: config, projectStore: projectStore) else { return [] }
         let primaryId = LoopEngineConfigStore.primaryLoop(projectRoot: context.projectRoot,
-                                                           projectId: project.bundle.id)?.id
+                                                           projectId: project.bundle.id,
+                                                           gitRoot: context.gitRoot)?.id
         // Read more than the requested limit — a project's journal
         // interleaves every loop's runs, so filtering down to the Primary
         // loop AFTER limiting would starve the result. Mirrors

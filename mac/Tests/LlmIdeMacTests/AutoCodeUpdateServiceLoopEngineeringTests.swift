@@ -106,4 +106,42 @@ final class AutoCodeUpdateServiceLoopEngineeringTests: XCTestCase {
         XCTAssertEqual(service.taskErrors[AutoTask.loopEngineering.rawValue],
                        "Loop skipped — the requested stage no longer exists.")
     }
+
+    /// The phone starts ONE loop (the one it displays). An id that no longer
+    /// resolves must refuse, never widen into the whole scheduled sweep —
+    /// same fail-closed rule as `onlyStageId`.
+    func testUnknownOnlyLoopIdRefusesTheRunWithATaskError() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loop-eng-one-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let service = makeService()
+        await service.runLoopEngineeringSweep(
+            projectRoot: tempDir.path,
+            gitRoot: tempDir.path,
+            projectId: "one-loop-test-\(UUID().uuidString)",
+            defaults: suite,
+            onlyLoopId: "no-such-loop-id")
+
+        XCTAssertEqual(service.taskErrors[AutoTask.loopEngineering.rawValue],
+                       "Loop skipped — the requested loop no longer exists, or every stage in it is disabled.")
+    }
+
+    /// The seeded editable loop has no stages, so a project that has only it
+    /// and the bare Regression loop is PARKED for anything else — and the
+    /// stage-less loop must never be treated as a runnable target.
+    func testEmptyEditableLoopIsNeverAScheduledTarget() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loop-eng-parked-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let store = LoopEngineConfigStore.loops(projectRoot: tempDir, projectId: "parked",
+                                                gitRoot: tempDir, defaults: suite)
+        XCTAssertEqual(store.scheduledLoops.compactMap(\.defaultKey), [LoopDefaultLoopKey.regression],
+                       "only the Regression loop has a stage to run in a bare tree")
+        XCTAssertTrue(store.loops.contains { !$0.isDefault && $0.config.stages.isEmpty },
+                      "the editable loop exists, it is just not a target yet")
+    }
 }

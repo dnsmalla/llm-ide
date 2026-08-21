@@ -141,6 +141,54 @@ autosave — the earlier design deliberately kept Apply unsaved so recipes could
 compared, but edits silently dying on a project switch proved the worse trap, so
 the TEMPLATE section now warns that applying replaces and saves.
 
+## Loops
+
+A project holds **several independent loops**, not one pipeline. Each
+`LoopDefinition` has its own stage list, budgets, goal/acceptance criteria,
+scope allowlist and run history, and each is run on its own — from its row in
+the Loop page's LOOPS pane, or by the scheduled Auto Task.
+
+This is the shape the built-in checks take. `LoopStageDetector.defaultLoops`
+seeds three, every one of them marker-gated so a repo that is not this one gets
+only what applies to it:
+
+| Loop | Its process | Created when |
+| --- | --- | --- |
+| **Regression** | The fault sweep, then the test suite — find the code behind a fault, repair it, then prove the repair did not break anything | always |
+| **Test** | The project's own test command, alone | test tooling is recognised (`swift test`, `npm test`, `make test`, `pytest`) |
+| **System Check** | One marker-gated stage per subsystem (Skills, Plugins, Connectors, GitHub dispatch, Backend, iOS ↔ Mac shared protocol, Mac app) | that subsystem's own files are present |
+
+They used to be pinned *stages inside one loop*, which meant one iteration
+re-ran all of them from the top: a failing Mac-app check dragged the fault
+sweep and the whole test suite round again, and the budgets could not tell the
+two jobs apart. Splitting them gives each its own iteration count, its own
+"what does done mean", and its own place in the journal.
+
+- **A default loop cannot be deleted** (`LoopDefinition.defaultKey` marks it;
+  `ensureDefaultLoops` recreates it if it goes missing) — the same invariant
+  the pinned stages had. It stays fully editable, and the escape hatches are
+  per-stage `enabled` and the loop's own **Runs on schedule**.
+- **`runsOnSchedule`** decides whether the scheduled `.loopEngineering` Auto
+  Task includes the loop. Each scheduled loop is a **separate run** with its own
+  budgets and journal record; they go one at a time only because one working
+  tree cannot host two runs (the runner's per-git-root guard).
+- **One editable loop is guaranteed.** The built-ins cannot be deleted, so a
+  project always keeps a loop of the user's own — "Main Loop", seeded on first
+  setup and preserved by the migration below (its built-in stages move out; the
+  loop itself stays). It is seeded, not enforced: deleting it later sticks.
+- **Exactly one loop is Primary (★), and never a stage-less one.** The phone and
+  the chat command address that one — the phone's Start runs *that* loop, not
+  the whole sweep, because it only ever shows one loop's stages, log and
+  history. Everything else reaches its own loop from the Loop page or the
+  scheduler.
+- **A pre-split project is migrated, not re-detected.** The single "Main Loop"
+  has its built-in stages moved into the three loops above — commands, renames,
+  `enabled` flags and the project's budgets come with them — and survives as an
+  ordinary user loop — kept even when the split leaves it with nothing, since it
+  is the project's editable loop. `ensureDefaultLoops`
+  is idempotent and runs on every load, so this happens once, silently, with no
+  action from the user.
+
 ## Stages
 
 A stage is one step of the run (`LoopStage`). Three kinds:
@@ -152,10 +200,8 @@ A stage is one step of the run (`LoopStage`). Three kinds:
 - **`skill`** — a central skill executed as a *generate* step: it edits the tree,
   and the verify stages decide whether that helped.
 
-`LoopStageDetector` seeds two pinned defaults on first use — **Regression**
-always, plus a **Test** stage when it recognises the project's test tooling
-(`swift test`, `npm test`, `make test`, `pytest`). Both remain editable; neither
-can be deleted.
+Which stages a default loop starts with is `LoopStageDetector`'s decision — see
+[Loops](#loops) above.
 
 Three per-stage properties shape how a stage participates:
 

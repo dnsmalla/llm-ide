@@ -5,8 +5,8 @@ import XCTest
 /// be the one the Mac would RUN — not the raw saved file. Both divergences
 /// pinned here shipped as bugs that made the iPhone page look empty or wrong:
 ///
-///  • a saved config shown without `ensureDefaultStages` lists fewer stages
-///    than the desktop does for the same project;
+///  • a saved config shown without the same ensure the desktop runs lists
+///    different stages than the desktop does for the same project;
 ///  • no saved config reported as "not configured" disables Start for a loop
 ///    the Mac would have run happily off detected defaults.
 final class MobileLoopStateTests: XCTestCase {
@@ -65,9 +65,12 @@ final class MobileLoopStateTests: XCTestCase {
 
     // MARK: - Saved config
 
-    func testSavedConfigIsRunThroughEnsureDefaultStages() throws {
-        // A config saved with ONLY a custom stage. The Mac adds the pinned
-        // defaults back on load, so the phone must see them too.
+    /// The built-in checks are their own loops now, so a saved USER loop keeps
+    /// exactly the stages the user gave it — the pinned defaults are no longer
+    /// injected into it. What the phone must not do is disagree with the
+    /// desktop, and it cannot: both go through `LoopEngineConfigStore.loops`.
+    func testSavedUserLoopIsShownWithItsOwnStagesOnly() throws {
+        // A config saved with ONLY a custom stage, from before the split.
         let custom = LoopStage(name: "My check", kind: .shellCommand, command: "echo hi", order: 0,
                                severity: .blocking)
         let saved = LoopEngineConfig(stages: [custom], maxIterations: 7)
@@ -78,12 +81,31 @@ final class MobileLoopStateTests: XCTestCase {
         let resolved = try XCTUnwrap(MobileControlManager.resolveLoopConfig(
             projectRoot: projectRoot, projectId: projectId, gitRoot: gitRoot))
 
-        XCTAssertTrue(resolved.stages.contains { $0.name == "My check" }, "the saved stage survives")
-        XCTAssertTrue(resolved.stages.contains { $0.kind == .regressionSweep },
-                      "the pinned Regression default must be restored, as the Mac page does")
-        XCTAssertGreaterThan(resolved.stages.count, saved.stages.count)
+        XCTAssertEqual(resolved.stages.map(\.name), ["My check"],
+                       "a user loop must not grow a copy of the built-in checks")
         // Budgets come from the saved file, not from the defaults.
         XCTAssertEqual(resolved.maxIterations, 7)
+    }
+
+    /// …and the Regression check the loop used to carry as a pinned stage is
+    /// still there — as its own independent loop, which the scheduled Auto Task
+    /// runs separately. Nothing is lost by the migration, it moves.
+    func testTheBuiltInChecksBecomeTheirOwnLoops() throws {
+        let saved = LoopEngineConfig(stages: [
+            LoopStage(name: "My check", kind: .shellCommand, command: "echo hi", order: 0)
+        ], maxIterations: 7)
+        LoopEngineConfigStore.save(
+            LoopEngineProjectStore(loops: [LoopDefinition(name: "Main Loop", isPrimary: true, config: saved)]),
+            projectRoot: projectRoot, projectId: projectId)
+
+        let store = LoopEngineConfigStore.loops(projectRoot: projectRoot, projectId: projectId,
+                                                gitRoot: gitRoot)
+        let regression = try XCTUnwrap(store.loop(defaultKey: LoopDefaultLoopKey.regression))
+        XCTAssertTrue(regression.config.stages.contains { $0.kind == .regressionSweep })
+        XCTAssertTrue(regression.isDefault, "a built-in loop cannot be deleted")
+        XCTAssertEqual(regression.config.maxIterations, 7, "it inherits the project's budgets")
+        XCTAssertTrue(store.loops.contains { $0.name == "Main Loop" },
+                      "the user's own loop survives the migration")
     }
 
     func testSavedConfigWinsOverDetection() throws {

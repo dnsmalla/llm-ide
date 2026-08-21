@@ -1,9 +1,18 @@
 // Loop Engineering home — the loop-list pane in front of the per-loop
 // workspace, mirroring AutoCodeView's left-list/right-detail split
 // (AutoCodeView.swift). This view owns which loops exist for the active
-// project (create/duplicate/delete/set Primary); LoopEngineView (unchanged
-// internally, see its own file header) owns everything about running and
-// configuring ONE selected loop.
+// project (create/duplicate/delete/set Primary/run on schedule);
+// LoopEngineView owns everything about running and configuring ONE selected
+// loop.
+//
+// A project's built-in checks are INDEPENDENT LOOPS here, not pinned stages
+// inside one pipeline: Regression, Test and System Check each get their own
+// row, their own process, their own budgets and their own run history, and
+// each is run on its own. They are marked `isDefault` (LoopDefinition.
+// defaultKey) so they cannot be deleted — the same invariant the pinned
+// stages had — while any loop the user adds is fully theirs to edit or
+// delete. LoopStageDetector.ensureDefaultLoops is what creates them and what
+// migrated a pre-split project's single "Main Loop" into them.
 
 import SwiftUI
 
@@ -110,19 +119,39 @@ struct LoopEngineHomeView: View {
                 .font(Typography.filename)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if loop.isDefault {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(t.textMuted)
+                    .help("Built-in loop — editable and can be switched off, but not deleted")
+            }
             if loop.isPrimary {
                 Image(systemName: "star.fill")
                     .font(.system(size: 9))
                     .foregroundStyle(t.accent)
-                    .help("Primary — the loop the scheduled Auto Task and phone run")
+                    .help("Primary — the loop the phone and the chat command run")
+            }
+            if !loop.runsOnSchedule {
+                Image(systemName: "clock.badge.xmark")
+                    .font(.system(size: 9))
+                    .foregroundStyle(t.textMuted)
+                    .help("Not run by the scheduled Loop auto task")
             }
             Spacer(minLength: 4)
             Menu {
                 if !loop.isPrimary {
                     Button("Set as Primary") { setPrimary(loop) }
                 }
+                Button(loop.runsOnSchedule ? "Don't run on schedule" : "Run on schedule") {
+                    setRunsOnSchedule(loop, !loop.runsOnSchedule)
+                }
                 Button("Duplicate") { duplicateLoop(loop) }
-                if loops.count > 1 {
+                // A built-in loop is never deletable — `ensureDefaultLoops`
+                // would recreate it on the next load, so offering Delete
+                // would be a button that appears to do nothing. Switching it
+                // off (its stages, or "Don't run on schedule") is the
+                // sanctioned escape hatch, exactly as it is for a pinned stage.
+                if !loop.isDefault, loops.count > 1 {
                     Button("Delete", role: .destructive) { loopPendingDelete = loop }
                 }
             } label: {
@@ -156,8 +185,14 @@ struct LoopEngineHomeView: View {
             selectedLoopId = nil
             return
         }
-        let store = LoopEngineConfigStore.load(projectRoot: workspaceContext?.projectRoot, projectId: projectId)
-        loops = store?.loops ?? []
+        // The ensuring loader, not a raw `load`: this is where a project's
+        // default loops are created and where a pre-split project is migrated
+        // into them — the Loop page is the surface the user is looking at when
+        // it happens, and it persists the result (see its doc comment).
+        let store = LoopEngineConfigStore.loops(projectRoot: workspaceContext?.projectRoot,
+                                                projectId: projectId,
+                                                gitRoot: workspaceContext?.gitRoot)
+        loops = store.loops
         if selectedLoopId == nil || !loops.contains(where: { $0.id == selectedLoopId }) {
             selectedLoopId = loops.first(where: \.isPrimary)?.id ?? loops.first?.id
         }
@@ -179,65 +214,85 @@ struct LoopEngineHomeView: View {
     /// used to document before this task moved that flow up here), and
     /// selects it.
     private func createLoop(_ config: LoopEngineConfig) {
-        guard let projectId = activeProjectId else { return }
         let newLoop = LoopDefinition(name: "New Loop \(loops.count + 1)",
                                      isPrimary: loops.isEmpty, config: config)
-        var store = LoopEngineConfigStore.load(projectRoot: workspaceContext?.projectRoot, projectId: projectId)
-            ?? LoopEngineProjectStore(loops: [])
-        store.loops.append(newLoop)
-        LoopEngineConfigStore.save(store, projectRoot: workspaceContext?.projectRoot, projectId: projectId)
-        loops = store.loops
+        mutateStore { $0.loops.append(newLoop) }
         selectedLoopId = newLoop.id
     }
 
     private func duplicateLoop(_ loop: LoopDefinition) {
-        guard let projectId = activeProjectId else { return }
         var copy = loop
         copy.id = UUID().uuidString
         copy.name = "\(loop.name) copy"
         copy.isPrimary = false
-        var store = LoopEngineConfigStore.load(projectRoot: workspaceContext?.projectRoot, projectId: projectId)
-            ?? LoopEngineProjectStore(loops: [])
-        store.loops.append(copy)
-        LoopEngineConfigStore.save(store, projectRoot: workspaceContext?.projectRoot, projectId: projectId)
-        loops = store.loops
+        // A copy is an ordinary user loop: it must not claim a built-in's
+        // identity, or `ensureDefaultLoops` would treat two loops as the same
+        // default. Its STAGES keep their `defaultKey`s, though — those are what
+        // the split routes by, so the copy's stages would be moved back out
+        // from under it. Clear them too.
+        copy.defaultKey = nil
+        copy.config.stages = copy.config.stages.map { stage in
+            var s = stage
+            s.isDefault = false
+            s.defaultKey = nil
+            return s
+        }
+        mutateStore { $0.loops.append(copy) }
         selectedLoopId = copy.id
     }
 
-    /// Refuses when `loop` is the last one — a project must always have at
-    /// least one loop, matching the invariant that used to be implicit
-    /// ("every project has a config"). The row's ⋯ menu already hides
-    /// Delete in that case; this is the belt-and-suspenders check.
+    /// Refuses when `loop` is the last one, or when it is a built-in default —
+    /// a project must always have at least one loop, and a default would be
+    /// recreated by `ensureDefaultLoops` on the next load anyway. The row's ⋯
+    /// menu already hides Delete in both cases; this is the belt-and-suspenders
+    /// check.
     private func deleteLoop(_ loop: LoopDefinition) {
-        guard let projectId = activeProjectId, loops.count > 1 else { return }
-        var store = LoopEngineConfigStore.load(projectRoot: workspaceContext?.projectRoot, projectId: projectId)
-            ?? LoopEngineProjectStore(loops: [])
-        store.loops.removeAll { $0.id == loop.id }
-        // Deleting the Primary loop promotes the next one — a project must
-        // always have exactly one Primary once it has any loop at all.
-        if loop.isPrimary, var next = store.loops.first {
-            next.isPrimary = true
-            store.loops[0] = next
+        guard loops.count > 1, !loop.isDefault else { return }
+        mutateStore { store in
+            store.loops.removeAll { $0.id == loop.id }
+            // Deleting the Primary loop promotes the next one — a project must
+            // always have exactly one Primary once it has any loop at all.
+            if loop.isPrimary, var next = store.loops.first {
+                next.isPrimary = true
+                store.loops[0] = next
+            }
         }
-        LoopEngineConfigStore.save(store, projectRoot: workspaceContext?.projectRoot, projectId: projectId)
-        loops = store.loops
         if selectedLoopId == loop.id {
             selectedLoopId = loops.first(where: \.isPrimary)?.id ?? loops.first?.id
         }
     }
 
+    /// Opt `loop` in or out of the scheduled `.loopEngineering` Auto Task.
+    /// Each opted-in loop runs as its own independent run when the task
+    /// fires — see `LoopDefinition.runsOnSchedule`.
+    private func setRunsOnSchedule(_ loop: LoopDefinition, _ enabled: Bool) {
+        mutateStore { store in
+            guard let index = store.loops.firstIndex(where: { $0.id == loop.id }) else { return }
+            store.loops[index].runsOnSchedule = enabled
+        }
+    }
+
+    /// Read-modify-write of this project's whole loop list — the store persists
+    /// the list, never one loop, so every mutation here has to re-read first.
+    private func mutateStore(_ body: (inout LoopEngineProjectStore) -> Void) {
+        guard let projectId = activeProjectId else { return }
+        var store = LoopEngineConfigStore.loops(projectRoot: workspaceContext?.projectRoot,
+                                                projectId: projectId,
+                                                gitRoot: workspaceContext?.gitRoot)
+        body(&store)
+        LoopEngineConfigStore.save(store, projectRoot: workspaceContext?.projectRoot, projectId: projectId)
+        loops = store.loops
+    }
+
     /// Moves the ★ to `loop`, clearing it everywhere else — a project has
     /// exactly one Primary loop at a time.
     private func setPrimary(_ loop: LoopDefinition) {
-        guard let projectId = activeProjectId else { return }
-        var store = LoopEngineConfigStore.load(projectRoot: workspaceContext?.projectRoot, projectId: projectId)
-            ?? LoopEngineProjectStore(loops: [])
-        store.loops = store.loops.map { entry in
-            var copy = entry
-            copy.isPrimary = (entry.id == loop.id)
-            return copy
+        mutateStore { store in
+            store.loops = store.loops.map { entry in
+                var copy = entry
+                copy.isPrimary = (entry.id == loop.id)
+                return copy
+            }
         }
-        LoopEngineConfigStore.save(store, projectRoot: workspaceContext?.projectRoot, projectId: projectId)
-        loops = store.loops
     }
 }

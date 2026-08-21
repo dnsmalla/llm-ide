@@ -148,6 +148,15 @@ struct LoopEngineView: View {
     /// Optional path allowlist, edited in the SETTINGS section. Empty means
     /// unrestricted — see `LoopDefinition.scopeGlobs`.
     @State var scopeGlobs: [String] = []
+    /// Which built-in loop this is (`LoopDefaultLoopKey`), or nil for a loop
+    /// the user created. Immutable identity — carried in state only so a save
+    /// from this page cannot drop it, the way a `LoopDefinition` field this
+    /// view forgets to thread would.
+    @State var loopDefaultKey: String?
+    /// Mirrors `LoopDefinition.runsOnSchedule`. Toggled from the loop-list
+    /// pane, not here, so — exactly like `isPrimaryLoop` — this copy can be
+    /// stale and `writeLoop` takes the value from disk instead.
+    @State var runsOnSchedule = true
     /// Whether the loop this page represents was the project's Primary loop
     /// as of the last `loadConfig()` — i.e. refreshed on a project/loop
     /// switch only, NOT when Primary is reassigned from the loop-list pane
@@ -818,7 +827,8 @@ struct LoopEngineView: View {
         LoopDefinition(id: loopId, name: loopName, isPrimary: isPrimaryLoop,
                        goal: goal.isEmpty ? nil : goal,
                        acceptanceCriteria: acceptanceCriteria.isEmpty ? nil : acceptanceCriteria,
-                       scopeGlobs: scopeGlobs, config: currentConfig)
+                       scopeGlobs: scopeGlobs, defaultKey: loopDefaultKey,
+                       runsOnSchedule: runsOnSchedule, config: currentConfig)
     }
 
     private func loadConfig() {
@@ -837,9 +847,14 @@ struct LoopEngineView: View {
             resetStagesToDefaults()
             return
         }
-        let store = LoopEngineConfigStore.load(projectRoot: workspaceContext?.projectRoot, projectId: projectId)
-        if let existing = store?.loops.first(where: { $0.id == loopId }) {
-            let ensuredConfig = LoopStageDetector.ensureDefaultStages(in: existing.config, gitRoot: activeGitRootURL)
+        let store = LoopEngineConfigStore.loops(projectRoot: workspaceContext?.projectRoot,
+                                                projectId: projectId, gitRoot: activeGitRootURL)
+        if let existing = store.loops.first(where: { $0.id == loopId }) {
+            // Loop-SCOPED ensure: only the default stages this loop's own
+            // `defaultKey` owns are re-pinned. The aggregate version would
+            // clone every built-in check into this loop — the bug the
+            // independent-loops split fixed.
+            let ensuredConfig = LoopStageDetector.ensureDefaultStages(in: existing, gitRoot: activeGitRootURL).config
             stages = ensuredConfig.stages
             maxIterations = ensuredConfig.maxIterations
             consecutiveFailureStop = ensuredConfig.consecutiveFailureStop
@@ -853,26 +868,23 @@ struct LoopEngineView: View {
             goal = existing.goal ?? ""
             acceptanceCriteria = existing.acceptanceCriteria ?? ""
             scopeGlobs = existing.scopeGlobs
+            loopDefaultKey = existing.defaultKey
+            runsOnSchedule = existing.runsOnSchedule
             // Baseline set from currentLoop (not `existing`) so a lossy
             // round-trip cannot register as an edit and rewrite the file on
             // open — same reasoning the pre-multi-loop version documented.
             persistedLoop = currentLoop
-        } else if let gitRoot = activeGitRootURL {
-            // No entry for `loopId` in this project's list. Populate state for
-            // display, but deliberately do NOT persist: `LoopEngineHomeView` is
-            // the only creator of loops and always saves before selecting, so
-            // reaching here means either a mid-project-switch render still
-            // holding the previous project's loopId, or a loop deleted out from
-            // under this view — writing in either case would put a phantom loop
-            // into an unrelated project's committed loop.json.
-            let detected = LoopStageDetector.detectDefaultStages(gitRoot: gitRoot)
-            resetStagesToDefaults(stages: detected)
         } else {
-            // No saved config AND no git root to detect defaults from
-            // (e.g. the project folder isn't resolvable yet) — reset
-            // instead of falling through and leaving a PREVIOUS
-            // loop's stages displayed (and later saved/run against
-            // THIS loop's id/gitRoot).
+            // No entry for `loopId` in this project's ensured list. Reset for
+            // display, and deliberately do NOT persist: `LoopEngineHomeView`
+            // is the only creator of loops and always saves before selecting,
+            // so reaching here means either a mid-project-switch render still
+            // holding the previous project's loopId, or a loop deleted out
+            // from under this view — writing in either case would put a
+            // phantom loop into an unrelated project's committed loop.json.
+            // Showing an empty pipeline (rather than a detected one) is also
+            // honest: a detected aggregate is no longer any loop's real
+            // contents now that the built-in checks are separate loops.
             resetStagesToDefaults()
         }
         loadPastRuns()
@@ -914,6 +926,8 @@ struct LoopEngineView: View {
         acceptanceCriteria = ""
         scopeGlobs = []
         isPrimaryLoop = false
+        loopDefaultKey = nil
+        runsOnSchedule = true
         pastRuns = []
         lastSummaryNoteName = nil
         // Nothing is persisted for this loop (that is what "reset to
@@ -1064,6 +1078,9 @@ struct LoopEngineView: View {
         else { return }
         var toWrite = loop
         toWrite.isPrimary = store.loops[index].isPrimary
+        // Same reasoning as `isPrimary` above: the loop-list pane can toggle
+        // this while this page stays mounted, so the on-disk flag wins.
+        toWrite.runsOnSchedule = store.loops[index].runsOnSchedule
         store.loops[index] = toWrite
         LoopEngineConfigStore.save(store, projectRoot: projectRoot, projectId: projectId)
     }

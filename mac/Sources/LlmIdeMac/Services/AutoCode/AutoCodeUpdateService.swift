@@ -211,17 +211,34 @@ final class AutoCodeUpdateService: ObservableObject {
     func runSingleLoopStage(stageId: String) -> Bool {
         guard runTask == nil else { return false }
         runTask = Task { [weak self] in
-            await self?.runLoopStageOnly(stageId: stageId)
+            await self?.runLoopFiltered(loopId: nil, stageId: stageId)
             self?.runTask = nil
         }
         return true
     }
 
-    /// Body for `runSingleLoopStage(stageId:)` — the `.loopEngineering` slice
-    /// of `runOne(_:)` with the stage filter threaded through. Kept separate
-    /// for the same reason `runCustomTask(_:)` is: the resolve/guard shell is
-    /// per-entry-point state management, not shareable logic.
-    private func runLoopStageOnly(stageId: String) async {
+    /// Phone-triggered "Start" on the Loop page (`loop_start`): run ONE loop —
+    /// the one the phone is showing.
+    ///
+    /// The scheduled task runs every loop the project schedules, which is right
+    /// for the scheduler and wrong here: the phone displays a single loop's
+    /// stages, log and history, so starting three would report on one and run
+    /// three. Same re-entrancy guard as every other entry point.
+    @discardableResult
+    func runSingleLoop(loopId: String) -> Bool {
+        guard runTask == nil else { return false }
+        runTask = Task { [weak self] in
+            await self?.runLoopFiltered(loopId: loopId, stageId: nil)
+            self?.runTask = nil
+        }
+        return true
+    }
+
+    /// Body for both filtered loop entry points — the `.loopEngineering` slice
+    /// of `runOne(_:)` with a loop and/or stage filter threaded through. Kept
+    /// separate for the same reason `runCustomTask(_:)` is: the resolve/guard
+    /// shell is per-entry-point state management, not shareable logic.
+    private func runLoopFiltered(loopId: String?, stageId: String?) async {
         guard !isRunning else { return }
         isRunning = true
         defer {
@@ -238,12 +255,13 @@ final class AutoCodeUpdateService: ObservableObject {
             return
         }
         currentTask = .loopEngineering
-        currentStep = "Running Loop stage"
-        logStore.append(.loopEngineering, "Running Loop (single stage)…")
+        currentStep = stageId != nil ? "Running Loop stage" : "Running Loop"
+        logStore.append(.loopEngineering,
+                        stageId != nil ? "Running Loop (single stage)…" : "Running Loop (one loop)…")
         await runLoopEngineeringSweep(projectRoot: resolved.projectRoot,
                                       gitRoot: resolved.gitRoot,
                                       projectId: projectStore?.activeProject?.bundle.id,
-                                      onlyStageId: stageId)
+                                      onlyStageId: stageId, onlyLoopId: loopId)
         statusMessage = "\(AutoTask.loopEngineering.label) — done"
     }
 
