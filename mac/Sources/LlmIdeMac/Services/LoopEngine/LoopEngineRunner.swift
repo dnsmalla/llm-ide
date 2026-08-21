@@ -691,9 +691,14 @@ final class LoopEngineRunner: ObservableObject {
     /// `scopeGlobs` is empty, so an unset allowlist (every loop before this
     /// feature, and any loop that never sets one) flags nothing.
     private static func outOfScopePaths(_ changed: [String], scopeGlobs: [String]) -> [String] {
-        guard !scopeGlobs.isEmpty else { return [] }
+        // Blank entries (e.g. a scope row added but not yet typed into) are
+        // ignored rather than treated as a wildcard — GlobMatch.matches returns
+        // true for an empty pattern, so without this filter a single blank row
+        // would silently disable every OTHER real glob in the list too.
+        let globs = scopeGlobs.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !globs.isEmpty else { return [] }
         return changed.filter { path in
-            !scopeGlobs.contains { GlobMatch.matches(path: path, pattern: $0) }
+            !globs.contains { GlobMatch.matches(path: path, pattern: $0) }
         }
     }
 

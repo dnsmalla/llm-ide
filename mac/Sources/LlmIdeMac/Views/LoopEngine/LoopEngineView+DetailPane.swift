@@ -28,6 +28,24 @@ extension LoopEngineView {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             SectionLabel("OVERVIEW")
 
+            TextField("Loop name", text: $loopName)
+                .textFieldStyle(.roundedBorder)
+                .font(Typography.bodyStrong)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Goal — what is this loop trying to achieve?").font(Typography.caption).foregroundStyle(t.textMuted)
+                TextField("e.g. Stabilize the auth test suite", text: $goal)
+                    .textFieldStyle(.roundedBorder)
+                Text("Acceptance criteria — what observable condition means done?").font(Typography.caption).foregroundStyle(t.textMuted)
+                TextField("e.g. swift test passes 3 times in a row", text: $acceptanceCriteria, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                Text("Optional. When set, both are given to the repair agent and any generate stage alongside the raw failure output — so a fix stays aimed at what this loop is for, not just at making a command exit 0.")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, 2)
+
             if stages.isEmpty {
                 Text("No stages yet. Apply a template below, or add a stage with + on the left.")
                     .font(Typography.body)
@@ -290,6 +308,44 @@ extension LoopEngineView {
             Text(protectedPolicyExplanation)
                 .font(Typography.caption)
                 .foregroundStyle(protectedPathPolicy == .off ? t.accent4 : t.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider().background(t.border).padding(.vertical, 2)
+
+            Text("Scope — restrict this loop to specific paths (optional)")
+                .font(Typography.caption)
+                .foregroundStyle(t.textMuted)
+            if scopeGlobs.isEmpty {
+                Text("Unrestricted — this loop's repairs may touch any path not otherwise protected.")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+            }
+            ForEach(Array(scopeGlobs.enumerated()), id: \.offset) { index, glob in
+                HStack(spacing: 4) {
+                    TextField("e.g. src/auth/**", text: Binding(
+                        get: { scopeGlobs[index] },
+                        set: { scopeGlobs[index] = $0 }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11, design: .monospaced))
+                    Button {
+                        scopeGlobs.remove(at: index)
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            Button {
+                scopeGlobs.append("")
+            } label: {
+                Label("Add path", systemImage: "plus")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            Text("When set, a repair that changes a path matching none of these is treated as an out-of-scope violation, under the same policy as the protected-path setting above.")
+                .font(Typography.caption)
+                .foregroundStyle(t.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: Spacing.sm) {
