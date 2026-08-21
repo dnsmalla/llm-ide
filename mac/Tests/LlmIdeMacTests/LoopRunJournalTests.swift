@@ -165,6 +165,43 @@ final class LoopRunJournalTests: XCTestCase {
         XCTAssertEqual(snapshot.protectedPathPolicy, .stop)
     }
 
+    // MARK: - Loop identity
+
+    func testLoopIdAndLoopNameRoundTripThroughEncodeDecode() throws {
+        var record = LoopRunRecord(
+            id: "run-1", projectId: "proj-1", trigger: .manual, gitRoot: "/tmp/repo",
+            startedAt: Date(), endedAt: Date(), iterationsUsed: 1,
+            config: LoopRunConfigSnapshot(LoopEngineConfig(stages: [])),
+            iterations: [], statusCode: "success", statusSummary: "done")
+        record.loopId = "loop-1"
+        record.loopName = "Fix flaky tests"
+
+        let data = try JSONEncoder().encode(record)
+        let decoded = try JSONDecoder().decode(LoopRunRecord.self, from: data)
+        XCTAssertEqual(decoded.loopId, "loop-1")
+        XCTAssertEqual(decoded.loopName, "Fix flaky tests")
+
+        let indexEntry = LoopRunIndexEntry(decoded)
+        XCTAssertEqual(indexEntry.loopId, "loop-1")
+        XCTAssertEqual(indexEntry.loopName, "Fix flaky tests")
+    }
+
+    /// A record written before this feature existed has no `loopId` key at
+    /// all — it must decode as `nil`, not fail, since `system/loop-runs/`
+    /// is append-only and never migrated.
+    func testRecordWithoutLoopIdKeyDecodesAsNil() throws {
+        let json = Data("""
+        {"id":"run-0","trigger":"manual","gitRoot":"/tmp/repo",
+         "startedAt":0,"endedAt":0,"iterationsUsed":1,
+         "config":{"stages":[],"maxIterations":10,"consecutiveFailureStop":2,
+                    "maxRepairsPerStage":3,"protectedPathPolicy":"revert"},
+         "iterations":[],"statusCode":"success","statusSummary":"done"}
+        """.utf8)
+        let decoded = try JSONDecoder().decode(LoopRunRecord.self, from: json)
+        XCTAssertNil(decoded.loopId)
+        XCTAssertNil(decoded.loopName)
+    }
+
     // MARK: - Status codes
 
     /// Journal `statusCode`s are the grouping key for any analysis across runs, so

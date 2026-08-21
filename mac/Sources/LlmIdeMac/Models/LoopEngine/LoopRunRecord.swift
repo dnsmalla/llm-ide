@@ -161,6 +161,13 @@ struct LoopRunRecord: Codable, Equatable {
     var statusCode: String
     /// Human-readable terminal status (`LoopEngineStatus.summary`).
     var statusSummary: String
+    /// Which `LoopDefinition` this run executed, and its name at the time —
+    /// `nil` for every record written before Loop Engineering supported more
+    /// than one loop per project (treated as "the legacy/primary loop" by
+    /// readers). Plain `Optional` properties decode missing keys as `nil`
+    /// automatically — no custom `Decodable` needed, same as `projectId`.
+    var loopId: String? = nil
+    var loopName: String? = nil
 
     var durationSeconds: Double { endedAt.timeIntervalSince(startedAt) }
 }
@@ -175,6 +182,8 @@ struct LoopRunIndexEntry: Codable, Equatable {
     var iterationsUsed: Int
     var statusCode: String
     var statusSummary: String
+    var loopId: String? = nil
+    var loopName: String? = nil
 
     init(_ record: LoopRunRecord) {
         id = record.id
@@ -184,5 +193,7 @@ struct LoopRunIndexEntry: Codable, Equatable {
         iterationsUsed = record.iterationsUsed
         statusCode = record.statusCode
         statusSummary = record.statusSummary
+        loopId = record.loopId
+        loopName = record.loopName
     }
 }
