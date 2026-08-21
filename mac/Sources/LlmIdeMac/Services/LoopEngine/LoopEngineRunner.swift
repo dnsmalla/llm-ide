@@ -563,7 +563,10 @@ final class LoopEngineRunner: ObservableObject {
                                            scopeGlobs: scopeGlobs) {
             try await stageRepairer.repair(
                 stageName: stage.name, command: command,
-                failureOutput: outcome.output, evidence: evidence, repoRoot: gitRoot)
+                failureOutput: Self.prependGoalContext(outcome.output, goal: goal,
+                                                       acceptanceCriteria: acceptanceCriteria,
+                                                       reservedForTruncation: AgentLoopStageRepairer.maxFailureOutputChars),
+                evidence: evidence, repoRoot: gitRoot)
         }
 
         switch guarded {
@@ -590,7 +593,8 @@ final class LoopEngineRunner: ObservableObject {
                               goal: String? = nil, acceptanceCriteria: String? = nil,
                               scopeGlobs: [String] = []) async -> StageDecision {
         let skillId = stage.skillId ?? ""
-        let message = Self.composeSkillMessage(stage)
+        let message = Self.prependGoalContext(Self.composeSkillMessage(stage), goal: goal,
+                                              acceptanceCriteria: acceptanceCriteria)
         let startedAt = Date()
         appendLog(.info, "  [\(stage.name)] running skill \(skillId.isEmpty ? "(none set)" : skillId) (generate)")
 
@@ -795,6 +799,38 @@ final class LoopEngineRunner: ObservableObject {
     /// double-dot, not "the project root").
     private static func describePath(_ path: String) -> String {
         path == "." ? "the project root" : path
+    }
+
+    /// Prefixes `goal`/`acceptanceCriteria` (when either is set) onto text the
+    /// repair agent or a skill stage will see, so a loop's "done" signal is
+    /// more than "the command exited 0". Returns `text` unchanged when both
+    /// are `nil`/empty — every loop before this feature, and every migrated
+    /// loop that never sets them, sees byte-identical prompts to before.
+    ///
+    /// - Parameter reservedForTruncation: when the caller's own downstream
+    ///   template truncates the combined string FROM THE TAIL (as
+    ///   `AgentLoopStageRepairer.buildPrompt` does via
+    ///   `.suffix(maxFailureOutputChars)` on `failureOutput`), a header placed
+    ///   at the FRONT of that string would otherwise be pushed entirely out of
+    ///   the kept window once `text` alone reaches that size — silently
+    ///   dropping the goal/acceptance context on exactly the large, ambiguous
+    ///   failures this feature exists to help with. Pass the downstream
+    ///   truncation budget here so `text` is trimmed to leave room for the
+    ///   header BEFORE that truncation ever runs. `nil` (the skill-message
+    ///   path, which has no downstream truncation) skips this entirely.
+    private static func prependGoalContext(_ text: String, goal: String?, acceptanceCriteria: String?,
+                                           reservedForTruncation: Int? = nil) -> String {
+        var lines: [String] = []
+        if let goal, !goal.isEmpty { lines.append("Goal: \(goal)") }
+        if let acceptanceCriteria, !acceptanceCriteria.isEmpty {
+            lines.append("Acceptance criteria: \(acceptanceCriteria)")
+        }
+        guard !lines.isEmpty else { return text }
+        let header = lines.joined(separator: "\n") + "\n\n"
+        guard let budget = reservedForTruncation else { return header + text }
+        let remaining = budget - header.count
+        let trimmedText = remaining > 0 ? String(text.suffix(remaining)) : ""
+        return header + trimmedText
     }
 
     private func appendLog(_ level: LogLine.Level, _ text: String) {

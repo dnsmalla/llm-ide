@@ -51,7 +51,7 @@ final class AgentLoopStageRepairer: LoopStageRepairer {
         self.language = language
     }
 
-    private static let maxFailureOutputChars = 4_000
+    static let maxFailureOutputChars = 4_000
 
     /// Builds the repair prompt. Factored out as a `static func` (unlike
     /// `AgentFaultRepairer`, which inlines its prompt) so it is

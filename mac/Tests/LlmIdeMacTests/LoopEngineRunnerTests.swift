@@ -22,10 +22,15 @@ final class LoopEngineRunnerTests: XCTestCase {
         /// Every evidence payload the runner passed, in order — so a test can
         /// assert what the repair agent was actually told about its last attempt.
         private(set) var evidence: [RepairEvidence?] = []
+        /// Every `failureOutput` string the runner passed, in order — lets a
+        /// test assert on the composed text itself (e.g. whether goal/
+        /// acceptance context was prepended) rather than just the call count.
+        private(set) var receivedFailureOutputs: [String] = []
         func repair(stageName: String, command: String?, failureOutput: String,
                     evidence: RepairEvidence?, repoRoot: URL) async throws {
             repairCount += 1
             self.evidence.append(evidence)
+            receivedFailureOutputs.append(failureOutput)
         }
     }
 
@@ -33,8 +38,13 @@ final class LoopEngineRunnerTests: XCTestCase {
     private final class StubSkillExecutor: LoopSkillExecuting {
         private(set) var callCount = 0
         var throwOnEveryCall: Bool = false
+        /// Every `message` string the runner passed, in order — lets a test
+        /// assert on the composed text itself (e.g. whether goal/acceptance
+        /// context was prepended) rather than just the call count.
+        private(set) var receivedMessages: [String] = []
         func execute(skillId: String, targetPath: String?, message: String) async throws {
             callCount += 1
+            receivedMessages.append(message)
             if throwOnEveryCall { throw SkillError() }
         }
     }
@@ -1789,5 +1799,109 @@ final class LoopEngineRunnerTests: XCTestCase {
         _ = await task.value
         XCTAssertNil(LoopEngineRunner.activeLoopId(gitRoot: repoRoot),
                     "must clear once the run finishes")
+    }
+
+    // MARK: - Goal/acceptance context
+
+    /// The repair agent must see the loop's goal/acceptance, not just the
+    /// bare failure output — that's the whole point of the fields.
+    func testRepairFailureOutputIncludesGoalAndAcceptanceCriteriaWhenSet() async {
+        let repairer = StubRepairer()
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") },
+            stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            journal: journal
+        )
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 1, consecutiveFailureStop: 5)
+        _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot,
+                             goal: "Stabilize auth", acceptanceCriteria: "swift test passes")
+        XCTAssertEqual(repairer.receivedFailureOutputs.count, 1)
+        let seen = repairer.receivedFailureOutputs[0]
+        XCTAssertTrue(seen.contains("Stabilize auth"))
+        XCTAssertTrue(seen.contains("swift test passes"))
+        XCTAssertTrue(seen.contains("boom"), "the real failure output must still be present")
+        // The journal must keep recording the RAW command output — the
+        // goal-prefixed text is a repair-prompt-only concern, and letting
+        // it leak into the journal would misrepresent what the stage
+        // actually printed.
+        XCTAssertEqual(journal.written.last?.iterations.last?.attempts.last?.outputTail, "boom")
+    }
+
+    /// Regression guard for the truncation-order bug: without reserving room
+    /// for the header BEFORE AgentLoopStageRepairer's own tail-truncation,
+    /// a large failure output pushes the goal/acceptance text entirely out
+    /// of the kept window.
+    func testRepairFailureOutputKeepsGoalContextEvenWhenOutputIsVeryLong() async {
+        let repairer = StubRepairer()
+        let longOutput = String(repeating: "x", count: 10_000)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: longOutput) },
+            stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")])
+        )
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 1, consecutiveFailureStop: 5)
+        _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot,
+                             goal: "Stabilize auth", acceptanceCriteria: "swift test passes")
+        // Simulate AgentLoopStageRepairer.buildPrompt's own downstream
+        // truncation on what the repairer actually received — this is the
+        // exact operation that dropped the goal/acceptance header before the
+        // fix (the header sat at the front, buildPrompt kept only the tail).
+        // Asserting on the untruncated string (as an earlier draft of this
+        // test did) would pass even with the fix reverted, since the header
+        // is always at the front regardless of trimming.
+        let asBuildPromptWouldSeeIt = String(
+            repairer.receivedFailureOutputs[0].suffix(AgentLoopStageRepairer.maxFailureOutputChars))
+        XCTAssertTrue(asBuildPromptWouldSeeIt.contains("Stabilize auth"))
+        XCTAssertTrue(asBuildPromptWouldSeeIt.contains("swift test passes"))
+    }
+
+    /// No goal/acceptance set (every loop before this feature, and every
+    /// existing test above) must produce BYTE-IDENTICAL failure output to
+    /// what the repairer received before this feature existed.
+    func testRepairFailureOutputIsUnchangedWhenGoalAndAcceptanceAreNotSet() async {
+        let repairer = StubRepairer()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") },
+            stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")])
+        )
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 1, consecutiveFailureStop: 5)
+        _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(repairer.receivedFailureOutputs, ["boom"])
+    }
+
+    func testSkillMessageIncludesGoalAndAcceptanceCriteriaWhenSet() async {
+        let skill = StubSkillExecutor()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill,
+            approvals: makeApprovals(approve: [("t1", "swift test")])
+        )
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "s1", name: "Fix", kind: .skill, command: nil, order: 0,
+                      skillId: "skills/fix", targetPath: nil, prompt: nil),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 1)
+        ], maxIterations: 1, consecutiveFailureStop: 5)
+        _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot,
+                             goal: "Ship the refactor", acceptanceCriteria: "no behavior change")
+        XCTAssertEqual(skill.receivedMessages.count, 1)
+        XCTAssertTrue(skill.receivedMessages[0].contains("Ship the refactor"))
+        XCTAssertTrue(skill.receivedMessages[0].contains("no behavior change"))
     }
 }

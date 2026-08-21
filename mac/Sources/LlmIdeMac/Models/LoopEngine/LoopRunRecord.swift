@@ -41,6 +41,11 @@ enum RepairScopeVerdict: String, Codable {
 struct LoopStageAttempt: Codable, Equatable {
     /// Cap on `outputTail`. Matches `AgentLoopStageRepairer.maxFailureOutputChars`
     /// so the journal records exactly what the repairer was shown, no more.
+    /// That equivalence is a base case, not an absolute guarantee: when a
+    /// loop's `goal`/`acceptanceCriteria` are set, the repairer additionally
+    /// sees a prepended header that the journal does not record — see
+    /// `LoopEngineRunner.prependGoalContext` — so `outputTail` stays the
+    /// plain raw stage output while the repair prompt is header + trimmed tail.
     static let maxOutputTailChars = 4_000
 
     var stageId: String
