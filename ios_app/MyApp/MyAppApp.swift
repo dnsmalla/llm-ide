@@ -7,6 +7,7 @@ struct MyAppApp: App {
     @StateObject private var llmIdeStore: LlmIdeChatStore
     @StateObject private var explorerStore: ExplorerChatStore
     @StateObject private var autoTaskStore: AutoTaskStore
+    @StateObject private var loopStore: LoopStore
     @StateObject private var macStatusStore: MacStatusStore
 
     init() {
@@ -23,6 +24,7 @@ struct MyAppApp: App {
         _llmIdeStore = StateObject(wrappedValue: LlmIdeChatStore(connection: connection))
         _explorerStore = StateObject(wrappedValue: ExplorerChatStore(connection: connection))
         _autoTaskStore = StateObject(wrappedValue: AutoTaskStore(connection: connection))
+        _loopStore = StateObject(wrappedValue: LoopStore(connection: connection))
         _macStatusStore = StateObject(wrappedValue: MacStatusStore(connection: connection))
     }
 
@@ -34,6 +36,7 @@ struct MyAppApp: App {
                 .environmentObject(llmIdeStore)
                 .environmentObject(explorerStore)
                 .environmentObject(autoTaskStore)
+                .environmentObject(loopStore)
                 .environmentObject(macStatusStore)
         }
     }

@@ -122,6 +122,7 @@ final class ConnectionService: ObservableObject {
     weak var llmIdeStore: LlmIdeChatStore?
     weak var explorerStore: ExplorerChatStore?
     weak var autoTaskStore: AutoTaskStore?
+    weak var loopStore: LoopStore?
     weak var macStatusStore: MacStatusStore?
     /// Set at app launch so `Connected.deviceName` can update persisted pairing info.
     weak var connectionStore: ConnectionStore?
@@ -243,6 +244,7 @@ final class ConnectionService: ObservableObject {
         llmIdeStore?.resetForNewDevice()
         explorerStore?.resetForNewDevice()
         autoTaskStore?.resetForNewDevice()
+        loopStore?.resetForNewDevice()
         macStatusStore?.resetForNewDevice()
     }
 
@@ -475,6 +477,8 @@ final class ConnectionService: ObservableObject {
             }
         case "auto_task_state", "auto_task_history_reply", "auto_task_ack", "auto_task_logs_reply":
             autoTaskStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
+        case "loop_state", "loop_ack", "loop_history_reply":
+            loopStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "mac_status":
             macStatusStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "llmide_chat_history_reply", "llmide_chat_history_clear_ack":
@@ -491,7 +495,9 @@ final class ConnectionService: ObservableObject {
             if let err = try? JSONDecoder().decode(CommandError.self, from: data) {
                 let cid = err.commandId
                 if err.message != "Cancelled" {
-                    if let cid, cid.hasPrefix("auto_task") {
+                    if let cid, cid.hasPrefix("loop_") {
+                        loopStore?.handleCommandError(err.message)
+                    } else if let cid, cid.hasPrefix("auto_task") {
                         autoTaskStore?.handleCommandError(err.message, commandId: cid)
                     } else if let cid, cid.hasPrefix("explore_") {
                         explorerStore?.handleSessionCommandError(err.message, commandId: cid)

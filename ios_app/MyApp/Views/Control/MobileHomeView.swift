@@ -10,6 +10,7 @@ struct MobileHomeView: View {
     @EnvironmentObject var llmIdeStore: LlmIdeChatStore
     @EnvironmentObject var explorerStore: ExplorerChatStore
     @EnvironmentObject var autoTaskStore: AutoTaskStore
+    @EnvironmentObject var loopStore: LoopStore
     @EnvironmentObject var macStatusStore: MacStatusStore
     @EnvironmentObject var connectionStore: ConnectionStore
 
@@ -17,6 +18,7 @@ struct MobileHomeView: View {
     @State private var showLlmIde: Bool = false
     @State private var showExplore: Bool = false
     @State private var showAutoTask: Bool = false
+    @State private var showLoop: Bool = false
 
     private var isConnected: Bool { connection.connectionStatus == .connected }
     private var autoState: AutoTaskState? { autoTaskStore.autoTaskState }
@@ -67,6 +69,11 @@ struct MobileHomeView: View {
                 .environmentObject(connection)
                 .environmentObject(autoTaskStore)
         }
+        .sheet(isPresented: $showLoop) {
+            LoopView()
+                .environmentObject(connection)
+                .environmentObject(loopStore)
+        }
         .onAppear { refreshMacData() }
         .onChange(of: connection.connectionStatus) { status in
             if status == .connected { refreshMacData() }
@@ -86,6 +93,7 @@ struct MobileHomeView: View {
 
                 macStatusStrip
                 autoTaskSummaryCard
+                loopSummaryCard
                 exploreSummaryCard
                 chatAction
             }
@@ -217,6 +225,61 @@ struct MobileHomeView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM))
     }
 
+    /// Loop summary — the same shape as the Auto Tasks card above, because the
+    /// two are the same kind of thing from the phone's side: a Mac-side runner
+    /// you start, stop and watch. The card shows only what is safe to read at a
+    /// glance; everything else is behind "Open Loop".
+    private var loopSummaryCard: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+            Label("Loop", systemImage: "arrow.triangle.2.circlepath")
+                .font(DesignSystem.Typography.headlineFont.weight(.semibold))
+                .foregroundColor(DesignSystem.Colors.textPrimary)
+
+            if let s = loopStore.state {
+                if !s.configured {
+                    Text("No loop set up for the active project.")
+                        .font(DesignSystem.Typography.subheadlineFont)
+                        .foregroundColor(DesignSystem.Colors.textTertiary)
+                } else {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(s.running ? DesignSystem.Colors.primary : DesignSystem.Colors.textTertiary)
+                            .frame(width: 8, height: 8)
+                        Text(s.running ? "Running" : "Idle")
+                            .font(DesignSystem.Typography.subheadlineFont)
+                            .foregroundColor(DesignSystem.Colors.textSecondary)
+                        if s.running && !s.startedHere {
+                            Text("· started on Mac")
+                                .font(DesignSystem.Typography.footnoteFont)
+                                .foregroundColor(DesignSystem.Colors.textTertiary)
+                        }
+                    }
+                    if let summary = s.lastStatusSummary, !s.running {
+                        Text("Last run: \(summary)")
+                            .font(DesignSystem.Typography.footnoteFont)
+                            .foregroundColor(DesignSystem.Colors.textTertiary)
+                            .lineLimit(2)
+                    }
+                }
+            } else {
+                Text("Loading loop state from Mac…")
+                    .font(DesignSystem.Typography.subheadlineFont)
+                    .foregroundColor(DesignSystem.Colors.textTertiary)
+            }
+
+            Button { showLoop = true } label: {
+                Text("Open Loop")
+                    .font(DesignSystem.Typography.bodyFont.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(DesignSystem.Colors.primary)
+        }
+        .padding(DesignSystem.Spacing.md)
+        .background(DesignSystem.Colors.surfaceSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM))
+    }
+
     private var exploreSummaryCard: some View {
         VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
             Label("Explorer chat", systemImage: "sidebar.left")
@@ -320,6 +383,7 @@ struct MobileHomeView: View {
         guard isConnected else { return }
         macStatusStore.requestMacStatus()
         autoTaskStore.refreshAll()
+        loopStore.refreshAll()
         explorerStore.exploreListSessions()
     }
 

@@ -220,7 +220,8 @@ LLM-IDE Mac app (native NWListener WebSocket on :3006)
     │ MobileControlManager.handleInbound
     ├──► LLM-IDE Chat → LlmIdeAPIClient (:3456)
     ├──► Explorer sessions → ChatSessionStore
-    └──► Auto Tasks → AutoCodeUpdateService / AutoTaskSettings
+    ├──► Auto Tasks → AutoCodeUpdateService / AutoTaskSettings
+    └──► Loop → the loopEngineering auto task + LoopRunJournal
         │
         ▼
 LLM-IDE Server (Node.js @ :3456)
@@ -246,6 +247,7 @@ cd ~/llm-ide/ios_app && open MyApp.xcodeproj
 - **LLM-IDE Chat** — Ask questions from iPhone (streamed via Mac → :3456)
 - **Explorer** — List and chat with Mac explorer sessions
 - **Auto Tasks** — Toggle and inspect scheduled auto-code tasks
+- **Loop** — Start/stop the active project's Loop, watch the live log, read finished runs (control only; stages and budgets are edited on the Mac)
 - **Device Discovery** — Bonjour/mDNS (`_llmide._tcp`) or Direct IP + PIN
 - **PIN Authentication** — 6-digit PIN + QR code (`llmide://pair?…`)
 

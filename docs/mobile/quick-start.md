@@ -52,7 +52,7 @@ Wire flow:
 
 1. iPhone → `{"type":"pairing","pin":"<PIN>"}`
 2. Mac → `{"type":"connected","deviceName":"…"}`
-3. Home shows **Live** with Auto Task + Explorer summaries — tap **Open Explorer** or **Open Auto Tasks**
+3. Home shows **Live** with Auto Task, Loop and Explorer summaries — tap **Open Explorer**, **Open Auto Tasks** or **Open Loop**
 
 ## Verify
 
@@ -80,6 +80,11 @@ reinstall from `ios_app/MyApp.xcodeproj`, pair again. The current app shows a
 - Tap **↻** on the home screen or open the sheet and refresh
 - Confirm Mobile Control **Running** on the Mac
 - Auto Tasks require the Mac app running with auto-code wired (same as on Mac)
+- Loop is control-only from the phone: start/stop, live log, finished runs. It needs a loop already
+  configured for the active project on the Mac (Loop → New Loop), and starting one from the phone
+  runs it through the Mac's `loopEngineering` auto task — the same path the scheduler uses, so the
+  run is journaled identically. `running` reflects the runner's process-wide guard, so a run started
+  on the desktop shows on the phone too (marked "started on Mac") and can be stopped from either.
 
 ### iPhone can't find the Mac
 
