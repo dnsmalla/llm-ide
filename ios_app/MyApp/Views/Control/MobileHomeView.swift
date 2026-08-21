@@ -304,7 +304,7 @@ struct MobileHomeView: View {
     private func metricPill(_ label: String, value: Int) -> some View {
         VStack(spacing: 2) {
             Text("\(value)")
-                .font(DesignSystem.Typography.title3Font.weight(.bold).design(.rounded))
+                .font(.system(.title3, design: .rounded, weight: .bold))
                 .foregroundColor(DesignSystem.Colors.textPrimary)
             Text(label)
                 .font(DesignSystem.Typography.captionFont)

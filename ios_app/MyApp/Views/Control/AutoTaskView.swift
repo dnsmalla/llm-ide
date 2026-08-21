@@ -243,7 +243,7 @@ struct AutoTaskView: View {
                 .font(.system(size: 13))
                 .foregroundColor(color)
             Text("\(value)")
-                .font(DesignSystem.Typography.title2Font.weight(.bold).design(.rounded))
+                .font(.system(.title2, design: .rounded, weight: .bold))
                 .foregroundColor(DesignSystem.Colors.textPrimary)
             Text(title)
                 .font(DesignSystem.Typography.captionFont)
