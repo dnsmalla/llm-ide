@@ -7,12 +7,14 @@
 // views, the catalog) lives in the skills module —
 // llm_agent/skills/registry.mjs. This file only orchestrates.
 
+import path from 'node:path';
 import { runAgentLoop, runNativeAgentLoop } from './loop.mjs';
 import { composeGlobalPrompt } from '../global/compose-prompt.mjs';
 import { expandSlashCommand } from '../../plugins/loader.mjs';
 import { globalSkills, internalSkills, buildPerUserSkillSet } from '../skills/index.mjs';
 import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
 import { renderGraphifyMemory } from '../../graphkit/index.mjs';
+import { expandTilde } from '../../graphkit/memory.mjs';
 import { persistTurnMemory } from './memory-persist.mjs';
 import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { buildReadableRoots } from './handlers/repo-files.mjs';
@@ -20,7 +22,7 @@ import { tasks, taskStatusIcon } from './handlers/session-tasks.mjs';
 import { redactFence } from './redaction.mjs';
 import { logger } from '../../core/logger.mjs';
 import { buildDispatch } from '../tools/registry.mjs';
-import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider, resolveCustomProviderDispatch, assertSafeBaseUrlResolved } from '../../providers/providers.mjs';
+import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider, resolveCustomProviderDispatch, assertSafeBaseUrlResolved, providerHasCli, DEFAULT_DEEPSEEK_BASE, DEFAULT_GEMINI_OPENAI_BASE } from '../../providers/providers.mjs';
 import { skillsToOpenAITools } from './openai-tools.mjs';
 import { fastModelFor } from '../../kb/usage.mjs';
 import { classifyCodeAssistMode, MODES } from './mode-classify.mjs';
@@ -28,6 +30,8 @@ import { personaForMode, restrictsTools, allowedToolNames, PLAN_LIKE_MODES } fro
 import { classifyTaskType } from './task-skill-routing.mjs';
 import { readSkillInstructions } from '../skills/skill-library.mjs';
 import { buildMcpConfigForUser } from '../../mcp/mcp-config.mjs';
+import { makeSecretReader } from '../../server/vault.mjs';
+import { getDb } from '../../kb/db.mjs';
 
 // Re-exported for the HTTP routes that historically imported these
 // from here (server/auth-routes.mjs, routes/agent.mjs import the
@@ -148,7 +152,15 @@ export async function handleCodeAssist({
   // MCP plugins (Claude CLI path only). Restricted modes get none; execute
   // modes get the user's enabled+consented servers as --mcp-config. Subagents
   // and the internal agent never receive MCP (global-agent-only for SP1).
-  const mcpConfig = buildMcpConfigForUser(userId, { mode: resolvedMode, restrictsToolsFn: restrictsTools });
+  // readSecret is passed down because mcp/ may not import server/ (module
+  // boundaries) yet MCP credentials live in the vault. Omitting it silently
+  // drops every catalog server's token, so it is threaded here rather than
+  // defaulted inside mcp-config.
+  const mcpConfig = buildMcpConfigForUser(userId, {
+    mode: resolvedMode,
+    restrictsToolsFn: restrictsTools,
+    readSecret: makeSecretReader(getDb(), userId),
+  });
 
   // Slash-command expansion. If the user's message starts with /foo,
   // look it up against the enabled command set and expand the prompt
@@ -373,7 +385,24 @@ export async function handleCodeAssist({
   // pattern: results fed back as native `tool` messages, natural termination)
   // instead of the text-fence loop, which those models don't follow and which
   // loops when results come back as fences.
-  const NATIVE_PROVIDERS = new Set(['deepseek', 'openai', 'custom']);
+  // Providers that speak OpenAI-style function calling, so they can run the
+  // real tool loop (skills, file tools, approval cards) rather than a
+  // single-shot completion. `google` is here because Gemini exposes an
+  // OpenAI-compatible /chat/completions with tools (DEFAULT_GEMINI_OPENAI_BASE);
+  // before that it fell through to the Anthropic branch below, which ignores
+  // `model` entirely — so picking Gemini silently answered as Claude.
+  const NATIVE_PROVIDERS = new Set(['deepseek', 'openai', 'custom', 'google']);
+  // What to tell the user when a non-Anthropic provider has no usable route.
+  // Generic "add an API key" is wrong for GLM: a key alone gets it nowhere,
+  // because GLM has no built-in adapter or base URL — it is reached as a named
+  // Custom Provider (which arrives as `custom:<uuid>`, not as `glm`).
+  const NO_ROUTE_HINTS = {
+    glm: 'GLM has no built-in provider. Add it under Settings → Custom Providers '
+      + '(base URL https://api.z.ai/api/paas/v4, plus your Z.AI key and model ids), then select it in the composer.',
+    deepseek: 'No API key configured for DeepSeek. Add one in Settings → Model Providers '
+      + '(DeepSeek has no CLI subscription mode).',
+    custom: 'No API key configured for the custom provider. Add a key and base URL in Settings → Model Providers.',
+  };
   // effProvider is hoisted next to utilityModel above — one derivation rule.
 
   // If the caller explicitly selected a non-Anthropic provider (custom, glm,
@@ -426,7 +455,8 @@ export async function handleCodeAssist({
     const nativeBaseUrl = customResolved
       ? customResolved.baseUrl.replace(/\/+$/, '')
       : effProvider === 'custom' ? customBaseUrl(userId)
-      : effProvider === 'deepseek' ? 'https://api.deepseek.com' : undefined;
+      : effProvider === 'deepseek' ? DEFAULT_DEEPSEEK_BASE
+      : effProvider === 'google' ? DEFAULT_GEMINI_OPENAI_BASE : undefined;
     // SSRF guard once, before the loop. The native loop calls callOpenAI
     // directly (not completeViaApi), so a user-supplied custom base URL must be
     // checked here — this also closes a pre-existing gap for the generic
@@ -462,6 +492,44 @@ export async function handleCodeAssist({
       // No deadlineMs: a chat turn is bounded by its call budget and by the
       // user's cancel, not by a clock. See loop.mjs's DEFAULT_DEADLINE_MS.
     });
+  } else if (effProvider !== 'anthropic') {
+    // An explicitly-selected non-Anthropic provider with no usable API key.
+    // Two outcomes, and never a silent Claude answer: the old `else` ran the
+    // Anthropic loop with GLOBAL_AGENT_MODEL, discarding `model` entirely, so
+    // choosing Gemini or GLM came back as Claude with nothing saying so.
+    //
+    //   • The provider has a logged-in CLI (openai → `codex`, google →
+    //     `gemini`): delegate the whole turn to it. runClaude's own ladder
+    //     performs the spawn (runViaCli) and already converts a missing
+    //     binary into "install it and log in, or add an API key".
+    //   • Otherwise (deepseek/glm/custom — all `cli: null`) there is nothing
+    //     to fall back to, so name what is missing.
+    //
+    // The CLI branch is deliberately a SINGLE-SHOT completion: codex/gemini
+    // are their own agents and do not speak this server's tool protocol, so
+    // our tool loop is not in play and no pendingTool can come back. That is
+    // the documented trade-off of subscription mode — an API key is what buys
+    // the full tool loop (runNativeAgentLoop above).
+    if (!providerHasCli(effProvider)) {
+      throw new Error(NO_ROUTE_HINTS[effProvider]
+        ?? `No API key configured for provider "${effProvider}". Add one in Settings → Model Providers.`);
+    }
+    const cliPrompt = [
+      NATIVE_SYSTEM_PROMPT + (modePersona ? `\n\n${modePersona}` : '') + modeToolNote,
+      composedUserMessage,
+    ].filter(Boolean).join('\n\n');
+    // Root the CLI in the chat's workspace so it can actually read the
+    // project it is being asked about (see runClaude's `cwd`). The wire
+    // convention is a home-relative root, which Node's spawn will not expand.
+    const rawRoot = typeof agentContext?.workspaceRoot === 'string' ? agentContext.workspaceRoot : '';
+    const cliCwd = rawRoot ? path.resolve(expandTilde(rawRoot)) : undefined;
+    const cliReply = await runClaude(cliPrompt, { userId, model, provider: effProvider, cwd: cliCwd });
+    out = {
+      reply: typeof cliReply === 'string' ? cliReply.trim() : '',
+      pendingTool: null,
+      iterations: 1,
+      cacheHits: 0,
+    };
   } else {
     out = await runAgentLoop({
       skills: activeSkills,

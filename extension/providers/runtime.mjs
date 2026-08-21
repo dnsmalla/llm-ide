@@ -105,7 +105,7 @@ const MAX_PROMPT_CHARS = 500_000;
 // so multi-user deployments charge each user's own Anthropic account
 // rather than the operator's CLI login.  When userId is omitted (or
 // the user has no stored key) we fall back to the operator's CLI auth.
-export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, tools, autoFallback = true, mcpConfig } = {}) {
+export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, tools, autoFallback = true, mcpConfig, cwd } = {}) {
   if (typeof prompt !== 'string') {
     throw new Error('runClaude: prompt must be a string');
   }
@@ -195,7 +195,12 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
     if (provider === 'deepseek') {
       throw new Error('No API key configured for DeepSeek. Add one in Settings → Model Providers.');
     }
-    const cliText = await runViaCli(provider, prompt);
+    // `cwd` roots the provider's CLI in the caller's workspace. It matters
+    // because codex/gemini are agents in their own right: given the project
+    // directory they can read it to answer, and without one they inherit the
+    // server's cwd and reason about the wrong tree. Anthropic ignores it —
+    // that path runs `claude -p` with `--tools ''`, a pure completion.
+    const cliText = await runViaCli(provider, prompt, { cwd });
     // Use the request's own model id, NOT resolvedModel — the local resolveModel
     // normalizes any non-Claude id to the Anthropic default, which would mislabel
     // this (openai/google/custom) provider's usage. `model` is already

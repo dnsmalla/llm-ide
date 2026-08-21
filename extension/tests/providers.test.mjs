@@ -5,13 +5,15 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import fs from 'node:fs';
 
 // Secrets must exist before kb/db (imported transitively) validates env.
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
-const { resolveProvider, providerApiKey, completeViaApi, callOpenAI, verifyProvider, cliInvocation, listProviderModels, chatModels, customBaseUrl, spawnCli, runViaCli, anthropicWebCliArgs, formatCliSpawnError, resolveCustomProviderDispatch } =
+const { resolveProvider, providerApiKey, completeViaApi, callOpenAI, verifyProvider, cliInvocation, listProviderModels, chatModels, customBaseUrl, spawnCli, runViaCli, anthropicWebCliArgs, formatCliSpawnError, resolveCustomProviderDispatch, providerHasCli } =
   await import('../providers/providers.mjs');
 const { setSecret } = await import('../server/vault.mjs');
 const { syncCustomProviders } = await import('../server/custom-providers.mjs');
@@ -61,8 +63,43 @@ test('resolveProvider: maps model families', () => {
   assert.equal(resolveProvider('models/gemini-2.0-flash'), 'google');
   assert.equal(resolveProvider('deepseek-chat'), 'deepseek');
   assert.equal(resolveProvider('deepseek-reasoner'), 'deepseek');
+  // GLM ids resolve to 'glm' — a provider with no adapter, so the caller
+  // fails loudly and is pointed at Custom Providers. Defaulting them to
+  // anthropic (the old behaviour) had Claude answer GLM requests silently.
+  assert.equal(resolveProvider('glm-5.2'), 'glm');
+  assert.equal(resolveProvider('glm-4.7'), 'glm');
   assert.equal(resolveProvider(''), 'anthropic');       // blank → default
   assert.equal(resolveProvider('mystery-model'), 'anthropic');
+});
+
+test('cliInvocation: codex is rooted with -C and pinned read-only; --yolo is never passed', () => {
+  // A chat turn delegated to `codex exec` runs OUTSIDE this server's tool
+  // loop, so no write it made could pass through the approval cards. The
+  // ceiling is therefore the sandbox flag, not a prompt.
+  const withCwd = cliInvocation('openai', 'do X', { cwd: '/tmp/proj' });
+  assert.deepEqual(withCwd.args, ['exec', '-C', '/tmp/proj', '-s', 'read-only', 'do X']);
+  // No workspace known → no -C, but still read-only.
+  assert.deepEqual(cliInvocation('openai', 'do X').args, ['exec', '-s', 'read-only', 'do X']);
+  for (const inv of [withCwd, cliInvocation('openai', 'do X'), cliInvocation('google', 'do X')]) {
+    assert.ok(!inv.args.includes('--yolo'), 'chat must never auto-approve writes');
+    assert.ok(!inv.args.includes('--dangerously-bypass-approvals-and-sandbox'));
+  }
+  // gemini takes no documented read-only flag — it is rooted via the child
+  // process cwd instead, so its argv stays the bare prompt form.
+  assert.deepEqual(cliInvocation('google', 'do X', { cwd: '/tmp/proj' }).args, ['-p', 'do X']);
+});
+
+test('providerHasCli: only providers with a real CLI binary can run keyless', () => {
+  // The predicate that decides "delegate to a logged-in CLI" vs "ask for a
+  // key" for a non-Anthropic turn (llm_agent/runtime/route.mjs).
+  assert.equal(providerHasCli('anthropic'), true);   // claude
+  assert.equal(providerHasCli('openai'), true);      // codex
+  assert.equal(providerHasCli('google'), true);      // gemini
+  assert.equal(providerHasCli('deepseek'), false);   // cli: null
+  assert.equal(providerHasCli('glm'), false);        // cli: null
+  assert.equal(providerHasCli('custom'), false);     // cli: null
+  assert.equal(providerHasCli('nope'), false);       // unknown provider
+  assert.equal(providerHasCli(undefined), false);
 });
 
 test('providerApiKey: falls back to operator env when no user key', () => {
@@ -334,7 +371,9 @@ test('formatCliSpawnError: empty streams falls back to actionable hint', () => {
 
 test('cliInvocation: standard non-interactive form per provider', () => {
   assert.deepEqual(cliInvocation('anthropic', 'hi'), { bin: 'claude', args: ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '--system-prompt', 'You are a helpful AI assistant.', '-p', 'hi'] });
-  assert.deepEqual(cliInvocation('openai', 'hi'),    { bin: 'codex',  args: ['exec', 'hi'] });
+  // codex is pinned read-only for chat delegation (see the dedicated test
+  // below); no workspace passed here, so no -C.
+  assert.deepEqual(cliInvocation('openai', 'hi'),    { bin: 'codex',  args: ['exec', '-s', 'read-only', 'hi'] });
   assert.deepEqual(cliInvocation('google', 'hi'),    { bin: 'gemini', args: ['-p', 'hi'] });
   assert.equal(cliInvocation('skynet', 'hi'), null);
 });
@@ -356,7 +395,7 @@ test('anthropicWebCliArgs: enables AND pre-approves a single web tool', () => {
 test('cliInvocation: binary overridable via LLMIDE_<PROVIDER>_CLI', () => {
   process.env.LLMIDE_OPENAI_CLI = 'my-codex';
   try {
-    assert.deepEqual(cliInvocation('openai', 'x'), { bin: 'my-codex', args: ['exec', 'x'] });
+    assert.deepEqual(cliInvocation('openai', 'x'), { bin: 'my-codex', args: ['exec', '-s', 'read-only', 'x'] });
   } finally {
     delete process.env.LLMIDE_OPENAI_CLI;
   }
@@ -368,13 +407,13 @@ test('spawnCli: rejects an unknown provider without spawning', async () => {
 
 test('spawnCli: invokes cliInvocation argv, closes stdin, resolves {stdout,stderr,bin}', async () => {
   // Override the binary to a harmless `echo`; cliInvocation('openai') yields
-  // args ['exec', prompt], so this round-trips ['exec','hi'] back as stdout.
-  // Proves the spawn resolves (stdin closed → no ~3s hang) and the shape.
+  // the codex argv, so this round-trips it back as stdout. Proves the spawn
+  // resolves (stdin closed → no ~3s hang) and the shape.
   process.env.LLMIDE_OPENAI_CLI = 'echo';
   try {
     const out = await spawnCli('openai', 'hi');
     assert.equal(out.bin, 'echo');
-    assert.equal(out.stdout.trim(), 'exec hi');
+    assert.equal(out.stdout.trim(), 'exec -s read-only hi');
     assert.equal(out.stderr, '');
   } finally {
     delete process.env.LLMIDE_OPENAI_CLI;
@@ -388,7 +427,24 @@ test('runViaCli: rejects an unknown provider with its own message', async () => 
 test('runViaCli: trims CLI stdout and reports it', async () => {
   process.env.LLMIDE_OPENAI_CLI = 'echo';
   try {
-    assert.equal(await runViaCli('openai', 'hi'), 'exec hi');
+    assert.equal(await runViaCli('openai', 'hi'), 'exec -s read-only hi');
+  } finally {
+    delete process.env.LLMIDE_OPENAI_CLI;
+  }
+});
+
+test('spawnCli: cwd really lands on the child process', async () => {
+  // `pwd` prints the child's working directory, so this proves the spawn
+  // option takes effect — without it the child inherits the SERVER's
+  // directory, which is what made a delegated codex/gemini turn read the
+  // wrong tree. argv is emptied because `pwd` rejects extra arguments.
+  process.env.LLMIDE_OPENAI_CLI = 'pwd';
+  try {
+    const out = await spawnCli('openai', 'hi', { args: [], cwd: os.tmpdir() });
+    assert.equal(fs.realpathSync(out.stdout.trim()), fs.realpathSync(os.tmpdir()));
+    // No cwd → inherits the server's directory (this test process).
+    const inherited = await spawnCli('openai', 'hi', { args: [] });
+    assert.equal(fs.realpathSync(inherited.stdout.trim()), fs.realpathSync(process.cwd()));
   } finally {
     delete process.env.LLMIDE_OPENAI_CLI;
   }

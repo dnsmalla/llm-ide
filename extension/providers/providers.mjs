@@ -58,6 +58,13 @@ const DEFAULT_OPENAI_BASE = 'https://api.openai.com/v1';
 // llm_agent/runtime/route.mjs's native-loop base) — one of which is how this
 // constant ended up declared-but-unused in the first place.
 export const DEFAULT_DEEPSEEK_BASE = 'https://api.deepseek.com';
+// Gemini's OpenAI-compatible surface. Google exposes /chat/completions with
+// `tools` + `tool_choice` here (ai.google.dev/gemini-api/docs/openai), which is
+// what lets `google` join the native tool-calling loop through callOpenAI
+// instead of needing a second, Gemini-shaped agent loop. The native
+// generativelanguage endpoints (callGoogle, MODELS_ENDPOINT.google) stay as
+// they are — this base is only for the OpenAI-compatible path.
+export const DEFAULT_GEMINI_OPENAI_BASE = 'https://generativelanguage.googleapis.com/v1beta/openai';
 
 // ── SSRF guard ────────────────────────────────────────────────────────
 //
@@ -162,6 +169,12 @@ export function resolveProvider(model) {
   if (/^(gpt[-_]|o\d|chatgpt|codex|text-davinci)/.test(m)) return 'openai';
   if (/^(gemini[-/]|models\/gemini)/.test(m)) return 'google';
   if (/^deepseek[-/]/.test(m)) return 'deepseek';
+  // GLM has no built-in route (it is configured as a named Custom Provider,
+  // which arrives as `custom:<uuid>` and returns above). Resolving its ids to
+  // 'glm' rather than falling through to the default is what makes that
+  // explicit: a bare `glm-*` id now reaches a provider with no adapter and
+  // fails loudly, instead of being answered by Claude under a GLM label.
+  if (/^glm[-/]/.test(m)) return 'glm';
   return 'anthropic';
 }
 
@@ -518,7 +531,24 @@ const CLI_ARG_BUILDERS = {
   // with the resolved model). If anthropic ever routes through runViaCli,
   // thread the model here too or the model-drop latency bug returns silently.
   anthropic: (p) => buildAnthropicCliArgs(p),
-  openai:    (p) => ['exec', p],   // codex exec "<prompt>"
+  // `codex exec` is itself an agent, so when a workspace is known it is given
+  // explicitly with `-C` and pinned to `-s read-only`
+  // (developers.openai.com/codex/developer-commands). Read-only is the right
+  // ceiling for a chat turn: the CLI can read the project to answer, but this
+  // path runs OUTSIDE the server's own tool loop, so nothing it did could be
+  // routed through the approval cards the API-key path uses. `--yolo` is
+  // deliberately never passed here — auto-approving writes is opted into
+  // per-task by the auto-task runner, not by chatting.
+  openai:    (p, { cwd } = {}) => [
+    'exec',
+    ...(cwd ? ['-C', cwd] : []),
+    '-s', 'read-only',
+    p,
+  ],
+  // The Gemini CLI has no documented read-only flag to pin, so it keeps its
+  // own default (interactive approval, which headless can never grant — the
+  // same effect) and is rooted via the child process cwd instead. `--yolo`,
+  // which WOULD auto-approve, is likewise never passed here.
   google:    (p) => ['-p', p],     // gemini -p "<prompt>"
 };
 
@@ -567,14 +597,29 @@ export function anthropicWebCliArgs(prompt, { tool = 'WebSearch' } = {}) {
   return ['--strict-mcp-config', '--setting-sources', '', '--tools', tool, '--allowedTools', tool, '-p', prompt];
 }
 
+/**
+ * True when `provider` can answer from a logged-in CLI (subscription mode, no
+ * API key): anthropic → `claude`, openai → `codex`, google → `gemini`.
+ * deepseek/glm/custom have `cli: null` — they are API-key-only. Callers use
+ * this to pick between the key path and the CLI path without reaching into
+ * PROVIDERS, and to tell "add a key" apart from "add a key or log in".
+ */
+export function providerHasCli(provider) {
+  const cfg = PROVIDERS[provider];
+  return typeof cfg?.cli === 'string' && cfg.cli.length > 0;
+}
+
 /** The {bin, args} a provider's CLI is invoked with for a prompt. Pure —
- *  exported so the invocation is testable without spawning anything. */
-export function cliInvocation(provider, prompt) {
+ *  exported so the invocation is testable without spawning anything.
+ *  `cwd` is passed through to the provider's arg builder for CLIs that take an
+ *  explicit workspace flag (codex `-C`); the child process cwd is set
+ *  separately by the spawn helpers, which covers the ones that don't. */
+export function cliInvocation(provider, prompt, { cwd } = {}) {
   const cfg = PROVIDERS[provider];
   if (!cfg) return null;
   const bin = process.env[`LLMIDE_${provider.toUpperCase()}_CLI`] || cfg.cli;
   const build = CLI_ARG_BUILDERS[provider] || ((p) => ['-p', p]);
-  return { bin, args: build(prompt) };
+  return { bin, args: build(prompt, { cwd }) };
 }
 
 // Last-resort HANG BREAKER for a CLI completion — not a work deadline.
@@ -656,8 +701,8 @@ export function minimalCliEnv(extraKeys = {}) {
  * `env` defaults to a minimal allowlist; callers pass their own to add
  * provider-specific vars (an API key, ANTHROPIC_BASE_URL, …).
  */
-export function spawnCli(provider, prompt, { env, timeoutMs = CLI_TIMEOUT_MS, signal, args: argsOverride } = {}) {
-  const inv = cliInvocation(provider, prompt);
+export function spawnCli(provider, prompt, { env, timeoutMs = CLI_TIMEOUT_MS, signal, args: argsOverride, cwd } = {}) {
+  const inv = cliInvocation(provider, prompt, { cwd });
   if (!inv) return Promise.reject(new Error(`spawnCli: unknown provider '${provider}'`));
   // `argsOverride` lets a caller drive the SAME provider binary with a different
   // argv than the default single-shot completion form — e.g. enabling the
@@ -677,7 +722,12 @@ export function spawnCli(provider, prompt, { env, timeoutMs = CLI_TIMEOUT_MS, si
     return new Promise((resolve, reject) => {
       const child = execFile(
         inv.bin, args,
-        { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env: env || minimalCliEnv(), signal },
+        // `cwd` roots an agentic CLI (codex/gemini) in the user's project.
+        // Without it the child inherits the SERVER's cwd (extension/), so a
+        // "review my repo" turn read the wrong tree entirely. Undefined means
+        // "inherit", preserving the previous behaviour for every caller that
+        // does not pass one.
+        { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env: env || minimalCliEnv(), signal, ...(cwd ? { cwd } : {}) },
         (err, stdout, stderr) => {
           if (err) {
             err.stdout = stdout;
@@ -752,11 +802,11 @@ const STREAM_ARG_EXTRAS = {
  */
 export function spawnCliStream(provider, prompt, {
   env, timeoutMs = CLI_TIMEOUT_MS, signal, onChunk,
-  binOverride, argsOverride,
+  binOverride, argsOverride, cwd,
 } = {}) {
   const inv = binOverride
     ? { bin: binOverride, args: argsOverride }
-    : cliInvocation(provider, prompt);
+    : cliInvocation(provider, prompt, { cwd });
   if (!inv) return Promise.reject(new Error(`spawnCliStream: unknown provider '${provider}'`));
   const parser = STREAM_PARSERS[provider];
   const args = binOverride
@@ -768,7 +818,9 @@ export function spawnCliStream(provider, prompt, {
       return Promise.reject(Object.assign(new Error('spawnCliStream: aborted'), { name: 'AbortError', bin: inv.bin }));
     }
     return new Promise((resolve, reject) => {
-      const child = spawn(inv.bin, args, { env: env || minimalCliEnv(), signal });
+      // See spawnCli for why `cwd` matters (agentic CLIs must run in the
+      // user's project, not the server's directory).
+      const child = spawn(inv.bin, args, { env: env || minimalCliEnv(), signal, ...(cwd ? { cwd } : {}) });
       child.stdin?.end();
 
       let stdoutText = '';
@@ -899,7 +951,7 @@ export function formatCliSpawnError(err, { bin = 'claude', apiKey, provider = 'a
 }
 
 /** Run a prompt through the provider's logged-in CLI, returning stdout. */
-export function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS } = {}) {
+export function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS, cwd } = {}) {
   const cfg = PROVIDERS[provider];
   if (!cfg) return Promise.reject(new Error(`runViaCli: unknown provider '${provider}'`));
   // Use a minimal env allowlist — never inherit LLMIDE_JWT_SECRET,
@@ -907,7 +959,7 @@ export function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS } = {})
   // Include the provider's own API key env var only when it is available.
   const extraKeys = cfg.env && process.env[cfg.env] ? { [cfg.env]: process.env[cfg.env] } : {};
   const env = minimalCliEnv(extraKeys);
-  return spawnCli(provider, prompt, { env, timeoutMs }).then(
+  return spawnCli(provider, prompt, { env, timeoutMs, cwd }).then(
     ({ stdout, bin }) => {
       const text = String(stdout || '').trim();
       if (!text) throw new Error(`${bin} returned empty output`);
