@@ -832,7 +832,12 @@ final class MobileControlManager {
 
         case MobileProtocol.Tag.loopStart:
             guard let autoCode else {
-                replyNotConfigured(commandId: "loop_start", logLabel: "loop_start")
+                // Not `replyNotConfigured`: that says "Auto-tasks not
+                // configured", which is true underneath but reads as a
+                // non-sequitur when the user pressed Start on the Loop page.
+                append(.stderr, "loop_start: auto-code service not wired")
+                reply(CommandError(commandId: "loop_start",
+                                   message: "The Mac app can't run a loop right now — its auto-code service isn't wired up."))
                 return
             }
             let state = buildLoopState()
@@ -859,7 +864,9 @@ final class MobileControlManager {
 
         case MobileProtocol.Tag.loopStop:
             guard let autoCode else {
-                replyNotConfigured(commandId: "loop_stop", logLabel: "loop_stop")
+                append(.stderr, "loop_stop: auto-code service not wired")
+                reply(CommandError(commandId: "loop_stop",
+                                   message: "The Mac app can't stop a loop right now — its auto-code service isn't wired up."))
                 return
             }
             autoCode.stop()

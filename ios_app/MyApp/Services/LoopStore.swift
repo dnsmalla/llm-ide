@@ -124,9 +124,13 @@ final class LoopStore: ObservableObject {
     // MARK: — Inbound
 
     func handleInbound(type: String, data: Data) {
-        // Any reply at all proves the Mac understands this channel.
+        // Any reply at all proves the Mac understands this channel — so retire
+        // the watchdog AND clear whatever it (or a previous failure) put on
+        // screen. Without the clear, the "Mac didn't answer" banner outlived
+        // the condition it described and sat over a working page indefinitely.
         firstReplyWatchdog?.cancel()
         firstReplyWatchdog = nil
+        lastError = nil
         switch type {
         case MobileProtocol.Tag.loopState:
             guard let s = try? JSONDecoder().decode(LoopState.self, from: data) else { return }
