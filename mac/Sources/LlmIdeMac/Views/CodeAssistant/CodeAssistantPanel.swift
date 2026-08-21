@@ -143,14 +143,27 @@ struct CodeAssistantPanel: View {
     /// `CodeAssistantSettingsSection` in Settings; the panel only READS it
     /// (plus swapping the transport when it flips).
     @AppStorage(AgentV2Selection.toggleKey) var useAgentV2 = true
-    /// True when the toggle is on but the currently selected provider can't
-    /// take the v2 engine — drives the "v2 needs the Anthropic provider"
-    /// hint near the mode/model chips. Uses the same provider resolution
-    /// the wire uses (`makeProvider`), so the hint appears exactly when a
-    /// turn would silently fall back to legacy.
+    /// True when THIS chat would run on the Agent engine but its selected
+    /// provider can't — drives the provider hint near the mode/model chips.
+    ///
+    /// Gated on `engine.usesAgentV2Engine`, not the bare toggle: that is the
+    /// same three-part rule the transport applies (transport present AND
+    /// toggle AND the chat's own engine marker — `AgentV2Selection.useV2`).
+    /// Gating on the toggle alone made the hint fire in chats that were never
+    /// eligible for the Agent engine in the first place — a legacy-stamped
+    /// chat (stamped at creation, legacy for life) or an out-of-date server —
+    /// where switching provider changes nothing, so the hint promised a
+    /// remedy that does not exist. `ChatComposer` reasons about exactly this
+    /// trap for the provider MENU and avoids it by reading the same property;
+    /// sharing it here is what keeps the two from drifting apart.
+    ///
+    /// It still fires where it should: `selectedProvider` is seeded from
+    /// `config.activeCLI` regardless of the chat's engine (see `onAppear`
+    /// below), so a non-Anthropic default really can land in a v2 chat.
     var agentV2ProviderBlocked: Bool {
-        useAgentV2 && !AgentV2Selection.providerIsAnthropic(
-            ChatTransportInput.makeProvider(selectedProvider: modelState.selectedProvider))
+        AgentV2Selection.providerHintNeeded(
+            usesAgentEngine: engine.usesAgentV2Engine,
+            resolvedProvider: ChatTransportInput.makeProvider(selectedProvider: modelState.selectedProvider))
     }
     @StateObject var session = CodeAssistantSession()
     /// Cursor-style "/" (command/skill) + "@" (file) autocomplete for the input.

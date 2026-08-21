@@ -50,6 +50,19 @@ enum AgentV2Selection {
         toggleOn && sessionEngine == sessionEngineV2 && providerIsAnthropic(resolvedProvider)
     }
 
+    /// Whether to show the composer's "this chat will use the classic engine"
+    /// provider hint. Pure so it can be pinned by tests and cannot drift from
+    /// `useV2` the way an inline view expression did.
+    ///
+    /// `usesAgentEngine` is the caller's THREE-part answer (transport present
+    /// AND toggle on AND the chat stamped v2 — `ChatEngine.usesAgentV2Engine`),
+    /// never the bare toggle. Gating on the toggle alone made the hint fire in
+    /// chats that could never run on the Agent engine — a legacy-stamped chat,
+    /// or an out-of-date server — where switching provider fixes nothing.
+    static func providerHintNeeded(usesAgentEngine: Bool, resolvedProvider: String?) -> Bool {
+        usesAgentEngine && !providerIsAnthropic(resolvedProvider)
+    }
+
     /// Current toggle value. UNSET defaults to true (the Agent engine is the
     /// default for new chats since P3); an explicit user opt-out (false) is
     /// honored forever. Read at ENGINE-CREATION time and at TURN time.

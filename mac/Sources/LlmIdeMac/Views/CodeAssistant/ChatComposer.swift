@@ -91,7 +91,7 @@ extension CodeAssistantPanel {
             Image(systemName: "info.circle")
                 .font(.system(size: 11))
                 .foregroundStyle(theme.current.warning)
-            Text("v2 needs the Anthropic provider — turns will use the classic engine until you switch.")
+            Text("The Claude Agent engine runs on Anthropic models only — this chat's turns will use the classic engine until you pick Claude.")
                 .font(.system(size: 11))
                 .foregroundStyle(theme.current.textMuted)
                 .fixedSize(horizontal: false, vertical: true)

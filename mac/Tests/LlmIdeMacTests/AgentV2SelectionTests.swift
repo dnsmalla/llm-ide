@@ -624,3 +624,48 @@ struct AgentV2SelectionTests {
         }
     }
 }
+
+
+@Suite("AgentV2Selection.providerHintNeeded")
+struct AgentV2ProviderHintTests {
+    // The composer's "this chat will use the classic engine" hint. It used to
+    // be gated on the bare toggle, so it fired in chats that were never
+    // eligible for the Agent engine at all — telling the user to switch
+    // provider when switching changes nothing.
+    @Test("no hint when this chat is not on the Agent engine, whatever the provider")
+    func silentOffAgentEngine() {
+        // A legacy-stamped chat, or an out-of-date server (no v2 transport):
+        // usesAgentEngine is false, so there is no fallback to warn about.
+        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: false, resolvedProvider: "openai") == false)
+        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: false, resolvedProvider: "custom:abc") == false)
+        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: false, resolvedProvider: nil) == false)
+    }
+
+    @Test("hint when an Agent-engine chat has a provider the engine cannot run")
+    func firesOnRealConflict() {
+        // selectedProvider is seeded from config.activeCLI regardless of the
+        // chat's engine, so a non-Anthropic default really can land here.
+        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: "openai"))
+        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: "google"))
+        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: "custom:abc"))
+        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: nil))
+    }
+
+    @Test("no hint on Anthropic — the engine runs the turn")
+    func silentOnAnthropic() {
+        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: "anthropic") == false)
+    }
+
+    // The hint must agree with the rule that actually picks the engine: for a
+    // v2-stamped chat with the toggle on, "hint shown" and "useV2" are exact
+    // opposites across providers. That equivalence is what stopped drifting.
+    @Test("the hint is the complement of useV2 for an eligible chat")
+    func complementsUseV2() {
+        for provider in ["anthropic", "openai", "google", "deepseek", "custom:abc"] {
+            let runsV2 = AgentV2Selection.useV2(toggleOn: true, resolvedProvider: provider,
+                                                sessionEngine: AgentV2Selection.sessionEngineV2)
+            let hinted = AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: provider)
+            #expect(runsV2 != hinted, "\(provider): hint and useV2 must never agree")
+        }
+    }
+}
