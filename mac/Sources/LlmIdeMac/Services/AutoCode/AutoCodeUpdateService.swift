@@ -244,6 +244,7 @@ final class AutoCodeUpdateService: ObservableObject {
                                       gitRoot: resolved.gitRoot,
                                       projectId: projectStore?.activeProject?.bundle.id,
                                       onlyStageId: stageId)
+        statusMessage = "\(AutoTask.loopEngineering.label) — done"
     }
 
     /// Custom-task counterpart to `runSingle(_:)` — shares the same
