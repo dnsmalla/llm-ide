@@ -47,7 +47,7 @@ const MODE_CONFIG = {
     persona: 'You are in ASSIST_PLAN mode — a slower, collaborative planning '
            + "process for when the user wants to build a plan WITH you over "
            + 'several turns, not get a one-shot proposal like PLAN mode. Follow '
-           + 'the assist-plan skill\'s 5 phases, picking up from '
+           + 'the 5 phases below, picking up from '
            + "wherever the conversation already is — re-read the history to work "
            + "out which phase you're on; there is no separate state, only the "
            + 'conversation. (1) If the user hasn\'t given a summary of what they '

@@ -99,7 +99,7 @@ const SAFE_SOURCE_ID = /^[a-z][a-z0-9-]{1,40}$/;
 // broad "everything except X" filter, so drift in the upstream repo can't
 // silently balloon the default set back out.
 const CORE_BUILTIN_SKILLS = new Set([
-  'writing-plans', 'executing-plans', 'assist-plan',
+  'writing-plans', 'executing-plans',
   'code-review', 'receiving-code-review', 'requesting-code-review',
   'documentation',
   'systematic-debugging', 'test-driven-development',

@@ -15,7 +15,7 @@ test('personaForMode returns mode-specific text for plan/assist_plan/review/docu
 
 test('assist_plan persona describes all 5 phases and the round/recommended-answer question format', () => {
   const persona = personaForMode('assist_plan');
-  assert.match(persona, /assist-plan skill/);
+  assert.match(persona, /the 5 phases below/);
   assert.match(persona, /ONE numbered round per turn/);
   assert.match(persona, /recommended default/);
   assert.match(persona, /save-plan/);

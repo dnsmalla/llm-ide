@@ -1,0 +1,129 @@
+{
+  "_note": "Claude Code's hook EVENTS — the lifecycle points a hook can attach to. A static reference catalog, not sourced from any registered llm-source and never executed by this server. Hooks that sources actually declare are in hooks.json alongside this file.",
+  "events": [
+    {
+      "name": "PreToolUse",
+      "description": "Before a tool call runs; can block it or ask for approval"
+    },
+    {
+      "name": "PostToolUse",
+      "description": "After a tool call completes successfully"
+    },
+    {
+      "name": "PostToolUseFailure",
+      "description": "After a tool call fails"
+    },
+    {
+      "name": "PostToolBatch",
+      "description": "After a batch of tool calls completes"
+    },
+    {
+      "name": "PermissionRequest",
+      "description": "When a tool call requires a permission decision"
+    },
+    {
+      "name": "PermissionDenied",
+      "description": "When a permission decision refuses a tool call"
+    },
+    {
+      "name": "SessionStart",
+      "description": "When a session starts or resumes — the usual place to load context"
+    },
+    {
+      "name": "SessionEnd",
+      "description": "When a session ends"
+    },
+    {
+      "name": "Setup",
+      "description": "Environment setup for a session"
+    },
+    {
+      "name": "InstructionsLoaded",
+      "description": "After instruction files (CLAUDE.md and friends) are loaded"
+    },
+    {
+      "name": "ConfigChange",
+      "description": "When configuration changes during a session"
+    },
+    {
+      "name": "UserPromptSubmit",
+      "description": "When the user submits a prompt, before the model sees it"
+    },
+    {
+      "name": "UserPromptExpansion",
+      "description": "When a submitted prompt is expanded"
+    },
+    {
+      "name": "Stop",
+      "description": "When the main agent finishes responding"
+    },
+    {
+      "name": "StopFailure",
+      "description": "When the main agent stops because of a failure"
+    },
+    {
+      "name": "MessageDisplay",
+      "description": "When a message is displayed"
+    },
+    {
+      "name": "Notification",
+      "description": "When Claude Code raises a notification"
+    },
+    {
+      "name": "SubagentStart",
+      "description": "When a subagent starts; `matcher` selects by agent name"
+    },
+    {
+      "name": "SubagentStop",
+      "description": "When a subagent finishes"
+    },
+    {
+      "name": "TaskCreated",
+      "description": "When a task is created"
+    },
+    {
+      "name": "TaskCompleted",
+      "description": "When a task completes"
+    },
+    {
+      "name": "TeammateIdle",
+      "description": "When a teammate session goes idle"
+    },
+    {
+      "name": "PreCompact",
+      "description": "Before the conversation is compacted"
+    },
+    {
+      "name": "PostCompact",
+      "description": "After the conversation is compacted"
+    },
+    {
+      "name": "Elicitation",
+      "description": "When input is elicited from the user"
+    },
+    {
+      "name": "ElicitationResult",
+      "description": "When an elicitation is answered"
+    },
+    {
+      "name": "DirectoryAdded",
+      "description": "When a directory is added to the session"
+    },
+    {
+      "name": "CwdChanged",
+      "description": "When the working directory changes"
+    },
+    {
+      "name": "FileChanged",
+      "description": "When a watched file changes"
+    },
+    {
+      "name": "WorktreeCreate",
+      "description": "When a git worktree is created"
+    },
+    {
+      "name": "WorktreeRemove",
+      "description": "When a git worktree is removed"
+    }
+  ]
+}

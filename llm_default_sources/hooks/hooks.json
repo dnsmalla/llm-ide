@@ -1,3 +1,26 @@
 {
-  "_note": "Hooks catalogued from enabled sources — DISCOVERY ONLY. LLM-IDE never executes these commands. Each hook entry carries its originating source id as `_source`."
+  "_note": "Hooks catalogued from enabled sources — DISCOVERY ONLY. LLM-IDE never executes these commands. Each hook entry carries its originating source id as `_source`.",
+  "SessionStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "${CLAUDE_PROJECT_DIR}/.system-controller/submodules/.skills/config/tool/claude/hooks/load-memory.sh",
+          "_source": "builtin"
+        }
+      ]
+    }
+  ],
+  "PreToolUse": [
+    {
+      "matcher": "Write|Edit",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "${CLAUDE_PROJECT_DIR}/.system-controller/submodules/.skills/config/tool/claude/hooks/tier-a-check.sh",
+          "_source": "builtin"
+        }
+      ]
+    }
+  ]
 }
