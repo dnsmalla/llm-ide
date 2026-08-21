@@ -629,7 +629,7 @@ struct AppShell: View {
             } else {
                 DisabledFeaturePlaceholderView(featureName: "3D Code Graph")
             }
-        case .loopEngine: LoopEngineView(api: api)
+        case .loopEngine: LoopEngineHomeView(api: api)
         case .settings:  SettingsView(api: api)
         }
     }
