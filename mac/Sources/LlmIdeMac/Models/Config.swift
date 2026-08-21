@@ -628,6 +628,22 @@ final class AppConfig: ObservableObject {
     /// Internal so tests can construct an AppConfig over an isolated
     /// `UserDefaults(suiteName:)` and not pollute the production
     /// defaults. Production code uses the `shared` singleton.
+    /// Persisted model ids that are no longer offered, mapped to the nearest
+    /// current equivalent. Only same-family successors belong here — anything
+    /// unrecognised falls back to the Claude default, which is the safe
+    /// outcome for an id we can't reason about.
+    static let retiredModelIds: [String: String] = [
+        "claude-opus-4-7": "claude-opus-4-8",
+        "claude-sonnet-4-6": "claude-sonnet-5",
+        "claude-haiku-4-5-20251001": "claude-haiku-4-5",   // date-suffixed form
+        "gpt-4o": "gpt-5.6-sol",
+        "gpt-4o-mini": "gpt-5.4-mini",
+        "o3-mini": "gpt-5.4-mini",
+        "gemini-2.0-flash": "gemini-3.6-flash",            // shut down 2026-06-01
+        "gemini-1.5-flash": "gemini-3.6-flash",
+        "gemini-1.5-pro": "gemini-3.5-flash",
+    ]
+
     init(userDefaults defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.persistsSecrets = (defaults === UserDefaults.standard)
@@ -659,8 +675,11 @@ final class AppConfig: ObservableObject {
         let storedModelId = defaults.string(forKey: "defaultModelId")
         if let storedModelId, knownModelIds.contains(storedModelId) {
             self.defaultModelId = storedModelId
-        } else if storedModelId == "claude-opus-4-7" {
-            self.defaultModelId = "claude-opus-4-8"
+        } else if let mapped = AppConfig.retiredModelIds[storedModelId ?? ""] {
+            // A known predecessor maps to its successor instead of collapsing
+            // to the Claude default, so a user who had picked a Sonnet keeps a
+            // Sonnet rather than silently landing on Opus.
+            self.defaultModelId = mapped
         } else {
             self.defaultModelId = AICliTool.claudeCode.defaultModelId
         }

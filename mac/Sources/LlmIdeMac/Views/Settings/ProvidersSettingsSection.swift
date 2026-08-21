@@ -9,47 +9,15 @@ struct ProvidersSettingsSection: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
 
-    private struct Provider: Identifiable {
-        let id: String          // "anthropic" — the verify-endpoint provider id
-        let label: String
-        let vaultKey: String     // "claude.apiKey" — the /auth/me/secrets key
-        let placeholder: String
-        let hint: String
-        /// The composer/CLI tool this provider maps to — drives the "active
-        /// default" radio + default-model picker (folded in from the old CLI
-        /// Tool section so providers live in ONE place). Nil for non-model
-        /// providers like web-search (tools, not chat models).
-        let tool: AICliTool?
-        /// OpenAI-compatible "custom" provider also needs an endpoint base URL.
-        var needsBaseURL: Bool = false
-    }
+    /// Rows come from `ProviderCatalog` — the one list the composer's provider
+    /// menu and the usage-limits picker are also built from, so a provider
+    /// cannot be offered in one place and missing from another (it was, twice).
+    private var providers: [ProviderCatalog.Entry] { ProviderCatalog.all }
 
-    private let providers: [Provider] = [
-        Provider(id: "anthropic", label: "Anthropic (Claude)", vaultKey: "claude.apiKey",
-                 placeholder: "sk-ant-…",
-                 hint: "claude-* models. Also works with no key via your logged-in `claude` CLI (subscription).",
-                 tool: .claudeCode),
-        Provider(id: "openai", label: "OpenAI (GPT / Codex)", vaultKey: "openai.apiKey",
-                 placeholder: "sk-…",
-                 hint: "gpt-*, o*, codex-* models. With no key, falls back to your logged-in `codex` CLI (subscription).",
-                 tool: .openai),
-        Provider(id: "google", label: "Google (Gemini)", vaultKey: "google.apiKey",
-                 placeholder: "AIza…",
-                 hint: "gemini-* models. With no key, falls back to your logged-in `gemini` CLI (subscription).",
-                 tool: .gemini),
-        Provider(id: "deepseek", label: "DeepSeek", vaultKey: "deepseek.apiKey",
-                 placeholder: "sk-…",
-                 hint: "deepseek-chat, deepseek-reasoner models. No CLI mode available.",
-                 tool: .deepseek),
-        Provider(id: "custom", label: "Custom (OpenAI-compatible)", vaultKey: "custom.apiKey",
-                 placeholder: "API key (any value for local servers)",
-                 hint: "Any OpenAI-compatible endpoint — OpenRouter, Ollama / LM Studio (local), Mistral. Add a model below or in the composer.",
-                 tool: .custom, needsBaseURL: true),
-        Provider(id: "web-search", label: "Web Search (SerpAPI, optional)", vaultKey: "serpapi.apiKey",
-                 placeholder: "Optional — your SerpAPI key from https://serpapi.com",
-                 hint: "Web search works automatically through your Claude login (or Anthropic API key) — no setup needed. A SerpAPI key is only an optional fallback.",
-                 tool: nil),
-    ]
+    /// The composer's user-added model ids, keyed by backend provider id — the
+    /// same store `ChatComposer.addCustomModel` writes. Read here so this
+    /// picker offers the same set the composer does (see `modelOptions`).
+    @AppStorage("MEETNOTES_CUSTOM_MODELS") private var customModelsRaw = "{}"
 
     @State private var drafts: [String: String] = [:]
     @State private var baseURLDraft: String = ""
@@ -68,12 +36,12 @@ struct ProvidersSettingsSection: View {
         .onAppear(perform: normalizeActiveCLI)
     }
 
-    private func isActive(_ p: Provider) -> Bool {
+    private func isActive(_ p: ProviderCatalog.Entry) -> Bool {
         guard let tool = p.tool else { return false }
         return config.activeCLI == tool.rawValue
     }
 
-    private func setActive(_ p: Provider) {
+    private func setActive(_ p: ProviderCatalog.Entry) {
         guard let tool = p.tool else { return }
         config.activeCLI = tool.rawValue
         config.defaultModelId = tool.defaultModelId
@@ -88,7 +56,7 @@ struct ProvidersSettingsSection: View {
     }
 
     @ViewBuilder
-    private func providerRow(_ p: Provider) -> some View {
+    private func providerRow(_ p: ProviderCatalog.Entry) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: Spacing.sm) {
                 // Active-default selector (replaces the old CLI Tool radio list).
@@ -154,15 +122,18 @@ struct ProvidersSettingsSection: View {
             // CLI Tool section). Custom has no built-in list — its model is
             // chosen in the composer ("Add model…"). Only shown for model
             // providers (tool != nil).
-            if isActive(p), let tool = p.tool, !tool.models.isEmpty {
-                HStack(spacing: Spacing.sm) {
-                    Text("Default model")
-                        .font(Typography.caption)
-                        .foregroundStyle(theme.current.textMuted)
-                    Picker("", selection: $config.defaultModelId) {
-                        ForEach(tool.models) { Text($0.displayName).tag($0.id) }
+            if isActive(p), let tool = p.tool {
+                let options = modelOptions(for: tool)
+                if !options.isEmpty {
+                    HStack(spacing: Spacing.sm) {
+                        Text("Default model")
+                            .font(Typography.caption)
+                            .foregroundStyle(theme.current.textMuted)
+                        Picker("", selection: $config.defaultModelId) {
+                            ForEach(options) { Text($0.displayName).tag($0.id) }
+                        }
+                        .labelsHidden().pickerStyle(.menu).fixedSize()
                     }
-                    .labelsHidden().pickerStyle(.menu).fixedSize()
                 }
             }
 
@@ -178,6 +149,34 @@ struct ProvidersSettingsSection: View {
         .padding(.vertical, 4)
     }
 
+    /// Models to offer for `tool`: its built-in list, plus the ids the user
+    /// added in the composer, plus the current selection when it is neither.
+    ///
+    /// That last clause is the important one. A SwiftUI `Picker` whose
+    /// selection matches no tag renders an EMPTY selection, and
+    /// `config.defaultModelId` is written from the composer — which offers
+    /// live-fetched ids and "Add model…" ids this static list never had. So
+    /// adding a model in the composer used to blank out this picker. Including
+    /// the live selection guarantees a tag always matches.
+    ///
+    /// It also gives the Custom provider a picker at all: `tool.models` is
+    /// empty for it by design, but a user-added id is a real choice.
+    private func modelOptions(for tool: AICliTool) -> [AIModel] {
+        var seen = Set<String>()
+        var out: [AIModel] = []
+        for m in tool.models where seen.insert(m.id).inserted { out.append(m) }
+        let added = (try? JSONDecoder().decode([String: [String]].self,
+                                               from: Data(customModelsRaw.utf8)))?[tool.provider] ?? []
+        for id in added where !id.isEmpty && seen.insert(id).inserted {
+            out.append(AIModel(id: id, displayName: id))
+        }
+        let current = config.defaultModelId
+        if !current.isEmpty && seen.insert(current).inserted {
+            out.append(AIModel(id: current, displayName: current))
+        }
+        return out
+    }
+
     private func bindingFor(_ id: String) -> Binding<String> {
         Binding(get: { drafts[id] ?? "" }, set: { drafts[id] = $0 })
     }
@@ -188,7 +187,7 @@ struct ProvidersSettingsSection: View {
         configured = (try? await api.configuredSecretKeys()) ?? []
     }
 
-    private func saveAndVerify(_ p: Provider) async {
+    private func saveAndVerify(_ p: ProviderCatalog.Entry) async {
         let key = (drafts[p.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { return }
         busy.insert(p.id); defer { busy.remove(p.id) }
@@ -216,7 +215,7 @@ struct ProvidersSettingsSection: View {
         }
     }
 
-    private func clear(_ p: Provider) async {
+    private func clear(_ p: ProviderCatalog.Entry) async {
         busy.insert(p.id); defer { busy.remove(p.id) }
         do {
             try await api.setSecret(key: p.vaultKey, value: "")
@@ -230,7 +229,7 @@ struct ProvidersSettingsSection: View {
     /// Verify the provider's logged-in CLI (subscription mode — no key). Lets
     /// users who run codex/gemini/claude via their own login confirm the CLI
     /// is installed and reachable from the server.
-    private func checkCli(_ p: Provider) async {
+    private func checkCli(_ p: ProviderCatalog.Entry) async {
         busy.insert(p.id); defer { busy.remove(p.id) }
         do {
             let result = try await api.verifyProvider(p.id, mode: "cli", apiKey: nil)

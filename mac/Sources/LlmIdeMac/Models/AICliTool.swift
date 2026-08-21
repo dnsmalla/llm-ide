@@ -23,7 +23,18 @@ enum AICliTool: String, CaseIterable, Identifiable {
     /// running Claude. Cursor/Copilot stay hidden — they're editor tools, not
     /// direct API endpoints, so routing their gpt ids to the OpenAI API would
     /// misrepresent the source.
-    static var selectable: [AICliTool] { [.claudeCode, .openai, .gemini, .deepseek, .glm, .custom] }
+    ///
+    /// GLM is deliberately absent. It has no built-in backend route — no
+    /// adapter, no base URL, and `resolveProvider` sends `glm-*` ids to a
+    /// provider that fails loudly — because it is reached as a named Custom
+    /// Provider (Z.AI, base URL https://api.z.ai/api/paas/v4), which arrives
+    /// on the wire as `custom:<uuid>`. Listing it here offered a selection
+    /// that silently answered as Claude.
+    ///
+    /// The list itself lives in `ProviderCatalog`, which also builds the
+    /// Settings credential rows and the usage-limits picker — one edit adds a
+    /// provider to all three instead of one of them.
+    static var selectable: [AICliTool] { ProviderCatalog.selectableTools }
 
     /// Backend provider id this tool's models route to.
     var provider: String {
@@ -79,17 +90,30 @@ enum AICliTool: String, CaseIterable, Identifiable {
 
     var models: [AIModel] {
         switch self {
+        // These lists are FALLBACKS. Once a provider has a key, the composer
+        // replaces them with the live `/models` result (see `modelsFor`), so
+        // they only have to be right enough to pick from before a key exists —
+        // and, critically, the FIRST entry is `defaultModelId`, the id sent
+        // when nothing has been chosen. That is why retired ids here were not
+        // harmless: they were the default.
         case .claudeCode:
+            // Model ids carry no date suffix — the undated id tracks the
+            // current snapshot. `claude-haiku-4-5-20251001` used to be listed
+            // in the date-suffixed form.
             return [
-                AIModel(id: "claude-sonnet-4-6",         displayName: "Sonnet 4.6"),
+                AIModel(id: "claude-opus-5",              displayName: "Opus 5"),
+                AIModel(id: "claude-sonnet-5",            displayName: "Sonnet 5"),
+                AIModel(id: "claude-haiku-4-5",           displayName: "Haiku 4.5"),
+                AIModel(id: "claude-fable-5",             displayName: "Fable 5"),
                 AIModel(id: "claude-opus-4-8",            displayName: "Opus 4.8"),
-                AIModel(id: "claude-haiku-4-5-20251001",  displayName: "Haiku 4.5"),
             ]
         case .openai:
             return [
-                AIModel(id: "gpt-4o",                     displayName: "GPT-4o"),
-                AIModel(id: "gpt-4o-mini",                displayName: "GPT-4o mini"),
-                AIModel(id: "o3-mini",                    displayName: "o3-mini"),
+                AIModel(id: "gpt-5.6-sol",                displayName: "GPT-5.6 Sol"),
+                AIModel(id: "gpt-5.6-terra",              displayName: "GPT-5.6 Terra"),
+                AIModel(id: "gpt-5.6-luna",               displayName: "GPT-5.6 Luna"),
+                AIModel(id: "gpt-5.5",                    displayName: "GPT-5.5"),
+                AIModel(id: "gpt-5.4-mini",               displayName: "GPT-5.4 mini"),
             ]
         case .cursor:
             return [
@@ -106,10 +130,12 @@ enum AICliTool: String, CaseIterable, Identifiable {
                 AIModel(id: "claude-3-5-sonnet-20241022", displayName: "claude-3.5-sonnet"),
             ]
         case .gemini:
+            // Gemini 2.0 flash / flash-lite were shut down (2026-06-01) and
+            // 1.5 before them, so every id previously listed here was dead.
             return [
-                AIModel(id: "gemini-2.0-flash",           displayName: "Gemini 2.0 Flash"),
-                AIModel(id: "gemini-1.5-pro",             displayName: "Gemini 1.5 Pro"),
-                AIModel(id: "gemini-1.5-flash",           displayName: "Gemini 1.5 Flash"),
+                AIModel(id: "gemini-3.6-flash",           displayName: "Gemini 3.6 Flash"),
+                AIModel(id: "gemini-3.5-flash",           displayName: "Gemini 3.5 Flash"),
+                AIModel(id: "gemini-3.1-flash-lite",      displayName: "Gemini 3.1 Flash-Lite"),
             ]
         case .deepseek:
             return [
@@ -117,12 +143,12 @@ enum AICliTool: String, CaseIterable, Identifiable {
                 AIModel(id: "deepseek-reasoner",          displayName: "DeepSeek Reasoner"),
             ]
         case .glm:
-            return [
-                AIModel(id: "glm-4-plus",                 displayName: "GLM-4 Plus"),
-                AIModel(id: "glm-4",                      displayName: "GLM-4"),
-                AIModel(id: "glm-4-vision",               displayName: "GLM-4 Vision"),
-                AIModel(id: "glm-3.5-turbo",              displayName: "GLM-3.5 Turbo"),
-            ]
+            // Not selectable (see `selectable`) — GLM is configured as a named
+            // Custom Provider, which carries its own model list. The old
+            // hardcoded ids here (glm-4-plus, glm-3.5-turbo) were retired
+            // upstream anyway; Z.AI's current line is glm-5.2 / glm-5-turbo /
+            // glm-4.7, entered per-provider in Settings → Custom Providers.
+            return []
         case .custom:
             // No built-in ids — the endpoint's models come from live discovery
             // (/kb/providers/models) or "Add model…".

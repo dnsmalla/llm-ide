@@ -13,7 +13,7 @@ struct CustomProvidersSection: View {
                 Text("Add named LLM providers (GLM, Ollama, OpenRouter, etc.) for the Code Assistant composer.")
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
-                SettingsHint("For Anthropic, OpenAI, Gemini, and a single shared custom endpoint, use Model Providers above. This section is for multiple named providers with their own model lists.")
+                SettingsHint("For Anthropic, OpenAI, Gemini, DeepSeek, and a single shared custom endpoint, use Model Providers above. This section is for multiple named providers with their own model lists — e.g. Z.AI GLM: base URL https://api.z.ai/api/paas/v4 with models glm-5.2 / glm-5-turbo / glm-4.7.")
 
                 if providers.isEmpty {
                     VStack(alignment: .center, spacing: Spacing.sm) {

@@ -12,9 +12,11 @@ struct ModelLimitsPanel: View {
     @EnvironmentObject private var config: AppConfig
     @EnvironmentObject private var theme: ThemeStore
 
-    private static let providerOptions: [(id: String, label: String)] = [
-        ("anthropic", "Claude"), ("openai", "OpenAI"), ("google", "Gemini"), ("custom", "Custom"),
-    ]
+    /// Derived from `ProviderCatalog` so a provider you can select and key is
+    /// always one you can cap too — DeepSeek was selectable and keyable but
+    /// missing from this list, so its usage limits were unreachable. Named
+    /// Custom Providers (`custom:<uuid>`) meter under "custom".
+    private static var providerOptions: [(id: String, label: String)] { ProviderCatalog.limitProviders }
 
     @State private var providerKey: String = "anthropic"
     @State private var limits: [LlmIdeAPIClient.ModelLimit] = []
