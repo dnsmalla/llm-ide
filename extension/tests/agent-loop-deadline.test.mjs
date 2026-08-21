@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runAgentLoop } from '../llm_agent/runtime/loop.mjs';
+import { runAgentLoop, runNativeAgentLoop } from '../llm_agent/runtime/loop.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -154,4 +154,69 @@ test('deadlineMs of 0 / null / Infinity all mean unlimited', async () => {
   }
   assert.deepEqual(seen, [undefined, undefined, undefined, undefined],
     'none of these may install a timeout signal');
+});
+
+
+// The native (OpenAI-compatible) loop bounds its call the same way, and had
+// two latent problems the fence loop's coverage never reached.
+//
+// 1. It used AbortSignal.timeout(), whose timer is UNREF'd — it only runs
+//    while something else keeps the event loop alive. With nothing else
+//    pending the loop drains, the timer never fires, and a call awaiting the
+//    signal hangs instead of being bounded. Under the server an open socket
+//    happened to hold it open, which is luck, not a guarantee.
+// 2. Its catch matches `AbortError` / `ABORT_ERR`, but AbortSignal.timeout
+//    makes fetch reject with a **TimeoutError** — so a deadline that DID fire
+//    was rethrown as a hard failure instead of returning the graceful
+//    "_(agent timed out)_" reply. An explicit controller aborts with
+//    AbortError, which is what that guard was written for.
+//
+// This test would hang (not fail) against the old signal, so it is also the
+// regression guard for #1.
+test('runNativeAgentLoop: a deadline aborts an in-flight complete() and returns the timeout reply', async () => {
+  let sawSignal = false;
+  const hangingComplete = async ({ signal }) => {
+    sawSignal = signal !== undefined;
+    // Nothing else is pending — exactly the case an unref'd timer never
+    // escapes. Resolve only when the deadline actually aborts us.
+    await new Promise((res) => signal.addEventListener('abort', res, { once: true }));
+    const err = new Error('aborted');
+    err.name = 'AbortError';
+    throw err;
+  };
+  const out = await runNativeAgentLoop({
+    systemPrompt: 's',
+    userMessage: 'm',
+    history: [],
+    skills: new Map(),
+    tools: [],
+    complete: hangingComplete,
+    userId: 'u',
+    handlers: {},
+    kb: {},
+    deadlineMs: 60,
+  });
+  assert.ok(sawSignal, 'an opted-in deadline must reach complete() as a signal');
+  assert.match(out.reply, /timed out/, 'a fired deadline returns the graceful reply, not a thrown error');
+  assert.equal(out.pendingTool, null);
+});
+
+test('runNativeAgentLoop: no deadlineMs passes no signal, so a slow call runs to completion', async () => {
+  let signalSeen = 'unset';
+  const out = await runNativeAgentLoop({
+    systemPrompt: 's',
+    userMessage: 'm',
+    history: [],
+    skills: new Map(),
+    tools: [],
+    complete: async ({ signal }) => {
+      signalSeen = signal;
+      return { text: 'done', toolCalls: [] };
+    },
+    userId: 'u',
+    handlers: {},
+    kb: {},
+  });
+  assert.equal(signalSeen, undefined, 'no deadline → no signal, so nothing can interrupt the call');
+  assert.equal(out.reply, 'done');
 });

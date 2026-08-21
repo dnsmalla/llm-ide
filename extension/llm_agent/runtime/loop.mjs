@@ -83,6 +83,26 @@ function resolveDeadline(deadlineMs) {
   return Number.isFinite(deadlineMs) && deadlineMs > 0 ? deadlineMs : DEFAULT_DEADLINE_MS;
 }
 
+/**
+ * A deadline signal that actually fires, plus the `cancel()` that retires it.
+ *
+ * `AbortSignal.timeout()` schedules an UNREF'd timer, so it only runs while
+ * something ELSE is keeping the event loop alive. Under the server an open
+ * socket happens to do that, but depending on it is wrong: with no other
+ * pending handle the loop drains, the timer never runs, and an in-flight call
+ * waiting on the signal hangs forever instead of being bounded. An explicit
+ * controller with an ordinary timer aborts deterministically.
+ *
+ * `cancel()` must be called when the call it bounds settles — an ordinary
+ * timer DOES hold the loop open, so a forgotten one would keep the process
+ * alive for the remainder of the deadline.
+ */
+function deadlineSignal(ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return { signal: controller.signal, cancel: () => clearTimeout(timer) };
+}
+
 // replyMode: 'final' — a final pass shorter than this falls back to the
 // accumulated narration. prompt.md tells the model to explain a failure
 // BEFORE calling task-update, so a one-line closing ack ("Marked as
@@ -521,7 +541,8 @@ export async function runAgentLoop({
     // one slow call blowing the budget on its own. With no deadline (the
     // default) no signal is created, so nothing interrupts a long model call —
     // runClaude keeps its own last-resort socket hang breaker.
-    const callSignal = remaining === null ? undefined : AbortSignal.timeout(remaining);
+    const callDeadline = remaining === null ? null : deadlineSignal(remaining);
+    const callSignal = callDeadline?.signal;
     let out;
     // Mirror of what the sniffer actually forwarded this call. On an
     // in-flight abort `out` never materializes, so this is the only record
@@ -554,6 +575,11 @@ export async function runAgentLoop({
         return deadlineReply(i);
       }
       throw err;
+    } finally {
+      // Retire the timer whether the call succeeded, aborted, or threw — it is
+      // a normal (ref'd) timer, so leaving it armed would hold the event loop
+      // open for the rest of the deadline after the turn is already done.
+      callDeadline?.cancel();
     }
     turnLog.push({ kind: 'assistant', text: out });
     const { text, fence, parseError } = parseFence(out);
@@ -759,6 +785,8 @@ export async function runNativeAgentLoop({
     emit({ phase: i === 0 ? 'thinking' : 'writing', iteration: i + 1 });
 
     let resp;
+    // Same deterministic-deadline reason as the fence loop above.
+    const callDeadline = remaining === null ? null : deadlineSignal(remaining);
     try {
       resp = await complete({
         messages,
@@ -766,13 +794,15 @@ export async function runNativeAgentLoop({
         maxTokens: 2048,
         // Only when the caller opted into a deadline; undefined otherwise so a
         // long native tool-calling turn runs to completion.
-        signal: remaining === null ? undefined : AbortSignal.timeout(remaining),
+        signal: callDeadline?.signal,
       });
     } catch (err) {
       if (err?.name === 'AbortError' || err?.code === 'ABORT_ERR') {
         return { reply: '_(agent timed out)_', pendingTool: null, iterations: i, cacheHits: 0 };
       }
       throw err;
+    } finally {
+      callDeadline?.cancel();
     }
     const { text, toolCalls } = resp;
 

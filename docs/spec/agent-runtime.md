@@ -61,7 +61,7 @@ Source: `extension/llm_agent/runtime/loop.mjs`
 | Constant | Value | Line |
 |---|---|---|
 | `DEFAULT_MAX_ITERATIONS` | 10 | loop.mjs:57 |
-| `DEFAULT_DEADLINE_MS` | 180 000 ms | loop.mjs:62 |
+| `DEFAULT_DEADLINE_MS` | `null` (no wall-clock limit — see below) | loop.mjs:79 |
 | `MAX_TOTAL_SKILL_BYTES` | 131 072 bytes (128 KB) | loop.mjs:68 |
 | `MAX_USER_MESSAGE_BYTES` | 500 000 bytes (500 KB) | loop.mjs:134 |
 | `MAX_LOOP_DEPTH` | 2 | loop.mjs:141 |
@@ -86,6 +86,8 @@ Practical depth levels:
 Each iteration of the `for` loop (loop.mjs:195–295) executes the following steps:
 
 1. **Deadline check** — skipped entirely unless the caller opted into a finite `deadlineMs` (the default is `null` = unlimited; see above). When one was supplied and the wall-clock elapsed exceeds it, return `{ reply, pendingTool: null }` with a deadline-expired annotation, and the in-flight `runClaude` call is bounded by an `AbortSignal` for the remaining budget. With no deadline, no abort signal is created at all.
+
+   That signal comes from `deadlineSignal()` — an explicit `AbortController` plus an ordinary timer, cleared in a `finally` — **not** `AbortSignal.timeout()`. The latter schedules an *unref'd* timer, so it fires only while some other handle happens to be keeping the event loop alive; with nothing else pending the loop drains, the timer never runs, and a call awaiting the signal hangs instead of being bounded. Under the server an open socket incidentally provided that handle, which is luck rather than a guarantee. The choice also matters for the native loop, whose abort branch matches `AbortError`/`ABORT_ERR`: `AbortSignal.timeout` makes `fetch` reject with a **`TimeoutError`**, which that branch does not match, so a deadline that did fire was rethrown as a hard failure instead of returning `_(agent timed out)_`. Both loops are covered by `tests/agent-loop-deadline.test.mjs` (the native-loop cases hang rather than fail if this regresses).
 2. **Prompt assembly** — `buildIterationPrompt` (loop.mjs:109–130) concatenates:
    - The composed system prompt (base role + optional context block + skill bodies)
    - Replayed history, selected by `selectHistoryTurns` (loop.mjs) under a **char budget** rather than a turn count, each turn clipped to `config.history.perTurnChars` (24 000) with fence sentinels redacted. The budget is `config.history.promptBudgetChars` (460 000, safely under `runClaude`'s hard 500 000-char throw) minus the system prompt, user message, and `prevOutput`, capped by `config.history.maxChars` (240 000) — so history yields to the parts of the prompt that cannot be dropped, and can never be what fails a turn. The **first user turn is always kept** as an anchor and any gap is disclosed inline (`_(N earlier turn(s) omitted…)_`). Replaced a fixed "last 8 turns" window: each client-executed tool call appends a synthetic result turn plus a reply, so a four-step task evicted the user's original request and the agent lost track of what it had been asked. `runNativeAgentLoop` and the non-agent `/code-assist` prompt in `server/ai-routes.mjs` share the same selector.
