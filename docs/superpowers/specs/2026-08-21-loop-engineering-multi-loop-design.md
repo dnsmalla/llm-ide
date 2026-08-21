@@ -67,7 +67,11 @@ struct LoopEngineProjectStore: Codable, Equatable {
   denylist: a changed path must match `scopeGlobs` (when non-empty) or it is
   treated as a scope violation using the same `protectedPathPolicy`
   (revert/warn/stop) the denylist already uses. The denylist always wins —
-  a path can be in-scope and still protected.
+  a path can be in-scope and still protected. Implemented entirely inside
+  `LoopEngineRunner.withScopeGuard` (not `RepairScopeGuard.swift`'s own
+  protocol) — Swift protocol requirements can't carry default arguments, and
+  this avoids updating every existing call site in `RepairScopeGuardTests.swift`
+  for a check that belongs to the runner's policy layer, not the guard itself.
 
 ## Storage & migration
 
