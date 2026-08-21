@@ -949,8 +949,8 @@ final class MobileControlManager {
         // Only ids that exist in the PERSISTED config are stable enough to
         // target, so unsaved/detector-appended stages get stageId: nil and
         // the phone hides ▶ for exactly those, same as it does for old Macs.
-        let saved = LoopEngineConfigStore.load(projectRoot: context.projectRoot, projectId: projectId)
-        let savedStageIds = Set(saved?.stages.map(\.id) ?? [])
+        let savedPrimary = LoopEngineConfigStore.primaryLoop(projectRoot: context.projectRoot, projectId: projectId)
+        let savedStageIds = Set(savedPrimary?.config.stages.map(\.id) ?? [])
         let running = context.gitRoot.map { LoopEngineRunner.isRunActive(gitRoot: $0) } ?? false
         let recent = loopHistory(limit: 1).first
 
@@ -1007,8 +1007,8 @@ final class MobileControlManager {
     /// without hopping onto the main actor.
     nonisolated static func resolveLoopConfig(projectRoot: URL?, projectId: String,
                                               gitRoot: URL?) -> LoopEngineConfig? {
-        if let saved = LoopEngineConfigStore.load(projectRoot: projectRoot, projectId: projectId) {
-            return LoopStageDetector.ensureDefaultStages(in: saved, gitRoot: gitRoot)
+        if let primary = LoopEngineConfigStore.primaryLoop(projectRoot: projectRoot, projectId: projectId) {
+            return LoopStageDetector.ensureDefaultStages(in: primary.config, gitRoot: gitRoot)
         }
         guard let gitRoot else { return nil }
         return LoopEngineDefaults.newConfig(stages: LoopStageDetector.detectDefaultStages(gitRoot: gitRoot))

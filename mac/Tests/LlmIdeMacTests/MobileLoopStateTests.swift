@@ -71,7 +71,9 @@ final class MobileLoopStateTests: XCTestCase {
         let custom = LoopStage(name: "My check", kind: .shellCommand, command: "echo hi", order: 0,
                                severity: .blocking)
         let saved = LoopEngineConfig(stages: [custom], maxIterations: 7)
-        LoopEngineConfigStore.save(saved, projectRoot: projectRoot, projectId: projectId)
+        LoopEngineConfigStore.save(
+            LoopEngineProjectStore(loops: [LoopDefinition(name: "Main Loop", isPrimary: true, config: saved)]),
+            projectRoot: projectRoot, projectId: projectId)
 
         let resolved = try XCTUnwrap(MobileControlManager.resolveLoopConfig(
             projectRoot: projectRoot, projectId: projectId, gitRoot: gitRoot))
@@ -89,7 +91,9 @@ final class MobileLoopStateTests: XCTestCase {
             LoopStage(name: "Only mine", kind: .shellCommand, command: "true", order: 0,
                       severity: .blocking),
         ], maxIterations: 3)
-        LoopEngineConfigStore.save(saved, projectRoot: projectRoot, projectId: projectId)
+        LoopEngineConfigStore.save(
+            LoopEngineProjectStore(loops: [LoopDefinition(name: "Main Loop", isPrimary: true, config: saved)]),
+            projectRoot: projectRoot, projectId: projectId)
         let resolved = try XCTUnwrap(MobileControlManager.resolveLoopConfig(
             projectRoot: projectRoot, projectId: projectId, gitRoot: gitRoot))
         XCTAssertEqual(resolved.maxIterations, 3, "the saved budget must not be replaced by a default")

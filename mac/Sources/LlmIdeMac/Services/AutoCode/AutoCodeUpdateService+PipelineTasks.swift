@@ -668,24 +668,26 @@ extension AutoCodeUpdateService {
         // single shared policy for this — `LoopEngineView` and the chat
         // panel's auto-detect path use the exact same helper so all three
         // call sites agree on when it's safe to persist.
-        let raw: LoopEngineConfig
-        if let saved = LoopEngineConfigStore.load(projectRoot: faultsRoot, projectId: projectId,
-                                                  defaults: defaults) {
-            raw = saved
+        var resolvedLoop: LoopDefinition
+        if let primary = LoopEngineConfigStore.primaryLoop(projectRoot: faultsRoot, projectId: projectId,
+                                                            defaults: defaults) {
+            resolvedLoop = primary
         } else {
             let detectedStages = LoopStageDetector.detectDefaultStages(gitRoot: gitRootURL)
             // Same app-wide defaults as the other two entry points — see
             // LoopEngineDefaults.newConfig.
             let detected = LoopEngineDefaults.newConfig(stages: detectedStages)
+            let newLoop = LoopDefinition(name: "Main Loop", isPrimary: true, config: detected)
             if LoopEngineConfig.shouldPersist(detectedStages) {
-                LoopEngineConfigStore.save(detected, projectRoot: faultsRoot, projectId: projectId,
+                LoopEngineConfigStore.save(LoopEngineProjectStore(loops: [newLoop]),
+                                           projectRoot: faultsRoot, projectId: projectId,
                                            defaults: defaults)
             }
-            raw = detected
+            resolvedLoop = newLoop
         }
-        var projectConfig = LoopStageDetector.ensureDefaultStages(in: raw, gitRoot: gitRootURL)
+        resolvedLoop.config = LoopStageDetector.ensureDefaultStages(in: resolvedLoop.config, gitRoot: gitRootURL)
         if let onlyStageId {
-            guard let soloed = LoopStage.soloing(projectConfig.stages, id: onlyStageId) else {
+            guard let soloed = LoopStage.soloing(resolvedLoop.config.stages, id: onlyStageId) else {
                 taskErrors[AutoTask.loopEngineering.rawValue] =
                     "Loop skipped — the requested stage no longer exists."
                 logStore.append(.loopEngineering,
@@ -693,8 +695,9 @@ extension AutoCodeUpdateService {
                                 level: .error)
                 return
             }
-            projectConfig.stages = soloed
+            resolvedLoop.config.stages = soloed
         }
+        let projectConfig = resolvedLoop.config
 
         // A project with every stage disabled is PARKED, not broken — the user
         // switched the stages off deliberately. Skipping quietly here (info
@@ -738,7 +741,10 @@ extension AutoCodeUpdateService {
         // process-wide). Use the RETURN VALUE, not runner.status, which per
         // its doc comment is only meaningful when run() returns non-nil.
         let result = await runner.run(config: projectConfig, faultsRoot: faultsRoot,
-                                      gitRoot: gitRootURL, projectId: projectId)
+                                      gitRoot: gitRootURL, projectId: projectId,
+                                      loopId: resolvedLoop.id, loopName: resolvedLoop.name,
+                                      goal: resolvedLoop.goal, acceptanceCriteria: resolvedLoop.acceptanceCriteria,
+                                      scopeGlobs: resolvedLoop.scopeGlobs)
 
         switch result {
         case .success:

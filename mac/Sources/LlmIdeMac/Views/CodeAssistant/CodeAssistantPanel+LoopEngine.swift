@@ -139,18 +139,20 @@ extension CodeAssistantPanel {
         // share one config per project. `faultsRoot`/`gitRoot` are the two
         // WorkspaceRoot-resolved roots passed in by the button above — NOT
         // necessarily the same URL (clone-into-code layout).
-        let raw = LoopEngineConfigStore.load(projectRoot: faultsRoot, projectId: projectId) ?? {
+        let resolvedLoop = LoopEngineConfigStore.primaryLoop(projectRoot: faultsRoot, projectId: projectId) ?? {
             let detectedStages = LoopStageDetector.detectDefaultStages(gitRoot: gitRoot)
             // Budgets/policy from the app-wide defaults (Settings → Loop) so a
             // project first reached from chat inherits the same starting point as
             // one first opened on the Loop page.
             let detected = LoopEngineDefaults.newConfig(stages: detectedStages)
+            let newLoop = LoopDefinition(name: "Main Loop", isPrimary: true, config: detected)
             if LoopEngineConfig.shouldPersist(detectedStages) {
-                LoopEngineConfigStore.save(detected, projectRoot: faultsRoot, projectId: projectId)
+                LoopEngineConfigStore.save(LoopEngineProjectStore(loops: [newLoop]),
+                                           projectRoot: faultsRoot, projectId: projectId)
             }
-            return detected
+            return newLoop
         }()
-        let loopConfig = LoopStageDetector.ensureDefaultStages(in: raw, gitRoot: gitRoot)
+        let loopConfig = LoopStageDetector.ensureDefaultStages(in: resolvedLoop.config, gitRoot: gitRoot)
         let prompter = CodeAssistPrompter(api: api, language: language)
         let regressionRunner = RegressionRunner(prompter: prompter, judge: CodeAssistJudge(api: api),
                                                 verifier: ShellFaultVerifier(), repairer: AgentFaultRepairer(api: api))
@@ -196,7 +198,10 @@ extension CodeAssistantPanel {
         // through the (throttled) log stream — but state the stop reason
         // explicitly too, using the shared LoopEngineStatus.summary.
         let result = await runner.run(config: loopConfig, faultsRoot: faultsRoot,
-                                      gitRoot: gitRoot, projectId: projectId)
+                                      gitRoot: gitRoot, projectId: projectId,
+                                      loopId: resolvedLoop.id, loopName: resolvedLoop.name,
+                                      goal: resolvedLoop.goal, acceptanceCriteria: resolvedLoop.acceptanceCriteria,
+                                      scopeGlobs: resolvedLoop.scopeGlobs)
         cancellable.cancel()
 
         if engine.sessionEpoch == startEpoch {
