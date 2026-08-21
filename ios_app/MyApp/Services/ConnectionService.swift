@@ -6,13 +6,35 @@ import SharedProtocol
 /// One entry in the AI prompt conversation. Shared by both chat stores
 /// (`LlmIdeChatStore`, `ExplorerChatStore`) and rendered by `ChatBubble`.
 struct ChatMessage: Identifiable, Equatable {
-    let id = UUID()
+    /// STABLE across a history reload. The id used to be a fresh `UUID()` per
+    /// instance, and `loadSharedHistory()` replaces the whole array after every
+    /// completed reply — so identical content got a new identity each time and
+    /// SwiftUI tore down and rebuilt the entire transcript, losing the scroll
+    /// anchor. Server-derived turns key on (index, role, text); locally minted
+    /// ones keep a UUID, which is stable for their lifetime.
+    let id: String
     let role: Role
     var text: String
     /// Optional image the user attached (shown as a thumbnail in the bubble).
     var imageData: Data? = nil
 
     enum Role { case user, assistant }
+
+    init(role: Role, text: String, imageData: Data? = nil) {
+        self.id = UUID().uuidString
+        self.role = role
+        self.text = text
+        self.imageData = imageData
+    }
+
+    /// A turn restored from the server transcript. `index` disambiguates two
+    /// identical messages in one conversation.
+    init(historyIndex index: Int, role: Role, text: String) {
+        self.id = "h\(index):\(role == .assistant ? "a" : "u"):\(text.hashValue)"
+        self.role = role
+        self.text = text
+        self.imageData = nil
+    }
 }
 
 /// The currently-loaded explorer-chat session and its on-device transcript.

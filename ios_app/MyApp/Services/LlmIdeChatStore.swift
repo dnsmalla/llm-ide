@@ -101,9 +101,15 @@ final class LlmIdeChatStore: ObservableObject {
         case "llmide_chat_history_reply":
             if let reply = try? JSONDecoder().decode(LlmIdeChatHistoryReply.self, from: data),
                !isStreaming {
-                llmIdeMessages = reply.messages.map {
-                    ChatMessage(role: $0.role == "assistant" ? .assistant : .user, text: $0.content)
+                let restored = reply.messages.enumerated().map { index, message in
+                    ChatMessage(historyIndex: index,
+                                role: message.role == "assistant" ? .assistant : .user,
+                                text: message.content)
                 }
+                // Carry local-only `imageData` across the swap: the server
+                // transcript has no images, so a just-sent thumbnail used to
+                // vanish from its bubble the moment the reply completed.
+                llmIdeMessages = Self.preservingAttachments(from: llmIdeMessages, into: restored)
             }
         case "llmide_chat_history_clear_ack":
             if (try? JSONDecoder().decode(LlmIdeChatHistoryClearAck.self, from: data))?.ok == true {
@@ -115,6 +121,29 @@ final class LlmIdeChatStore: ObservableObject {
     }
 
     func ownsCommand(_ id: String) -> Bool { llmIdeCommandIds.contains(id) }
+
+    /// Re-attach image thumbnails the server transcript can't carry, matching
+    /// on (role, text) from the most recent local turns.
+    static func preservingAttachments(from local: [ChatMessage],
+                                      into restored: [ChatMessage]) -> [ChatMessage] {
+        guard local.contains(where: { $0.imageData != nil }) else { return restored }
+        // Walk BOTH lists forward. Matching on (role, text) alone attached the
+        // image to the FIRST identical turn — send "look" without an image,
+        // then "look" with one, and the thumbnail landed on the older bubble.
+        var cursor = local.startIndex
+        return restored.map { message in
+            while cursor < local.endIndex {
+                let candidate = local[cursor]
+                cursor += 1
+                guard candidate.role == message.role, candidate.text == message.text else { continue }
+                guard let imageData = candidate.imageData else { return message }
+                var merged = message
+                merged.imageData = imageData
+                return merged
+            }
+            return message
+        }
+    }
 
     /// Handle a streamed `output` frame. Only acts when this store owns the
     /// frame's commandId: appends a `stream` chunk to the last assistant

@@ -20,6 +20,8 @@ struct LlmIdeControlView: View {
     @State private var pickedItems: [PhotosPickerItem] = []
     @State private var showPhotoPicker = false
     @State private var showCamera = false
+    /// Guards the trash action — it also wipes the Mac's shared transcript.
+    @State private var showClearConfirm = false
     @State private var showFilePicker = false
     @FocusState private var isInputFocused: Bool
 
@@ -52,10 +54,13 @@ struct LlmIdeControlView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        llmIdeStore.clearLlmIdeChat()
-                        haptic(.light)
+                        // This also clears the MAC's shared transcript
+                        // (LlmIdeChatHistoryClear) and cannot be undone, so it
+                        // must not be a single unconfirmed tap.
+                        showClearConfirm = true
                     } label: { Image(systemName: "trash") }
                     .disabled(llmIdeStore.llmIdeMessages.isEmpty)
+                    .accessibilityLabel("Clear chat history")
                 }
                 if llmIdeStore.isStreaming {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -139,7 +144,9 @@ struct LlmIdeControlView: View {
                         )
                     }
                     ForEach(llmIdeStore.llmIdeMessages) { msg in
-                        ChatBubble(message: msg).id(msg.id)
+                        ChatBubble(message: msg,
+                                       isStreaming: llmIdeStore.isStreaming && msg.id == llmIdeStore.llmIdeMessages.last?.id)
+                                .id(msg.id)
                     }
                 }
                 .padding(DesignSystem.Spacing.md)
@@ -150,6 +157,17 @@ struct LlmIdeControlView: View {
                         proxy.scrollTo(last.id, anchor: .bottom)
                     }
                 }
+            }
+            .confirmationDialog("Clear this chat?",
+                                isPresented: $showClearConfirm,
+                                titleVisibility: .visible) {
+                Button("Clear on this iPhone and Mac", role: .destructive) {
+                    llmIdeStore.clearLlmIdeChat()
+                    haptic(.light)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This deletes the shared llm-ide transcript on your Mac too. It can't be undone.")
             }
         }
     }

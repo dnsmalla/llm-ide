@@ -196,8 +196,13 @@ final class ExplorerChatStore: ObservableObject {
                 exploreCurrent = ExploreCurrentSession(
                     id: hist.sessionId,
                     title: hist.title,
-                    history: hist.history.map {
-                        ChatMessage(role: $0.role == "assistant" ? .assistant : .user, text: $0.content)
+                    // Stable, index-derived ids: a fresh UUID per load made
+                    // SwiftUI rebuild the whole transcript (and lose the
+                    // scroll anchor) on every session (re)load.
+                    history: hist.history.enumerated().map { index, message in
+                        ChatMessage(historyIndex: index,
+                                    role: message.role == "assistant" ? .assistant : .user,
+                                    text: message.content)
                     }
                 )
                 completeSessionPrep()

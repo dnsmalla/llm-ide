@@ -199,7 +199,9 @@ struct ExplorerChatView: View {
                             )
                         }
                         ForEach(current.history) { msg in
-                            ChatBubble(message: msg).id(msg.id)
+                            ChatBubble(message: msg,
+                                       isStreaming: explorerStore.isStreaming && msg.id == current.history.last?.id)
+                                .id(msg.id)
                         }
                     } else if explorerStore.isPreparingSession {
                         VStack(spacing: DesignSystem.Spacing.sm) {
