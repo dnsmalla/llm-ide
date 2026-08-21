@@ -1121,18 +1121,11 @@ struct LoopEngineView: View {
             saveConfig()
         }
         var runConfig = currentConfig
-        if let solo = single {
-            // "Run this stage only" = run with every OTHER stage disabled for
-            // this one run. Keeping the full stage list (rather than
-            // fabricating a one-stage config) means the journal snapshot
-            // records the project's real pipeline with the skipped stages
-            // marked disabled — not a record that reads as "the user deleted
-            // their whole pipeline".
-            runConfig.stages = runConfig.stages.map { stage in
-                var copy = stage
-                copy.enabled = (stage.id == solo.id)
-                return copy
-            }
+        if let solo = single,
+           let soloed = LoopStage.soloing(runConfig.stages, id: solo.id) {
+            // "Run this stage only" — see LoopStage.soloing for why the full
+            // stage list is kept with the others disabled.
+            runConfig.stages = soloed
         }
         let result = await runner.run(config: runConfig, faultsRoot: context.projectRoot,
                                       gitRoot: gitRoot, projectId: projectId)

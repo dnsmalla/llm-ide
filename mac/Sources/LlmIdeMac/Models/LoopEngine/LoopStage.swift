@@ -174,4 +174,21 @@ extension LoopStage {
             return copy
         }
     }
+
+    /// "Run this stage only": force-enable the stage carrying `id` and disable
+    /// every other stage, for one run. The FULL list is kept (rather than
+    /// fabricating a one-stage config) so the journal snapshot records the
+    /// project's real pipeline with the skipped stages marked disabled — not a
+    /// record that reads as "the user deleted their whole pipeline". Returns
+    /// nil when no stage carries `id`, so callers refuse the run instead of
+    /// silently running everything. Shared by the desktop's "Run this stage
+    /// only" menu action and the phone's `loop_start_stage`.
+    static func soloing(_ stages: [LoopStage], id: String) -> [LoopStage]? {
+        guard stages.contains(where: { $0.id == id }) else { return nil }
+        return stages.map { stage in
+            var copy = stage
+            copy.enabled = (stage.id == id)
+            return copy
+        }
+    }
 }
