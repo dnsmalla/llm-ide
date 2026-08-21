@@ -338,6 +338,30 @@ test('default-sources own hooks.json is readable by the generic per-source hook 
   assert.equal(countDiscoveryHooks(defaultSnapshotDir()), 1);
 });
 
+// The event VOCABULARY is a reference catalog, so it must live in its own
+// file: hooks.json is read by the generic hook reader, which treats every
+// array-valued key as an event with declared hooks behind it — an events list
+// in there would be counted as real hooks and inflate every hookCount.
+test('the hook event catalog is written beside hooks.json without inflating the hook count', async () => {
+  writeRegistry([
+    { id: 'extra', name: 'Extra', origin: 'local', location: extra, builtin: false },
+  ]);
+  setEnabled(USER, 'extra', true);
+  const res = refreshDefaultSnapshot(USER);
+
+  const { CLAUDE_CODE_HOOK_EVENTS } = await import('../llm_agent/claude-code-hooks.mjs');
+  const events = JSON.parse(fs.readFileSync(path.join(defaultSnapshotDir(), 'hooks', 'events.json'), 'utf8'));
+  assert.equal(events.events.length, CLAUDE_CODE_HOOK_EVENTS.length);
+  assert.ok(events.events.some((e) => e.name === 'PreToolUse'));
+  assert.ok(events.events.some((e) => e.name === 'SessionStart'));
+  assert.equal(res.counts.hookEvents, CLAUDE_CODE_HOOK_EVENTS.length);
+
+  // The declared-hook count is unchanged by the catalog's presence.
+  const { countDiscoveryHooks } = await import('../llm-sources/registry.mjs');
+  assert.equal(countDiscoveryHooks(defaultSnapshotDir()), 1, 'events.json must not read as declared hooks');
+  assert.equal(res.counts.hooks, 1);
+});
+
 // Regression: a user whose only enabled source is default-sources itself has
 // ZERO input sources (the folder is output, never input). A refresh used to
 // rebuild anyway and swap in an EMPTY snapshot — silently deleting every

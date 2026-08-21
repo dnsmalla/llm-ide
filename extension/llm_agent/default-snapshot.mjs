@@ -78,7 +78,10 @@ import { basename, dirname, join } from 'node:path';
 import { listSources, listDiscoveryHooks, defaultSourcesDir, defaultSourcesLocation, BUILTIN_ID, DEFAULT_SOURCES_ID } from '../llm-sources/registry.mjs';
 import { listEnabled } from '../llm-sources/state.mjs';
 import { effectiveMcpServers } from '../mcp/mcp-config.mjs';
+import { makeSecretReader } from '../server/vault.mjs';
+import { getDb } from '../kb/db.mjs';
 import { CLAUDE_CODE_COMMANDS } from './claude-code-commands.mjs';
+import { CLAUDE_CODE_HOOK_EVENTS } from './claude-code-hooks.mjs';
 
 const LIBRARY_FAMILIES = ['skills', 'runtime']; // mirrors registry.mjs
 const SNAPSHOT_DIR_NAME = 'llm_default_sources'; // legacy app-support folder name
@@ -175,7 +178,14 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
   mkdirSync(staging, { recursive: true });
 
   const enabled = listEnabled(userId);
-  const counts = { sources: 0, skills: 0, agents: 0, hooks: 0, mcpServers: 0, commands: CLAUDE_CODE_COMMANDS.length };
+  // `hooks` counts what enabled sources actually declare; `hookEvents` is the
+  // fixed Claude Code event vocabulary, independent of any source (the same
+  // relationship `commands` has to the sources — intrinsic to the CLI).
+  const counts = {
+    sources: 0, skills: 0, agents: 0, hooks: 0, mcpServers: 0,
+    commands: CLAUDE_CODE_COMMANDS.length,
+    hookEvents: CLAUDE_CODE_HOOK_EVENTS.length,
+  };
   const skipped = [];
   // Standard Claude-Code hook-manifest shape ({event: [{matcher, hooks:
   // [{type, command}]}]}) — NOT a custom {sources: {...}} wrapper. This
@@ -287,6 +297,17 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
     ...hookManifest,
   }, null, 2));
 
+  // The hook EVENT vocabulary — a reference catalog, deliberately a SEPARATE
+  // file from hooks.json. Merging them would corrupt the manifest: hooks.json
+  // is parsed by the generic hook reader, which treats every array-valued key
+  // as an event with hook entries behind it, so an events list living in there
+  // would be read as declared hooks and inflate every hookCount. Static list
+  // lives in claude-code-hooks.mjs.
+  writeFileSync(join(staging, 'hooks', 'events.json'), JSON.stringify({
+    _note: "Claude Code's hook EVENTS — the lifecycle points a hook can attach to. A static reference catalog, not sourced from any registered llm-source and never executed by this server. Hooks that sources actually declare are in hooks.json alongside this file.",
+    events: CLAUDE_CODE_HOOK_EVENTS,
+  }, null, 2));
+
   // Claude Code's own built-in slash commands (/clear, /compact, /help, …) —
   // a REFERENCE catalog, not discovered from any registered llm-source: these
   // are intrinsic to the `claude` CLI itself, independent of enabled sources
@@ -302,14 +323,16 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
   // Source .mcp.json manifests are deliberately NOT merged here: they are
   // catalogued-only and never spawned. The effective servers chat runs with
   // come exclusively from enabled+consented MCP plugins.
-  const mcpServers = effectiveMcpServers(userId);
+  // Same injected-reader reason as route.mjs: the snapshot must show the same
+  // truth the live --mcp-config carries, credentials included.
+  const mcpServers = effectiveMcpServers(userId, { readSecret: makeSecretReader(getDb(), userId) });
   counts.mcpServers = Object.keys(mcpServers).length;
   writeFileSync(join(staging, '.mcp.json'), JSON.stringify({ mcpServers }, null, 2));
 
   writeFileSync(join(staging, '_meta.json'), JSON.stringify({
     generatedAt: new Date().toISOString(),
     userId,
-    description: 'Effective chat configuration. skills/: copied from ENABLED sources (BUILTIN_ID curated to a fundamental subset). agents/<name>.md: discovery-only copies from a source\'s agents/ family (for the REAL agent tiers/subagents chat runs, use GET /kb/agent/catalog instead — this folder does not duplicate it). hooks/: discovery catalog, standard hook-manifest shape (never executed). commands/commands.json: Claude Code\'s own built-in slash commands, reference only. .mcp.json: enabled+consented MCP plugins actually passed to the CLI. Single global folder — the last user to trigger a refresh wins (this userId).',
+    description: 'Effective chat configuration. skills/: copied from ENABLED sources (BUILTIN_ID curated to a fundamental subset). agents/<name>.md: discovery-only copies from a source\'s agents/ family (for the REAL agent tiers/subagents chat runs, use GET /kb/agent/catalog instead — this folder does not duplicate it). hooks/hooks.json: hooks declared by enabled sources — discovery catalog in the standard hook-manifest shape (never executed); hooks/events.json: Claude Code\'s hook event vocabulary, reference only. commands/commands.json: Claude Code\'s own built-in slash commands, reference only. .mcp.json: enabled+consented MCP plugins actually passed to the CLI. Single global folder — the last user to trigger a refresh wins (this userId).',
     counts,
     skipped,
   }, null, 2));
