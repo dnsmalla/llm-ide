@@ -85,4 +85,25 @@ final class AutoCodeUpdateServiceLoopEngineeringTests: XCTestCase {
 
         XCTAssertNil(LoopEngineConfig.load(for: projectId, defaults: suite))
     }
+
+    /// A phone can ask for a stage that was deleted or renamed after its
+    /// snapshot. The sweep must refuse with a task error and never start the
+    /// runner — not fall back to running the whole pipeline.
+    func testUnknownOnlyStageIdRefusesTheRunWithATaskError() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loop-eng-solo-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let service = makeService()
+        await service.runLoopEngineeringSweep(
+            projectRoot: tempDir.path,
+            gitRoot: tempDir.path,
+            projectId: "solo-test-\(UUID().uuidString)",
+            defaults: suite,
+            onlyStageId: "no-such-stage-id")
+
+        XCTAssertEqual(service.taskErrors[AutoTask.loopEngineering.rawValue],
+                       "Loop skipped — the requested stage no longer exists.")
+    }
 }

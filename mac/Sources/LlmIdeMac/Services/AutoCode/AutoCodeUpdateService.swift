@@ -202,6 +202,50 @@ final class AutoCodeUpdateService: ObservableObject {
         return true
     }
 
+    /// Phone-triggered "Run this stage only" (`loop_start_stage`). A dedicated
+    /// entry point rather than a parameter on `runSingle(_:)`: no other task
+    /// has a use for a stage id, and this keeps the generic signatures
+    /// untouched. Shares the `runTask` re-entrancy guard, so it can never
+    /// overlap a global run, a per-task run, or a custom run.
+    @discardableResult
+    func runSingleLoopStage(stageId: String) -> Bool {
+        guard runTask == nil else { return false }
+        runTask = Task { [weak self] in
+            await self?.runLoopStageOnly(stageId: stageId)
+            self?.runTask = nil
+        }
+        return true
+    }
+
+    /// Body for `runSingleLoopStage(stageId:)` — the `.loopEngineering` slice
+    /// of `runOne(_:)` with the stage filter threaded through. Kept separate
+    /// for the same reason `runCustomTask(_:)` is: the resolve/guard shell is
+    /// per-entry-point state management, not shareable logic.
+    private func runLoopStageOnly(stageId: String) async {
+        guard !isRunning else { return }
+        isRunning = true
+        defer {
+            isRunning = false
+            currentTask = nil
+            currentStep = nil
+            lastRunDate = Date()
+        }
+        guard let resolved = resolveBackendAndProject() else {
+            let reason = lastResolveDiagnosis ?? "No linked repo — configure in GitLab or GitHub settings"
+            statusMessage = "No linked repo"
+            logStore.append(.loopEngineering, "⚠ \(reason)", level: .error)
+            taskErrors[AutoTask.loopEngineering.rawValue] = reason
+            return
+        }
+        currentTask = .loopEngineering
+        currentStep = "Running Loop stage"
+        logStore.append(.loopEngineering, "Running Loop (single stage)…")
+        await runLoopEngineeringSweep(projectRoot: resolved.projectRoot,
+                                      gitRoot: resolved.gitRoot,
+                                      projectId: projectStore?.activeProject?.bundle.id,
+                                      onlyStageId: stageId)
+    }
+
     /// Custom-task counterpart to `runSingle(_:)` — shares the same
     /// `runTask` re-entrancy guard, so a built-in run and a custom run
     /// can't overlap either.

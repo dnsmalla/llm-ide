@@ -615,8 +615,16 @@ extension AutoCodeUpdateService {
     ///   from / saved to. Defaults to `.standard` for production; tests pass
     ///   an isolated suite so the persistence branch (auto-detect + save) is
     ///   exercisable without touching the developer's real UserDefaults.
+    /// - Parameter onlyStageId: When set, run just this one stage — the
+    ///   phone's `loop_start_stage` counterpart to the desktop's "Run this
+    ///   stage only". Applied AFTER the config is loaded and
+    ///   `ensureDefaultStages` runs, via the same `LoopStage.soloing` mapping
+    ///   the desktop uses: the target is force-enabled, every other stage is
+    ///   disabled for this run only, and the saved config is untouched. An id
+    ///   that matches no stage refuses the run — falling back to the full
+    ///   pipeline would silently do far more than the user asked for.
     func runLoopEngineeringSweep(
-        projectRoot: String, gitRoot: String, projectId: String?, defaults: UserDefaults = .standard
+        projectRoot: String, gitRoot: String, projectId: String?, defaults: UserDefaults = .standard, onlyStageId: String? = nil
     ) async {
         guard let api else {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop skipped — no API client wired."
@@ -675,7 +683,18 @@ extension AutoCodeUpdateService {
             }
             raw = detected
         }
-        let projectConfig = LoopStageDetector.ensureDefaultStages(in: raw, gitRoot: gitRootURL)
+        var projectConfig = LoopStageDetector.ensureDefaultStages(in: raw, gitRoot: gitRootURL)
+        if let onlyStageId {
+            guard let soloed = LoopStage.soloing(projectConfig.stages, id: onlyStageId) else {
+                taskErrors[AutoTask.loopEngineering.rawValue] =
+                    "Loop skipped — the requested stage no longer exists."
+                logStore.append(.loopEngineering,
+                                "Loop skipped — single-stage run asked for a stage that no longer exists.",
+                                level: .error)
+                return
+            }
+            projectConfig.stages = soloed
+        }
 
         // A project with every stage disabled is PARKED, not broken — the user
         // switched the stages off deliberately. Skipping quietly here (info
