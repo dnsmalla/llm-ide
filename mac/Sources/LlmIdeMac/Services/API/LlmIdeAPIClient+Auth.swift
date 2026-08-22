@@ -5,10 +5,15 @@ extension LlmIdeAPIClient {
     // Per-user UI preferences, synced server-side via /auth/me/prefs.
     // Both the Chrome extension and Mac app read this on login and PUT
     // on change so a language switch in one client follows the user to
-    // the other.  Allow-listed keys today: language, bilingual.
+    // the other.  Allow-listed keys today: language, bilingual, nativePlugins.
     struct UserPrefs: Codable, Equatable {
         var language: String?
         var bilingual: Bool?
+        /// Hand Claude-format plugins to the Agent SDK to load themselves
+        /// (skills, commands, agents, and their hooks at full fidelity) instead
+        /// of llm-ide translating their `command` hooks. `nil` means unset,
+        /// which the server treats as ON — see `nativePluginsEnabled`.
+        var nativePlugins: Bool?
     }
     struct UserPrefsWrap: Codable { let prefs: UserPrefs }
 
@@ -286,6 +291,10 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     /// MCP servers the plugin declares; each needs its own consent in the MCP
     /// Plugins section before it connects.
     let mcpServerCount: Int
+    /// True when this plugin would be handed to the agent engine to load itself
+    /// — so its hooks run at full fidelity, and the "not run here" notes below
+    /// do not apply. Follows both hook trust and the `nativePlugins` pref.
+    let nativeDelivery: Bool
     var id: String { name }
     static func == (lhs: PluginInfo, rhs: PluginInfo) -> Bool {
         lhs.name == rhs.name && lhs.enabled == rhs.enabled && lhs.hooksTrusted == rhs.hooksTrusted
@@ -295,7 +304,7 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         case name, version, displayName, description, author
         case enabled, skillCount, commands, subagents
         case format, unsupportedComponents, pendingComponents
-        case hookCount, hookNotes, hooksTrusted, mcpServerCount
+        case hookCount, hookNotes, hooksTrusted, mcpServerCount, nativeDelivery
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -315,6 +324,7 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         self.hookNotes      = try c.decodeIfPresent([String].self, forKey: .hookNotes) ?? []
         self.hooksTrusted   = try c.decodeIfPresent(Bool.self, forKey: .hooksTrusted) ?? false
         self.mcpServerCount = try c.decodeIfPresent(Int.self, forKey: .mcpServerCount) ?? 0
+        self.nativeDelivery = try c.decodeIfPresent(Bool.self, forKey: .nativeDelivery) ?? false
     }
 }
 

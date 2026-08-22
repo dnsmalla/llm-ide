@@ -262,13 +262,26 @@ Two further per-user views feed the **v2 (Agent SDK) engine** only:
   `buildMcpConfigForUser`'s policy on the legacy CLI path. A server declared by
   a plugin also requires that plugin to be enabled for the user
   (`effectiveMcpServers({ pluginEnabled })`).
-- `buildUserPluginHooks(userId)` (`llm_agent/skills/registry.mjs`) — hook
-  handlers from plugins the user has both enabled and **hook-trusted**
-  (`plugins/state.mjs` → `hooksTrusted`, default off). Only `command` handlers
-  on supported events run, each with a timeout and a 4 KB output cap; exit code
-  2 blocks the action, any other non-zero is a hook failure that does not stop
-  the turn (`llm_agent/sdk/hooks.mjs`). The legacy CLI path and the native
-  provider loop have no hook surface.
+- `buildUserPluginDelivery(userId)` (`llm_agent/skills/registry.mjs`) — how each
+  enabled plugin reaches the engine. Two mechanisms, one per plugin:
+
+  - **native** (default): a `.claude-plugin` package is passed as
+    `plugins: [{ type: 'local', path, skipMcpDiscovery: true }]` and the SDK
+    loads its skills/commands/agents and runs its hooks itself, at full
+    fidelity. `skipMcpDiscovery` is always set — a plugin's declared MCP
+    servers keep their own consent gate and must not be connected behind it.
+  - **translated**: llm-ide runs the plugin's `command` hooks itself, each with
+    a timeout and a 4 KB output cap; exit code 2 blocks the action, any other
+    non-zero is a hook failure that does not stop the turn
+    (`llm_agent/sdk/hooks.mjs`). This covers Codex-layout packages (the SDK
+    does not read `.codex-plugin`) and is what the `nativePlugins` pref
+    (`kb/user.mjs` → `nativePluginsEnabled`, default on) falls back to.
+
+  Invariants either way: a plugin with hooks is delivered by neither mechanism
+  until the user has **hook-trusted** it (`plugins/state.mjs` → `hooksTrusted`,
+  default off), and no plugin is ever delivered by both — that would fire every
+  hook twice. The legacy CLI path and the native provider loop have no hook
+  surface at all.
 
 The global agent always runs with `globalSkills.skills` (route.mjs:182), not the per-user internal set. The per-user set is the internal agent's effective skill map.
 

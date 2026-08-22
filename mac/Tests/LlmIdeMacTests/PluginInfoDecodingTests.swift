@@ -62,3 +62,23 @@ extension PluginInfoDecodingTests {
         XCTAssertEqual(info.mcpServerCount, 0)
     }
 }
+
+/// The synced pref that decides how plugins are delivered. `nil` must survive
+/// as `nil` — the server reads absence as "on", so a client that coerced it to
+/// `false` would silently disable native loading on the next save.
+final class NativePluginsPrefTests: XCTestCase {
+    func testAbsentStaysNil() throws {
+        let json = "{\"language\":\"en\"}".data(using: .utf8)!
+        let prefs = try JSONDecoder().decode(LlmIdeAPIClient.UserPrefs.self, from: json)
+        XCTAssertNil(prefs.nativePlugins)
+    }
+
+    func testRoundTripsBothValues() throws {
+        for value in [true, false] {
+            let encoded = try JSONEncoder().encode(
+                LlmIdeAPIClient.UserPrefs(language: "en", bilingual: false, nativePlugins: value))
+            let decoded = try JSONDecoder().decode(LlmIdeAPIClient.UserPrefs.self, from: encoded)
+            XCTAssertEqual(decoded.nativePlugins, value)
+        }
+    }
+}

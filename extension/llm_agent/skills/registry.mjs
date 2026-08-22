@@ -18,6 +18,7 @@ import {
 } from '../../plugins/state.mjs';
 import { syncPluginMcpServers } from '../../mcp/state.mjs';
 import { buildPluginHooks } from '../sdk/hooks.mjs';
+import { nativePluginsEnabled } from '../../kb/user.mjs';
 import { INTERNAL_HANDLERS } from '../runtime/handlers/ask-internal.mjs';
 import { GLOBAL_HANDLER_NAMES } from '../runtime/global-handlers.mjs';
 
@@ -294,6 +295,12 @@ export function listAllSkills() {
 export function listInstalledPlugins(userId) {
   const enabled = listEnabledPlugins(userId);
   const hooksTrusted = listHooksTrustedPlugins(userId);
+  // Which plugins this user's next turn would hand to the SDK. Reported so the
+  // UI can describe hook behaviour truthfully: natively the SDK runs every
+  // handler type it supports, translated only `command` ones.
+  const nativeNames = new Set(buildUserPluginDelivery(userId, {
+    nativeEnabled: nativePluginsEnabled(userId),
+  }).native);
   const items = [];
   for (const p of pluginRegistry.plugins.values()) {
     items.push({
@@ -326,6 +333,7 @@ export function listInstalledPlugins(userId) {
       hookCount: Array.isArray(p.hooks) ? p.hooks.length : 0,
       hookNotes: p.hookNotes || [],
       hooksTrusted: hooksTrusted.has(p.name),
+      nativeDelivery: nativeNames.has(p.name),
       mcpServerCount: Array.isArray(p.mcpServers) ? p.mcpServers.length : 0,
     });
   }

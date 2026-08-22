@@ -187,22 +187,38 @@ struct PluginDetailView: View {
                     }
                     .toggleStyle(.switch)
                     .disabled(trustPending || !plugin.enabled)
-                    Text(plugin.hooksTrusted
-                         ? "This plugin's hook commands run during a turn, with the same access as the app."
-                         : "Turning this on lets this plugin run shell commands from its hooks file during a turn. Leave it off unless you trust the author.")
+                    Text(trustExplanation(plugin))
                         .font(.caption)
                         .foregroundStyle(plugin.hooksTrusted ? .orange : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if !plugin.enabled {
                         Text("Enable the plugin first — hooks only run for an enabled plugin.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                ForEach(plugin.hookNotes, id: \.self) { note in
-                    Label(note, systemImage: "minus.circle")
-                        .font(.caption).foregroundStyle(.secondary)
+                if !plugin.nativeDelivery {
+                    // These notes describe what LLM-IDE's own hook handling
+                    // skips. When the engine loads the plugin natively it runs
+                    // those handlers itself, so showing them would be wrong.
+                    ForEach(plugin.hookNotes, id: \.self) { note in
+                        Label(note, systemImage: "minus.circle")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
         }
+    }
+
+    /// What trusting (or having trusted) this plugin's hooks actually means —
+    /// which differs by delivery route, so the copy follows it rather than
+    /// describing one mechanism for both.
+    private func trustExplanation(_ plugin: PluginInfo) -> String {
+        guard plugin.hooksTrusted else {
+            return "Turning this on lets this plugin run commands from its hooks file during a turn. Leave it off unless you trust the author."
+        }
+        return plugin.nativeDelivery
+            ? "The agent engine loads this plugin and runs its hooks as its author wrote them, with the same access as the app."
+            : "LLM-IDE runs this plugin's command hooks during a turn, with the same access as the app."
     }
 
     /// MCP servers a plugin declares are registered but inert until consented

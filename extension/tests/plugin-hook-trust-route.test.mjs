@@ -81,3 +81,34 @@ test('revoking trust always works, even for a plugin that is already gone', () =
   assert.deepEqual(setPluginHookTrust('u', 'ghost', false), { ok: true, hooksTrusted: false });
   assert.equal(listHooksTrusted('u').has('ghost'), false);
 });
+
+// The payload must say WHICH mechanism will deliver this plugin, or the UI
+// cannot honestly describe what its hooks will do: natively the SDK runs every
+// handler type it supports, translated only `command` ones.
+test('the payload reports native delivery per plugin, following trust and the pref', async () => {
+  const { setUserPrefs } = await import('../kb/user.mjs');
+  const { registerUser } = await import('../server/users.mjs');
+  const { getDb } = await import('../kb/db.mjs');
+  const { id } = registerUser(getDb(), {
+    email: 'delivery@example.com', password: 'pw-12345678', displayName: 'D',
+  });
+
+  setEnabled(id, 'hooked', true);
+  const untrusted = listInstalledPlugins(id).plugins.find((p) => p.name === 'hooked');
+  assert.equal(untrusted.nativeDelivery, false, 'an untrusted plugin is handed over by neither route');
+
+  setPluginHookTrust(id, 'hooked', true);
+  const trusted = listInstalledPlugins(id).plugins.find((p) => p.name === 'hooked');
+  assert.equal(trusted.nativeDelivery, true);
+
+  setUserPrefs(id, { nativePlugins: false });
+  const translated = listInstalledPlugins(id).plugins.find((p) => p.name === 'hooked');
+  assert.equal(translated.nativeDelivery, false, 'the pref falls back to translation');
+
+  // A hookless plugin still goes native — that is how its commands and agents
+  // reach the engine — and needs no trust for it.
+  setUserPrefs(id, { nativePlugins: true });
+  setEnabled(id, 'plain', true);
+  const plain = listInstalledPlugins(id).plugins.find((p) => p.name === 'plain');
+  assert.equal(plain.nativeDelivery, true);
+});
