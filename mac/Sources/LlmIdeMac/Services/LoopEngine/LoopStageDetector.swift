@@ -264,33 +264,40 @@ enum LoopStageDetector {
     /// The `prompt` carries the whole contract on its own: the skill ids
     /// (`skills/plan-structure-index`, `skills/plan-director`) deepen the
     /// instructions when the central skills repo is installed, but a machine
-    /// without it must still produce the right artifacts. `targetPath` /
-    /// `outputPath` are the runner's usual text hints. Paths are written
-    /// relative to the PROJECT root (the folder holding `system/project.json`),
-    /// which in the clone-into-code layout is two levels above the git root —
-    /// the prompt tells the agent how to find it.
+    /// without it must still produce the right artifacts.
+    ///
+    /// The prompts deliberately name no concrete path — they defer to the
+    /// stage's editable Input/Output fields (`targetPath`/`outputPath`, which
+    /// `composeSkillMessage` appends as "Input: …" / "Write output to: …"), so
+    /// editing those fields on the Loop page actually REDIRECTS the loop
+    /// instead of contradicting a path baked into the prompt. The defaults
+    /// below are relative to the PROJECT root (the folder holding
+    /// `system/project.json`), which in the clone-into-code layout is two
+    /// levels above the git root — the prompt tells the agent how to find it.
     private static func planStages() -> [LoopStage] {
         [
             LoopStage(name: "Structure Index", kind: .skill, order: 0,
                       skillId: "skills/plan-structure-index",
                       targetPath: "llm-doc/plans",
                       outputPath: "llm-doc/plans/INDEX.md",
-                      prompt: "Refresh the plan structure index at llm-doc/plans/INDEX.md, creating it if missing. "
-                          + "The project root is the directory containing system/project.json — the repo root itself, "
-                          + "or two levels up when the repo is checked out under code/. INDEX.md holds: a "
-                          + "folder-structure index of the codebase, a file index and a function index for the areas "
-                          + "the collected plans touch, and a registry of every file in llm-doc/plans/. Compare "
-                          + "against the real tree and rewrite only the sections that have drifted.",
+                      prompt: "Refresh the plan structure index: read every plan in the Input directory and "
+                          + "rewrite only the drifted sections of the Output index file, creating it if missing. "
+                          + "Paths are relative to the project root — the directory containing system/project.json: "
+                          + "the repo root itself, or two levels up when the repo is checked out under code/. The "
+                          + "index holds: a folder-structure index of the codebase, a file index and a function "
+                          + "index for the areas the collected plans touch, and a registry of every plan file in "
+                          + "the Input directory.",
                       isDefault: true, defaultKey: "plan-structure-index"),
             LoopStage(name: "Plan Director", kind: .skill, order: 1,
                       skillId: "skills/plan-director",
                       targetPath: "llm-doc/plans",
                       outputPath: "llm-doc/plans/PLAN.md",
-                      prompt: "Consolidate every plan in llm-doc/plans/ into the master plan llm-doc/plans/PLAN.md: "
-                          + "a hierarchy of areas → file plans → function plans, each entry with a stable task ID, a "
-                          + "status, and links back to its source plan and its INDEX.md rows. Keep every plan file "
-                          + "within the 250-line limit, splitting oversized areas into llm-doc/plans/areas/. Preserve "
-                          + "existing task IDs and completed ticks; never delete or rewrite the source plans.",
+                      prompt: "Consolidate every plan in the Input directory into the master plan at the Output "
+                          + "path: a hierarchy of areas → file plans → function plans, each entry with a stable "
+                          + "task ID, a status, and links back to its source plan and its structure-index rows. "
+                          + "Keep every generated plan file within the 250-line limit, splitting oversized areas "
+                          + "into an areas/ folder beside the Output file. Preserve existing task IDs and completed "
+                          + "ticks; never delete or rewrite the source plans.",
                       isDefault: true, defaultKey: "plan-director"),
         ]
     }

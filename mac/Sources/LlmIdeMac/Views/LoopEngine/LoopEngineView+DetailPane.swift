@@ -140,7 +140,12 @@ extension LoopEngineView {
                 : "\(command) — needs approval"
         case .skill:
             guard let skillId = stage.skillId, !skillId.isEmpty else { return "no skill chosen" }
-            return stage.targetPath.map { "\(skillId) → \($0)" } ?? skillId
+            // Show the full data path (skill · input → output) so a redirected
+            // Input/Output edit is visible at a glance, not only in the editor.
+            var detail = skillId
+            if let input = stage.targetPath, !input.isEmpty { detail += " · \(input)" }
+            if let output = stage.outputPath, !output.isEmpty { detail += " → \(output)" }
+            return detail
         }
     }
 

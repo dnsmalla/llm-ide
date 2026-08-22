@@ -259,27 +259,31 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
             + "llm-doc/plans/ into one hierarchical, line-limited master plan.",
         config: LoopEngineConfig(
             stages: [
+                // Prompts name no concrete path: they defer to the editable
+                // Input/Output fields (same reasoning as
+                // `LoopStageDetector.planStages`), so redirecting the loop is
+                // an Input/Output edit, not a prompt rewrite.
                 LoopStage(name: "Structure Index", kind: .skill, order: 0,
                           skillId: "skills/plan-structure-index",
                           targetPath: "llm-doc/plans",
                           outputPath: "llm-doc/plans/INDEX.md",
-                          prompt: "Refresh the plan structure index at llm-doc/plans/INDEX.md, creating it if "
-                              + "missing. The project root is the directory containing system/project.json — the "
-                              + "repo root itself, or two levels up when the repo is checked out under code/. "
-                              + "INDEX.md holds: a folder-structure index of the codebase, a file index and a "
-                              + "function index for the areas the collected plans touch, and a registry of every "
-                              + "file in llm-doc/plans/. Compare against the real tree and rewrite only the "
-                              + "sections that have drifted."),
+                          prompt: "Refresh the plan structure index: read every plan in the Input directory and "
+                              + "rewrite only the drifted sections of the Output index file, creating it if "
+                              + "missing. Paths are relative to the project root — the directory containing "
+                              + "system/project.json: the repo root itself, or two levels up when the repo is "
+                              + "checked out under code/. The index holds: a folder-structure index of the "
+                              + "codebase, a file index and a function index for the areas the collected plans "
+                              + "touch, and a registry of every plan file in the Input directory."),
                 LoopStage(name: "Plan Director", kind: .skill, order: 1,
                           skillId: "skills/plan-director",
                           targetPath: "llm-doc/plans",
                           outputPath: "llm-doc/plans/PLAN.md",
-                          prompt: "Consolidate every plan in llm-doc/plans/ into the master plan "
-                              + "llm-doc/plans/PLAN.md: a hierarchy of areas → file plans → function plans, each "
-                              + "entry with a stable task ID, a status, and links back to its source plan and its "
-                              + "INDEX.md rows. Keep every plan file within the 250-line limit, splitting "
-                              + "oversized areas into llm-doc/plans/areas/. Preserve existing task IDs and "
-                              + "completed ticks; never delete or rewrite the source plans.")
+                          prompt: "Consolidate every plan in the Input directory into the master plan at the "
+                              + "Output path: a hierarchy of areas → file plans → function plans, each entry with "
+                              + "a stable task ID, a status, and links back to its source plan and its "
+                              + "structure-index rows. Keep every generated plan file within the 250-line limit, "
+                              + "splitting oversized areas into an areas/ folder beside the Output file. Preserve "
+                              + "existing task IDs and completed ticks; never delete or rewrite the source plans.")
             ],
             maxIterations: 2, consecutiveFailureStop: 2),
         isBuiltIn: true)
