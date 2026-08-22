@@ -184,6 +184,7 @@ export function isAuthRoute(url) {
       || path === '/auth/me/prefs'
       || path === '/auth/me/plugins'
       || path === '/auth/me/plugins/toggle'
+      || path === '/auth/me/plugins/hook-trust'
       || path === '/auth/me/plugins/reload'
       || path === '/auth/me/plugins/install'
       || path.startsWith('/auth/me/plugins/uninstall/')
@@ -955,6 +956,32 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     } catch (err) {
       send(res, err.status || 400, { error: { code: err.code || 'VALIDATION_FAILED', message: err.message } });
     }
+    return;
+  }
+
+  // POST /auth/me/plugins/hook-trust → { name, trusted }
+  // Trusting a plugin's hooks authorizes shell commands from that plugin to
+  // run during a turn, so it is a separate, audited grant — never implied by
+  // enabling the plugin.
+  if (method === 'POST' && url === '/auth/me/plugins/hook-trust') {
+    let body;
+    try { body = await readJson(req, bodyLimit); }
+    catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
+    const { setPluginHookTrust } = await import('../plugins/hook-trust.mjs');
+    const { listInstalledPlugins } = await import('../llm_agent/runtime/route.mjs');
+    const result = setPluginHookTrust(req.user.id, body?.name, body?.trusted, {
+      listPlugins: (userId) => listInstalledPlugins(userId).plugins,
+    });
+    if (result.error) {
+      send(res, result.status || 400, { error: { code: 'VALIDATION_FAILED', message: result.error } });
+      return;
+    }
+    safeAudit(db, {
+      userId: req.user.id, requestId, ip, userAgent: ua,
+      action: result.hooksTrusted ? 'plugin.hooks.trust' : 'plugin.hooks.revoke',
+      resource: body.name, outcome: 'success',
+    });
+    send(res, 200, result);
     return;
   }
 

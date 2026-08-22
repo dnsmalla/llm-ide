@@ -242,6 +242,7 @@ export function listAllSkills() {
  */
 export function listInstalledPlugins(userId) {
   const enabled = listEnabledPlugins(userId);
+  const hooksTrusted = listHooksTrustedPlugins(userId);
   const items = [];
   for (const p of pluginRegistry.plugins.values()) {
     items.push({
@@ -267,6 +268,14 @@ export function listInstalledPlugins(userId) {
       format: p.format || 'llmide',
       unsupportedComponents: p.unsupportedComponents || [],
       pendingComponents: p.pendingComponents || [],
+      // Hooks: how many runnable handlers the plugin declares, what llm-ide
+      // will NOT run from its hooks file, and whether this user has trusted
+      // them. The count gates the trust toggle — there is nothing to trust
+      // when it is zero.
+      hookCount: Array.isArray(p.hooks) ? p.hooks.length : 0,
+      hookNotes: p.hookNotes || [],
+      hooksTrusted: hooksTrusted.has(p.name),
+      mcpServerCount: Array.isArray(p.mcpServers) ? p.mcpServers.length : 0,
     });
   }
   return {
